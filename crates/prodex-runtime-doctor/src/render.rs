@@ -60,6 +60,7 @@ struct RuntimeDoctorJsonView {
     persisted_continuation_journal_turn_state_bindings: usize,
     persisted_continuation_journal_session_id_bindings: usize,
     persisted_turn_state_coverage_percent: Option<u8>,
+    binding_state: RuntimeDoctorBindingStateSummary,
     state_save_queue_backlog: Option<usize>,
     state_save_lag_ms: Option<u64>,
     continuation_journal_save_backlog: Option<usize>,
@@ -224,6 +225,7 @@ impl From<&RuntimeDoctorSummary> for RuntimeDoctorJsonView {
             persisted_continuation_journal_session_id_bindings: summary
                 .persisted_continuation_journal_session_id_bindings,
             persisted_turn_state_coverage_percent: summary.persisted_turn_state_coverage_percent,
+            binding_state: summary.binding_state.clone(),
             state_save_queue_backlog: summary.state_save_queue_backlog,
             state_save_lag_ms: summary.state_save_lag_ms,
             continuation_journal_save_backlog: summary.continuation_journal_save_backlog,
@@ -299,6 +301,42 @@ fn runtime_doctor_format_option<T: ToString>(value: Option<T>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "-".to_string())
+}
+
+fn runtime_doctor_binding_source_text(source: &RuntimeDoctorBindingSourceSummary) -> String {
+    let top_profile = source
+        .profiles
+        .first()
+        .map(|profile| format!("{}={}", profile.profile, profile.total_bindings))
+        .unwrap_or_else(|| "-".to_string());
+    format!(
+        "r={} s={} t={} sid={} total={} profiles={} top={}",
+        source.response_bindings,
+        source.session_bindings,
+        source.turn_state_bindings,
+        source.session_id_bindings,
+        source.total_bindings,
+        source.profile_count,
+        top_profile
+    )
+}
+
+fn runtime_doctor_binding_state_text(summary: &RuntimeDoctorBindingStateSummary) -> String {
+    let missing = summary.state.missing_profile_bindings
+        + summary.runtime_continuations.missing_profile_bindings
+        + summary.continuation_journal.missing_profile_bindings
+        + summary.merged_continuations.missing_profile_bindings;
+    format!(
+        "active={} profiles={} selected={} | state {} | runtime {} | journal {} | merged {} | missing={}",
+        summary.active_profile.as_deref().unwrap_or("-"),
+        summary.profile_count,
+        summary.last_run_selected_profiles,
+        runtime_doctor_binding_source_text(&summary.state),
+        runtime_doctor_binding_source_text(&summary.runtime_continuations),
+        runtime_doctor_binding_source_text(&summary.continuation_journal),
+        runtime_doctor_binding_source_text(&summary.merged_continuations),
+        missing
+    )
 }
 
 fn runtime_doctor_request_timeline_text(summary: &RuntimeDoctorSummary) -> String {
@@ -909,6 +947,10 @@ fn runtime_doctor_push_summary_tail_rows(
             ),
         )
         .push(
+            "Binding state",
+            runtime_doctor_binding_state_text(&summary.binding_state),
+        )
+        .push(
             "Continuation states",
             format!(
                 "verified={} warm={} suspect={} dead={}",
@@ -1480,6 +1522,7 @@ mod tests {
             "persisted_continuation_journal_turn_state_bindings",
             "persisted_continuation_journal_session_id_bindings",
             "persisted_turn_state_coverage_percent",
+            "binding_state",
             "state_save_queue_backlog",
             "state_save_lag_ms",
             "continuation_journal_save_backlog",

@@ -807,10 +807,11 @@ fn runtime_continuation_store_compaction_keeps_verified_hot_binding_over_newer_c
         statuses: compacted.statuses,
         ..RuntimeContinuationStore::default()
     };
-    prune_runtime_continuation_response_bindings(
+    prodex_runtime_store::prune_runtime_continuation_response_bindings(
         &mut pruned.response_profile_bindings,
         &pruned.statuses.response,
         2,
+        runtime_continuation_compaction_policy(),
     );
     assert!(pruned.response_profile_bindings.contains_key("resp-hot"));
     assert!(

@@ -1,32 +1,7 @@
 use super::*;
 
 pub(crate) fn runtime_broker_process_args(config: RuntimeBrokerSpawnConfig<'_>) -> Vec<OsString> {
-    let mut args = vec![
-        OsString::from("__runtime-broker"),
-        OsString::from("--current-profile"),
-        OsString::from(config.current_profile),
-        OsString::from("--upstream-base-url"),
-        OsString::from(config.upstream_base_url),
-    ];
-    if config.include_code_review {
-        args.push(OsString::from("--include-code-review"));
-    }
-    if config.upstream_no_proxy {
-        args.push(OsString::from("--upstream-no-proxy"));
-    }
-    args.extend([
-        OsString::from("--broker-key"),
-        OsString::from(config.broker_key),
-        OsString::from("--instance-token"),
-        OsString::from(config.instance_token),
-        OsString::from("--admin-token"),
-        OsString::from(config.admin_token),
-    ]);
-    if let Some(listen_addr) = config.listen_addr {
-        args.push(OsString::from("--listen-addr"));
-        args.push(OsString::from(listen_addr));
-    }
-    args
+    prodex_runtime_broker::runtime_broker_process_args(config)
 }
 
 pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
@@ -67,11 +42,9 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
             }
         }
 
-        if existing.upstream_base_url == upstream_base_url
-            && existing.include_code_review == include_code_review
-            && existing.upstream_no_proxy == upstream_no_proxy
+        if existing.matches_launch_config(upstream_base_url, include_code_review, upstream_no_proxy)
             && let Some(health) = health
-            && health.instance_token == existing.instance_token
+            && health.matches_registry_instance(&existing)
         {
             return Ok(Some(existing));
         }
@@ -98,10 +71,11 @@ pub(crate) fn find_compatible_runtime_broker_registry(
         let Some(registry) = load_runtime_broker_registry(paths, &broker_key)? else {
             continue;
         };
-        if registry.upstream_base_url != upstream_base_url
-            || registry.include_code_review != include_code_review
-            || registry.upstream_no_proxy != upstream_no_proxy
-        {
+        if !registry.matches_launch_config(
+            upstream_base_url,
+            include_code_review,
+            upstream_no_proxy,
+        ) {
             continue;
         }
         if !runtime_process_pid_alive(registry.pid) {
@@ -124,7 +98,7 @@ pub(crate) fn find_compatible_runtime_broker_registry(
             | RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests => continue,
         }
         if let Some(health) = health
-            && health.instance_token == registry.instance_token
+            && health.matches_registry_instance(&registry)
         {
             return Ok(Some((broker_key, registry)));
         }
@@ -145,7 +119,7 @@ pub(crate) fn wait_for_runtime_broker_ready(
         if let Some(registry) = load_runtime_broker_registry(paths, broker_key)?
             && registry.instance_token == expected_instance_token
             && let Some(health) = probe_runtime_broker_health(client, &registry)?
-            && health.instance_token == expected_instance_token
+            && health.matches_registry_instance(&registry)
         {
             return Ok(registry);
         }
@@ -154,16 +128,7 @@ pub(crate) fn wait_for_runtime_broker_ready(
     bail!("timed out waiting for runtime broker readiness");
 }
 
-pub(crate) struct RuntimeBrokerSpawnConfig<'a> {
-    pub(crate) current_profile: &'a str,
-    pub(crate) upstream_base_url: &'a str,
-    pub(crate) include_code_review: bool,
-    pub(crate) upstream_no_proxy: bool,
-    pub(crate) broker_key: &'a str,
-    pub(crate) instance_token: &'a str,
-    pub(crate) admin_token: &'a str,
-    pub(crate) listen_addr: Option<&'a str>,
-}
+pub(crate) type RuntimeBrokerSpawnConfig<'a> = prodex_runtime_broker::RuntimeBrokerSpawnConfig<'a>;
 
 pub(crate) fn spawn_runtime_broker_process(
     paths: &AppPaths,
@@ -233,11 +198,12 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
                 health.as_ref(),
             ) {
                 RuntimeBrokerVersionGuardOutcome::Compatible => {
-                    if existing.upstream_base_url == upstream_base_url
-                        && existing.include_code_review == include_code_review
-                        && existing.upstream_no_proxy == upstream_no_proxy
-                        && let Some(health) = health
-                        && health.instance_token == existing.instance_token
+                    if existing.matches_launch_config(
+                        upstream_base_url,
+                        include_code_review,
+                        upstream_no_proxy,
+                    ) && let Some(health) = health
+                        && health.matches_registry_instance(&existing)
                     {
                         activate_runtime_broker_profile(
                             &broker_client,

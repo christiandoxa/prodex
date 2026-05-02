@@ -61,6 +61,43 @@ Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as indepen
 
 Use `npm run test:runtime-smoke` for a small local runtime invariant suite before broad runtime work. It runs curated log JSON/marker, header preservation, selection affinity, stale continuation, websocket local pressure, and tuning snapshot checks from the shared runtime manifest without changing the broad runtime or stress suites.
 
+## Manual Runtime Load
+
+Use the load harness under [tests/load](../tests/load) for local runtime proxy load and stress checks. It is intentionally manual and not part of CI. The harness has a ChatGPT-like mock upstream, a load driver, and scenario defaults for baseline, stress, spike, and soak runs.
+
+Baseline mock-only smoke:
+
+```bash
+npm run load:runtime-proxy -- --scenario baseline --start-mock
+```
+
+End-to-end proxy run against a temporary `PRODEX_HOME` and local mock upstream:
+
+```bash
+cargo build
+npm run load:runtime-proxy -- --scenario baseline --start-mock --start-proxy --prodex ./target/debug/prodex
+```
+
+Higher pressure examples:
+
+```bash
+npm run load:runtime-proxy -- --scenario stress --start-mock --start-proxy --prodex ./target/debug/prodex --profiles 4
+npm run load:runtime-proxy -- --scenario spike --start-mock --start-proxy --prodex ./target/debug/prodex --profiles 4
+npm run load:runtime-proxy -- --scenario soak --start-mock --start-proxy --prodex ./target/debug/prodex --profiles 4
+```
+
+Default thresholds focus on request error rate, p95 time to first byte, and admission pressure. Admission pressure counts local overload-style responses plus runtime log markers such as `runtime_proxy_active_limit_reached`, `runtime_proxy_lane_limit_reached`, `runtime_proxy_queue_overloaded`, `runtime_proxy_overload_backoff`, `profile_inflight_saturated`, and `precommit_budget_exhausted`. Override thresholds when intentionally testing a smaller local cap:
+
+```bash
+npm run load:runtime-proxy -- --scenario stress --start-mock --start-proxy --prodex ./target/debug/prodex --max-error-rate 0.05 --max-ttft-p95-ms 2500 --max-admission-pressure-rate 0.10
+```
+
+To exercise an already-running proxy, pass the Codex-facing base URL:
+
+```bash
+npm run load:runtime-proxy -- --scenario spike --target http://127.0.0.1:9901/backend-api --runtime-log-dir /tmp/prodex-runtime
+```
+
 Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release metadata-only, runtime hot-path, churn hygiene report, version/docs/runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan.
 
 Use `npm run ci:release-metadata-guard` to keep release/chore release commits metadata-only. By default it checks `HEAD`; use `-- --range main..HEAD` for a branch range, or `-- --staged --assume-release` before committing a release bump. The guard fails only when a release-like commit changes both version metadata files such as `Cargo.toml`, `Cargo.lock`, npm package manifests, `README.md`, or `QUICKSTART.md`, and non-metadata files.
@@ -73,6 +110,8 @@ Use `npm run release:prepare` before release work. It checks version/doc sync, a
 The default test-compile guard runs `cargo test --locked --workspace --all-targets --all-features --no-run` so workspace lib, bin, integration test, example, and benchmark targets stay compile-covered. Use `npm run release:prepare -- --no-cargo-test` to skip test binary compilation and run `cargo check --locked --workspace --all-targets --all-features` instead.
 
 Use `npm run ci:runtime-manifest` after adding or renaming runtime proxy tests. New `main_internal_tests::runtime_proxy_` tests should normally get a targeted `RUNTIME_CI_TEST_CASES` entry; only add or rely on `RUNTIME_CI_BROAD_SHARD_FILTERS` when a broad CI shard intentionally owns that whole module or prefix. Broad shard filters must mirror the `label|filter` entries in the `main-internal-runtime-proxy` matrix in `.github/workflows/ci.yml` and must not match tests outside runtime CI ownership.
+
+When changing `prodex-context` audit, prose compression, or command-output context-saver helpers, run `cargo test -q -p prodex-context`. If the `prodex context compact-output` CLI surface changes, also run a focused CLI parse/handler test. The command-output helpers are pure and opt-in; they should not require runtime proxy tests unless a separate runtime integration changes.
 
 When changing `prodex info` runtime tuning output, run the focused `cargo test -q runtime_tuning_snapshot_reports_effective_policy_and_env_values -- --test-threads=1` check so env, policy, and default-derived values stay aligned.
 

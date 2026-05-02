@@ -1,47 +1,13 @@
 use super::*;
 
+pub(crate) use prodex_profile_export::CopilotUserInfo;
+use prodex_profile_export::{
+    CopilotConfigFile, copilot_account_key, copilot_platform_label, copilot_token_from_config,
+    copilot_user_api_origin, default_copilot_models_api_url, parse_copilot_config_file,
+    parse_copilot_version, select_copilot_logged_in_user,
+};
+
 const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CopilotConfigFile {
-    #[serde(default)]
-    last_logged_in_user: Option<CopilotConfigUser>,
-    #[serde(default)]
-    logged_in_users: Vec<CopilotConfigUser>,
-    #[serde(default)]
-    copilot_tokens: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct CopilotConfigUser {
-    host: String,
-    login: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct CopilotUserInfo {
-    #[serde(default)]
-    pub(crate) login: Option<String>,
-    #[serde(default)]
-    pub(crate) access_type_sku: Option<String>,
-    #[serde(default)]
-    pub(crate) copilot_plan: Option<String>,
-    #[serde(default)]
-    pub(crate) endpoints: Option<CopilotUserEndpoints>,
-    #[serde(default)]
-    pub(crate) limited_user_quotas: BTreeMap<String, i64>,
-    #[serde(default)]
-    pub(crate) monthly_quotas: BTreeMap<String, i64>,
-    #[serde(default)]
-    pub(crate) limited_user_reset_date: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct CopilotUserEndpoints {
-    #[serde(default)]
-    pub(crate) api: Option<String>,
-}
 
 #[derive(Debug)]
 struct CopilotImportContext {
@@ -267,10 +233,7 @@ fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str
 
 fn resolve_copilot_import_context() -> Result<CopilotImportContext> {
     let config = read_copilot_config()?;
-    let user = config
-        .last_logged_in_user
-        .clone()
-        .or_else(|| config.logged_in_users.first().cloned())
+    let user = select_copilot_logged_in_user(&config)
         .context("no logged-in Copilot user found in config.json")?;
     let token = resolve_copilot_account_token_from_config(&config, &user.host, &user.login)?;
 
@@ -286,7 +249,8 @@ fn read_copilot_config() -> Result<CopilotConfigFile> {
     let config_path = config_root.join("config.json");
     let raw = fs::read_to_string(&config_path)
         .with_context(|| format!("failed to read {}", config_path.display()))?;
-    serde_json::from_str(&raw).with_context(|| format!("failed to parse {}", config_path.display()))
+    parse_copilot_config_file(&raw)
+        .with_context(|| format!("failed to parse {}", config_path.display()))
 }
 
 fn discover_copilot_config_root() -> Result<PathBuf> {
@@ -391,55 +355,13 @@ fn copilot_package_roots() -> Result<Vec<PathBuf>> {
     Ok(roots.into_iter().collect())
 }
 
-fn parse_copilot_version(raw: &str) -> (u64, u64, u64) {
-    let mut parts = raw.split('.');
-    let parse_part = |value: Option<&str>| {
-        value
-            .and_then(|part| {
-                part.chars()
-                    .take_while(|ch| ch.is_ascii_digit())
-                    .collect::<String>()
-                    .parse::<u64>()
-                    .ok()
-            })
-            .unwrap_or(0)
-    };
-    (
-        parse_part(parts.next()),
-        parse_part(parts.next()),
-        parse_part(parts.next()),
-    )
-}
-
-fn copilot_platform_label() -> &'static str {
-    match (env::consts::OS, env::consts::ARCH) {
-        ("linux", "x86_64") => "linux-x64",
-        ("linux", "aarch64") => "linux-arm64",
-        ("macos", "x86_64") => "darwin-x64",
-        ("macos", "aarch64") => "darwin-arm64",
-        ("windows", "x86_64") => "win32-x64",
-        ("windows", "aarch64") => "win32-arm64",
-        _ => "linux-x64",
-    }
-}
-
-fn copilot_account_key(host: &str, login: &str) -> String {
-    format!("{}:{}", host.trim(), login.trim())
-}
-
 fn resolve_copilot_account_token_from_config(
     config: &CopilotConfigFile,
     host: &str,
     login: &str,
 ) -> Result<String> {
     let account_key = copilot_account_key(host, login);
-    config
-        .copilot_tokens
-        .get(&account_key)
-        .map(String::as_str)
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(ToOwned::to_owned)
+    copilot_token_from_config(config, host, login)
         .or_else(|| read_copilot_keychain_token(&account_key).ok().flatten())
         .context(format!(
             "failed to resolve the stored Copilot token for {} from config or keychain",
@@ -520,49 +442,4 @@ fn fetch_copilot_user_info_json_with_token(host: &str, token: &str) -> Result<se
         );
     }
     serde_json::from_slice(&body).with_context(|| format!("failed to parse {}", user_url))
-}
-
-fn copilot_user_api_origin(host: &str) -> Result<String> {
-    let mut url = if host.contains("://") {
-        reqwest::Url::parse(host).with_context(|| format!("invalid Copilot host '{}'", host))?
-    } else {
-        reqwest::Url::parse(&format!("https://{host}"))
-            .with_context(|| format!("invalid Copilot host '{}'", host))?
-    };
-    let is_local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
-    let has_explicit_port = url.port().is_some();
-    if !has_explicit_port
-        && !is_local
-        && let Some(hostname) = url.host_str()
-        && !hostname.starts_with("api.")
-    {
-        url.set_host(Some(&format!("api.{hostname}")))
-            .map_err(|_| {
-                anyhow::anyhow!("failed to derive Copilot API hostname from '{}'", host)
-            })?;
-    }
-    url.set_path("");
-    url.set_query(None);
-    url.set_fragment(None);
-    Ok(url.to_string().trim_end_matches('/').to_string())
-}
-
-fn default_copilot_models_api_url(host: &str) -> String {
-    let normalized = host.trim().trim_end_matches('/');
-    if normalized.eq_ignore_ascii_case("https://github.com")
-        || normalized.eq_ignore_ascii_case("http://github.com")
-        || normalized.eq_ignore_ascii_case("github.com")
-    {
-        return "https://api.githubcopilot.com".to_string();
-    }
-
-    let fallback_host = normalized
-        .strip_prefix("https://")
-        .or_else(|| normalized.strip_prefix("http://"))
-        .unwrap_or(normalized);
-    if let Some(subdomain) = fallback_host.strip_suffix(".ghe.com") {
-        return format!("https://copilot-api.{subdomain}.ghe.com");
-    }
-
-    format!("https://api.{fallback_host}")
 }

@@ -3,6 +3,42 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RuntimeDoctorBindingProfileSummary {
+    pub profile: String,
+    pub response_bindings: usize,
+    pub session_bindings: usize,
+    pub turn_state_bindings: usize,
+    pub session_id_bindings: usize,
+    pub total_bindings: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RuntimeDoctorBindingSourceSummary {
+    pub response_bindings: usize,
+    pub session_bindings: usize,
+    pub turn_state_bindings: usize,
+    pub session_id_bindings: usize,
+    pub total_bindings: usize,
+    pub profile_count: usize,
+    pub profiles: Vec<RuntimeDoctorBindingProfileSummary>,
+    pub missing_profile_bindings: usize,
+    pub missing_profile_binding_samples: Vec<String>,
+    pub oldest_bound_at: Option<i64>,
+    pub newest_bound_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RuntimeDoctorBindingStateSummary {
+    pub active_profile: Option<String>,
+    pub profile_count: usize,
+    pub last_run_selected_profiles: usize,
+    pub state: RuntimeDoctorBindingSourceSummary,
+    pub runtime_continuations: RuntimeDoctorBindingSourceSummary,
+    pub continuation_journal: RuntimeDoctorBindingSourceSummary,
+    pub merged_continuations: RuntimeDoctorBindingSourceSummary,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeDoctorSummary {
     pub log_path: Option<PathBuf>,
@@ -52,6 +88,7 @@ pub struct RuntimeDoctorSummary {
     pub persisted_continuation_journal_turn_state_bindings: usize,
     pub persisted_continuation_journal_session_id_bindings: usize,
     pub persisted_turn_state_coverage_percent: Option<u8>,
+    pub binding_state: RuntimeDoctorBindingStateSummary,
     pub state_save_queue_backlog: Option<usize>,
     pub state_save_lag_ms: Option<u64>,
     pub continuation_journal_save_backlog: Option<usize>,

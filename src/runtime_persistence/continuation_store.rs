@@ -3,109 +3,19 @@ use super::*;
 pub(crate) fn runtime_continuation_store_from_app_state(
     state: &AppState,
 ) -> RuntimeContinuationStore {
-    RuntimeContinuationStore {
-        response_profile_bindings: runtime_external_response_profile_bindings(
-            &state.response_profile_bindings,
-        ),
-        session_profile_bindings: state.session_profile_bindings.clone(),
-        turn_state_bindings: BTreeMap::new(),
-        session_id_bindings: runtime_external_session_id_bindings(&state.session_profile_bindings),
-        statuses: RuntimeContinuationStatuses::default(),
-    }
+    prodex_runtime_store::runtime_continuation_store_from_app_state(state)
 }
 
 pub(crate) fn compact_runtime_continuation_store(
-    mut continuations: RuntimeContinuationStore,
+    continuations: RuntimeContinuationStore,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> RuntimeContinuationStore {
-    let now = Local::now().timestamp();
-    prune_profile_bindings_for_housekeeping_without_retention(
-        &mut continuations.response_profile_bindings,
+    prodex_runtime_store::compact_runtime_continuation_store(
+        continuations,
         profiles,
-    );
-    prune_profile_bindings_for_housekeeping_without_retention(
-        &mut continuations.session_profile_bindings,
-        profiles,
-    );
-    prune_profile_bindings_for_housekeeping_without_retention(
-        &mut continuations.turn_state_bindings,
-        profiles,
-    );
-    prune_profile_bindings_for_housekeeping_without_retention(
-        &mut continuations.session_id_bindings,
-        profiles,
-    );
-    continuations
-        .response_profile_bindings
-        .retain(|key, binding| {
-            runtime_continuation_binding_should_retain(
-                binding,
-                continuations.statuses.response.get(key),
-                now,
-            )
-        });
-    let response_turn_state_keys = continuations
-        .response_profile_bindings
-        .keys()
-        .filter(|key| runtime_is_response_turn_state_lineage_key(key))
-        .cloned()
-        .collect::<Vec<_>>();
-    for key in response_turn_state_keys {
-        let Some((response_id, _)) = runtime_response_turn_state_lineage_parts(&key) else {
-            continuations.response_profile_bindings.remove(&key);
-            continue;
-        };
-        if continuations
-            .response_profile_bindings
-            .get(response_id)
-            .is_none_or(|binding| !profiles.contains_key(&binding.profile_name))
-        {
-            continuations.response_profile_bindings.remove(&key);
-        }
-    }
-    continuations.turn_state_bindings.retain(|key, binding| {
-        runtime_continuation_binding_should_retain(
-            binding,
-            continuations.statuses.turn_state.get(key),
-            now,
-        )
-    });
-    continuations
-        .session_profile_bindings
-        .retain(|key, binding| {
-            runtime_continuation_binding_should_retain(
-                binding,
-                continuations.statuses.session_id.get(key),
-                now,
-            )
-        });
-    continuations.session_id_bindings.retain(|key, binding| {
-        runtime_continuation_binding_should_retain(
-            binding,
-            continuations.statuses.session_id.get(key),
-            now,
-        )
-    });
-    prune_runtime_continuation_response_bindings(
-        &mut continuations.response_profile_bindings,
-        &continuations.statuses.response,
-        RESPONSE_PROFILE_BINDING_LIMIT,
-    );
-    prune_profile_bindings(
-        &mut continuations.turn_state_bindings,
-        TURN_STATE_PROFILE_BINDING_LIMIT,
-    );
-    prune_profile_bindings(
-        &mut continuations.session_profile_bindings,
-        SESSION_ID_PROFILE_BINDING_LIMIT,
-    );
-    prune_profile_bindings(
-        &mut continuations.session_id_bindings,
-        SESSION_ID_PROFILE_BINDING_LIMIT,
-    );
-    let statuses = std::mem::take(&mut continuations.statuses);
-    continuations.statuses = compact_runtime_continuation_statuses(statuses, &continuations);
-    continuations
+        Local::now().timestamp(),
+        runtime_continuation_compaction_policy(),
+    )
 }
 
 pub(crate) fn merge_runtime_continuation_store(
@@ -113,49 +23,12 @@ pub(crate) fn merge_runtime_continuation_store(
     incoming: &RuntimeContinuationStore,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> RuntimeContinuationStore {
-    compact_runtime_continuation_store(
-        RuntimeContinuationStore {
-            response_profile_bindings: merge_profile_bindings(
-                &existing.response_profile_bindings,
-                &incoming.response_profile_bindings,
-                profiles,
-            ),
-            session_profile_bindings: merge_profile_bindings(
-                &existing.session_profile_bindings,
-                &incoming.session_profile_bindings,
-                profiles,
-            ),
-            turn_state_bindings: merge_profile_bindings(
-                &existing.turn_state_bindings,
-                &incoming.turn_state_bindings,
-                profiles,
-            ),
-            session_id_bindings: merge_profile_bindings(
-                &existing.session_id_bindings,
-                &incoming.session_id_bindings,
-                profiles,
-            ),
-            statuses: merge_runtime_continuation_statuses(
-                &existing.statuses,
-                &incoming.statuses,
-                &merge_profile_bindings(
-                    &existing.response_profile_bindings,
-                    &incoming.response_profile_bindings,
-                    profiles,
-                ),
-                &merge_profile_bindings(
-                    &existing.turn_state_bindings,
-                    &incoming.turn_state_bindings,
-                    profiles,
-                ),
-                &merge_profile_bindings(
-                    &existing.session_id_bindings,
-                    &incoming.session_id_bindings,
-                    profiles,
-                ),
-            ),
-        },
+    prodex_runtime_store::merge_runtime_continuation_store(
+        existing,
+        incoming,
         profiles,
+        Local::now().timestamp(),
+        runtime_continuation_compaction_policy(),
     )
 }
 

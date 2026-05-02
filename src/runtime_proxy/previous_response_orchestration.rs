@@ -1,42 +1,8 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RuntimePreviousResponseNotFoundAction {
-    RetryOwner,
-    StaleContinuation,
-    Rotate,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct RuntimePreviousResponseNotFoundPolicy {
-    pub(crate) reset_previous_response_retry_index_on_rotate: bool,
-    pub(crate) log_fresh_fallback_blocked: bool,
-    pub(crate) fail_stale_continuation: bool,
-    pub(crate) clear_trusted_affinity_on_rotate: bool,
-}
-
-impl RuntimePreviousResponseNotFoundPolicy {
-    pub(crate) fn websocket(
-        reset_previous_response_retry_index_on_rotate: bool,
-        clear_trusted_affinity_on_rotate: bool,
-    ) -> Self {
-        Self {
-            reset_previous_response_retry_index_on_rotate,
-            log_fresh_fallback_blocked: true,
-            fail_stale_continuation: true,
-            clear_trusted_affinity_on_rotate,
-        }
-    }
-
-    pub(crate) fn responses(clear_trusted_affinity_on_rotate: bool) -> Self {
-        Self {
-            reset_previous_response_retry_index_on_rotate: false,
-            log_fresh_fallback_blocked: true,
-            fail_stale_continuation: false,
-            clear_trusted_affinity_on_rotate,
-        }
-    }
-}
+pub(crate) use runtime_proxy_crate::{
+    RuntimePreviousResponseNotFoundAction, RuntimePreviousResponseNotFoundPolicy,
+};
 
 pub(crate) struct RuntimePreviousResponseNotFoundContext<'a> {
     pub(crate) shared: &'a RuntimeRotationProxyShared,
@@ -124,8 +90,8 @@ pub(crate) fn handle_runtime_previous_response_not_found(
         candidate_turn_state_retry_profile,
         candidate_turn_state_retry_value,
     );
-    let decision = runtime_previous_response_not_found_decision(
-        RuntimePreviousResponseNotFoundDecisionInput {
+    let plan = runtime_proxy_crate::runtime_previous_response_not_found_plan(
+        runtime_proxy_crate::RuntimePreviousResponseNotFoundPlanInput {
             route,
             previous_response_id,
             has_turn_state_retry,
@@ -135,11 +101,13 @@ pub(crate) fn handle_runtime_previous_response_not_found(
             previous_response_fresh_fallback_used,
             fresh_fallback_shape,
             retry_index: *previous_response_retry_index,
+            policy,
         },
     );
+    let decision = plan.decision;
 
     if let Some(delay) = decision.retry_delay {
-        *previous_response_retry_index += 1;
+        *previous_response_retry_index = plan.next_retry_index;
         runtime_proxy_log(
             shared,
             runtime_previous_response_retry_immediate_log_message(
@@ -168,10 +136,12 @@ pub(crate) fn handle_runtime_previous_response_not_found(
         return Ok(RuntimePreviousResponseNotFoundAction::RetryOwner);
     }
 
-    *previous_response_retry_candidate = None;
-    *previous_response_retry_index = 0;
+    if plan.reset_retry_state {
+        *previous_response_retry_candidate = None;
+        *previous_response_retry_index = plan.next_retry_index;
+    }
 
-    if policy.fail_stale_continuation && decision.stale_continuation {
+    if plan.action == RuntimePreviousResponseNotFoundAction::StaleContinuation {
         runtime_proxy_log_previous_response_stale_continuation(shared, log_context, profile_name);
         runtime_proxy_log_chain_dead_upstream_confirmed(
             shared,
@@ -190,7 +160,7 @@ pub(crate) fn handle_runtime_previous_response_not_found(
         return Ok(RuntimePreviousResponseNotFoundAction::StaleContinuation);
     }
 
-    if policy.log_fresh_fallback_blocked && decision.fresh_fallback_blocked_without_affinity {
+    if plan.log_fresh_fallback_blocked {
         runtime_proxy_log(
             shared,
             runtime_previous_response_not_found_fresh_fallback_log_message(
@@ -203,36 +173,40 @@ pub(crate) fn handle_runtime_previous_response_not_found(
         );
     }
 
-    let released_affinity = release_runtime_previous_response_affinity(
-        shared,
-        profile_name,
-        previous_response_id,
-        request_turn_state,
-        request_session_id,
-        route_kind,
-    )?;
-    if released_affinity {
-        runtime_proxy_log(
+    if plan.release_affinity {
+        let released_affinity = release_runtime_previous_response_affinity(
             shared,
-            runtime_previous_response_affinity_released_log_message(log_context, profile_name),
+            profile_name,
+            previous_response_id,
+            request_turn_state,
+            request_session_id,
+            route_kind,
+        )?;
+        if released_affinity {
+            runtime_proxy_log(
+                shared,
+                runtime_previous_response_affinity_released_log_message(log_context, profile_name),
+            );
+        }
+    }
+    if plan.clear_response_profile_affinity {
+        clear_runtime_response_profile_affinity(
+            profile_name,
+            bound_profile,
+            session_profile,
+            candidate_turn_state_retry_profile,
+            candidate_turn_state_retry_value,
+            pinned_profile,
+            previous_response_retry_index,
+            policy.reset_previous_response_retry_index_on_rotate,
+            turn_state_profile,
+            compact_followup_profile,
         );
     }
-    clear_runtime_response_profile_affinity(
-        profile_name,
-        bound_profile,
-        session_profile,
-        candidate_turn_state_retry_profile,
-        candidate_turn_state_retry_value,
-        pinned_profile,
-        previous_response_retry_index,
-        policy.reset_previous_response_retry_index_on_rotate,
-        turn_state_profile,
-        compact_followup_profile,
-    );
-    if policy.clear_trusted_affinity_on_rotate
-        && let Some(trusted_previous_response_affinity) = trusted_previous_response_affinity_mut
-    {
-        *trusted_previous_response_affinity = false;
+    if plan.clear_trusted_affinity {
+        if let Some(trusted_previous_response_affinity) = trusted_previous_response_affinity_mut {
+            *trusted_previous_response_affinity = false;
+        }
     }
     excluded_profiles.insert(profile_name.to_string());
 

@@ -75,19 +75,7 @@ pub(crate) fn acquire_runtime_profile_inflight_guard(
         *count = count.saturating_add(weight);
         *count
     };
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "profile_inflight",
-            [
-                runtime_proxy_log_field("profile", profile_name),
-                runtime_proxy_log_field("count", count.to_string()),
-                runtime_proxy_log_field("weight", weight.to_string()),
-                runtime_proxy_log_field("context", context),
-                runtime_proxy_log_field("event", "acquire"),
-            ],
-        ),
-    );
+    record_runtime_profile_inflight_acquire(shared, profile_name, count, weight, context);
     Ok(RuntimeProfileInFlightGuard {
         shared: shared.clone(),
         profile_name: profile_name.to_string(),

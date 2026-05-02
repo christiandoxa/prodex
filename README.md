@@ -205,11 +205,13 @@ prodex info
 prodex doctor --runtime
 prodex context audit
 prodex context compress ~/.codex/AGENTS.md --dry-run
+git diff | prodex context compact-output --kind git-diff
 ```
 
 `prodex info` includes the effective runtime tuning values after environment, policy, and default resolution.
 `prodex session list` shows shared Codex session metadata, and `prodex session current` filters that list to sessions started from the current directory.
 `prodex context audit` reports approximate token weight for shared instruction and memory files. `prodex context compress` is deterministic, only touches Markdown/text files, skips `.original.md` backups, and writes an `.original.md` backup before replacing a file.
+`prodex context compact-output` is an explicit stdin/file helper for compacting copied command output such as `git status`, `git diff`, `rg`/`grep`, `find`/`tree`, or generic long logs. The same logic is exposed by the `prodex-context` crate and does not rewrite Codex runtime payloads.
 For full policy keys, env overrides, and runtime log path resolution, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 
 ## Support

@@ -106,53 +106,33 @@ pub(super) struct RuntimeProfileInFlightGuard {
 pub(super) struct RuntimeProxyActiveRequestGuard {
     pub(super) active_request_count: Arc<AtomicUsize>,
     pub(super) lane_active_count: Arc<AtomicUsize>,
+    pub(super) lane_releases_total: Arc<AtomicU64>,
+    pub(super) active_request_release_underflows_total: Arc<AtomicU64>,
+    pub(super) lane_release_underflows_total: Arc<AtomicU64>,
     pub(super) wait: Arc<(Mutex<()>, Condvar)>,
 }
 
 impl Drop for RuntimeProxyActiveRequestGuard {
     fn drop(&mut self) {
-        let (mutex, condvar) = &*self.wait;
-        let _guard = mutex
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.active_request_count.fetch_sub(1, Ordering::SeqCst);
-        self.lane_active_count.fetch_sub(1, Ordering::SeqCst);
-        condvar.notify_all();
+        let _ = release_runtime_proxy_active_request_guard(
+            &self.active_request_count,
+            &self.lane_active_count,
+            &self.lane_releases_total,
+            &self.active_request_release_underflows_total,
+            &self.lane_release_underflows_total,
+            &self.wait,
+        );
     }
 }
 
 impl Drop for RuntimeProfileInFlightGuard {
     fn drop(&mut self) {
-        if let Ok(mut runtime) = self.shared.runtime.lock() {
-            let remaining =
-                if let Some(count) = runtime.profile_inflight.get_mut(&self.profile_name) {
-                    *count = count.saturating_sub(self.weight);
-                    let remaining = *count;
-                    if remaining == 0 {
-                        runtime.profile_inflight.remove(&self.profile_name);
-                    }
-                    remaining
-                } else {
-                    0
-                };
-            drop(runtime);
-            runtime_proxy_log(
-                &self.shared,
-                format!(
-                    "profile_inflight profile={} count={} weight={} context={} event=release",
-                    self.profile_name, remaining, self.weight, self.context
-                ),
-            );
-            self.shared
-                .lane_admission
-                .inflight_release_revision
-                .fetch_add(1, Ordering::SeqCst);
-            let (mutex, condvar) = &*self.shared.lane_admission.wait;
-            let _guard = mutex
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            condvar.notify_all();
-        }
+        let _ = release_runtime_profile_inflight_guard(
+            &self.shared,
+            &self.profile_name,
+            self.context,
+            self.weight,
+        );
     }
 }
 

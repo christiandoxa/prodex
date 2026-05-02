@@ -416,49 +416,12 @@ pub(crate) fn runtime_process_prodex_binary_identity(pid: u32) -> RuntimeProdexB
     }
 }
 
-fn runtime_broker_replacement_reason(
-    current: &RuntimeProdexBinaryIdentity,
-    observed: &RuntimeProdexBinaryIdentity,
-) -> &'static str {
-    match (
-        current.executable_sha256.as_deref(),
-        observed.executable_sha256.as_deref(),
-    ) {
-        (Some(current_sha256), Some(observed_sha256)) if current_sha256 != observed_sha256 => {
-            "sha256_mismatch"
-        }
-        _ => match (
-            current.prodex_version.as_deref(),
-            observed.prodex_version.as_deref(),
-        ) {
-            (Some(current_version), Some(observed_version))
-                if current_version != observed_version =>
-            {
-                "version_mismatch"
-            }
-            _ if observed.is_present() => "identity_mismatch",
-            _ => "identity_unresolved",
-        },
-    }
-}
-
 fn runtime_broker_observed_binary_identity(
     registry: &RuntimeBrokerRegistry,
     health: Option<&RuntimeBrokerHealth>,
 ) -> RuntimeProdexBinaryIdentity {
-    health
-        .filter(|health| health.instance_token == registry.instance_token)
-        .map(runtime_health_prodex_binary_identity)
-        .filter(RuntimeProdexBinaryIdentity::is_present)
-        .or_else(|| {
-            let identity = runtime_registry_prodex_binary_identity(registry);
-            identity.is_present().then_some(identity)
-        })
-        .or_else(|| {
-            let identity = runtime_process_prodex_binary_identity(registry.pid);
-            identity.is_present().then_some(identity)
-        })
-        .unwrap_or_default()
+    prodex_runtime_broker::runtime_broker_observed_known_binary_identity(registry, health)
+        .unwrap_or_else(|| runtime_process_prodex_binary_identity(registry.pid))
 }
 
 pub(crate) fn runtime_process_prodex_version(pid: u32) -> Option<String> {
@@ -518,7 +481,7 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
     }
 
     let active_requests = health
-        .filter(|health| health.instance_token == registry.instance_token)
+        .filter(|health| health.matches_registry_instance(registry))
         .map(|health| health.active_requests)
         .unwrap_or_default();
     let live_leases = cleanup_runtime_broker_stale_leases(paths, broker_key);
@@ -526,8 +489,10 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
         return RuntimeBrokerVersionGuardOutcome::DeferredActiveRequests;
     }
 
-    let replacement_reason =
-        runtime_broker_replacement_reason(&current_identity, &observed_identity);
+    let replacement_reason = prodex_runtime_broker::runtime_broker_replacement_reason(
+        &current_identity,
+        &observed_identity,
+    );
     audit_log_event_best_effort(
         "runtime_broker",
         "replace_stale_broker",

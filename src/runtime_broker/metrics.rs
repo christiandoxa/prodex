@@ -288,6 +288,14 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             },
             traffic: self.build_traffic(),
             profile_inflight: self.build_profile_inflight(),
+            active_request_release_underflows_total: self
+                .metrics
+                .active_request_release_underflows_total,
+            profile_inflight_admissions_total: self.metrics.profile_inflight_admissions_total,
+            profile_inflight_releases_total: self.metrics.profile_inflight_releases_total,
+            profile_inflight_release_underflows_total: self
+                .metrics
+                .profile_inflight_release_underflows_total,
             retry_backoffs: self.metrics.retry_backoffs as u64,
             transport_backoffs: self.metrics.transport_backoffs as u64,
             route_circuits: self.metrics.route_circuits as u64,
@@ -394,8 +402,10 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             active: lane.active as u64,
             limit: lane.limit as u64,
             admissions_total: lane.admissions_total,
+            releases_total: lane.releases_total,
             global_limit_rejections_total: lane.global_limit_rejections_total,
             lane_limit_rejections_total: lane.lane_limit_rejections_total,
+            release_underflows_total: lane.release_underflows_total,
         }
     }
 
@@ -432,6 +442,10 @@ fn runtime_broker_live_lane_metrics(
             .lane_admission
             .admissions_total_counter(lane)
             .load(Ordering::Relaxed),
+        releases_total: shared
+            .lane_admission
+            .releases_total_counter(lane)
+            .load(Ordering::Relaxed),
         global_limit_rejections_total: shared
             .lane_admission
             .global_limit_rejections_total_counter(lane)
@@ -439,6 +453,10 @@ fn runtime_broker_live_lane_metrics(
         lane_limit_rejections_total: shared
             .lane_admission
             .lane_limit_rejections_total_counter(lane)
+            .load(Ordering::Relaxed),
+        release_underflows_total: shared
+            .lane_admission
+            .release_underflows_total_counter(lane)
             .load(Ordering::Relaxed),
     }
 }
@@ -503,6 +521,22 @@ pub(crate) fn runtime_broker_metrics_snapshot(
             standard: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Standard),
         },
         profile_inflight: runtime.profile_inflight.clone(),
+        active_request_release_underflows_total: shared
+            .lane_admission
+            .active_request_release_underflows_total
+            .load(Ordering::Relaxed),
+        profile_inflight_admissions_total: shared
+            .lane_admission
+            .profile_inflight_admissions_total
+            .load(Ordering::Relaxed),
+        profile_inflight_releases_total: shared
+            .lane_admission
+            .profile_inflight_releases_total
+            .load(Ordering::Relaxed),
+        profile_inflight_release_underflows_total: shared
+            .lane_admission
+            .profile_inflight_release_underflows_total
+            .load(Ordering::Relaxed),
         retry_backoffs: runtime
             .profile_retry_backoff_until
             .values()

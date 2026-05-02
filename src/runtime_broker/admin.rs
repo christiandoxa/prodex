@@ -48,26 +48,6 @@ pub(crate) fn update_runtime_broker_current_profile(log_path: &Path, current_pro
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RuntimeBrokerAdminRoute {
-    Health,
-    Metrics,
-    MetricsPrometheus,
-    Activate,
-}
-
-impl RuntimeBrokerAdminRoute {
-    fn from_path(path: &str) -> Option<Self> {
-        match path {
-            "/__prodex/runtime/health" => Some(Self::Health),
-            "/__prodex/runtime/metrics" => Some(Self::Metrics),
-            "/__prodex/runtime/metrics/prometheus" => Some(Self::MetricsPrometheus),
-            "/__prodex/runtime/activate" => Some(Self::Activate),
-            _ => None,
-        }
-    }
-}
-
 fn runtime_broker_metrics_json_response(
     shared: &RuntimeRotationProxyShared,
     metadata: &RuntimeBrokerMetadata,
@@ -109,22 +89,12 @@ fn runtime_broker_health_response(
     shared: &RuntimeRotationProxyShared,
     metadata: RuntimeBrokerMetadata,
 ) -> Option<tiny_http::ResponseBox> {
-    let health = RuntimeBrokerHealth {
-        pid: std::process::id(),
-        started_at: metadata.started_at,
-        current_profile: metadata.current_profile,
-        include_code_review: metadata.include_code_review,
-        active_requests: shared.active_request_count.load(Ordering::SeqCst),
-        instance_token: metadata.instance_token,
-        persistence_role: if runtime_proxy_persistence_enabled(shared) {
-            "owner".to_string()
-        } else {
-            "follower".to_string()
-        },
-        prodex_version: metadata.prodex_version,
-        executable_path: metadata.executable_path,
-        executable_sha256: metadata.executable_sha256,
-    };
+    let health = RuntimeBrokerHealth::from_metadata(
+        &metadata,
+        std::process::id(),
+        shared.active_request_count.load(Ordering::SeqCst),
+        runtime_proxy_persistence_enabled(shared),
+    );
     let body = serde_json::to_string(&health).ok()?;
     Some(build_runtime_proxy_json_response(200, body))
 }
@@ -225,7 +195,7 @@ pub(crate) fn handle_runtime_proxy_admin_request(
     shared: &RuntimeRotationProxyShared,
 ) -> Option<tiny_http::ResponseBox> {
     let path = path_without_query(request.url());
-    let route = RuntimeBrokerAdminRoute::from_path(path)?;
+    let route = prodex_runtime_broker::RuntimeBrokerAdminRoute::from_path(path)?;
 
     let Some(metadata) = runtime_broker_metadata_for_log_path(&shared.log_path) else {
         return Some(build_runtime_proxy_json_error_response(
@@ -243,12 +213,16 @@ pub(crate) fn handle_runtime_proxy_admin_request(
     }
 
     match route {
-        RuntimeBrokerAdminRoute::Health => runtime_broker_health_response(shared, metadata),
-        RuntimeBrokerAdminRoute::Metrics => runtime_broker_metrics_json_response(shared, &metadata),
-        RuntimeBrokerAdminRoute::MetricsPrometheus => {
+        prodex_runtime_broker::RuntimeBrokerAdminRoute::Health => {
+            runtime_broker_health_response(shared, metadata)
+        }
+        prodex_runtime_broker::RuntimeBrokerAdminRoute::Metrics => {
+            runtime_broker_metrics_json_response(shared, &metadata)
+        }
+        prodex_runtime_broker::RuntimeBrokerAdminRoute::MetricsPrometheus => {
             runtime_broker_metrics_prometheus_response(shared, &metadata)
         }
-        RuntimeBrokerAdminRoute::Activate => {
+        prodex_runtime_broker::RuntimeBrokerAdminRoute::Activate => {
             runtime_broker_activation_response(request, shared, metadata)
         }
     }

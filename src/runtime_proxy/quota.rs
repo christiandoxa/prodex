@@ -1,5 +1,7 @@
 use super::*;
 
+pub(crate) use prodex_quota::quota_reset_at_from_message as runtime_proxy_quota_reset_at_from_message;
+
 pub(crate) fn runtime_profile_usage_cache_is_fresh(
     entry: &RuntimeProfileProbeCacheEntry,
     now: i64,
@@ -229,66 +231,6 @@ pub(crate) fn runtime_profile_usage_snapshot_hold_expired(
     })
 }
 
-pub(crate) fn runtime_proxy_quota_reset_at_from_message(message: &str) -> Option<i64> {
-    let marker = message.to_ascii_lowercase().find("try again at ")?;
-    let candidate = message
-        .get(marker + "try again at ".len()..)?
-        .trim()
-        .trim_end_matches('.');
-    let now = Local::now();
-    if let Some((time_text, meridiem)) = candidate
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .get(..2)
-        .and_then(|parts| {
-            if parts.len() == 2 {
-                Some((parts[0], parts[1]))
-            } else {
-                None
-            }
-        })
-        && let Ok(time) =
-            chrono::NaiveTime::parse_from_str(&format!("{time_text} {meridiem}"), "%I:%M %p")
-    {
-        let mut naive = now.date_naive().and_time(time);
-        let mut parsed = Local
-            .from_local_datetime(&naive)
-            .single()
-            .or_else(|| Local.from_local_datetime(&naive).earliest())?;
-        if parsed.timestamp() <= now.timestamp() {
-            naive = naive.checked_add_signed(chrono::Duration::days(1))?;
-            parsed = Local
-                .from_local_datetime(&naive)
-                .single()
-                .or_else(|| Local.from_local_datetime(&naive).earliest())?;
-        }
-        return Some(parsed.timestamp());
-    }
-    let mut parts = candidate
-        .split_whitespace()
-        .map(|part| part.to_string())
-        .collect::<Vec<_>>();
-    if parts.len() < 5 {
-        return None;
-    }
-    let day_digits = parts[1]
-        .trim_end_matches(',')
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    if day_digits.is_empty() {
-        return None;
-    }
-    parts[1] = format!("{day_digits},");
-    let normalized = parts[..5].join(" ");
-    let naive = chrono::NaiveDateTime::parse_from_str(&normalized, "%b %d, %Y %I:%M %p").ok()?;
-    Local
-        .from_local_datetime(&naive)
-        .single()
-        .or_else(|| Local.from_local_datetime(&naive).earliest())
-        .map(|datetime| datetime.timestamp())
-}
-
 pub(crate) fn runtime_profile_known_quota_reset_at(
     runtime: &RuntimeRotationState,
     profile_name: &str,
@@ -388,31 +330,6 @@ pub(crate) fn mark_runtime_profile_quota_quarantine(
         format!("profile_retry_backoff profile={profile_name} until={until}"),
     );
     Ok(())
-}
-
-pub(crate) fn usage_from_runtime_usage_snapshot(
-    snapshot: &RuntimeProfileUsageSnapshot,
-) -> UsageResponse {
-    UsageResponse {
-        email: None,
-        plan_type: None,
-        rate_limit: Some(WindowPair {
-            primary_window: Some(UsageWindow {
-                used_percent: Some((100 - snapshot.five_hour_remaining_percent).clamp(0, 100)),
-                reset_at: (snapshot.five_hour_reset_at != i64::MAX)
-                    .then_some(snapshot.five_hour_reset_at),
-                limit_window_seconds: Some(18_000),
-            }),
-            secondary_window: Some(UsageWindow {
-                used_percent: Some((100 - snapshot.weekly_remaining_percent).clamp(0, 100)),
-                reset_at: (snapshot.weekly_reset_at != i64::MAX)
-                    .then_some(snapshot.weekly_reset_at),
-                limit_window_seconds: Some(604_800),
-            }),
-        }),
-        code_review_rate_limit: None,
-        additional_rate_limits: Vec::new(),
-    }
 }
 
 pub(crate) fn runtime_quota_source_label(source: RuntimeQuotaSource) -> &'static str {
@@ -1017,23 +934,6 @@ pub(crate) fn runtime_quota_soft_affinity_rejection_reason(
         "quota_exhausted"
     } else {
         runtime_quota_pressure_band_reason(summary.route_band)
-    }
-}
-
-pub(crate) fn runtime_quota_source_sort_key(
-    route_kind: RuntimeRouteKind,
-    source: RuntimeQuotaSource,
-) -> usize {
-    match (route_kind, source) {
-        (
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket,
-            RuntimeQuotaSource::LiveProbe,
-        ) => 0,
-        (
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket,
-            RuntimeQuotaSource::PersistedSnapshot,
-        ) => 1,
-        _ => 0,
     }
 }
 

@@ -221,7 +221,9 @@ fn merge_runtime_state_and_continuations_for_save(
         &state.profiles,
     );
     state.response_profile_bindings =
-        runtime_external_response_profile_bindings(&continuations.response_profile_bindings);
+        prodex_runtime_store::runtime_external_response_profile_bindings(
+            &continuations.response_profile_bindings,
+        );
     state.session_profile_bindings = continuations.session_profile_bindings.clone();
     Ok((state, continuations))
 }

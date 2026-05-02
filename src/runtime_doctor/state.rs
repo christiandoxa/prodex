@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use prodex_runtime_doctor::{
-    RuntimeDoctorBackoffMaps, RuntimeDoctorBinaryIdentity, RuntimeDoctorHealthScore,
+    RuntimeDoctorBackoffMaps, RuntimeDoctorBinaryIdentity, RuntimeDoctorBindingSourceInput,
+    RuntimeDoctorBindingStateInput, RuntimeDoctorHealthScore,
     RuntimeDoctorQuotaWindowStatus as DoctorQuotaWindowStatus, RuntimeDoctorStateSummaryConfig,
     RuntimeDoctorUsageSnapshot,
 };
@@ -448,6 +449,47 @@ pub(crate) fn collect_runtime_doctor_state(paths: &AppPaths, summary: &mut Runti
             recovered_from_backup: false,
         });
     let orphan_managed_dirs = collect_orphan_managed_profile_dirs(paths, &state.value);
+    let profile_names = state.value.profiles.keys().cloned().collect::<Vec<_>>();
+    let empty_bindings = BTreeMap::new();
+    summary.binding_state = prodex_runtime_doctor::runtime_doctor_binding_state_summary(
+        RuntimeDoctorBindingStateInput {
+            active_profile: state.value.active_profile.as_deref(),
+            profile_names: &profile_names,
+            last_run_selected_profiles: state.value.last_run_selected_at.len(),
+            state: RuntimeDoctorBindingSourceInput {
+                response_profile_bindings: &state.value.response_profile_bindings,
+                session_profile_bindings: &state.value.session_profile_bindings,
+                turn_state_bindings: &empty_bindings,
+                session_id_bindings: &empty_bindings,
+            },
+            runtime_continuations: RuntimeDoctorBindingSourceInput {
+                response_profile_bindings: &continuations.value.response_profile_bindings,
+                session_profile_bindings: &continuations.value.session_profile_bindings,
+                turn_state_bindings: &continuations.value.turn_state_bindings,
+                session_id_bindings: &continuations.value.session_id_bindings,
+            },
+            continuation_journal: RuntimeDoctorBindingSourceInput {
+                response_profile_bindings: &continuation_journal
+                    .value
+                    .continuations
+                    .response_profile_bindings,
+                session_profile_bindings: &continuation_journal
+                    .value
+                    .continuations
+                    .session_profile_bindings,
+                turn_state_bindings: &continuation_journal.value.continuations.turn_state_bindings,
+                session_id_bindings: &continuation_journal.value.continuations.session_id_bindings,
+            },
+            merged_continuations: RuntimeDoctorBindingSourceInput {
+                response_profile_bindings: &merged_continuations.response_profile_bindings,
+                session_profile_bindings: &merged_continuations.session_profile_bindings,
+                turn_state_bindings: &merged_continuations.turn_state_bindings,
+                session_id_bindings: &merged_continuations.session_id_bindings,
+            },
+        },
+        |binding| binding.profile_name.as_str(),
+        |binding| binding.bound_at,
+    );
 
     summary.persisted_retry_backoffs = backoffs.value.retry_backoff_until.len();
     summary.persisted_transport_backoffs = backoffs.value.transport_backoff_until.len();

@@ -10,8 +10,14 @@ use prodex_runtime_state::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
+use std::ffi::OsString;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+
+pub const RUNTIME_BROKER_HEALTH_PATH: &str = "/__prodex/runtime/health";
+pub const RUNTIME_BROKER_METRICS_PATH: &str = "/__prodex/runtime/metrics";
+pub const RUNTIME_BROKER_METRICS_PROMETHEUS_PATH: &str = "/__prodex/runtime/metrics/prometheus";
+pub const RUNTIME_BROKER_ACTIVATE_PATH: &str = "/__prodex/runtime/activate";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeBrokerRegistry {
@@ -35,6 +41,39 @@ pub struct RuntimeBrokerRegistry {
     pub openai_mount_path: Option<String>,
 }
 
+impl RuntimeBrokerRegistry {
+    pub fn admin_url(&self, route: RuntimeBrokerAdminRoute) -> String {
+        runtime_broker_admin_url(&self.listen_addr, route)
+    }
+
+    pub fn health_url(&self) -> String {
+        self.admin_url(RuntimeBrokerAdminRoute::Health)
+    }
+
+    pub fn metrics_url(&self) -> String {
+        self.admin_url(RuntimeBrokerAdminRoute::Metrics)
+    }
+
+    pub fn metrics_prometheus_url(&self) -> String {
+        self.admin_url(RuntimeBrokerAdminRoute::MetricsPrometheus)
+    }
+
+    pub fn activate_url(&self) -> String {
+        self.admin_url(RuntimeBrokerAdminRoute::Activate)
+    }
+
+    pub fn matches_launch_config(
+        &self,
+        upstream_base_url: &str,
+        include_code_review: bool,
+        upstream_no_proxy: bool,
+    ) -> bool {
+        self.upstream_base_url == upstream_base_url
+            && self.include_code_review == include_code_review
+            && self.upstream_no_proxy == upstream_no_proxy
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeBrokerHealth {
     pub pid: u32,
@@ -52,13 +91,97 @@ pub struct RuntimeBrokerHealth {
     pub executable_sha256: Option<String>,
 }
 
+impl RuntimeBrokerHealth {
+    pub fn from_metadata(
+        metadata: &RuntimeBrokerMetadata,
+        pid: u32,
+        active_requests: usize,
+        persistence_owner: bool,
+    ) -> Self {
+        Self {
+            pid,
+            started_at: metadata.started_at,
+            current_profile: metadata.current_profile.clone(),
+            include_code_review: metadata.include_code_review,
+            active_requests,
+            instance_token: metadata.instance_token.clone(),
+            persistence_role: if persistence_owner {
+                "owner"
+            } else {
+                "follower"
+            }
+            .to_string(),
+            prodex_version: metadata.prodex_version.clone(),
+            executable_path: metadata.executable_path.clone(),
+            executable_sha256: metadata.executable_sha256.clone(),
+        }
+    }
+
+    pub fn matches_registry_instance(&self, registry: &RuntimeBrokerRegistry) -> bool {
+        self.instance_token == registry.instance_token
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeBrokerAdminRoute {
+    Health,
+    Metrics,
+    MetricsPrometheus,
+    Activate,
+}
+
+impl RuntimeBrokerAdminRoute {
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::Health => RUNTIME_BROKER_HEALTH_PATH,
+            Self::Metrics => RUNTIME_BROKER_METRICS_PATH,
+            Self::MetricsPrometheus => RUNTIME_BROKER_METRICS_PROMETHEUS_PATH,
+            Self::Activate => RUNTIME_BROKER_ACTIVATE_PATH,
+        }
+    }
+
+    pub fn from_path(path: &str) -> Option<Self> {
+        match path {
+            RUNTIME_BROKER_HEALTH_PATH => Some(Self::Health),
+            RUNTIME_BROKER_METRICS_PATH => Some(Self::Metrics),
+            RUNTIME_BROKER_METRICS_PROMETHEUS_PATH => Some(Self::MetricsPrometheus),
+            RUNTIME_BROKER_ACTIVATE_PATH => Some(Self::Activate),
+            _ => None,
+        }
+    }
+}
+
+pub fn runtime_broker_admin_url(listen_addr: &str, route: RuntimeBrokerAdminRoute) -> String {
+    format!("http://{}{}", listen_addr, route.path())
+}
+
+pub fn runtime_broker_health_url(registry: &RuntimeBrokerRegistry) -> String {
+    registry.health_url()
+}
+
+pub fn runtime_broker_metrics_url(registry: &RuntimeBrokerRegistry) -> String {
+    registry.metrics_url()
+}
+
+pub fn runtime_broker_metrics_prometheus_url(registry: &RuntimeBrokerRegistry) -> String {
+    registry.metrics_prometheus_url()
+}
+
+pub fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
+    registry.activate_url()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeBrokerLaneMetrics {
     pub active: usize,
     pub limit: usize,
     pub admissions_total: u64,
+    #[serde(default)]
+    pub releases_total: u64,
     pub global_limit_rejections_total: u64,
     pub lane_limit_rejections_total: u64,
+    #[serde(default)]
+    pub release_underflows_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -126,6 +249,14 @@ pub struct RuntimeBrokerMetrics {
     pub runtime_state_lock_wait: RuntimeStateLockWaitMetrics,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub active_request_release_underflows_total: u64,
+    #[serde(default)]
+    pub profile_inflight_admissions_total: u64,
+    #[serde(default)]
+    pub profile_inflight_releases_total: u64,
+    #[serde(default)]
+    pub profile_inflight_release_underflows_total: u64,
     pub retry_backoffs: usize,
     pub transport_backoffs: usize,
     pub route_circuits: usize,
@@ -369,6 +500,46 @@ pub struct RuntimeBrokerMetadata {
     pub executable_sha256: Option<String>,
 }
 
+pub struct RuntimeBrokerSpawnConfig<'a> {
+    pub current_profile: &'a str,
+    pub upstream_base_url: &'a str,
+    pub include_code_review: bool,
+    pub upstream_no_proxy: bool,
+    pub broker_key: &'a str,
+    pub instance_token: &'a str,
+    pub admin_token: &'a str,
+    pub listen_addr: Option<&'a str>,
+}
+
+pub fn runtime_broker_process_args(config: RuntimeBrokerSpawnConfig<'_>) -> Vec<OsString> {
+    let mut args = vec![
+        OsString::from("__runtime-broker"),
+        OsString::from("--current-profile"),
+        OsString::from(config.current_profile),
+        OsString::from("--upstream-base-url"),
+        OsString::from(config.upstream_base_url),
+    ];
+    if config.include_code_review {
+        args.push(OsString::from("--include-code-review"));
+    }
+    if config.upstream_no_proxy {
+        args.push(OsString::from("--upstream-no-proxy"));
+    }
+    args.extend([
+        OsString::from("--broker-key"),
+        OsString::from(config.broker_key),
+        OsString::from("--instance-token"),
+        OsString::from(config.instance_token),
+        OsString::from("--admin-token"),
+        OsString::from(config.admin_token),
+    ]);
+    if let Some(listen_addr) = config.listen_addr {
+        args.push(OsString::from("--listen-addr"));
+        args.push(OsString::from(listen_addr));
+    }
+    args
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeProdexBinaryIdentity {
     pub prodex_version: Option<String>,
@@ -437,6 +608,34 @@ pub fn runtime_health_prodex_binary_identity(
     }
 }
 
+pub fn runtime_broker_observed_known_binary_identity(
+    registry: &RuntimeBrokerRegistry,
+    health: Option<&RuntimeBrokerHealth>,
+) -> Option<RuntimeProdexBinaryIdentity> {
+    health
+        .filter(|health| health.matches_registry_instance(registry))
+        .map(runtime_health_prodex_binary_identity)
+        .filter(RuntimeProdexBinaryIdentity::is_present)
+        .or_else(|| {
+            let identity = runtime_registry_prodex_binary_identity(registry);
+            identity.is_present().then_some(identity)
+        })
+}
+
+pub fn runtime_broker_observed_binary_identity(
+    registry: &RuntimeBrokerRegistry,
+    health: Option<&RuntimeBrokerHealth>,
+    process_identity: Option<&RuntimeProdexBinaryIdentity>,
+) -> RuntimeProdexBinaryIdentity {
+    runtime_broker_observed_known_binary_identity(registry, health)
+        .or_else(|| {
+            process_identity
+                .filter(|identity| identity.is_present())
+                .cloned()
+        })
+        .unwrap_or_default()
+}
+
 pub fn runtime_prodex_binary_identity_matches(
     current: &RuntimeProdexBinaryIdentity,
     other: &RuntimeProdexBinaryIdentity,
@@ -456,6 +655,32 @@ pub fn runtime_prodex_binary_identity_matches(
     false
 }
 
+pub fn runtime_broker_replacement_reason(
+    current: &RuntimeProdexBinaryIdentity,
+    observed: &RuntimeProdexBinaryIdentity,
+) -> &'static str {
+    match (
+        current.executable_sha256.as_deref(),
+        observed.executable_sha256.as_deref(),
+    ) {
+        (Some(current_sha256), Some(observed_sha256)) if current_sha256 != observed_sha256 => {
+            "sha256_mismatch"
+        }
+        _ => match (
+            current.prodex_version.as_deref(),
+            observed.prodex_version.as_deref(),
+        ) {
+            (Some(current_version), Some(observed_version))
+                if current_version != observed_version =>
+            {
+                "version_mismatch"
+            }
+            _ if observed.is_present() => "identity_mismatch",
+            _ => "identity_unresolved",
+        },
+    }
+}
+
 pub fn parse_prodex_version_output(output: &str) -> Option<String> {
     let mut parts = output.split_whitespace();
     let binary_name = parts.next()?;
@@ -469,6 +694,89 @@ pub fn parse_prodex_version_output(output: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_registry() -> RuntimeBrokerRegistry {
+        RuntimeBrokerRegistry {
+            pid: 42,
+            listen_addr: "127.0.0.1:4567".to_string(),
+            started_at: 100,
+            upstream_base_url: "https://upstream.example".to_string(),
+            include_code_review: true,
+            upstream_no_proxy: false,
+            current_profile: "work".to_string(),
+            instance_token: "broker-token".to_string(),
+            admin_token: "admin-token".to_string(),
+            prodex_version: Some("0.7.0".to_string()),
+            executable_path: Some("/tmp/prodex".to_string()),
+            executable_sha256: Some("abc123".to_string()),
+            openai_mount_path: Some("/backend-api/prodex".to_string()),
+        }
+    }
+
+    #[test]
+    fn registry_builds_admin_urls_and_matches_launch_config() {
+        let registry = test_registry();
+
+        assert_eq!(
+            RuntimeBrokerAdminRoute::from_path("/__prodex/runtime/metrics/prometheus"),
+            Some(RuntimeBrokerAdminRoute::MetricsPrometheus)
+        );
+        assert_eq!(
+            registry.health_url(),
+            "http://127.0.0.1:4567/__prodex/runtime/health"
+        );
+        assert_eq!(
+            registry.metrics_prometheus_url(),
+            "http://127.0.0.1:4567/__prodex/runtime/metrics/prometheus"
+        );
+        assert!(registry.matches_launch_config("https://upstream.example", true, false));
+        assert!(!registry.matches_launch_config("https://other.example", true, false));
+    }
+
+    #[test]
+    fn health_from_metadata_preserves_identity_fields() {
+        let metadata = RuntimeBrokerMetadata {
+            broker_key: "key".to_string(),
+            listen_addr: "127.0.0.1:4567".to_string(),
+            started_at: 100,
+            current_profile: "work".to_string(),
+            include_code_review: true,
+            upstream_no_proxy: false,
+            instance_token: "broker-token".to_string(),
+            admin_token: "admin-token".to_string(),
+            prodex_version: Some("0.7.0".to_string()),
+            executable_path: Some("/tmp/prodex".to_string()),
+            executable_sha256: Some("abc123".to_string()),
+        };
+
+        let health = RuntimeBrokerHealth::from_metadata(&metadata, 42, 3, true);
+
+        assert_eq!(health.pid, 42);
+        assert_eq!(health.active_requests, 3);
+        assert_eq!(health.persistence_role, "owner");
+        assert_eq!(health.current_profile, "work");
+        assert_eq!(health.executable_sha256.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn broker_process_args_encode_optional_boolean_switches() {
+        let args = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
+            current_profile: "default",
+            upstream_base_url: "https://upstream.example",
+            include_code_review: true,
+            upstream_no_proxy: true,
+            broker_key: "key",
+            instance_token: "broker-token",
+            admin_token: "admin-token",
+            listen_addr: Some("127.0.0.1:4567"),
+        });
+
+        assert_eq!(args[0], OsString::from("__runtime-broker"));
+        assert!(args.contains(&OsString::from("--include-code-review")));
+        assert!(args.contains(&OsString::from("--upstream-no-proxy")));
+        assert!(args.contains(&OsString::from("--listen-addr")));
+        assert!(args.contains(&OsString::from("127.0.0.1:4567")));
+    }
 
     #[test]
     fn continuation_metrics_aggregate_lifecycle_signals_and_staleness() {
@@ -702,6 +1010,85 @@ mod tests {
             &current,
             &other_same_version
         ));
+    }
+
+    #[test]
+    fn observed_binary_identity_prefers_matching_health_then_registry_then_process() {
+        let mut registry = test_registry();
+        registry.executable_sha256 = None;
+        let process_identity = RuntimeProdexBinaryIdentity {
+            prodex_version: Some("0.9.0".to_string()),
+            executable_path: None,
+            executable_sha256: Some("process-sha".to_string()),
+        };
+        let health = RuntimeBrokerHealth {
+            pid: 42,
+            started_at: 100,
+            current_profile: "work".to_string(),
+            include_code_review: true,
+            active_requests: 0,
+            instance_token: "broker-token".to_string(),
+            persistence_role: "owner".to_string(),
+            prodex_version: Some("0.8.0".to_string()),
+            executable_path: None,
+            executable_sha256: Some("health-sha".to_string()),
+        };
+
+        let observed = runtime_broker_observed_binary_identity(
+            &registry,
+            Some(&health),
+            Some(&process_identity),
+        );
+
+        assert_eq!(observed.prodex_version.as_deref(), Some("0.8.0"));
+        assert_eq!(observed.executable_sha256.as_deref(), Some("health-sha"));
+
+        let mismatched_health = RuntimeBrokerHealth {
+            instance_token: "other-token".to_string(),
+            ..health
+        };
+        let observed = runtime_broker_observed_binary_identity(
+            &registry,
+            Some(&mismatched_health),
+            Some(&process_identity),
+        );
+
+        assert_eq!(observed.prodex_version.as_deref(), Some("0.7.0"));
+        assert_eq!(observed.executable_path, Some(PathBuf::from("/tmp/prodex")));
+    }
+
+    #[test]
+    fn replacement_reason_prefers_sha_then_version_then_presence() {
+        let current = RuntimeProdexBinaryIdentity {
+            prodex_version: Some("0.7.0".to_string()),
+            executable_path: None,
+            executable_sha256: Some("abc123".to_string()),
+        };
+
+        assert_eq!(
+            runtime_broker_replacement_reason(
+                &current,
+                &RuntimeProdexBinaryIdentity {
+                    executable_sha256: Some("def456".to_string()),
+                    ..RuntimeProdexBinaryIdentity::default()
+                },
+            ),
+            "sha256_mismatch"
+        );
+        assert_eq!(
+            runtime_broker_replacement_reason(
+                &current,
+                &RuntimeProdexBinaryIdentity {
+                    prodex_version: Some("0.8.0".to_string()),
+                    ..RuntimeProdexBinaryIdentity::default()
+                },
+            ),
+            "version_mismatch"
+        );
+        assert_eq!(
+            runtime_broker_replacement_reason(&current, &RuntimeProdexBinaryIdentity::default()),
+            "identity_unresolved"
+        );
     }
 
     #[test]

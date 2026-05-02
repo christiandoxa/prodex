@@ -6,8 +6,10 @@ pub struct RuntimeBrokerLaneMetrics {
     pub active: u64,
     pub limit: u64,
     pub admissions_total: u64,
+    pub releases_total: u64,
     pub global_limit_rejections_total: u64,
     pub lane_limit_rejections_total: u64,
+    pub release_underflows_total: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -78,6 +80,10 @@ pub struct RuntimeBrokerSnapshot {
     pub runtime_state_lock_wait: RuntimeBrokerStateLockWaitMetrics,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: BTreeMap<String, u64>,
+    pub active_request_release_underflows_total: u64,
+    pub profile_inflight_admissions_total: u64,
+    pub profile_inflight_releases_total: u64,
+    pub profile_inflight_release_underflows_total: u64,
     pub retry_backoffs: u64,
     pub transport_backoffs: u64,
     pub route_circuits: u64,
@@ -165,6 +171,7 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             "Maximum observed wait for the runtime state lock.",
             self.snapshot.runtime_state_lock_wait.wait_max_ns as f64 / 1_000_000_000.0,
         );
+        self.render_guard_counters();
         self.render_broker_gauge(
             "prodex_runtime_broker_retry_backoffs",
             "Profiles currently in retry backoff.",
@@ -352,6 +359,18 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
         render_lane_family(
             &mut self.out,
             LaneFamilyDescriptor {
+                metric_name: "prodex_runtime_broker_lane_releases_total",
+                help: "Cumulative active-request guard releases per broker lane.",
+                metric_type: "counter",
+            },
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+            &lanes,
+            |lane| lane.releases_total as f64,
+        );
+        render_lane_family(
+            &mut self.out,
+            LaneFamilyDescriptor {
                 metric_name: "prodex_runtime_broker_lane_global_limit_rejections_total",
                 help: "Cumulative broker-global admission rejections per lane.",
                 metric_type: "counter",
@@ -372,6 +391,18 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             self.snapshot.listen_addr.as_str(),
             &lanes,
             |lane| lane.lane_limit_rejections_total as f64,
+        );
+        render_lane_family(
+            &mut self.out,
+            LaneFamilyDescriptor {
+                metric_name: "prodex_runtime_broker_lane_release_underflows_total",
+                help: "Cumulative active-request guard release underflows per broker lane.",
+                metric_type: "counter",
+            },
+            self.snapshot.broker_key.as_str(),
+            self.snapshot.listen_addr.as_str(),
+            &lanes,
+            |lane| lane.release_underflows_total as f64,
         );
     }
 
@@ -400,6 +431,29 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
                 ("listen_addr", self.snapshot.listen_addr.as_str()),
             ]),
             value,
+        );
+    }
+
+    fn render_guard_counters(&mut self) {
+        self.render_broker_counter(
+            "prodex_runtime_broker_active_request_release_underflows_total",
+            "Cumulative active-request guard release underflows across all lanes.",
+            self.snapshot.active_request_release_underflows_total as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_profile_inflight_admissions_total",
+            "Cumulative profile in-flight guard admissions.",
+            self.snapshot.profile_inflight_admissions_total as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_profile_inflight_releases_total",
+            "Cumulative profile in-flight guard releases.",
+            self.snapshot.profile_inflight_releases_total as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_profile_inflight_release_underflows_total",
+            "Cumulative profile in-flight guard release underflows.",
+            self.snapshot.profile_inflight_release_underflows_total as f64,
         );
     }
 
@@ -738,32 +792,44 @@ mod tests {
                     active: 3,
                     limit: 9,
                     admissions_total: 42,
+                    releases_total: 40,
                     global_limit_rejections_total: 2,
                     lane_limit_rejections_total: 5,
+                    release_underflows_total: 1,
                 },
                 compact: RuntimeBrokerLaneMetrics {
                     active: 1,
                     limit: 3,
                     admissions_total: 12,
+                    releases_total: 11,
                     global_limit_rejections_total: 1,
                     lane_limit_rejections_total: 4,
+                    release_underflows_total: 0,
                 },
                 websocket: RuntimeBrokerLaneMetrics {
                     active: 0,
                     limit: 4,
                     admissions_total: 7,
+                    releases_total: 7,
                     global_limit_rejections_total: 0,
                     lane_limit_rejections_total: 1,
+                    release_underflows_total: 0,
                 },
                 standard: RuntimeBrokerLaneMetrics {
                     active: 1,
                     limit: 2,
                     admissions_total: 9,
+                    releases_total: 8,
                     global_limit_rejections_total: 3,
                     lane_limit_rejections_total: 2,
+                    release_underflows_total: 0,
                 },
             },
             profile_inflight,
+            active_request_release_underflows_total: 1,
+            profile_inflight_admissions_total: 17,
+            profile_inflight_releases_total: 16,
+            profile_inflight_release_underflows_total: 1,
             retry_backoffs: 2,
             transport_backoffs: 1,
             route_circuits: 4,
@@ -838,8 +904,14 @@ mod tests {
             "prodex_runtime_broker_runtime_state_lock_wait_max_seconds{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 0.01"
         ));
         assert!(rendered.contains("prodex_runtime_broker_lane_admissions_total"));
+        assert!(rendered.contains("prodex_runtime_broker_lane_releases_total"));
         assert!(rendered.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
         assert!(rendered.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
+        assert!(rendered.contains("prodex_runtime_broker_lane_release_underflows_total"));
+        assert!(rendered.contains("prodex_runtime_broker_active_request_release_underflows_total"));
+        assert!(
+            rendered.contains("prodex_runtime_broker_profile_inflight_release_underflows_total")
+        );
         assert!(rendered.contains("# HELP prodex_runtime_broker_continuation_binding_counts"));
         assert!(rendered.contains(
             "prodex_runtime_broker_continuation_binding_counts{binding_kind=\"response\",broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 7"

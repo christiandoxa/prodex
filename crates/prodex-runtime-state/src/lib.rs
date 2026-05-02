@@ -188,6 +188,10 @@ pub struct RuntimeProxyLaneAdmission {
     pub compact_admissions_total: Arc<AtomicU64>,
     pub websocket_admissions_total: Arc<AtomicU64>,
     pub standard_admissions_total: Arc<AtomicU64>,
+    pub responses_releases_total: Arc<AtomicU64>,
+    pub compact_releases_total: Arc<AtomicU64>,
+    pub websocket_releases_total: Arc<AtomicU64>,
+    pub standard_releases_total: Arc<AtomicU64>,
     pub responses_global_limit_rejections_total: Arc<AtomicU64>,
     pub compact_global_limit_rejections_total: Arc<AtomicU64>,
     pub websocket_global_limit_rejections_total: Arc<AtomicU64>,
@@ -196,6 +200,14 @@ pub struct RuntimeProxyLaneAdmission {
     pub compact_lane_limit_rejections_total: Arc<AtomicU64>,
     pub websocket_lane_limit_rejections_total: Arc<AtomicU64>,
     pub standard_lane_limit_rejections_total: Arc<AtomicU64>,
+    pub active_request_release_underflows_total: Arc<AtomicU64>,
+    pub responses_release_underflows_total: Arc<AtomicU64>,
+    pub compact_release_underflows_total: Arc<AtomicU64>,
+    pub websocket_release_underflows_total: Arc<AtomicU64>,
+    pub standard_release_underflows_total: Arc<AtomicU64>,
+    pub profile_inflight_admissions_total: Arc<AtomicU64>,
+    pub profile_inflight_releases_total: Arc<AtomicU64>,
+    pub profile_inflight_release_underflows_total: Arc<AtomicU64>,
     pub wait: Arc<(Mutex<()>, Condvar)>,
     pub inflight_release_revision: Arc<AtomicU64>,
     pub limits: RuntimeProxyLaneLimits,
@@ -212,6 +224,10 @@ impl RuntimeProxyLaneAdmission {
             compact_admissions_total: Arc::new(AtomicU64::new(0)),
             websocket_admissions_total: Arc::new(AtomicU64::new(0)),
             standard_admissions_total: Arc::new(AtomicU64::new(0)),
+            responses_releases_total: Arc::new(AtomicU64::new(0)),
+            compact_releases_total: Arc::new(AtomicU64::new(0)),
+            websocket_releases_total: Arc::new(AtomicU64::new(0)),
+            standard_releases_total: Arc::new(AtomicU64::new(0)),
             responses_global_limit_rejections_total: Arc::new(AtomicU64::new(0)),
             compact_global_limit_rejections_total: Arc::new(AtomicU64::new(0)),
             websocket_global_limit_rejections_total: Arc::new(AtomicU64::new(0)),
@@ -220,6 +236,14 @@ impl RuntimeProxyLaneAdmission {
             compact_lane_limit_rejections_total: Arc::new(AtomicU64::new(0)),
             websocket_lane_limit_rejections_total: Arc::new(AtomicU64::new(0)),
             standard_lane_limit_rejections_total: Arc::new(AtomicU64::new(0)),
+            active_request_release_underflows_total: Arc::new(AtomicU64::new(0)),
+            responses_release_underflows_total: Arc::new(AtomicU64::new(0)),
+            compact_release_underflows_total: Arc::new(AtomicU64::new(0)),
+            websocket_release_underflows_total: Arc::new(AtomicU64::new(0)),
+            standard_release_underflows_total: Arc::new(AtomicU64::new(0)),
+            profile_inflight_admissions_total: Arc::new(AtomicU64::new(0)),
+            profile_inflight_releases_total: Arc::new(AtomicU64::new(0)),
+            profile_inflight_release_underflows_total: Arc::new(AtomicU64::new(0)),
             wait: Arc::new((Mutex::new(()), Condvar::new())),
             inflight_release_revision: Arc::new(AtomicU64::new(0)),
             limits,
@@ -253,6 +277,15 @@ impl RuntimeProxyLaneAdmission {
         }
     }
 
+    pub fn releases_total_counter(&self, lane: RuntimeRouteKind) -> Arc<AtomicU64> {
+        match lane {
+            RuntimeRouteKind::Responses => Arc::clone(&self.responses_releases_total),
+            RuntimeRouteKind::Compact => Arc::clone(&self.compact_releases_total),
+            RuntimeRouteKind::Websocket => Arc::clone(&self.websocket_releases_total),
+            RuntimeRouteKind::Standard => Arc::clone(&self.standard_releases_total),
+        }
+    }
+
     pub fn global_limit_rejections_total_counter(&self, lane: RuntimeRouteKind) -> Arc<AtomicU64> {
         match lane {
             RuntimeRouteKind::Responses => {
@@ -272,6 +305,15 @@ impl RuntimeProxyLaneAdmission {
             RuntimeRouteKind::Compact => Arc::clone(&self.compact_lane_limit_rejections_total),
             RuntimeRouteKind::Websocket => Arc::clone(&self.websocket_lane_limit_rejections_total),
             RuntimeRouteKind::Standard => Arc::clone(&self.standard_lane_limit_rejections_total),
+        }
+    }
+
+    pub fn release_underflows_total_counter(&self, lane: RuntimeRouteKind) -> Arc<AtomicU64> {
+        match lane {
+            RuntimeRouteKind::Responses => Arc::clone(&self.responses_release_underflows_total),
+            RuntimeRouteKind::Compact => Arc::clone(&self.compact_release_underflows_total),
+            RuntimeRouteKind::Websocket => Arc::clone(&self.websocket_release_underflows_total),
+            RuntimeRouteKind::Standard => Arc::clone(&self.standard_release_underflows_total),
         }
     }
 }
@@ -325,6 +367,173 @@ impl RuntimeStateSaveSections {
             usage_snapshots: true,
             backoffs: true,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeBackgroundQueuePressureThresholds {
+    pub state_save: usize,
+    pub continuation_journal: usize,
+    pub probe_refresh: usize,
+}
+
+pub fn runtime_proxy_queue_pressure_active(
+    state_save_backlog: usize,
+    continuation_journal_backlog: usize,
+    probe_refresh_backlog: usize,
+    thresholds: RuntimeBackgroundQueuePressureThresholds,
+) -> bool {
+    state_save_backlog >= thresholds.state_save
+        || continuation_journal_backlog >= thresholds.continuation_journal
+        || probe_refresh_backlog >= thresholds.probe_refresh
+}
+
+pub fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool {
+    [
+        "response_ids:",
+        "turn_state:",
+        "session_id:",
+        "compact_lineage:",
+        "compact_lineage_release:",
+    ]
+    .into_iter()
+    .any(|prefix| reason.starts_with(prefix))
+}
+
+pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveSections {
+    if matches!(reason, "startup_audit" | "startup_continuation_migration") {
+        return RuntimeStateSaveSections::full();
+    }
+
+    let touches_continuations = [
+        "response_ids:",
+        "previous_response_owner:",
+        "previous_response_negative_cache:",
+        "previous_response_release:",
+        "previous_response_binding_clear:",
+        "response_touch:",
+        "turn_state:",
+        "turn_state_touch:",
+        "session_id:",
+        "session_touch:",
+        "compact_lineage:",
+        "compact_lineage_release:",
+        "compact_session_touch:",
+        "compact_turn_state_touch:",
+        "dead_response_binding_clear:",
+        "quota_release:",
+        "continuation_stale:",
+    ]
+    .into_iter()
+    .any(|prefix| reason.starts_with(prefix));
+    if touches_continuations {
+        let profile_scores = [
+            "response_ids:",
+            "previous_response_owner:",
+            "previous_response_negative_cache:",
+            "previous_response_release:",
+        ]
+        .into_iter()
+        .any(|prefix| reason.starts_with(prefix));
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::Core,
+            continuations: true,
+            profile_scores,
+            usage_snapshots: false,
+            backoffs: false,
+        };
+    }
+
+    if reason.starts_with("profile_commit:") {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::Core,
+            continuations: false,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: true,
+        };
+    }
+
+    if reason.starts_with("usage_snapshot:") || reason.starts_with("profile_retry_backoff:") {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: false,
+            usage_snapshots: true,
+            backoffs: true,
+        };
+    }
+
+    if reason.starts_with("profile_transport_backoff:")
+        || reason.starts_with("profile_circuit_half_open_probe:")
+        || reason == "startup_backoff_soften"
+    {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: false,
+            usage_snapshots: false,
+            backoffs: true,
+        };
+    }
+
+    if reason.starts_with("profile_health:") || reason.starts_with("profile_circuit_clear:") {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: true,
+        };
+    }
+
+    if reason.starts_with("profile_bad_pairing:")
+        || reason.starts_with("profile_auth_backoff:")
+        || reason.starts_with("profile_auth_backoff_cleared:")
+    {
+        return RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::None,
+            continuations: false,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: false,
+        };
+    }
+
+    RuntimeStateSaveSections::full()
+}
+
+pub fn runtime_hot_continuation_state_reason(reason: &str) -> bool {
+    [
+        "response_ids:",
+        "previous_response_owner:",
+        "response_touch:",
+        "turn_state:",
+        "turn_state_touch:",
+        "session_id:",
+        "session_touch:",
+        "compact_lineage:",
+        "compact_lineage_release:",
+        "compact_session_touch:",
+        "compact_turn_state_touch:",
+    ]
+    .into_iter()
+    .any(|prefix| reason.starts_with(prefix))
+}
+
+pub fn runtime_state_save_debounce(reason: &str, debounce: Duration) -> Duration {
+    if runtime_hot_continuation_state_reason(reason) {
+        debounce
+    } else {
+        Duration::ZERO
+    }
+}
+
+pub fn runtime_continuation_journal_save_debounce(reason: &str, debounce: Duration) -> Duration {
+    if runtime_hot_continuation_state_reason(reason) {
+        debounce
+    } else {
+        Duration::ZERO
     }
 }
 
@@ -519,5 +728,71 @@ mod tests {
         }
 
         assert_eq!(pending.len(), 1);
+    }
+
+    #[test]
+    fn save_sections_follow_dirty_reason_scope() {
+        assert_eq!(
+            runtime_state_save_sections_for_reason("usage_snapshot:main"),
+            RuntimeStateSaveSections {
+                state: RuntimeStateSaveStateSection::None,
+                continuations: false,
+                profile_scores: false,
+                usage_snapshots: true,
+                backoffs: true,
+            }
+        );
+        assert_eq!(
+            runtime_state_save_sections_for_reason("response_ids:main"),
+            RuntimeStateSaveSections {
+                state: RuntimeStateSaveStateSection::Core,
+                continuations: true,
+                profile_scores: true,
+                usage_snapshots: false,
+                backoffs: false,
+            }
+        );
+        assert_eq!(
+            runtime_state_save_sections_for_reason("profile_commit:second"),
+            RuntimeStateSaveSections {
+                state: RuntimeStateSaveStateSection::Core,
+                continuations: false,
+                profile_scores: true,
+                usage_snapshots: false,
+                backoffs: true,
+            }
+        );
+        assert_eq!(
+            runtime_state_save_sections_for_reason("startup_audit"),
+            RuntimeStateSaveSections::full()
+        );
+    }
+
+    #[test]
+    fn debounce_only_applies_to_hot_continuation_reasons() {
+        let debounce = Duration::from_millis(150);
+
+        assert_eq!(
+            runtime_state_save_debounce("turn_state:abc", debounce),
+            debounce
+        );
+        assert_eq!(
+            runtime_continuation_journal_save_debounce("profile_commit:main", debounce),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn pressure_helper_checks_each_queue_threshold() {
+        let thresholds = RuntimeBackgroundQueuePressureThresholds {
+            state_save: 8,
+            continuation_journal: 8,
+            probe_refresh: 16,
+        };
+
+        assert!(runtime_proxy_queue_pressure_active(8, 0, 0, thresholds));
+        assert!(runtime_proxy_queue_pressure_active(0, 8, 0, thresholds));
+        assert!(runtime_proxy_queue_pressure_active(0, 0, 16, thresholds));
+        assert!(!runtime_proxy_queue_pressure_active(7, 7, 15, thresholds));
     }
 }

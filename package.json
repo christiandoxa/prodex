@@ -15,6 +15,8 @@
     "changelog": "node scripts/npm/changelog.mjs",
     "changelog:check": "node scripts/npm/changelog.mjs --check",
     "compat:capture": "node scripts/compat/capture-replay.mjs",
+    "load:mock-upstream": "node tests/load/mock-upstream.mjs",
+    "load:runtime-proxy": "node tests/load/runtime-proxy-load.mjs",
     "release:prepare": "node scripts/npm/release-prepare.mjs",
     "docs:lint": "node scripts/docs/lint-markdown.mjs && npm run docs:runtime-policy:check",
     "docs:runtime-policy": "node scripts/docs/runtime-policy.mjs --write",

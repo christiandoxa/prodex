@@ -132,19 +132,8 @@ pub(crate) fn collect_blocked_limits(
     prodex_quota::collect_blocked_limits(usage, include_code_review)
 }
 
-pub(crate) fn find_main_window<'a>(
-    main: &'a WindowPair,
-    expected_label: &str,
-) -> Option<&'a UsageWindow> {
-    prodex_quota::find_main_window(main, expected_label)
-}
-
 pub(crate) fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
     prodex_quota::format_blocked_limits(blocked)
-}
-
-pub(crate) fn remaining_percent(used_percent: Option<i64>) -> i64 {
-    prodex_quota::remaining_percent(used_percent)
 }
 
 #[allow(dead_code)]

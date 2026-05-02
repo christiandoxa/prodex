@@ -2,7 +2,10 @@ use std::fs::OpenOptions;
 use std::io::IsTerminal;
 use std::io::Write as _;
 
-use prodex_profile_export::ImportedExistingProfileAuthUpdateJournal;
+use prodex_profile_export::{
+    ImportedExistingProfileAuthUpdateJournal, ProfileImportIdentity, ProfileImportPlanAction,
+    ProfileImportPlanProfile,
+};
 
 use super::*;
 
@@ -589,6 +592,26 @@ pub(super) fn remove_committed_import_homes(committed_homes: &[PathBuf]) {
     }
 }
 
+struct ExportedProfileImportPlanInput<'a> {
+    exported: &'a ExportedProfile,
+    identity: ProfileImportIdentity,
+    supports_codex_runtime: bool,
+}
+
+impl ProfileImportPlanProfile for ExportedProfileImportPlanInput<'_> {
+    fn profile_name(&self) -> &str {
+        &self.exported.name
+    }
+
+    fn supports_codex_runtime(&self) -> bool {
+        self.supports_codex_runtime
+    }
+
+    fn import_identity(&self) -> ProfileImportIdentity {
+        self.identity.clone()
+    }
+}
+
 pub(super) fn stage_imported_profiles(
     paths: &AppPaths,
     state: &mut AppState,
@@ -601,141 +624,133 @@ pub(super) fn stage_imported_profiles(
     ensure_managed_profiles_root(paths)?;
 
     let mut seen_names = BTreeSet::new();
+    let mut plan_inputs = Vec::with_capacity(payload.profiles.len());
+    for exported in &payload.profiles {
+        validate_profile_name(&exported.name)?;
+        if !seen_names.insert(exported.name.clone()) {
+            bail!(
+                "profile export bundle contains duplicate profile '{}'",
+                exported.name
+            );
+        }
+
+        let supports_codex_runtime = exported.provider.supports_codex_runtime();
+        if supports_codex_runtime {
+            let _: StoredAuth = serde_json::from_str(&exported.auth_json).with_context(|| {
+                format!(
+                    "failed to parse exported auth.json for profile '{}'",
+                    exported.name
+                )
+            })?;
+        }
+        let resolved_identity = resolved_exported_profile_identity(exported);
+        plan_inputs.push(ExportedProfileImportPlanInput {
+            exported,
+            identity: ProfileImportIdentity {
+                email: resolved_identity.email,
+                account_id: resolved_identity.account_id,
+            },
+            supports_codex_runtime,
+        });
+    }
+
+    let existing_profile_runtime_support = state
+        .profiles
+        .iter()
+        .map(|(name, profile)| (name.clone(), profile.provider.supports_codex_runtime()))
+        .collect::<BTreeMap<_, _>>();
+    let plan = prodex_profile_export::plan_profile_import(
+        &plan_inputs,
+        |profile_name| existing_profile_runtime_support.get(profile_name).copied(),
+        |identity| {
+            find_profile_by_identity(
+                state,
+                &ProfileIdentity {
+                    email: identity.email.clone(),
+                    account_id: identity.account_id.clone(),
+                },
+            )
+        },
+    )?;
+
     let mut staged_profiles = Vec::with_capacity(payload.profiles.len());
     let mut auth_updates = Vec::new();
-    let mut resolved_profile_names = BTreeMap::new();
-    let mut identity_targets = BTreeMap::new();
     let result = (|| -> Result<()> {
-        for exported in &payload.profiles {
-            validate_profile_name(&exported.name)?;
-            if !seen_names.insert(exported.name.clone()) {
-                bail!(
-                    "profile export bundle contains duplicate profile '{}'",
-                    exported.name
-                );
-            }
-
-            let provider = exported.provider.clone();
-            if provider.supports_codex_runtime() {
-                let _: StoredAuth =
-                    serde_json::from_str(&exported.auth_json).with_context(|| {
-                        format!(
-                            "failed to parse exported auth.json for profile '{}'",
-                            exported.name
-                        )
+        for action in &plan.actions {
+            match action {
+                ProfileImportPlanAction::UpdateExisting {
+                    source_index,
+                    target_profile_name,
+                } => {
+                    let exported = payload.profiles.get(*source_index).with_context(|| {
+                        format!("import plan source index {} is missing", source_index)
                     })?;
-            }
-            let resolved_identity = resolved_exported_profile_identity(exported);
-            let resolved_email = resolved_identity.email.clone();
-
-            if let Some(existing_profile) = state.profiles.get(&exported.name) {
-                if !provider.supports_codex_runtime()
-                    || !existing_profile.provider.supports_codex_runtime()
-                {
-                    bail!("profile '{}' already exists", exported.name);
-                }
-
-                queue_existing_profile_auth_update(
-                    &mut auth_updates,
-                    &exported.name,
-                    resolved_email.clone(),
-                    exported.auth_json.clone(),
-                );
-                resolved_profile_names.insert(exported.name.clone(), exported.name.clone());
-                if let Some(identity_key) = import_identity_target_key(&resolved_identity) {
-                    identity_targets.insert(
-                        identity_key,
-                        ImportIdentityTarget::Existing(exported.name.clone()),
-                    );
-                }
-                continue;
-            }
-
-            if provider.supports_codex_runtime() {
-                if let Some(identity_key) = import_identity_target_key(&resolved_identity)
-                    && let Some(target) = identity_targets.get(&identity_key)
-                {
-                    match target {
-                        ImportIdentityTarget::Existing(profile_name) => {
-                            queue_existing_profile_auth_update(
-                                &mut auth_updates,
-                                profile_name,
-                                resolved_email.clone(),
-                                exported.auth_json.clone(),
-                            );
-                            resolved_profile_names
-                                .insert(exported.name.clone(), profile_name.clone());
-                            continue;
-                        }
-                        ImportIdentityTarget::PendingNew(index) => {
-                            let staged: &mut StagedImportedProfile =
-                                staged_profiles.get_mut(*index).with_context(|| {
-                                    format!(
-                                        "staged import profile index {} is missing for '{}'",
-                                        index, exported.name
-                                    )
-                                })?;
-                            write_secret_text_file(
-                                &staged.staging_home.join("auth.json"),
-                                &exported.auth_json,
-                            )?;
-                            staged.email = resolved_email.clone();
-                            resolved_profile_names
-                                .insert(exported.name.clone(), staged.name.clone());
-                            continue;
-                        }
-                    }
-                }
-
-                if let Some(existing_profile_name) =
-                    find_profile_by_identity(state, &resolved_identity)?
-                {
-                    if let Some(identity_key) = import_identity_target_key(&resolved_identity) {
-                        identity_targets.insert(
-                            identity_key,
-                            ImportIdentityTarget::Existing(existing_profile_name.clone()),
-                        );
-                    }
                     queue_existing_profile_auth_update(
                         &mut auth_updates,
-                        &existing_profile_name,
-                        resolved_email.clone(),
+                        target_profile_name,
+                        plan_inputs[*source_index].identity.email.clone(),
                         exported.auth_json.clone(),
                     );
-                    resolved_profile_names.insert(exported.name.clone(), existing_profile_name);
-                    continue;
                 }
-            }
+                ProfileImportPlanAction::StageNew {
+                    source_index,
+                    staged_index,
+                } => {
+                    if staged_profiles.len() != *staged_index {
+                        bail!(
+                            "staged import profile index {} is out of order",
+                            staged_index
+                        );
+                    }
+                    let exported = payload.profiles.get(*source_index).with_context(|| {
+                        format!("import plan source index {} is missing", source_index)
+                    })?;
+                    let final_home = managed_profile_home_path(paths, &exported.name)?;
+                    ensure_path_is_unique(state, &final_home)?;
+                    if final_home.exists() {
+                        bail!(
+                            "managed profile home {} already exists",
+                            final_home.display()
+                        );
+                    }
 
-            let final_home = managed_profile_home_path(paths, &exported.name)?;
-            ensure_path_is_unique(state, &final_home)?;
-            if final_home.exists() {
-                bail!(
-                    "managed profile home {} already exists",
-                    final_home.display()
-                );
-            }
+                    let staging_home = unique_import_staging_home(paths, &exported.name);
+                    create_codex_home_if_missing(&staging_home)?;
+                    prepare_managed_codex_home(paths, &staging_home)?;
+                    if plan_inputs[*source_index].supports_codex_runtime {
+                        write_secret_text_file(
+                            &staging_home.join("auth.json"),
+                            &exported.auth_json,
+                        )?;
+                    }
 
-            let staging_home = unique_import_staging_home(paths, &exported.name);
-            create_codex_home_if_missing(&staging_home)?;
-            prepare_managed_codex_home(paths, &staging_home)?;
-            if provider.supports_codex_runtime() {
-                write_secret_text_file(&staging_home.join("auth.json"), &exported.auth_json)?;
-            }
-
-            let new_index = staged_profiles.len();
-            staged_profiles.push(StagedImportedProfile {
-                name: exported.name.clone(),
-                email: resolved_email.clone(),
-                staging_home,
-                final_home,
-                provider: provider.clone(),
-            });
-            resolved_profile_names.insert(exported.name.clone(), exported.name.clone());
-            if provider.supports_codex_runtime()
-                && let Some(identity_key) = import_identity_target_key(&resolved_identity)
-            {
-                identity_targets.insert(identity_key, ImportIdentityTarget::PendingNew(new_index));
+                    staged_profiles.push(StagedImportedProfile {
+                        name: exported.name.clone(),
+                        email: plan_inputs[*source_index].identity.email.clone(),
+                        staging_home,
+                        final_home,
+                        provider: exported.provider.clone(),
+                    });
+                }
+                ProfileImportPlanAction::RewriteStagedAuth {
+                    source_index,
+                    staged_index,
+                } => {
+                    let exported = payload.profiles.get(*source_index).with_context(|| {
+                        format!("import plan source index {} is missing", source_index)
+                    })?;
+                    let staged = staged_profiles.get_mut(*staged_index).with_context(|| {
+                        format!(
+                            "staged import profile index {} is missing for '{}'",
+                            staged_index, exported.name
+                        )
+                    })?;
+                    write_secret_text_file(
+                        &staged.staging_home.join("auth.json"),
+                        &exported.auth_json,
+                    )?;
+                    staged.email = plan_inputs[*source_index].identity.email.clone();
+                }
             }
         }
         Ok(())
@@ -751,7 +766,7 @@ pub(super) fn stage_imported_profiles(
     Ok(PreparedImportedProfiles {
         staged_profiles,
         auth_updates,
-        resolved_profile_names,
+        resolved_profile_names: plan.resolved_profile_names,
     })
 }
 
@@ -761,23 +776,6 @@ fn unique_import_staging_home(paths: &AppPaths, profile_name: &str) -> PathBuf {
         profile_name,
         runtime_random_token("profile")
     ))
-}
-
-fn import_identity_target_key(identity: &ProfileIdentity) -> Option<String> {
-    identity
-        .account_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|account_id| !account_id.is_empty())
-        .map(|account_id| format!("account:{account_id}"))
-        .or_else(|| {
-            identity
-                .email
-                .as_deref()
-                .map(str::trim)
-                .filter(|email| !email.is_empty())
-                .map(|email| format!("email:{}", normalize_email(email)))
-        })
 }
 
 fn write_imported_auth_update_journal(

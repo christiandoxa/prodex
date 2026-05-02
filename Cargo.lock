@@ -1374,7 +1374,9 @@ dependencies = [
  "criterion",
  "dirs",
  "fs2",
+ "prodex-app-reports",
  "prodex-audit-log",
+ "prodex-bench-support",
  "prodex-caveman-assets",
  "prodex-cli",
  "prodex-codex-config",
@@ -1417,6 +1419,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-app-reports"
+version = "0.69.0"
+dependencies = [
+ "chrono",
+ "prodex-quota",
+ "prodex-runtime-state",
+ "prodex-shared-types",
+ "prodex-state",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "prodex-audit-log"
 version = "0.69.0"
 dependencies = [
@@ -1425,6 +1440,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "prodex-bench-support"
+version = "0.69.0"
 
 [[package]]
 name = "prodex-caveman-assets"

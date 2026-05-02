@@ -14,22 +14,19 @@ pub(crate) fn runtime_broker_client() -> Result<Client> {
 }
 
 pub(crate) fn runtime_broker_health_url(registry: &RuntimeBrokerRegistry) -> String {
-    format!("http://{}/__prodex/runtime/health", registry.listen_addr)
+    prodex_runtime_broker::runtime_broker_health_url(registry)
 }
 
 pub(crate) fn runtime_broker_metrics_url(registry: &RuntimeBrokerRegistry) -> String {
-    format!("http://{}/__prodex/runtime/metrics", registry.listen_addr)
+    prodex_runtime_broker::runtime_broker_metrics_url(registry)
 }
 
 pub(crate) fn runtime_broker_metrics_prometheus_url(registry: &RuntimeBrokerRegistry) -> String {
-    format!(
-        "http://{}/__prodex/runtime/metrics/prometheus",
-        registry.listen_addr
-    )
+    prodex_runtime_broker::runtime_broker_metrics_prometheus_url(registry)
 }
 
 pub(crate) fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
-    format!("http://{}/__prodex/runtime/activate", registry.listen_addr)
+    prodex_runtime_broker::runtime_broker_activate_url(registry)
 }
 
 pub(crate) fn probe_runtime_broker_health(

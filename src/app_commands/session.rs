@@ -1,18 +1,9 @@
 use super::*;
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SessionReport {
-    pub(crate) id: String,
-    pub(crate) thread_name: Option<String>,
-    pub(crate) updated_at: Option<String>,
-    pub(crate) cwd: Option<String>,
-    pub(crate) profile: Option<String>,
-    pub(crate) path: String,
-    #[serde(skip)]
-    updated_sort_key: i64,
-    #[serde(skip)]
-    cwd_path: Option<PathBuf>,
-}
+pub(crate) use prodex_app_reports::SessionReport;
+use prodex_app_reports::{
+    apply_session_json_line, apply_session_json_lines, apply_session_value,
+    is_session_metadata_file, sort_session_reports,
+};
 
 pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
     match command {
@@ -93,28 +84,16 @@ pub(crate) fn collect_session_reports(
     collect_session_paths(&sessions_root, &mut session_paths)?;
     session_paths.sort();
 
-    let current_dir = current_dir.map(normalize_path_for_compare);
     let mut reports = Vec::new();
     for path in session_paths {
         let report = read_session_report(&path, state)?;
-        if current_dir.as_ref().is_some_and(|current_dir| {
-            report
-                .cwd_path
-                .as_ref()
-                .is_none_or(|cwd| normalize_path_for_compare(cwd) != *current_dir)
-        }) {
+        if current_dir.is_some_and(|current_dir| !report.matches_current_dir(current_dir)) {
             continue;
         }
         reports.push(report);
     }
 
-    reports.sort_by(|left, right| {
-        right
-            .updated_sort_key
-            .cmp(&left.updated_sort_key)
-            .then_with(|| left.id.cmp(&right.id))
-            .then_with(|| left.path.cmp(&right.path))
-    });
+    sort_session_reports(&mut reports);
     Ok(reports)
 }
 
@@ -139,24 +118,8 @@ fn collect_session_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn is_session_metadata_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| matches!(extension, "jsonl" | "json"))
-}
-
 fn read_session_report(path: &Path, state: &AppState) -> Result<SessionReport> {
-    let mut report = SessionReport {
-        id: session_id_from_path(path),
-        thread_name: None,
-        updated_at: None,
-        cwd: None,
-        profile: None,
-        path: path.display().to_string(),
-        updated_sort_key: file_modified_epoch(path).unwrap_or(0),
-        cwd_path: None,
-    };
-    report.updated_at = Some(format_epoch(report.updated_sort_key));
+    let mut report = SessionReport::from_path(path, file_modified_epoch(path).unwrap_or(0));
 
     if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
         let raw = fs::read_to_string(path)
@@ -178,156 +141,16 @@ fn read_session_report(path: &Path, state: &AppState) -> Result<SessionReport> {
     }
 
     if let Some(binding) = state.session_profile_bindings.get(&report.id) {
-        report.profile = Some(binding.profile_name.clone());
+        report.set_profile(Some(binding.profile_name.clone()));
     }
     Ok(report)
-}
-
-fn apply_session_json_lines<'a>(
-    report: &mut SessionReport,
-    lines: impl IntoIterator<Item = &'a str>,
-) {
-    for line in lines {
-        apply_session_json_line(report, line);
-    }
-}
-
-fn apply_session_json_line(report: &mut SessionReport, line: &str) {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        apply_session_value(report, &value);
-    }
-}
-
-fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value) {
-    if let Some(id) = first_string_value(
-        value,
-        &[
-            &["payload", "id"],
-            &["payload", "session_id"],
-            &["id"],
-            &["session_id"],
-        ],
-    ) {
-        report.id = id;
-    }
-
-    if let Some(thread_name) = first_string_value(
-        value,
-        &[
-            &["payload", "thread_name"],
-            &["payload", "title"],
-            &["payload", "metadata", "thread_name"],
-            &["thread_name"],
-            &["title"],
-            &["metadata", "thread_name"],
-        ],
-    ) {
-        report.thread_name = Some(thread_name);
-    }
-
-    if let Some(cwd) = first_string_value(
-        value,
-        &[
-            &["payload", "cwd"],
-            &["payload", "metadata", "cwd"],
-            &["payload", "workdir"],
-            &["cwd"],
-            &["metadata", "cwd"],
-            &["workdir"],
-        ],
-    ) {
-        report.cwd_path = Some(PathBuf::from(&cwd));
-        report.cwd = Some(cwd);
-    }
-
-    if let Some(updated_at) = first_string_value(
-        value,
-        &[
-            &["updated_at"],
-            &["timestamp"],
-            &["payload", "updated_at"],
-            &["payload", "timestamp"],
-        ],
-    ) {
-        report.updated_sort_key =
-            timestamp_label_sort_key(&updated_at).unwrap_or(report.updated_sort_key);
-        report.updated_at = Some(updated_at);
-    } else if let Some(epoch) = first_i64_value(
-        value,
-        &[
-            &["updated_at"],
-            &["ts"],
-            &["timestamp"],
-            &["payload", "updated_at"],
-            &["payload", "ts"],
-            &["payload", "timestamp"],
-        ],
-    ) {
-        report.updated_sort_key = epoch;
-        report.updated_at = Some(format_epoch(epoch));
-    }
-}
-
-fn first_string_value(value: &serde_json::Value, paths: &[&[&str]]) -> Option<String> {
-    paths
-        .iter()
-        .find_map(|path| value_at_path(value, path).and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-}
-
-fn first_i64_value(value: &serde_json::Value, paths: &[&[&str]]) -> Option<i64> {
-    paths
-        .iter()
-        .find_map(|path| value_at_path(value, path).and_then(serde_json::Value::as_i64))
-}
-
-fn value_at_path<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a serde_json::Value> {
-    let mut current = value;
-    for key in path {
-        current = current.get(*key)?;
-    }
-    Some(current)
-}
-
-fn session_id_from_path(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unknown-session")
-        .to_string()
 }
 
 fn file_modified_epoch(path: &Path) -> Option<i64> {
     fs::metadata(path)
         .ok()
         .and_then(|metadata| metadata.modified().ok())
-        .and_then(system_time_epoch)
-}
-
-fn system_time_epoch(time: SystemTime) -> Option<i64> {
-    time.duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_secs()).ok())
-}
-
-fn timestamp_label_sort_key(value: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map(|timestamp| timestamp.timestamp())
-        .ok()
-        .or_else(|| value.parse::<i64>().ok())
-}
-
-fn format_epoch(epoch: i64) -> String {
-    Local
-        .timestamp_opt(epoch, 0)
-        .single()
-        .map(|timestamp| timestamp.format("%Y-%m-%d %H:%M:%S %Z").to_string())
-        .unwrap_or_else(|| epoch.to_string())
+        .and_then(prodex_core::system_time_to_unix_seconds)
 }
 
 #[cfg(test)]

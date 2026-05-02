@@ -1,8 +1,10 @@
 use super::*;
+use std::io::IsTerminal;
 
 pub(crate) use prodex_context::{
-    collect_context_audit_report, compress_context_path, render_context_audit_report_with_width,
-    render_context_compress_report,
+    CommandOutputCompactOptions, CommandOutputKind, collect_context_audit_report,
+    compact_command_output_with_options, compress_context_path,
+    render_context_audit_report_with_width, render_context_compress_report,
 };
 
 pub(crate) fn handle_context_audit(args: ContextAuditArgs) -> Result<()> {
@@ -40,4 +42,50 @@ pub(crate) fn handle_context_compress(args: ContextCompressArgs) -> Result<()> {
     };
     print_stdout_line(&json);
     Ok(())
+}
+
+pub(crate) fn handle_context_compact_output(args: ContextCompactOutputArgs) -> Result<()> {
+    let input = if let Some(path) = args.path {
+        let path = absolutize(path)?;
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?
+    } else {
+        if io::stdin().is_terminal() {
+            bail!("pass a text file path or pipe command output to stdin");
+        }
+        let mut input = String::new();
+        io::stdin()
+            .read_to_string(&mut input)
+            .context("failed to read command output from stdin")?;
+        input
+    };
+    let options = CommandOutputCompactOptions {
+        kind: context_compact_output_kind(args.kind),
+        max_lines: args.max_lines,
+        head_lines: args.head_lines,
+        tail_lines: args.tail_lines,
+        max_line_chars: args.max_line_chars,
+        max_search_matches_per_file: args.max_search_matches_per_file,
+        max_path_entries: args.max_path_entries,
+    };
+    let report = compact_command_output_with_options(&input, &options);
+
+    if args.json {
+        let json = serde_json::to_string_pretty(&report)
+            .context("failed to serialize context compact-output report")?;
+        print_stdout_line(&json);
+    } else {
+        print_stdout_line(report.output.trim_end());
+    }
+    Ok(())
+}
+
+fn context_compact_output_kind(kind: ContextCompactOutputKind) -> CommandOutputKind {
+    match kind {
+        ContextCompactOutputKind::Auto => CommandOutputKind::Auto,
+        ContextCompactOutputKind::GitStatus => CommandOutputKind::GitStatus,
+        ContextCompactOutputKind::GitDiff => CommandOutputKind::GitDiff,
+        ContextCompactOutputKind::Search => CommandOutputKind::Search,
+        ContextCompactOutputKind::FileList => CommandOutputKind::FileList,
+        ContextCompactOutputKind::Plain => CommandOutputKind::Plain,
+    }
 }

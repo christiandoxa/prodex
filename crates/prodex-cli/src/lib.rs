@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -358,6 +358,9 @@ pub enum ContextCommands {
     Audit(ContextAuditArgs),
     /// Deterministically compact prose context files and write .original.md backups.
     Compress(ContextCompressArgs),
+    /// Compact copied command output from stdin or a file for low-token context sharing.
+    #[command(name = "compact-output")]
+    CompactOutput(ContextCompactOutputArgs),
 }
 
 #[derive(Args, Debug)]
@@ -382,6 +385,47 @@ pub struct ContextCompressArgs {
     #[arg(long)]
     pub dry_run: bool,
     /// Emit machine-readable JSON output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ContextCompactOutputKind {
+    Auto,
+    GitStatus,
+    GitDiff,
+    Search,
+    FileList,
+    Plain,
+}
+
+#[derive(Args, Debug)]
+pub struct ContextCompactOutputArgs {
+    /// Text file to compact. Omit to read command output from stdin.
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
+    /// Output kind to use. `auto` detects common git/search/file-list output.
+    #[arg(long, value_enum, default_value = "auto")]
+    pub kind: ContextCompactOutputKind,
+    /// Maximum lines in the compacted output.
+    #[arg(long, default_value_t = 160, value_name = "COUNT")]
+    pub max_lines: usize,
+    /// Lines to keep from the beginning for plain truncation.
+    #[arg(long, default_value_t = 80, value_name = "COUNT")]
+    pub head_lines: usize,
+    /// Lines to keep from the end for plain truncation.
+    #[arg(long, default_value_t = 40, value_name = "COUNT")]
+    pub tail_lines: usize,
+    /// Maximum characters per retained line.
+    #[arg(long, default_value_t = 240, value_name = "CHARS")]
+    pub max_line_chars: usize,
+    /// Maximum search matches to keep per file.
+    #[arg(long, default_value_t = 4, value_name = "COUNT")]
+    pub max_search_matches_per_file: usize,
+    /// Maximum paths to keep in file-list summaries.
+    #[arg(long, default_value_t = 120, value_name = "COUNT")]
+    pub max_path_entries: usize,
+    /// Emit machine-readable JSON output including the compacted text.
     #[arg(long)]
     pub json: bool,
 }

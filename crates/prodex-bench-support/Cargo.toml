@@ -1,0 +1,14 @@
+[package]
+name = "prodex-bench-support"
+version.workspace = true
+edition.workspace = true
+description = "Benchmark check harness helpers for prodex"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "prodex_bench_support"
+path = "src/lib.rs"
+
+[dependencies]

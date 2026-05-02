@@ -23,6 +23,93 @@ pub const IMPORT_AUTH_UPDATE_JOURNAL_VERSION: u32 = 1;
 
 pub type SummaryFields = Vec<(String, String)>;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProfileImportIdentity {
+    pub email: Option<String>,
+    pub account_id: Option<String>,
+}
+
+impl ProfileImportIdentity {
+    pub fn target_key(&self) -> Option<String> {
+        profile_import_identity_parts_target_key(self.account_id.as_deref(), self.email.as_deref())
+    }
+}
+
+pub trait ProfileImportPlanProfile {
+    fn profile_name(&self) -> &str;
+    fn supports_codex_runtime(&self) -> bool;
+    fn import_identity(&self) -> ProfileImportIdentity;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileImportPlan {
+    pub actions: Vec<ProfileImportPlanAction>,
+    pub resolved_profile_names: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileImportPlanAction {
+    UpdateExisting {
+        source_index: usize,
+        target_profile_name: String,
+    },
+    StageNew {
+        source_index: usize,
+        staged_index: usize,
+    },
+    RewriteStagedAuth {
+        source_index: usize,
+        staged_index: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ImportIdentityTarget {
+    Existing(String),
+    PendingNew(usize),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopilotConfigFile {
+    #[serde(default)]
+    pub last_logged_in_user: Option<CopilotConfigUser>,
+    #[serde(default)]
+    pub logged_in_users: Vec<CopilotConfigUser>,
+    #[serde(default)]
+    pub copilot_tokens: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CopilotConfigUser {
+    pub host: String,
+    pub login: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopilotUserInfo {
+    #[serde(default)]
+    pub login: Option<String>,
+    #[serde(default)]
+    pub access_type_sku: Option<String>,
+    #[serde(default)]
+    pub copilot_plan: Option<String>,
+    #[serde(default)]
+    pub endpoints: Option<CopilotUserEndpoints>,
+    #[serde(default)]
+    pub limited_user_quotas: BTreeMap<String, i64>,
+    #[serde(default)]
+    pub monthly_quotas: BTreeMap<String, i64>,
+    #[serde(default)]
+    pub limited_user_reset_date: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopilotUserEndpoints {
+    #[serde(default)]
+    pub api: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileExportSummary {
     pub profile_count: usize,
@@ -184,6 +271,297 @@ pub fn validate_import_auth_update_journal_version(version: u32) -> Result<()> {
     Ok(())
 }
 
+pub fn plan_profile_import<P>(
+    profiles: &[P],
+    existing_profile_supports_codex_runtime: impl Fn(&str) -> Option<bool>,
+    mut find_existing_profile_by_identity: impl FnMut(&ProfileImportIdentity) -> Result<Option<String>>,
+) -> Result<ProfileImportPlan>
+where
+    P: ProfileImportPlanProfile,
+{
+    if profiles.is_empty() {
+        bail!("profile export bundle does not contain any profiles");
+    }
+
+    let mut seen_names = BTreeSet::new();
+    let mut identity_targets = BTreeMap::new();
+    let mut actions = Vec::with_capacity(profiles.len());
+    let mut resolved_profile_names = BTreeMap::new();
+    let mut staged_profile_names = Vec::new();
+    let mut staged_count = 0_usize;
+
+    for (source_index, profile) in profiles.iter().enumerate() {
+        let source_profile_name = profile.profile_name();
+        if !seen_names.insert(source_profile_name.to_string()) {
+            bail!(
+                "profile export bundle contains duplicate profile '{}'",
+                source_profile_name
+            );
+        }
+
+        let provider_supports_codex_runtime = profile.supports_codex_runtime();
+        let resolved_identity = profile.import_identity();
+        let identity_key = resolved_identity.target_key();
+
+        if let Some(existing_supports_codex_runtime) =
+            existing_profile_supports_codex_runtime(source_profile_name)
+        {
+            if !provider_supports_codex_runtime || !existing_supports_codex_runtime {
+                bail!("profile '{}' already exists", source_profile_name);
+            }
+
+            actions.push(ProfileImportPlanAction::UpdateExisting {
+                source_index,
+                target_profile_name: source_profile_name.to_string(),
+            });
+            resolved_profile_names.insert(
+                source_profile_name.to_string(),
+                source_profile_name.to_string(),
+            );
+            if let Some(identity_key) = identity_key {
+                identity_targets.insert(
+                    identity_key,
+                    ImportIdentityTarget::Existing(source_profile_name.to_string()),
+                );
+            }
+            continue;
+        }
+
+        if provider_supports_codex_runtime {
+            if let Some(identity_key) = identity_key.as_deref()
+                && let Some(target) = identity_targets.get(identity_key)
+            {
+                match target {
+                    ImportIdentityTarget::Existing(profile_name) => {
+                        actions.push(ProfileImportPlanAction::UpdateExisting {
+                            source_index,
+                            target_profile_name: profile_name.clone(),
+                        });
+                        resolved_profile_names
+                            .insert(source_profile_name.to_string(), profile_name.clone());
+                        continue;
+                    }
+                    ImportIdentityTarget::PendingNew(staged_index) => {
+                        actions.push(ProfileImportPlanAction::RewriteStagedAuth {
+                            source_index,
+                            staged_index: *staged_index,
+                        });
+                        let target_profile_name = staged_profile_names
+                            .get(*staged_index)
+                            .cloned()
+                            .with_context(|| {
+                                format!(
+                                    "staged import profile index {} is missing for '{}'",
+                                    staged_index, source_profile_name
+                                )
+                            })?;
+                        resolved_profile_names
+                            .insert(source_profile_name.to_string(), target_profile_name);
+                        continue;
+                    }
+                }
+            }
+
+            if identity_key.is_some()
+                && let Some(existing_profile_name) =
+                    find_existing_profile_by_identity(&resolved_identity)?
+            {
+                if let Some(identity_key) = identity_key {
+                    identity_targets.insert(
+                        identity_key,
+                        ImportIdentityTarget::Existing(existing_profile_name.clone()),
+                    );
+                }
+                actions.push(ProfileImportPlanAction::UpdateExisting {
+                    source_index,
+                    target_profile_name: existing_profile_name.clone(),
+                });
+                resolved_profile_names
+                    .insert(source_profile_name.to_string(), existing_profile_name);
+                continue;
+            }
+        }
+
+        let staged_index = staged_count;
+        staged_count += 1;
+        staged_profile_names.push(source_profile_name.to_string());
+        actions.push(ProfileImportPlanAction::StageNew {
+            source_index,
+            staged_index,
+        });
+        resolved_profile_names.insert(
+            source_profile_name.to_string(),
+            source_profile_name.to_string(),
+        );
+        if provider_supports_codex_runtime && let Some(identity_key) = identity_key {
+            identity_targets.insert(identity_key, ImportIdentityTarget::PendingNew(staged_index));
+        }
+    }
+
+    Ok(ProfileImportPlan {
+        actions,
+        resolved_profile_names,
+    })
+}
+
+pub fn profile_import_identity_target_key(identity: &ProfileImportIdentity) -> Option<String> {
+    identity.target_key()
+}
+
+pub fn profile_import_identity_parts_target_key(
+    account_id: Option<&str>,
+    email: Option<&str>,
+) -> Option<String> {
+    account_id
+        .map(str::trim)
+        .filter(|account_id| !account_id.is_empty())
+        .map(|account_id| format!("account:{account_id}"))
+        .or_else(|| {
+            email
+                .map(str::trim)
+                .filter(|email| !email.is_empty())
+                .map(|email| format!("email:{}", email.to_ascii_lowercase()))
+        })
+}
+
+pub fn parse_copilot_config_file(raw: &str) -> Result<CopilotConfigFile> {
+    serde_json::from_str(raw).context("failed to parse Copilot config")
+}
+
+pub fn select_copilot_logged_in_user(config: &CopilotConfigFile) -> Option<CopilotConfigUser> {
+    config
+        .last_logged_in_user
+        .clone()
+        .or_else(|| config.logged_in_users.first().cloned())
+}
+
+pub fn copilot_account_key(host: &str, login: &str) -> String {
+    format!("{}:{}", host.trim(), login.trim())
+}
+
+pub fn copilot_token_from_config(
+    config: &CopilotConfigFile,
+    host: &str,
+    login: &str,
+) -> Option<String> {
+    let account_key = copilot_account_key(host, login);
+    config
+        .copilot_tokens
+        .get(&account_key)
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+pub fn parse_copilot_version(raw: &str) -> (u64, u64, u64) {
+    let mut parts = raw.split('.');
+    let parse_part = |value: Option<&str>| {
+        value
+            .and_then(|part| {
+                part.chars()
+                    .take_while(|ch| ch.is_ascii_digit())
+                    .collect::<String>()
+                    .parse::<u64>()
+                    .ok()
+            })
+            .unwrap_or(0)
+    };
+    (
+        parse_part(parts.next()),
+        parse_part(parts.next()),
+        parse_part(parts.next()),
+    )
+}
+
+pub fn copilot_platform_label() -> &'static str {
+    copilot_platform_label_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+pub fn copilot_platform_label_for(os: &str, arch: &str) -> &'static str {
+    match (os, arch) {
+        ("linux", "x86_64") => "linux-x64",
+        ("linux", "aarch64") => "linux-arm64",
+        ("macos", "x86_64") => "darwin-x64",
+        ("macos", "aarch64") => "darwin-arm64",
+        ("windows", "x86_64") => "win32-x64",
+        ("windows", "aarch64") => "win32-arm64",
+        _ => "linux-x64",
+    }
+}
+
+pub fn copilot_user_api_origin(host: &str) -> Result<String> {
+    let trimmed = host.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        bail!("invalid Copilot host '{}'", host);
+    }
+
+    let (scheme, rest) = if let Some((scheme, rest)) = trimmed.split_once("://") {
+        if scheme.is_empty() || rest.is_empty() {
+            bail!("invalid Copilot host '{}'", host);
+        }
+        (scheme, rest)
+    } else {
+        ("https", trimmed)
+    };
+
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .filter(|authority| !authority.is_empty())
+        .with_context(|| format!("invalid Copilot host '{}'", host))?;
+    let (hostname, has_explicit_port) = authority_host_and_port(authority)
+        .with_context(|| format!("invalid Copilot host '{}'", host))?;
+    let is_local = matches!(hostname, "localhost" | "127.0.0.1" | "::1");
+
+    let authority = if has_explicit_port || is_local || hostname.starts_with("api.") {
+        authority.to_string()
+    } else {
+        format!("api.{authority}")
+    };
+
+    Ok(format!("{scheme}://{authority}"))
+}
+
+pub fn default_copilot_models_api_url(host: &str) -> String {
+    let normalized = host.trim().trim_end_matches('/');
+    if normalized.eq_ignore_ascii_case("https://github.com")
+        || normalized.eq_ignore_ascii_case("http://github.com")
+        || normalized.eq_ignore_ascii_case("github.com")
+    {
+        return "https://api.githubcopilot.com".to_string();
+    }
+
+    let fallback_host = normalized
+        .strip_prefix("https://")
+        .or_else(|| normalized.strip_prefix("http://"))
+        .unwrap_or(normalized);
+    if let Some(subdomain) = fallback_host.strip_suffix(".ghe.com") {
+        return format!("https://copilot-api.{subdomain}.ghe.com");
+    }
+
+    format!("https://api.{fallback_host}")
+}
+
+fn authority_host_and_port(authority: &str) -> Option<(&str, bool)> {
+    if let Some(rest) = authority.strip_prefix('[') {
+        let closing = rest.find(']')?;
+        let hostname = &rest[..closing];
+        let after = &rest[closing + 1..];
+        return Some((hostname, after.starts_with(':')));
+    }
+
+    let mut parts = authority.rsplitn(2, ':');
+    let last = parts.next()?;
+    let maybe_host = parts.next();
+    match maybe_host {
+        Some(host) if !host.is_empty() && last.chars().all(|ch| ch.is_ascii_digit()) => {
+            Some((host, true))
+        }
+        _ => Some((authority, false)),
+    }
+}
+
 pub fn serialize_profile_export_payload<T>(payload: &T, password: Option<&str>) -> Result<Vec<u8>>
 where
     T: Clone + Serialize,
@@ -327,6 +705,31 @@ fn yes_no(value: bool) -> String {
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
+    struct PlanProfile {
+        name: &'static str,
+        supports_codex_runtime: bool,
+        email: Option<&'static str>,
+        account_id: Option<&'static str>,
+    }
+
+    impl ProfileImportPlanProfile for PlanProfile {
+        fn profile_name(&self) -> &str {
+            self.name
+        }
+
+        fn supports_codex_runtime(&self) -> bool {
+            self.supports_codex_runtime
+        }
+
+        fn import_identity(&self) -> ProfileImportIdentity {
+            ProfileImportIdentity {
+                email: self.email.map(ToOwned::to_owned),
+                account_id: self.account_id.map(ToOwned::to_owned),
+            }
+        }
+    }
+
     fn available(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|name| (*name).to_string()).collect()
     }
@@ -441,5 +844,150 @@ mod tests {
         validate_import_auth_update_journal_version(journal.version)
             .expect("current journal version should validate");
         assert!(validate_import_auth_update_journal_version(journal.version + 1).is_err());
+    }
+
+    #[test]
+    fn import_plan_updates_same_name_runtime_profile() {
+        let profiles = [PlanProfile {
+            name: "main",
+            supports_codex_runtime: true,
+            email: Some("user@example.com"),
+            account_id: Some("acct-main"),
+        }];
+
+        let plan = plan_profile_import(
+            &profiles,
+            |name| (name == "main").then_some(true),
+            |_| Ok(None),
+        )
+        .expect("plan should resolve");
+
+        assert_eq!(
+            plan.actions,
+            vec![ProfileImportPlanAction::UpdateExisting {
+                source_index: 0,
+                target_profile_name: "main".to_string(),
+            }]
+        );
+        assert_eq!(
+            plan.resolved_profile_names,
+            BTreeMap::from([("main".to_string(), "main".to_string())])
+        );
+    }
+
+    #[test]
+    fn import_plan_rewrites_pending_new_profile_for_duplicate_identity() {
+        let profiles = [
+            PlanProfile {
+                name: "first",
+                supports_codex_runtime: true,
+                email: Some("user@example.com"),
+                account_id: Some("acct-main"),
+            },
+            PlanProfile {
+                name: "second",
+                supports_codex_runtime: true,
+                email: Some("other@example.com"),
+                account_id: Some("acct-main"),
+            },
+        ];
+
+        let plan =
+            plan_profile_import(&profiles, |_| None, |_| Ok(None)).expect("plan should resolve");
+
+        assert_eq!(
+            plan.actions,
+            vec![
+                ProfileImportPlanAction::StageNew {
+                    source_index: 0,
+                    staged_index: 0,
+                },
+                ProfileImportPlanAction::RewriteStagedAuth {
+                    source_index: 1,
+                    staged_index: 0,
+                },
+            ]
+        );
+        assert_eq!(
+            plan.resolved_profile_names,
+            BTreeMap::from([
+                ("first".to_string(), "first".to_string()),
+                ("second".to_string(), "first".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn import_plan_uses_external_identity_match() {
+        let profiles = [PlanProfile {
+            name: "incoming",
+            supports_codex_runtime: true,
+            email: Some("user@example.com"),
+            account_id: Some("acct-main"),
+        }];
+
+        let plan = plan_profile_import(&profiles, |_| None, |_| Ok(Some("existing".to_string())))
+            .expect("plan should resolve");
+
+        assert_eq!(
+            plan.actions,
+            vec![ProfileImportPlanAction::UpdateExisting {
+                source_index: 0,
+                target_profile_name: "existing".to_string(),
+            }]
+        );
+        assert_eq!(
+            plan.resolved_profile_names,
+            BTreeMap::from([("incoming".to_string(), "existing".to_string())])
+        );
+    }
+
+    #[test]
+    fn copilot_config_helpers_select_user_and_token() {
+        let config = parse_copilot_config_file(
+            r#"{
+                "loggedInUsers": [{"host": "https://github.com", "login": "fallback"}],
+                "lastLoggedInUser": {"host": "https://ghe.example", "login": "main"},
+                "copilotTokens": {
+                    "https://ghe.example:main": " token-value "
+                }
+            }"#,
+        )
+        .expect("config should parse");
+
+        let user = select_copilot_logged_in_user(&config).expect("user should resolve");
+
+        assert_eq!(user.host, "https://ghe.example");
+        assert_eq!(user.login, "main");
+        assert_eq!(
+            copilot_token_from_config(&config, "https://ghe.example", "main").as_deref(),
+            Some("token-value")
+        );
+        assert_eq!(
+            copilot_account_key(" https://ghe.example ", " main "),
+            "https://ghe.example:main"
+        );
+    }
+
+    #[test]
+    fn copilot_url_helpers_match_import_expectations() {
+        assert_eq!(parse_copilot_version("1.2.3-beta"), (1, 2, 3));
+        assert_eq!(copilot_platform_label_for("linux", "x86_64"), "linux-x64");
+        assert_eq!(
+            copilot_user_api_origin("github.com").unwrap(),
+            "https://api.github.com"
+        );
+        assert_eq!(
+            copilot_user_api_origin("http://127.0.0.1:1234/path").unwrap(),
+            "http://127.0.0.1:1234"
+        );
+        assert_eq!(
+            default_copilot_models_api_url("github.com"),
+            "https://api.githubcopilot.com"
+        );
+        assert_eq!(
+            default_copilot_models_api_url("https://enterprise.ghe.com"),
+            "https://copilot-api.enterprise.ghe.com"
+        );
     }
 }

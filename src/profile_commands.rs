@@ -1,6 +1,6 @@
 use super::profile_identity::{
     ProfileIdentity, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
-    normalize_email, parse_identity_from_auth_json, persist_login_home, remove_dir_if_exists,
+    parse_identity_from_auth_json, persist_login_home, remove_dir_if_exists,
     unique_profile_name_for_email,
 };
 use super::shared_codex_fs::{
@@ -161,12 +161,6 @@ impl ImportedProfilesTransaction {
             previous_active_profile: self.previous_active_profile,
         }
     }
-}
-
-#[derive(Debug)]
-pub(super) enum ImportIdentityTarget {
-    Existing(String),
-    PendingNew(usize),
 }
 
 #[derive(Debug)]

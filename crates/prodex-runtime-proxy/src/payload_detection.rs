@@ -1,3 +1,9 @@
+use crate::{
+    RuntimeHttpErrorClass, RuntimeHttpErrorPhase, runtime_error_signal_message_from_text,
+    runtime_error_signal_message_from_value, runtime_http_error_policy,
+    runtime_overload_text_message, runtime_usage_limit_text_message,
+};
+
 const RUNTIME_PROXY_JSON_SCAN_LIMIT: usize = 2_048;
 const RUNTIME_SSE_INVALID_DATA_MARKER: &str = "\u{0}prodex-invalid-sse-data";
 
@@ -199,13 +205,10 @@ where
 }
 
 pub fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String> {
-    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
-        && let Some(message) = extract_runtime_proxy_quota_message_from_value(&value)
-    {
-        return Some(message);
-    }
-
-    runtime_proxy_utf8_text(body).and_then(extract_runtime_proxy_quota_message_from_text)
+    let policy = runtime_http_error_policy(429, body, RuntimeHttpErrorPhase::PreCommit);
+    (policy.class == RuntimeHttpErrorClass::Quota)
+        .then_some(policy.message)
+        .flatten()
 }
 
 pub fn extract_runtime_proxy_quota_message_from_websocket_payload(
@@ -257,146 +260,43 @@ pub fn extract_runtime_proxy_previous_response_message(body: &[u8]) -> Option<St
 }
 
 pub fn extract_runtime_proxy_overload_message(status: u16, body: &[u8]) -> Option<String> {
-    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
-        && let Some(message) = extract_runtime_proxy_overload_message_from_value(&value)
-    {
-        return Some(message);
-    }
-
-    let body_text = runtime_proxy_utf8_text(body)
-        .unwrap_or_default()
-        .to_string();
-    if matches!(status, 429 | 500 | 502 | 503 | 504 | 529)
-        && let Some(message) = extract_runtime_proxy_overload_message_from_text(&body_text)
-    {
-        return Some(message);
-    }
-
-    (status == 500).then(|| {
-        if body_text.is_empty() {
-            "Upstream Codex backend is currently experiencing high demand.".to_string()
-        } else {
-            body_text
-        }
-    })
+    let policy = runtime_http_error_policy(status, body, RuntimeHttpErrorPhase::PreCommit);
+    matches!(
+        policy.class,
+        RuntimeHttpErrorClass::Overload | RuntimeHttpErrorClass::TransientServer
+    )
+    .then_some(policy.message)
+    .flatten()
 }
 
 pub fn extract_runtime_proxy_overload_message_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
-    runtime_json_find(value, extract_runtime_proxy_overload_message_candidate)
-}
-
-fn extract_runtime_proxy_overload_message_candidate(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(message) => {
-            runtime_proxy_overload_message(message).then(|| message.to_string())
-        }
-        serde_json::Value::Object(map) => {
-            let message = map
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .or_else(|| map.get("detail").and_then(serde_json::Value::as_str));
-            let code = map.get("code").and_then(serde_json::Value::as_str);
-
-            if matches!(code, Some("server_is_overloaded" | "slow_down")) {
-                return Some(
-                    message
-                        .unwrap_or("Upstream Codex backend is currently overloaded.")
-                        .to_string(),
-                );
-            }
-
-            message
-                .filter(|message| runtime_proxy_overload_message(message))
-                .map(str::to_string)
-        }
-        _ => None,
-    }
+    runtime_error_signal_message_from_value(value, RuntimeHttpErrorClass::Overload)
 }
 
 pub fn extract_runtime_proxy_overload_message_from_text(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    runtime_proxy_overload_message(trimmed).then(|| trimmed.to_string())
+    runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Overload)
 }
 
 pub fn extract_runtime_proxy_quota_message_from_value(value: &serde_json::Value) -> Option<String> {
-    runtime_json_find(value, extract_runtime_proxy_quota_message_candidate)
+    runtime_error_signal_message_from_value(value, RuntimeHttpErrorClass::Quota)
 }
 
 pub fn extract_runtime_proxy_quota_message_candidate(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(message) => {
-            runtime_proxy_usage_limit_message(message).then(|| message.to_string())
-        }
-        serde_json::Value::Object(map) => {
-            let message = map
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
-                .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
-            let code = map.get("code").and_then(serde_json::Value::as_str);
-            let error_type = map.get("type").and_then(serde_json::Value::as_str);
-            let code_matches = matches!(code, Some("insufficient_quota" | "rate_limit_exceeded"));
-            let type_matches = matches!(error_type, Some("usage_limit_reached"));
-            let message_matches = message.is_some_and(runtime_proxy_usage_limit_message);
-            if !(code_matches || type_matches || message_matches) {
-                return None;
-            }
-
-            Some(
-                message
-                    .unwrap_or("Upstream Codex account quota was exhausted.")
-                    .to_string(),
-            )
-        }
-        _ => None,
-    }
+    runtime_error_signal_message_from_value(value, RuntimeHttpErrorClass::Quota)
 }
 
 pub fn extract_runtime_proxy_quota_message_from_text(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let lower = trimmed.to_ascii_lowercase();
-    if runtime_proxy_usage_limit_message(trimmed)
-        || lower.contains("usage_limit_reached")
-        || lower.contains("insufficient_quota")
-        || lower.contains("rate_limit_exceeded")
-    {
-        Some(trimmed.to_string())
-    } else {
-        None
-    }
+    runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Quota)
 }
 
 pub fn runtime_proxy_usage_limit_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("you've hit your usage limit")
-        || lower.contains("you have hit your usage limit")
-        || lower.contains("the usage limit has been reached")
-        || lower.contains("usage limit has been reached")
-        || lower.contains("usage limit")
-            && (lower.contains("try again at")
-                || lower.contains("request to your admin")
-                || lower.contains("more access now"))
+    runtime_usage_limit_text_message(message)
 }
 
 pub fn runtime_proxy_overload_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("selected model is at capacity")
-        || (lower.contains("model is at capacity")
-            && (lower.contains("try a different model") || lower.contains("please try again")))
-        || lower.contains("backend under high demand")
-        || lower.contains("experiencing high demand")
-        || lower.contains("server is overloaded")
-        || lower.contains("currently overloaded")
+    runtime_overload_text_message(message)
 }
 
 pub fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> String {
@@ -954,6 +854,36 @@ data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
     }
 
     #[test]
+    fn quota_http_body_detection_requires_explicit_error_code() {
+        assert_eq!(
+            extract_runtime_proxy_quota_message(br#"{"error":{"message":"Too Many Requests"}}"#),
+            None
+        );
+        assert_eq!(
+            extract_runtime_proxy_quota_message(
+                br#"{"error":{"message":"The usage limit has been reached"}}"#
+            ),
+            None
+        );
+
+        for code in ["insufficient_quota", "rate_limit_exceeded"] {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "error": {
+                    "code": code,
+                    "message": "Quota exhausted"
+                }
+            }))
+            .expect("quota body should serialize");
+
+            assert_eq!(
+                extract_runtime_proxy_quota_message(&body),
+                Some("Quota exhausted".to_string()),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
     fn overload_message_detects_top_level_and_nested_error_payloads() {
         let top_level = serde_json::json!({
             "code": "server_is_overloaded",
@@ -1000,7 +930,7 @@ data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
                 503,
                 b"\xffSelected model is at capacity. Please try again."
             ),
-            None
+            Some("Upstream Codex backend returned transient HTTP 503.".to_string())
         );
         assert_eq!(
             extract_runtime_proxy_overload_message(500, b"\xff"),

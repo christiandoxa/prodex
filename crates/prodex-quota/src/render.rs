@@ -111,6 +111,61 @@ pub fn quota_pressure_band_from_window_status(
     }
 }
 
+pub fn quota_reset_at_from_message(message: &str) -> Option<i64> {
+    let marker = message.to_ascii_lowercase().find("try again at ")?;
+    let candidate = message
+        .get(marker + "try again at ".len()..)?
+        .trim()
+        .trim_end_matches('.');
+    let now = Local::now();
+    if let Some((time_text, meridiem)) = candidate
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .get(..2)
+        .and_then(|parts| (parts.len() == 2).then_some((parts[0], parts[1])))
+        && let Ok(time) =
+            chrono::NaiveTime::parse_from_str(&format!("{time_text} {meridiem}"), "%I:%M %p")
+    {
+        let mut naive = now.date_naive().and_time(time);
+        let mut parsed = Local
+            .from_local_datetime(&naive)
+            .single()
+            .or_else(|| Local.from_local_datetime(&naive).earliest())?;
+        if parsed.timestamp() <= now.timestamp() {
+            naive = naive.checked_add_signed(chrono::Duration::days(1))?;
+            parsed = Local
+                .from_local_datetime(&naive)
+                .single()
+                .or_else(|| Local.from_local_datetime(&naive).earliest())?;
+        }
+        return Some(parsed.timestamp());
+    }
+
+    let mut parts = candidate
+        .split_whitespace()
+        .map(|part| part.to_string())
+        .collect::<Vec<_>>();
+    if parts.len() < 5 {
+        return None;
+    }
+    let day_digits = parts[1]
+        .trim_end_matches(',')
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if day_digits.is_empty() {
+        return None;
+    }
+    parts[1] = format!("{day_digits},");
+    let normalized = parts[..5].join(" ");
+    let naive = chrono::NaiveDateTime::parse_from_str(&normalized, "%b %d, %Y %I:%M %p").ok()?;
+    Local
+        .from_local_datetime(&naive)
+        .single()
+        .or_else(|| Local.from_local_datetime(&naive).earliest())
+        .map(|datetime| datetime.timestamp())
+}
+
 pub fn earliest_required_main_reset_epoch(usage: &UsageResponse) -> Option<i64> {
     ["5h", "weekly"]
         .into_iter()
@@ -1563,5 +1618,21 @@ mod tests {
         let output = render_quota_reports_with_layout(&reports, false, None, 72);
 
         assert!(output.lines().all(|line| text_width(line) <= 72));
+    }
+
+    #[test]
+    fn quota_reset_at_from_message_parses_ordinal_date() {
+        let parsed = quota_reset_at_from_message(
+            "You've hit your usage limit. Try again at Mar 24th, 2026 2:04 AM.",
+        )
+        .expect("reset timestamp should parse");
+        let expected = Local
+            .with_ymd_and_hms(2026, 3, 24, 2, 4, 0)
+            .single()
+            .or_else(|| Local.with_ymd_and_hms(2026, 3, 24, 2, 4, 0).earliest())
+            .expect("local timestamp should resolve")
+            .timestamp();
+
+        assert_eq!(parsed, expected);
     }
 }

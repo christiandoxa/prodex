@@ -46,42 +46,70 @@ pub fn runtime_upstream_connect_failure_marker(
     }
 }
 
+struct RuntimeTransportFailureMessageRule {
+    kind: RuntimeTransportFailureKind,
+    needles: &'static [&'static str],
+}
+
+const RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES: &[RuntimeTransportFailureMessageRule] = &[
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::Dns,
+        needles: &[
+            "dns",
+            "failed to lookup address information",
+            "no such host",
+            "name or service not known",
+        ],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::TlsHandshake,
+        needles: &["tls", "handshake", "certificate"],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::ConnectRefused,
+        needles: &["connection refused"],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::ConnectTimeout,
+        needles: &["timed out", "timeout"],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::ConnectReset,
+        needles: &["connection reset"],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::BrokenPipe,
+        needles: &["broken pipe"],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::UnexpectedEof,
+        needles: &["unexpected eof"],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::ConnectionAborted,
+        needles: &["connection aborted"],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::UpstreamClosedBeforeCommit,
+        needles: &[
+            "stream closed before response.completed",
+            "closed before response.completed",
+        ],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::Other,
+        needles: &["unable to connect"],
+    },
+];
+
 pub fn runtime_transport_failure_kind_from_message(
     message: &str,
 ) -> Option<RuntimeTransportFailureKind> {
     let message = message.to_ascii_lowercase();
-    if message.contains("dns")
-        || message.contains("failed to lookup address information")
-        || message.contains("no such host")
-        || message.contains("name or service not known")
-    {
-        Some(RuntimeTransportFailureKind::Dns)
-    } else if message.contains("tls")
-        || message.contains("handshake")
-        || message.contains("certificate")
-    {
-        Some(RuntimeTransportFailureKind::TlsHandshake)
-    } else if message.contains("connection refused") {
-        Some(RuntimeTransportFailureKind::ConnectRefused)
-    } else if message.contains("timed out") || message.contains("timeout") {
-        Some(RuntimeTransportFailureKind::ConnectTimeout)
-    } else if message.contains("connection reset") {
-        Some(RuntimeTransportFailureKind::ConnectReset)
-    } else if message.contains("broken pipe") {
-        Some(RuntimeTransportFailureKind::BrokenPipe)
-    } else if message.contains("unexpected eof") {
-        Some(RuntimeTransportFailureKind::UnexpectedEof)
-    } else if message.contains("connection aborted") {
-        Some(RuntimeTransportFailureKind::ConnectionAborted)
-    } else if message.contains("stream closed before response.completed")
-        || message.contains("closed before response.completed")
-    {
-        Some(RuntimeTransportFailureKind::UpstreamClosedBeforeCommit)
-    } else if message.contains("unable to connect") {
-        Some(RuntimeTransportFailureKind::Other)
-    } else {
-        None
-    }
+    RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES
+        .iter()
+        .find(|rule| rule.needles.iter().any(|needle| message.contains(needle)))
+        .map(|rule| rule.kind)
 }
 
 pub fn runtime_transport_failure_kind_from_io_error(

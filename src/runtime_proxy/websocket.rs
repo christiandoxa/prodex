@@ -11,6 +11,10 @@ pub(super) use self::unauthorized_recovery::{
     RuntimeProfileUnauthorizedRecoveryStep,
     runtime_try_recover_profile_auth_from_unauthorized_steps,
 };
+use runtime_proxy_crate::{
+    runtime_websocket_authority, runtime_websocket_no_proxy_pattern_matches,
+    runtime_websocket_normalize_host,
+};
 
 pub(super) fn run_runtime_proxy_websocket_session(
     session_id: u64,
@@ -819,55 +823,6 @@ fn runtime_websocket_no_proxy_matches(host: &str, port: u16) -> bool {
                 .any(|pattern| runtime_websocket_no_proxy_pattern_matches(pattern, host, port))
         })
     })
-}
-
-fn runtime_websocket_no_proxy_pattern_matches(pattern: &str, host: &str, port: u16) -> bool {
-    let pattern = pattern.trim();
-    if pattern.is_empty() {
-        return false;
-    }
-    if pattern == "*" {
-        return true;
-    }
-    let (pattern_host, pattern_port) = runtime_websocket_no_proxy_pattern_host_port(pattern);
-    if pattern_port.is_some_and(|candidate_port| candidate_port != port) {
-        return false;
-    }
-    let pattern_host = runtime_websocket_normalize_host(pattern_host);
-    let host = runtime_websocket_normalize_host(host);
-    let pattern_host = pattern_host.trim_start_matches('.').to_ascii_lowercase();
-    let host = host.to_ascii_lowercase();
-    host == pattern_host || host.ends_with(&format!(".{pattern_host}"))
-}
-
-fn runtime_websocket_no_proxy_pattern_host_port(pattern: &str) -> (&str, Option<u16>) {
-    if let Some(stripped) = pattern.strip_prefix('[')
-        && let Some((host, rest)) = stripped.split_once(']')
-    {
-        let port = rest
-            .strip_prefix(':')
-            .and_then(|value| value.parse::<u16>().ok());
-        return (host, port);
-    }
-    if pattern.matches(':').count() == 1
-        && let Some((host, port)) = pattern.rsplit_once(':')
-        && let Ok(port) = port.parse::<u16>()
-    {
-        return (host, Some(port));
-    }
-    (pattern, None)
-}
-
-fn runtime_websocket_normalize_host(host: &str) -> String {
-    host.trim_matches(|ch| ch == '[' || ch == ']').to_string()
-}
-
-fn runtime_websocket_authority(host: &str, port: u16) -> String {
-    if host.contains(':') {
-        format!("[{host}]:{port}")
-    } else {
-        format!("{host}:{port}")
-    }
 }
 
 fn runtime_websocket_establish_http_proxy_tunnel(

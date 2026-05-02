@@ -233,6 +233,15 @@ fn probe_runtime_proxy_active_request_slot(
                 return Ok(RuntimeProxyActiveRequestGuard {
                     active_request_count: Arc::clone(&shared.active_request_count),
                     lane_active_count,
+                    lane_releases_total: shared.lane_admission.releases_total_counter(lane),
+                    active_request_release_underflows_total: Arc::clone(
+                        &shared
+                            .lane_admission
+                            .active_request_release_underflows_total,
+                    ),
+                    lane_release_underflows_total: shared
+                        .lane_admission
+                        .release_underflows_total_counter(lane),
                     wait: Arc::clone(&shared.lane_admission.wait),
                 });
             }

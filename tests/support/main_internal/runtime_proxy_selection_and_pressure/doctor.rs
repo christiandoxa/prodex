@@ -127,6 +127,21 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     summary.persisted_continuation_journal_session_bindings = 2;
     summary.persisted_continuation_journal_turn_state_bindings = 1;
     summary.persisted_continuation_journal_session_id_bindings = 4;
+    summary.binding_state.active_profile = Some("main".to_string());
+    summary.binding_state.profile_count = 2;
+    summary.binding_state.last_run_selected_profiles = 2;
+    summary
+        .binding_state
+        .runtime_continuations
+        .response_bindings = 3;
+    summary
+        .binding_state
+        .runtime_continuations
+        .turn_state_bindings = 1;
+    summary.binding_state.runtime_continuations.total_bindings = 4;
+    summary.binding_state.runtime_continuations.profile_count = 2;
+    summary.binding_state.merged_continuations.response_bindings = 4;
+    summary.binding_state.merged_continuations.total_bindings = 5;
     summary.state_save_queue_backlog = Some(2);
     summary.state_save_lag_ms = Some(17);
     summary.continuation_journal_save_backlog = Some(1);
@@ -249,6 +264,20 @@ fn runtime_doctor_json_value_includes_selection_markers() {
     assert_eq!(
         value["persisted_continuation_journal_session_id_bindings"],
         4
+    );
+    assert_eq!(value["binding_state"]["active_profile"], "main");
+    assert_eq!(value["binding_state"]["profile_count"], 2);
+    assert_eq!(
+        value["binding_state"]["runtime_continuations"]["response_bindings"],
+        3
+    );
+    assert_eq!(
+        value["binding_state"]["runtime_continuations"]["turn_state_bindings"],
+        1
+    );
+    assert_eq!(
+        value["binding_state"]["merged_continuations"]["total_bindings"],
+        5
     );
     assert_eq!(value["state_save_queue_backlog"], 2);
     assert_eq!(value["state_save_lag_ms"], 17);
@@ -1399,6 +1428,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     fs::create_dir_all(&orphan).expect("orphan dir should exist");
     fs::write(orphan.join("auth.json"), "{}").expect("orphan auth should be written");
 
+    let binding_bound_at = Local::now().timestamp();
     let state = AppState {
         active_profile: Some("main".to_string()),
         profiles: BTreeMap::from([(
@@ -1411,8 +1441,20 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
             },
         )]),
         last_run_selected_at: BTreeMap::new(),
-        response_profile_bindings: BTreeMap::new(),
-        session_profile_bindings: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "state-resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: binding_bound_at,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::from([(
+            "state-session-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: binding_bound_at,
+            },
+        )]),
     };
     state.save(&paths).expect("state should save");
     let usage_snapshots = BTreeMap::from([(
@@ -1472,6 +1514,42 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
         },
     )
     .expect("backoffs should save");
+    save_runtime_continuations_for_profiles(
+        &paths,
+        &RuntimeContinuationStore {
+            response_profile_bindings: BTreeMap::from([(
+                "runtime-resp-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: binding_bound_at,
+                },
+            )]),
+            session_profile_bindings: BTreeMap::from([(
+                "runtime-session-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: binding_bound_at,
+                },
+            )]),
+            turn_state_bindings: BTreeMap::from([(
+                "runtime-turn-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: binding_bound_at,
+                },
+            )]),
+            session_id_bindings: BTreeMap::from([(
+                "runtime-session-id-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: binding_bound_at,
+                },
+            )]),
+            ..RuntimeContinuationStore::default()
+        },
+        &state.profiles,
+    )
+    .expect("runtime continuations should save");
     let journal_saved_at = Local::now().timestamp();
     let recent_not_found_at = journal_saved_at + RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS;
     save_runtime_continuation_journal_for_profiles(
@@ -1515,6 +1593,10 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     assert_eq!(summary.persisted_retry_backoffs, 1);
     assert_eq!(summary.persisted_route_circuits, 1);
     assert_eq!(summary.persisted_usage_snapshots, 1);
+    assert_eq!(summary.persisted_response_bindings, 1);
+    assert_eq!(summary.persisted_session_bindings, 1);
+    assert_eq!(summary.persisted_turn_state_bindings, 1);
+    assert_eq!(summary.persisted_session_id_bindings, 1);
     assert_eq!(summary.persisted_continuation_journal_response_bindings, 1);
     assert_eq!(summary.persisted_suspect_continuations, 1);
     assert_eq!(summary.persisted_dead_continuations, 0);
@@ -1525,6 +1607,63 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     assert_eq!(
         summary.suspect_continuation_bindings,
         vec!["resp-main:suspect".to_string()]
+    );
+    assert_eq!(
+        summary.binding_state.active_profile.as_deref(),
+        Some("main")
+    );
+    assert_eq!(summary.binding_state.profile_count, 1);
+    assert_eq!(summary.binding_state.state.response_bindings, 1);
+    assert_eq!(summary.binding_state.state.session_bindings, 1);
+    assert_eq!(
+        summary
+            .binding_state
+            .runtime_continuations
+            .response_bindings,
+        1
+    );
+    assert_eq!(
+        summary
+            .binding_state
+            .runtime_continuations
+            .turn_state_bindings,
+        1
+    );
+    assert_eq!(
+        summary
+            .binding_state
+            .runtime_continuations
+            .session_id_bindings,
+        1
+    );
+    assert_eq!(
+        summary.binding_state.continuation_journal.response_bindings,
+        1
+    );
+    assert_eq!(
+        summary.binding_state.merged_continuations.response_bindings,
+        2
+    );
+    assert_eq!(
+        summary.binding_state.merged_continuations.profiles[0].profile,
+        "main"
+    );
+    let fields = runtime_doctor_fields_for_summary(
+        &summary,
+        std::path::Path::new("/tmp/prodex-runtime-latest.path"),
+    )
+    .into_iter()
+    .collect::<BTreeMap<_, _>>();
+    let binding_state = fields
+        .get("Binding state")
+        .expect("binding state row should render");
+    assert!(
+        binding_state.contains("active=main profiles=1"),
+        "binding state should surface active profile and profile count: {binding_state}"
+    );
+    assert!(
+        binding_state.contains("merged r=2"),
+        "binding state should surface merged continuation bindings: {binding_state}"
     );
     assert!(
         summary

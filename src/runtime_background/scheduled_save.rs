@@ -506,9 +506,16 @@ pub(crate) fn runtime_proxy_queue_pressure_active(
     continuation_journal_backlog: usize,
     probe_refresh_backlog: usize,
 ) -> bool {
-    state_save_backlog >= RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD
-        || continuation_journal_backlog >= RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD
-        || probe_refresh_backlog >= RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD
+    prodex_runtime_state::runtime_proxy_queue_pressure_active(
+        state_save_backlog,
+        continuation_journal_backlog,
+        probe_refresh_backlog,
+        prodex_runtime_state::RuntimeBackgroundQueuePressureThresholds {
+            state_save: RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD,
+            continuation_journal: RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD,
+            probe_refresh: RUNTIME_PROBE_REFRESH_QUEUE_PRESSURE_THRESHOLD,
+        },
+    )
 }
 
 pub(crate) fn schedule_runtime_continuation_journal_save(
@@ -882,150 +889,23 @@ where
 }
 
 pub(crate) fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool {
-    [
-        "response_ids:",
-        "turn_state:",
-        "session_id:",
-        "compact_lineage:",
-        "compact_lineage_release:",
-    ]
-    .into_iter()
-    .any(|prefix| reason.starts_with(prefix))
+    prodex_runtime_state::runtime_state_save_reason_requires_continuation_journal(reason)
 }
 
 pub(crate) fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveSections {
-    if matches!(reason, "startup_audit" | "startup_continuation_migration") {
-        return RuntimeStateSaveSections::full();
-    }
-
-    let touches_continuations = [
-        "response_ids:",
-        "previous_response_owner:",
-        "previous_response_negative_cache:",
-        "previous_response_release:",
-        "previous_response_binding_clear:",
-        "response_touch:",
-        "turn_state:",
-        "turn_state_touch:",
-        "session_id:",
-        "session_touch:",
-        "compact_lineage:",
-        "compact_lineage_release:",
-        "compact_session_touch:",
-        "compact_turn_state_touch:",
-        "dead_response_binding_clear:",
-        "quota_release:",
-        "continuation_stale:",
-    ]
-    .into_iter()
-    .any(|prefix| reason.starts_with(prefix));
-    if touches_continuations {
-        let profile_scores = [
-            "response_ids:",
-            "previous_response_owner:",
-            "previous_response_negative_cache:",
-            "previous_response_release:",
-        ]
-        .into_iter()
-        .any(|prefix| reason.starts_with(prefix));
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::Core,
-            continuations: true,
-            profile_scores,
-            usage_snapshots: false,
-            backoffs: false,
-        };
-    }
-
-    if reason.starts_with("profile_commit:") {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::Core,
-            continuations: false,
-            profile_scores: true,
-            usage_snapshots: false,
-            backoffs: true,
-        };
-    }
-
-    if reason.starts_with("usage_snapshot:") || reason.starts_with("profile_retry_backoff:") {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::None,
-            continuations: false,
-            profile_scores: false,
-            usage_snapshots: true,
-            backoffs: true,
-        };
-    }
-
-    if reason.starts_with("profile_transport_backoff:")
-        || reason.starts_with("profile_circuit_half_open_probe:")
-        || reason == "startup_backoff_soften"
-    {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::None,
-            continuations: false,
-            profile_scores: false,
-            usage_snapshots: false,
-            backoffs: true,
-        };
-    }
-
-    if reason.starts_with("profile_health:") || reason.starts_with("profile_circuit_clear:") {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::None,
-            continuations: false,
-            profile_scores: true,
-            usage_snapshots: false,
-            backoffs: true,
-        };
-    }
-
-    if reason.starts_with("profile_bad_pairing:")
-        || reason.starts_with("profile_auth_backoff:")
-        || reason.starts_with("profile_auth_backoff_cleared:")
-    {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::None,
-            continuations: false,
-            profile_scores: true,
-            usage_snapshots: false,
-            backoffs: false,
-        };
-    }
-
-    RuntimeStateSaveSections::full()
-}
-
-pub(crate) fn runtime_hot_continuation_state_reason(reason: &str) -> bool {
-    [
-        "response_ids:",
-        "previous_response_owner:",
-        "response_touch:",
-        "turn_state:",
-        "turn_state_touch:",
-        "session_id:",
-        "session_touch:",
-        "compact_lineage:",
-        "compact_lineage_release:",
-        "compact_session_touch:",
-        "compact_turn_state_touch:",
-    ]
-    .into_iter()
-    .any(|prefix| reason.starts_with(prefix))
+    prodex_runtime_state::runtime_state_save_sections_for_reason(reason)
 }
 
 pub(crate) fn runtime_state_save_debounce(reason: &str) -> Duration {
-    if runtime_hot_continuation_state_reason(reason) {
-        Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS)
-    } else {
-        Duration::ZERO
-    }
+    prodex_runtime_state::runtime_state_save_debounce(
+        reason,
+        Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS),
+    )
 }
 
 pub(crate) fn runtime_continuation_journal_save_debounce(reason: &str) -> Duration {
-    if runtime_hot_continuation_state_reason(reason) {
-        Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS)
-    } else {
-        Duration::ZERO
-    }
+    prodex_runtime_state::runtime_continuation_journal_save_debounce(
+        reason,
+        Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS),
+    )
 }

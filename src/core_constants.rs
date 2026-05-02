@@ -23,9 +23,6 @@ pub(crate) const CHATGPT_AUTH_REFRESH_URL: &str = "https://auth.openai.com/oauth
 pub(crate) const CHATGPT_AUTH_REFRESH_INTERVAL_DAYS: i64 = 8;
 pub(crate) const CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS: i64 =
     if cfg!(test) { 30 } else { 5 * 60 };
-pub(crate) const RUN_SELECTION_NEAR_OPTIMAL_BPS: i64 = 1_000;
-pub(crate) const RUN_SELECTION_HYSTERESIS_BPS: i64 = 500;
-pub(crate) const RUN_SELECTION_COOLDOWN_SECONDS: i64 = 15 * 60;
 pub(crate) const RESPONSE_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 16_384 };
 pub(crate) const TURN_STATE_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };
 pub(crate) const SESSION_ID_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };

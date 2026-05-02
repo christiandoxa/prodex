@@ -544,6 +544,44 @@ fn context_audit_command_accepts_json_and_root() {
 }
 
 #[test]
+fn context_compact_output_command_accepts_kind_limits_and_json() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "context",
+        "compact-output",
+        "/tmp/prodex-output.txt",
+        "--kind",
+        "git-diff",
+        "--max-lines",
+        "24",
+        "--head-lines",
+        "10",
+        "--tail-lines",
+        "4",
+        "--max-line-chars",
+        "120",
+        "--max-search-matches-per-file",
+        "2",
+        "--max-path-entries",
+        "12",
+        "--json",
+    ])
+    .expect("context compact-output command");
+    let Commands::Context(ContextCommands::CompactOutput(args)) = command else {
+        panic!("expected context compact-output command");
+    };
+    assert_eq!(args.path.as_deref(), Some(Path::new("/tmp/prodex-output.txt")));
+    assert!(matches!(args.kind, ContextCompactOutputKind::GitDiff));
+    assert_eq!(args.max_lines, 24);
+    assert_eq!(args.head_lines, 10);
+    assert_eq!(args.tail_lines, 4);
+    assert_eq!(args.max_line_chars, 120);
+    assert_eq!(args.max_search_matches_per_file, 2);
+    assert_eq!(args.max_path_entries, 12);
+    assert!(args.json);
+}
+
+#[test]
 fn context_audit_reports_shared_context_roots() {
     let temp_dir = TestDir::new();
     let root = temp_dir.path.join("codex");
@@ -1339,8 +1377,18 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     assert!(body.contains("prodex_version=\""));
     assert!(body.contains("executable_sha256=\""));
     assert!(body.contains("prodex_runtime_broker_lane_admissions_total"));
+    assert!(body.contains("prodex_runtime_broker_lane_releases_total"));
     assert!(body.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
     assert!(body.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
+    assert!(body.contains(
+        "prodex_runtime_broker_lane_release_underflows_total"
+    ));
+    assert!(body.contains(
+        "prodex_runtime_broker_active_request_release_underflows_total"
+    ));
+    assert!(body.contains(
+        "prodex_runtime_broker_profile_inflight_release_underflows_total"
+    ));
     assert!(body.contains("prodex_runtime_broker_continuation_binding_counts"));
     assert!(body.contains("prodex_runtime_broker_continuity_failures_total"));
     assert!(body.contains("binding_kind=\"response\""));
@@ -1457,11 +1505,18 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
     .expect("broker metrics snapshot should succeed");
 
     assert_eq!(metrics.traffic.responses.admissions_total, 1);
+    assert_eq!(metrics.traffic.responses.releases_total, 1);
+    assert_eq!(metrics.traffic.responses.release_underflows_total, 0);
     assert_eq!(metrics.traffic.responses.global_limit_rejections_total, 0);
     assert_eq!(metrics.traffic.responses.lane_limit_rejections_total, 1);
     assert_eq!(metrics.traffic.compact.admissions_total, 0);
+    assert_eq!(metrics.traffic.compact.releases_total, 0);
     assert_eq!(metrics.traffic.compact.global_limit_rejections_total, 1);
     assert_eq!(metrics.traffic.compact.lane_limit_rejections_total, 0);
+    assert_eq!(metrics.active_request_release_underflows_total, 0);
+    assert_eq!(metrics.profile_inflight_admissions_total, 0);
+    assert_eq!(metrics.profile_inflight_releases_total, 0);
+    assert_eq!(metrics.profile_inflight_release_underflows_total, 0);
 }
 
 #[test]
