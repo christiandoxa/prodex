@@ -9,18 +9,17 @@ This file applies to the entire repository.
 The codebase is now a Cargo workspace split across focused crates and modules:
 
 - `src/main.rs`: binary entrypoint
-- `src/lib.rs`: shared crate wiring and tests
-- `src/cli_args.rs`, `src/shared_types.rs`, `src/update_notice.rs`, and similar small root modules may be compatibility shims over workspace crates
-- `src/command_dispatch.rs`, `src/app_commands/`: command routing and Prodex-owned command handlers
-- `src/profile_commands/`, `src/quota_support/`, `src/profile_identity.rs`: profile, quota, and credential identity flows
-- `src/runtime_proxy/`, `src/runtime_launch/`, `src/runtime_persistence/`, `src/runtime_store/`, `src/runtime_broker/`: runtime proxy, launch, persistence, and broker logic
-- `src/runtime_claude/`, `src/runtime_anthropic/`, `src/runtime_caveman.rs`, `src/runtime_mem.rs`: Claude/Caveman integration layers
+- `src/lib.rs`: compatibility shim that includes `crates/prodex-app/src/lib.rs`
+- `crates/prodex-app/`: application orchestration, command routing, Prodex-owned command handlers, profile flows, and runtime integration glue
+- `crates/prodex-app-reports/`: reusable application report rendering helpers
 - `crates/prodex-audit-log/`: audit log append, query, and rendering helpers
+- `crates/prodex-bench-support/`: benchmark support helpers
 - `crates/prodex-caveman-assets/`: embedded Codex/Claude Caveman plugin assets and Caveman home/config preparation
 - `crates/prodex-cli/`: reusable CLI argument model, help text, and parse/default-run rewrite helpers
 - `crates/prodex-codex-config/`: reusable Codex config parsing helpers
 - `crates/prodex-context/`: context audit and compression helpers
 - `crates/prodex-core/`: common path discovery and core filesystem helpers
+- `crates/prodex-housekeeping/`: cleanup and duplicate-detection helpers
 - `crates/prodex-profile-export/`: encrypted profile export/import envelope helpers
 - `crates/prodex-profile-identity/`: account identity parsing and profile-name normalization helpers
 - `crates/prodex-proxy-config/`: reusable upstream proxy/client configuration helpers
@@ -29,11 +28,13 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-secret-store/`: reusable secret storage backend primitives
 - `crates/prodex-runtime-anthropic/`: Anthropic compatibility translation helpers
 - `crates/prodex-runtime-broker/`: side-effect-free runtime broker registry, health, and metrics DTOs
+- `crates/prodex-runtime-broker-log/`: runtime broker log parsing and rendering helpers
 - `crates/prodex-runtime-capabilities/`: runtime request compatibility surface detection
 - `crates/prodex-runtime-claude/`: Claude Code runtime launch configuration helpers
 - `crates/prodex-runtime-cookies/`: runtime proxy profile-scoped cookie relay helpers
 - `crates/prodex-runtime-doctor/`: runtime diagnostics summary helpers
 - `crates/prodex-runtime-launch/`: child process and runtime launch planning primitives
+- `crates/prodex-runtime-log/`: runtime log path and marker helpers
 - `crates/prodex-runtime-mem/`: runtime memory mode helpers
 - `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering
 - `crates/prodex-runtime-policy/`: runtime policy parsing, validation, caching, and summary helpers
@@ -42,6 +43,7 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-runtime-state/`: runtime state, lane admission counters, and scheduled-save data structures
 - `crates/prodex-runtime-store/`: runtime store merge and compaction helpers
 - `crates/prodex-runtime-tuning/`: runtime tuning snapshot types, override parsing, and fault-injection counters
+- `crates/prodex-session-store/`: persisted session metadata helpers
 - `crates/prodex-shared-codex-fs/`: shared Codex home file operations
 - `crates/prodex-shared-types/`: shared serializable command/runtime models used across modules
 - `crates/prodex-state/`: state models and merge/compaction helpers

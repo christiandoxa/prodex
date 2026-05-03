@@ -11,6 +11,7 @@ publish = false
 [workspace]
 members = [
     ".",
+    "crates/prodex-app",
     "crates/prodex-app-reports",
     "crates/prodex-caveman-assets",
     "crates/prodex-cli",

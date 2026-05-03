@@ -96,7 +96,18 @@ function runtimeSmokeSteps(smokeTests) {
     if (!testCase.filter || typeof testCase.filter !== "string") {
       throw new Error("runtime smoke manifest entries need a string filter");
     }
+    if (testCase.package !== undefined && typeof testCase.package !== "string") {
+      throw new Error("runtime smoke manifest package must be a string when provided");
+    }
     const label = testCase.label ?? testCase.filter;
+    if (testCase.package) {
+      return {
+        label: `serial:runtime-smoke:${label}`,
+        command: "cargo",
+        args: ["test", "-p", testCase.package, "--lib", testCase.filter, "--", "--test-threads=1"],
+        failOnZeroTests: true,
+      };
+    }
     return cargoTestStep(`serial:runtime-smoke:${label}`, testCase.filter);
   });
 }

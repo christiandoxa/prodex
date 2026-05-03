@@ -1,0 +1,72 @@
+use super::*;
+
+fn window(remaining_percent: i64) -> RuntimeProxyQuotaWindowObservation {
+    RuntimeProxyQuotaWindowObservation {
+        remaining_percent,
+        reset_at: 3_600,
+        pressure_score: 3_600_000 / remaining_percent.max(1),
+    }
+}
+
+#[test]
+fn route_pressure_uses_route_specific_reserve_thresholds() {
+    assert_eq!(
+        runtime_proxy_quota_pressure_band_for_route(
+            Some(window(9)),
+            Some(window(19)),
+            RuntimeRouteKind::Responses,
+        ),
+        RuntimeSelectionQuotaPressureBand::Thin
+    );
+    assert_eq!(
+        runtime_proxy_quota_pressure_band_for_route(
+            Some(window(9)),
+            Some(window(19)),
+            RuntimeRouteKind::Compact,
+        ),
+        RuntimeSelectionQuotaPressureBand::Healthy
+    );
+}
+
+#[test]
+fn snapshot_hold_preserves_active_exhaustion_until_reset() {
+    let snapshot = RuntimeProxyUsageSnapshot {
+        checked_at: 100,
+        five_hour_status: RuntimeSelectionQuotaWindowStatus::Exhausted,
+        five_hour_remaining_percent: 0,
+        five_hour_reset_at: 200,
+        weekly_status: RuntimeSelectionQuotaWindowStatus::Ready,
+        weekly_remaining_percent: 90,
+        weekly_reset_at: i64::MAX,
+    };
+
+    assert!(runtime_proxy_usage_snapshot_hold_active(snapshot, 150));
+    assert!(!runtime_proxy_usage_snapshot_hold_active(snapshot, 250));
+    assert!(runtime_proxy_usage_snapshot_hold_expired(snapshot, 250));
+}
+
+#[test]
+fn precommit_block_reason_keeps_response_floor_only_for_main_lanes() {
+    let summary = RuntimeProxyQuotaSummary {
+        five_hour: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Critical,
+            remaining_percent: 2,
+            reset_at: 200,
+        },
+        weekly: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Ready,
+            remaining_percent: 80,
+            reset_at: i64::MAX,
+        },
+        route_band: RuntimeSelectionQuotaPressureBand::Critical,
+    };
+
+    assert_eq!(
+        runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Responses, 2,),
+        Some(RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend)
+    );
+    assert_eq!(
+        runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Compact, 2),
+        None
+    );
+}

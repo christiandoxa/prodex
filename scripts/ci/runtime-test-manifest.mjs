@@ -40,7 +40,8 @@ export const RUNTIME_SMOKE_TESTS = [
   },
   {
     label: "header-preservation",
-    filter: "runtime_proxy_header_skip_list_preserves_codex_metadata_headers",
+    package: "prodex-runtime-proxy",
+    filter: "request_header_skip_list_preserves_codex_metadata_headers",
   },
   {
     label: "selection-hard-affinity",

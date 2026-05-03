@@ -1424,6 +1424,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-app"
+version = "0.70.0"
+dependencies = [
+ "aes-gcm-siv",
+ "anyhow",
+ "base64",
+ "chrono",
+ "clap",
+ "dirs",
+ "fs2",
+ "prodex-app-reports",
+ "prodex-audit-log",
+ "prodex-bench-support",
+ "prodex-caveman-assets",
+ "prodex-cli",
+ "prodex-codex-config",
+ "prodex-context",
+ "prodex-core",
+ "prodex-housekeeping",
+ "prodex-profile-export",
+ "prodex-profile-identity",
+ "prodex-proxy-config",
+ "prodex-quota",
+ "prodex-redaction",
+ "prodex-runtime-anthropic",
+ "prodex-runtime-broker",
+ "prodex-runtime-broker-log",
+ "prodex-runtime-capabilities",
+ "prodex-runtime-claude",
+ "prodex-runtime-cookies",
+ "prodex-runtime-doctor",
+ "prodex-runtime-launch",
+ "prodex-runtime-log",
+ "prodex-runtime-mem",
+ "prodex-runtime-metrics",
+ "prodex-runtime-policy",
+ "prodex-runtime-proxy",
+ "prodex-runtime-quota",
+ "prodex-runtime-state",
+ "prodex-runtime-store",
+ "prodex-runtime-tuning",
+ "prodex-secret-store",
+ "prodex-session-store",
+ "prodex-shared-codex-fs",
+ "prodex-shared-types",
+ "prodex-state",
+ "prodex-terminal-ui",
+ "prodex-update-notice",
+ "reqwest",
+ "rpassword",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tiny_http",
+ "tokio",
+ "toml",
+ "tungstenite",
+]
+
+[[package]]
 name = "prodex-app-reports"
 version = "0.70.0"
 dependencies = [

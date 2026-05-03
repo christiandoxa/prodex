@@ -11,4 +11,5 @@ pub use self::model::*;
 pub use self::selection::*;
 
 #[cfg(test)]
+#[path = "../../../tests/unit/crates/prodex-secret-store/src/tests.rs"]
 mod tests;
