@@ -577,5 +577,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-app-reports/src/selection.rs"]
+#[path = "../tests/src/selection.rs"]
 mod tests;

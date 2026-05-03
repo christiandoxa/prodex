@@ -914,5 +914,5 @@ fn runtime_websocket_tcp_connect_log_dns_resolve_timeout(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor.rs"]
+#[path = "../tests/src/websocket_tcp_connect_executor.rs"]
 mod tests;

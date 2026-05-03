@@ -566,5 +566,5 @@ pub fn cleanup_prodex_chat_history_at(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-housekeeping/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -262,5 +262,5 @@ pub fn runtime_proxy_continuation_dead_status_shadowed_by_binding_bound_at(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/continuation.rs"]
+#[path = "../tests/src/continuation.rs"]
 mod tests;

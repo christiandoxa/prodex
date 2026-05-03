@@ -297,5 +297,5 @@ impl RuntimeSseTapState {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/response_forwarding.rs"]
+#[path = "../tests/src/response_forwarding.rs"]
 mod tests;

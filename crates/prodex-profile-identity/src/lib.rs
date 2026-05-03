@@ -470,5 +470,5 @@ pub fn plan_removed_profile_state<'a>(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-profile-identity/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

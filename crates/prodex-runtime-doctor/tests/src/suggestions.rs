@@ -1,19 +1,18 @@
 use super::*;
 
 const ACTIVE_REQUEST_PRESSURE_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/active_request_pressure.log");
-const LANE_PRESSURE_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/lane_pressure.log");
+    include_bytes!("../fixtures/runtime_doctor/active_request_pressure.log");
+const LANE_PRESSURE_LOG: &[u8] = include_bytes!("../fixtures/runtime_doctor/lane_pressure.log");
 const PERSISTENCE_BACKPRESSURE_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/persistence_backpressure.log");
+    include_bytes!("../fixtures/runtime_doctor/persistence_backpressure.log");
 const PROFILE_INFLIGHT_SATURATION_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/profile_inflight_saturation.log");
+    include_bytes!("../fixtures/runtime_doctor/profile_inflight_saturation.log");
 const ROUTE_SCOPED_PROFILE_HEALTH_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/route_scoped_profile_health.log");
+    include_bytes!("../fixtures/runtime_doctor/route_scoped_profile_health.log");
 const WEBSOCKET_CONNECT_OVERFLOW_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/websocket_connect_overflow.log");
+    include_bytes!("../fixtures/runtime_doctor/websocket_connect_overflow.log");
 const WEBSOCKET_DNS_OVERFLOW_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/websocket_dns_overflow.log");
+    include_bytes!("../fixtures/runtime_doctor/websocket_dns_overflow.log");
 
 fn runtime_doctor_fixture_suggestions(log: &[u8]) -> Vec<RuntimeDoctorPolicySuggestion> {
     let mut summary = summarize_runtime_log_tail(log);

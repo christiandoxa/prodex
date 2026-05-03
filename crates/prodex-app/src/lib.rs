@@ -265,7 +265,7 @@ impl Drop for TestRuntimeLockGuard {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod test_env_guard_tests;
 
 struct RuntimeRotationProxy {
@@ -364,9 +364,9 @@ fn claude_bin() -> OsString {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/support/main_internal_harness.rs"]
+#[path = "../tests/support/main_internal_harness.rs"]
 mod main_internal_tests;
 
 #[cfg(test)]
-#[path = "../../../tests/support/compat_replay_body.rs"]
+#[path = "../tests/support/compat_replay_body.rs"]
 mod compat_replay_tests;

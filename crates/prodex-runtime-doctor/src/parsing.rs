@@ -419,5 +419,5 @@ fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-doctor/src/parsing.rs"]
+#[path = "../tests/src/parsing.rs"]
 mod tests;

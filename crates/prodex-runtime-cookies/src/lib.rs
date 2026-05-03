@@ -479,5 +479,5 @@ pub fn runtime_proxy_capture_websocket_cookies_namespace(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-cookies/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

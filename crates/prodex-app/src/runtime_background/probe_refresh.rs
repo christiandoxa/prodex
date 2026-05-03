@@ -721,5 +721,5 @@ impl RuntimeProbeRefreshJobExt for RuntimeProbeRefreshJob {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/runtime_background/probe_refresh.rs"]
+#[path = "../../tests/src/runtime_background/probe_refresh.rs"]
 mod tests;

@@ -513,5 +513,5 @@ fn runtime_proxy_quota_window_status_rank(status: RuntimeSelectionQuotaWindowSta
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/quota.rs"]
+#[path = "../tests/src/quota.rs"]
 mod tests;

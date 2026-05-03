@@ -338,5 +338,5 @@ fn auth_tokens_object_mut(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-quota/src/auth.rs"]
+#[path = "../tests/src/auth.rs"]
 mod tests;

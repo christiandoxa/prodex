@@ -347,5 +347,5 @@ pub fn runtime_previous_response_not_found_observability_outcome(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/attempt_outcome.rs"]
+#[path = "../tests/src/attempt_outcome.rs"]
 mod tests;

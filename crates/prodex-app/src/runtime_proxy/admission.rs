@@ -321,5 +321,5 @@ pub(crate) fn runtime_proxy_should_shed_fresh_compact_request(
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/runtime_proxy/admission.rs"]
+#[path = "../../tests/src/runtime_proxy/admission.rs"]
 mod tests;

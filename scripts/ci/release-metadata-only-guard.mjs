@@ -7,6 +7,7 @@ import { repoRoot } from "../npm/common.mjs";
 const RELEASE_METADATA_PATTERNS = Object.freeze([
   "Cargo.toml",
   "Cargo.lock",
+  "CHANGELOG.md",
   "crates/*/Cargo.toml",
   "README.md",
   "QUICKSTART.md",

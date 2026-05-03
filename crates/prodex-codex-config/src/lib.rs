@@ -164,5 +164,5 @@ fn normalize_model_provider_value(raw_value: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-codex-config/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -1316,5 +1316,5 @@ pub fn parse_prodex_version_output(output: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-broker/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

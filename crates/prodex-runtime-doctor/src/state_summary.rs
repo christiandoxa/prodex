@@ -884,5 +884,5 @@ pub fn runtime_doctor_runtime_broker_mismatch_reason(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-doctor/src/state_summary.rs"]
+#[path = "../tests/src/state_summary.rs"]
 mod tests;

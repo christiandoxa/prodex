@@ -345,5 +345,5 @@ impl Drop for JsonFileLock {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/src/runtime_core_shared.rs"]
+#[path = "../tests/src/runtime_core_shared.rs"]
 mod tests;

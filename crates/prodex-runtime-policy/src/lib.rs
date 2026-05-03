@@ -86,5 +86,5 @@ fn runtime_policy_enabled_for_current_process() -> bool {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-policy/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

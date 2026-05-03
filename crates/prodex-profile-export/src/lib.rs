@@ -1231,5 +1231,5 @@ fn yes_no(value: bool) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-profile-export/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -291,5 +291,5 @@ fn validate_optional_i64_percent(value: Option<i64>, path: &Path, field: &str) -
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-policy/src/validate.rs"]
+#[path = "../tests/src/validate.rs"]
 mod tests;

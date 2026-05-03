@@ -83,5 +83,5 @@ pub fn runtime_proxy_anthropic_model_id_from_path(path: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-anthropic/src/models.rs"]
+#[path = "../tests/src/models.rs"]
 mod tests;

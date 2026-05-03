@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 pub mod diagnosis;
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-doctor/src/marker_guard.rs"]
+#[path = "../tests/src/marker_guard.rs"]
 mod marker_guard;
 pub mod parsing;
 pub mod render;

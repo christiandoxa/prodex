@@ -534,5 +534,5 @@ pub fn runtime_proxy_continuity_failure_reason_metrics_store_entry_count_for_tes
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-broker-log/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

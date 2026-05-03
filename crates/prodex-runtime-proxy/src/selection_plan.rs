@@ -472,5 +472,5 @@ fn runtime_prompt_cache_affinity_score(prompt_cache_key: &str, profile_name: &st
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/selection_plan.rs"]
+#[path = "../tests/src/selection_plan.rs"]
 mod tests;

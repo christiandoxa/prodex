@@ -551,5 +551,5 @@ pub(crate) fn refresh_and_log_runtime_response_route_affinity(
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/runtime_proxy/affinity.rs"]
+#[path = "../../tests/src/runtime_proxy/affinity.rs"]
 mod tests;

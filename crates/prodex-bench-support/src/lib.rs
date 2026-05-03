@@ -461,5 +461,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-bench-support/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

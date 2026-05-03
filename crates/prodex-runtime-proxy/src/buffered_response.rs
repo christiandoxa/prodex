@@ -99,5 +99,5 @@ pub fn runtime_buffered_response_content_type(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/buffered_response.rs"]
+#[path = "../tests/src/buffered_response.rs"]
 mod tests;

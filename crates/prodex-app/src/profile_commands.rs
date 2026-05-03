@@ -123,5 +123,5 @@ pub(super) fn update_existing_profile_auth(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/support/profile_commands_internal_harness.rs"]
+#[path = "../tests/support/profile_commands_internal_harness.rs"]
 mod profile_commands_internal_tests;

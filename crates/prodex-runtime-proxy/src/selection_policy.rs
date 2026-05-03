@@ -486,5 +486,5 @@ pub fn runtime_soft_affinity_rejection_reason(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/selection_policy.rs"]
+#[path = "../tests/src/selection_policy.rs"]
 mod tests;

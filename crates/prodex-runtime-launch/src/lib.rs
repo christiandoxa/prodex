@@ -754,5 +754,5 @@ pub fn blocked_selected_runtime_profile_plan(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-launch/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -1111,5 +1111,5 @@ pub fn runtime_doctor_fields_for_summary(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-doctor/src/render.rs"]
+#[path = "../tests/src/render.rs"]
 mod tests;

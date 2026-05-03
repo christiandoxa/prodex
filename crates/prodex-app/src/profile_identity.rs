@@ -197,5 +197,5 @@ fn reclaim_stale_managed_profile_path(paths: &AppPaths, state: &AppState, candid
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/src/profile_identity.rs"]
+#[path = "../tests/src/profile_identity.rs"]
 mod tests;

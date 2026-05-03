@@ -1305,5 +1305,5 @@ pub fn first_line_of_error(input: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-quota/src/render.rs"]
+#[path = "../tests/src/render.rs"]
 mod tests;

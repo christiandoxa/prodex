@@ -215,5 +215,5 @@ pub fn is_runtime_terminal_event(payload: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/websocket_message.rs"]
+#[path = "../tests/src/websocket_message.rs"]
 mod tests;

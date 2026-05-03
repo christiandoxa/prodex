@@ -237,5 +237,5 @@ fn normalize_path_for_compare(path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-app-reports/src/session.rs"]
+#[path = "../tests/src/session.rs"]
 mod tests;

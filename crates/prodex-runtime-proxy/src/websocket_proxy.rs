@@ -224,5 +224,5 @@ pub fn runtime_websocket_authority(host: &str, port: u16) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/websocket_proxy.rs"]
+#[path = "../tests/src/websocket_proxy.rs"]
 mod tests;

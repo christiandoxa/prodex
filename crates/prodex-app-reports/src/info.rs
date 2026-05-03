@@ -961,5 +961,5 @@ pub fn format_info_runway(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-app-reports/src/info.rs"]
+#[path = "../tests/src/info.rs"]
 mod tests;

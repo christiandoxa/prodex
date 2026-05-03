@@ -834,5 +834,5 @@ pub fn print_wrapped_stderr(message: &str) {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-terminal-ui/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -64,5 +64,5 @@ pub(crate) fn runtime_doctor_policy_suggestions(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/src/runtime_doctor.rs"]
+#[path = "../tests/src/runtime_doctor.rs"]
 mod tests;

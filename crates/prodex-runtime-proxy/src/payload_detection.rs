@@ -705,5 +705,5 @@ pub fn runtime_response_event_type_from_value(value: &serde_json::Value) -> Opti
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/payload_detection.rs"]
+#[path = "../tests/src/payload_detection.rs"]
 mod tests;

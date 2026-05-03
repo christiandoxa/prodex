@@ -441,5 +441,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/error_policy.rs"]
+#[path = "../tests/src/error_policy.rs"]
 mod tests;

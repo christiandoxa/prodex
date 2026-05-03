@@ -1956,5 +1956,5 @@ pub fn merge_runtime_continuation_store(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-store/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

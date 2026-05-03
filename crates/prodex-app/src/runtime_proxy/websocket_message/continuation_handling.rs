@@ -294,5 +294,5 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 }
 
 #[cfg(test)]
-#[path = "../../../../../tests/unit/src/runtime_proxy/websocket_message/continuation_handling.rs"]
+#[path = "../../../tests/src/runtime_proxy/websocket_message/continuation_handling.rs"]
 mod tests;

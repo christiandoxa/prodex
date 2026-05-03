@@ -423,5 +423,5 @@ fn runtime_response_best_candidate_order_index(
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/runtime_proxy/selection_plan.rs"]
+#[path = "../../tests/src/runtime_proxy/selection_plan.rs"]
 mod tests;

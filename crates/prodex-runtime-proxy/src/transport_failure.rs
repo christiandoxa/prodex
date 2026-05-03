@@ -145,5 +145,5 @@ pub fn runtime_profile_transport_health_penalty(kind: RuntimeTransportFailureKin
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/transport_failure.rs"]
+#[path = "../tests/src/transport_failure.rs"]
 mod tests;

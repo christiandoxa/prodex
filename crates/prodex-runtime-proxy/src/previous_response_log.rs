@@ -122,5 +122,5 @@ pub fn runtime_previous_response_affinity_released_log_message(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/previous_response_log.rs"]
+#[path = "../tests/src/previous_response_log.rs"]
 mod tests;

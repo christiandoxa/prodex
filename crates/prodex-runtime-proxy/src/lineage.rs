@@ -161,5 +161,5 @@ fn runtime_response_turn_state_lineage_prefix(previous_response_id: &str) -> Str
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/lineage.rs"]
+#[path = "../tests/src/lineage.rs"]
 mod tests;

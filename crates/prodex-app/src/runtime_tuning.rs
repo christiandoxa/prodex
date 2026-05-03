@@ -347,5 +347,5 @@ pub(super) fn runtime_startup_sync_probe_warm_limit() -> usize {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/src/runtime_tuning.rs"]
+#[path = "../tests/src/runtime_tuning.rs"]
 mod tests;

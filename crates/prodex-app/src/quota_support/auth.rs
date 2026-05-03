@@ -289,5 +289,5 @@ fn write_auth_json_value(codex_home: &Path, auth_json: &serde_json::Value) -> Re
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/quota_support/auth.rs"]
+#[path = "../../tests/src/quota_support/auth.rs"]
 mod tests;

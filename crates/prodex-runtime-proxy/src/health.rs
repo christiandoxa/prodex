@@ -705,5 +705,5 @@ pub fn runtime_soften_persisted_backoffs_for_startup<T: RuntimeProfileHealthEntr
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/health.rs"]
+#[path = "../tests/src/health.rs"]
 mod tests;

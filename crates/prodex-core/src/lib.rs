@@ -301,5 +301,5 @@ pub fn resolve_binary_path(binary: &OsString) -> Option<PathBuf> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-core/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

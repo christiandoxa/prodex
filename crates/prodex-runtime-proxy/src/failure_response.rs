@@ -95,5 +95,5 @@ pub fn runtime_proxy_final_retryable_failure_message(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/failure_response.rs"]
+#[path = "../tests/src/failure_response.rs"]
 mod tests;

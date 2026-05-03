@@ -744,5 +744,5 @@ pub(super) fn runtime_proxy_tungstenite_header_value(
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/runtime_proxy/response_forwarding.rs"]
+#[path = "../../tests/src/runtime_proxy/response_forwarding.rs"]
 mod tests;

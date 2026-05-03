@@ -716,5 +716,5 @@ pub fn runtime_proxy_log_event(message: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -698,5 +698,5 @@ fn runtime_launch_profile_home(state: &AppState, profile_name: &str) -> Result<P
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/app_commands/runtime_launch.rs"]
+#[path = "../../tests/src/app_commands/runtime_launch.rs"]
 mod tests;

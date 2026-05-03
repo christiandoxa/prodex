@@ -17,5 +17,5 @@ pub(crate) use runtime_anthropic_crate::{
 };
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/runtime_claude/models.rs"]
+#[path = "../../tests/src/runtime_claude/models.rs"]
 mod tests;

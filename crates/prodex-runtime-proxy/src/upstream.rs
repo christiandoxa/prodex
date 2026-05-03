@@ -40,5 +40,5 @@ pub fn runtime_proxy_effective_user_agent(headers: &[(String, String)]) -> Optio
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/upstream.rs"]
+#[path = "../tests/src/upstream.rs"]
 mod tests;

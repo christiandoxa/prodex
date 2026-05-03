@@ -3,7 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
-const DEFAULT_OUT_DIR = path.join(repoRoot, "tests/fixtures/compat_replay");
+const DEFAULT_OUT_DIR = path.join(
+  repoRoot,
+  "crates/prodex-app/tests/fixtures/compat_replay",
+);
 const DEFAULT_FORMAT_VERSION = 1;
 
 const SENSITIVE_KEY_PATTERNS = [
@@ -55,7 +58,7 @@ function usage() {
 
 Options:
   --input, -i <path>       JSON, JSONL, or text capture input
-  --out-dir <path>         Output directory (default: tests/fixtures/compat_replay)
+  --out-dir <path>         Output directory (default: crates/prodex-app/tests/fixtures/compat_replay)
   --output <path>          Exact output file path
   --name <slug>            Fixture basename (default: input filename)
   --stdout                 Print scrubbed fixture instead of writing

@@ -413,5 +413,5 @@ fn redaction_display_text(value: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-redaction/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

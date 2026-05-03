@@ -455,5 +455,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-anthropic/src/output.rs"]
+#[path = "../tests/src/output.rs"]
 mod tests;

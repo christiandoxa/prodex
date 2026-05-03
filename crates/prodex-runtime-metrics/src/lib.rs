@@ -949,5 +949,5 @@ fn escape_prometheus_label_value(value: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-metrics/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

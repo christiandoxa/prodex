@@ -79,5 +79,5 @@ fn recreate_symlink(source_path: &Path, destination_path: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-shared-codex-fs/src/copy.rs"]
+#[path = "../tests/src/copy.rs"]
 mod tests;

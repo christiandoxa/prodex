@@ -434,5 +434,5 @@ fn current_unix_timestamp() -> i64 {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-state/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

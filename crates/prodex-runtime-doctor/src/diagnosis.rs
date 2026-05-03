@@ -1105,5 +1105,5 @@ pub fn runtime_doctor_append_pointer_note(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-doctor/src/diagnosis.rs"]
+#[path = "../tests/src/diagnosis.rs"]
 mod tests;

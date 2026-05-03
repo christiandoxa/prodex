@@ -1119,5 +1119,5 @@ pub struct RuntimeProbeRefreshJob<Shared> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-state/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -180,5 +180,5 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 }
 
 #[cfg(test)]
-#[path = "../../../../../tests/unit/src/runtime_proxy/websocket_message/loop_control.rs"]
+#[path = "../../../tests/src/runtime_proxy/websocket_message/loop_control.rs"]
 mod tests;

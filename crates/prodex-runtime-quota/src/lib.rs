@@ -617,5 +617,5 @@ pub fn runtime_snapshot_blocks_same_request_cold_start_probe(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-quota/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -2,20 +2,19 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-const LANE_PRESSURE_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/lane_pressure.log");
+const LANE_PRESSURE_LOG: &[u8] = include_bytes!("../fixtures/runtime_doctor/lane_pressure.log");
 const PERSISTENCE_BACKPRESSURE_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/persistence_backpressure.log");
+    include_bytes!("../fixtures/runtime_doctor/persistence_backpressure.log");
 const PREVIOUS_RESPONSE_FAIL_CLOSED_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/previous_response_fail_closed.log");
+    include_bytes!("../fixtures/runtime_doctor/previous_response_fail_closed.log");
 const ROUTE_SCOPED_PROFILE_HEALTH_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/route_scoped_profile_health.log");
+    include_bytes!("../fixtures/runtime_doctor/route_scoped_profile_health.log");
 const WEBSOCKET_CONNECT_OVERFLOW_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/websocket_connect_overflow.log");
+    include_bytes!("../fixtures/runtime_doctor/websocket_connect_overflow.log");
 const PROFILE_AUTH_RECOVERY_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/profile_auth_recovery.log");
+    include_bytes!("../fixtures/runtime_doctor/profile_auth_recovery.log");
 const REQUEST_TIMELINE_LOG: &[u8] =
-    include_bytes!("../../../../fixtures/runtime_doctor/request_timeline.log");
+    include_bytes!("../fixtures/runtime_doctor/request_timeline.log");
 
 fn json_object_keys(value: &serde_json::Value) -> BTreeSet<String> {
     value

@@ -345,5 +345,5 @@ pub fn runtime_take_fault_injection(env_key: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-tuning/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

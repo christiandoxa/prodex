@@ -119,5 +119,5 @@ pub fn runtime_proxy_should_shed_fresh_compact_request(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/admission.rs"]
+#[path = "../tests/src/admission.rs"]
 mod tests;

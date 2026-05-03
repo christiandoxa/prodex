@@ -2,9 +2,15 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.71.0 - Unreleased
+## 0.71.0 - 2026-05-03
 
-Changes after `0.69.0`.
+### Misc
+
+- Release 0.71.0 (`84a71b4`)
+- Update refactor guard paths (`30d95c9`)
+- Move app code and tests out of src (`4014e29`)
+
+## 0.70.0 - 2026-05-03
 
 ### Runtime
 
@@ -49,8 +55,6 @@ Changes after `0.69.0`.
 
 ### Misc
 
-- Update refactor guard paths (`30d95c9`)
-- Move app code and tests out of src (`4014e29`)
 - Release 0.70.0 (`17a42cf`)
 - Extract housekeeping helpers (`2c96bc4`)
 - Satisfy clippy previous response orchestration (`e5b292c`)
@@ -158,15 +162,3 @@ Changes after `0.69.0`.
 ### Runtime
 
 - Improve runtime diagnostics and import safety (`3c62d3a`)
-
-## 0.59.0 - 2026-04-28
-
-### Runtime
-
-- Improve runtime diagnostics and preflight tooling (`efb9f4e`)
-
-## 0.58.0 - 2026-04-28
-
-### CLI
-
-- Improve prodex super local launch (`dc8e7fe`)

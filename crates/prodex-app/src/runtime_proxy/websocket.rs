@@ -1732,5 +1732,5 @@ pub(super) fn attempt_runtime_websocket_request(
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/unit/src/runtime_proxy/websocket.rs"]
+#[path = "../../tests/src/runtime_proxy/websocket.rs"]
 mod tests;

@@ -373,5 +373,5 @@ fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<AuditLogL
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-audit-log/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

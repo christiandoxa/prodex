@@ -88,5 +88,5 @@ fn file_modified_epoch(path: &Path) -> Option<i64> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-session-store/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

@@ -29,5 +29,5 @@ pub fn format_response_body(body: &[u8]) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-quota/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;

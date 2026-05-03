@@ -543,5 +543,5 @@ pub fn runtime_doctor_policy_suggestion_lines(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-doctor/src/suggestions.rs"]
+#[path = "../tests/src/suggestions.rs"]
 mod tests;

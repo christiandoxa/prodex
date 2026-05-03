@@ -126,5 +126,5 @@ pub fn runtime_previous_response_not_found_plan(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-runtime-proxy/src/previous_response_orchestration.rs"]
+#[path = "../tests/src/previous_response_orchestration.rs"]
 mod tests;

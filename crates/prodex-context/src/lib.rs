@@ -1402,5 +1402,5 @@ fn format_count<T: std::fmt::Display>(value: T) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/crates/prodex-context/src/lib.rs"]
+#[path = "../tests/src/lib.rs"]
 mod tests;
