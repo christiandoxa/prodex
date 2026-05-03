@@ -36,6 +36,7 @@ pub fn find_matching_profile_identity(
                 .account_id
                 .as_deref()
                 .is_some_and(|account_id| normalize_account_id(account_id) == target_account_id)
+                && profile_identity_email_matches_target(identity, target_email.as_deref())
             {
                 return Some(name.clone());
             }
@@ -55,6 +56,20 @@ pub fn find_matching_profile_identity(
         .map(|(name, _)| name.clone());
     let match_name = legacy_email_matches.next()?;
     legacy_email_matches.next().is_none().then_some(match_name)
+}
+
+fn profile_identity_email_matches_target(
+    identity: &ProfileIdentity,
+    target_email: Option<&str>,
+) -> bool {
+    let Some(target_email) = target_email else {
+        return true;
+    };
+
+    identity
+        .email
+        .as_deref()
+        .is_some_and(|email| normalize_email(email) == target_email)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -563,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_match_prefers_account_id_then_single_legacy_email() {
+    fn identity_match_requires_email_when_account_id_matches() {
         let discovered = vec![
             (
                 "legacy".to_string(),
@@ -585,12 +600,22 @@ mod tests {
             find_matching_profile_identity(
                 &discovered,
                 &ProfileIdentity {
-                    email: Some("different@example.com".to_string()),
+                    email: Some("other@example.com".to_string()),
                     account_id: Some("acct-one".to_string()),
                 },
             )
             .as_deref(),
             Some("workspace")
+        );
+        assert_eq!(
+            find_matching_profile_identity(
+                &discovered,
+                &ProfileIdentity {
+                    email: Some("different@example.com".to_string()),
+                    account_id: Some("acct-one".to_string()),
+                },
+            ),
+            None
         );
         assert_eq!(
             find_matching_profile_identity(
