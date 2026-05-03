@@ -322,3 +322,377 @@ test result: ok. 6 passed; 0 failed; 0 ignored; finished in 0.00s
     );
     assert!(!report.output.contains("test tests::alpha ... ok"));
 }
+
+#[test]
+fn rust_short_clippy_output_preserves_lint_and_location() {
+    let input = "\
+    Checking prodex-context v0.1.0 (/repo/crates/prodex-context)
+src/lib.rs:12:9: warning: used `unwrap()` on an `Option` value
+   |
+12 |     value.unwrap()
+   |     ^^^^^^^^^^^^^^
+   = note: `#[warn(clippy::unwrap_used)]` on by default
+warning: `prodex-context` generated 1 warning
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 40,
+            max_line_chars: 180,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::RustDiagnostics);
+    assert!(
+        report
+            .output
+            .contains("src/lib.rs:12:9: warning: used `unwrap()`")
+    );
+    assert!(report.output.contains("clippy::unwrap_used"));
+    assert!(report.output.contains("warnings="));
+}
+
+#[test]
+fn git_diff_stat_output_detects_git_diff_and_keeps_totals() {
+    let input = "\
+ src/lib.rs | 10 +++++-----
+ README.md  |  2 ++
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 20,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::GitDiff);
+    assert!(
+        report
+            .output
+            .contains("git diff summary: stat-only, 2 file entries")
+    );
+    assert!(
+        report
+            .output
+            .contains("stat totals: 2 files changed, 7 insertions(+), 5 deletions(-)")
+    );
+    assert!(report.output.contains("src/lib.rs | 10 +++++-----"));
+}
+
+#[test]
+fn rg_json_output_groups_matches_and_skips_metadata() {
+    let input = "\
+{\"type\":\"begin\",\"data\":{\"path\":{\"text\":\"src/lib.rs\"}}}
+{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"src/lib.rs\"},\"lines\":{\"text\":\"fn alpha() {}\\n\"},\"line_number\":10}}
+{\"type\":\"match\",\"data\":{\"path\":{\"text\":\"README.md\"},\"lines\":{\"text\":\"prodex alpha\\n\"},\"line_number\":4}}
+{\"type\":\"end\",\"data\":{\"path\":{\"text\":\"src/lib.rs\"}}}
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_search_matches_per_file: 2,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Search);
+    assert!(
+        report
+            .output
+            .contains("search summary: 2 matches across 2 files")
+    );
+    assert!(report.output.contains("src/lib.rs (1 matches):"));
+    assert!(report.output.contains("10: fn alpha() {}"));
+    assert!(report.output.contains("README.md (1 matches):"));
+    assert!(!report.output.contains("\"type\":\"begin\""));
+}
+
+#[test]
+fn rg_heading_output_uses_current_file_for_numbered_matches() {
+    let input = "\
+src/lib.rs
+10:fn alpha() {}
+20:fn beta() {}
+--
+README.md
+3:prodex alpha
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Search);
+    assert!(report.output.contains("src/lib.rs (2 matches):"));
+    assert!(report.output.contains("10: fn alpha() {}"));
+    assert!(report.output.contains("README.md (1 matches):"));
+}
+
+#[test]
+fn file_list_output_accepts_bare_paths_and_ls_listing_rows() {
+    let input = "\
+total 16
+-rw-r--r-- 1 doxa doxa 10 May 1 12:00 Cargo.toml
+-rw-r--r-- 1 doxa doxa 20 May 1 12:00 README.md
+drwxr-xr-x 2 doxa doxa 4096 May 1 12:00 crates
+src/main.rs
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_path_entries: 10,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::FileList);
+    assert!(report.output.contains("file list summary: 4 entries"));
+    assert!(report.output.contains("Cargo.toml"));
+    assert!(report.output.contains("README.md"));
+    assert!(report.output.contains("src/main.rs"));
+}
+
+#[test]
+fn json_logish_plain_output_keeps_middle_error_line() {
+    let mut input = String::new();
+    for index in 0..25 {
+        input.push_str(&format!(
+            "{{\"level\":\"info\",\"message\":\"heartbeat {index}\"}}\n"
+        ));
+    }
+    input.push_str(
+        "{\"level\":\"error\",\"message\":\"database unavailable\",\"at\":\"src/db.rs:44:9\"}\n",
+    );
+    for index in 25..50 {
+        input.push_str(&format!(
+            "{{\"level\":\"info\",\"message\":\"heartbeat {index}\"}}\n"
+        ));
+    }
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 12,
+            head_lines: 2,
+            tail_lines: 2,
+            max_line_chars: 180,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Plain);
+    assert!(report.output.contains("critical lines:"));
+    assert!(report.output.contains("\"level\":\"error\""));
+    assert!(report.output.contains("database unavailable"));
+    assert!(report.output.contains("src/db.rs:44:9"));
+    assert!(report.compacted_lines <= 12);
+}
+
+#[test]
+fn critical_signal_counts_mixed_command_output() {
+    let input = "\
+\u{1b}[31merror[E0308]: mismatched types\u{1b}[0m
+  --> crates/prodex-context/src/lib.rs:42:17
+   = note: expected `usize`, found `&str`
+@@ -1,3 +1,4 @@
+test tests::critical_signal_failure ... FAILED
+---- tests::critical_signal_failure stdout ----
+thread 'tests::critical_signal_failure' panicked at crates/prodex-context/tests/src/lib.rs:211:9:
+stack backtrace:
+             at /rustc/library/core/src/panicking.rs:75:14
+test result: FAILED. 0 passed; 1 failed; finished in 0.01s
+process didn't exit successfully: `cargo test` (exit status: 101)
+";
+
+    let counts = count_critical_signals(input);
+
+    assert_eq!(counts.errors, 2);
+    assert_eq!(counts.file_locations, 3);
+    assert_eq!(counts.diff_hunks, 1);
+    assert_eq!(counts.test_failures, 3);
+    assert_eq!(counts.exit_codes, 1);
+    assert_eq!(counts.stack_markers, 1);
+    assert_eq!(counts.rust_diagnostics, 3);
+    assert_eq!(counts.total(), 14);
+}
+
+#[test]
+fn critical_signal_counts_proxy_payload_error_text() {
+    let input =
+        r#"{"error":{"message":"upstream failed","type":"server_error","code":"internal_error"}}"#
+            .to_string()
+            + "\nrequest=abc status=error upstream_status=500\n"
+            + "src/runtime_proxy.rs:88:13: forwarded payload marker\n";
+
+    let counts = count_critical_signals(&input);
+
+    assert_eq!(counts.errors, 2);
+    assert_eq!(counts.file_locations, 1);
+    assert_eq!(counts.diff_hunks, 0);
+    assert_eq!(counts.test_failures, 0);
+    assert_eq!(counts.exit_codes, 0);
+    assert_eq!(counts.stack_markers, 0);
+    assert_eq!(counts.rust_diagnostics, 0);
+}
+
+#[test]
+fn critical_signal_self_check_reports_lost_and_gained_counts() {
+    let before = "\
+error: build failed
+  --> src/lib.rs:7:5
+test tests::boom ... FAILED
+process exited with exit code 101
+";
+    let after = "\
+error: build failed
+@@ -7,1 +7,1 @@
+";
+
+    let check = critical_signal_self_check(before, after);
+
+    assert!(check.has_loss());
+    assert!(!check.passed());
+    assert_eq!(check.before.errors, 1);
+    assert_eq!(check.after.errors, 1);
+    assert_eq!(check.lost.file_locations, 1);
+    assert_eq!(check.lost.test_failures, 1);
+    assert_eq!(check.lost.exit_codes, 1);
+    assert_eq!(check.gained.diff_hunks, 1);
+}
+
+#[test]
+fn critical_signal_self_check_passes_when_signal_counts_preserved() {
+    let before = "\
+running 2 tests
+test tests::boom ... FAILED
+thread 'tests::boom' panicked at src/lib.rs:7:5:
+stack backtrace:
+process didn't exit successfully: `cargo test` (exit status: 101)
+";
+    let after = "\
+test tests::boom ... FAILED
+thread 'tests::boom' panicked at src/lib.rs:7:5:
+stack backtrace:
+exit status: 101
+";
+
+    let check = critical_signal_self_check(before, after);
+
+    assert!(check.passed());
+    assert!(!check.has_loss());
+    assert_eq!(check.lost.total(), 0);
+    assert_eq!(check.before.total(), check.after.total());
+}
+
+#[test]
+fn context_blob_noise_detects_base64ish_blob() {
+    let blob = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".repeat(4);
+    let input = format!("header\n{blob}\nfooter\n");
+
+    let report = detect_context_blob_noise(&input);
+
+    assert!(report.is_noise());
+    assert!(report.has_kind(ContextBlobNoiseKind::Base64Blob));
+    assert_eq!(
+        report
+            .findings
+            .iter()
+            .find(|finding| finding.kind == ContextBlobNoiseKind::Base64Blob)
+            .and_then(|finding| finding.line),
+        Some(2)
+    );
+}
+
+#[test]
+fn context_blob_noise_detects_minified_json_and_javascript() {
+    let json_entries = (0..48)
+        .map(|index| {
+            format!("\"pkg{index}\":{{\"version\":\"1.0.{index}\",\"deps\":[\"a\",\"b\"]}}")
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!("{{{json_entries}}}");
+    let js = (0..36)
+        .map(|index| format!("!function(a){{return a+{index}}}({index});"))
+        .collect::<String>();
+
+    let json_report = detect_context_blob_noise(&json);
+    let js_report = detect_context_blob_noise(&js);
+
+    assert!(json_report.has_kind(ContextBlobNoiseKind::MinifiedJsJson));
+    assert!(js_report.has_kind(ContextBlobNoiseKind::MinifiedJsJson));
+}
+
+#[test]
+fn context_blob_noise_detects_lockfile_and_vendor_noise() {
+    let cargo_lock = (0..5)
+        .map(|index| {
+            format!(
+                "[[package]]\nname = \"dep{index}\"\nversion = \"0.1.{index}\"\nchecksum = \"abcdef{index}\"\n"
+            )
+        })
+        .collect::<String>();
+    let vendor_report = detect_context_blob_noise_for_path(
+        std::path::Path::new("node_modules/example/index.js"),
+        "module.exports = 1;\n",
+    );
+
+    let lock_report = detect_context_blob_noise(&cargo_lock);
+
+    assert!(lock_report.has_kind(ContextBlobNoiseKind::LockfileOrVendor));
+    assert!(vendor_report.has_kind(ContextBlobNoiseKind::LockfileOrVendor));
+}
+
+#[test]
+fn context_blob_noise_detects_binaryish_text_without_nul_bytes() {
+    let input = format!("plain text line\n{}payload\n", "\u{1}".repeat(6));
+
+    let report = detect_context_blob_noise(&input);
+
+    assert!(report.has_kind(ContextBlobNoiseKind::BinaryText));
+}
+
+#[test]
+fn context_blob_noise_detects_repeated_path_flood() {
+    let mut input = String::new();
+    for index in 0..20 {
+        input.push_str(&format!(
+            "target/debug/build/prodex/out/generated.rs:{index}:1: generated path noise\n"
+        ));
+    }
+
+    let report = detect_context_blob_noise(&input);
+
+    assert!(report.has_kind(ContextBlobNoiseKind::RepeatedPathFlood));
+}
+
+#[test]
+fn context_blob_noise_keeps_normal_diagnostic_text_clean() {
+    let input = "\
+error[E0308]: mismatched types
+  --> crates/prodex-context/src/lib.rs:42:17
+   |
+42 |     let value: usize = \"nope\";
+";
+
+    let report = detect_context_blob_noise(input);
+
+    assert!(!report.is_noise());
+    assert!(!is_context_blob_noise(input));
+}

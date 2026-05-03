@@ -1,7 +1,10 @@
 use crate::{
     AppPaths, AppState, ProfileEntry, RuntimeContinuationStore, RuntimeProfileBackoffs,
     RuntimeProfileHealth, RuntimeProfileUsageSnapshot, RuntimeRotationProxyShared,
+    RuntimeSmartContextArtifactStore,
 };
+use std::path::PathBuf;
+use std::time::Instant;
 
 #[cfg(test)]
 pub(crate) use prodex_runtime_state::{
@@ -62,3 +65,22 @@ pub(crate) type RuntimeProbeRefreshQueue =
     prodex_runtime_state::RuntimeProbeRefreshQueue<RuntimeProbeRefreshJob>;
 pub(crate) type RuntimeProbeRefreshJob =
     prodex_runtime_state::RuntimeProbeRefreshJob<RuntimeRotationProxyShared>;
+
+pub(crate) type RuntimeSmartContextArtifactSaveQueue =
+    prodex_runtime_state::RuntimeStateSaveQueue<RuntimeSmartContextArtifactSaveJob>;
+
+#[derive(Debug)]
+pub(crate) struct RuntimeSmartContextArtifactSaveJob {
+    pub(crate) path: PathBuf,
+    pub(crate) store: RuntimeSmartContextArtifactStore,
+    pub(crate) log_path: PathBuf,
+    pub(crate) reason: String,
+    pub(crate) queued_at: Instant,
+    pub(crate) ready_at: Instant,
+}
+
+impl prodex_runtime_state::RuntimeScheduledSaveJob for RuntimeSmartContextArtifactSaveJob {
+    fn ready_at(&self) -> Instant {
+        self.ready_at
+    }
+}

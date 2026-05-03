@@ -2,9 +2,10 @@ use crate::{
     AppPaths, AppState, ResponseProfileBinding, RuntimeProxyLaneAdmission,
     RuntimeQuotaWindowStatus, UsageAuth,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -78,7 +79,7 @@ const RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS: usize = 128;
 const RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RuntimeSmartContextArtifact {
     pub(crate) id: String,
     pub(crate) byte_len: usize,
@@ -87,13 +88,34 @@ pub(crate) struct RuntimeSmartContextArtifact {
     pub(crate) sequence: u64,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct RuntimeSmartContextArtifactStore {
     artifacts: BTreeMap<String, RuntimeSmartContextArtifact>,
     total_bytes: usize,
 }
 
 impl RuntimeSmartContextArtifactStore {
+    pub(crate) fn load_from_path(path: &Path) -> Self {
+        let Some(raw) = fs::read_to_string(path).ok() else {
+            return Self::default();
+        };
+        let Ok(mut store) = serde_json::from_str::<Self>(&raw) else {
+            return Self::default();
+        };
+        store.recompute_total_bytes();
+        store.enforce_limits();
+        store
+    }
+
+    pub(crate) fn save_to_path(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let raw = serde_json::to_vec(self)?;
+        fs::write(path, raw)?;
+        Ok(())
+    }
+
     pub(crate) fn insert_text(
         &mut self,
         sequence: u64,
@@ -139,6 +161,14 @@ impl RuntimeSmartContextArtifactStore {
 
     pub(crate) fn contains(&self, id: &str) -> bool {
         self.artifacts.contains_key(id)
+    }
+
+    fn recompute_total_bytes(&mut self) {
+        self.total_bytes = self
+            .artifacts
+            .values()
+            .map(|artifact| artifact.byte_len)
+            .sum();
     }
 
     fn enforce_limits(&mut self) {

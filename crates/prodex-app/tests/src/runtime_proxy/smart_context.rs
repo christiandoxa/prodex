@@ -17,6 +17,7 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
         &mut store,
         7,
         runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        4 * 1024,
         &mut stats,
     );
 
@@ -76,7 +77,9 @@ fn smart_context_dedupes_repeated_input_text() {
     });
     let mut stats = RuntimeSmartContextTransformStats::default();
 
-    runtime_smart_context_dedupe_input_text(&mut value, &mut stats);
+    let store = RuntimeSmartContextArtifactStore::default();
+
+    runtime_smart_context_dedupe_input_text(&mut value, &store, &mut stats);
 
     assert!(
         value["input"][1]["content"]
@@ -90,7 +93,7 @@ fn smart_context_dedupes_repeated_input_text() {
 #[test]
 fn smart_context_budget_uses_runtime_token_usage_observation() {
     let shared = smart_context_test_shared("budget");
-    register_runtime_smart_context_proxy_state(&shared.log_path, true);
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None);
     observe_runtime_smart_context_token_usage(
         &shared,
         RuntimeTokenUsage {
@@ -101,7 +104,14 @@ fn smart_context_budget_uses_runtime_token_usage_observation() {
         },
     );
 
-    let budget = runtime_smart_context_budget(&shared, 32);
+    let budget = runtime_smart_context_budget(
+        &shared,
+        32,
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+    );
 
     assert_eq!(
         budget.tier,
@@ -117,6 +127,8 @@ fn smart_context_self_check_passes_through_growth_without_rehydrate() {
         artifacts_stored: 1,
         tool_outputs_condensed: 1,
         duplicate_texts: 0,
+        cross_turn_duplicate_texts: 0,
+        blob_outputs_condensed: 0,
         rehydrated_refs: 0,
     };
 

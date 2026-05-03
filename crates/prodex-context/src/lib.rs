@@ -123,6 +123,218 @@ pub struct CommandOutputCompactReport {
     pub output: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextBlobNoiseKind {
+    Base64Blob,
+    MinifiedJsJson,
+    LockfileOrVendor,
+    BinaryText,
+    RepeatedPathFlood,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContextBlobNoiseFinding {
+    pub kind: ContextBlobNoiseKind,
+    pub line: Option<usize>,
+    pub bytes: usize,
+    pub score: usize,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ContextBlobNoiseReport {
+    pub bytes: usize,
+    pub lines: usize,
+    pub findings: Vec<ContextBlobNoiseFinding>,
+}
+
+impl ContextBlobNoiseReport {
+    pub fn is_noise(&self) -> bool {
+        !self.findings.is_empty()
+    }
+
+    pub fn has_kind(&self, kind: ContextBlobNoiseKind) -> bool {
+        self.findings.iter().any(|finding| finding.kind == kind)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct CriticalSignalCounts {
+    pub errors: usize,
+    pub file_locations: usize,
+    pub diff_hunks: usize,
+    pub test_failures: usize,
+    pub exit_codes: usize,
+    pub stack_markers: usize,
+    pub rust_diagnostics: usize,
+}
+
+impl CriticalSignalCounts {
+    pub fn total(self) -> usize {
+        self.errors
+            + self.file_locations
+            + self.diff_hunks
+            + self.test_failures
+            + self.exit_codes
+            + self.stack_markers
+            + self.rust_diagnostics
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.total() == 0
+    }
+
+    fn saturating_loss(self, after: Self) -> Self {
+        Self {
+            errors: self.errors.saturating_sub(after.errors),
+            file_locations: self.file_locations.saturating_sub(after.file_locations),
+            diff_hunks: self.diff_hunks.saturating_sub(after.diff_hunks),
+            test_failures: self.test_failures.saturating_sub(after.test_failures),
+            exit_codes: self.exit_codes.saturating_sub(after.exit_codes),
+            stack_markers: self.stack_markers.saturating_sub(after.stack_markers),
+            rust_diagnostics: self.rust_diagnostics.saturating_sub(after.rust_diagnostics),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CriticalSignalSelfCheck {
+    pub before: CriticalSignalCounts,
+    pub after: CriticalSignalCounts,
+    pub lost: CriticalSignalCounts,
+    pub gained: CriticalSignalCounts,
+}
+
+impl CriticalSignalSelfCheck {
+    pub fn passed(self) -> bool {
+        self.lost.is_empty()
+    }
+
+    pub fn has_loss(self) -> bool {
+        !self.passed()
+    }
+}
+
+pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
+    let normalized = normalize_command_output(input);
+    let mut counts = CriticalSignalCounts::default();
+
+    for line in command_lines(&normalized) {
+        if is_error_signal_line(line) {
+            counts.errors += 1;
+        }
+        counts.file_locations += count_file_location_signals(line);
+        if is_diff_hunk_line(line) {
+            counts.diff_hunks += 1;
+        }
+        if is_test_failure_signal_line(line) {
+            counts.test_failures += 1;
+        }
+        if is_rust_exit_status_line(line) {
+            counts.exit_codes += 1;
+        }
+        if is_stack_signal_line(line) {
+            counts.stack_markers += 1;
+        }
+        if is_rust_diagnostic_signal_line(line) {
+            counts.rust_diagnostics += 1;
+        }
+    }
+
+    counts
+}
+
+pub fn critical_signal_self_check(before: &str, after: &str) -> CriticalSignalSelfCheck {
+    let before = count_critical_signals(before);
+    let after = count_critical_signals(after);
+    CriticalSignalSelfCheck {
+        before,
+        after,
+        lost: before.saturating_loss(after),
+        gained: after.saturating_loss(before),
+    }
+}
+
+pub fn detect_context_blob_noise(input: &str) -> ContextBlobNoiseReport {
+    detect_context_blob_noise_inner(None, input)
+}
+
+pub fn detect_context_blob_noise_for_path(path: &Path, input: &str) -> ContextBlobNoiseReport {
+    detect_context_blob_noise_inner(Some(path), input)
+}
+
+pub fn is_context_blob_noise(input: &str) -> bool {
+    detect_context_blob_noise(input).is_noise()
+}
+
+fn detect_context_blob_noise_inner(path: Option<&Path>, input: &str) -> ContextBlobNoiseReport {
+    let normalized = normalize_command_output(input);
+    let lines = command_lines(&normalized);
+    let mut findings = Vec::new();
+
+    if path.is_some_and(is_lockfile_or_vendor_path) {
+        findings.push(ContextBlobNoiseFinding {
+            kind: ContextBlobNoiseKind::LockfileOrVendor,
+            line: None,
+            bytes: input.len(),
+            score: input.len().min(usize::MAX / 2),
+            detail: "path looks like generated dependency/vendor content".to_string(),
+        });
+    }
+
+    if input.chars().any(|ch| ch == '\0' || ch == '\u{fffd}') {
+        findings.push(ContextBlobNoiseFinding {
+            kind: ContextBlobNoiseKind::BinaryText,
+            line: None,
+            bytes: input.len(),
+            score: input.len(),
+            detail: "text contains binary replacement or NUL characters".to_string(),
+        });
+    }
+
+    for (index, line) in lines.iter().enumerate() {
+        let line_number = Some(index + 1);
+        let trimmed = line.trim();
+        if trimmed.len() >= 512 && looks_like_base64_blob(trimmed) {
+            findings.push(ContextBlobNoiseFinding {
+                kind: ContextBlobNoiseKind::Base64Blob,
+                line: line_number,
+                bytes: trimmed.len(),
+                score: trimmed.len(),
+                detail: "long high-entropy base64-like line".to_string(),
+            });
+        }
+        if trimmed.len() >= 800 && looks_like_minified_js_json(trimmed) {
+            findings.push(ContextBlobNoiseFinding {
+                kind: ContextBlobNoiseKind::MinifiedJsJson,
+                line: line_number,
+                bytes: trimmed.len(),
+                score: trimmed.len(),
+                detail: "long minified JSON/JavaScript-like line".to_string(),
+            });
+        }
+    }
+
+    if let Some((line, count)) = repeated_path_flood(&lines) {
+        findings.push(ContextBlobNoiseFinding {
+            kind: ContextBlobNoiseKind::RepeatedPathFlood,
+            line: Some(line),
+            bytes: input.len(),
+            score: count,
+            detail: format!("{count} path-like lines detected"),
+        });
+    }
+
+    add_context_blob_noise_supplemental_findings(path, input, &lines, &mut findings);
+
+    ContextBlobNoiseReport {
+        bytes: input.len(),
+        lines: count_text_lines(&normalized),
+        findings,
+    }
+}
+
 pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<ContextAuditReport> {
     let mut paths = Vec::new();
     for entry in CONTEXT_AUDIT_ROOTS {
@@ -471,6 +683,14 @@ fn compact_git_diff_output(input: &str, options: &CommandOutputCompactOptions) -
     let lines = command_lines(input);
     let sections = split_git_diff_sections(&lines);
     if sections.is_empty() {
+        if let Some(output) = compact_git_diff_stat_output(&lines, options) {
+            return finalize_compacted_command_output(
+                CommandOutputKind::GitDiff,
+                input,
+                output,
+                options,
+            );
+        }
         return smart_truncate_command_output(input, options);
     }
 
@@ -541,13 +761,28 @@ fn compact_search_output(input: &str, options: &CommandOutputCompactOptions) -> 
     let lines = command_lines(input);
     let mut files: BTreeMap<String, Vec<SearchMatch>> = BTreeMap::new();
     let mut other = Vec::new();
+    let mut current_heading_path = None::<String>;
 
     for line in lines {
-        if let Some(search_match) = parse_search_match_line(line) {
+        if let Some(search_match) =
+            parse_rg_json_match_line(line).or_else(|| parse_search_match_line(line))
+        {
+            current_heading_path = Some(search_match.path.clone());
             files
                 .entry(search_match.path.clone())
                 .or_default()
                 .push(search_match);
+        } else if let Some(search_match) =
+            parse_heading_search_match_line(line, current_heading_path.as_deref())
+        {
+            files
+                .entry(search_match.path.clone())
+                .or_default()
+                .push(search_match);
+        } else if let Some(path) = parse_search_heading_line(line) {
+            current_heading_path = Some(path);
+        } else if looks_like_rg_json_line(line) {
+            // Non-match rg JSON records are command metadata, not useful context.
         } else if !line.trim().is_empty() {
             other.push(line.to_string());
         }
@@ -608,8 +843,8 @@ fn compact_file_list_output(input: &str, options: &CommandOutputCompactOptions) 
     let lines = command_lines(input);
     let mut entries = Vec::new();
     for line in lines {
-        if looks_like_file_list_line(line) {
-            entries.push(line.trim().to_string());
+        if let Some(entry) = parse_file_list_entry_line(line) {
+            entries.push(entry);
         }
     }
 
@@ -652,6 +887,79 @@ fn compact_file_list_output(input: &str, options: &CommandOutputCompactOptions) 
     }
 
     finalize_compacted_command_output(CommandOutputKind::FileList, input, output, options)
+}
+
+fn compact_git_diff_stat_output(
+    lines: &[&str],
+    options: &CommandOutputCompactOptions,
+) -> Option<Vec<String>> {
+    let stat_lines = lines
+        .iter()
+        .filter(|line| looks_like_git_diff_stat_line(line))
+        .copied()
+        .collect::<Vec<_>>();
+    if stat_lines.is_empty()
+        || !lines
+            .iter()
+            .any(|line| looks_like_git_diff_stat_summary(line))
+    {
+        return None;
+    }
+
+    let summary_lines = lines
+        .iter()
+        .filter(|line| looks_like_git_diff_stat_summary(line))
+        .copied()
+        .collect::<Vec<_>>();
+    let mut output = Vec::new();
+    output.push(format!(
+        "git diff summary: stat-only, {} file entries",
+        stat_lines.len()
+    ));
+    for line in summary_lines {
+        output.push(format!(
+            "stat totals: {}",
+            truncate_command_line(line.trim(), options.max_line_chars)
+        ));
+    }
+    output.push("stat files:".to_string());
+
+    let limit = options
+        .max_path_entries
+        .max(1)
+        .min(options.max_lines.max(8));
+    let head = limit.div_ceil(2);
+    let tail = limit.saturating_sub(head);
+    if stat_lines.len() <= limit {
+        for line in stat_lines {
+            output.push(format!(
+                "  {}",
+                truncate_command_line(line.trim(), options.max_line_chars)
+            ));
+        }
+    } else {
+        for line in stat_lines.iter().take(head) {
+            output.push(format!(
+                "  {}",
+                truncate_command_line(line.trim(), options.max_line_chars)
+            ));
+        }
+        output.push(format!(
+            "  [... omitted {} stat entries ...]",
+            stat_lines.len().saturating_sub(head + tail)
+        ));
+        for line in stat_lines
+            .iter()
+            .skip(stat_lines.len().saturating_sub(tail))
+        {
+            output.push(format!(
+                "  {}",
+                truncate_command_line(line.trim(), options.max_line_chars)
+            ));
+        }
+    }
+
+    Some(output)
 }
 
 fn compact_rust_diagnostic_output(input: &str, options: &CommandOutputCompactOptions) -> String {
@@ -840,11 +1148,13 @@ fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
     let mut location_signals = 0usize;
     let mut backtrace_signals = 0usize;
     let mut exit_signals = 0usize;
+    let mut clippy_signals = 0usize;
     for line in lines {
         if rust_diagnostic_severity(line).is_some()
             || rust_failed_test_name(line).is_some()
             || rust_failure_separator_name(line).is_some()
             || is_rust_panic_line(line)
+            || is_rust_failure_summary_line(line)
         {
             strong_signals += 1;
         }
@@ -860,6 +1170,9 @@ fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
         if rust_noise_label(line).is_some() {
             cargo_noise_signals += 1;
         }
+        if line.contains("clippy::") || line.contains("cargo clippy") {
+            clippy_signals += 1;
+        }
     }
 
     if strong_signals > 0 {
@@ -868,6 +1181,7 @@ fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
             + location_signals
             + backtrace_signals
             + exit_signals
+            + clippy_signals
             >= 2;
     }
     if backtrace_signals > 0 && location_signals > 0 {
@@ -920,8 +1234,24 @@ fn rust_diagnostic_severity(line: &str) -> Option<RustDiagnosticSeverity> {
     } else if trimmed.starts_with("warning[") || trimmed.starts_with("warning:") {
         Some(RustDiagnosticSeverity::Warning)
     } else {
-        None
+        rust_short_diagnostic_severity(trimmed)
     }
+}
+
+fn rust_short_diagnostic_severity(line: &str) -> Option<RustDiagnosticSeverity> {
+    let lower = line.to_ascii_lowercase();
+    for (needle, severity) in [
+        (": error", RustDiagnosticSeverity::Error),
+        (": warning", RustDiagnosticSeverity::Warning),
+    ] {
+        let Some(position) = lower.find(needle) else {
+            continue;
+        };
+        if contains_rust_file_location(&line[..position]) {
+            return Some(severity);
+        }
+    }
+    None
 }
 
 fn rust_failed_test_name(line: &str) -> Option<&str> {
@@ -1148,6 +1478,10 @@ fn smart_truncate_command_output(input: &str, options: &CommandOutputCompactOpti
         return lines_to_text(output);
     }
 
+    if let Some(output) = smart_truncate_with_critical_lines(&lines, options, max_lines) {
+        return output;
+    }
+
     let (head, tail) = bounded_head_tail(options, max_lines);
     for line in lines.iter().take(head) {
         output.push(truncate_command_line(line, options.max_line_chars));
@@ -1160,6 +1494,137 @@ fn smart_truncate_command_output(input: &str, options: &CommandOutputCompactOpti
         output.push(truncate_command_line(line, options.max_line_chars));
     }
     lines_to_text(output)
+}
+
+fn smart_truncate_with_critical_lines(
+    lines: &[&str],
+    options: &CommandOutputCompactOptions,
+    max_lines: usize,
+) -> Option<String> {
+    let critical = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| is_critical_preserve_line(line))
+        .map(|(index, line)| (index, *line))
+        .collect::<Vec<_>>();
+    if critical.is_empty() {
+        return None;
+    }
+
+    if max_lines < 8 {
+        let mut output = Vec::new();
+        output.push(format!(
+            "command output summary: {} lines, {} critical lines preserved",
+            lines.len(),
+            critical.len()
+        ));
+        for (index, line) in critical.iter().take(max_lines.saturating_sub(1).max(1)) {
+            output.push(format!(
+                "L{}: {}",
+                index + 1,
+                truncate_command_line(line.trim(), options.max_line_chars)
+            ));
+        }
+        return Some(lines_to_text(output));
+    }
+
+    let section_overhead = 4usize;
+    let context_budget = max_lines.saturating_sub(section_overhead).max(1);
+    let mut head = options
+        .head_lines
+        .min(context_budget.saturating_div(4).max(1));
+    let mut tail = options
+        .tail_lines
+        .min(context_budget.saturating_div(4).max(1));
+    while head.saturating_add(tail) >= context_budget && tail > 0 {
+        tail -= 1;
+    }
+    while head.saturating_add(tail) >= context_budget && head > 0 {
+        head -= 1;
+    }
+    let critical_budget = context_budget.saturating_sub(head + tail).max(1);
+
+    let mut output = Vec::new();
+    output.push(format!(
+        "command output summary: {} lines, {} critical lines preserved",
+        lines.len(),
+        critical.len()
+    ));
+    output.push("head:".to_string());
+    for line in lines.iter().take(head) {
+        output.push(truncate_command_line(line, options.max_line_chars));
+    }
+    output.push("critical lines:".to_string());
+
+    let filtered_critical = critical
+        .iter()
+        .filter(|(index, _)| *index >= head && *index < lines.len().saturating_sub(tail))
+        .copied()
+        .collect::<Vec<_>>();
+    push_numbered_critical_lines(&mut output, &filtered_critical, critical_budget, options);
+
+    output.push("tail:".to_string());
+    for line in lines.iter().skip(lines.len().saturating_sub(tail)) {
+        output.push(truncate_command_line(line, options.max_line_chars));
+    }
+
+    Some(lines_to_text(output))
+}
+
+fn push_numbered_critical_lines(
+    output: &mut Vec<String>,
+    critical: &[(usize, &str)],
+    budget: usize,
+    options: &CommandOutputCompactOptions,
+) {
+    if critical.is_empty() || budget == 0 {
+        return;
+    }
+
+    if critical.len() <= budget {
+        for (index, line) in critical {
+            output.push(format!(
+                "  L{}: {}",
+                index + 1,
+                truncate_command_line(line.trim(), options.max_line_chars)
+            ));
+        }
+        return;
+    }
+
+    if budget == 1 {
+        if let Some((index, line)) = critical.first() {
+            output.push(format!(
+                "  L{}: {}",
+                index + 1,
+                truncate_command_line(line.trim(), options.max_line_chars)
+            ));
+        }
+        return;
+    }
+
+    let head = budget.div_ceil(2).saturating_sub(1).max(1);
+    let tail = budget.saturating_sub(head).saturating_sub(1);
+    for (index, line) in critical.iter().take(head) {
+        output.push(format!(
+            "  L{}: {}",
+            index + 1,
+            truncate_command_line(line.trim(), options.max_line_chars)
+        ));
+    }
+    output.push(format!(
+        "  [... omitted {} critical lines ...]",
+        critical.len().saturating_sub(head + tail)
+    ));
+    if tail > 0 {
+        for (index, line) in critical.iter().skip(critical.len().saturating_sub(tail)) {
+            output.push(format!(
+                "  L{}: {}",
+                index + 1,
+                truncate_command_line(line.trim(), options.max_line_chars)
+            ));
+        }
+    }
 }
 
 fn finalize_compacted_command_output(
@@ -1188,14 +1653,7 @@ fn finalize_compacted_command_output(
 
 fn detect_command_output_kind(input: &str) -> CommandOutputKind {
     let lines = command_lines(input);
-    if lines.iter().any(|line| line.starts_with("diff --git "))
-        || lines
-            .iter()
-            .filter(|line| line.starts_with("@@ "))
-            .take(2)
-            .count()
-            >= 1
-    {
+    if looks_like_git_diff_output(&lines) {
         return CommandOutputKind::GitDiff;
     }
 
@@ -1222,21 +1680,768 @@ fn detect_command_output_kind(input: &str) -> CommandOutputKind {
     let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
     let search_matches = lines
         .iter()
-        .filter(|line| parse_search_match_line(line).is_some())
+        .filter(|line| {
+            parse_search_match_line(line).is_some() || parse_rg_json_match_line(line).is_some()
+        })
         .count();
-    if search_matches >= 2 && search_matches.saturating_mul(2) >= non_empty {
+    let heading_search_matches = count_heading_search_matches(&lines);
+    let rg_json_lines = lines
+        .iter()
+        .filter(|line| looks_like_rg_json_line(line))
+        .count();
+    let total_search_matches = search_matches.saturating_add(heading_search_matches);
+    if total_search_matches >= 2 && total_search_matches.saturating_mul(2) >= non_empty {
+        return CommandOutputKind::Search;
+    }
+    if search_matches > 0 && rg_json_lines.saturating_mul(2) >= non_empty {
         return CommandOutputKind::Search;
     }
 
     let file_list_lines = lines
         .iter()
-        .filter(|line| looks_like_file_list_line(line))
+        .filter(|line| parse_file_list_entry_line(line).is_some())
         .count();
     if file_list_lines >= 4 && file_list_lines.saturating_mul(2) >= non_empty {
         return CommandOutputKind::FileList;
     }
 
     CommandOutputKind::Plain
+}
+
+fn is_error_signal_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("error:")
+        || lower.starts_with("error[")
+        || lower.starts_with("error ")
+        || lower.starts_with("error\t")
+        || lower.starts_with("fatal:")
+        || lower.starts_with("panic:")
+        || lower.starts_with("thread '") && lower.contains("' panicked at")
+        || is_rust_panic_line(line)
+        || is_log_level_signal_line(line)
+    {
+        return true;
+    }
+
+    contains_jsonish_error_key(trimmed)
+        || lower.contains(" status=error")
+        || lower.starts_with("status=error")
+        || lower.contains(" level=error")
+        || lower.starts_with("level=error")
+}
+
+fn contains_jsonish_error_key(line: &str) -> bool {
+    line.contains("\"error\"")
+        || line.contains("'error'")
+        || line.contains("\\\"error\\\"")
+        || line.contains("\"type\":\"error\"")
+        || line.contains("\"type\": \"error\"")
+        || line.contains("\\\"type\\\":\\\"error\\\"")
+        || line.contains("\\\"type\\\": \\\"error\\\"")
+}
+
+fn count_file_location_signals(line: &str) -> usize {
+    line.split_whitespace()
+        .filter(|token| token_contains_file_location(token))
+        .count()
+}
+
+fn token_contains_file_location(token: &str) -> bool {
+    let token = token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'
+        )
+    });
+    let token = token.trim_end_matches([':', '.']);
+    if token.contains("://") || !token.chars().any(|ch| ch.is_ascii_digit()) {
+        return false;
+    }
+
+    let mut segments = token.rsplitn(3, ':');
+    let tail = segments.next().unwrap_or_default().trim_end_matches('.');
+    let middle = segments.next().unwrap_or_default();
+    let path = segments.next().unwrap_or_default();
+
+    if !tail.chars().all(|ch| ch.is_ascii_digit()) || tail.is_empty() {
+        return false;
+    }
+
+    if middle.chars().all(|ch| ch.is_ascii_digit()) && !middle.is_empty() {
+        return looks_like_location_path(path);
+    }
+
+    looks_like_location_path(middle)
+}
+
+fn looks_like_location_path(path: &str) -> bool {
+    let path = path.trim_matches(|ch: char| matches!(ch, '<' | '>' | '-' | ':' | ' '));
+    if path.is_empty() {
+        return false;
+    }
+    path.contains('/')
+        || path.contains('\\')
+        || path.rsplit('/').next().is_some_and(|name| {
+            name.rsplit_once('.').is_some_and(|(_, ext)| {
+                !ext.is_empty()
+                    && ext.len() <= 12
+                    && ext
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+            })
+        })
+}
+
+fn is_diff_hunk_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("@@ ") && trimmed[3..].contains("@@")
+}
+
+fn is_test_failure_signal_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    rust_failed_test_name(trimmed).is_some()
+        || rust_failure_separator_name(trimmed).is_some()
+        || is_rust_failure_summary_line(trimmed)
+        || trimmed.starts_with("test result: FAILED")
+        || trimmed.starts_with("failures:")
+        || trimmed.contains(" ... FAILED")
+}
+
+fn is_stack_signal_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    is_rust_backtrace_start(trimmed)
+        || trimmed.starts_with("Traceback (most recent call last):")
+        || trimmed.starts_with("Stack trace:")
+        || trimmed.starts_with("stack trace:")
+        || trimmed.starts_with("Backtrace:")
+        || trimmed.starts_with("Caused by:")
+}
+
+fn is_rust_diagnostic_signal_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    rust_diagnostic_severity(trimmed).is_some()
+        || trimmed.starts_with("--> ")
+        || trimmed.starts_with("::: ")
+        || trimmed.starts_with("= note:")
+        || trimmed.starts_with("= help:")
+        || trimmed.starts_with("help:")
+        || trimmed.starts_with("note:")
+        || trimmed.starts_with("warning:")
+        || trimmed.starts_with("warning[")
+        || trimmed.contains("clippy::")
+}
+
+fn is_lockfile_or_vendor_path(path: &Path) -> bool {
+    let rendered = path.display().to_string();
+    let normalized = rendered.replace('\\', "/").to_ascii_lowercase();
+    normalized.ends_with("cargo.lock")
+        || normalized.ends_with("package-lock.json")
+        || normalized.ends_with("pnpm-lock.yaml")
+        || normalized.ends_with("yarn.lock")
+        || normalized.contains("/node_modules/")
+        || normalized.contains("/vendor/")
+        || normalized.contains("/target/")
+}
+
+fn looks_like_base64_blob(line: &str) -> bool {
+    let base64_chars = line
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '/' | '=' | '-' | '_'))
+        .count();
+    base64_chars.saturating_mul(100) >= line.len().saturating_mul(95)
+        && line.chars().any(|ch| ch.is_ascii_digit())
+        && line.chars().any(|ch| ch.is_ascii_uppercase())
+        && line.chars().any(|ch| ch.is_ascii_lowercase())
+}
+
+fn looks_like_minified_js_json(line: &str) -> bool {
+    let punctuation = line
+        .chars()
+        .filter(|ch| matches!(ch, '{' | '}' | '[' | ']' | ':' | ',' | ';'))
+        .count();
+    let spaces = line.chars().filter(|ch| ch.is_whitespace()).count();
+    punctuation >= 32 && spaces.saturating_mul(80) < line.len()
+}
+
+fn repeated_path_flood(lines: &[&str]) -> Option<(usize, usize)> {
+    let mut first_path_line = None;
+    let mut path_lines = 0usize;
+    let mut non_empty = 0usize;
+    for (index, line) in lines.iter().enumerate() {
+        if !line.trim().is_empty() {
+            non_empty += 1;
+        }
+        if parse_file_list_entry_line(line).is_some() || parse_search_match_line(line).is_some() {
+            path_lines += 1;
+            first_path_line.get_or_insert(index + 1);
+        }
+    }
+
+    if path_lines >= 200 && path_lines.saturating_mul(100) >= non_empty.saturating_mul(80) {
+        first_path_line.map(|line| (line, path_lines))
+    } else {
+        None
+    }
+}
+
+fn add_context_blob_noise_supplemental_findings(
+    path: Option<&Path>,
+    input: &str,
+    lines: &[&str],
+    findings: &mut Vec<ContextBlobNoiseFinding>,
+) {
+    if let Some(finding) = detect_binaryish_text_noise_supplement(input) {
+        push_context_blob_noise_finding(findings, finding);
+    }
+    if let Some(finding) = detect_base64ish_blob_noise_supplement(lines) {
+        push_context_blob_noise_finding(findings, finding);
+    }
+    if let Some(finding) = detect_minified_js_json_noise_supplement(input, lines) {
+        push_context_blob_noise_finding(findings, finding);
+    }
+    if let Some(finding) = detect_lockfile_or_vendor_noise_supplement(path, input, lines) {
+        push_context_blob_noise_finding(findings, finding);
+    }
+    if let Some(finding) = detect_repeated_path_flood_noise_supplement(input, lines) {
+        push_context_blob_noise_finding(findings, finding);
+    }
+}
+
+fn push_context_blob_noise_finding(
+    findings: &mut Vec<ContextBlobNoiseFinding>,
+    finding: ContextBlobNoiseFinding,
+) {
+    if !findings
+        .iter()
+        .any(|existing| existing.kind == finding.kind)
+    {
+        findings.push(finding);
+    }
+}
+
+fn detect_binaryish_text_noise_supplement(input: &str) -> Option<ContextBlobNoiseFinding> {
+    let total_chars = input.chars().count();
+    if total_chars < 16 {
+        return None;
+    }
+
+    let mut suspicious_chars = 0usize;
+    let mut nul_chars = 0usize;
+    let mut replacement_chars = 0usize;
+    let mut first_line = None;
+    for (line_index, line) in input.lines().enumerate() {
+        for ch in line.chars() {
+            let suspicious = ch == '\0'
+                || ch == '\u{fffd}'
+                || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'));
+            if !suspicious {
+                continue;
+            }
+            first_line.get_or_insert(line_index + 1);
+            suspicious_chars += 1;
+            if ch == '\0' {
+                nul_chars += 1;
+            } else if ch == '\u{fffd}' {
+                replacement_chars += 1;
+            }
+        }
+    }
+
+    let suspicious_ratio = suspicious_chars.saturating_mul(100) / total_chars.max(1);
+    if nul_chars == 0 && replacement_chars < 2 && (suspicious_chars < 4 || suspicious_ratio < 2) {
+        return None;
+    }
+
+    Some(ContextBlobNoiseFinding {
+        kind: ContextBlobNoiseKind::BinaryText,
+        line: first_line,
+        bytes: input.len(),
+        score: (60 + suspicious_ratio).min(100),
+        detail: format!(
+            "binaryish_controls={suspicious_chars}, nul_chars={nul_chars}, replacement_chars={replacement_chars}"
+        ),
+    })
+}
+
+fn detect_base64ish_blob_noise_supplement(lines: &[&str]) -> Option<ContextBlobNoiseFinding> {
+    let mut best_line = None;
+    let mut best_bytes = 0usize;
+    let mut best_score = 0usize;
+    let mut block_start = 0usize;
+    let mut block_lines = 0usize;
+    let mut block_bytes = 0usize;
+    let mut block_score = 0usize;
+
+    for (index, line) in lines.iter().enumerate() {
+        if let Some((bytes, score)) = longest_base64ish_span_supplement(line, 160, 16)
+            && bytes > best_bytes
+        {
+            best_line = Some(index + 1);
+            best_bytes = bytes;
+            best_score = score;
+        }
+
+        let trimmed = line.trim();
+        if let Some(score) = base64ish_candidate_score_supplement(trimmed, 56, 12) {
+            if block_lines == 0 {
+                block_start = index + 1;
+            }
+            block_lines += 1;
+            block_bytes += trimmed.len();
+            block_score = block_score.max(score);
+        } else {
+            if block_lines >= 4 && block_bytes >= 240 && block_bytes > best_bytes {
+                best_line = Some(block_start);
+                best_bytes = block_bytes;
+                best_score = block_score;
+            }
+            block_lines = 0;
+            block_bytes = 0;
+            block_score = 0;
+        }
+    }
+
+    if block_lines >= 4 && block_bytes >= 240 && block_bytes > best_bytes {
+        best_line = Some(block_start);
+        best_bytes = block_bytes;
+        best_score = block_score;
+    }
+
+    (best_bytes > 0).then(|| ContextBlobNoiseFinding {
+        kind: ContextBlobNoiseKind::Base64Blob,
+        line: best_line,
+        bytes: best_bytes,
+        score: best_score,
+        detail: format!("base64ish_bytes={best_bytes}"),
+    })
+}
+
+fn longest_base64ish_span_supplement(
+    line: &str,
+    min_bytes: usize,
+    min_unique_chars: usize,
+) -> Option<(usize, usize)> {
+    let mut best = None;
+    let mut start = None;
+
+    for (index, ch) in line.char_indices() {
+        if is_base64ish_char_supplement(ch) {
+            start.get_or_insert(index);
+            continue;
+        }
+        if let Some(span_start) = start.take() {
+            let candidate = &line[span_start..index];
+            if let Some(score) =
+                base64ish_candidate_score_supplement(candidate, min_bytes, min_unique_chars)
+            {
+                best = Some(match best {
+                    Some((bytes, best_score)) if bytes >= candidate.len() => (bytes, best_score),
+                    _ => (candidate.len(), score),
+                });
+            }
+        }
+    }
+
+    if let Some(span_start) = start {
+        let candidate = &line[span_start..];
+        if let Some(score) =
+            base64ish_candidate_score_supplement(candidate, min_bytes, min_unique_chars)
+        {
+            best = Some(match best {
+                Some((bytes, best_score)) if bytes >= candidate.len() => (bytes, best_score),
+                _ => (candidate.len(), score),
+            });
+        }
+    }
+
+    best
+}
+
+fn base64ish_candidate_score_supplement(
+    candidate: &str,
+    min_bytes: usize,
+    min_unique_chars: usize,
+) -> Option<usize> {
+    let candidate = candidate.trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ',' | ';'));
+    if candidate.len() < min_bytes || !candidate.is_ascii() {
+        return None;
+    }
+
+    let mut base64_chars = 0usize;
+    let mut upper = 0usize;
+    let mut lower = 0usize;
+    let mut digit = 0usize;
+    let mut symbol = 0usize;
+    let mut seen = [false; 128];
+    for byte in candidate.bytes() {
+        let ch = byte as char;
+        if !is_base64ish_char_supplement(ch) {
+            continue;
+        }
+        base64_chars += 1;
+        seen[byte as usize] = true;
+        if ch.is_ascii_uppercase() {
+            upper += 1;
+        } else if ch.is_ascii_lowercase() {
+            lower += 1;
+        } else if ch.is_ascii_digit() {
+            digit += 1;
+        } else {
+            symbol += 1;
+        }
+    }
+
+    let unique_chars = seen.into_iter().filter(|seen| *seen).count();
+    let ratio = base64_chars.saturating_mul(100) / candidate.len().max(1);
+    let classes = [upper, lower, digit, symbol]
+        .into_iter()
+        .filter(|count| *count > 0)
+        .count();
+    if ratio < 96 || unique_chars < min_unique_chars || classes < 2 {
+        return None;
+    }
+
+    Some((70 + ratio.saturating_sub(96).saturating_mul(8)).min(100))
+}
+
+fn is_base64ish_char_supplement(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '+' | '/' | '_' | '-' | '=')
+}
+
+fn detect_minified_js_json_noise_supplement(
+    input: &str,
+    lines: &[&str],
+) -> Option<ContextBlobNoiseFinding> {
+    let trimmed = input.trim();
+    if trimmed.len() < 512 {
+        return None;
+    }
+
+    let non_empty_lines = lines.iter().filter(|line| !line.trim().is_empty()).count();
+    let max_line_bytes = lines
+        .iter()
+        .map(|line| line.trim().len())
+        .max()
+        .unwrap_or(0);
+    if non_empty_lines > 4 && max_line_bytes < 512 {
+        return None;
+    }
+
+    let chars = trimmed.chars().count();
+    let whitespace = trimmed.chars().filter(|ch| ch.is_whitespace()).count();
+    if whitespace.saturating_mul(100) > chars.max(1).saturating_mul(5) {
+        return None;
+    }
+
+    let punctuation = trimmed
+        .chars()
+        .filter(|ch| matches!(ch, '{' | '}' | '[' | ']' | '(' | ')' | ':' | ',' | ';'))
+        .count();
+    if punctuation.saturating_mul(100) < chars.max(1).saturating_mul(8) {
+        return None;
+    }
+
+    let (detail, score) = if looks_like_minified_json_supplement(trimmed) {
+        ("minified_json", 92)
+    } else if looks_like_minified_javascript_supplement(trimmed) {
+        ("minified_javascript", 88)
+    } else {
+        return None;
+    };
+
+    Some(ContextBlobNoiseFinding {
+        kind: ContextBlobNoiseKind::MinifiedJsJson,
+        line: Some(1),
+        bytes: trimmed.len(),
+        score,
+        detail: format!("{detail}, max_line_bytes={max_line_bytes}"),
+    })
+}
+
+fn looks_like_minified_json_supplement(input: &str) -> bool {
+    (input.starts_with('{') && input.ends_with('}')
+        || input.starts_with('[') && input.ends_with(']'))
+        && input.matches(':').count() >= 8
+        && input.matches(',').count() >= 8
+        && input.matches('"').count() >= 16
+}
+
+fn looks_like_minified_javascript_supplement(input: &str) -> bool {
+    let function_markers = count_substring_supplement(input, "function(")
+        + count_substring_supplement(input, "=>")
+        + count_substring_supplement(input, "module.exports")
+        + count_substring_supplement(input, "exports.");
+    let semicolons = input.matches(';').count();
+    let braces = input.matches('{').count() + input.matches('}').count();
+    let parens = input.matches('(').count() + input.matches(')').count();
+
+    function_markers >= 2 && (semicolons >= 8 || braces + parens >= 32)
+}
+
+fn count_substring_supplement(input: &str, needle: &str) -> usize {
+    input.match_indices(needle).count()
+}
+
+fn detect_lockfile_or_vendor_noise_supplement(
+    path: Option<&Path>,
+    input: &str,
+    lines: &[&str],
+) -> Option<ContextBlobNoiseFinding> {
+    if let Some(path) = path
+        && let Some(detail) = context_lockfile_or_vendor_path_detail_supplement(path)
+    {
+        return Some(ContextBlobNoiseFinding {
+            kind: ContextBlobNoiseKind::LockfileOrVendor,
+            line: None,
+            bytes: input.len(),
+            score: 100,
+            detail,
+        });
+    }
+
+    let cargo_packages = lines
+        .iter()
+        .filter(|line| line.trim() == "[[package]]")
+        .count();
+    let cargo_checksums = lines
+        .iter()
+        .filter(|line| line.trim_start().starts_with("checksum = "))
+        .count();
+    if cargo_packages >= 4 && cargo_checksums >= 2 {
+        return Some(ContextBlobNoiseFinding {
+            kind: ContextBlobNoiseKind::LockfileOrVendor,
+            line: Some(1),
+            bytes: input.len(),
+            score: 95,
+            detail: format!("cargo_lock_packages={cargo_packages}"),
+        });
+    }
+
+    let lower = input.to_ascii_lowercase();
+    if lower.contains("\"lockfileversion\"")
+        && (lower.contains("\"packages\"") || lower.contains("\"dependencies\""))
+    {
+        return Some(ContextBlobNoiseFinding {
+            kind: ContextBlobNoiseKind::LockfileOrVendor,
+            line: Some(1),
+            bytes: input.len(),
+            score: 95,
+            detail: "npm_lockfile_json".to_string(),
+        });
+    }
+
+    if lower.contains("# yarn lockfile")
+        || lower.contains("pnpm-lock.yaml")
+        || lower.contains("lockfileversion:")
+            && (lower.contains("importers:") || lower.contains("packages:"))
+    {
+        return Some(ContextBlobNoiseFinding {
+            kind: ContextBlobNoiseKind::LockfileOrVendor,
+            line: Some(1),
+            bytes: input.len(),
+            score: 90,
+            detail: "package_manager_lockfile".to_string(),
+        });
+    }
+
+    let non_empty_lines = lines.iter().filter(|line| !line.trim().is_empty()).count();
+    let mut vendor_path_lines = 0usize;
+    let mut first_vendor_line = None;
+    for (index, line) in lines.iter().enumerate() {
+        if context_line_has_vendor_path_supplement(line) {
+            vendor_path_lines += 1;
+            first_vendor_line.get_or_insert(index + 1);
+        }
+    }
+    if vendor_path_lines >= 8
+        && vendor_path_lines.saturating_mul(100) >= non_empty_lines.max(1) * 40
+    {
+        return Some(ContextBlobNoiseFinding {
+            kind: ContextBlobNoiseKind::LockfileOrVendor,
+            line: first_vendor_line,
+            bytes: input.len(),
+            score: 85,
+            detail: format!("vendor_path_lines={vendor_path_lines}"),
+        });
+    }
+
+    None
+}
+
+fn context_lockfile_or_vendor_path_detail_supplement(path: &Path) -> Option<String> {
+    let normalized = path.display().to_string().replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    let file_name = lower.rsplit('/').next().unwrap_or(lower.as_str());
+    if matches!(
+        file_name,
+        "cargo.lock"
+            | "package-lock.json"
+            | "npm-shrinkwrap.json"
+            | "yarn.lock"
+            | "pnpm-lock.yaml"
+            | "bun.lock"
+            | "bun.lockb"
+            | "poetry.lock"
+            | "pipfile.lock"
+            | "gemfile.lock"
+            | "composer.lock"
+            | "go.sum"
+    ) {
+        return Some(format!("lockfile_path={normalized}"));
+    }
+
+    [
+        "/node_modules/",
+        "/vendor/",
+        "/third_party/",
+        "/.cargo/registry/",
+        "/.pnpm/",
+        "/.yarn/cache/",
+    ]
+    .into_iter()
+    .find(|marker| {
+        lower.contains(marker) || lower.trim_start_matches("./").starts_with(&marker[1..])
+    })
+    .map(|_| format!("vendor_path={normalized}"))
+}
+
+fn context_line_has_vendor_path_supplement(line: &str) -> bool {
+    let lower = line.replace('\\', "/").to_ascii_lowercase();
+    [
+        "/node_modules/",
+        "node_modules/",
+        "/vendor/",
+        "vendor/",
+        "/third_party/",
+        "third_party/",
+        "/.cargo/registry/",
+        ".cargo/registry/",
+        "/.pnpm/",
+        ".pnpm/",
+        "/.yarn/cache/",
+        ".yarn/cache/",
+    ]
+    .into_iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn detect_repeated_path_flood_noise_supplement(
+    input: &str,
+    lines: &[&str],
+) -> Option<ContextBlobNoiseFinding> {
+    let mut path_counts = BTreeMap::<String, usize>::new();
+    let mut prefix_counts = BTreeMap::<String, usize>::new();
+    let mut first_path_line = BTreeMap::<String, usize>::new();
+    let mut path_lines = 0usize;
+
+    for (index, line) in lines.iter().enumerate() {
+        let Some(path) = context_noise_extract_path_key_supplement(line) else {
+            continue;
+        };
+        path_lines += 1;
+        first_path_line.entry(path.clone()).or_insert(index + 1);
+        *path_counts.entry(path.clone()).or_default() += 1;
+        *prefix_counts
+            .entry(context_noise_path_prefix_supplement(&path))
+            .or_default() += 1;
+    }
+
+    if path_lines < 16 {
+        return None;
+    }
+
+    let (top_path, top_path_count) = path_counts
+        .iter()
+        .max_by(|left, right| left.1.cmp(right.1).then_with(|| right.0.cmp(left.0)))?;
+    let top_prefix_count = prefix_counts.values().copied().max().unwrap_or(0);
+    let unique_paths = path_counts.len();
+    let exact_flood = *top_path_count >= 8 && top_path_count.saturating_mul(100) >= path_lines * 35;
+    let low_variety_flood = path_lines >= 24 && unique_paths.saturating_mul(100) <= path_lines * 20;
+    let prefix_flood =
+        top_prefix_count >= 24 && top_prefix_count.saturating_mul(100) >= path_lines * 70;
+
+    if !exact_flood && !low_variety_flood && !prefix_flood {
+        return None;
+    }
+
+    Some(ContextBlobNoiseFinding {
+        kind: ContextBlobNoiseKind::RepeatedPathFlood,
+        line: first_path_line.get(top_path.as_str()).copied(),
+        bytes: input.len(),
+        score: if exact_flood { 92 } else { 84 },
+        detail: format!(
+            "path_lines={path_lines}, unique_paths={unique_paths}, top_path_count={top_path_count}, top_path={top_path}"
+        ),
+    })
+}
+
+fn context_noise_extract_path_key_supplement(line: &str) -> Option<String> {
+    if let Some(search_match) =
+        parse_search_match_line(line).or_else(|| parse_rg_json_match_line(line))
+    {
+        return context_noise_normalize_path_token_supplement(&search_match.path);
+    }
+
+    if let Some(path) = parse_file_list_entry_line(line) {
+        return context_noise_normalize_path_token_supplement(&path);
+    }
+
+    line.split_whitespace()
+        .filter_map(context_noise_normalize_path_token_supplement)
+        .next()
+}
+
+fn context_noise_normalize_path_token_supplement(token: &str) -> Option<String> {
+    let token = token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
+        )
+    });
+    if token.contains("://") {
+        return None;
+    }
+
+    let normalized = token.replace('\\', "/");
+    let stripped = context_noise_strip_path_location_suffix_supplement(&normalized);
+    let stripped = stripped
+        .trim_start_matches("a/")
+        .trim_start_matches("b/")
+        .trim_start_matches("./")
+        .trim_matches('/');
+    if stripped.len() < 3 || !stripped.contains('/') || stripped.contains(' ') {
+        return None;
+    }
+
+    Some(stripped.to_string())
+}
+
+fn context_noise_strip_path_location_suffix_supplement(path: &str) -> &str {
+    let mut value = path;
+    for _ in 0..2 {
+        let Some((head, tail)) = value.rsplit_once(':') else {
+            break;
+        };
+        if tail.is_empty() || !tail.chars().all(|ch| ch.is_ascii_digit()) {
+            break;
+        }
+        value = head;
+    }
+    value
+}
+
+fn context_noise_path_prefix_supplement(path: &str) -> String {
+    let segments = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .take(3)
+        .collect::<Vec<_>>();
+    if segments.len() <= 1 {
+        path.to_string()
+    } else {
+        segments.join("/")
+    }
 }
 
 fn normalize_command_output(input: &str) -> String {
@@ -1607,7 +2812,11 @@ fn split_git_diff_sections<'a>(lines: &'a [&'a str]) -> Vec<Vec<&'a str>> {
             sections.push(current);
             current = Vec::new();
         }
-        if line.starts_with("diff --git ") || !current.is_empty() {
+        if line.starts_with("diff --git ")
+            || !current.is_empty()
+            || line.starts_with("--- ")
+            || line.starts_with("@@ ")
+        {
             current.push(*line);
         }
     }
@@ -1671,6 +2880,54 @@ fn is_git_diff_structural_line(line: &str) -> bool {
         || line.starts_with("GIT binary patch")
 }
 
+fn looks_like_git_diff_output(lines: &[&str]) -> bool {
+    if lines.iter().any(|line| line.starts_with("diff --git "))
+        || lines
+            .iter()
+            .filter(|line| is_diff_hunk_line(line))
+            .take(2)
+            .count()
+            >= 1
+    {
+        return true;
+    }
+
+    let stat_lines = lines
+        .iter()
+        .filter(|line| looks_like_git_diff_stat_line(line))
+        .count();
+    let stat_summaries = lines
+        .iter()
+        .filter(|line| looks_like_git_diff_stat_summary(line))
+        .count();
+    stat_lines > 0 && stat_summaries > 0
+}
+
+fn looks_like_git_diff_stat_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    let Some((path, stats)) = trimmed.split_once(" | ") else {
+        return false;
+    };
+    if path.trim().is_empty() || stats.trim().is_empty() {
+        return false;
+    }
+    let stats = stats.trim();
+    stats.starts_with("Bin ")
+        || stats.chars().any(|ch| ch == '+' || ch == '-')
+        || stats
+            .split_whitespace()
+            .next()
+            .is_some_and(|count| count.chars().all(|ch| ch.is_ascii_digit()))
+}
+
+fn looks_like_git_diff_stat_summary(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.contains(" file changed")
+        || trimmed.contains(" files changed")
+        || trimmed.contains(" insertion")
+        || trimmed.contains(" deletion")
+}
+
 #[derive(Clone)]
 struct SearchMatch {
     path: String,
@@ -1714,6 +2971,135 @@ fn parse_search_match_line(line: &str) -> Option<SearchMatch> {
     })
 }
 
+fn parse_rg_json_match_line(line: &str) -> Option<SearchMatch> {
+    if !looks_like_rg_json_line(line) || !json_field_has_string_value(line, "type", "match") {
+        return None;
+    }
+
+    let path_section = line.split_once("\"path\"")?.1;
+    let path = extract_json_string_field(path_section, "text")
+        .or_else(|| extract_json_string_field(path_section, "path"))?;
+    let lines_section = line.split_once("\"lines\"").map(|(_, section)| section);
+    let text = lines_section
+        .and_then(|section| extract_json_string_field(section, "text"))
+        .unwrap_or_default();
+    Some(SearchMatch {
+        path: path.trim().to_string(),
+        line_number: extract_json_usize_field(line, "line_number"),
+        text: text.trim().to_string(),
+    })
+}
+
+fn looks_like_rg_json_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with('{')
+        && trimmed.contains("\"type\"")
+        && (trimmed.contains("\"data\"") || trimmed.contains("\"path\""))
+}
+
+fn json_field_has_string_value(line: &str, field: &str, value: &str) -> bool {
+    extract_json_string_field(line, field).is_some_and(|found| found == value)
+}
+
+fn extract_json_string_field(input: &str, field: &str) -> Option<String> {
+    let marker = format!("\"{field}\"");
+    let after_marker = input.split_once(&marker)?.1;
+    let after_colon = after_marker.split_once(':')?.1.trim_start();
+    let value = after_colon.strip_prefix('"')?;
+    parse_json_string_prefix(value)
+}
+
+fn extract_json_usize_field(input: &str, field: &str) -> Option<usize> {
+    let marker = format!("\"{field}\"");
+    let after_marker = input.split_once(&marker)?.1;
+    let after_colon = after_marker.split_once(':')?.1.trim_start();
+    let digits = after_colon
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    (!digits.is_empty()).then(|| digits.parse::<usize>().ok())?
+}
+
+fn parse_json_string_prefix(input: &str) -> Option<String> {
+    let mut output = String::new();
+    let mut escaped = false;
+    for ch in input.chars() {
+        if escaped {
+            match ch {
+                'n' => output.push('\n'),
+                'r' => output.push('\r'),
+                't' => output.push('\t'),
+                '"' => output.push('"'),
+                '\\' => output.push('\\'),
+                other => output.push(other),
+            }
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '"' => return Some(output),
+            other => output.push(other),
+        }
+    }
+    None
+}
+
+fn parse_search_heading_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty()
+        || trimmed == "--"
+        || trimmed.contains(':')
+        || trimmed.contains("://")
+        || trimmed.split_whitespace().count() > 1
+    {
+        return None;
+    }
+    parse_file_list_entry_line(trimmed).filter(|path| looks_like_search_path(path))
+}
+
+fn parse_heading_search_match_line(line: &str, path: Option<&str>) -> Option<SearchMatch> {
+    let path = path?;
+    let trimmed = line.trim_start();
+    let (candidate, after_line) = trimmed.split_once(':')?;
+    if !candidate.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let text = if let Some((column, after_column)) = after_line.split_once(':') {
+        if column.chars().all(|ch| ch.is_ascii_digit()) {
+            after_column
+        } else {
+            after_line
+        }
+    } else {
+        after_line
+    };
+    Some(SearchMatch {
+        path: path.to_string(),
+        line_number: candidate.parse::<usize>().ok(),
+        text: text.trim().to_string(),
+    })
+}
+
+fn count_heading_search_matches(lines: &[&str]) -> usize {
+    let mut count = 0usize;
+    let mut current_path = None::<String>;
+    for line in lines {
+        if parse_search_match_line(line).is_some() || parse_rg_json_match_line(line).is_some() {
+            current_path = None;
+            continue;
+        }
+        if let Some(path) = parse_search_heading_line(line) {
+            current_path = Some(path);
+            continue;
+        }
+        if parse_heading_search_match_line(line, current_path.as_deref()).is_some() {
+            count += 1;
+        }
+    }
+    count
+}
+
 fn looks_like_search_path(path: &str) -> bool {
     path.contains('/') || path.contains('\\') || path.contains('.')
 }
@@ -1724,6 +3110,7 @@ fn looks_like_file_list_line(line: &str) -> bool {
         || trimmed.starts_with('#')
         || trimmed.starts_with("[...")
         || trimmed.contains(" directories, ")
+        || trimmed.contains("://")
     {
         return false;
     }
@@ -1734,6 +3121,94 @@ fn looks_like_file_list_line(line: &str) -> bool {
         || trimmed.contains("\u{251c}\u{2500}\u{2500} ")
         || trimmed.contains("\u{2514}\u{2500}\u{2500} ")
         || (trimmed.contains('/') && !trimmed.contains("://") && !trimmed.contains(' '))
+        || looks_like_bare_path_entry(trimmed)
+}
+
+fn parse_file_list_entry_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if looks_like_file_list_line(trimmed) {
+        return Some(normalize_file_list_path(trimmed));
+    }
+    parse_ls_listing_path(trimmed)
+}
+
+fn looks_like_bare_path_entry(trimmed: &str) -> bool {
+    if trimmed.is_empty()
+        || trimmed.chars().any(char::is_whitespace)
+        || trimmed.contains(':')
+        || trimmed.starts_with('-')
+        || trimmed.starts_with('{')
+        || trimmed.starts_with('[')
+    {
+        return false;
+    }
+
+    if matches!(
+        trimmed,
+        "Cargo.toml"
+            | "Cargo.lock"
+            | "Makefile"
+            | "README"
+            | "README.md"
+            | "LICENSE"
+            | "AGENTS.md"
+            | ".gitignore"
+    ) {
+        return true;
+    }
+
+    let Some((_, ext)) = trimmed.rsplit_once('.') else {
+        return false;
+    };
+    !ext.is_empty()
+        && ext.len() <= 12
+        && ext
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+fn parse_ls_listing_path(trimmed: &str) -> Option<String> {
+    if trimmed.is_empty() || trimmed.starts_with("total ") {
+        return None;
+    }
+    let first = trimmed.chars().next()?;
+    if !matches!(first, '-' | 'd' | 'l' | 'c' | 'b' | 'p' | 's' | 'D') {
+        return None;
+    }
+    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+    if parts.len() < 9 || !looks_like_ls_mode(parts[0]) {
+        return None;
+    }
+    let path = parts[8..].join(" ");
+    let path = path.trim();
+    if path.is_empty() || path == "." || path == ".." {
+        None
+    } else {
+        Some(path.to_string())
+    }
+}
+
+fn looks_like_ls_mode(mode: &str) -> bool {
+    mode.len() >= 10
+        && mode.chars().all(|ch| {
+            matches!(
+                ch,
+                '-' | 'd'
+                    | 'l'
+                    | 'c'
+                    | 'b'
+                    | 'p'
+                    | 's'
+                    | 'D'
+                    | 'r'
+                    | 'w'
+                    | 'x'
+                    | 'S'
+                    | 'T'
+                    | 't'
+                    | '+'
+            )
+        })
 }
 
 fn normalize_file_list_path(entry: &str) -> String {
@@ -1793,6 +3268,45 @@ fn format_count_map(label: &str, counts: &BTreeMap<String, usize>, limit: usize)
         rendered.push_str(&format!(" (+{} more)", entries.len() - limit));
     }
     format!("{label}: {rendered}")
+}
+
+fn is_critical_preserve_line(line: &str) -> bool {
+    is_error_signal_line(line)
+        || count_file_location_signals(line) > 0
+        || is_diff_hunk_line(line)
+        || is_test_failure_signal_line(line)
+        || is_rust_exit_status_line(line)
+        || is_stack_signal_line(line)
+        || is_rust_diagnostic_signal_line(line)
+        || is_log_level_signal_line(line)
+}
+
+fn is_log_level_signal_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    contains_json_log_level(&lower, "error")
+        || contains_json_log_level(&lower, "fatal")
+        || contains_json_log_level(&lower, "warn")
+        || lower.starts_with("error ")
+        || lower.starts_with("warn ")
+        || lower.starts_with("warning ")
+        || lower.starts_with("fatal ")
+        || lower.starts_with("[error]")
+        || lower.starts_with("[warn]")
+        || lower.contains(" error ")
+        || lower.contains(" fatal ")
+        || lower.contains(" warn ")
+}
+
+fn contains_json_log_level(lower: &str, level: &str) -> bool {
+    for field in ["level", "severity", "status"] {
+        if lower.contains(&format!("\"{field}\":\"{level}\""))
+            || lower.contains(&format!("\"{field}\": \"{level}\""))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 impl CommandOutputKind {

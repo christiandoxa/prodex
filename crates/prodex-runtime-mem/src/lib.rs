@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, bail};
 use dirs::home_dir;
+use std::cmp::Ordering;
 use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_CLAUDE_CONFIG_DIR_NAME: &str = ".claude";
 const CLAUDE_MEM_DATA_DIR_NAME: &str = ".claude-mem";
@@ -20,11 +21,125 @@ const PRODEX_CLAUDE_MEM_WRAPPER_NAME: &str = "prodex-claude";
 const CLAUDE_MEM_PREFIX: &str = "mem";
 const CLAUDE_MEM_FULL_PREFIX: &str = "mem-full";
 const CLAUDE_MEM_FULL_FLAG: &str = "--mem-full";
+pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMemTranscriptMode {
     Slim,
     Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMemCapsulePriority {
+    Required,
+    ProjectLocal,
+    Recent,
+    Optional,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeMemCapsuleMetadata {
+    pub id: String,
+    pub token_cost: usize,
+    pub required: bool,
+    pub project_path: Option<PathBuf>,
+    pub updated_at_seconds: Option<i64>,
+    pub relevance: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeMemCapsuleSelectionContext {
+    pub token_budget: usize,
+    pub project_root: Option<PathBuf>,
+    pub now_seconds: Option<i64>,
+    pub recent_window_seconds: u64,
+}
+
+impl RuntimeMemCapsuleSelectionContext {
+    pub fn new(token_budget: usize) -> Self {
+        Self {
+            token_budget,
+            project_root: None,
+            now_seconds: None,
+            recent_window_seconds: RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS,
+        }
+    }
+}
+
+impl Default for RuntimeMemCapsuleSelectionContext {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeMemCapsuleSelectionEntry {
+    pub id: String,
+    pub priority: RuntimeMemCapsulePriority,
+    pub token_cost: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeMemCapsuleSelection {
+    pub selected: Vec<RuntimeMemCapsuleSelectionEntry>,
+    pub omitted: Vec<RuntimeMemCapsuleSelectionEntry>,
+    pub used_tokens: usize,
+    pub token_budget: usize,
+}
+
+pub fn runtime_mem_classify_capsule(
+    capsule: &RuntimeMemCapsuleMetadata,
+    context: &RuntimeMemCapsuleSelectionContext,
+) -> RuntimeMemCapsulePriority {
+    if capsule.required {
+        return RuntimeMemCapsulePriority::Required;
+    }
+    if runtime_mem_capsule_is_project_local(capsule, context) {
+        return RuntimeMemCapsulePriority::ProjectLocal;
+    }
+    if runtime_mem_capsule_is_recent(capsule, context) {
+        return RuntimeMemCapsulePriority::Recent;
+    }
+    RuntimeMemCapsulePriority::Optional
+}
+
+pub fn runtime_mem_select_capsules(
+    capsules: impl IntoIterator<Item = RuntimeMemCapsuleMetadata>,
+    context: RuntimeMemCapsuleSelectionContext,
+) -> RuntimeMemCapsuleSelection {
+    let mut candidates = capsules
+        .into_iter()
+        .map(|capsule| {
+            let priority = runtime_mem_classify_capsule(&capsule, &context);
+            (capsule, priority)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(runtime_mem_capsule_order);
+
+    let mut selected = Vec::new();
+    let mut omitted = Vec::new();
+    let mut used_tokens = 0usize;
+
+    for (capsule, priority) in candidates {
+        let entry = RuntimeMemCapsuleSelectionEntry {
+            id: capsule.id,
+            priority,
+            token_cost: capsule.token_cost,
+        };
+        if used_tokens.saturating_add(entry.token_cost) <= context.token_budget {
+            used_tokens += entry.token_cost;
+            selected.push(entry);
+        } else {
+            omitted.push(entry);
+        }
+    }
+
+    RuntimeMemCapsuleSelection {
+        selected,
+        omitted,
+        used_tokens,
+        token_budget: context.token_budget,
+    }
 }
 
 pub fn runtime_mem_extract_mode(args: &[OsString]) -> (bool, Vec<OsString>) {
@@ -411,6 +526,80 @@ fn runtime_mem_codex_schema_for_mode(mode: RuntimeMemTranscriptMode) -> serde_js
     }
 }
 
+fn runtime_mem_capsule_is_project_local(
+    capsule: &RuntimeMemCapsuleMetadata,
+    context: &RuntimeMemCapsuleSelectionContext,
+) -> bool {
+    let (Some(project_root), Some(capsule_path)) = (&context.project_root, &capsule.project_path)
+    else {
+        return false;
+    };
+    let project_root = runtime_mem_normalized_path(project_root);
+    let capsule_path = runtime_mem_normalized_path(capsule_path);
+    capsule_path == project_root || capsule_path.starts_with(project_root)
+}
+
+fn runtime_mem_capsule_is_recent(
+    capsule: &RuntimeMemCapsuleMetadata,
+    context: &RuntimeMemCapsuleSelectionContext,
+) -> bool {
+    let (Some(updated_at), Some(now)) = (capsule.updated_at_seconds, context.now_seconds) else {
+        return false;
+    };
+    if updated_at >= now {
+        return true;
+    }
+    now.checked_sub(updated_at)
+        .is_some_and(|age| (age as u64) <= context.recent_window_seconds)
+}
+
+fn runtime_mem_capsule_order(
+    left: &(RuntimeMemCapsuleMetadata, RuntimeMemCapsulePriority),
+    right: &(RuntimeMemCapsuleMetadata, RuntimeMemCapsulePriority),
+) -> Ordering {
+    runtime_mem_capsule_priority_rank(left.1)
+        .cmp(&runtime_mem_capsule_priority_rank(right.1))
+        .then_with(|| runtime_mem_relevance_order(right.0.relevance, left.0.relevance))
+        .then_with(|| {
+            right
+                .0
+                .updated_at_seconds
+                .unwrap_or(i64::MIN)
+                .cmp(&left.0.updated_at_seconds.unwrap_or(i64::MIN))
+        })
+        .then_with(|| left.0.token_cost.cmp(&right.0.token_cost))
+        .then_with(|| left.0.id.cmp(&right.0.id))
+}
+
+fn runtime_mem_capsule_priority_rank(priority: RuntimeMemCapsulePriority) -> u8 {
+    match priority {
+        RuntimeMemCapsulePriority::Required => 0,
+        RuntimeMemCapsulePriority::ProjectLocal => 1,
+        RuntimeMemCapsulePriority::Recent => 2,
+        RuntimeMemCapsulePriority::Optional => 3,
+    }
+}
+
+fn runtime_mem_relevance_order(left: f32, right: f32) -> Ordering {
+    left.partial_cmp(&right).unwrap_or(Ordering::Equal)
+}
+
+fn runtime_mem_normalized_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
 fn runtime_mem_slim_codex_schema() -> serde_json::Value {
     serde_json::json!({
         "name": CLAUDE_MEM_CODEX_SCHEMA_NAME,
@@ -463,3 +652,7 @@ fn runtime_mem_slim_codex_schema() -> serde_json::Value {
         ]
     })
 }
+
+#[cfg(test)]
+#[path = "../tests/src/lib.rs"]
+mod tests;

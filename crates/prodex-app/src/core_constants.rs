@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{
     RuntimeBrokerMetadata, RuntimeContinuationJournalSaveQueue, RuntimeProbeRefreshQueue,
-    RuntimeStateSaveQueue,
+    RuntimeSmartContextArtifactSaveQueue, RuntimeStateSaveQueue,
 };
 
 pub(crate) const DEFAULT_CODEX_DIR: &str = ".codex";
@@ -178,6 +178,9 @@ pub(crate) static RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE: OnceLock<
 > = OnceLock::new();
 pub(crate) static RUNTIME_PROBE_REFRESH_QUEUE: OnceLock<Arc<RuntimeProbeRefreshQueue>> =
     OnceLock::new();
+pub(crate) static RUNTIME_SMART_CONTEXT_ARTIFACT_SAVE_QUEUE: OnceLock<
+    Arc<RuntimeSmartContextArtifactSaveQueue>,
+> = OnceLock::new();
 pub(crate) static RUNTIME_PERSISTENCE_MODE_BY_LOG_PATH: OnceLock<Mutex<BTreeMap<PathBuf, bool>>> =
     OnceLock::new();
 pub(crate) static RUNTIME_BROKER_METADATA_BY_LOG_PATH: OnceLock<

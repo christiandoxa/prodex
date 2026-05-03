@@ -186,6 +186,92 @@ pub fn smart_context_conversation_dedupe(
         .collect()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmartContextCrossTurnDuplicateKeepReason {
+    ExactnessRequired,
+    BelowMinByteThreshold,
+    MissingArtifact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SmartContextCrossTurnDuplicateRefAction {
+    Keep {
+        id: String,
+        content_hash: String,
+        byte_len: usize,
+        reason: SmartContextCrossTurnDuplicateKeepReason,
+    },
+    ReplaceWithArtifactRef {
+        id: String,
+        artifact: SmartContextArtifactRef,
+        content_hash: String,
+        byte_len: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextCrossTurnDuplicateRefPlan {
+    pub actions: Vec<SmartContextCrossTurnDuplicateRefAction>,
+    pub replaced_items: usize,
+    pub replaced_bytes: usize,
+}
+
+pub fn smart_context_cross_turn_duplicate_ref_plan(
+    items: impl IntoIterator<Item = SmartContextConversationItem>,
+    available_artifacts: impl IntoIterator<Item = SmartContextArtifactRef>,
+    min_replacement_bytes: usize,
+    exactness_guard: &SmartContextExactnessGuard,
+) -> SmartContextCrossTurnDuplicateRefPlan {
+    let artifacts = smart_context_available_artifacts_by_hash_and_len(available_artifacts);
+    let exactness_allows = exactness_guard.decision == SmartContextExactnessDecision::Allow;
+    let mut actions = Vec::new();
+    let mut replaced_items = 0usize;
+    let mut replaced_bytes = 0usize;
+
+    for item in items {
+        let byte_len = item.text.len();
+        let content_hash = smart_context_hash_text(&item.text);
+        let action = if !exactness_allows {
+            SmartContextCrossTurnDuplicateRefAction::Keep {
+                id: item.id,
+                content_hash,
+                byte_len,
+                reason: SmartContextCrossTurnDuplicateKeepReason::ExactnessRequired,
+            }
+        } else if byte_len < min_replacement_bytes {
+            SmartContextCrossTurnDuplicateRefAction::Keep {
+                id: item.id,
+                content_hash,
+                byte_len,
+                reason: SmartContextCrossTurnDuplicateKeepReason::BelowMinByteThreshold,
+            }
+        } else if let Some(artifact) = artifacts.get(&(content_hash.clone(), byte_len)) {
+            replaced_items += 1;
+            replaced_bytes = replaced_bytes.saturating_add(byte_len);
+            SmartContextCrossTurnDuplicateRefAction::ReplaceWithArtifactRef {
+                id: item.id,
+                artifact: artifact.clone(),
+                content_hash,
+                byte_len,
+            }
+        } else {
+            SmartContextCrossTurnDuplicateRefAction::Keep {
+                id: item.id,
+                content_hash,
+                byte_len,
+                reason: SmartContextCrossTurnDuplicateKeepReason::MissingArtifact,
+            }
+        };
+        actions.push(action);
+    }
+
+    SmartContextCrossTurnDuplicateRefPlan {
+        actions,
+        replaced_items,
+        replaced_bytes,
+    }
+}
+
 pub fn smart_context_hash_refs(
     items: impl IntoIterator<Item = SmartContextConversationItem>,
 ) -> Vec<SmartContextHashRef> {
@@ -348,16 +434,36 @@ pub fn smart_context_auto_rehydrate_plan(
     }
 }
 
+pub const SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN: u64 = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmartContextTokenAccountingSource {
+    CurrentRequestTokens,
+    CurrentRequestBodyEstimate,
+    ObservedHistory,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmartContextTokenAccountingRisk {
+    UnknownTokenWindow,
+    ZeroContextWindow,
+    ReservedOutputConsumesWindow,
+    UnknownCurrentRequestAccounting,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SmartContextObservedTokenAccountingInput {
     pub model_context_window_tokens: Option<u64>,
     pub reserved_output_tokens: u64,
     pub current_input_tokens: u64,
+    pub current_request_body_bytes: usize,
     pub observed_usage: Vec<RuntimeTokenUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmartContextObservedTokenAccounting {
+    pub model_context_window_tokens: Option<u64>,
     pub observed_turns: usize,
     pub observed_input_tokens: u64,
     pub observed_cached_input_tokens: u64,
@@ -365,10 +471,18 @@ pub struct SmartContextObservedTokenAccounting {
     pub observed_output_tokens: u64,
     pub observed_reasoning_tokens: u64,
     pub observed_total_tokens: u64,
+    pub observed_context_tokens: u64,
     pub last_input_tokens: u64,
+    pub last_accounted_input_tokens: u64,
+    pub last_observed_context_tokens: u64,
+    pub current_request_body_bytes: usize,
+    pub estimated_current_request_tokens: u64,
+    pub current_request_accounted_tokens: u64,
     pub effective_input_tokens: u64,
+    pub effective_input_source: SmartContextTokenAccountingSource,
     pub reserved_output_tokens: u64,
     pub available_context_tokens: Option<u64>,
+    pub accounting_risks: Vec<SmartContextTokenAccountingRisk>,
 }
 
 pub fn smart_context_observed_token_accounting(
@@ -379,6 +493,8 @@ pub fn smart_context_observed_token_accounting(
     let mut observed_output_tokens = 0u64;
     let mut observed_reasoning_tokens = 0u64;
     let mut last_input_tokens = 0u64;
+    let mut last_accounted_input_tokens = 0u64;
+    let mut last_observed_context_tokens = 0u64;
 
     for usage in &input.observed_usage {
         observed_input_tokens = observed_input_tokens.saturating_add(usage.input_tokens);
@@ -388,19 +504,45 @@ pub fn smart_context_observed_token_accounting(
         observed_reasoning_tokens =
             observed_reasoning_tokens.saturating_add(usage.reasoning_tokens);
         last_input_tokens = usage.input_tokens;
+        last_accounted_input_tokens = if usage.input_tokens == 0 {
+            usage.cached_input_tokens
+        } else {
+            usage.input_tokens
+        };
+        last_observed_context_tokens =
+            smart_context_observed_usage_context_tokens(*usage).unwrap_or(0);
     }
 
     let observed_uncached_input_tokens =
         observed_input_tokens.saturating_sub(observed_cached_input_tokens);
     let observed_total_tokens = observed_input_tokens.saturating_add(observed_output_tokens);
-    let effective_input_tokens = input.current_input_tokens.max(last_input_tokens);
+    let observed_context_tokens = observed_total_tokens.saturating_add(observed_reasoning_tokens);
+    let estimated_current_request_tokens =
+        smart_context_estimate_tokens_from_body_bytes(input.current_request_body_bytes);
+    let current_request_accounted_tokens = input
+        .current_input_tokens
+        .max(estimated_current_request_tokens);
+    let effective_input_tokens = current_request_accounted_tokens.max(last_accounted_input_tokens);
+    let effective_input_source = smart_context_effective_input_source(
+        input.current_input_tokens,
+        estimated_current_request_tokens,
+        current_request_accounted_tokens,
+        last_accounted_input_tokens,
+        effective_input_tokens,
+    );
     let available_context_tokens = input.model_context_window_tokens.map(|window| {
         window
             .saturating_sub(effective_input_tokens)
             .saturating_sub(input.reserved_output_tokens)
     });
+    let accounting_risks = smart_context_token_accounting_risks(
+        input.model_context_window_tokens,
+        input.reserved_output_tokens,
+        effective_input_source,
+    );
 
     SmartContextObservedTokenAccounting {
+        model_context_window_tokens: input.model_context_window_tokens,
         observed_turns: input.observed_usage.len(),
         observed_input_tokens,
         observed_cached_input_tokens,
@@ -408,11 +550,38 @@ pub fn smart_context_observed_token_accounting(
         observed_output_tokens,
         observed_reasoning_tokens,
         observed_total_tokens,
+        observed_context_tokens,
         last_input_tokens,
+        last_accounted_input_tokens,
+        last_observed_context_tokens,
+        current_request_body_bytes: input.current_request_body_bytes,
+        estimated_current_request_tokens,
+        current_request_accounted_tokens,
         effective_input_tokens,
+        effective_input_source,
         reserved_output_tokens: input.reserved_output_tokens,
         available_context_tokens,
+        accounting_risks,
     }
+}
+
+pub fn smart_context_estimate_tokens_from_body_bytes(body_bytes: usize) -> u64 {
+    let body_bytes = u64::try_from(body_bytes).unwrap_or(u64::MAX);
+    body_bytes.saturating_add(SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN - 1)
+        / SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN
+}
+
+pub fn smart_context_observed_usage_context_tokens(usage: RuntimeTokenUsage) -> Option<u64> {
+    let observed = usage
+        .input_tokens
+        .saturating_add(usage.output_tokens)
+        .saturating_add(usage.reasoning_tokens);
+    let observed = if observed == 0 {
+        usage.cached_input_tokens
+    } else {
+        observed
+    };
+    (observed > 0).then_some(observed)
 }
 
 pub fn smart_context_token_budget_tier_from_accounting(
@@ -422,6 +591,12 @@ pub fn smart_context_token_budget_tier_from_accounting(
         .available_context_tokens
         .map(smart_context_u64_budget_tier)
         .unwrap_or(SmartContextTokenBudgetTier::Exact)
+}
+
+pub fn smart_context_accounting_safe_for_adaptive_policy(
+    accounting: &SmartContextObservedTokenAccounting,
+) -> bool {
+    accounting.accounting_risks.is_empty()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -513,6 +688,26 @@ pub struct SmartContextFingerprint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextStaticContextItem {
+    pub id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextStableStaticContextItem {
+    pub id: String,
+    pub canonical_text: String,
+    pub content_hash: String,
+    pub byte_len: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextStaticContextPromptCacheFingerprint {
+    pub content_hash: String,
+    pub items: Vec<SmartContextStableStaticContextItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SmartContextFingerprintChange {
     Added {
         fingerprint: SmartContextFingerprint,
@@ -542,6 +737,62 @@ pub fn smart_context_fingerprints(
     inputs: impl IntoIterator<Item = SmartContextFingerprintInput>,
 ) -> Vec<SmartContextFingerprint> {
     inputs.into_iter().map(smart_context_fingerprint).collect()
+}
+
+pub fn smart_context_stabilize_static_context_text(text: &str) -> String {
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    let lines = text
+        .lines()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !smart_context_static_context_noise_line(line))
+        .collect::<Vec<_>>();
+
+    let Some(start) = lines.iter().position(|line| !line.trim().is_empty()) else {
+        return String::new();
+    };
+    let end = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .unwrap_or(start);
+
+    lines[start..=end].join("\n")
+}
+
+pub fn smart_context_stabilize_static_context_items(
+    items: impl IntoIterator<Item = SmartContextStaticContextItem>,
+) -> Vec<SmartContextStableStaticContextItem> {
+    let mut items = items
+        .into_iter()
+        .filter_map(|item| {
+            let id = smart_context_stabilize_static_context_id(&item.id);
+            let canonical_text = smart_context_stabilize_static_context_text(&item.text);
+            if id.is_empty() && canonical_text.is_empty() {
+                return None;
+            }
+            let content_hash = smart_context_hash_text(&canonical_text);
+            Some(SmartContextStableStaticContextItem {
+                id,
+                byte_len: canonical_text.len(),
+                canonical_text,
+                content_hash,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    items.sort_by(smart_context_static_context_item_order);
+    items
+}
+
+pub fn smart_context_static_context_prompt_cache_fingerprint(
+    items: impl IntoIterator<Item = SmartContextStaticContextItem>,
+) -> SmartContextStaticContextPromptCacheFingerprint {
+    let items = smart_context_stabilize_static_context_items(items);
+    let payload = smart_context_static_context_prompt_cache_payload(&items);
+
+    SmartContextStaticContextPromptCacheFingerprint {
+        content_hash: format!("scpc:{:016x}", smart_context_fnv1a64(payload.as_bytes())),
+        items,
+    }
 }
 
 pub fn smart_context_fingerprint_delta(
@@ -590,6 +841,7 @@ pub enum SmartContextBudgetPolicyReason {
     StaticContextChanged,
     MissingRehydrateRefs,
     UnknownTokenWindow,
+    UnsafeAccounting,
     PlentyOfBudget,
     ModerateBudget,
     TightBudget,
@@ -608,6 +860,7 @@ pub struct SmartContextAdaptiveBudgetPolicyInput {
 pub struct SmartContextAdaptiveBudgetPolicy {
     pub tier: SmartContextTokenBudgetTier,
     pub mode: SmartContextBudgetMode,
+    pub max_inline_bytes: usize,
     pub max_inline_tool_output_bytes: usize,
     pub max_rehydrate_tokens: u64,
     pub reasons: Vec<SmartContextBudgetPolicyReason>,
@@ -635,6 +888,14 @@ pub fn smart_context_adaptive_budget_policy(
     if input.accounting.available_context_tokens.is_none() {
         reasons.push(SmartContextBudgetPolicyReason::UnknownTokenWindow);
     }
+    if input
+        .accounting
+        .accounting_risks
+        .iter()
+        .any(|risk| *risk != SmartContextTokenAccountingRisk::UnknownTokenWindow)
+    {
+        reasons.push(SmartContextBudgetPolicyReason::UnsafeAccounting);
+    }
 
     if reasons.iter().any(|reason| {
         matches!(
@@ -643,11 +904,13 @@ pub fn smart_context_adaptive_budget_policy(
                 | SmartContextBudgetPolicyReason::StaticContextChanged
                 | SmartContextBudgetPolicyReason::MissingRehydrateRefs
                 | SmartContextBudgetPolicyReason::UnknownTokenWindow
+                | SmartContextBudgetPolicyReason::UnsafeAccounting
         )
     }) {
         return SmartContextAdaptiveBudgetPolicy {
             tier,
             mode: SmartContextBudgetMode::ExactPassThrough,
+            max_inline_bytes: usize::MAX,
             max_inline_tool_output_bytes: usize::MAX,
             max_rehydrate_tokens: input
                 .accounting
@@ -687,10 +950,16 @@ pub fn smart_context_adaptive_budget_policy(
         ),
     };
     reasons.push(tier_reason);
+    let max_rehydrate_tokens = input
+        .accounting
+        .available_context_tokens
+        .map(|available| max_rehydrate_tokens.min(available))
+        .unwrap_or(max_rehydrate_tokens);
 
     SmartContextAdaptiveBudgetPolicy {
         tier,
         mode,
+        max_inline_bytes: max_inline_tool_output_bytes,
         max_inline_tool_output_bytes,
         max_rehydrate_tokens,
         reasons,
@@ -780,6 +1049,50 @@ pub fn smart_context_hash_text(text: &str) -> String {
     format!("sc:{:016x}", smart_context_fnv1a64(text.as_bytes()))
 }
 
+fn smart_context_effective_input_source(
+    current_input_tokens: u64,
+    estimated_current_request_tokens: u64,
+    current_request_accounted_tokens: u64,
+    last_accounted_input_tokens: u64,
+    effective_input_tokens: u64,
+) -> SmartContextTokenAccountingSource {
+    if effective_input_tokens == 0 {
+        SmartContextTokenAccountingSource::Unknown
+    } else if last_accounted_input_tokens > current_request_accounted_tokens {
+        SmartContextTokenAccountingSource::ObservedHistory
+    } else if current_input_tokens >= estimated_current_request_tokens && current_input_tokens > 0 {
+        SmartContextTokenAccountingSource::CurrentRequestTokens
+    } else if estimated_current_request_tokens > 0 {
+        SmartContextTokenAccountingSource::CurrentRequestBodyEstimate
+    } else if last_accounted_input_tokens > 0 {
+        SmartContextTokenAccountingSource::ObservedHistory
+    } else {
+        SmartContextTokenAccountingSource::Unknown
+    }
+}
+
+fn smart_context_token_accounting_risks(
+    model_context_window_tokens: Option<u64>,
+    reserved_output_tokens: u64,
+    effective_input_source: SmartContextTokenAccountingSource,
+) -> Vec<SmartContextTokenAccountingRisk> {
+    let mut risks = Vec::new();
+
+    match model_context_window_tokens {
+        Some(0) => risks.push(SmartContextTokenAccountingRisk::ZeroContextWindow),
+        Some(window) if reserved_output_tokens >= window => {
+            risks.push(SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow);
+        }
+        Some(_) => {}
+        None => risks.push(SmartContextTokenAccountingRisk::UnknownTokenWindow),
+    }
+    if effective_input_source == SmartContextTokenAccountingSource::Unknown {
+        risks.push(SmartContextTokenAccountingRisk::UnknownCurrentRequestAccounting);
+    }
+
+    risks
+}
+
 fn smart_context_u64_budget_tier(available_tokens: u64) -> SmartContextTokenBudgetTier {
     if available_tokens > usize::MAX as u64 {
         SmartContextTokenBudgetTier::Exact
@@ -795,6 +1108,155 @@ fn smart_context_fingerprint_map(
         .into_iter()
         .map(|fingerprint| ((fingerprint.kind, fingerprint.id.clone()), fingerprint))
         .collect()
+}
+
+fn smart_context_available_artifacts_by_hash_and_len(
+    artifacts: impl IntoIterator<Item = SmartContextArtifactRef>,
+) -> BTreeMap<(String, usize), SmartContextArtifactRef> {
+    let mut artifacts = artifacts
+        .into_iter()
+        .filter(|artifact| non_empty(&artifact.id) && non_empty(&artifact.content_hash))
+        .collect::<Vec<_>>();
+    artifacts.sort_by(|left, right| {
+        left.content_hash
+            .cmp(&right.content_hash)
+            .then_with(|| left.byte_len.cmp(&right.byte_len))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut available = BTreeMap::new();
+    for artifact in artifacts {
+        available
+            .entry((artifact.content_hash.clone(), artifact.byte_len))
+            .or_insert(artifact);
+    }
+
+    available
+}
+
+fn smart_context_stabilize_static_context_id(id: &str) -> String {
+    id.trim().replace('\\', "/")
+}
+
+fn smart_context_static_context_item_order(
+    left: &SmartContextStableStaticContextItem,
+    right: &SmartContextStableStaticContextItem,
+) -> Ordering {
+    left.id
+        .cmp(&right.id)
+        .then_with(|| left.content_hash.cmp(&right.content_hash))
+        .then_with(|| left.byte_len.cmp(&right.byte_len))
+        .then_with(|| left.canonical_text.cmp(&right.canonical_text))
+}
+
+fn smart_context_static_context_prompt_cache_payload(
+    items: &[SmartContextStableStaticContextItem],
+) -> String {
+    let mut payload = String::from("prodex-smart-context-static-prompt-cache-v1\n");
+    for item in items {
+        payload.push_str("id-bytes:");
+        payload.push_str(&item.id.len().to_string());
+        payload.push('\n');
+        payload.push_str(&item.id);
+        payload.push('\n');
+        payload.push_str("text-bytes:");
+        payload.push_str(&item.byte_len.to_string());
+        payload.push('\n');
+        payload.push_str(&item.canonical_text);
+        payload.push('\n');
+    }
+    payload
+}
+
+fn smart_context_static_context_noise_line(line: &str) -> bool {
+    let mut value = line.trim();
+    if let Some(inner) = value
+        .strip_prefix("<!--")
+        .and_then(|value| value.strip_suffix("-->"))
+    {
+        value = inner.trim();
+    }
+
+    for prefix in ["//", "#", ";"] {
+        if let Some(rest) = value.strip_prefix(prefix) {
+            value = rest.trim_start();
+            break;
+        }
+    }
+
+    let Some((key, noise_value)) = value.split_once(':').or_else(|| value.split_once('=')) else {
+        return false;
+    };
+    let key = smart_context_static_context_noise_key(key);
+    if !smart_context_static_context_noise_key_is_volatile(&key) {
+        return false;
+    }
+
+    matches!(
+        key.as_str(),
+        "run id" | "request id" | "trace id" | "session id"
+    ) || smart_context_static_context_noise_value_looks_volatile(noise_value)
+}
+
+fn smart_context_static_context_noise_key(key: &str) -> String {
+    let lower = key.trim().to_ascii_lowercase();
+    let mut normalized = String::new();
+    let mut previous_space = false;
+    for value in lower.chars() {
+        let value = match value {
+            '-' | '_' => ' ',
+            value => value,
+        };
+        if value.is_whitespace() {
+            if !previous_space {
+                normalized.push(' ');
+                previous_space = true;
+            }
+        } else {
+            normalized.push(value);
+            previous_space = false;
+        }
+    }
+
+    normalized
+        .trim()
+        .strip_prefix("prodex ")
+        .unwrap_or(normalized.trim())
+        .to_string()
+}
+
+fn smart_context_static_context_noise_key_is_volatile(key: &str) -> bool {
+    matches!(
+        key,
+        "generated"
+            | "generated at"
+            | "generated on"
+            | "last generated"
+            | "last generated at"
+            | "timestamp"
+            | "current date"
+            | "current time"
+            | "current datetime"
+            | "as of"
+            | "last updated"
+            | "updated at"
+            | "run id"
+            | "request id"
+            | "trace id"
+            | "session id"
+    )
+}
+
+fn smart_context_static_context_noise_value_looks_volatile(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() || value.chars().any(|value| value.is_ascii_digit()) {
+        return true;
+    }
+
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "now" | "today" | "yesterday" | "tomorrow"
+    )
 }
 
 fn smart_context_summary_prefix(text: &str, byte_limit: usize) -> String {

@@ -1,10 +1,11 @@
 use super::*;
 use std::borrow::Cow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-const SMART_CONTEXT_TOOL_OUTPUT_INLINE_LIMIT: usize = 4 * 1024;
 const SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES: usize = 1024;
 const SMART_CONTEXT_ESTIMATED_CONTEXT_WINDOW: usize = 32_000;
+const SMART_CONTEXT_RESERVED_OUTPUT_TOKENS: u64 = 4_096;
+const SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeSmartContextTransport {
@@ -26,6 +27,8 @@ struct RuntimeSmartContextTransformStats {
     artifacts_stored: usize,
     tool_outputs_condensed: usize,
     duplicate_texts: usize,
+    cross_turn_duplicate_texts: usize,
+    blob_outputs_condensed: usize,
     rehydrated_refs: usize,
 }
 
@@ -46,24 +49,37 @@ struct RuntimeSmartContextArtifactReference {
 struct RuntimeSmartContextProxyState {
     enabled: bool,
     artifacts: RuntimeSmartContextArtifactStore,
+    artifact_path: Option<PathBuf>,
     last_token_usage: Option<RuntimeTokenUsage>,
+    token_usage_history: Vec<RuntimeTokenUsage>,
 }
 
 static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimeSmartContextProxyState>>,
 > = OnceLock::new();
 
-pub(crate) fn register_runtime_smart_context_proxy_state(log_path: &Path, enabled: bool) {
+pub(crate) fn register_runtime_smart_context_proxy_state(
+    log_path: &Path,
+    enabled: bool,
+    artifact_path: Option<PathBuf>,
+) {
     let states = RUNTIME_SMART_CONTEXT_PROXY_STATES.get_or_init(|| Mutex::new(BTreeMap::new()));
     let Ok(mut states) = states.lock() else {
         return;
     };
+    let artifacts = artifact_path
+        .as_deref()
+        .filter(|_| enabled)
+        .map(RuntimeSmartContextArtifactStore::load_from_path)
+        .unwrap_or_default();
     states.insert(
         log_path.to_path_buf(),
         RuntimeSmartContextProxyState {
             enabled,
-            artifacts: RuntimeSmartContextArtifactStore::default(),
+            artifacts,
+            artifact_path,
             last_token_usage: None,
+            token_usage_history: Vec::new(),
         },
     );
 }
@@ -82,6 +98,14 @@ pub(crate) fn observe_runtime_smart_context_token_usage(
         && state.enabled
     {
         state.last_token_usage = Some(usage);
+        state.token_usage_history.push(usage);
+        if state.token_usage_history.len() > SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT {
+            let overflow = state
+                .token_usage_history
+                .len()
+                .saturating_sub(SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT);
+            state.token_usage_history.drain(0..overflow);
+        }
     }
 }
 
@@ -141,7 +165,15 @@ fn prepare_runtime_smart_context_body<'a>(
     route_kind: RuntimeRouteKind,
     transport: RuntimeSmartContextTransport,
 ) -> Cow<'a, [u8]> {
-    let budget = runtime_smart_context_budget(shared, request.body.len());
+    let budget = runtime_smart_context_budget(
+        shared,
+        request.body.len(),
+        runtime_proxy_crate::SmartContextExactnessGuard {
+            decision: runtime_proxy_crate::SmartContextExactnessDecision::Allow,
+            reasons: Vec::new(),
+        },
+        Vec::new(),
+    );
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
         runtime_smart_context_log(
             request_id,
@@ -154,7 +186,7 @@ fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             request.body.len(),
             RuntimeSmartContextTransformStats::default(),
-            budget,
+            &budget,
             "pass_through",
         );
         return Cow::Borrowed(&request.body);
@@ -168,8 +200,14 @@ fn prepare_runtime_smart_context_body<'a>(
             turn_state: runtime_request_turn_state(request),
             session_id: runtime_request_session_id(request),
             tool_output_without_artifact: false,
-            missing_rehydrate_refs,
+            missing_rehydrate_refs: missing_rehydrate_refs.clone(),
         },
+    );
+    let budget = runtime_smart_context_budget(
+        shared,
+        request.body.len(),
+        exactness.clone(),
+        missing_rehydrate_refs,
     );
     let tier = budget.tier;
 
@@ -185,7 +223,7 @@ fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             request.body.len(),
             RuntimeSmartContextTransformStats::default(),
-            budget,
+            &budget,
             "pass_through_exact",
         );
         return Cow::Borrowed(&request.body);
@@ -194,11 +232,16 @@ fn prepare_runtime_smart_context_body<'a>(
     let Some(stats) = with_runtime_smart_context_artifacts(shared, |store| {
         let mut stats = RuntimeSmartContextTransformStats::default();
         runtime_smart_context_rehydrate_value(&mut value, store, &mut stats);
-        if tier != runtime_proxy_crate::SmartContextTokenBudgetTier::Exact {
+        if budget.policy.mode != runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough {
             runtime_smart_context_condense_tool_outputs(
-                &mut value, store, request_id, tier, &mut stats,
+                &mut value,
+                store,
+                request_id,
+                tier,
+                budget.policy.max_inline_tool_output_bytes,
+                &mut stats,
             );
-            runtime_smart_context_dedupe_input_text(&mut value, &mut stats);
+            runtime_smart_context_dedupe_input_text(&mut value, store, &mut stats);
         }
         stats
     }) else {
@@ -213,11 +256,14 @@ fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             request.body.len(),
             RuntimeSmartContextTransformStats::default(),
-            budget,
+            &budget,
             "pass_through",
         );
         return Cow::Borrowed(&request.body);
     };
+    if stats.artifacts_stored > 0 {
+        persist_runtime_smart_context_artifacts(shared);
+    }
 
     if stats == RuntimeSmartContextTransformStats::default() {
         runtime_smart_context_log(
@@ -231,7 +277,7 @@ fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             request.body.len(),
             stats,
-            budget,
+            &budget,
             "noop",
         );
         return Cow::Borrowed(&request.body);
@@ -242,6 +288,25 @@ fn prepare_runtime_smart_context_body<'a>(
     };
     let self_check =
         runtime_smart_context_rewrite_self_check(request.body.len(), body.len(), &stats);
+    let critical_signal_check =
+        runtime_smart_context_critical_signal_self_check(&request.body, &body);
+    if critical_signal_check.has_loss() {
+        runtime_smart_context_log(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            runtime_smart_context_tier_label(tier),
+            "self_check_passthrough",
+            "-",
+            request.body.len(),
+            request.body.len(),
+            stats,
+            &budget,
+            "critical_signal_loss",
+        );
+        return Cow::Borrowed(&request.body);
+    }
     if runtime_smart_context_should_pass_through_after_self_check(
         request.body.len(),
         body.len(),
@@ -258,7 +323,7 @@ fn prepare_runtime_smart_context_body<'a>(
             request.body.len(),
             request.body.len(),
             stats,
-            budget,
+            &budget,
             self_check,
         );
         return Cow::Borrowed(&request.body);
@@ -274,15 +339,16 @@ fn prepare_runtime_smart_context_body<'a>(
         request.body.len(),
         body.len(),
         stats,
-        budget,
+        &budget,
         self_check,
     );
     Cow::Owned(body)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeSmartContextBudget {
     tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    policy: runtime_proxy_crate::SmartContextAdaptiveBudgetPolicy,
     available_tokens: usize,
     observed_context_tokens: Option<usize>,
     token_usage_source: &'static str,
@@ -291,14 +357,41 @@ struct RuntimeSmartContextBudget {
 fn runtime_smart_context_budget(
     shared: &RuntimeRotationProxyShared,
     body_bytes: usize,
+    exactness_guard: runtime_proxy_crate::SmartContextExactnessGuard,
+    missing_rehydrate_refs: Vec<String>,
 ) -> RuntimeSmartContextBudget {
-    let estimated_tokens = body_bytes.div_ceil(4);
+    let history = runtime_smart_context_token_usage_history(shared);
+    let observed_context_tokens_u64 = history
+        .last()
+        .and_then(|usage| runtime_proxy_crate::smart_context_observed_usage_context_tokens(*usage));
     let observed_context_tokens =
-        runtime_smart_context_last_token_usage(shared).and_then(runtime_smart_context_usage_tokens);
-    let effective_tokens = observed_context_tokens.unwrap_or(estimated_tokens);
-    let available_tokens = SMART_CONTEXT_ESTIMATED_CONTEXT_WINDOW.saturating_sub(effective_tokens);
+        observed_context_tokens_u64.and_then(|tokens| usize::try_from(tokens).ok());
+    let current_input_tokens = observed_context_tokens_u64.unwrap_or(0);
+    let accounting = runtime_proxy_crate::smart_context_observed_token_accounting(
+        runtime_proxy_crate::SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(SMART_CONTEXT_ESTIMATED_CONTEXT_WINDOW as u64),
+            reserved_output_tokens: SMART_CONTEXT_RESERVED_OUTPUT_TOKENS,
+            current_input_tokens,
+            current_request_body_bytes: body_bytes,
+            observed_usage: history,
+        },
+    );
+    let policy = runtime_proxy_crate::smart_context_adaptive_budget_policy(
+        runtime_proxy_crate::SmartContextAdaptiveBudgetPolicyInput {
+            exactness_guard,
+            accounting,
+            static_context_changed: false,
+            missing_rehydrate_refs,
+        },
+    );
+    let available_tokens = policy
+        .max_rehydrate_tokens
+        .min(usize::MAX as u64)
+        .try_into()
+        .unwrap_or(usize::MAX);
     RuntimeSmartContextBudget {
-        tier: runtime_proxy_crate::smart_context_token_budget_tier(available_tokens),
+        tier: policy.tier,
+        policy,
         available_tokens,
         observed_context_tokens,
         token_usage_source: if observed_context_tokens.is_some() {
@@ -306,23 +399,6 @@ fn runtime_smart_context_budget(
         } else {
             "estimated_body"
         },
-    }
-}
-
-fn runtime_smart_context_usage_tokens(usage: RuntimeTokenUsage) -> Option<usize> {
-    let observed = usage
-        .input_tokens
-        .saturating_add(usage.output_tokens)
-        .saturating_add(usage.reasoning_tokens);
-    let observed = if observed == 0 {
-        usage.cached_input_tokens
-    } else {
-        observed
-    };
-    if observed == 0 {
-        None
-    } else {
-        Some(usize::try_from(observed).unwrap_or(usize::MAX))
     }
 }
 
@@ -338,12 +414,19 @@ fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
         .is_some_and(|state| state.enabled)
 }
 
-fn runtime_smart_context_last_token_usage(
+fn runtime_smart_context_token_usage_history(
     shared: &RuntimeRotationProxyShared,
-) -> Option<RuntimeTokenUsage> {
-    let states = RUNTIME_SMART_CONTEXT_PROXY_STATES.get()?;
-    let states = states.lock().ok()?;
-    states.get(&shared.log_path)?.last_token_usage
+) -> Vec<RuntimeTokenUsage> {
+    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+        return Vec::new();
+    };
+    let Ok(states) = states.lock() else {
+        return Vec::new();
+    };
+    states
+        .get(&shared.log_path)
+        .map(|state| state.token_usage_history.clone())
+        .unwrap_or_default()
 }
 
 fn with_runtime_smart_context_artifacts<R>(
@@ -354,6 +437,26 @@ fn with_runtime_smart_context_artifacts<R>(
     let mut states = states.lock().ok()?;
     let state = states.get_mut(&shared.log_path)?;
     state.enabled.then(|| action(&mut state.artifacts))
+}
+
+fn persist_runtime_smart_context_artifacts(shared: &RuntimeRotationProxyShared) {
+    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+        return;
+    };
+    let Ok(states) = states.lock() else {
+        return;
+    };
+    let Some(state) = states.get(&shared.log_path) else {
+        return;
+    };
+    if !state.enabled {
+        return;
+    }
+    let Some(path) = state.artifact_path.clone() else {
+        return;
+    };
+    let store = state.artifacts.clone();
+    schedule_runtime_smart_context_artifact_save(shared, path, store, "smart_context_artifacts");
 }
 
 fn runtime_smart_context_exact_header(request: &RuntimeProxyRequest) -> bool {
@@ -546,6 +649,7 @@ fn runtime_smart_context_condense_tool_outputs(
     store: &mut RuntimeSmartContextArtifactStore,
     request_id: u64,
     tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    inline_limit: usize,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
     let Some(input) = value
@@ -573,7 +677,7 @@ fn runtime_smart_context_condense_tool_outputs(
             else {
                 continue;
             };
-            if output.len() <= SMART_CONTEXT_TOOL_OUTPUT_INLINE_LIMIT {
+            if output.len() <= inline_limit.max(256) {
                 continue;
             }
             let Some(artifact) = store.insert_text(request_id, &output) else {
@@ -587,6 +691,9 @@ fn runtime_smart_context_condense_tool_outputs(
             object.insert(field.to_string(), serde_json::Value::String(replacement));
             stats.artifacts_stored += 1;
             stats.tool_outputs_condensed += 1;
+            if runtime_smart_context_likely_blob_or_noise(&output) {
+                stats.blob_outputs_condensed += 1;
+            }
             break;
         }
     }
@@ -627,6 +734,7 @@ fn runtime_smart_context_artifact_summary(
 
 fn runtime_smart_context_dedupe_input_text(
     value: &mut serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
     let Some(input) = value
@@ -637,7 +745,7 @@ fn runtime_smart_context_dedupe_input_text(
     };
     let mut seen = BTreeMap::<String, usize>::new();
     for (index, item) in input.iter_mut().enumerate() {
-        runtime_smart_context_dedupe_value_text(item, index, &mut seen, stats);
+        runtime_smart_context_dedupe_value_text(item, index, &mut seen, store, stats);
     }
 }
 
@@ -645,6 +753,7 @@ fn runtime_smart_context_dedupe_value_text(
     value: &mut serde_json::Value,
     item_index: usize,
     seen: &mut BTreeMap<String, usize>,
+    store: &RuntimeSmartContextArtifactStore,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
     match value {
@@ -659,21 +768,42 @@ fn runtime_smart_context_dedupe_value_text(
                 );
                 stats.duplicate_texts += 1;
             } else {
-                seen.insert(hash, item_index);
+                seen.insert(hash.clone(), item_index);
+            }
+            if let Some(artifact_text) = store.get_text(&hash)
+                && artifact_text == *text
+            {
+                *text = format!(
+                    "[prodex smart context repeated artifact prodex-artifact:{hash} content_hash={hash}]"
+                );
+                stats.cross_turn_duplicate_texts += 1;
             }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                runtime_smart_context_dedupe_value_text(item, item_index, seen, stats);
+                runtime_smart_context_dedupe_value_text(item, item_index, seen, store, stats);
             }
         }
         serde_json::Value::Object(object) => {
             for item in object.values_mut() {
-                runtime_smart_context_dedupe_value_text(item, item_index, seen, stats);
+                runtime_smart_context_dedupe_value_text(item, item_index, seen, store, stats);
             }
         }
         _ => {}
     }
+}
+
+fn runtime_smart_context_likely_blob_or_noise(text: &str) -> bool {
+    prodex_context::is_context_blob_noise(text)
+}
+
+fn runtime_smart_context_critical_signal_self_check(
+    before: &[u8],
+    after: &[u8],
+) -> prodex_context::CriticalSignalSelfCheck {
+    let before = String::from_utf8_lossy(before);
+    let after = String::from_utf8_lossy(after);
+    prodex_context::critical_signal_self_check(&before, &after)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -688,7 +818,7 @@ fn runtime_smart_context_log(
     body_bytes_before: usize,
     body_bytes_after: usize,
     stats: RuntimeSmartContextTransformStats,
-    budget: RuntimeSmartContextBudget,
+    budget: &RuntimeSmartContextBudget,
     self_check: &'static str,
 ) {
     runtime_proxy_log(
@@ -728,16 +858,90 @@ fn runtime_smart_context_log(
                 ),
                 runtime_proxy_log_field("self_check", self_check),
                 runtime_proxy_log_field("available_tokens", budget.available_tokens.to_string()),
+                runtime_proxy_log_field(
+                    "budget_mode",
+                    runtime_smart_context_budget_mode_label(budget.policy.mode),
+                ),
+                runtime_proxy_log_field(
+                    "max_inline_tool_output_bytes",
+                    budget.policy.max_inline_tool_output_bytes.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "max_rehydrate_tokens",
+                    budget.policy.max_rehydrate_tokens.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "policy_reasons",
+                    runtime_smart_context_budget_policy_reason_labels(&budget.policy.reasons),
+                ),
                 runtime_proxy_log_field("artifacts_stored", stats.artifacts_stored.to_string()),
                 runtime_proxy_log_field(
                     "tool_outputs_condensed",
                     stats.tool_outputs_condensed.to_string(),
                 ),
                 runtime_proxy_log_field("duplicate_texts", stats.duplicate_texts.to_string()),
+                runtime_proxy_log_field(
+                    "cross_turn_duplicate_texts",
+                    stats.cross_turn_duplicate_texts.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "blob_outputs_condensed",
+                    stats.blob_outputs_condensed.to_string(),
+                ),
                 runtime_proxy_log_field("rehydrated_refs", stats.rehydrated_refs.to_string()),
             ],
         ),
     );
+}
+
+fn runtime_smart_context_budget_mode_label(
+    mode: runtime_proxy_crate::SmartContextBudgetMode,
+) -> &'static str {
+    match mode {
+        runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough => "exact_pass_through",
+        runtime_proxy_crate::SmartContextBudgetMode::LargeLossless => "large_lossless",
+        runtime_proxy_crate::SmartContextBudgetMode::ArtifactCondensed => "artifact_condensed",
+        runtime_proxy_crate::SmartContextBudgetMode::MinimalRefsOnly => "minimal_refs_only",
+    }
+}
+
+fn runtime_smart_context_budget_policy_reason_labels(
+    reasons: &[runtime_proxy_crate::SmartContextBudgetPolicyReason],
+) -> String {
+    if reasons.is_empty() {
+        return "-".to_string();
+    }
+    reasons
+        .iter()
+        .map(|reason| match reason {
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::ExactnessRequired => {
+                "exactness_required"
+            }
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::StaticContextChanged => {
+                "static_context_changed"
+            }
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::MissingRehydrateRefs => {
+                "missing_rehydrate_refs"
+            }
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::UnknownTokenWindow => {
+                "unknown_token_window"
+            }
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::UnsafeAccounting => {
+                "unsafe_accounting"
+            }
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::PlentyOfBudget => {
+                "plenty_of_budget"
+            }
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::ModerateBudget => {
+                "moderate_budget"
+            }
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::TightBudget => "tight_budget",
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::CriticalBudget => {
+                "critical_budget"
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn runtime_smart_context_rewrite_self_check(

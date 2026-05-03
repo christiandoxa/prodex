@@ -835,3 +835,157 @@ fn lineage_key_helpers_round_trip_and_filter_internal_keys() {
         vec!["external".to_string()]
     );
 }
+
+#[test]
+fn smart_context_artifact_helpers_hash_touch_and_extract_line_ranges() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let content = "one\ntwo\nthree\n";
+    let artifact =
+        runtime_smart_context_upsert_artifact(&mut store, "file:src/lib.rs", content, 100);
+
+    assert_eq!(artifact.byte_len, content.len());
+    assert_eq!(
+        artifact.content_hash,
+        runtime_smart_context_artifact_content_hash(content.as_bytes())
+    );
+
+    let artifact =
+        runtime_smart_context_upsert_artifact(&mut store, "file:src/lib.rs", content, 120);
+    assert_eq!(artifact.created_at, 100);
+    assert_eq!(artifact.last_accessed_at, 120);
+
+    let touched = runtime_smart_context_touch_artifact(&mut store, "file:src/lib.rs", 130)
+        .expect("artifact touched");
+    assert_eq!(touched.last_accessed_at, 130);
+
+    let extracted = runtime_smart_context_artifact_line_range(
+        touched,
+        RuntimeSmartContextLineRange {
+            start_line: 2,
+            end_line: 3,
+        },
+    )
+    .expect("line range extracted");
+    assert_eq!(extracted.start_line, 2);
+    assert_eq!(extracted.end_line, 3);
+    assert_eq!(extracted.content, "two\nthree\n");
+
+    assert!(
+        runtime_smart_context_extract_line_range(
+            content,
+            RuntimeSmartContextLineRange {
+                start_line: 4,
+                end_line: 4,
+            },
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn smart_context_artifact_compaction_applies_ttl_and_max_entries() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    for (key, created_at, last_accessed_at) in [
+        ("expired", 70, 80),
+        ("cold", 90, 95),
+        ("warm", 91, 97),
+        ("hot", 92, 99),
+    ] {
+        let mut artifact = runtime_smart_context_artifact_from_content(key, key, created_at);
+        artifact.last_accessed_at = last_accessed_at;
+        store.artifacts.insert(key.to_string(), artifact);
+    }
+
+    let compacted = compact_runtime_smart_context_artifact_store(
+        store,
+        100,
+        RuntimeSmartContextArtifactStorePolicy {
+            ttl_seconds: 10,
+            max_entries: 2,
+        },
+    );
+
+    assert_eq!(
+        compacted.artifacts.keys().cloned().collect::<Vec<_>>(),
+        vec!["hot".to_string(), "warm".to_string()]
+    );
+}
+
+#[test]
+fn smart_context_artifact_json_round_trips_and_validates_metadata() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    runtime_smart_context_upsert_artifact(
+        &mut store,
+        "path:\"quoted\"\\name",
+        "line \"one\"\nslash \\ tab\tend",
+        100,
+    );
+
+    let json = runtime_smart_context_artifact_store_to_json(&store);
+    assert!(json.contains("\\\"quoted\\\""));
+    assert!(json.contains("\\n"));
+    assert!(json.contains("\\t"));
+
+    let parsed = runtime_smart_context_artifact_store_from_json(&json).expect("store json parsed");
+    assert_eq!(parsed, store);
+
+    let hash = store
+        .artifacts
+        .values()
+        .next()
+        .expect("artifact")
+        .content_hash
+        .clone();
+    let bad_json = json.replace(&hash, "fnv1a64:0000000000000000");
+    assert!(
+        runtime_smart_context_artifact_store_from_json(&bad_json)
+            .expect_err("bad hash rejected")
+            .message
+            .contains("content_hash mismatch")
+    );
+}
+
+#[test]
+fn smart_context_artifact_file_save_merges_existing_json() {
+    let path = smart_context_temp_path("merge");
+    let _ = std::fs::remove_file(&path);
+    let policy = RuntimeSmartContextArtifactStorePolicy {
+        ttl_seconds: 100,
+        max_entries: 8,
+    };
+
+    let mut existing = RuntimeSmartContextArtifactStore::default();
+    runtime_smart_context_upsert_artifact(&mut existing, "a", "alpha", 10);
+    save_runtime_smart_context_artifact_store(&path, &existing, 20, policy)
+        .expect("existing store saved");
+
+    let mut incoming = RuntimeSmartContextArtifactStore::default();
+    runtime_smart_context_upsert_artifact(&mut incoming, "a", "alpha", 40);
+    runtime_smart_context_upsert_artifact(&mut incoming, "b", "beta", 40);
+    let merged = save_merged_runtime_smart_context_artifact_store(&path, &incoming, 40, policy)
+        .expect("merged store saved");
+
+    assert_eq!(
+        merged.artifacts.keys().cloned().collect::<Vec<_>>(),
+        vec!["a".to_string(), "b".to_string()]
+    );
+    let a = merged.artifacts.get("a").expect("merged a");
+    assert_eq!(a.created_at, 10);
+    assert_eq!(a.last_accessed_at, 40);
+
+    let loaded =
+        load_runtime_smart_context_artifact_store(&path, 40, policy).expect("store loaded");
+    assert_eq!(loaded, merged);
+    std::fs::remove_file(path).expect("temp store removed");
+}
+
+fn smart_context_temp_path(name: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "prodex-runtime-store-smart-context-{name}-{}-{nanos}.json",
+        std::process::id()
+    ))
+}

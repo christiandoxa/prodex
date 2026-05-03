@@ -48,10 +48,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.72.0`:
+The current local version in this repo is `0.73.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.72.0
+npm install -g @christiandoxa/prodex@0.73.0
 ```
 
 Dependency status in this repo:
@@ -174,6 +174,7 @@ If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex sk
 
 Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
 Mem mode uses a slim Codex transcript schema by default so recall stays lower-token; use `prodex super --mem-full` when you need full assistant/tool transcript capture.
+`prodex super` and its `prodex s` alias also enable Smart Context Autopilot. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cacheable context, and critical-signal self-checks.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 

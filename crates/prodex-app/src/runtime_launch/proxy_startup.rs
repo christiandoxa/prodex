@@ -257,7 +257,11 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         })),
     };
     register_runtime_proxy_persistence_mode(&log_path, persistence_enabled);
-    register_runtime_smart_context_proxy_state(&log_path, smart_context_enabled);
+    register_runtime_smart_context_proxy_state(
+        &log_path,
+        smart_context_enabled,
+        Some(paths.root.join("runtime-smart-context-artifacts.json")),
+    );
     runtime_proxy_log_to_path(
         &log_path,
         &format!(

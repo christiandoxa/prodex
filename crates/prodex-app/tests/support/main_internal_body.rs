@@ -2258,10 +2258,12 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
     })
     .to_string();
     let estimated_tokens = body.len().div_ceil(4);
-    let available_tokens = 32_000usize.saturating_sub(estimated_tokens);
+    let available_tokens = 32_000usize
+        .saturating_sub(estimated_tokens)
+        .saturating_sub(4_096);
     assert_eq!(
         runtime_proxy_crate::smart_context_token_budget_tier(available_tokens),
-        runtime_proxy_crate::SmartContextTokenBudgetTier::Large
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed
     );
 
     let response = Client::builder()
@@ -2299,7 +2301,9 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
         20,
     );
     let log_tail = String::from_utf8_lossy(&log_tail);
-    assert!(log_tail.contains("tier=large"));
+    assert!(log_tail.contains("tier=condensed"));
+    assert!(log_tail.contains("budget_mode=artifact_condensed"));
+    assert!(log_tail.contains("policy_reasons=tight_budget"));
     assert!(log_tail.contains("artifacts_stored=1"));
     assert!(log_tail.contains("tool_outputs_condensed=1"));
 }

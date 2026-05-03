@@ -93,6 +93,129 @@ fn conversation_dedupe_keeps_first_hash_ref() {
 }
 
 #[test]
+fn cross_turn_duplicate_ref_plan_replaces_only_artifact_backed_large_text() {
+    let repeated = "large repeated cross-turn payload".to_string();
+    let small = "small".to_string();
+    let missing = "large duplicate without artifact".to_string();
+    let mismatch = "large duplicate with stale artifact length".to_string();
+    let repeated_artifact = SmartContextArtifactRef {
+        id: "artifact-repeat".to_string(),
+        byte_len: repeated.len(),
+        content_hash: smart_context_hash_text(&repeated),
+    };
+
+    let plan = smart_context_cross_turn_duplicate_ref_plan(
+        [
+            SmartContextConversationItem {
+                id: "repeat".to_string(),
+                text: repeated.clone(),
+            },
+            SmartContextConversationItem {
+                id: "small".to_string(),
+                text: small.clone(),
+            },
+            SmartContextConversationItem {
+                id: "missing".to_string(),
+                text: missing.clone(),
+            },
+            SmartContextConversationItem {
+                id: "mismatch".to_string(),
+                text: mismatch.clone(),
+            },
+        ],
+        [
+            repeated_artifact.clone(),
+            SmartContextArtifactRef {
+                id: "artifact-small".to_string(),
+                byte_len: small.len(),
+                content_hash: smart_context_hash_text(&small),
+            },
+            SmartContextArtifactRef {
+                id: "artifact-stale-len".to_string(),
+                byte_len: mismatch.len() + 1,
+                content_hash: smart_context_hash_text(&mismatch),
+            },
+        ],
+        16,
+        &smart_context_exactness_guard(SmartContextExactnessInput::default()),
+    );
+
+    assert_eq!(plan.replaced_items, 1);
+    assert_eq!(plan.replaced_bytes, repeated.len());
+    assert_eq!(
+        plan.actions[0],
+        SmartContextCrossTurnDuplicateRefAction::ReplaceWithArtifactRef {
+            id: "repeat".to_string(),
+            artifact: repeated_artifact,
+            content_hash: smart_context_hash_text(&repeated),
+            byte_len: repeated.len(),
+        }
+    );
+    assert_eq!(
+        plan.actions[1],
+        SmartContextCrossTurnDuplicateRefAction::Keep {
+            id: "small".to_string(),
+            content_hash: smart_context_hash_text(&small),
+            byte_len: small.len(),
+            reason: SmartContextCrossTurnDuplicateKeepReason::BelowMinByteThreshold,
+        }
+    );
+    assert_eq!(
+        plan.actions[2],
+        SmartContextCrossTurnDuplicateRefAction::Keep {
+            id: "missing".to_string(),
+            content_hash: smart_context_hash_text(&missing),
+            byte_len: missing.len(),
+            reason: SmartContextCrossTurnDuplicateKeepReason::MissingArtifact,
+        }
+    );
+    assert_eq!(
+        plan.actions[3],
+        SmartContextCrossTurnDuplicateRefAction::Keep {
+            id: "mismatch".to_string(),
+            content_hash: smart_context_hash_text(&mismatch),
+            byte_len: mismatch.len(),
+            reason: SmartContextCrossTurnDuplicateKeepReason::MissingArtifact,
+        }
+    );
+}
+
+#[test]
+fn cross_turn_duplicate_ref_plan_keeps_when_exactness_required() {
+    let text = "large repeated payload with artifact".to_string();
+    let guard = smart_context_exactness_guard(SmartContextExactnessInput {
+        exact_mode: true,
+        ..SmartContextExactnessInput::default()
+    });
+
+    let plan = smart_context_cross_turn_duplicate_ref_plan(
+        [SmartContextConversationItem {
+            id: "repeat".to_string(),
+            text: text.clone(),
+        }],
+        [SmartContextArtifactRef {
+            id: "artifact-repeat".to_string(),
+            byte_len: text.len(),
+            content_hash: smart_context_hash_text(&text),
+        }],
+        1,
+        &guard,
+    );
+
+    assert_eq!(plan.replaced_items, 0);
+    assert_eq!(plan.replaced_bytes, 0);
+    assert_eq!(
+        plan.actions,
+        vec![SmartContextCrossTurnDuplicateRefAction::Keep {
+            id: "repeat".to_string(),
+            content_hash: smart_context_hash_text(&text),
+            byte_len: text.len(),
+            reason: SmartContextCrossTurnDuplicateKeepReason::ExactnessRequired,
+        }]
+    );
+}
+
+#[test]
 fn memory_capsule_selection_prioritizes_required_then_relevance() {
     let selected = smart_context_select_memory_capsules(
         [
@@ -195,6 +318,7 @@ fn observed_token_accounting_uses_real_usage_and_available_window() {
             model_context_window_tokens: Some(128_000),
             reserved_output_tokens: 8_000,
             current_input_tokens: 40_000,
+            current_request_body_bytes: 0,
             observed_usage: vec![
                 RuntimeTokenUsage {
                     input_tokens: 20_000,
@@ -218,13 +342,100 @@ fn observed_token_accounting_uses_real_usage_and_available_window() {
     assert_eq!(accounting.observed_output_tokens, 3_000);
     assert_eq!(accounting.observed_reasoning_tokens, 1_100);
     assert_eq!(accounting.observed_total_tokens, 65_000);
+    assert_eq!(accounting.observed_context_tokens, 66_100);
     assert_eq!(accounting.last_input_tokens, 42_000);
+    assert_eq!(accounting.last_accounted_input_tokens, 42_000);
+    assert_eq!(accounting.last_observed_context_tokens, 44_700);
+    assert_eq!(
+        accounting.effective_input_source,
+        SmartContextTokenAccountingSource::ObservedHistory
+    );
     assert_eq!(accounting.effective_input_tokens, 42_000);
     assert_eq!(accounting.available_context_tokens, Some(78_000));
+    assert!(accounting.accounting_risks.is_empty());
     assert_eq!(
         smart_context_token_budget_tier_from_accounting(&accounting),
         SmartContextTokenBudgetTier::Exact
     );
+}
+
+#[test]
+fn observed_token_accounting_uses_cached_only_history_as_input_fallback() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(32_000),
+            reserved_output_tokens: 4_000,
+            current_input_tokens: 0,
+            current_request_body_bytes: 0,
+            observed_usage: vec![RuntimeTokenUsage {
+                cached_input_tokens: 16_000,
+                ..RuntimeTokenUsage::default()
+            }],
+        });
+
+    assert_eq!(accounting.last_input_tokens, 0);
+    assert_eq!(accounting.last_accounted_input_tokens, 16_000);
+    assert_eq!(accounting.last_observed_context_tokens, 16_000);
+    assert_eq!(
+        accounting.effective_input_source,
+        SmartContextTokenAccountingSource::ObservedHistory
+    );
+    assert_eq!(accounting.effective_input_tokens, 16_000);
+    assert_eq!(accounting.available_context_tokens, Some(12_000));
+    assert!(accounting.accounting_risks.is_empty());
+}
+
+#[test]
+fn observed_token_accounting_uses_body_estimate_when_tokens_unknown() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(64_000),
+            reserved_output_tokens: 4_000,
+            current_input_tokens: 0,
+            current_request_body_bytes: 80_001,
+            observed_usage: Vec::new(),
+        });
+
+    assert_eq!(
+        smart_context_estimate_tokens_from_body_bytes(80_001),
+        20_001
+    );
+    assert_eq!(accounting.estimated_current_request_tokens, 20_001);
+    assert_eq!(accounting.current_request_accounted_tokens, 20_001);
+    assert_eq!(
+        accounting.effective_input_source,
+        SmartContextTokenAccountingSource::CurrentRequestBodyEstimate
+    );
+    assert_eq!(accounting.effective_input_tokens, 20_001);
+    assert_eq!(accounting.available_context_tokens, Some(39_999));
+    assert!(smart_context_accounting_safe_for_adaptive_policy(
+        &accounting
+    ));
+}
+
+#[test]
+fn observed_token_accounting_uses_larger_history_to_avoid_underbudget() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(128_000),
+            reserved_output_tokens: 8_000,
+            current_input_tokens: 10_000,
+            current_request_body_bytes: 20_000,
+            observed_usage: vec![RuntimeTokenUsage {
+                input_tokens: 100_000,
+                output_tokens: 2_000,
+                reasoning_tokens: 500,
+                ..RuntimeTokenUsage::default()
+            }],
+        });
+
+    assert_eq!(accounting.current_request_accounted_tokens, 10_000);
+    assert_eq!(
+        accounting.effective_input_source,
+        SmartContextTokenAccountingSource::ObservedHistory
+    );
+    assert_eq!(accounting.effective_input_tokens, 100_000);
+    assert_eq!(accounting.available_context_tokens, Some(20_000));
 }
 
 #[test]
@@ -326,12 +537,84 @@ fn fingerprint_delta_tracks_static_context_across_turns() {
 }
 
 #[test]
+fn static_context_prompt_cache_fingerprint_is_input_order_stable() {
+    let left = smart_context_static_context_prompt_cache_fingerprint([
+        SmartContextStaticContextItem {
+            id: "README.md".to_string(),
+            text: "usage\n".to_string(),
+        },
+        SmartContextStaticContextItem {
+            id: "AGENTS.md".to_string(),
+            text: "rules\n".to_string(),
+        },
+    ]);
+    let right = smart_context_static_context_prompt_cache_fingerprint([
+        SmartContextStaticContextItem {
+            id: " AGENTS.md ".to_string(),
+            text: "rules".to_string(),
+        },
+        SmartContextStaticContextItem {
+            id: "README.md".to_string(),
+            text: "usage".to_string(),
+        },
+    ]);
+
+    assert_eq!(left, right);
+    assert_eq!(left.items[0].id, "AGENTS.md");
+    assert_eq!(left.items[1].id, "README.md");
+    assert!(left.content_hash.starts_with("scpc:"));
+}
+
+#[test]
+fn static_context_stabilizer_ignores_timestamp_noise() {
+    let first = smart_context_static_context_prompt_cache_fingerprint([
+        SmartContextStaticContextItem {
+            id: "prodex-context".to_string(),
+            text: "\r\nGenerated at: 2026-05-04T01:02:03Z\r\nRules  \r\n<!-- prodex current_date: 2026-05-04 -->\r\nKeep affinity\r\n"
+                .to_string(),
+        },
+    ]);
+    let second = smart_context_static_context_prompt_cache_fingerprint([
+        SmartContextStaticContextItem {
+            id: "prodex-context".to_string(),
+            text: "Generated at: 2027-01-02T03:04:05Z\nRules\n<!-- prodex current_date: 2027-01-02 -->\nKeep affinity\n"
+                .to_string(),
+        },
+    ]);
+
+    assert_eq!(first.content_hash, second.content_hash);
+    assert_eq!(first.items[0].canonical_text, "Rules\nKeep affinity");
+    assert_eq!(
+        first.items[0].content_hash,
+        smart_context_hash_text("Rules\nKeep affinity")
+    );
+}
+
+#[test]
+fn static_context_prompt_cache_fingerprint_changes_on_substantive_text() {
+    let before =
+        smart_context_static_context_prompt_cache_fingerprint([SmartContextStaticContextItem {
+            id: "AGENTS.md".to_string(),
+            text: "Generated at: 2026-05-04T01:02:03Z\nPreserve affinity\n".to_string(),
+        }]);
+    let after =
+        smart_context_static_context_prompt_cache_fingerprint([SmartContextStaticContextItem {
+            id: "AGENTS.md".to_string(),
+            text: "Generated at: 2027-01-02T03:04:05Z\nAllow rotation\n".to_string(),
+        }]);
+
+    assert_ne!(before.content_hash, after.content_hash);
+    assert_ne!(before.items[0].content_hash, after.items[0].content_hash);
+}
+
+#[test]
 fn adaptive_budget_policy_prefers_safe_exact_when_required() {
     let accounting =
         smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
             model_context_window_tokens: Some(128_000),
             reserved_output_tokens: 8_000,
             current_input_tokens: 125_000,
+            current_request_body_bytes: 0,
             observed_usage: Vec::new(),
         });
     let guard = smart_context_exactness_guard(SmartContextExactnessInput {
@@ -361,6 +644,7 @@ fn adaptive_budget_policy_uses_condensed_and_minimal_modes_by_real_budget() {
             model_context_window_tokens: Some(128_000),
             reserved_output_tokens: 8_000,
             current_input_tokens: 114_000,
+            current_request_body_bytes: 0,
             observed_usage: Vec::new(),
         });
     let minimal =
@@ -368,6 +652,7 @@ fn adaptive_budget_policy_uses_condensed_and_minimal_modes_by_real_budget() {
             model_context_window_tokens: Some(128_000),
             reserved_output_tokens: 8_000,
             current_input_tokens: 119_000,
+            current_request_body_bytes: 0,
             observed_usage: Vec::new(),
         });
 
@@ -401,7 +686,82 @@ fn adaptive_budget_policy_uses_condensed_and_minimal_modes_by_real_budget() {
     );
     assert_eq!(minimal_policy.tier, SmartContextTokenBudgetTier::Minimal);
     assert_eq!(minimal_policy.mode, SmartContextBudgetMode::MinimalRefsOnly);
+    assert_eq!(minimal_policy.max_inline_bytes, 2 * 1024);
     assert_eq!(minimal_policy.max_inline_tool_output_bytes, 2 * 1024);
+}
+
+#[test]
+fn adaptive_budget_policy_caps_rehydrate_budget_to_available_tokens() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(20_000),
+            reserved_output_tokens: 0,
+            current_input_tokens: 11_000,
+            current_request_body_bytes: 0,
+            observed_usage: Vec::new(),
+        });
+
+    let policy = smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {
+        exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
+        accounting,
+        static_context_changed: false,
+        missing_rehydrate_refs: Vec::new(),
+    });
+
+    assert_eq!(policy.tier, SmartContextTokenBudgetTier::Large);
+    assert_eq!(policy.max_inline_bytes, 32 * 1024);
+    assert_eq!(policy.max_inline_tool_output_bytes, 32 * 1024);
+    assert_eq!(policy.max_rehydrate_tokens, 9_000);
+}
+
+#[test]
+fn adaptive_budget_policy_falls_back_exact_when_accounting_unknown_or_unsafe() {
+    let unknown =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: None,
+            reserved_output_tokens: 8_000,
+            current_input_tokens: 12_000,
+            current_request_body_bytes: 0,
+            observed_usage: Vec::new(),
+        });
+    let unsafe_accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(8_000),
+            reserved_output_tokens: 8_000,
+            current_input_tokens: 1,
+            current_request_body_bytes: 0,
+            observed_usage: Vec::new(),
+        });
+
+    let unknown_policy =
+        smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {
+            exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
+            accounting: unknown,
+            static_context_changed: false,
+            missing_rehydrate_refs: Vec::new(),
+        });
+    let unsafe_policy =
+        smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {
+            exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
+            accounting: unsafe_accounting,
+            static_context_changed: false,
+            missing_rehydrate_refs: Vec::new(),
+        });
+
+    assert_eq!(
+        unknown_policy.mode,
+        SmartContextBudgetMode::ExactPassThrough
+    );
+    assert_eq!(
+        unknown_policy.reasons,
+        vec![SmartContextBudgetPolicyReason::UnknownTokenWindow]
+    );
+    assert_eq!(unsafe_policy.mode, SmartContextBudgetMode::ExactPassThrough);
+    assert_eq!(
+        unsafe_policy.reasons,
+        vec![SmartContextBudgetPolicyReason::UnsafeAccounting]
+    );
+    assert_eq!(unsafe_policy.max_inline_bytes, usize::MAX);
 }
 
 #[test]
