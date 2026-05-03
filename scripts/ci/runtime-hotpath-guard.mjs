@@ -4,8 +4,8 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_SCAN_TARGETS = Object.freeze([
-  "src/runtime_proxy",
-  "src/runtime_launch/proxy_startup.rs",
+  "crates/prodex-app/src/runtime_proxy",
+  "crates/prodex-app/src/runtime_launch/proxy_startup.rs",
 ]);
 
 const FORBIDDEN_PATTERNS = Object.freeze([
@@ -35,7 +35,7 @@ const FORBIDDEN_PATTERNS = Object.freeze([
 const ALLOWLIST = Object.freeze([
   {
     name: "chain-log-metadata-fingerprint",
-    file: "src/runtime_proxy/chain_log.rs",
+    file: "crates/prodex-app/src/runtime_proxy/chain_log.rs",
     id: "blocking-disk-io",
     pattern: /\bfs::metadata\s*\(/,
     maxHits: 2,
@@ -43,7 +43,7 @@ const ALLOWLIST = Object.freeze([
   },
   {
     name: "launch-worker-pool-threads",
-    file: "src/runtime_launch/proxy_startup.rs",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup.rs",
     id: "blocking-thread-spawn",
     pattern: /\bthread::spawn\s*\(/,
     maxHits: 2,

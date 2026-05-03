@@ -9,8 +9,8 @@ const runtimePolicyTypesPath = path.join(
   "crates/prodex-runtime-policy/src/types.rs",
 );
 const runtimeEnvSourcePaths = [
-  path.join(repoRoot, "src/runtime_core_shared.rs"),
-  path.join(repoRoot, "src/runtime_tuning.rs"),
+  path.join(repoRoot, "crates/prodex-app/src/runtime_core_shared.rs"),
+  path.join(repoRoot, "crates/prodex-app/src/runtime_tuning.rs"),
 ];
 
 const beginMarker = "<!-- BEGIN GENERATED RUNTIME_PROXY_KEYS -->";
