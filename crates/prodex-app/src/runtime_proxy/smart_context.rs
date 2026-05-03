@@ -400,14 +400,15 @@ fn runtime_smart_context_collect_artifact_refs_from_value(
     refs: &mut BTreeSet<RuntimeSmartContextArtifactReference>,
 ) {
     match value {
-        serde_json::Value::String(text) => {
-            if text.contains("prodex-artifact:") || text.contains("prodex smart context artifact") {
-                for token in
-                    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ')' | ']' | '}'))
-                {
-                    if let Some(reference) = runtime_smart_context_parse_artifact_reference(token) {
-                        refs.insert(reference);
-                    }
+        serde_json::Value::String(text)
+            if text.contains("prodex-artifact:")
+                || text.contains("prodex smart context artifact") =>
+        {
+            for token in
+                text.split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ')' | ']' | '}'))
+            {
+                if let Some(reference) = runtime_smart_context_parse_artifact_reference(token) {
+                    refs.insert(reference);
                 }
             }
         }
@@ -675,6 +676,7 @@ fn runtime_smart_context_dedupe_value_text(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_smart_context_log(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,

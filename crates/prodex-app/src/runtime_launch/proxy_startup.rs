@@ -41,6 +41,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn start_runtime_rotation_proxy_with_options(
     paths: &AppPaths,
     state: &AppState,
