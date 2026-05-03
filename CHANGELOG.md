@@ -2,7 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.70.0 - Unreleased
+## 0.71.0 - Unreleased
 
 Changes after `0.69.0`.
 
@@ -49,6 +49,7 @@ Changes after `0.69.0`.
 
 ### Misc
 
+- Update refactor guard paths (`30d95c9`)
 - Move app code and tests out of src (`4014e29`)
 - Release 0.70.0 (`17a42cf`)
 - Extract housekeeping helpers (`2c96bc4`)
