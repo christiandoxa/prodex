@@ -29,6 +29,7 @@ pub struct RuntimeLaunchRequest<'a> {
     pub base_url: Option<&'a str>,
     pub upstream_no_proxy: bool,
     pub include_code_review: bool,
+    pub smart_context_enabled: bool,
     pub force_runtime_proxy: bool,
     pub model_provider_override: Option<&'a str>,
 }

@@ -61,6 +61,7 @@ pub(crate) fn log_runtime_token_usage(
     let Some(usage) = usage else {
         return;
     };
+    observe_runtime_smart_context_token_usage(shared, usage);
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(

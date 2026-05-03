@@ -39,6 +39,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             base_url: self.args.base_url.as_deref(),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
+            smart_context_enabled: false,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
         }
@@ -320,6 +321,7 @@ impl RuntimeProxyStartupFactory {
                 runtime_upstream_base_url.as_str(),
                 request.include_code_review,
                 request.upstream_no_proxy,
+                request.smart_context_enabled,
             )?));
         }
 
@@ -406,13 +408,14 @@ fn start_fixed_runtime_proxy_endpoint(
     runtime_upstream_base_url: String,
 ) -> Result<RuntimeProxyEndpoint> {
     let fixed_state = fixed_runtime_proxy_state(state, &selection.selected_profile_name)?;
-    let proxy = start_runtime_rotation_proxy_with_listen_addr(
+    let proxy = start_runtime_rotation_proxy_with_options(
         paths,
         &fixed_state,
         &selection.selected_profile_name,
         runtime_upstream_base_url,
         request.include_code_review,
         request.upstream_no_proxy,
+        request.smart_context_enabled,
         None,
     )?;
     Ok(RuntimeProxyEndpoint {

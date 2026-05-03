@@ -36,6 +36,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             base_url: self.args.base_url.as_deref(),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
+            smart_context_enabled: self.args.smart_context,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
         }

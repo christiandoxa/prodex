@@ -684,6 +684,7 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
+        smart_context_enabled: false,
             current_profile: "tracked".to_string(),
             instance_token: "stale-instance".to_string(),
             admin_token: "stale-admin".to_string(),

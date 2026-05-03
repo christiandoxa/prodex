@@ -512,6 +512,9 @@ pub struct CavemanArgs {
     /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
     #[arg(long)]
     pub no_proxy: bool,
+    /// Enable Prodex Smart Context Autopilot in the runtime proxy.
+    #[arg(skip)]
+    pub smart_context: bool,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
@@ -610,6 +613,7 @@ impl SuperArgs {
             dry_run: self.dry_run,
             base_url: self.base_url,
             no_proxy: self.no_proxy,
+            smart_context: true,
             codex_args,
         }
     }
@@ -722,6 +726,8 @@ pub struct RuntimeBrokerArgs {
     pub include_code_review: bool,
     #[arg(long = "upstream-no-proxy", default_value_t = false)]
     pub upstream_no_proxy: bool,
+    #[arg(long = "smart-context", default_value_t = false)]
+    pub smart_context_enabled: bool,
     #[arg(long)]
     pub broker_key: String,
     #[arg(long)]
@@ -799,3 +805,7 @@ pub fn rewrite_cli_args_as_run(args: &[OsString]) -> Vec<OsString> {
     rewritten.extend(args.iter().skip(1).cloned());
     rewritten
 }
+
+#[cfg(test)]
+#[path = "../tests/src/lib.rs"]
+mod tests;

@@ -2006,6 +2006,7 @@ fn runtime_broker_version_replacement_defers_while_child_lease_is_live() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        smart_context_enabled: false,
         current_profile: "main".to_string(),
         instance_token: "old-instance".to_string(),
         admin_token: "secret".to_string(),
@@ -2035,6 +2036,7 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
         upstream_base_url: "https://chatgpt.com/backend-api",
         include_code_review: false,
         upstream_no_proxy: false,
+        smart_context_enabled: false,
         broker_key: "broker-key",
         instance_token: "instance",
         admin_token: "admin",
@@ -2056,6 +2058,7 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
         upstream_base_url: "https://chatgpt.com/backend-api",
         include_code_review: true,
         upstream_no_proxy: false,
+        smart_context_enabled: false,
         broker_key: "broker-key",
         instance_token: "instance",
         admin_token: "admin",
@@ -2089,6 +2092,7 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
         upstream_base_url: "https://chatgpt.com/backend-api",
         include_code_review: false,
         upstream_no_proxy: true,
+        smart_context_enabled: false,
         broker_key: "broker-key",
         instance_token: "instance",
         admin_token: "admin",
@@ -2103,6 +2107,28 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
             .iter()
             .any(|value| value == "--upstream-no-proxy"),
         "upstream no-proxy mode should be encoded as a clap boolean switch"
+    );
+
+    let with_smart_context = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
+        current_profile: "main",
+        upstream_base_url: "https://chatgpt.com/backend-api",
+        include_code_review: false,
+        upstream_no_proxy: false,
+        smart_context_enabled: true,
+        broker_key: "broker-key",
+        instance_token: "instance",
+        admin_token: "admin",
+        listen_addr: None,
+    });
+    let with_smart_context: Vec<String> = with_smart_context
+        .into_iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        with_smart_context
+            .iter()
+            .any(|value| value == "--smart-context"),
+        "smart context mode should be encoded as a clap boolean switch"
     );
 }
 
@@ -2158,6 +2184,202 @@ fn runtime_broker_key_is_scoped_to_prodex_binary_identity() {
 }
 
 #[test]
+fn runtime_broker_key_is_scoped_to_smart_context_mode() {
+    let normal = runtime_broker_key_for_binary_identity_with_smart_context(
+        "https://chatgpt.com/backend-api",
+        false,
+        false,
+        false,
+        "version=0.71.0;sha256=alpha",
+    );
+    let smart = runtime_broker_key_for_binary_identity_with_smart_context(
+        "https://chatgpt.com/backend-api",
+        false,
+        false,
+        true,
+        "version=0.71.0;sha256=alpha",
+    );
+
+    assert_ne!(
+        normal, smart,
+        "smart-context broker must not reuse a non-smart broker"
+    );
+}
+
+#[test]
+fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy_with_options(
+        &paths,
+        &state,
+        "second",
+        backend.base_url(),
+        false,
+        false,
+        true,
+        None,
+    )
+    .expect("runtime proxy should start with smart context enabled");
+    let tool_output = (0..2500)
+        .map(|index| format!("line {index}: repeated command output"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_big",
+            "output": tool_output,
+        }]
+    })
+    .to_string();
+    let estimated_tokens = body.len().div_ceil(4);
+    let available_tokens = 32_000usize.saturating_sub(estimated_tokens);
+    assert_eq!(
+        runtime_proxy_crate::smart_context_token_budget_tier(available_tokens),
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Large
+    );
+
+    let response = Client::builder()
+        .timeout(ci_timing_upper_bound_ms(2_000, 8_000))
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .expect("responses request should succeed");
+
+    assert!(
+        response.status().is_success(),
+        "smart-context request should pass through upstream status: {}",
+        response.status()
+    );
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(responses_bodies.len(), 1);
+    assert!(responses_bodies[0].contains("prodex smart context artifact"));
+    assert!(responses_bodies[0].contains("prodex-artifact:sc:"));
+    assert!(
+        !responses_bodies[0].contains("line 1200: repeated command output"),
+        "middle tool-output noise should be artifact-backed, not forwarded inline"
+    );
+
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |text| text.contains("smart_context_autopilot") && text.contains("decision=rewritten"),
+        2_000,
+        8_000,
+        20,
+    );
+    let log_tail = String::from_utf8_lossy(&log_tail);
+    assert!(log_tail.contains("tier=large"));
+    assert!(log_tail.contains("artifacts_stored=1"));
+    assert!(log_tail.contains("tool_outputs_condensed=1"));
+}
+
+#[test]
+fn runtime_smart_context_proxy_disabled_passes_large_tool_output_unchanged() {
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let temp_dir = TestDir::new();
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([(
+            "second".to_string(),
+            ProfileEntry {
+                codex_home: second_home,
+                managed: true,
+                email: Some("second@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let proxy = start_runtime_rotation_proxy(
+        &paths,
+        &state,
+        "second",
+        backend.base_url(),
+        false,
+    )
+    .expect("runtime proxy should start with smart context disabled");
+    let tool_output = (0..2500)
+        .map(|index| format!("line {index}: repeated command output"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_big",
+            "output": tool_output,
+        }]
+    })
+    .to_string();
+
+    let response = Client::builder()
+        .timeout(ci_timing_upper_bound_ms(2_000, 8_000))
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .send()
+        .expect("responses request should succeed");
+
+    assert!(
+        response.status().is_success(),
+        "disabled smart-context request should pass through upstream status: {}",
+        response.status()
+    );
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(responses_bodies.len(), 1);
+    assert!(!responses_bodies[0].contains("prodex smart context artifact"));
+    assert!(responses_bodies[0].contains("line 1200: repeated command output"));
+    let log = fs::read_to_string(&proxy.log_path).expect("runtime proxy log should be readable");
+    assert!(!log.contains("smart_context_autopilot"));
+}
+
+#[test]
 fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
     let temp_dir = TestDir::new();
     let paths = AppPaths {
@@ -2178,6 +2400,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
+            smart_context_enabled: false,
             current_profile: "main".to_string(),
             instance_token: "dead-instance".to_string(),
             admin_token: "secret".to_string(),
@@ -2205,6 +2428,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
+            smart_context_enabled: false,
             current_profile: "main".to_string(),
             instance_token: "live-instance".to_string(),
             admin_token: "secret".to_string(),
@@ -2311,6 +2535,7 @@ fn runtime_broker_and_update_commands_skip_prodex_update_notice() {
         upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
+        smart_context_enabled: false,
         broker_key: "broker".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "admin".to_string(),

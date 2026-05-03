@@ -5,6 +5,7 @@ pub(crate) fn runtime_broker_process_args(config: RuntimeBrokerSpawnConfig<'_>) 
     prodex_runtime_broker::runtime_broker_process_args(config)
 }
 
+#[cfg(test)]
 pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
     client: &Client,
     paths: &AppPaths,
@@ -13,12 +14,33 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
     include_code_review: bool,
     upstream_no_proxy: bool,
 ) -> Result<Option<RuntimeBrokerRegistry>> {
+    wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
+        client,
+        paths,
+        broker_key,
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+        false,
+    )
+}
+
+pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
+    client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
+    upstream_base_url: &str,
+    include_code_review: bool,
+    upstream_no_proxy: bool,
+    smart_context_enabled: bool,
+) -> Result<Option<RuntimeBrokerRegistry>> {
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
     let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
+        smart_context_enabled,
     };
     while started_at.elapsed() < Duration::from_millis(runtime_broker_ready_timeout_ms()) {
         let Some(existing) = load_runtime_broker_registry(paths, broker_key)? else {
@@ -63,6 +85,7 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
     Ok(None)
 }
 
+#[cfg(test)]
 pub(crate) fn find_compatible_runtime_broker_registry(
     client: &Client,
     paths: &AppPaths,
@@ -71,10 +94,31 @@ pub(crate) fn find_compatible_runtime_broker_registry(
     include_code_review: bool,
     upstream_no_proxy: bool,
 ) -> Result<Option<(String, RuntimeBrokerRegistry)>> {
+    find_compatible_runtime_broker_registry_with_smart_context(
+        client,
+        paths,
+        excluded_broker_key,
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+        false,
+    )
+}
+
+pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
+    client: &Client,
+    paths: &AppPaths,
+    excluded_broker_key: &str,
+    upstream_base_url: &str,
+    include_code_review: bool,
+    upstream_no_proxy: bool,
+    smart_context_enabled: bool,
+) -> Result<Option<(String, RuntimeBrokerRegistry)>> {
     let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
+        smart_context_enabled,
     };
     for broker_key in runtime_broker_registry_keys(paths) {
         if broker_key == excluded_broker_key {
@@ -180,25 +224,33 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
     upstream_base_url: &str,
     include_code_review: bool,
     upstream_no_proxy: bool,
+    smart_context_enabled: bool,
 ) -> Result<RuntimeProxyEndpoint> {
-    let broker_key = runtime_broker_key(upstream_base_url, include_code_review, upstream_no_proxy);
+    let broker_key = runtime_broker_key_with_smart_context(
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+        smart_context_enabled,
+    );
     let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
+        smart_context_enabled,
     };
     let ensure_lock_path = runtime_broker_ensure_lock_path(paths, &broker_key);
     let _ensure_lock = acquire_json_file_lock(&ensure_lock_path)?;
     let preferred_listen_addr = preferred_runtime_broker_listen_addr(paths, &broker_key)?;
     let broker_client = runtime_broker_client()?;
 
-    if let Some(existing) = wait_for_existing_runtime_broker_recovery_or_exit(
+    if let Some(existing) = wait_for_existing_runtime_broker_recovery_or_exit_with_smart_context(
         &broker_client,
         paths,
         &broker_key,
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
+        smart_context_enabled,
     )? {
         activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
         return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
@@ -240,14 +292,17 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         }
     }
 
-    if let Some((existing_broker_key, existing)) = find_compatible_runtime_broker_registry(
-        &broker_client,
-        paths,
-        &broker_key,
-        upstream_base_url,
-        include_code_review,
-        upstream_no_proxy,
-    )? {
+    if let Some((existing_broker_key, existing)) =
+        find_compatible_runtime_broker_registry_with_smart_context(
+            &broker_client,
+            paths,
+            &broker_key,
+            upstream_base_url,
+            include_code_review,
+            upstream_no_proxy,
+            smart_context_enabled,
+        )?
+    {
         activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
         return runtime_proxy_endpoint_from_registry(paths, &existing_broker_key, &existing);
     }
@@ -261,6 +316,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
             upstream_base_url,
             include_code_review,
             upstream_no_proxy,
+            smart_context_enabled,
             broker_key: &broker_key,
             instance_token: &instance_token,
             admin_token: &admin_token,

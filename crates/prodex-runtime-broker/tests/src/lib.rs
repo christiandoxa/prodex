@@ -8,6 +8,7 @@ fn test_registry() -> RuntimeBrokerRegistry {
         upstream_base_url: "https://upstream.example".to_string(),
         include_code_review: true,
         upstream_no_proxy: false,
+        smart_context_enabled: false,
         current_profile: "work".to_string(),
         instance_token: "broker-token".to_string(),
         admin_token: "admin-token".to_string(),
@@ -34,8 +35,29 @@ fn registry_builds_admin_urls_and_matches_launch_config() {
         registry.metrics_prometheus_url(),
         "http://127.0.0.1:4567/__prodex/runtime/metrics/prometheus"
     );
-    assert!(registry.matches_launch_config("https://upstream.example", true, false));
-    assert!(!registry.matches_launch_config("https://other.example", true, false));
+    assert!(registry.matches_launch_config("https://upstream.example", true, false, false));
+    assert!(!registry.matches_launch_config("https://other.example", true, false, false));
+    assert!(!registry.matches_launch_config("https://upstream.example", true, false, true));
+}
+
+#[test]
+fn registry_json_defaults_smart_context_disabled() {
+    let registry: RuntimeBrokerRegistry = serde_json::from_str(
+        r#"{
+            "pid": 42,
+            "listen_addr": "127.0.0.1:4567",
+            "started_at": 100,
+            "upstream_base_url": "https://upstream.example",
+            "include_code_review": true,
+            "current_profile": "work",
+            "instance_token": "broker-token",
+            "admin_token": "admin-token"
+        }"#,
+    )
+    .expect("legacy registry should deserialize");
+
+    assert!(!registry.smart_context_enabled);
+    assert!(registry.matches_launch_config("https://upstream.example", true, false, false));
 }
 
 #[test]
@@ -138,6 +160,7 @@ fn registry_reuse_decision_requires_launch_match_and_matching_health() {
         upstream_base_url: "https://upstream.example",
         include_code_review: true,
         upstream_no_proxy: false,
+        smart_context_enabled: false,
     };
     let health = RuntimeBrokerHealth {
         pid: registry.pid,
@@ -168,6 +191,20 @@ fn registry_reuse_decision_requires_launch_match_and_matching_health() {
                 upstream_base_url: "https://other.example",
                 include_code_review: true,
                 upstream_no_proxy: false,
+                smart_context_enabled: false,
+            },
+        ),
+        RuntimeBrokerRegistryReuseDecision::LaunchConfigMismatch
+    );
+    assert_eq!(
+        runtime_broker_registry_reuse_decision(
+            &registry,
+            Some(&health),
+            RuntimeBrokerLaunchConfig {
+                upstream_base_url: "https://upstream.example",
+                include_code_review: true,
+                upstream_no_proxy: false,
+                smart_context_enabled: true,
             },
         ),
         RuntimeBrokerRegistryReuseDecision::LaunchConfigMismatch
@@ -181,6 +218,7 @@ fn broker_process_args_encode_optional_boolean_switches() {
         upstream_base_url: "https://upstream.example",
         include_code_review: true,
         upstream_no_proxy: true,
+        smart_context_enabled: true,
         broker_key: "key",
         instance_token: "broker-token",
         admin_token: "admin-token",
@@ -191,6 +229,7 @@ fn broker_process_args_encode_optional_boolean_switches() {
     assert_eq!(args[0], OsString::from("__runtime-broker"));
     assert!(args.contains(&OsString::from("--include-code-review")));
     assert!(args.contains(&OsString::from("--upstream-no-proxy")));
+    assert!(args.contains(&OsString::from("--smart-context")));
     assert!(args.contains(&OsString::from("--listen-addr")));
     assert!(args.contains(&OsString::from("127.0.0.1:4567")));
 
@@ -199,6 +238,35 @@ fn broker_process_args_encode_optional_boolean_switches() {
     assert_eq!(plan.executable, PathBuf::from("/bin/prodex"));
     assert_eq!(plan.prodex_home, PathBuf::from("/tmp/prodex-home"));
     assert!(plan.args.contains(&OsString::from("--instance-token")));
+
+    let disabled_args = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
+        smart_context_enabled: false,
+        listen_addr: None,
+        ..config
+    });
+    assert!(!disabled_args.contains(&OsString::from("--smart-context")));
+}
+
+#[test]
+fn broker_key_is_scoped_to_smart_context_mode() {
+    let normal = runtime_broker_key_for_binary_identity(
+        "https://upstream.example",
+        true,
+        false,
+        false,
+        "/backend-api/prodex",
+        "version=0.7.0;sha256=abc123",
+    );
+    let smart = runtime_broker_key_for_binary_identity(
+        "https://upstream.example",
+        true,
+        false,
+        true,
+        "/backend-api/prodex",
+        "version=0.7.0;sha256=abc123",
+    );
+
+    assert_ne!(normal, smart);
 }
 
 #[test]

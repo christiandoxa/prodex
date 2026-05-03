@@ -19,6 +19,7 @@ pub(crate) fn start_runtime_rotation_proxy(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
     paths: &AppPaths,
     state: &AppState,
@@ -26,6 +27,28 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
     upstream_base_url: String,
     include_code_review: bool,
     upstream_no_proxy: bool,
+    preferred_listen_addr: Option<&str>,
+) -> Result<RuntimeRotationProxy> {
+    start_runtime_rotation_proxy_with_options(
+        paths,
+        state,
+        current_profile,
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+        false,
+        preferred_listen_addr,
+    )
+}
+
+pub(crate) fn start_runtime_rotation_proxy_with_options(
+    paths: &AppPaths,
+    state: &AppState,
+    current_profile: &str,
+    upstream_base_url: String,
+    include_code_review: bool,
+    upstream_no_proxy: bool,
+    smart_context_enabled: bool,
     preferred_listen_addr: Option<&str>,
 ) -> Result<RuntimeRotationProxy> {
     let log_path = initialize_runtime_proxy_log_path();
@@ -233,10 +256,11 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
         })),
     };
     register_runtime_proxy_persistence_mode(&log_path, persistence_enabled);
+    register_runtime_smart_context_proxy_state(&log_path, smart_context_enabled);
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime proxy started listen_addr={listen_addr} current_profile={current_profile} include_code_review={include_code_review} upstream_base_url={upstream_base_url} persistence_mode={}",
+            "runtime proxy started listen_addr={listen_addr} current_profile={current_profile} include_code_review={include_code_review} smart_context_enabled={smart_context_enabled} upstream_base_url={upstream_base_url} persistence_mode={}",
             if persistence_enabled {
                 "owner"
             } else {

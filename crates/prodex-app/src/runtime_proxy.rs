@@ -24,6 +24,7 @@ mod response_forwarding;
 mod responses;
 mod selection;
 mod selection_plan;
+mod smart_context;
 mod standard;
 mod transport_failure;
 mod upstream;
@@ -56,6 +57,10 @@ pub(crate) use self::responses::attempt_runtime_responses_request;
 pub(crate) use self::responses::proxy_runtime_responses_request;
 pub(crate) use self::selection::*;
 pub(crate) use self::selection_plan::*;
+use self::smart_context::*;
+pub(crate) use self::smart_context::{
+    observe_runtime_smart_context_token_usage, register_runtime_smart_context_proxy_state,
+};
 pub(crate) use self::standard::*;
 pub(super) use self::transport_failure::*;
 pub(crate) use self::upstream::*;

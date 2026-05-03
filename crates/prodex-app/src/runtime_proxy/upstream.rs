@@ -89,9 +89,12 @@ fn send_runtime_proxy_upstream_request_with_events(
         upstream_request = upstream_request.header("x-codex-turn-state", turn_state);
     }
 
+    let upstream_body =
+        prepare_runtime_smart_context_http_body(request_id, request, shared, events.route_kind);
+
     upstream_request = upstream_request
         .header("Authorization", format!("Bearer {}", auth.access_token))
-        .body(request.body.clone());
+        .body(upstream_body.into_owned());
 
     if let Some(cookie_header) = runtime_proxy_cookie_header_for_reqwest(
         shared,

@@ -53,6 +53,7 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        smart_context_enabled: false,
         force_runtime_proxy: false,
         model_provider_override: None,
     })
@@ -97,6 +98,7 @@ fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        smart_context_enabled: false,
         force_runtime_proxy: true,
         model_provider_override: None,
     }) {
@@ -162,6 +164,7 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        smart_context_enabled: false,
         force_runtime_proxy: false,
         model_provider_override: None,
     })
@@ -198,6 +201,7 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        smart_context_enabled: false,
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
     })
@@ -243,6 +247,7 @@ fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        smart_context_enabled: false,
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
     })
@@ -283,6 +288,7 @@ fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_overrid
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        smart_context_enabled: false,
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
     })
@@ -328,6 +334,7 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        smart_context_enabled: false,
         force_runtime_proxy: false,
         model_provider_override: None,
     })
@@ -355,6 +362,7 @@ fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
         base_url: None,
         upstream_no_proxy: false,
         include_code_review: false,
+        smart_context_enabled: false,
         force_runtime_proxy: true,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
     }) {
@@ -395,6 +403,7 @@ fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
             base_url: None,
             upstream_no_proxy: false,
             include_code_review: false,
+            smart_context_enabled: false,
             force_runtime_proxy: false,
             model_provider_override: None,
         },
@@ -434,11 +443,29 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
             base_url: None,
             upstream_no_proxy: false,
             include_code_review: false,
+            smart_context_enabled: false,
             force_runtime_proxy: false,
             model_provider_override: None,
         },
     )
     .expect("probe failure should still continue without quota gate");
+}
+
+#[test]
+fn run_command_strategy_keeps_smart_context_autopilot_disabled() {
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        skip_quota_check: false,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args: vec![OsString::from("exec"), OsString::from("hello")],
+    });
+
+    assert!(!strategy.runtime_request().smart_context_enabled);
 }
 
 fn write_state(root: &Path, state: AppState) {

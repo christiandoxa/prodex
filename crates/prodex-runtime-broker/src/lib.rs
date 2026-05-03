@@ -29,6 +29,8 @@ pub struct RuntimeBrokerRegistry {
     pub include_code_review: bool,
     #[serde(default)]
     pub upstream_no_proxy: bool,
+    #[serde(default)]
+    pub smart_context_enabled: bool,
     pub current_profile: String,
     pub instance_token: String,
     pub admin_token: String,
@@ -68,10 +70,12 @@ impl RuntimeBrokerRegistry {
         upstream_base_url: &str,
         include_code_review: bool,
         upstream_no_proxy: bool,
+        smart_context_enabled: bool,
     ) -> bool {
         self.upstream_base_url == upstream_base_url
             && self.include_code_review == include_code_review
             && self.upstream_no_proxy == upstream_no_proxy
+            && self.smart_context_enabled == smart_context_enabled
     }
 }
 
@@ -195,6 +199,7 @@ pub struct RuntimeBrokerLaunchConfig<'a> {
     pub upstream_base_url: &'a str,
     pub include_code_review: bool,
     pub upstream_no_proxy: bool,
+    pub smart_context_enabled: bool,
 }
 
 impl RuntimeBrokerLaunchConfig<'_> {
@@ -203,6 +208,7 @@ impl RuntimeBrokerLaunchConfig<'_> {
             self.upstream_base_url,
             self.include_code_review,
             self.upstream_no_proxy,
+            self.smart_context_enabled,
         )
     }
 }
@@ -1035,6 +1041,7 @@ pub struct RuntimeBrokerSpawnConfig<'a> {
     pub upstream_base_url: &'a str,
     pub include_code_review: bool,
     pub upstream_no_proxy: bool,
+    pub smart_context_enabled: bool,
     pub broker_key: &'a str,
     pub instance_token: &'a str,
     pub admin_token: &'a str,
@@ -1061,6 +1068,9 @@ pub fn runtime_broker_process_args(config: RuntimeBrokerSpawnConfig<'_>) -> Vec<
     }
     if config.upstream_no_proxy {
         args.push(OsString::from("--upstream-no-proxy"));
+    }
+    if config.smart_context_enabled {
+        args.push(OsString::from("--smart-context"));
     }
     args.extend([
         OsString::from("--broker-key"),
@@ -1129,6 +1139,7 @@ pub fn runtime_broker_key_for_binary_identity(
     upstream_base_url: &str,
     include_code_review: bool,
     upstream_no_proxy: bool,
+    smart_context_enabled: bool,
     openai_mount_path: &str,
     binary_identity_key: &str,
 ) -> String {
@@ -1136,6 +1147,7 @@ pub fn runtime_broker_key_for_binary_identity(
     upstream_base_url.hash(&mut hasher);
     include_code_review.hash(&mut hasher);
     upstream_no_proxy.hash(&mut hasher);
+    smart_context_enabled.hash(&mut hasher);
     openai_mount_path.hash(&mut hasher);
     binary_identity_key.hash(&mut hasher);
     format!("{:016x}", hasher.finish())

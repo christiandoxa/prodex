@@ -3,13 +3,14 @@ use super::*;
 pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let proxy = start_runtime_rotation_proxy_with_listen_addr(
+    let proxy = start_runtime_rotation_proxy_with_options(
         &paths,
         &state,
         &args.current_profile,
         args.upstream_base_url.clone(),
         args.include_code_review,
         args.upstream_no_proxy,
+        args.smart_context_enabled,
         args.listen_addr.as_deref(),
     )?;
     if proxy.owner_lock.is_none() {
@@ -18,10 +19,11 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
 
     let current_identity = runtime_current_prodex_binary_identity();
     let metadata = RuntimeBrokerMetadata {
-        broker_key: runtime_broker_key(
+        broker_key: runtime_broker_key_with_smart_context(
             &args.upstream_base_url,
             args.include_code_review,
             args.upstream_no_proxy,
+            args.smart_context_enabled,
         ),
         listen_addr: proxy.listen_addr.to_string(),
         started_at: Local::now().timestamp(),
@@ -45,6 +47,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         upstream_base_url: args.upstream_base_url.clone(),
         include_code_review: args.include_code_review,
         upstream_no_proxy: args.upstream_no_proxy,
+        smart_context_enabled: args.smart_context_enabled,
         current_profile: args.current_profile.clone(),
         instance_token: args.instance_token.clone(),
         admin_token: args.admin_token.clone(),
@@ -60,11 +63,12 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     runtime_proxy_log_to_path(
         &proxy.log_path,
         &format!(
-            "runtime_broker_started listen_addr={} broker_key={} current_profile={} include_code_review={} upstream_proxy_mode={} prodex_version={} executable_path={} executable_sha256={}",
+            "runtime_broker_started listen_addr={} broker_key={} current_profile={} include_code_review={} smart_context_enabled={} upstream_proxy_mode={} prodex_version={} executable_path={} executable_sha256={}",
             proxy.listen_addr,
             args.broker_key,
             args.current_profile,
             args.include_code_review,
+            args.smart_context_enabled,
             runtime_upstream_proxy_mode_label(args.upstream_no_proxy),
             metadata.prodex_version.as_deref().unwrap_or("-"),
             metadata.executable_path.as_deref().unwrap_or("-"),
@@ -80,6 +84,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
             "listen_addr": proxy.listen_addr.to_string(),
             "current_profile": args.current_profile,
             "include_code_review": args.include_code_review,
+            "smart_context_enabled": args.smart_context_enabled,
             "upstream_proxy_mode": runtime_upstream_proxy_mode_label(args.upstream_no_proxy),
             "upstream_base_url": args.upstream_base_url,
             "prodex_version": metadata.prodex_version,

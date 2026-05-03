@@ -1051,7 +1051,15 @@ pub(super) fn attempt_runtime_websocket_request(
     )
     .context("failed to configure runtime websocket pre-commit timeout")?;
 
-    if let Err(err) = upstream_socket.send(WsMessage::Text(request_text.to_string().into())) {
+    let upstream_request_text = prepare_runtime_smart_context_websocket_text(
+        request_id,
+        request_text,
+        handshake_request,
+        shared,
+    );
+    if let Err(err) =
+        upstream_socket.send(WsMessage::Text(upstream_request_text.into_owned().into()))
+    {
         let _ = upstream_socket.close(None);
         websocket_session.reset();
         let transport_error =

@@ -58,6 +58,7 @@ pub enum CommandOutputKind {
     Auto,
     GitStatus,
     GitDiff,
+    RustDiagnostics,
     Search,
     FileList,
     Plain,
@@ -396,6 +397,7 @@ pub fn compact_command_output_with_options(
         CommandOutputKind::Auto => smart_truncate_command_output(&normalized, options),
         CommandOutputKind::GitStatus => compact_git_status_output(&normalized, options),
         CommandOutputKind::GitDiff => compact_git_diff_output(&normalized, options),
+        CommandOutputKind::RustDiagnostics => compact_rust_diagnostic_output(&normalized, options),
         CommandOutputKind::Search => compact_search_output(&normalized, options),
         CommandOutputKind::FileList => compact_file_list_output(&normalized, options),
         CommandOutputKind::Plain => smart_truncate_command_output(&normalized, options),
@@ -652,6 +654,485 @@ fn compact_file_list_output(input: &str, options: &CommandOutputCompactOptions) 
     finalize_compacted_command_output(CommandOutputKind::FileList, input, output, options)
 }
 
+fn compact_rust_diagnostic_output(input: &str, options: &CommandOutputCompactOptions) -> String {
+    let lines = command_lines(input);
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut summary = RustDiagnosticSummary::default();
+    let mut noise_counts = BTreeMap::<String, usize>::new();
+    let mut key_lines = Vec::<String>::new();
+    let mut blocks = Vec::<RustCriticalBlock>::new();
+    let block_limit = rust_block_line_limit(options);
+    let block_budget = options.max_lines.max(24).saturating_div(3).max(4);
+    let mut used_block_lines = 0usize;
+    let mut omitted_blocks = 0usize;
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let line = lines[index];
+        if let Some(label) = rust_noise_label(line) {
+            *noise_counts.entry(label.to_string()).or_default() += 1;
+            if is_rust_success_summary_line(line) {
+                push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            }
+            index += 1;
+            continue;
+        }
+
+        if let Some(severity) = rust_diagnostic_severity(line) {
+            summary.record_diagnostic(severity, line);
+            let (block, next_index) = collect_rust_diagnostic_block(&lines, index, block_limit);
+            summary.record_block_signals(&block);
+            if used_block_lines.saturating_add(block.lines.len()) <= block_budget
+                || blocks.is_empty()
+            {
+                used_block_lines = used_block_lines.saturating_add(block.lines.len());
+                blocks.push(block);
+            } else {
+                omitted_blocks += 1;
+            }
+            index = next_index;
+            continue;
+        }
+
+        if let Some(test_name) = rust_failed_test_name(line) {
+            summary.record_failed_test(test_name);
+            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            let (block, next_index) = collect_rust_failure_block(&lines, index, block_limit);
+            summary.record_block_signals(&block);
+            if used_block_lines.saturating_add(block.lines.len()) <= block_budget
+                || blocks.is_empty()
+            {
+                used_block_lines = used_block_lines.saturating_add(block.lines.len());
+                blocks.push(block);
+            } else {
+                omitted_blocks += 1;
+            }
+            index = next_index;
+            continue;
+        }
+
+        if let Some(test_name) = rust_failure_separator_name(line) {
+            summary.record_failed_test(test_name);
+            let (block, next_index) = collect_rust_failure_block(&lines, index, block_limit);
+            summary.record_block_signals(&block);
+            if used_block_lines.saturating_add(block.lines.len()) <= block_budget
+                || blocks.is_empty()
+            {
+                used_block_lines = used_block_lines.saturating_add(block.lines.len());
+                blocks.push(block);
+            } else {
+                omitted_blocks += 1;
+            }
+            index = next_index;
+            continue;
+        }
+
+        if is_rust_panic_line(line) || is_rust_backtrace_start(line) {
+            let (block, next_index) = collect_rust_failure_block(&lines, index, block_limit);
+            summary.record_block_signals(&block);
+            if used_block_lines.saturating_add(block.lines.len()) <= block_budget
+                || blocks.is_empty()
+            {
+                used_block_lines = used_block_lines.saturating_add(block.lines.len());
+                blocks.push(block);
+            } else {
+                omitted_blocks += 1;
+            }
+            index = next_index;
+            continue;
+        }
+
+        if is_rust_exit_status_line(line) {
+            summary.record_exit_status(line);
+            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            index += 1;
+            continue;
+        }
+
+        if is_rust_location_line(line) {
+            summary.record_location(line);
+            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            index += 1;
+            continue;
+        }
+
+        if is_rust_failure_summary_line(line) {
+            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+    }
+
+    if summary.is_empty() && noise_counts.is_empty() && key_lines.is_empty() && blocks.is_empty() {
+        return smart_truncate_command_output(input, options);
+    }
+
+    let mut output = Vec::new();
+    output.push(format!(
+        "rust/cargo summary: errors={}, warnings={}, failed_tests={}, panics={}, exit_statuses={}, noisy_success_lines={}",
+        summary.errors,
+        summary.warnings,
+        summary.failed_tests.len(),
+        summary.panics,
+        summary.exit_statuses.len(),
+        noise_counts.values().sum::<usize>(),
+    ));
+    if !noise_counts.is_empty() {
+        output.push(format_count_map("noise", &noise_counts, 10));
+    }
+    push_labeled_lines(
+        &mut output,
+        "diagnostics",
+        &summary.diagnostic_headers,
+        options.max_lines.max(24).saturating_div(4).max(4),
+    );
+    push_labeled_lines(
+        &mut output,
+        "locations",
+        &summary.locations,
+        options.max_lines.max(24).saturating_div(5).max(4),
+    );
+    push_labeled_lines(
+        &mut output,
+        "failed tests",
+        &summary.failed_tests,
+        options.max_lines.max(24).saturating_div(5).max(4),
+    );
+    push_labeled_lines(
+        &mut output,
+        "exit statuses",
+        &summary.exit_statuses,
+        options.max_lines.max(24).saturating_div(6).max(3),
+    );
+    push_labeled_lines(
+        &mut output,
+        "key lines",
+        &key_lines,
+        options.max_lines.max(24).saturating_div(6).max(3),
+    );
+
+    if !blocks.is_empty() {
+        output.push("critical blocks:".to_string());
+        for block in blocks {
+            output.push(format!("-- {} --", block.label));
+            for line in block.lines {
+                output.push(truncate_command_line(&line, options.max_line_chars));
+            }
+        }
+    }
+    if omitted_blocks > 0 {
+        output.push(format!(
+            "[... omitted {omitted_blocks} additional critical blocks ...]"
+        ));
+    }
+
+    finalize_compacted_command_output(CommandOutputKind::RustDiagnostics, input, output, options)
+}
+
+fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
+    let mut strong_signals = 0usize;
+    let mut cargo_noise_signals = 0usize;
+    let mut location_signals = 0usize;
+    let mut backtrace_signals = 0usize;
+    let mut exit_signals = 0usize;
+    for line in lines {
+        if rust_diagnostic_severity(line).is_some()
+            || rust_failed_test_name(line).is_some()
+            || rust_failure_separator_name(line).is_some()
+            || is_rust_panic_line(line)
+        {
+            strong_signals += 1;
+        }
+        if is_rust_location_line(line) {
+            location_signals += 1;
+        }
+        if is_rust_backtrace_start(line) {
+            backtrace_signals += 1;
+        }
+        if is_rust_exit_status_line(line) {
+            exit_signals += 1;
+        }
+        if rust_noise_label(line).is_some() {
+            cargo_noise_signals += 1;
+        }
+    }
+
+    if strong_signals > 0 {
+        return strong_signals
+            + cargo_noise_signals
+            + location_signals
+            + backtrace_signals
+            + exit_signals
+            >= 2;
+    }
+    if backtrace_signals > 0 && location_signals > 0 {
+        return true;
+    }
+    if exit_signals > 0 && (cargo_noise_signals > 0 || location_signals > 0) {
+        return true;
+    }
+    cargo_noise_signals >= 4
+}
+
+fn rust_block_line_limit(options: &CommandOutputCompactOptions) -> usize {
+    options.max_lines.max(24).saturating_div(5).clamp(8, 32)
+}
+
+fn rust_noise_label(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("Compiling ") {
+        Some("compiling")
+    } else if trimmed.starts_with("Checking ") {
+        Some("checking")
+    } else if trimmed.starts_with("Fresh ") {
+        Some("fresh")
+    } else if trimmed.starts_with("Finished ") {
+        Some("finished")
+    } else if trimmed.starts_with("Running ") {
+        Some("running_targets")
+    } else if trimmed.starts_with("Doc-tests ") {
+        Some("doc_tests")
+    } else if trimmed.starts_with("running ") && trimmed.ends_with(" tests") {
+        Some("running_tests")
+    } else if trimmed.starts_with("test ") && trimmed.contains(" ... ok") {
+        Some("passed_tests")
+    } else if trimmed.starts_with("test result: ok") {
+        Some("test_result_ok")
+    } else {
+        None
+    }
+}
+
+fn is_rust_success_summary_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("Finished ") || trimmed.starts_with("test result: ok")
+}
+
+fn rust_diagnostic_severity(line: &str) -> Option<RustDiagnosticSeverity> {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("error[") || trimmed.starts_with("error:") {
+        Some(RustDiagnosticSeverity::Error)
+    } else if trimmed.starts_with("warning[") || trimmed.starts_with("warning:") {
+        Some(RustDiagnosticSeverity::Warning)
+    } else {
+        None
+    }
+}
+
+fn rust_failed_test_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let rest = trimmed.strip_prefix("test ")?;
+    let (name, status) = rest.rsplit_once(" ... ")?;
+    (status == "FAILED").then_some(name.trim())
+}
+
+fn rust_failure_separator_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let inner = trimmed.strip_prefix("---- ")?.strip_suffix(" ----")?.trim();
+    let name = inner
+        .strip_suffix(" stdout")
+        .or_else(|| inner.strip_suffix(" stderr"))
+        .unwrap_or(inner)
+        .trim();
+    (!name.is_empty()).then_some(name)
+}
+
+fn is_rust_panic_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.contains("panicked at ") || trimmed.contains("panicked at:")
+}
+
+fn is_rust_backtrace_start(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed == "stack backtrace:" || trimmed == "Backtrace:"
+}
+
+fn is_rust_exit_status_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("exit status")
+        || lower.contains("exit code")
+        || lower.contains("exit_status")
+        || lower.contains("process didn't exit successfully")
+}
+
+fn is_rust_location_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("--> ")
+        || trimmed.starts_with("::: ")
+        || (trimmed.starts_with("at ") && contains_rust_file_location(trimmed))
+        || contains_rust_file_location(trimmed)
+}
+
+fn contains_rust_file_location(line: &str) -> bool {
+    let Some((_, after_rs)) = line.split_once(".rs:") else {
+        return false;
+    };
+    let mut chars = after_rs.chars();
+    let mut saw_digit = false;
+    while let Some(ch) = chars.next() {
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+            continue;
+        }
+        if ch == ':' {
+            return saw_digit && chars.next().is_some_and(|next| next.is_ascii_digit());
+        }
+        return saw_digit;
+    }
+    saw_digit
+}
+
+fn is_rust_failure_summary_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("test result: FAILED")
+        || trimmed == "failures:"
+        || trimmed.starts_with("failures:")
+        || trimmed.starts_with("error: aborting")
+}
+
+fn collect_rust_diagnostic_block(
+    lines: &[&str],
+    start: usize,
+    max_lines: usize,
+) -> (RustCriticalBlock, usize) {
+    let mut end = start + 1;
+    while end < lines.len() {
+        let line = lines[end];
+        if rust_diagnostic_severity(line).is_some()
+            || rust_failed_test_name(line).is_some()
+            || rust_failure_separator_name(line).is_some()
+        {
+            break;
+        }
+        if rust_noise_label(line).is_some() && !is_rust_success_summary_line(line) {
+            break;
+        }
+        if line.trim().is_empty()
+            && end + 1 < lines.len()
+            && rust_diagnostic_severity(lines[end + 1]).is_some()
+        {
+            break;
+        }
+        end += 1;
+        if end.saturating_sub(start) >= max_lines.saturating_mul(4) {
+            break;
+        }
+    }
+
+    let label = format!("diagnostic: {}", rust_critical_label(lines[start]));
+    (
+        RustCriticalBlock {
+            label,
+            lines: compact_rust_block_lines(&lines[start..end], max_lines),
+        },
+        end,
+    )
+}
+
+fn collect_rust_failure_block(
+    lines: &[&str],
+    start: usize,
+    max_lines: usize,
+) -> (RustCriticalBlock, usize) {
+    let mut end = start + 1;
+    while end < lines.len() {
+        let line = lines[end];
+        if end > start + 1
+            && (rust_diagnostic_severity(line).is_some()
+                || rust_failed_test_name(line).is_some()
+                || rust_failure_separator_name(line).is_some())
+        {
+            break;
+        }
+        if rust_noise_label(line).is_some() && !is_rust_success_summary_line(line) {
+            break;
+        }
+        end += 1;
+        if end.saturating_sub(start) >= max_lines.saturating_mul(4) {
+            break;
+        }
+    }
+
+    let label = if let Some(test_name) =
+        rust_failed_test_name(lines[start]).or_else(|| rust_failure_separator_name(lines[start]))
+    {
+        format!("failed test: {test_name}")
+    } else if is_rust_backtrace_start(lines[start]) {
+        "stack backtrace".to_string()
+    } else {
+        format!("panic/error: {}", rust_critical_label(lines[start]))
+    };
+    (
+        RustCriticalBlock {
+            label,
+            lines: compact_rust_block_lines(&lines[start..end], max_lines),
+        },
+        end,
+    )
+}
+
+fn compact_rust_block_lines(lines: &[&str], max_lines: usize) -> Vec<String> {
+    if lines.len() <= max_lines {
+        return lines.iter().map(|line| (*line).to_string()).collect();
+    }
+
+    let head = max_lines.saturating_mul(2).div_ceil(3).max(1);
+    let tail = max_lines.saturating_sub(head).saturating_sub(1);
+    let omitted = lines.len().saturating_sub(head + tail);
+    let mut output = lines
+        .iter()
+        .take(head)
+        .map(|line| (*line).to_string())
+        .collect::<Vec<_>>();
+    output.push(format!("[... omitted {omitted} lines inside block ...]"));
+    if tail > 0 {
+        output.extend(
+            lines
+                .iter()
+                .skip(lines.len().saturating_sub(tail))
+                .map(|line| (*line).to_string()),
+        );
+    }
+    output
+}
+
+fn rust_critical_label(line: &str) -> String {
+    truncate_command_line(line.trim(), 96)
+}
+
+fn push_labeled_lines(output: &mut Vec<String>, label: &str, lines: &[String], limit: usize) {
+    if lines.is_empty() {
+        return;
+    }
+
+    output.push(format!("{label} ({}):", lines.len()));
+    for line in lines.iter().take(limit.max(1)) {
+        output.push(format!("  {line}"));
+    }
+    if lines.len() > limit.max(1) {
+        output.push(format!(
+            "  [... {} more {label} ...]",
+            lines.len() - limit.max(1)
+        ));
+    }
+}
+
+fn push_unique_line(lines: &mut Vec<String>, line: &str) {
+    if !line.is_empty() && !lines.iter().any(|existing| existing == line) {
+        lines.push(line.to_string());
+    }
+}
+
+fn push_unique_truncated_line(lines: &mut Vec<String>, line: &str, max_chars: usize) {
+    let line = truncate_command_line(line.trim(), max_chars);
+    push_unique_line(lines, &line);
+}
+
 fn smart_truncate_command_output(input: &str, options: &CommandOutputCompactOptions) -> String {
     let lines = command_lines(input);
     if lines.is_empty() {
@@ -716,6 +1197,10 @@ fn detect_command_output_kind(input: &str) -> CommandOutputKind {
             >= 1
     {
         return CommandOutputKind::GitDiff;
+    }
+
+    if looks_like_rust_diagnostic_output(&lines) {
+        return CommandOutputKind::RustDiagnostics;
     }
 
     if lines.iter().any(|line| {
@@ -1043,6 +1528,77 @@ struct GitDiffSummary {
     binary: bool,
 }
 
+#[derive(Default)]
+struct RustDiagnosticSummary {
+    errors: usize,
+    warnings: usize,
+    panics: usize,
+    diagnostic_headers: Vec<String>,
+    locations: Vec<String>,
+    failed_tests: Vec<String>,
+    exit_statuses: Vec<String>,
+}
+
+impl RustDiagnosticSummary {
+    fn is_empty(&self) -> bool {
+        self.errors == 0
+            && self.warnings == 0
+            && self.panics == 0
+            && self.diagnostic_headers.is_empty()
+            && self.locations.is_empty()
+            && self.failed_tests.is_empty()
+            && self.exit_statuses.is_empty()
+    }
+
+    fn record_diagnostic(&mut self, severity: RustDiagnosticSeverity, line: &str) {
+        match severity {
+            RustDiagnosticSeverity::Error => self.errors += 1,
+            RustDiagnosticSeverity::Warning => self.warnings += 1,
+        }
+        push_unique_line(&mut self.diagnostic_headers, line.trim());
+    }
+
+    fn record_failed_test(&mut self, test_name: &str) {
+        push_unique_line(&mut self.failed_tests, test_name.trim());
+    }
+
+    fn record_location(&mut self, line: &str) {
+        push_unique_line(&mut self.locations, line.trim());
+    }
+
+    fn record_exit_status(&mut self, line: &str) {
+        push_unique_line(&mut self.exit_statuses, line.trim());
+    }
+
+    fn record_block_signals(&mut self, block: &RustCriticalBlock) {
+        for line in &block.lines {
+            if is_rust_location_line(line) {
+                self.record_location(line);
+            }
+            if is_rust_panic_line(line) {
+                self.panics += 1;
+            }
+            if is_rust_exit_status_line(line) {
+                self.record_exit_status(line);
+            }
+            if let Some(test_name) = rust_failure_separator_name(line) {
+                self.record_failed_test(test_name);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RustDiagnosticSeverity {
+    Error,
+    Warning,
+}
+
+struct RustCriticalBlock {
+    label: String,
+    lines: Vec<String>,
+}
+
 fn split_git_diff_sections<'a>(lines: &'a [&'a str]) -> Vec<Vec<&'a str>> {
     let mut sections = Vec::new();
     let mut current = Vec::new();
@@ -1245,6 +1801,7 @@ impl CommandOutputKind {
             CommandOutputKind::Auto => "auto",
             CommandOutputKind::GitStatus => "git status",
             CommandOutputKind::GitDiff => "git diff",
+            CommandOutputKind::RustDiagnostics => "rust diagnostics",
             CommandOutputKind::Search => "search",
             CommandOutputKind::FileList => "file list",
             CommandOutputKind::Plain => "plain",

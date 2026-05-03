@@ -80,6 +80,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         base_url: args.base_url.as_deref(),
         upstream_no_proxy: args.no_proxy,
         include_code_review,
+        smart_context_enabled: args.smart_context,
         force_runtime_proxy: false,
         model_provider_override: model_provider_override.as_deref(),
     };

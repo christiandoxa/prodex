@@ -74,6 +74,92 @@ impl RuntimeRotationProxyShared {
     }
 }
 
+const RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS: usize = 128;
+const RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
+const RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeSmartContextArtifact {
+    pub(crate) id: String,
+    pub(crate) byte_len: usize,
+    pub(crate) content_hash: String,
+    pub(crate) text: String,
+    pub(crate) sequence: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RuntimeSmartContextArtifactStore {
+    artifacts: BTreeMap<String, RuntimeSmartContextArtifact>,
+    total_bytes: usize,
+}
+
+impl RuntimeSmartContextArtifactStore {
+    pub(crate) fn insert_text(
+        &mut self,
+        sequence: u64,
+        text: &str,
+    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
+        if text.len() > RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES {
+            return None;
+        }
+        let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
+        let id = content_hash.clone();
+        if let Some(existing) = self.artifacts.get_mut(&id) {
+            existing.sequence = sequence;
+            return Some(runtime_proxy_crate::SmartContextArtifactRef {
+                id: existing.id.clone(),
+                byte_len: existing.byte_len,
+                content_hash: existing.content_hash.clone(),
+            });
+        }
+
+        let byte_len = text.len();
+        self.artifacts.insert(
+            id.clone(),
+            RuntimeSmartContextArtifact {
+                id: id.clone(),
+                byte_len,
+                content_hash: content_hash.clone(),
+                text: text.to_string(),
+                sequence,
+            },
+        );
+        self.total_bytes = self.total_bytes.saturating_add(byte_len);
+        self.enforce_limits();
+        Some(runtime_proxy_crate::SmartContextArtifactRef {
+            id,
+            byte_len,
+            content_hash,
+        })
+    }
+
+    pub(crate) fn get_text(&self, id: &str) -> Option<String> {
+        self.artifacts.get(id).map(|artifact| artifact.text.clone())
+    }
+
+    pub(crate) fn contains(&self, id: &str) -> bool {
+        self.artifacts.contains_key(id)
+    }
+
+    fn enforce_limits(&mut self) {
+        while self.artifacts.len() > RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS
+            || self.total_bytes > RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES
+        {
+            let Some(oldest_id) = self
+                .artifacts
+                .values()
+                .min_by_key(|artifact| artifact.sequence)
+                .map(|artifact| artifact.id.clone())
+            else {
+                break;
+            };
+            if let Some(removed) = self.artifacts.remove(&oldest_id) {
+                self.total_bytes = self.total_bytes.saturating_sub(removed.byte_len);
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct StateFileLock {
     pub(crate) file: fs::File,

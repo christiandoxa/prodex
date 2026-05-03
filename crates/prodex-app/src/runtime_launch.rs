@@ -22,4 +22,6 @@ pub(super) use proxy_args::runtime_proxy_codex_passthrough_args;
 pub(super) use proxy_args::{runtime_proxy_codex_args, runtime_proxy_codex_args_with_mount_path};
 #[cfg(test)]
 pub(super) use proxy_startup::start_runtime_rotation_proxy;
+#[cfg(test)]
 pub(super) use proxy_startup::start_runtime_rotation_proxy_with_listen_addr;
+pub(super) use proxy_startup::start_runtime_rotation_proxy_with_options;
