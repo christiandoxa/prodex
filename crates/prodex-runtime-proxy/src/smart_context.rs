@@ -875,16 +875,35 @@ pub enum SmartContextBudgetPolicyReason {
     MissingRehydrateRefs,
     UnknownTokenWindow,
     UnsafeAccounting,
+    RecentRewriteSavingsSafe,
     PlentyOfBudget,
     ModerateBudget,
     TightBudget,
     CriticalBudget,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SmartContextRecentRewriteSafety {
+    pub safe_rewrites: usize,
+    pub fallback_rewrites: usize,
+    pub saved_tokens: u64,
+}
+
+pub const SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS: u64 = 256;
+
+pub fn smart_context_recent_rewrite_safety_allows_larger_preview(
+    safety: &SmartContextRecentRewriteSafety,
+) -> bool {
+    safety.safe_rewrites > 0
+        && safety.fallback_rewrites == 0
+        && safety.saved_tokens >= SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmartContextAdaptiveBudgetPolicyInput {
     pub exactness_guard: SmartContextExactnessGuard,
     pub accounting: SmartContextObservedTokenAccounting,
+    pub recent_rewrite_safety: SmartContextRecentRewriteSafety,
     pub static_context_changed: bool,
     pub missing_rehydrate_refs: Vec<String>,
 }
@@ -953,6 +972,8 @@ pub fn smart_context_adaptive_budget_policy(
         };
     }
 
+    let larger_preview_safe =
+        smart_context_recent_rewrite_safety_allows_larger_preview(&input.recent_rewrite_safety);
     let (mode, max_inline_tool_output_bytes, max_rehydrate_tokens, tier_reason) = match tier {
         SmartContextTokenBudgetTier::Exact => (
             SmartContextBudgetMode::ExactPassThrough,
@@ -965,7 +986,11 @@ pub fn smart_context_adaptive_budget_policy(
         ),
         SmartContextTokenBudgetTier::Large => (
             SmartContextBudgetMode::LargeLossless,
-            32 * 1024,
+            if larger_preview_safe {
+                64 * 1024
+            } else {
+                32 * 1024
+            },
             12_000,
             SmartContextBudgetPolicyReason::ModerateBudget,
         ),
@@ -977,12 +1002,15 @@ pub fn smart_context_adaptive_budget_policy(
         ),
         SmartContextTokenBudgetTier::Minimal => (
             SmartContextBudgetMode::MinimalRefsOnly,
-            2 * 1024,
+            1024,
             1_000,
             SmartContextBudgetPolicyReason::CriticalBudget,
         ),
     };
     reasons.push(tier_reason);
+    if larger_preview_safe && matches!(tier, SmartContextTokenBudgetTier::Large) {
+        reasons.push(SmartContextBudgetPolicyReason::RecentRewriteSavingsSafe);
+    }
     let max_rehydrate_tokens = input
         .accounting
         .available_context_tokens

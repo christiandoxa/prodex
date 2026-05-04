@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use dirs::home_dir;
+use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
@@ -23,6 +24,18 @@ const CLAUDE_MEM_FULL_PREFIX: &str = "mem-full";
 const CLAUDE_MEM_SUPER_SLIM_PREFIX: &str = "mem-super-slim";
 const CLAUDE_MEM_FULL_FLAG: &str = "--mem-full";
 const CLAUDE_MEM_SUPER_SLIM_FLAG: &str = "--mem-super-slim";
+const RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS: &[&str] =
+    &["payload.prompt_summary", "payload.metadata.prompt_summary"];
+const RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS: &[&str] = &[
+    "payload.metadata.artifact_ref",
+    "payload.metadata.artifact_id",
+    "payload.metadata.artifactId",
+    "payload.artifact.reference",
+    "payload.artifact.ref",
+    "payload.artifact.id",
+    "payload.artifact_id",
+    "payload.artifactId",
+];
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +43,14 @@ pub enum RuntimeMemTranscriptMode {
     Slim,
     SuperSlim,
     Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMemSchemaSelectionPolicy {
+    Explicit(RuntimeMemTranscriptMode),
+    SafeSuperSlimCandidate {
+        fallback_mode: RuntimeMemTranscriptMode,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +169,56 @@ pub fn runtime_mem_select_capsules(
 pub fn runtime_mem_extract_mode(args: &[OsString]) -> (bool, Vec<OsString>) {
     let (mode, args) = runtime_mem_extract_mode_with_detail(args);
     (mode.is_some(), args)
+}
+
+pub fn runtime_mem_select_codex_schema_mode_for_event(
+    policy: RuntimeMemSchemaSelectionPolicy,
+    event: &Value,
+) -> RuntimeMemTranscriptMode {
+    match policy {
+        RuntimeMemSchemaSelectionPolicy::Explicit(mode) => mode,
+        RuntimeMemSchemaSelectionPolicy::SafeSuperSlimCandidate { fallback_mode } => {
+            runtime_mem_safe_auto_codex_schema_mode_for_event(fallback_mode, event)
+        }
+    }
+}
+
+pub fn runtime_mem_safe_auto_codex_schema_mode_for_event(
+    fallback_mode: RuntimeMemTranscriptMode,
+    event: &Value,
+) -> RuntimeMemTranscriptMode {
+    if matches!(fallback_mode, RuntimeMemTranscriptMode::Full) {
+        return RuntimeMemTranscriptMode::Full;
+    }
+    if runtime_mem_event_has_super_slim_prompt_reference(event) {
+        RuntimeMemTranscriptMode::SuperSlim
+    } else {
+        RuntimeMemTranscriptMode::Slim
+    }
+}
+
+pub fn runtime_mem_codex_schema_for_safe_auto_event(
+    fallback_mode: RuntimeMemTranscriptMode,
+    event: &Value,
+) -> Value {
+    runtime_mem_codex_schema_for_mode(runtime_mem_safe_auto_codex_schema_mode_for_event(
+        fallback_mode,
+        event,
+    ))
+}
+
+pub fn runtime_mem_event_has_super_slim_prompt_reference(event: &Value) -> bool {
+    RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS
+        .iter()
+        .any(|path| {
+            runtime_mem_lookup_json_path(event, path).is_some_and(runtime_mem_value_is_text)
+        })
+        || RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS
+            .iter()
+            .any(|path| {
+                runtime_mem_lookup_json_path(event, path).is_some_and(runtime_mem_value_is_text)
+            })
+        || runtime_mem_value_contains_artifact_marker(event)
 }
 
 pub fn runtime_mem_extract_mode_with_detail(
@@ -436,7 +507,7 @@ pub fn runtime_mem_full_codex_schema() -> serde_json::Value {
 pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
     serde_json::json!({
         "name": CLAUDE_MEM_CODEX_SCHEMA_NAME,
-        "version": "0.5-super-slim",
+        "version": "0.6-super-slim",
         "description": "Super-slim schema for Codex session JSONL files under ~/.codex/sessions.",
         "events": [
             { "name": "session-meta", "match": { "path": "type", "equals": "session_meta" }, "action": "session_context", "fields": { "sessionId": "payload.id", "cwd": "payload.cwd" } },
@@ -448,15 +519,17 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
                 "fields": {
                     "prompt": {
                         "coalesce": [
-                            "payload.summary",
+                            "payload.prompt_summary",
                             "payload.metadata.prompt_summary",
-                            "payload.metadata.summary",
                             "payload.metadata.artifact_ref",
                             "payload.metadata.artifact_id",
                             "payload.metadata.artifactId",
                             "payload.artifact.reference",
+                            "payload.artifact.ref",
                             "payload.artifact.id",
                             "payload.artifact_id",
+                            "payload.artifactId",
+                            "payload.message",
                             { "value": "user prompt recorded by prodex super-slim mem; content omitted" }
                         ]
                     }
@@ -611,11 +684,40 @@ fn runtime_mem_codex_watch_definition(name: &str, path: &str) -> serde_json::Val
     })
 }
 
-fn runtime_mem_codex_schema_for_mode(mode: RuntimeMemTranscriptMode) -> serde_json::Value {
+pub fn runtime_mem_codex_schema_for_mode(mode: RuntimeMemTranscriptMode) -> serde_json::Value {
     match mode {
         RuntimeMemTranscriptMode::Slim => runtime_mem_slim_codex_schema(),
         RuntimeMemTranscriptMode::SuperSlim => runtime_mem_super_slim_codex_schema(),
         RuntimeMemTranscriptMode::Full => runtime_mem_full_codex_schema(),
+    }
+}
+
+fn runtime_mem_lookup_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut current = value;
+    for part in path.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current)
+}
+
+fn runtime_mem_value_is_text(value: &Value) -> bool {
+    value.as_str().is_some_and(|text| !text.trim().is_empty())
+}
+
+fn runtime_mem_value_contains_artifact_marker(value: &Value) -> bool {
+    match value {
+        Value::String(text) => {
+            text.contains("prodex-artifact:")
+                || text.contains("prodex://artifact/")
+                || text.contains("prodex smart context artifact")
+        }
+        Value::Array(values) => values
+            .iter()
+            .any(runtime_mem_value_contains_artifact_marker),
+        Value::Object(object) => object
+            .values()
+            .any(runtime_mem_value_contains_artifact_marker),
+        _ => false,
     }
 }
 

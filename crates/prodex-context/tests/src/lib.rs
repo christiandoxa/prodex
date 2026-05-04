@@ -20,6 +20,20 @@ fn test_cwd_prefix() -> String {
         .to_string()
 }
 
+fn temp_context_root(name: &str) -> std::path::PathBuf {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock should be after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "prodex-context-{name}-{}-{unique}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("temp context root should be created");
+    root
+}
+
 #[test]
 fn plain_command_output_strips_ansi_and_keeps_head_tail() {
     let input =
@@ -42,6 +56,114 @@ fn plain_command_output_strips_ansi_and_keeps_head_tail() {
     assert!(report.output.contains("line9"));
     assert!(report.output.contains("[... omitted 6 lines ...]"));
     assert!(!report.output.contains("\u{1b}"));
+}
+
+#[test]
+fn command_metadata_infers_output_kind_hints() {
+    let cases = [
+        (
+            "{\"cmd\":\"cargo test -q\"}",
+            CommandOutputKind::RustDiagnostics,
+        ),
+        (
+            "command: cargo +nightly check --workspace",
+            CommandOutputKind::RustDiagnostics,
+        ),
+        ("rg --json needle crates", CommandOutputKind::Search),
+        ("grep -R needle src", CommandOutputKind::Search),
+        ("git -C repo status --short", CommandOutputKind::GitStatus),
+        ("git diff --stat", CommandOutputKind::GitDiff),
+        ("git log --stat --oneline", CommandOutputKind::GitLog),
+        ("pytest tests -q", CommandOutputKind::Diagnostics),
+        ("python -m pytest tests", CommandOutputKind::Diagnostics),
+        ("npx tsc --noEmit", CommandOutputKind::Diagnostics),
+        ("npm test -- --runInBand", CommandOutputKind::Diagnostics),
+        (
+            "npm --prefix web run typecheck",
+            CommandOutputKind::Diagnostics,
+        ),
+        ("ls -la crates", CommandOutputKind::FileList),
+        (
+            "find crates -maxdepth 2 -type f",
+            CommandOutputKind::FileList,
+        ),
+        ("tree -L 2 crates", CommandOutputKind::FileList),
+    ];
+
+    for (metadata, expected) in cases {
+        assert_eq!(
+            infer_command_output_kind_from_metadata(metadata),
+            Some(expected),
+            "metadata: {metadata}"
+        );
+    }
+}
+
+#[test]
+fn command_metadata_hint_compacts_single_search_match_as_search() {
+    let input = "src/lib.rs:42:needle once\n";
+    let hint = infer_command_output_kind_from_metadata("rg needle src");
+    let report = compact_command_output_with_options_and_kind_hint(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 20,
+            ..CommandOutputCompactOptions::default()
+        },
+        hint,
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Search);
+    assert!(
+        report
+            .output
+            .contains("search summary: 1 matches across 1 files")
+    );
+    assert!(report.output.contains("src/lib.rs (1 matches):"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn command_metadata_hint_compacts_quiet_cargo_output_as_rust_diagnostics() {
+    let input = "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s\n";
+    let hint = infer_command_output_kind_from_metadata("cargo check --workspace");
+    let report = compact_command_output_with_options_and_kind_hint(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 20,
+            ..CommandOutputCompactOptions::default()
+        },
+        hint,
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::RustDiagnostics);
+    assert!(report.output.contains("rust/cargo summary"));
+    assert!(report.output.contains("Finished `dev` profile"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn command_metadata_hint_does_not_override_strong_output_detection() {
+    let input = "\
+src/app.ts:12:7 - error TS2322: Type 'string' is not assignable to type 'number'.
+
+12 const count: number = value;
+         ~~~~~
+";
+    let report = compact_command_output_with_options_and_kind_hint(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 20,
+            ..CommandOutputCompactOptions::default()
+        },
+        Some(CommandOutputKind::Search),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("error TS2322"));
+    assert_no_critical_signal_loss(input, &report.output);
 }
 
 #[test]
@@ -1040,6 +1162,91 @@ src/main.rs:22:5
 ";
 
     assert!(critical_signal_lost_line_ranges(before, after).is_empty());
+}
+
+#[test]
+fn context_static_duplicate_report_detects_repeated_snippets_across_roots() {
+    let root = temp_context_root("static-dupes");
+    std::fs::create_dir_all(root.join("rules")).expect("rules dir should be created");
+    std::fs::create_dir_all(root.join("skills/review")).expect("skill dir should be created");
+    let duplicate = "Always preserve upstream request metadata unless it is hop-by-hop or authentication metadata that must be replaced for the selected profile.";
+    std::fs::write(
+        root.join("AGENTS.md"),
+        format!("# Instructions\n\n{duplicate}\n\nUnique AGENTS guidance lives here.\n"),
+    )
+    .expect("AGENTS should be written");
+    std::fs::write(
+        root.join("rules/runtime.md"),
+        format!("# Runtime Rules\n\n{duplicate}\n"),
+    )
+    .expect("rules file should be written");
+    std::fs::write(
+        root.join("skills/review/SKILL.md"),
+        format!("---\nname: review\n---\n\n{duplicate}\n"),
+    )
+    .expect("skill file should be written");
+
+    let report =
+        collect_context_static_duplicate_report(&root, 10).expect("duplicate report should load");
+    let snippet = report
+        .snippets
+        .first()
+        .expect("duplicate snippet should be reported");
+    let paths = snippet
+        .occurrences
+        .iter()
+        .map(|occurrence| occurrence.relative_path.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(report.total_duplicate_snippets, 1);
+    assert_eq!(report.total_duplicate_occurrences, 3);
+    assert_eq!(snippet.occurrence_count, 3);
+    assert!(snippet.estimated_duplicate_tokens > 0);
+    assert!(paths.contains(&"AGENTS.md"));
+    assert!(paths.contains(&"rules/runtime.md"));
+    assert!(paths.contains(&"skills/review/SKILL.md"));
+    assert!(snippet.suggestion.contains("Keep one canonical copy"));
+
+    let audit = collect_context_audit_report(&root, 10).expect("audit should load duplicates");
+    let rendered = render_context_audit_report_with_width(&audit, 10, 100);
+    assert_eq!(audit.static_duplicates.total_duplicate_snippets, 1);
+    assert!(rendered.contains("Static Context Duplicates"));
+    assert!(rendered.contains("Suggestion: Review and consolidate"));
+    assert!(rendered.contains("does not edit files"));
+
+    std::fs::remove_dir_all(root).expect("temp context root should be removed");
+}
+
+#[test]
+fn context_static_duplicate_report_ignores_short_snippets_fences_and_backups() {
+    let root = temp_context_root("static-dupes-ignored");
+    std::fs::create_dir_all(root.join("rules")).expect("rules dir should be created");
+    let duplicate = "This long paragraph is present only in a backup file, so the report must not count it as repeated static context that should be consolidated.";
+    let fenced_duplicate = "This long fenced command sample repeats in two files but should not be reported because fenced content can be intentional examples.";
+    std::fs::write(
+        root.join("AGENTS.md"),
+        format!("Keep terse.\n\n{duplicate}\n\n```text\n{fenced_duplicate}\n```\n"),
+    )
+    .expect("AGENTS should be written");
+    std::fs::write(
+        root.join("rules/team.md"),
+        format!("Keep terse.\n\n```text\n{fenced_duplicate}\n```\n"),
+    )
+    .expect("rules file should be written");
+    std::fs::write(
+        root.join("rules/team.original.md"),
+        format!("{duplicate}\n"),
+    )
+    .expect("backup should be written");
+
+    let report =
+        collect_context_static_duplicate_report(&root, 10).expect("duplicate report should load");
+
+    assert_eq!(report.total_duplicate_snippets, 0);
+    assert!(report.snippets.is_empty());
+    assert!(report.suggestion.contains("No duplicate"));
+
+    std::fs::remove_dir_all(root).expect("temp context root should be removed");
 }
 
 #[test]

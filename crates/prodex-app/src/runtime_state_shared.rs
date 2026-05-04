@@ -78,6 +78,8 @@ impl RuntimeRotationProxyShared {
 const RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS: usize = 128;
 const RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
+const RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES: usize = 256;
+const RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES: usize = 16 * 1024;
 
 static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
     Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
@@ -90,6 +92,25 @@ pub(crate) struct RuntimeSmartContextArtifact {
     pub(crate) content_hash: String,
     pub(crate) text: String,
     pub(crate) sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) line_index: Option<RuntimeSmartContextArtifactLineIndex>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactLineIndex {
+    #[serde(default)]
+    pub(crate) complete: bool,
+    #[serde(default)]
+    pub(crate) critical_ranges: Vec<RuntimeSmartContextArtifactLineRange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactLineRange {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) byte_len: usize,
+    pub(crate) content_hash: String,
+    pub(crate) text: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -153,6 +174,9 @@ impl RuntimeSmartContextArtifactStore {
                 return None;
             }
             existing.sequence = sequence;
+            if existing.line_index.is_none() {
+                existing.line_index = Some(runtime_smart_context_artifact_line_index(text));
+            }
             return Some(Self::artifact_ref(existing));
         }
 
@@ -165,6 +189,7 @@ impl RuntimeSmartContextArtifactStore {
                 content_hash: content_hash.clone(),
                 text: text.to_string(),
                 sequence,
+                line_index: Some(runtime_smart_context_artifact_line_index(text)),
             },
         );
         self.total_bytes = self.total_bytes.saturating_add(byte_len);
@@ -178,6 +203,12 @@ impl RuntimeSmartContextArtifactStore {
 
     pub(crate) fn get_text(&self, id: &str) -> Option<String> {
         self.artifacts.get(id).map(|artifact| artifact.text.clone())
+    }
+
+    pub(crate) fn line_index(&self, id: &str) -> Option<&RuntimeSmartContextArtifactLineIndex> {
+        self.artifacts
+            .get(id)
+            .and_then(|artifact| artifact.line_index.as_ref())
     }
 
     pub(crate) fn artifact_ref_for_exact_text(
@@ -267,6 +298,48 @@ impl RuntimeSmartContextArtifactStore {
     }
 }
 
+fn runtime_smart_context_artifact_line_index(text: &str) -> RuntimeSmartContextArtifactLineIndex {
+    let mut ranges = prodex_context::critical_signal_lost_line_ranges_with_options(
+        text,
+        "",
+        prodex_context::CriticalSignalLineRangeOptions {
+            context_lines: 1,
+            max_ranges: RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES.saturating_add(1),
+            max_range_lines: 6,
+        },
+    );
+    let complete = ranges.len() <= RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES;
+    ranges.truncate(RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES);
+
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut indexed_ranges = Vec::new();
+    let mut index_complete = complete;
+    for range in ranges {
+        if range.start == 0 || range.start > lines.len() || range.end < range.start {
+            index_complete = false;
+            continue;
+        }
+        let end = range.end.min(lines.len());
+        let excerpt = lines[range.start - 1..end].join("\n");
+        if excerpt.len() > RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES {
+            index_complete = false;
+            continue;
+        }
+        indexed_ranges.push(RuntimeSmartContextArtifactLineRange {
+            start: range.start,
+            end,
+            byte_len: excerpt.len(),
+            content_hash: runtime_proxy_crate::smart_context_hash_text(&excerpt),
+            text: excerpt,
+        });
+    }
+
+    RuntimeSmartContextArtifactLineIndex {
+        complete: index_complete,
+        critical_ranges: indexed_ranges,
+    }
+}
+
 fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {
     let locks =
         RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS.get_or_init(|| Mutex::new(BTreeMap::new()));
@@ -338,6 +411,87 @@ mod tests {
                 .is_none(),
             "stale artifact metadata must not produce an exact ref"
         );
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_insert_stores_critical_line_index() {
+        let text = "\
+setup
+error: hidden failure
+src/main.rs:22:5
+test result: FAILED. 0 passed; 1 failed
+tail";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(1, text).expect("artifact inserted");
+
+        let index = store
+            .line_index(&artifact.id)
+            .expect("new artifacts should carry a line index");
+        assert!(index.complete);
+        assert!(
+            index
+                .critical_ranges
+                .iter()
+                .any(|range| range.text.contains("error: hidden failure"))
+        );
+        assert!(
+            index
+                .critical_ranges
+                .iter()
+                .any(|range| range.text.contains("src/main.rs:22:5"))
+        );
+        assert!(
+            index
+                .critical_ranges
+                .iter()
+                .any(|range| range.text.contains("test result: FAILED"))
+        );
+        for range in &index.critical_ranges {
+            assert_eq!(range.byte_len, range.text.len());
+            assert_eq!(
+                range.content_hash,
+                runtime_proxy_crate::smart_context_hash_text(&range.text)
+            );
+        }
+        assert_eq!(store.get_text(&artifact.id).as_deref(), Some(text));
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_json_without_line_index_still_loads() {
+        let text = "error: old failure\nsrc/main.rs:22:5";
+        let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
+        let mut artifacts = serde_json::Map::new();
+        artifacts.insert(
+            content_hash.clone(),
+            serde_json::json!({
+                "id": content_hash.clone(),
+                "byte_len": text.len(),
+                "content_hash": runtime_proxy_crate::smart_context_hash_text(text),
+                "text": text,
+                "sequence": 1
+            }),
+        );
+        let raw = serde_json::json!({
+            "artifacts": artifacts,
+            "total_bytes": text.len()
+        });
+
+        let mut store: RuntimeSmartContextArtifactStore =
+            serde_json::from_value(raw).expect("legacy artifact store should deserialize");
+
+        assert_eq!(store.get_text(&content_hash).as_deref(), Some(text));
+        assert!(store.line_index(&content_hash).is_none());
+
+        store
+            .insert_text(2, text)
+            .expect("matching legacy artifact should refresh metadata");
+
+        assert!(
+            store
+                .line_index(&content_hash)
+                .is_some_and(|index| index.complete)
+        );
+        assert_eq!(store.get_text(&content_hash).as_deref(), Some(text));
     }
 
     #[test]

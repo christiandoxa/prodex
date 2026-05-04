@@ -42,6 +42,46 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
 }
 
 #[test]
+fn smart_context_uses_command_metadata_hint_for_tool_output_compaction() {
+    let original_output = std::iter::once("src/lib.rs:42:needle once".to_string())
+        .chain((0..120).map(|index| format!("filler line {index}: no match here")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"rg needle src\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": original_output
+            }
+        ]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &mut stats,
+    );
+
+    let output = value["input"][1]["output"].as_str().unwrap();
+    assert!(output.contains("prodex-sc artifact"));
+    assert!(output.contains("search summary: 1 matches across 1 files"));
+    assert!(output.contains("src/lib.rs (1 matches):"));
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
 fn smart_context_rehydrates_known_artifact_refs() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store.insert_text(1, "exact artifact text").unwrap();
@@ -268,6 +308,91 @@ fn smart_context_budget_uses_configured_model_context_window() {
     assert_eq!(budget.model_context_window_tokens, 64_000);
     assert_eq!(budget.model_context_window_source, "launch_config");
     assert_eq!(budget.observed_context_tokens, Some(32_000));
+}
+
+#[test]
+fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
+    let shared = smart_context_test_shared("budget-recent-safe");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    observe_runtime_smart_context_token_usage(
+        &shared,
+        RuntimeTokenUsage {
+            input_tokens: 48_000,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+        },
+    );
+
+    let before = runtime_smart_context_budget(
+        &shared,
+        32,
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+    observe_runtime_smart_context_rewrite_safety(
+        &shared,
+        RuntimeSmartContextRewriteSafetyObservation {
+            safe: true,
+            saved_tokens: runtime_proxy_crate::SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS,
+        },
+    );
+    let after = runtime_smart_context_budget(
+        &shared,
+        32,
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+
+    assert_eq!(
+        before.tier,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Large
+    );
+    assert_eq!(before.policy.max_inline_tool_output_bytes, 32 * 1024);
+    assert_eq!(after.policy.max_inline_tool_output_bytes, 64 * 1024);
+    assert!(
+        after.policy.reasons.contains(
+            &runtime_proxy_crate::SmartContextBudgetPolicyReason::RecentRewriteSavingsSafe
+        )
+    );
+}
+
+#[test]
+fn smart_context_tool_preview_lines_follow_budget_tier_and_limit() {
+    assert_eq!(
+        runtime_smart_context_tool_preview_max_lines(
+            runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+            1024,
+        ),
+        Some(8)
+    );
+    assert_eq!(
+        runtime_smart_context_tool_preview_max_lines(
+            runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed,
+            8 * 1024,
+        ),
+        Some(32)
+    );
+    assert_eq!(
+        runtime_smart_context_tool_preview_max_lines(
+            runtime_proxy_crate::SmartContextTokenBudgetTier::Large,
+            64 * 1024,
+        ),
+        Some(240)
+    );
+    assert_eq!(
+        runtime_smart_context_tool_preview_max_lines(
+            runtime_proxy_crate::SmartContextTokenBudgetTier::Exact,
+            usize::MAX,
+        ),
+        None
+    );
 }
 
 #[test]
@@ -646,6 +771,57 @@ fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
         prodex_context::critical_signal_self_check(&String::from_utf8_lossy(&original), &text)
             .passed()
     );
+}
+
+#[test]
+fn smart_context_surgical_rehydrate_prefers_artifact_line_index() {
+    let artifact_text = "\
+setup
+error: hidden indexed failure
+src/main.rs:22:5
+noise";
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let line_index = store
+        .line_index(&artifact.id)
+        .expect("inserted artifact should have line index");
+
+    let (appendix, range_count) = runtime_smart_context_missing_critical_range_appendix(
+        &artifact.id,
+        "fallback text without indexed critical signals",
+        Some(line_index),
+        &format!("prodex-artifact:{}\nsummary without failure", artifact.id),
+    )
+    .expect("indexed critical range should be rehydrated");
+
+    assert_eq!(range_count, 1);
+    assert!(appendix.contains("critical exact ranges:"));
+    assert!(appendix.contains(&format!("prodex-artifact:{}#L1-L4", artifact.id)));
+    assert!(appendix.contains("error: hidden indexed failure"));
+    assert!(appendix.contains("src/main.rs:22:5"));
+}
+
+#[test]
+fn smart_context_surgical_rehydrate_falls_back_for_legacy_unindexed_artifact() {
+    let artifact_text = "\
+setup
+error: legacy failure
+src/main.rs:22:5
+noise";
+    let artifact_id = runtime_proxy_crate::smart_context_hash_text(artifact_text);
+
+    let (appendix, range_count) = runtime_smart_context_missing_critical_range_appendix(
+        &artifact_id,
+        artifact_text,
+        None,
+        &format!("prodex-artifact:{artifact_id}\nsummary without failure"),
+    )
+    .expect("legacy artifact should still rehydrate by rescanning");
+
+    assert_eq!(range_count, 1);
+    assert!(appendix.contains(&format!("prodex-artifact:{artifact_id}#L1-L4")));
+    assert!(appendix.contains("error: legacy failure"));
+    assert!(appendix.contains("src/main.rs:22:5"));
 }
 
 #[test]

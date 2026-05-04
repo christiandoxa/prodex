@@ -6,7 +6,10 @@ const SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES: usize = 1024;
 const SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS: u64 = 32_000;
 const SMART_CONTEXT_RESERVED_OUTPUT_TOKENS: u64 = 4_096;
 const SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT: usize = 8;
+const SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT: usize = 4;
 const SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES: usize = 12;
+const SMART_CONTEXT_TOOL_PREVIEW_ESTIMATED_LINE_BYTES: usize = 256;
+const SMART_CONTEXT_TOOL_PREVIEW_MAX_LINE_CHARS: usize = 220;
 const RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS: [&str; 3] =
     ["instructions", "system", "developer"];
 
@@ -49,6 +52,12 @@ struct RuntimeSmartContextStaticContextObservation {
     delta_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeSmartContextRewriteSafetyObservation {
+    safe: bool,
+    saved_tokens: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct RuntimeSmartContextLineRange {
     start: usize,
@@ -70,6 +79,7 @@ struct RuntimeSmartContextProxyState {
     artifact_path: Option<PathBuf>,
     last_token_usage: Option<RuntimeTokenUsage>,
     token_usage_history: Vec<RuntimeTokenUsage>,
+    rewrite_safety_history: Vec<RuntimeSmartContextRewriteSafetyObservation>,
     last_static_context_fingerprints: Vec<runtime_proxy_crate::SmartContextFingerprint>,
     last_static_context_prompt_cache_hash: Option<String>,
 }
@@ -102,6 +112,7 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
             artifact_path,
             last_token_usage: None,
             token_usage_history: Vec::new(),
+            rewrite_safety_history: Vec::new(),
             last_static_context_fingerprints: Vec::new(),
             last_static_context_prompt_cache_hash: None,
         },
@@ -129,6 +140,30 @@ pub(crate) fn observe_runtime_smart_context_token_usage(
                 .len()
                 .saturating_sub(SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT);
             state.token_usage_history.drain(0..overflow);
+        }
+    }
+}
+
+fn observe_runtime_smart_context_rewrite_safety(
+    shared: &RuntimeRotationProxyShared,
+    observation: RuntimeSmartContextRewriteSafetyObservation,
+) {
+    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+        return;
+    };
+    let Ok(mut states) = states.lock() else {
+        return;
+    };
+    if let Some(state) = states.get_mut(&shared.log_path)
+        && state.enabled
+    {
+        state.rewrite_safety_history.push(observation);
+        if state.rewrite_safety_history.len() > SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT {
+            let overflow = state
+                .rewrite_safety_history
+                .len()
+                .saturating_sub(SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT);
+            state.rewrite_safety_history.drain(0..overflow);
         }
     }
 }
@@ -401,6 +436,16 @@ fn prepare_runtime_smart_context_body<'a>(
                 &stats,
             )
     {
+        observe_runtime_smart_context_rewrite_safety(
+            shared,
+            RuntimeSmartContextRewriteSafetyObservation {
+                safe: true,
+                saved_tokens: runtime_smart_context_saved_tokens(
+                    request.body.len(),
+                    repaired_body.len(),
+                ),
+            },
+        );
         runtime_smart_context_log(
             request_id,
             shared,
@@ -422,6 +467,13 @@ fn prepare_runtime_smart_context_body<'a>(
         critical_signal_check,
         &stats,
     ) {
+        observe_runtime_smart_context_rewrite_safety(
+            shared,
+            RuntimeSmartContextRewriteSafetyObservation {
+                safe: false,
+                saved_tokens: 0,
+            },
+        );
         if let Some(body) = runtime_smart_context_minified_json_body_from_original(&request.body) {
             runtime_smart_context_log(
                 request_id,
@@ -455,6 +507,13 @@ fn prepare_runtime_smart_context_body<'a>(
         );
         return Cow::Borrowed(&request.body);
     }
+    observe_runtime_smart_context_rewrite_safety(
+        shared,
+        RuntimeSmartContextRewriteSafetyObservation {
+            safe: true,
+            saved_tokens: regression_check.saved_tokens,
+        },
+    );
     runtime_smart_context_log(
         request_id,
         shared,
@@ -490,7 +549,8 @@ fn runtime_smart_context_budget(
     missing_rehydrate_refs: Vec<String>,
     static_context_changed: bool,
 ) -> RuntimeSmartContextBudget {
-    let (history, configured_context_window_tokens) = runtime_smart_context_budget_inputs(shared);
+    let (history, configured_context_window_tokens, recent_rewrite_safety) =
+        runtime_smart_context_budget_inputs(shared);
     let model_context_window_tokens =
         configured_context_window_tokens.unwrap_or(SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS);
     let observed_context_tokens_u64 = history
@@ -512,6 +572,7 @@ fn runtime_smart_context_budget(
         runtime_proxy_crate::SmartContextAdaptiveBudgetPolicyInput {
             exactness_guard,
             accounting,
+            recent_rewrite_safety,
             static_context_changed,
             missing_rehydrate_refs,
         },
@@ -554,12 +615,16 @@ fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
 
 fn runtime_smart_context_budget_inputs(
     shared: &RuntimeRotationProxyShared,
-) -> (Vec<RuntimeTokenUsage>, Option<u64>) {
+) -> (
+    Vec<RuntimeTokenUsage>,
+    Option<u64>,
+    runtime_proxy_crate::SmartContextRecentRewriteSafety,
+) {
     let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
-        return (Vec::new(), None);
+        return (Vec::new(), None, Default::default());
     };
     let Ok(states) = states.lock() else {
-        return (Vec::new(), None);
+        return (Vec::new(), None, Default::default());
     };
     states
         .get(&shared.log_path)
@@ -567,9 +632,25 @@ fn runtime_smart_context_budget_inputs(
             (
                 state.token_usage_history.clone(),
                 state.model_context_window_tokens,
+                runtime_smart_context_recent_rewrite_safety(&state.rewrite_safety_history),
             )
         })
         .unwrap_or_default()
+}
+
+fn runtime_smart_context_recent_rewrite_safety(
+    history: &[RuntimeSmartContextRewriteSafetyObservation],
+) -> runtime_proxy_crate::SmartContextRecentRewriteSafety {
+    let mut safety = runtime_proxy_crate::SmartContextRecentRewriteSafety::default();
+    for observation in history {
+        if observation.safe {
+            safety.safe_rewrites = safety.safe_rewrites.saturating_add(1);
+            safety.saved_tokens = safety.saved_tokens.saturating_add(observation.saved_tokens);
+        } else {
+            safety.fallback_rewrites = safety.fallback_rewrites.saturating_add(1);
+        }
+    }
+    safety
 }
 
 fn runtime_smart_context_observe_static_context(
@@ -1199,9 +1280,13 @@ fn runtime_smart_context_rehydrate_lost_critical_ranges_in_text(
         let Some(artifact_text) = store.get_text(&id) else {
             continue;
         };
-        let Some((appendix, range_count)) =
-            runtime_smart_context_missing_critical_range_appendix(&id, &artifact_text, &next)
-        else {
+        let artifact_line_index = store.line_index(&id);
+        let Some((appendix, range_count)) = runtime_smart_context_missing_critical_range_appendix(
+            &id,
+            &artifact_text,
+            artifact_line_index,
+            &next,
+        ) else {
             continue;
         };
         if !next.ends_with('\n') {
@@ -1219,11 +1304,32 @@ fn runtime_smart_context_rehydrate_lost_critical_ranges_in_text(
     rehydrated_ranges
 }
 
+enum RuntimeSmartContextIndexedCriticalAppendix {
+    Found(String, usize),
+    NoLoss,
+    Unusable,
+}
+
 fn runtime_smart_context_missing_critical_range_appendix(
     artifact_id: &str,
     artifact_text: &str,
+    artifact_line_index: Option<&RuntimeSmartContextArtifactLineIndex>,
     current_text: &str,
 ) -> Option<(String, usize)> {
+    if let Some(line_index) = artifact_line_index {
+        match runtime_smart_context_missing_indexed_critical_range_appendix(
+            artifact_id,
+            line_index,
+            current_text,
+        ) {
+            RuntimeSmartContextIndexedCriticalAppendix::Found(appendix, range_count) => {
+                return Some((appendix, range_count));
+            }
+            RuntimeSmartContextIndexedCriticalAppendix::NoLoss => return None,
+            RuntimeSmartContextIndexedCriticalAppendix::Unusable => {}
+        }
+    }
+
     let ranges = prodex_context::critical_signal_lost_line_ranges_with_options(
         artifact_text,
         current_text,
@@ -1260,6 +1366,107 @@ fn runtime_smart_context_missing_critical_range_appendix(
     (range_count > 0).then_some((rendered.join("\n"), range_count))
 }
 
+fn runtime_smart_context_missing_indexed_critical_range_appendix(
+    artifact_id: &str,
+    line_index: &RuntimeSmartContextArtifactLineIndex,
+    current_text: &str,
+) -> RuntimeSmartContextIndexedCriticalAppendix {
+    if line_index.critical_ranges.is_empty() {
+        return if line_index.complete {
+            RuntimeSmartContextIndexedCriticalAppendix::NoLoss
+        } else {
+            RuntimeSmartContextIndexedCriticalAppendix::Unusable
+        };
+    }
+
+    let mut synthetic = String::new();
+    let mut synthetic_line_to_range = Vec::new();
+    for (range_index, range) in line_index.critical_ranges.iter().enumerate() {
+        if !runtime_smart_context_artifact_line_index_range_valid(range) {
+            return RuntimeSmartContextIndexedCriticalAppendix::Unusable;
+        }
+        for line in range.text.lines() {
+            if !synthetic.is_empty() {
+                synthetic.push('\n');
+            }
+            synthetic.push_str(line);
+            synthetic_line_to_range.push(range_index);
+        }
+    }
+
+    if synthetic_line_to_range.is_empty() {
+        return if line_index.complete {
+            RuntimeSmartContextIndexedCriticalAppendix::NoLoss
+        } else {
+            RuntimeSmartContextIndexedCriticalAppendix::Unusable
+        };
+    }
+
+    let lost_synthetic_ranges = prodex_context::critical_signal_lost_line_ranges_with_options(
+        &synthetic,
+        current_text,
+        prodex_context::CriticalSignalLineRangeOptions {
+            context_lines: 0,
+            max_ranges: SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES,
+            max_range_lines: 1,
+        },
+    );
+    if lost_synthetic_ranges.is_empty() {
+        return if line_index.complete {
+            RuntimeSmartContextIndexedCriticalAppendix::NoLoss
+        } else {
+            RuntimeSmartContextIndexedCriticalAppendix::Unusable
+        };
+    }
+
+    let mut selected = BTreeSet::<usize>::new();
+    for lost_range in lost_synthetic_ranges {
+        for synthetic_line in lost_range.start..=lost_range.end {
+            let Some(range_index) = synthetic_line_to_range.get(synthetic_line - 1) else {
+                return RuntimeSmartContextIndexedCriticalAppendix::Unusable;
+            };
+            selected.insert(*range_index);
+            if selected.len() >= SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES {
+                break;
+            }
+        }
+        if selected.len() >= SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES {
+            break;
+        }
+    }
+
+    let mut rendered = vec!["critical exact ranges:".to_string()];
+    for range_index in &selected {
+        let range = &line_index.critical_ranges[*range_index];
+        if range.text.trim().is_empty() {
+            continue;
+        }
+        rendered.push(format!(
+            "prodex-artifact:{artifact_id}#L{}-L{}\n{}",
+            range.start, range.end, range.text
+        ));
+    }
+
+    if rendered.len() <= 1 {
+        return if line_index.complete {
+            RuntimeSmartContextIndexedCriticalAppendix::NoLoss
+        } else {
+            RuntimeSmartContextIndexedCriticalAppendix::Unusable
+        };
+    }
+
+    RuntimeSmartContextIndexedCriticalAppendix::Found(rendered.join("\n"), rendered.len() - 1)
+}
+
+fn runtime_smart_context_artifact_line_index_range_valid(
+    range: &RuntimeSmartContextArtifactLineRange,
+) -> bool {
+    range.start > 0
+        && range.end >= range.start
+        && range.byte_len == range.text.len()
+        && range.content_hash == runtime_proxy_crate::smart_context_hash_text(&range.text)
+}
+
 fn runtime_smart_context_condense_tool_outputs(
     value: &mut serde_json::Value,
     store: &mut RuntimeSmartContextArtifactStore,
@@ -1274,6 +1481,7 @@ fn runtime_smart_context_condense_tool_outputs(
     else {
         return;
     };
+    let tool_call_metadata = runtime_smart_context_tool_call_metadata_by_call_id(input);
     for item in input {
         let Some(object) = item.as_object_mut() else {
             continue;
@@ -1285,6 +1493,11 @@ fn runtime_smart_context_condense_tool_outputs(
         if !item_type.ends_with("_call_output") {
             continue;
         }
+        let linked_metadata = runtime_smart_context_tool_call_id(object)
+            .and_then(|call_id| tool_call_metadata.get(call_id))
+            .map(String::as_str);
+        let command_kind_hint =
+            runtime_smart_context_tool_output_kind_hint(object, linked_metadata);
         for field in ["output", "content"] {
             let Some(output) = object
                 .get(field)
@@ -1307,8 +1520,12 @@ fn runtime_smart_context_condense_tool_outputs(
                 stats.repeat_tool_output_refs += 1;
                 runtime_smart_context_artifact_reference_summary(&artifact)
             } else {
-                let compacted =
-                    runtime_smart_context_compact_tool_output_preserving_critical(&output, tier);
+                let compacted = runtime_smart_context_compact_tool_output_preserving_critical(
+                    &output,
+                    tier,
+                    inline_limit,
+                    command_kind_hint,
+                );
                 runtime_smart_context_artifact_summary(&artifact, &compacted)
             };
             if replacement.len().saturating_mul(100) >= output.len().saturating_mul(90) {
@@ -1330,8 +1547,15 @@ fn runtime_smart_context_condense_tool_outputs(
 fn runtime_smart_context_compact_tool_output_preserving_critical(
     text: &str,
     tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    preview_byte_limit: usize,
+    command_kind_hint: Option<prodex_context::CommandOutputKind>,
 ) -> String {
-    let compacted = runtime_smart_context_compact_tool_output(text, tier);
+    let compacted = runtime_smart_context_compact_tool_output(
+        text,
+        tier,
+        preview_byte_limit,
+        command_kind_hint,
+    );
     runtime_smart_context_append_missing_critical_ranges(
         text,
         compacted,
@@ -1342,24 +1566,181 @@ fn runtime_smart_context_compact_tool_output_preserving_critical(
 fn runtime_smart_context_compact_tool_output(
     text: &str,
     tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    preview_byte_limit: usize,
+    command_kind_hint: Option<prodex_context::CommandOutputKind>,
 ) -> String {
-    let max_lines = match tier {
-        runtime_proxy_crate::SmartContextTokenBudgetTier::Large => 120,
-        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed => 80,
-        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal => 40,
-        runtime_proxy_crate::SmartContextTokenBudgetTier::Exact => return text.to_string(),
+    let Some(max_lines) = runtime_smart_context_tool_preview_max_lines(tier, preview_byte_limit)
+    else {
+        return text.to_string();
     };
-    prodex_context::compact_command_output_with_options(
+    prodex_context::compact_command_output_with_options_and_kind_hint(
         text,
         &prodex_context::CommandOutputCompactOptions {
             max_lines,
             head_lines: max_lines.saturating_mul(2) / 3,
             tail_lines: max_lines / 3,
-            max_line_chars: 220,
+            max_line_chars: SMART_CONTEXT_TOOL_PREVIEW_MAX_LINE_CHARS,
             ..prodex_context::CommandOutputCompactOptions::default()
         },
+        command_kind_hint,
     )
     .output
+}
+
+fn runtime_smart_context_tool_preview_max_lines(
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    preview_byte_limit: usize,
+) -> Option<usize> {
+    if tier == runtime_proxy_crate::SmartContextTokenBudgetTier::Exact
+        && preview_byte_limit == usize::MAX
+    {
+        return None;
+    }
+
+    let budget_lines = preview_byte_limit / SMART_CONTEXT_TOOL_PREVIEW_ESTIMATED_LINE_BYTES;
+    let (floor, cap) = match tier {
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal => (8, 24),
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed => (24, 80),
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Large => (80, 240),
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Exact => (120, 360),
+    };
+    Some(budget_lines.max(floor).min(cap))
+}
+
+fn runtime_smart_context_tool_call_metadata_by_call_id(
+    input: &[serde_json::Value],
+) -> BTreeMap<String, String> {
+    let mut metadata_by_call_id = BTreeMap::new();
+    for item in input {
+        let Some(object) = item.as_object() else {
+            continue;
+        };
+        let Some(call_id) = runtime_smart_context_tool_call_id(object) else {
+            continue;
+        };
+        let item_type = object
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if item_type.ends_with("_call_output") {
+            continue;
+        }
+        let metadata = runtime_smart_context_tool_output_metadata(object);
+        if !metadata.trim().is_empty() {
+            metadata_by_call_id.insert(call_id.to_string(), metadata);
+        }
+    }
+    metadata_by_call_id
+}
+
+fn runtime_smart_context_tool_output_kind_hint(
+    object: &serde_json::Map<String, serde_json::Value>,
+    linked_metadata: Option<&str>,
+) -> Option<prodex_context::CommandOutputKind> {
+    let mut metadata = linked_metadata.unwrap_or_default().to_string();
+    runtime_smart_context_push_tool_output_metadata(
+        &runtime_smart_context_tool_output_metadata(object),
+        &mut metadata,
+        SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS,
+    );
+    prodex_context::infer_command_output_kind_from_metadata(&metadata)
+}
+
+const SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS: usize = 8192;
+
+fn runtime_smart_context_tool_output_metadata(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let mut metadata = String::new();
+    for (field, child) in object {
+        runtime_smart_context_collect_tool_output_metadata(child, Some(field), 0, &mut metadata);
+        if metadata.len() >= SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS {
+            break;
+        }
+    }
+    metadata
+}
+
+fn runtime_smart_context_tool_call_id(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&str> {
+    ["call_id", "tool_call_id", "id"]
+        .into_iter()
+        .find_map(|key| object.get(key).and_then(serde_json::Value::as_str))
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn runtime_smart_context_collect_tool_output_metadata(
+    value: &serde_json::Value,
+    key: Option<&str>,
+    depth: usize,
+    metadata: &mut String,
+) {
+    const MAX_DEPTH: usize = 8;
+
+    if metadata.len() >= SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS || depth > MAX_DEPTH {
+        return;
+    }
+    if key.is_some_and(runtime_smart_context_tool_output_payload_field) {
+        return;
+    }
+    if let Some(key) = key {
+        runtime_smart_context_push_tool_output_metadata(
+            key,
+            metadata,
+            SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS,
+        );
+    }
+    match value {
+        serde_json::Value::String(text) => {
+            runtime_smart_context_push_tool_output_metadata(
+                text,
+                metadata,
+                SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS,
+            );
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                runtime_smart_context_collect_tool_output_metadata(item, None, depth + 1, metadata);
+                if metadata.len() >= SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS {
+                    break;
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (field, child) in map {
+                runtime_smart_context_collect_tool_output_metadata(
+                    child,
+                    Some(field),
+                    depth + 1,
+                    metadata,
+                );
+                if metadata.len() >= SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS {
+                    break;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn runtime_smart_context_tool_output_payload_field(key: &str) -> bool {
+    matches!(key, "output" | "content")
+}
+
+fn runtime_smart_context_push_tool_output_metadata(
+    text: &str,
+    metadata: &mut String,
+    max_chars: usize,
+) {
+    if metadata.len() >= max_chars {
+        return;
+    }
+    if !metadata.is_empty() {
+        metadata.push(' ');
+    }
+    let remaining = max_chars.saturating_sub(metadata.len());
+    metadata.extend(text.chars().take(remaining));
 }
 
 fn runtime_smart_context_artifact_summary(
@@ -1908,6 +2289,9 @@ fn runtime_smart_context_budget_policy_reason_labels(
             runtime_proxy_crate::SmartContextBudgetPolicyReason::UnsafeAccounting => {
                 "unsafe_accounting"
             }
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::RecentRewriteSavingsSafe => {
+                "recent_rewrite_savings_safe"
+            }
             runtime_proxy_crate::SmartContextBudgetPolicyReason::PlentyOfBudget => {
                 "plenty_of_budget"
             }
@@ -1938,6 +2322,13 @@ fn runtime_smart_context_rewrite_self_check(
     } else {
         "growth"
     }
+}
+
+fn runtime_smart_context_saved_tokens(body_bytes_before: usize, body_bytes_after: usize) -> u64 {
+    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(body_bytes_before)
+        .saturating_sub(
+            runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(body_bytes_after),
+        )
 }
 
 fn runtime_smart_context_minified_json_body(

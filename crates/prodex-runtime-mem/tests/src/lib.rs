@@ -245,7 +245,7 @@ fn slim_and_full_schema_outputs_stay_unchanged() {
 }
 
 #[test]
-fn super_slim_schema_prefers_prompt_summary_or_refs_and_omits_large_prompt_body() {
+fn super_slim_schema_prefers_prompt_summary_or_refs_and_falls_back_to_prompt_body() {
     let large_prompt = "repeat ".repeat(8_000);
     let slim_prompt = resolve_schema_user_prompt(
         &runtime_mem_default_codex_schema(),
@@ -270,11 +270,7 @@ fn super_slim_schema_prefers_prompt_summary_or_refs_and_omits_large_prompt_body(
     .expect("super-slim prompt should resolve");
 
     assert_eq!(slim_prompt, large_prompt);
-    assert_eq!(
-        super_slim_prompt,
-        "user prompt recorded by prodex super-slim mem; content omitted"
-    );
-    assert!(super_slim_prompt.len() < slim_prompt.len() / 100);
+    assert_eq!(super_slim_prompt, large_prompt);
 
     let summarized = resolve_schema_user_prompt(
         &super_slim_schema,
@@ -293,13 +289,161 @@ fn super_slim_schema_prefers_prompt_summary_or_refs_and_omits_large_prompt_body(
         summarized,
         "Task summary and artifact prodex://artifact/prompt-1"
     );
+    let artifact_ref = resolve_schema_user_prompt(
+        &super_slim_schema,
+        &serde_json::json!({
+            "payload": {
+                "type": "user_message",
+                "message": large_prompt,
+                "metadata": {
+                    "artifact_ref": "prodex-artifact:sc:prompt-1"
+                }
+            }
+        }),
+    )
+    .expect("super-slim artifact ref prompt should resolve");
+    assert_eq!(artifact_ref, "prodex-artifact:sc:prompt-1");
 
     let prompt_field = schema_user_prompt_field(&super_slim_schema)
         .expect("super-slim schema should define prompt field")
         .to_string();
-    assert!(!prompt_field.contains("payload.message"));
     assert!(prompt_field.contains("metadata.prompt_summary"));
     assert!(prompt_field.contains("artifact"));
+    assert!(prompt_field.contains("payload.message"));
+    assert!(
+        prompt_field.find("metadata.prompt_summary") < prompt_field.find("payload.message"),
+        "safe summary/ref candidates must be tried before full prompt fallback"
+    );
+}
+
+#[test]
+fn safe_auto_schema_mode_uses_super_slim_only_with_prompt_summary_or_artifact_ref() {
+    let plain_prompt = serde_json::json!({
+        "payload": {
+            "type": "user_message",
+            "message": "long prompt without safe summary"
+        }
+    });
+    let prompt_summary = serde_json::json!({
+        "payload": {
+            "type": "user_message",
+            "message": "long prompt",
+            "metadata": {
+                "prompt_summary": "short prompt summary"
+            }
+        }
+    });
+    let artifact_ref = serde_json::json!({
+        "payload": {
+            "type": "user_message",
+            "message": "long prompt",
+            "metadata": {
+                "artifact_ref": "prodex-artifact:sc:abc"
+            }
+        }
+    });
+    let marker_text = serde_json::json!({
+        "payload": {
+            "type": "user_message",
+            "message": "use prodex-artifact:sc:def"
+        }
+    });
+    let generic_summary = serde_json::json!({
+        "payload": {
+            "type": "user_message",
+            "message": "long prompt",
+            "metadata": {
+                "summary": "not a prompt_summary field"
+            }
+        }
+    });
+
+    assert_eq!(
+        runtime_mem_safe_auto_codex_schema_mode_for_event(
+            RuntimeMemTranscriptMode::Slim,
+            &plain_prompt,
+        ),
+        RuntimeMemTranscriptMode::Slim
+    );
+    assert_eq!(
+        runtime_mem_safe_auto_codex_schema_mode_for_event(
+            RuntimeMemTranscriptMode::SuperSlim,
+            &plain_prompt,
+        ),
+        RuntimeMemTranscriptMode::Slim
+    );
+    assert_eq!(
+        runtime_mem_safe_auto_codex_schema_mode_for_event(
+            RuntimeMemTranscriptMode::Slim,
+            &prompt_summary,
+        ),
+        RuntimeMemTranscriptMode::SuperSlim
+    );
+    assert_eq!(
+        runtime_mem_safe_auto_codex_schema_mode_for_event(
+            RuntimeMemTranscriptMode::Slim,
+            &artifact_ref,
+        ),
+        RuntimeMemTranscriptMode::SuperSlim
+    );
+    assert_eq!(
+        runtime_mem_safe_auto_codex_schema_mode_for_event(
+            RuntimeMemTranscriptMode::Slim,
+            &marker_text,
+        ),
+        RuntimeMemTranscriptMode::SuperSlim
+    );
+    assert_eq!(
+        runtime_mem_safe_auto_codex_schema_mode_for_event(
+            RuntimeMemTranscriptMode::Slim,
+            &generic_summary,
+        ),
+        RuntimeMemTranscriptMode::Slim
+    );
+    assert_eq!(
+        runtime_mem_safe_auto_codex_schema_mode_for_event(
+            RuntimeMemTranscriptMode::Full,
+            &prompt_summary,
+        ),
+        RuntimeMemTranscriptMode::Full
+    );
+}
+
+#[test]
+fn safe_auto_schema_policy_and_schema_helper_are_ready_for_app_integration() {
+    let event = serde_json::json!({
+        "payload": {
+            "type": "user_message",
+            "metadata": {
+                "artifact_id": "prompt-artifact-1"
+            }
+        }
+    });
+
+    assert!(runtime_mem_event_has_super_slim_prompt_reference(&event));
+    assert_eq!(
+        runtime_mem_select_codex_schema_mode_for_event(
+            RuntimeMemSchemaSelectionPolicy::SafeSuperSlimCandidate {
+                fallback_mode: RuntimeMemTranscriptMode::Slim,
+            },
+            &event,
+        ),
+        RuntimeMemTranscriptMode::SuperSlim
+    );
+    assert_eq!(
+        runtime_mem_select_codex_schema_mode_for_event(
+            RuntimeMemSchemaSelectionPolicy::Explicit(RuntimeMemTranscriptMode::Slim),
+            &event,
+        ),
+        RuntimeMemTranscriptMode::Slim
+    );
+
+    let schema =
+        runtime_mem_codex_schema_for_safe_auto_event(RuntimeMemTranscriptMode::Slim, &event);
+    assert_eq!(
+        schema.get("version").and_then(Value::as_str),
+        Some("0.6-super-slim")
+    );
 }
 
 fn schema_user_prompt_field(schema: &Value) -> Option<&Value> {

@@ -99,6 +99,20 @@ fn super_mem_super_slim_expands_to_super_slim_mem_prefix() {
 }
 
 #[test]
+fn super_default_keeps_slim_mem_prefix() {
+    let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
+
+    assert_eq!(
+        args.codex_args,
+        vec![
+            OsString::from("mem"),
+            OsString::from("exec"),
+            OsString::from("review")
+        ]
+    );
+}
+
+#[test]
 fn super_rejects_conflicting_mem_schema_flags() {
     assert!(
         parse_cli_command_from([

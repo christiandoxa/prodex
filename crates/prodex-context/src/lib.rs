@@ -14,6 +14,19 @@ const CONTEXT_AUDIT_ROOTS: &[&str] = &[
     "rules",
     "skills",
 ];
+const STATIC_DUPLICATE_MIN_CHARS: usize = 80;
+const STATIC_DUPLICATE_MIN_WORDS: usize = 10;
+const STATIC_DUPLICATE_PREVIEW_CHARS: usize = 160;
+
+#[derive(Debug, Clone)]
+struct ContextStaticDuplicateCandidate {
+    key: String,
+    preview: String,
+    occurrence: ContextStaticDuplicateOccurrence,
+    words: usize,
+    normalized_chars: usize,
+    estimated_tokens: usize,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ContextAuditEntry {
@@ -34,6 +47,38 @@ pub struct ContextAuditReport {
     pub total_chars: usize,
     pub total_words: usize,
     pub total_estimated_tokens: usize,
+    pub static_duplicates: ContextStaticDuplicateReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextStaticDuplicateOccurrence {
+    pub path: PathBuf,
+    pub relative_path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextStaticDuplicateSnippet {
+    pub preview: String,
+    pub occurrence_count: usize,
+    pub occurrences: Vec<ContextStaticDuplicateOccurrence>,
+    pub words: usize,
+    pub normalized_chars: usize,
+    pub estimated_tokens_per_occurrence: usize,
+    pub estimated_duplicate_tokens: usize,
+    pub suggestion: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextStaticDuplicateReport {
+    pub root: PathBuf,
+    pub snippets: Vec<ContextStaticDuplicateSnippet>,
+    pub total_duplicate_snippets: usize,
+    pub hidden_duplicate_snippets: usize,
+    pub total_duplicate_occurrences: usize,
+    pub estimated_duplicate_tokens: usize,
+    pub suggestion: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -454,6 +499,25 @@ pub fn is_context_blob_noise(input: &str) -> bool {
     detect_context_blob_noise(input).is_noise()
 }
 
+pub fn collect_context_static_duplicate_report(
+    root: &Path,
+    limit: usize,
+) -> Result<ContextStaticDuplicateReport> {
+    let mut paths = Vec::new();
+    for entry in CONTEXT_AUDIT_ROOTS {
+        collect_context_files(&root.join(entry), &mut paths)?;
+    }
+    paths.sort();
+    paths.dedup();
+
+    let candidates = collect_context_static_duplicate_candidates(root, &paths)?;
+    Ok(build_context_static_duplicate_report(
+        root.to_path_buf(),
+        candidates,
+        limit,
+    ))
+}
+
 fn detect_context_blob_noise_inner(path: Option<&Path>, input: &str) -> ContextBlobNoiseReport {
     let normalized = normalize_command_output(input);
     let lines = command_lines(&normalized);
@@ -530,6 +594,7 @@ pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<Context
     paths.dedup();
 
     let mut files = Vec::new();
+    let mut duplicate_candidates = Vec::new();
     for path in paths {
         if !is_auditable_context_file(&path) {
             continue;
@@ -549,6 +614,14 @@ pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<Context
             .display()
             .to_string();
         let compressible = is_compressible_context_file(&path);
+        if is_static_duplicate_context_file(&path) {
+            duplicate_candidates.extend(context_static_duplicate_candidates_for_text(
+                root,
+                &path,
+                &relative_path,
+                &text,
+            ));
+        }
         files.push(ContextAuditEntry {
             path,
             relative_path,
@@ -570,6 +643,8 @@ pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<Context
     let total_chars = files.iter().map(|entry| entry.chars).sum();
     let total_words = files.iter().map(|entry| entry.words).sum();
     let total_estimated_tokens = files.iter().map(|entry| entry.estimated_tokens).sum();
+    let static_duplicates =
+        build_context_static_duplicate_report(root.to_path_buf(), duplicate_candidates, limit);
 
     Ok(ContextAuditReport {
         root: root.to_path_buf(),
@@ -578,6 +653,7 @@ pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<Context
         total_chars,
         total_words,
         total_estimated_tokens,
+        static_duplicates,
     })
 }
 
@@ -691,6 +767,294 @@ fn collect_context_files(path: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+fn collect_context_static_duplicate_candidates(
+    root: &Path,
+    paths: &[PathBuf],
+) -> Result<Vec<ContextStaticDuplicateCandidate>> {
+    let mut candidates = Vec::new();
+    for path in paths {
+        if !is_static_duplicate_context_file(path) {
+            continue;
+        }
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(_) => continue,
+        };
+        let relative_path = path
+            .strip_prefix(root)
+            .unwrap_or(path.as_path())
+            .display()
+            .to_string();
+        candidates.extend(context_static_duplicate_candidates_for_text(
+            root,
+            path,
+            &relative_path,
+            &text,
+        ));
+    }
+    Ok(candidates)
+}
+
+fn context_static_duplicate_candidates_for_text(
+    _root: &Path,
+    path: &Path,
+    relative_path: &str,
+    text: &str,
+) -> Vec<ContextStaticDuplicateCandidate> {
+    let mut candidates = Vec::new();
+    let mut block = Vec::<String>::new();
+    let mut block_start = 0usize;
+    let mut in_fence = false;
+
+    for (index, line) in text.lines().enumerate() {
+        let line_number = index + 1;
+        let trimmed = line.trim();
+        let fence = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+        if fence {
+            push_context_static_duplicate_candidate(
+                &mut candidates,
+                path,
+                relative_path,
+                &mut block,
+                block_start,
+                line_number.saturating_sub(1),
+            );
+            in_fence = !in_fence;
+            continue;
+        }
+
+        if in_fence || trimmed.is_empty() || is_static_context_duplicate_boundary_line(trimmed) {
+            push_context_static_duplicate_candidate(
+                &mut candidates,
+                path,
+                relative_path,
+                &mut block,
+                block_start,
+                line_number.saturating_sub(1),
+            );
+            continue;
+        }
+
+        if block.is_empty() {
+            block_start = line_number;
+        }
+        block.push(trimmed.to_string());
+    }
+
+    push_context_static_duplicate_candidate(
+        &mut candidates,
+        path,
+        relative_path,
+        &mut block,
+        block_start,
+        text.lines().count(),
+    );
+    candidates
+}
+
+fn push_context_static_duplicate_candidate(
+    candidates: &mut Vec<ContextStaticDuplicateCandidate>,
+    path: &Path,
+    relative_path: &str,
+    block: &mut Vec<String>,
+    start_line: usize,
+    end_line: usize,
+) {
+    if block.is_empty() {
+        return;
+    }
+    let joined = block.join(" ");
+    block.clear();
+
+    let Some((key, preview, words, normalized_chars, estimated_tokens)) =
+        normalize_context_static_duplicate_snippet(&joined)
+    else {
+        return;
+    };
+
+    candidates.push(ContextStaticDuplicateCandidate {
+        key,
+        preview,
+        occurrence: ContextStaticDuplicateOccurrence {
+            path: path.to_path_buf(),
+            relative_path: relative_path.to_string(),
+            start_line,
+            end_line: end_line.max(start_line),
+        },
+        words,
+        normalized_chars,
+        estimated_tokens,
+    });
+}
+
+fn build_context_static_duplicate_report(
+    root: PathBuf,
+    candidates: Vec<ContextStaticDuplicateCandidate>,
+    limit: usize,
+) -> ContextStaticDuplicateReport {
+    let mut groups = BTreeMap::<String, Vec<ContextStaticDuplicateCandidate>>::new();
+    for candidate in candidates {
+        groups
+            .entry(candidate.key.clone())
+            .or_default()
+            .push(candidate);
+    }
+
+    let mut snippets = groups
+        .into_values()
+        .filter(|group| group.len() > 1)
+        .map(context_static_duplicate_snippet_from_group)
+        .collect::<Vec<_>>();
+    snippets.sort_by_key(|snippet| {
+        (
+            Reverse(snippet.estimated_duplicate_tokens),
+            Reverse(snippet.occurrence_count),
+            snippet.preview.clone(),
+        )
+    });
+
+    let total_duplicate_snippets = snippets.len();
+    let total_duplicate_occurrences = snippets
+        .iter()
+        .map(|snippet| snippet.occurrence_count)
+        .sum();
+    let estimated_duplicate_tokens = snippets
+        .iter()
+        .map(|snippet| snippet.estimated_duplicate_tokens)
+        .sum();
+    let shown = if limit == 0 {
+        snippets.len()
+    } else {
+        snippets.len().min(limit)
+    };
+    let hidden_duplicate_snippets = snippets.len().saturating_sub(shown);
+    snippets.truncate(shown);
+
+    ContextStaticDuplicateReport {
+        root,
+        snippets,
+        total_duplicate_snippets,
+        hidden_duplicate_snippets,
+        total_duplicate_occurrences,
+        estimated_duplicate_tokens,
+        suggestion: if total_duplicate_snippets == 0 {
+            "No duplicate static context snippets found.".to_string()
+        } else {
+            "Review and consolidate repeated snippets manually; this report does not edit files."
+                .to_string()
+        },
+    }
+}
+
+fn context_static_duplicate_snippet_from_group(
+    mut group: Vec<ContextStaticDuplicateCandidate>,
+) -> ContextStaticDuplicateSnippet {
+    group.sort_by_key(|candidate| {
+        (
+            candidate.occurrence.relative_path.clone(),
+            candidate.occurrence.start_line,
+            candidate.occurrence.end_line,
+        )
+    });
+    let first = group.first().expect("duplicate group should be non-empty");
+    let estimated_tokens = first.estimated_tokens;
+    let estimated_duplicate_tokens = estimated_tokens.saturating_mul(group.len().saturating_sub(1));
+    let occurrence_count = group.len();
+    let preview = first.preview.clone();
+    let words = first.words;
+    let normalized_chars = first.normalized_chars;
+    let occurrences = group
+        .into_iter()
+        .map(|candidate| candidate.occurrence)
+        .collect::<Vec<_>>();
+    let primary_location = occurrences
+        .first()
+        .map(|occurrence| context_static_duplicate_location_label(occurrence))
+        .unwrap_or_else(|| "one canonical file".to_string());
+
+    ContextStaticDuplicateSnippet {
+        preview,
+        occurrence_count,
+        occurrences,
+        words,
+        normalized_chars,
+        estimated_tokens_per_occurrence: estimated_tokens,
+        estimated_duplicate_tokens,
+        suggestion: format!(
+            "Keep one canonical copy, for example {primary_location}, and replace other copies with a short reference if needed."
+        ),
+    }
+}
+
+fn normalize_context_static_duplicate_snippet(
+    input: &str,
+) -> Option<(String, String, usize, usize, usize)> {
+    let preview = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    let key = normalize_context_static_duplicate_key(&preview);
+    let words = key.split_whitespace().count();
+    let normalized_chars = key.chars().count();
+    if words < STATIC_DUPLICATE_MIN_WORDS || normalized_chars < STATIC_DUPLICATE_MIN_CHARS {
+        return None;
+    }
+    let estimated_tokens = estimate_context_tokens(normalized_chars, words);
+    Some((
+        key,
+        truncate_context_static_duplicate_preview(&preview),
+        words,
+        normalized_chars,
+        estimated_tokens,
+    ))
+}
+
+fn normalize_context_static_duplicate_key(input: &str) -> String {
+    let mut key = String::new();
+    let mut previous_space = true;
+    for ch in input.chars() {
+        if ch.is_alphanumeric() || ch == '_' || ch == '-' {
+            for lower in ch.to_lowercase() {
+                key.push(lower);
+            }
+            previous_space = false;
+        } else if !previous_space {
+            key.push(' ');
+            previous_space = true;
+        }
+    }
+    key.trim().to_string()
+}
+
+fn truncate_context_static_duplicate_preview(input: &str) -> String {
+    let mut preview = input
+        .chars()
+        .take(STATIC_DUPLICATE_PREVIEW_CHARS)
+        .collect::<String>();
+    if input.chars().count() > STATIC_DUPLICATE_PREVIEW_CHARS {
+        preview.push_str("...");
+    }
+    preview
+}
+
+fn is_static_context_duplicate_boundary_line(trimmed: &str) -> bool {
+    trimmed.starts_with('#')
+        || trimmed.starts_with('|')
+        || trimmed.starts_with('>')
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("~~~")
+}
+
+fn context_static_duplicate_location_label(
+    occurrence: &ContextStaticDuplicateOccurrence,
+) -> String {
+    if occurrence.start_line == occurrence.end_line {
+        format!("{}:{}", occurrence.relative_path, occurrence.start_line)
+    } else {
+        format!(
+            "{}:{}-{}",
+            occurrence.relative_path, occurrence.start_line, occurrence.end_line
+        )
+    }
+}
+
 pub fn render_context_audit_report_with_width(
     report: &ContextAuditReport,
     limit: usize,
@@ -738,7 +1102,66 @@ pub fn render_context_audit_report_with_width(
             report.files.len() - shown
         ));
     }
+    lines.extend(render_context_static_duplicate_report_lines(
+        &report.static_duplicates,
+        total_width,
+    ));
     lines.join("\n")
+}
+
+fn render_context_static_duplicate_report_lines(
+    report: &ContextStaticDuplicateReport,
+    total_width: usize,
+) -> Vec<String> {
+    let mut lines = vec![
+        String::new(),
+        section_header_with_width("Static Context Duplicates", total_width),
+    ];
+    if report.total_duplicate_snippets == 0 {
+        lines.push(report.suggestion.clone());
+        return lines;
+    }
+
+    lines.push(format!(
+        "Found {} duplicate snippets across {} occurrences (~{} duplicate tokens).",
+        format_count(report.total_duplicate_snippets),
+        format_count(report.total_duplicate_occurrences),
+        format_count(report.estimated_duplicate_tokens),
+    ));
+    lines.push(format!("Suggestion: {}", report.suggestion));
+    let preview_width = total_width.saturating_sub(28).max(24);
+    let detail_width = total_width.saturating_sub(13).max(24);
+
+    for snippet in &report.snippets {
+        lines.push(format!(
+            "- ~{} duplicate tokens, {} copies: {}",
+            format_count(snippet.estimated_duplicate_tokens),
+            format_count(snippet.occurrence_count),
+            fit_cell(&snippet.preview, preview_width),
+        ));
+        let locations = snippet
+            .occurrences
+            .iter()
+            .map(context_static_duplicate_location_label)
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!(
+            "  locations: {}",
+            fit_cell(&locations, detail_width)
+        ));
+        lines.push(format!(
+            "  suggestion: {}",
+            fit_cell(&snippet.suggestion, detail_width)
+        ));
+    }
+
+    if report.hidden_duplicate_snippets > 0 {
+        lines.push(format!(
+            "... {} more duplicate snippets hidden",
+            format_count(report.hidden_duplicate_snippets),
+        ));
+    }
+    lines
 }
 
 pub fn render_context_compress_report(report: &ContextCompressReport, dry_run: bool) -> String {
@@ -782,13 +1205,25 @@ pub fn compact_command_output(input: &str, kind: CommandOutputKind) -> String {
     compact_command_output_with_options(input, &options).output
 }
 
+pub fn command_output_kind_hint_for_command(command: &str) -> Option<CommandOutputKind> {
+    infer_command_output_kind_from_metadata(command)
+}
+
 pub fn compact_command_output_with_options(
     input: &str,
     options: &CommandOutputCompactOptions,
 ) -> CommandOutputCompactReport {
+    compact_command_output_with_options_and_kind_hint(input, options, None)
+}
+
+pub fn compact_command_output_with_options_and_kind_hint(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+    kind_hint: Option<CommandOutputKind>,
+) -> CommandOutputCompactReport {
     let normalized = normalize_command_output(input);
     let detected_kind = match options.kind {
-        CommandOutputKind::Auto => detect_command_output_kind(&normalized),
+        CommandOutputKind::Auto => detect_command_output_kind_with_hint(&normalized, kind_hint),
         explicit => explicit,
     };
     let output = match detected_kind {
@@ -2772,6 +3207,211 @@ fn detect_command_output_kind(input: &str) -> CommandOutputKind {
     CommandOutputKind::Plain
 }
 
+fn detect_command_output_kind_with_hint(
+    input: &str,
+    kind_hint: Option<CommandOutputKind>,
+) -> CommandOutputKind {
+    let detected = detect_command_output_kind(input);
+    if detected == CommandOutputKind::Plain {
+        kind_hint
+            .filter(|kind| *kind != CommandOutputKind::Auto)
+            .unwrap_or(detected)
+    } else {
+        detected
+    }
+}
+
+pub fn infer_command_output_kind_from_metadata(metadata: &str) -> Option<CommandOutputKind> {
+    let tokens = command_metadata_tokens(metadata);
+    infer_command_output_kind_from_metadata_tokens(&tokens)
+}
+
+fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<CommandOutputKind> {
+    for index in 0..tokens.len() {
+        let command = command_metadata_token_command_name(&tokens[index]);
+        if matches!(command, "rg" | "ripgrep" | "grep" | "egrep" | "fgrep") {
+            return Some(CommandOutputKind::Search);
+        }
+        if matches!(command, "ls" | "find" | "tree") {
+            return Some(CommandOutputKind::FileList);
+        }
+        if matches!(command, "pytest" | "py.test" | "tsc")
+            || command.ends_with("-tsc")
+            || command.ends_with("_tsc")
+        {
+            return Some(CommandOutputKind::Diagnostics);
+        }
+        if command == "cargo"
+            && command_metadata_subcommand_after(tokens, index).is_some_and(|subcommand| {
+                matches!(
+                    subcommand,
+                    "test" | "check" | "clippy" | "build" | "nextest" | "fmt"
+                )
+            })
+        {
+            return Some(CommandOutputKind::RustDiagnostics);
+        }
+        if command == "git"
+            && let Some(subcommand) = command_metadata_subcommand_after(tokens, index)
+        {
+            match subcommand {
+                "status" => return Some(CommandOutputKind::GitStatus),
+                "diff" | "show" => return Some(CommandOutputKind::GitDiff),
+                "log" => return Some(CommandOutputKind::GitLog),
+                "grep" => return Some(CommandOutputKind::Search),
+                "ls-files" => return Some(CommandOutputKind::FileList),
+                _ => {}
+            }
+        }
+        if matches!(command, "npm" | "pnpm" | "yarn" | "bun")
+            && command_metadata_package_script_after(tokens, index).is_some()
+        {
+            return Some(CommandOutputKind::Diagnostics);
+        }
+    }
+    None
+}
+
+fn command_metadata_subcommand_after(tokens: &[String], command_index: usize) -> Option<&str> {
+    let mut skip_next = false;
+    for token in tokens
+        .iter()
+        .skip(command_index + 1)
+        .map(|token| command_metadata_token_command_name(token))
+    {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if command_metadata_token_option_takes_value(token) {
+            skip_next = true;
+            continue;
+        }
+        if !command_metadata_token_is_option_or_shell_glue(token) {
+            return Some(token);
+        }
+    }
+    None
+}
+
+fn command_metadata_package_script_after(tokens: &[String], command_index: usize) -> Option<&str> {
+    let mut saw_run = false;
+    let mut skip_next = false;
+    for token in tokens
+        .iter()
+        .skip(command_index + 1)
+        .map(|token| command_metadata_token_command_name(token))
+    {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if command_metadata_token_option_takes_value(token) {
+            skip_next = true;
+            continue;
+        }
+        if command_metadata_token_is_option_or_shell_glue(token) {
+            continue;
+        }
+        if token == "run" || token == "run-script" {
+            saw_run = true;
+            continue;
+        }
+        if matches!(
+            token,
+            "test" | "t" | "typecheck" | "type-check" | "tsc" | "check"
+        ) || (saw_run && (token.contains("test") || token.contains("typecheck")))
+        {
+            return Some(token);
+        }
+        return None;
+    }
+    None
+}
+
+fn command_metadata_token_is_option_or_shell_glue(token: &str) -> bool {
+    token.is_empty()
+        || token.starts_with('-')
+        || token.starts_with('+')
+        || matches!(
+            token,
+            "cmd"
+                | "command"
+                | "args"
+                | "arguments"
+                | "metadata"
+                | "name"
+                | "tool"
+                | "tool_name"
+                | "shell"
+                | "bash"
+                | "sh"
+                | "zsh"
+                | "fish"
+                | "powershell"
+                | "pwsh"
+                | "python"
+                | "python3"
+                | "py"
+                | "node"
+                | "npx"
+                | "bunx"
+                | "uv"
+                | "uvx"
+                | "poetry"
+                | "pipenv"
+                | "exec_command"
+                | "function_call"
+                | "function_call_output"
+                | "shell_call"
+                | "shell_call_output"
+                | "true"
+                | "false"
+                | "null"
+        )
+}
+
+fn command_metadata_token_option_takes_value(token: &str) -> bool {
+    matches!(
+        token,
+        "-c" | "-m"
+            | "-p"
+            | "--config"
+            | "--git-dir"
+            | "--work-tree"
+            | "--manifest-path"
+            | "--package"
+            | "--bin"
+            | "--example"
+            | "--target"
+            | "--project"
+            | "--cwd"
+            | "--prefix"
+            | "--directory"
+    )
+}
+
+fn command_metadata_token_command_name(token: &str) -> &str {
+    let basename = token.rsplit('/').next().unwrap_or(token);
+    basename.strip_suffix(".exe").unwrap_or(basename)
+}
+
+fn command_metadata_tokens(metadata: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut token = String::new();
+    for ch in metadata.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | '+') {
+            token.push(ch.to_ascii_lowercase());
+        } else if !token.is_empty() {
+            tokens.push(std::mem::take(&mut token));
+        }
+    }
+    if !token.is_empty() {
+        tokens.push(token);
+    }
+    tokens
+}
+
 fn is_error_signal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     let lower = trimmed.to_ascii_lowercase();
@@ -4713,6 +5353,10 @@ fn is_auditable_context_file(path: &Path) -> bool {
                 path.extension().and_then(|ext| ext.to_str()),
                 Some("toml" | "json" | "yaml" | "yml")
             ))
+}
+
+fn is_static_duplicate_context_file(path: &Path) -> bool {
+    is_compressible_context_file(path)
 }
 
 fn is_compressible_context_file(path: &Path) -> bool {
