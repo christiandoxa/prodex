@@ -2,6 +2,48 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.75.0 - Unreleased
+
+Changes after `0.74.0`.
+
+### CLI
+
+- Preserve shared-account profile imports (`8703402`)
+
+### Misc
+
+- Improve smart context token efficiency (`8c82f51`)
+- Reduce super context token overhead (`a20286e`)
+- Improve super token efficiency (`b8012cd`)
+
+## 0.74.0 - 2026-05-04
+
+### CLI
+
+- Prevent login profile email mismatch (`618664f`)
+
+### Misc
+
+- Release 0.74.0 (`a15618d`)
+
+## 0.73.0 - 2026-05-04
+
+### Misc
+
+- Add smart context autopilot (`7b2a9d7`)
+
+## 0.72.0 - 2026-05-04
+
+### Tests
+
+- Colocate crate tests under crate directories (`1c65070`)
+
+### Misc
+
+- Release 0.72.0 (`dde529f`)
+- Satisfy smart context clippy gate (`b432d95`)
+- Add smart context autopilot (`7d98725`)
+
 ## 0.71.0 - 2026-05-03
 
 ### Misc
@@ -139,26 +181,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Support proxies and native Codex history (`63ef05a`)
-
-## 0.62.0 - 2026-04-28
-
-### Runtime
-
-- Improve diagnostics and release readiness (`cf19a7e`)
-
-### CI
-
-- Avoid synthetic secret scan matches (`68e0398`)
-- Refresh upstream watchdog baseline (`4bccb9f`)
-
-## 0.61.0 - 2026-04-28
-
-### Runtime
-
-- Harden proxy and shared state resilience (`439da04`)
-
-## 0.60.0 - 2026-04-28
-
-### Runtime
-
-- Improve runtime diagnostics and import safety (`3c62d3a`)
