@@ -220,7 +220,7 @@ fn import_plan_rewrites_pending_new_profile_for_duplicate_identity() {
         PlanProfile {
             name: "second",
             supports_codex_runtime: true,
-            email: Some("other@example.com"),
+            email: Some("User@Example.com"),
             account_id: Some("acct-main"),
         },
     ];
@@ -245,6 +245,47 @@ fn import_plan_rewrites_pending_new_profile_for_duplicate_identity() {
         BTreeMap::from([
             ("first".to_string(), "first".to_string()),
             ("second".to_string(), "first".to_string()),
+        ])
+    );
+}
+
+#[test]
+fn import_plan_keeps_same_account_with_different_emails_distinct() {
+    let profiles = [
+        PlanProfile {
+            name: "first",
+            supports_codex_runtime: true,
+            email: Some("first@example.com"),
+            account_id: Some("acct-main"),
+        },
+        PlanProfile {
+            name: "second",
+            supports_codex_runtime: true,
+            email: Some("second@example.com"),
+            account_id: Some("acct-main"),
+        },
+    ];
+
+    let plan = plan_profile_import(&profiles, |_| None, |_| Ok(None)).expect("plan should resolve");
+
+    assert_eq!(
+        plan.actions,
+        vec![
+            ProfileImportPlanAction::StageNew {
+                source_index: 0,
+                staged_index: 0,
+            },
+            ProfileImportPlanAction::StageNew {
+                source_index: 1,
+                staged_index: 1,
+            },
+        ]
+    );
+    assert_eq!(
+        plan.resolved_profile_names,
+        BTreeMap::from([
+            ("first".to_string(), "first".to_string()),
+            ("second".to_string(), "second".to_string()),
         ])
     );
 }
@@ -311,6 +352,26 @@ fn import_identity_falls_back_to_exported_email() {
         .email
         .as_deref(),
         Some("auth@example.com")
+    );
+}
+
+#[test]
+fn import_identity_key_combines_account_and_email_when_both_exist() {
+    assert_eq!(
+        profile_import_identity_parts_target_key(Some(" acct-main "), Some(" User@Example.COM ")),
+        Some("account:acct-main|email:user@example.com".to_string())
+    );
+    assert_eq!(
+        profile_import_identity_parts_target_key(Some(" acct-main "), None),
+        Some("account:acct-main".to_string())
+    );
+    assert_eq!(
+        profile_import_identity_parts_target_key(None, Some(" User@Example.COM ")),
+        Some("email:user@example.com".to_string())
+    );
+    assert_ne!(
+        profile_import_identity_parts_target_key(Some("acct-main"), Some("first@example.com")),
+        profile_import_identity_parts_target_key(Some("acct-main"), Some("second@example.com"))
     );
 }
 

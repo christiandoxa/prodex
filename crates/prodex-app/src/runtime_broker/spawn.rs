@@ -5,6 +5,40 @@ pub(crate) fn runtime_broker_process_args(config: RuntimeBrokerSpawnConfig<'_>) 
     prodex_runtime_broker::runtime_broker_process_args(config)
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RuntimeBrokerSmartContextOptions {
+    pub(crate) enabled: bool,
+    pub(crate) model_context_window_tokens: Option<u64>,
+}
+
+impl RuntimeBrokerSmartContextOptions {
+    #[cfg(test)]
+    fn disabled() -> Self {
+        Self {
+            enabled: false,
+            model_context_window_tokens: None,
+        }
+    }
+
+    fn launch_config<'a>(
+        self,
+        upstream_base_url: &'a str,
+        include_code_review: bool,
+        upstream_no_proxy: bool,
+    ) -> prodex_runtime_broker::RuntimeBrokerLaunchConfig<'a> {
+        prodex_runtime_broker::RuntimeBrokerLaunchConfig {
+            upstream_base_url,
+            include_code_review,
+            upstream_no_proxy,
+            smart_context_enabled: self.enabled,
+        }
+    }
+
+    fn supports_cross_broker_reuse(self) -> bool {
+        self.model_context_window_tokens.is_none()
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
     client: &Client,
@@ -21,8 +55,7 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
-        false,
-        None,
+        RuntimeBrokerSmartContextOptions::disabled(),
     )
 }
 
@@ -33,18 +66,12 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_conte
     upstream_base_url: &str,
     include_code_review: bool,
     upstream_no_proxy: bool,
-    smart_context_enabled: bool,
-    model_context_window_tokens: Option<u64>,
+    smart_context: RuntimeBrokerSmartContextOptions,
 ) -> Result<Option<RuntimeBrokerRegistry>> {
-    let _ = model_context_window_tokens;
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
-    let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
-        upstream_base_url,
-        include_code_review,
-        upstream_no_proxy,
-        smart_context_enabled,
-    };
+    let launch_config =
+        smart_context.launch_config(upstream_base_url, include_code_review, upstream_no_proxy);
     while started_at.elapsed() < Duration::from_millis(runtime_broker_ready_timeout_ms()) {
         let Some(existing) = load_runtime_broker_registry(paths, broker_key)? else {
             return Ok(None);
@@ -104,8 +131,7 @@ pub(crate) fn find_compatible_runtime_broker_registry(
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
-        false,
-        None,
+        RuntimeBrokerSmartContextOptions::disabled(),
     )
 }
 
@@ -116,19 +142,14 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
     upstream_base_url: &str,
     include_code_review: bool,
     upstream_no_proxy: bool,
-    smart_context_enabled: bool,
-    model_context_window_tokens: Option<u64>,
+    smart_context: RuntimeBrokerSmartContextOptions,
 ) -> Result<Option<(String, RuntimeBrokerRegistry)>> {
-    if model_context_window_tokens.is_some() {
+    if !smart_context.supports_cross_broker_reuse() {
         return Ok(None);
     }
 
-    let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
-        upstream_base_url,
-        include_code_review,
-        upstream_no_proxy,
-        smart_context_enabled,
-    };
+    let launch_config =
+        smart_context.launch_config(upstream_base_url, include_code_review, upstream_no_proxy);
     for broker_key in runtime_broker_registry_keys(paths) {
         if broker_key == excluded_broker_key {
             continue;
@@ -243,11 +264,15 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         smart_context_enabled,
         model_context_window_tokens,
     );
+    let smart_context = RuntimeBrokerSmartContextOptions {
+        enabled: smart_context_enabled,
+        model_context_window_tokens,
+    };
     let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
-        smart_context_enabled,
+        smart_context_enabled: smart_context.enabled,
     };
     let ensure_lock_path = runtime_broker_ensure_lock_path(paths, &broker_key);
     let _ensure_lock = acquire_json_file_lock(&ensure_lock_path)?;
@@ -261,8 +286,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
-        smart_context_enabled,
-        model_context_window_tokens,
+        smart_context,
     )? {
         activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
         return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
@@ -312,8 +336,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
             upstream_base_url,
             include_code_review,
             upstream_no_proxy,
-            smart_context_enabled,
-            model_context_window_tokens,
+            smart_context,
         )?
     {
         activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;

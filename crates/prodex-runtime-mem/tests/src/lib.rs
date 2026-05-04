@@ -476,10 +476,10 @@ fn resolve_test_field(spec: &Value, entry: &Value) -> Option<Value> {
     }
     if let Some(coalesce) = spec.get("coalesce").and_then(Value::as_array) {
         for candidate in coalesce {
-            if let Some(value) = resolve_test_field(candidate, entry) {
-                if !value.as_str().is_some_and(str::is_empty) {
-                    return Some(value);
-                }
+            if let Some(value) = resolve_test_field(candidate, entry)
+                && !value.as_str().is_some_and(str::is_empty)
+            {
+                return Some(value);
             }
         }
     }

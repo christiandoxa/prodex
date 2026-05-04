@@ -969,7 +969,7 @@ fn context_static_duplicate_snippet_from_group(
         .collect::<Vec<_>>();
     let primary_location = occurrences
         .first()
-        .map(|occurrence| context_static_duplicate_location_label(occurrence))
+        .map(context_static_duplicate_location_label)
         .unwrap_or_else(|| "one canonical file".to_string());
 
     ContextStaticDuplicateSnippet {
@@ -2220,9 +2220,9 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("build_summary")
     } else if lower.starts_with("compiled successfully") {
         Some("compile_summary")
-    } else if lower.starts_with("tests/") && lower.contains(" passed") {
-        Some("passed_tests")
-    } else if lower.contains("::test_") && lower.ends_with(" passed") {
+    } else if (lower.starts_with("tests/") && lower.contains(" passed"))
+        || (lower.contains("::test_") && lower.ends_with(" passed"))
+    {
         Some("passed_tests")
     } else if is_pytest_progress_line(trimmed) {
         Some("pytest_progress")
@@ -3515,7 +3515,7 @@ fn contains_python_file_location(line: &str) -> bool {
 
 fn contains_paren_file_location(line: &str) -> bool {
     line.split_whitespace()
-        .any(|token| token_contains_paren_file_location(token))
+        .any(token_contains_paren_file_location)
 }
 
 fn token_contains_paren_file_location(token: &str) -> bool {

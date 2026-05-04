@@ -46,8 +46,9 @@ const ALLOWLIST = Object.freeze([
     file: "crates/prodex-app/src/runtime_launch/proxy_startup.rs",
     id: "blocking-thread-spawn",
     pattern: /\bthread::spawn\s*\(/,
-    maxHits: 2,
-    reason: "bounded proxy worker pools created during launch, outside request commit path",
+    maxHits: 3,
+    reason:
+      "bounded local rewrite, rotation acceptor, and long-lived proxy worker pools created during launch, outside request commit path",
   },
 ]);
 

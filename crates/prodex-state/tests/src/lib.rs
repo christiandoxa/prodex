@@ -45,14 +45,22 @@ fn merge_profile_bindings_prefers_newer_known_profile_binding() {
 }
 
 #[test]
-fn duplicate_identity_key_prefers_account_then_normalized_email() {
+fn duplicate_identity_key_combines_account_and_email_when_both_exist() {
     assert_eq!(
         duplicate_profile_identity_key(Some(" acct "), Some("User@Example.COM")),
+        Some("account:acct|email:user@example.com".to_string())
+    );
+    assert_eq!(
+        duplicate_profile_identity_key(Some(" acct "), None),
         Some("account:acct".to_string())
     );
     assert_eq!(
         duplicate_profile_identity_key(None, Some(" User@Example.COM ")),
         Some("email:user@example.com".to_string())
+    );
+    assert_ne!(
+        duplicate_profile_identity_key(Some("acct"), Some("first@example.com")),
+        duplicate_profile_identity_key(Some("acct"), Some("second@example.com"))
     );
     assert_eq!(duplicate_profile_identity_key(Some(" "), Some(" ")), None);
 }

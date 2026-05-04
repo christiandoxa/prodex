@@ -736,16 +736,20 @@ pub fn profile_import_identity_parts_target_key(
     account_id: Option<&str>,
     email: Option<&str>,
 ) -> Option<String> {
-    account_id
+    let account_id = account_id
         .map(str::trim)
-        .filter(|account_id| !account_id.is_empty())
-        .map(|account_id| format!("account:{account_id}"))
-        .or_else(|| {
-            email
-                .map(str::trim)
-                .filter(|email| !email.is_empty())
-                .map(|email| format!("email:{}", email.to_ascii_lowercase()))
-        })
+        .filter(|account_id| !account_id.is_empty());
+    let email = email
+        .map(str::trim)
+        .filter(|email| !email.is_empty())
+        .map(str::to_ascii_lowercase);
+
+    match (account_id, email) {
+        (Some(account_id), Some(email)) => Some(format!("account:{account_id}|email:{email}")),
+        (Some(account_id), None) => Some(format!("account:{account_id}")),
+        (None, Some(email)) => Some(format!("email:{email}")),
+        (None, None) => None,
+    }
 }
 
 pub fn validate_profile_import_source_names<'a>(

@@ -887,6 +887,77 @@ fn profile_import_keeps_distinct_workspaces_with_same_email() {
 }
 
 #[test]
+fn profile_import_keeps_distinct_profiles_with_same_workspace_and_different_emails() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-same-workspace-different-email");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("second-login".to_string()),
+        profiles: vec![
+            ExportedProfile {
+                name: "first-login".to_string(),
+                email: Some("first@example.com".to_string()),
+                source_managed: true,
+                provider: ProfileProvider::Openai,
+                auth_json: profile_commands_auth_json_with_email(
+                    "first@example.com",
+                    "first-token",
+                    "shared-account",
+                ),
+            },
+            ExportedProfile {
+                name: "second-login".to_string(),
+                email: Some("second@example.com".to_string()),
+                source_managed: true,
+                provider: ProfileProvider::Openai,
+                auth_json: profile_commands_auth_json_with_email(
+                    "second@example.com",
+                    "second-token",
+                    "shared-account",
+                ),
+            },
+        ],
+    };
+    let mut state = AppState::default();
+
+    let commit = import_profile_export_payload(&target_paths, &mut state, &payload)
+        .expect("same workspace with different emails should preserve both profiles");
+
+    assert_eq!(
+        commit.imported_names,
+        vec!["first-login".to_string(), "second-login".to_string()]
+    );
+    assert!(commit.updated_existing_names.is_empty());
+    assert_eq!(state.active_profile.as_deref(), Some("second-login"));
+    assert_eq!(state.profiles.len(), 2);
+    assert_eq!(
+        state
+            .profiles
+            .get("first-login")
+            .and_then(|profile| profile.email.as_deref()),
+        Some("first@example.com")
+    );
+    assert_eq!(
+        state
+            .profiles
+            .get("second-login")
+            .and_then(|profile| profile.email.as_deref()),
+        Some("second@example.com")
+    );
+    assert_eq!(
+        profile_commands_read_access_token(&target_paths.managed_profiles_root.join("first-login")),
+        "first-token".to_string()
+    );
+    assert_eq!(
+        profile_commands_read_access_token(&target_paths.managed_profiles_root.join("second-login")),
+        "second-token".to_string()
+    );
+}
+
+#[test]
 fn profile_import_save_failure_rolls_back_auth_and_keeps_recoverable_journal() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
