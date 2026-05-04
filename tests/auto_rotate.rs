@@ -1918,6 +1918,58 @@ fn login_without_profile_reuses_existing_profile_for_same_email() {
 }
 
 #[test]
+fn login_without_profile_does_not_reuse_email_derived_profile_name_for_other_email() {
+    let fixture = setup_fixture();
+    let id_token = chatgpt_id_token("main@example.com");
+    write_json(
+        &fixture.main_home.join("auth.json"),
+        &json!({
+            "tokens": {
+                "id_token": id_token,
+                "access_token": "test-token",
+                "account_id": "main-account"
+            }
+        }),
+    );
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({
+            "active_profile": "customeradroit_gmail.com",
+            "profiles": {
+                "customeradroit_gmail.com": {
+                    "codex_home": fixture.main_home,
+                    "managed": true,
+                    "email": "main@example.com"
+                }
+            }
+        }),
+    );
+
+    let output = run_prodex_with_env(
+        &fixture,
+        &["login"],
+        &[("TEST_LOGIN_ACCOUNT_ID", "main-account")],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let state = read_state(&fixture.prodex_home);
+    assert_eq!(state["active_profile"], "main_example.com");
+    assert_eq!(
+        state["profiles"]["main_example.com"]["email"],
+        "main@example.com"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("Logged in as main@example.com. Created profile 'main_example.com'.")
+    );
+}
+
+#[test]
 fn login_without_profile_updates_token_only_for_duplicate_email() {
     let fixture = setup_fixture();
     let id_token = chatgpt_id_token("main@example.com");

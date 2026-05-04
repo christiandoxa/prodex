@@ -261,6 +261,43 @@ pub fn profile_name_from_email(email: &str) -> String {
     }
 }
 
+pub fn profile_name_looks_email_derived_for_other_email(profile_name: &str, email: &str) -> bool {
+    let target_base = profile_name_from_email(email);
+    let candidate_base = strip_unique_profile_suffix(profile_name);
+
+    candidate_base != target_base && profile_name_base_looks_email_derived(candidate_base)
+}
+
+fn strip_unique_profile_suffix(profile_name: &str) -> &str {
+    let Some((base, suffix)) = profile_name.rsplit_once('-') else {
+        return profile_name;
+    };
+
+    if !suffix.is_empty()
+        && suffix.chars().all(|ch| ch.is_ascii_digit())
+        && profile_name_base_looks_email_derived(base)
+    {
+        base
+    } else {
+        profile_name
+    }
+}
+
+fn profile_name_base_looks_email_derived(profile_name: &str) -> bool {
+    let Some((local, domain)) = profile_name.rsplit_once('_') else {
+        return false;
+    };
+
+    !local.is_empty()
+        && domain.contains('.')
+        && domain
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'))
+        && domain
+            .split('.')
+            .all(|label| !label.is_empty() && !label.starts_with('-') && !label.ends_with('-'))
+}
+
 pub fn validate_profile_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("profile name cannot be empty");

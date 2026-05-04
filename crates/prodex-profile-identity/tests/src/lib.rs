@@ -208,6 +208,26 @@ fn unique_profile_name_helpers_pick_first_available_candidate() {
 }
 
 #[test]
+fn detects_email_derived_profile_name_for_other_email() {
+    assert!(!profile_name_looks_email_derived_for_other_email(
+        "main_example.com",
+        "main@example.com"
+    ));
+    assert!(!profile_name_looks_email_derived_for_other_email(
+        "main_example.com-2",
+        "main@example.com"
+    ));
+    assert!(!profile_name_looks_email_derived_for_other_email(
+        "primary",
+        "main@example.com"
+    ));
+    assert!(profile_name_looks_email_derived_for_other_email(
+        "customeradroit_gmail.com",
+        "usahaqteam@gmail.com"
+    ));
+}
+
+#[test]
 fn profile_name_validation_matches_cli_rules() {
     validate_profile_name("main.profile_1").expect("valid profile name");
 

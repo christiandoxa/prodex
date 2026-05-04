@@ -118,7 +118,18 @@ pub(crate) fn find_profile_by_identity(
     state: &mut AppState,
     target: &ProfileIdentity,
 ) -> Result<Option<String>> {
-    let discovered = collect_profile_identities(state);
+    let mut discovered = collect_profile_identities(state);
+    if let Some(target_email) = target.email.as_deref() {
+        // Auto-created login profiles are named from their email. If a previous
+        // bad login wrote a new account token under an old email-derived name,
+        // keep auto-login from perpetuating that mismatch.
+        discovered.retain(|(name, _)| {
+            !prodex_profile_identity::profile_name_looks_email_derived_for_other_email(
+                name,
+                target_email,
+            )
+        });
+    }
     Ok(prodex_profile_identity::find_matching_profile_identity(
         &discovered,
         target,

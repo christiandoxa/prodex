@@ -168,6 +168,47 @@ fn find_profile_by_identity_does_not_match_same_workspace_with_different_email()
     assert_eq!(matched, None);
 }
 
+#[test]
+fn find_profile_by_identity_rejects_email_derived_name_for_other_account_email() {
+    let root = temp_dir("identity-email-derived-name-mismatch");
+    let first_home = root.join("first");
+    fs::create_dir_all(&first_home).unwrap();
+    fs::write(
+        secret_store::auth_json_path(&first_home),
+        format!(
+            r#"{{"tokens":{{"id_token":"{}","access_token":"test-token","account_id":"acct-one"}}}}"#,
+            chatgpt_id_token("usahaqteam@gmail.com", Some("acct-one"))
+        ),
+    )
+    .unwrap();
+    let mut state = AppState {
+        active_profile: None,
+        profiles: BTreeMap::from([(
+            "customeradroit_gmail.com".to_string(),
+            ProfileEntry {
+                codex_home: first_home,
+                managed: true,
+                email: Some("usahaqteam@gmail.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+
+    let matched = find_profile_by_identity(
+        &mut state,
+        &ProfileIdentity {
+            email: Some("usahaqteam@gmail.com".to_string()),
+            account_id: Some("acct-one".to_string()),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(matched, None);
+}
+
 fn chatgpt_id_token(email: &str, account_id: Option<&str>) -> String {
     let header =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"none","typ":"JWT"}"#);
