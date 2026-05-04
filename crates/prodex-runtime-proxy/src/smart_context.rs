@@ -349,6 +349,64 @@ pub struct SmartContextMemoryCapsuleSelection {
     pub used_tokens: usize,
 }
 
+pub const SMART_CONTEXT_MEMORY_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 256;
+pub const SMART_CONTEXT_MEMORY_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 1_024;
+pub const SMART_CONTEXT_MEMORY_CAPSULE_LARGE_TOKEN_BUDGET: usize = 4_096;
+
+pub fn smart_context_select_memory_capsules_for_policy(
+    capsules: impl IntoIterator<Item = SmartContextMemoryCapsule>,
+    accounting: &SmartContextObservedTokenAccounting,
+    policy: &SmartContextAdaptiveBudgetPolicy,
+) -> SmartContextMemoryCapsuleSelection {
+    smart_context_select_memory_capsules(
+        capsules,
+        smart_context_memory_capsule_token_budget(accounting, policy),
+    )
+}
+
+pub fn smart_context_memory_capsule_token_budget(
+    accounting: &SmartContextObservedTokenAccounting,
+    policy: &SmartContextAdaptiveBudgetPolicy,
+) -> usize {
+    if smart_context_memory_capsule_policy_allows_unbounded_budget(accounting, policy) {
+        return usize::MAX;
+    }
+    if !smart_context_memory_capsule_policy_allows_bounded_budget(accounting, policy) {
+        return 0;
+    }
+
+    let Some(available_context_tokens) = accounting.available_context_tokens else {
+        return 0;
+    };
+
+    let mode_budget = match policy.mode {
+        SmartContextBudgetMode::MinimalRefsOnly => {
+            SMART_CONTEXT_MEMORY_CAPSULE_MINIMAL_TOKEN_BUDGET
+        }
+        SmartContextBudgetMode::ArtifactCondensed => {
+            SMART_CONTEXT_MEMORY_CAPSULE_CONDENSED_TOKEN_BUDGET
+        }
+        SmartContextBudgetMode::LargeLossless => SMART_CONTEXT_MEMORY_CAPSULE_LARGE_TOKEN_BUDGET,
+        SmartContextBudgetMode::ExactPassThrough => match policy.tier {
+            SmartContextTokenBudgetTier::Exact | SmartContextTokenBudgetTier::Large => {
+                SMART_CONTEXT_MEMORY_CAPSULE_LARGE_TOKEN_BUDGET
+            }
+            SmartContextTokenBudgetTier::Condensed => {
+                SMART_CONTEXT_MEMORY_CAPSULE_CONDENSED_TOKEN_BUDGET
+            }
+            SmartContextTokenBudgetTier::Minimal => {
+                SMART_CONTEXT_MEMORY_CAPSULE_MINIMAL_TOKEN_BUDGET
+            }
+        },
+    };
+
+    mode_budget
+        .min(smart_context_u64_saturating_usize(
+            policy.max_rehydrate_tokens,
+        ))
+        .min(smart_context_u64_saturating_usize(available_context_tokens))
+}
+
 pub fn smart_context_select_memory_capsules(
     capsules: impl IntoIterator<Item = SmartContextMemoryCapsule>,
     token_budget: usize,
@@ -1160,6 +1218,41 @@ fn smart_context_u64_budget_tier(available_tokens: u64) -> SmartContextTokenBudg
     } else {
         smart_context_token_budget_tier(available_tokens as usize)
     }
+}
+
+fn smart_context_u64_saturating_usize(value: u64) -> usize {
+    if value > usize::MAX as u64 {
+        usize::MAX
+    } else {
+        value as usize
+    }
+}
+
+fn smart_context_memory_capsule_policy_allows_unbounded_budget(
+    accounting: &SmartContextObservedTokenAccounting,
+    policy: &SmartContextAdaptiveBudgetPolicy,
+) -> bool {
+    smart_context_accounting_safe_for_adaptive_policy(accounting)
+        && policy.mode == SmartContextBudgetMode::ExactPassThrough
+        && policy.tier == SmartContextTokenBudgetTier::Exact
+        && policy.reasons == [SmartContextBudgetPolicyReason::PlentyOfBudget]
+}
+
+fn smart_context_memory_capsule_policy_allows_bounded_budget(
+    accounting: &SmartContextObservedTokenAccounting,
+    policy: &SmartContextAdaptiveBudgetPolicy,
+) -> bool {
+    smart_context_accounting_safe_for_adaptive_policy(accounting)
+        && !policy.reasons.iter().any(|reason| {
+            matches!(
+                reason,
+                SmartContextBudgetPolicyReason::ExactnessRequired
+                    | SmartContextBudgetPolicyReason::StaticContextChanged
+                    | SmartContextBudgetPolicyReason::MissingRehydrateRefs
+                    | SmartContextBudgetPolicyReason::UnknownTokenWindow
+                    | SmartContextBudgetPolicyReason::UnsafeAccounting
+            )
+        })
 }
 
 fn smart_context_fingerprint_map(

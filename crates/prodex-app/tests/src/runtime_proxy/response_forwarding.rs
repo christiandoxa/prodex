@@ -129,6 +129,7 @@ fn sse_tap_reader_observes_split_events_without_event_buffering() {
             request_previous_response_id: None,
             turn_state: None,
             request_id: 1,
+            prompt_cache_key: None,
         },
     );
 

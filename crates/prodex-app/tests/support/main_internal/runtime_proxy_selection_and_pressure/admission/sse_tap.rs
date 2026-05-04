@@ -82,6 +82,7 @@ fn runtime_sse_tap_reader_keeps_response_affinity_when_prelude_splits_event() {
             request_previous_response_id: None,
             turn_state: None,
             request_id: 1,
+            prompt_cache_key: None,
         },
     );
     let mut body = Vec::new();

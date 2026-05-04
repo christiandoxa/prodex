@@ -20,7 +20,7 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
         body: br#"{"input":[]}"#.to_vec(),
     };
 
-    match attempt_runtime_responses_request(1, &request, harness.shared(), "main", None)
+    match attempt_runtime_responses_request(1, &request, harness.shared(), "main", None, None)
         .expect("responses attempt should succeed")
     {
         RuntimeResponsesAttempt::LocalSelectionBlocked {

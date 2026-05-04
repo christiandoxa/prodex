@@ -1,7 +1,9 @@
 use super::*;
 use serde_json::Value;
 use std::ffi::OsString;
+use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn capsule(
     id: &str,
@@ -18,6 +20,18 @@ fn capsule(
         project_path: project_path.map(PathBuf::from),
         updated_at_seconds,
         relevance,
+    }
+}
+
+fn recall_capsule(
+    capsule: RuntimeMemCapsuleMetadata,
+    paths: &[&str],
+    symbols: &[&str],
+) -> RuntimeMemRecallCapsuleMetadata {
+    RuntimeMemRecallCapsuleMetadata {
+        capsule,
+        paths: paths.iter().map(PathBuf::from).collect(),
+        symbols: symbols.iter().map(|symbol| symbol.to_string()).collect(),
     }
 }
 
@@ -158,6 +172,383 @@ fn selection_keeps_scanning_after_oversized_higher_priority_capsule() {
 }
 
 #[test]
+fn auto_capsule_budget_tiers_support_default_and_super_modes() {
+    assert_eq!(
+        runtime_mem_capsule_budget_tier(1_999),
+        RuntimeMemCapsuleBudgetTier::Minimal
+    );
+    assert_eq!(
+        runtime_mem_capsule_budget_tier(2_000),
+        RuntimeMemCapsuleBudgetTier::Condensed
+    );
+    assert_eq!(
+        runtime_mem_capsule_budget_tier(8_000),
+        RuntimeMemCapsuleBudgetTier::Large
+    );
+    assert_eq!(
+        runtime_mem_capsule_budget_tier(16_000),
+        RuntimeMemCapsuleBudgetTier::Exact
+    );
+
+    assert_eq!(
+        runtime_mem_capsule_token_budget_for_tier(
+            RuntimeMemCapsuleBudgetMode::Default,
+            RuntimeMemCapsuleBudgetTier::Minimal,
+        ),
+        RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET
+    );
+    assert_eq!(
+        runtime_mem_capsule_token_budget_for_tier(
+            RuntimeMemCapsuleBudgetMode::Default,
+            RuntimeMemCapsuleBudgetTier::Condensed,
+        ),
+        RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET
+    );
+    assert_eq!(
+        runtime_mem_capsule_token_budget_for_tier(
+            RuntimeMemCapsuleBudgetMode::Default,
+            RuntimeMemCapsuleBudgetTier::Large,
+        ),
+        RUNTIME_MEM_DEFAULT_CAPSULE_LARGE_TOKEN_BUDGET
+    );
+    assert_eq!(
+        runtime_mem_capsule_token_budget_for_tier(
+            RuntimeMemCapsuleBudgetMode::Default,
+            RuntimeMemCapsuleBudgetTier::Exact,
+        ),
+        RUNTIME_MEM_DEFAULT_CAPSULE_LARGE_TOKEN_BUDGET
+    );
+    assert_eq!(
+        runtime_mem_capsule_token_budget_for_tier(
+            RuntimeMemCapsuleBudgetMode::Super,
+            RuntimeMemCapsuleBudgetTier::Minimal,
+        ),
+        RUNTIME_MEM_SUPER_CAPSULE_MINIMAL_TOKEN_BUDGET
+    );
+    assert_eq!(
+        runtime_mem_capsule_token_budget_for_tier(
+            RuntimeMemCapsuleBudgetMode::Super,
+            RuntimeMemCapsuleBudgetTier::Condensed,
+        ),
+        RUNTIME_MEM_SUPER_CAPSULE_CONDENSED_TOKEN_BUDGET
+    );
+    assert_eq!(
+        runtime_mem_capsule_token_budget_for_tier(
+            RuntimeMemCapsuleBudgetMode::Super,
+            RuntimeMemCapsuleBudgetTier::Large,
+        ),
+        RUNTIME_MEM_SUPER_CAPSULE_LARGE_TOKEN_BUDGET
+    );
+    assert_eq!(
+        runtime_mem_capsule_token_budget(RuntimeMemCapsuleBudget::Explicit(777)),
+        777
+    );
+}
+
+#[test]
+fn auto_capsule_selection_super_budget_admits_more_than_default_budget() {
+    let capsules = || {
+        [
+            capsule("optional", 300, false, None, Some(100), 1.0),
+            capsule("recent", 400, false, None, Some(995), 0.1),
+            capsule(
+                "project",
+                300,
+                false,
+                Some("/repo/prodex/src"),
+                Some(100),
+                0.1,
+            ),
+            capsule("required", 200, true, None, None, 0.0),
+        ]
+    };
+
+    let default_selection = runtime_mem_select_capsules_auto(
+        capsules(),
+        RuntimeMemAutoCapsuleSelectionContext {
+            budget: RuntimeMemCapsuleBudget::Tier {
+                available_tokens: 6_000,
+                mode: RuntimeMemCapsuleBudgetMode::Default,
+            },
+            project_root: Some(PathBuf::from("/repo/prodex")),
+            now_seconds: Some(1_000),
+            recent_window_seconds: 60,
+        },
+    );
+    let super_selection = runtime_mem_select_capsules_auto(
+        capsules(),
+        RuntimeMemAutoCapsuleSelectionContext {
+            budget: RuntimeMemCapsuleBudget::Tier {
+                available_tokens: 6_000,
+                mode: RuntimeMemCapsuleBudgetMode::Super,
+            },
+            project_root: Some(PathBuf::from("/repo/prodex")),
+            now_seconds: Some(1_000),
+            recent_window_seconds: 60,
+        },
+    );
+
+    assert_eq!(
+        default_selection
+            .selected
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["required", "project"]
+    );
+    assert_eq!(
+        default_selection
+            .omitted
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["recent", "optional"]
+    );
+    assert_eq!(
+        default_selection.token_budget,
+        RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET
+    );
+    assert_eq!(default_selection.used_tokens, 500);
+
+    assert_eq!(
+        super_selection
+            .selected
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["required", "project", "recent"]
+    );
+    assert_eq!(
+        super_selection
+            .omitted
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["optional"]
+    );
+    assert_eq!(
+        super_selection.token_budget,
+        RUNTIME_MEM_SUPER_CAPSULE_CONDENSED_TOKEN_BUDGET
+    );
+    assert_eq!(super_selection.used_tokens, 900);
+}
+
+#[test]
+fn auto_capsule_selection_prioritizes_project_local_and_recent_over_optional_relevance() {
+    let selection = runtime_mem_select_capsules_auto(
+        [
+            capsule("optional-high", 20, false, None, Some(100), 1.0),
+            capsule("recent-low", 20, false, Some("/other"), Some(995), 0.1),
+            capsule(
+                "project-low",
+                20,
+                false,
+                Some("/repo/prodex/crates/runtime-mem"),
+                Some(100),
+                0.1,
+            ),
+            capsule("required", 20, true, None, None, 0.0),
+        ],
+        RuntimeMemAutoCapsuleSelectionContext {
+            budget: RuntimeMemCapsuleBudget::Explicit(60),
+            project_root: Some(PathBuf::from("/repo/prodex")),
+            now_seconds: Some(1_000),
+            recent_window_seconds: 60,
+        },
+    );
+
+    assert_eq!(
+        selection
+            .selected
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["required", "project-low", "recent-low"]
+    );
+    assert_eq!(
+        selection
+            .omitted
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["optional-high"]
+    );
+}
+
+#[test]
+fn recall_diet_prioritizes_path_intent_matches_before_unrelated_optional() {
+    let selection = runtime_mem_select_capsules_for_recall_diet(
+        [
+            recall_capsule(
+                capsule("optional-unrelated-high", 20, false, None, Some(1_000), 1.0),
+                &[],
+                &[],
+            ),
+            recall_capsule(
+                capsule("path-match", 30, false, None, Some(900), 0.1),
+                &["crates/prodex-runtime-mem/src/lib.rs"],
+                &[],
+            ),
+            recall_capsule(
+                capsule(
+                    "project-path-match",
+                    30,
+                    false,
+                    Some("/repo/prodex/crates"),
+                    Some(800),
+                    0.1,
+                ),
+                &[],
+                &[],
+            ),
+        ],
+        RuntimeMemAutoCapsuleSelectionContext {
+            budget: RuntimeMemCapsuleBudget::Explicit(60),
+            project_root: Some(PathBuf::from("/repo/prodex")),
+            now_seconds: Some(1_000),
+            recent_window_seconds: 60,
+        },
+        RuntimeMemRecallIntent {
+            paths: vec![PathBuf::from("crates/prodex-runtime-mem/src/lib.rs")],
+            symbols: Vec::new(),
+        },
+    );
+
+    assert_eq!(
+        selection
+            .selected
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["project-path-match", "path-match"]
+    );
+    assert_eq!(
+        selection
+            .omitted
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["optional-unrelated-high"]
+    );
+}
+
+#[test]
+fn recall_diet_prioritizes_symbol_intent_matches_before_unrelated_optional() {
+    let selection = runtime_mem_select_capsules_for_recall_diet(
+        [
+            recall_capsule(
+                capsule("optional-unrelated-high", 20, false, None, Some(1_000), 1.0),
+                &[],
+                &["other::Thing"],
+            ),
+            recall_capsule(
+                capsule("symbol-match", 30, false, None, Some(900), 0.1),
+                &[],
+                &["prodex_runtime_mem::RuntimeMemCapsuleMetadata"],
+            ),
+            recall_capsule(
+                capsule("recent-symbol-match", 30, false, None, Some(995), 0.1),
+                &[],
+                &["RuntimeMemRecallIntent"],
+            ),
+        ],
+        RuntimeMemAutoCapsuleSelectionContext {
+            budget: RuntimeMemCapsuleBudget::Explicit(60),
+            project_root: Some(PathBuf::from("/repo/prodex")),
+            now_seconds: Some(1_000),
+            recent_window_seconds: 60,
+        },
+        RuntimeMemRecallIntent {
+            paths: Vec::new(),
+            symbols: vec![
+                "RuntimeMemCapsuleMetadata".to_string(),
+                "prodex_runtime_mem::RuntimeMemRecallIntent".to_string(),
+            ],
+        },
+    );
+
+    assert_eq!(
+        selection
+            .selected
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["recent-symbol-match", "symbol-match"]
+    );
+    assert_eq!(
+        selection
+            .omitted
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["optional-unrelated-high"]
+    );
+}
+
+#[test]
+fn recall_diet_oversized_required_does_not_block_smaller_useful_capsules() {
+    let selection = runtime_mem_select_capsules_for_recall_diet(
+        [
+            recall_capsule(
+                capsule("required-too-large", 90, true, None, None, 0.0),
+                &[],
+                &[],
+            ),
+            recall_capsule(
+                capsule(
+                    "path-match",
+                    25,
+                    false,
+                    Some("/repo/prodex/crates/prodex-runtime-mem"),
+                    Some(900),
+                    0.1,
+                ),
+                &["crates/prodex-runtime-mem/src/lib.rs"],
+                &[],
+            ),
+            recall_capsule(
+                capsule("symbol-match", 20, false, None, Some(900), 0.1),
+                &[],
+                &["RuntimeMemRecallIntent"],
+            ),
+            recall_capsule(
+                capsule("optional-unrelated", 20, false, None, Some(1_000), 1.0),
+                &[],
+                &[],
+            ),
+        ],
+        RuntimeMemAutoCapsuleSelectionContext {
+            budget: RuntimeMemCapsuleBudget::Explicit(45),
+            project_root: Some(PathBuf::from("/repo/prodex")),
+            now_seconds: Some(1_000),
+            recent_window_seconds: 60,
+        },
+        RuntimeMemRecallIntent {
+            paths: vec![PathBuf::from("crates/prodex-runtime-mem/src/lib.rs")],
+            symbols: vec!["prodex_runtime_mem::RuntimeMemRecallIntent".to_string()],
+        },
+    );
+
+    assert_eq!(
+        selection
+            .omitted
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["required-too-large", "optional-unrelated"]
+    );
+    assert_eq!(
+        selection
+            .selected
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["path-match", "symbol-match"]
+    );
+    assert_eq!(selection.used_tokens, 45);
+}
+
+#[test]
 fn selection_sorts_same_priority_by_relevance_recency_cost_then_id() {
     let selection = runtime_mem_select_capsules(
         [
@@ -230,6 +621,23 @@ fn extract_mode_keeps_slim_and_full_behavior_and_accepts_super_slim() {
 }
 
 #[test]
+fn super_default_transcript_mode_upgrades_only_slim_to_super_slim() {
+    assert_eq!(
+        runtime_mem_super_default_transcript_mode(Some(RuntimeMemTranscriptMode::Slim)),
+        Some(RuntimeMemTranscriptMode::SuperSlim)
+    );
+    assert_eq!(
+        runtime_mem_super_default_transcript_mode(Some(RuntimeMemTranscriptMode::SuperSlim)),
+        Some(RuntimeMemTranscriptMode::SuperSlim)
+    );
+    assert_eq!(
+        runtime_mem_super_default_transcript_mode(Some(RuntimeMemTranscriptMode::Full)),
+        Some(RuntimeMemTranscriptMode::Full)
+    );
+    assert_eq!(runtime_mem_super_default_transcript_mode(None), None);
+}
+
+#[test]
 fn slim_and_full_schema_outputs_stay_unchanged() {
     let slim = runtime_mem_default_codex_schema().to_string();
     assert!(slim.contains("0.4-slim"));
@@ -245,7 +653,7 @@ fn slim_and_full_schema_outputs_stay_unchanged() {
 }
 
 #[test]
-fn super_slim_schema_prefers_prompt_summary_or_refs_and_falls_back_to_prompt_body() {
+fn super_slim_schema_prefers_prompt_summary_or_refs_and_omits_plain_prompt_body() {
     let large_prompt = "repeat ".repeat(8_000);
     let slim_prompt = resolve_schema_user_prompt(
         &runtime_mem_default_codex_schema(),
@@ -270,7 +678,10 @@ fn super_slim_schema_prefers_prompt_summary_or_refs_and_falls_back_to_prompt_bod
     .expect("super-slim prompt should resolve");
 
     assert_eq!(slim_prompt, large_prompt);
-    assert_eq!(super_slim_prompt, large_prompt);
+    assert_eq!(
+        super_slim_prompt,
+        "user prompt recorded by prodex super-slim mem; content omitted"
+    );
 
     let summarized = resolve_schema_user_prompt(
         &super_slim_schema,
@@ -309,11 +720,59 @@ fn super_slim_schema_prefers_prompt_summary_or_refs_and_falls_back_to_prompt_bod
         .to_string();
     assert!(prompt_field.contains("metadata.prompt_summary"));
     assert!(prompt_field.contains("artifact"));
-    assert!(prompt_field.contains("payload.message"));
     assert!(
-        prompt_field.find("metadata.prompt_summary") < prompt_field.find("payload.message"),
-        "safe summary/ref candidates must be tried before full prompt fallback"
+        !prompt_field.contains("payload.message"),
+        "super-slim schema must not recall full prompt bodies without shadow summaries"
     );
+}
+
+#[test]
+fn transcript_watch_super_slim_schema_is_shadow_safe_and_full_mode_remains_full() {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "prodex-runtime-mem-watch-test-{}-{stamp}",
+        std::process::id()
+    ));
+    let config_path = root.join("claude-mem/transcript-watch.json");
+    let sessions_root = root.join("codex/sessions");
+    fs::create_dir_all(&sessions_root).expect("sessions root should exist");
+
+    ensure_runtime_mem_codex_watch_for_sessions_root_with_mode(
+        &config_path,
+        &sessions_root,
+        RuntimeMemTranscriptMode::SuperSlim,
+    )
+    .expect("super-slim watch should write");
+    let super_slim_config: Value =
+        serde_json::from_str(&fs::read_to_string(&config_path).expect("config should read"))
+            .expect("config should parse");
+    let super_slim_schema = &super_slim_config["schemas"]["codex"];
+    let super_slim_schema_text = super_slim_schema.to_string();
+    assert_eq!(
+        super_slim_schema["version"].as_str(),
+        Some("0.6-super-slim")
+    );
+    assert!(super_slim_schema_text.contains("prompt_summary"));
+    assert!(!super_slim_schema_text.contains("payload.message"));
+    assert!(!super_slim_schema_text.contains("payload.output"));
+
+    ensure_runtime_mem_codex_watch_for_sessions_root_with_mode(
+        &config_path,
+        &sessions_root,
+        RuntimeMemTranscriptMode::Full,
+    )
+    .expect("full watch should write");
+    let full_config: Value =
+        serde_json::from_str(&fs::read_to_string(&config_path).expect("config should read"))
+            .expect("config should parse");
+    let full_schema_text = full_config["schemas"]["codex"].to_string();
+    assert!(full_schema_text.contains("\"prompt\":\"payload.message\""));
+    assert!(full_schema_text.contains("\"toolResponse\":\"payload.output\""));
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -446,6 +905,133 @@ fn safe_auto_schema_policy_and_schema_helper_are_ready_for_app_integration() {
     );
 }
 
+#[test]
+fn super_slim_shadow_user_prompt_stores_summary_counts_and_ref_not_full_prompt() {
+    let prompt = "\n\nImplement shadow transcript helpers\n".to_string() + &"detail ".repeat(400);
+    let event = serde_json::json!({
+        "payload": {
+            "type": "user_message",
+            "message": prompt,
+            "metadata": {
+                "artifact_ref": "prodex-artifact:prompt-123"
+            }
+        }
+    });
+
+    let shadow = runtime_mem_super_slim_shadow_codex_event(&event);
+    let summary = lookup_test_path(&shadow, "payload.prompt_summary")
+        .and_then(Value::as_str)
+        .expect("shadow prompt summary should exist");
+    let shadow_message = lookup_test_path(&shadow, "payload.message")
+        .and_then(Value::as_str)
+        .expect("shadow prompt body should exist");
+
+    assert!(summary.starts_with("user prompt summary: Implement shadow transcript helpers"));
+    assert!(summary.contains("bytes="));
+    assert!(summary.contains("approx_tokens="));
+    assert!(summary.contains("ref=prodex-artifact:prompt-123"));
+    assert!(summary.contains("full prompt omitted"));
+    assert_eq!(
+        shadow_message,
+        "user prompt shadowed by prodex super-slim mem; full content omitted"
+    );
+    assert_ne!(
+        lookup_test_path(&event, "payload.message").and_then(Value::as_str),
+        Some(shadow_message)
+    );
+    assert_eq!(
+        resolve_schema_user_prompt(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
+        Some(summary)
+    );
+}
+
+#[test]
+fn super_slim_shadow_assistant_message_uses_short_summary() {
+    let message =
+        "Completed helper implementation\n".to_string() + &"verbose explanation ".repeat(300);
+    let shadow = runtime_mem_super_slim_shadow_codex_event(&serde_json::json!({
+        "payload": {
+            "type": "agent_message",
+            "message": message
+        }
+    }));
+    let summary = lookup_test_path(&shadow, "payload.summary")
+        .and_then(Value::as_str)
+        .expect("assistant summary should exist");
+
+    assert!(summary.starts_with("assistant response summary: Completed helper implementation"));
+    assert!(summary.contains("bytes="));
+    assert!(summary.contains("approx_tokens="));
+    assert_eq!(
+        lookup_test_path(&shadow, "payload.message").and_then(Value::as_str),
+        Some("assistant response shadowed by prodex super-slim mem; full content omitted")
+    );
+    assert_eq!(
+        resolve_schema_assistant_message(&runtime_mem_super_slim_codex_schema(), &shadow)
+            .as_deref(),
+        Some(summary)
+    );
+}
+
+#[test]
+fn super_slim_shadow_tool_output_stores_summary_and_ref() {
+    let output = "\nfirst useful output line\n".to_string() + &"artifact data ".repeat(500);
+    let shadow = runtime_mem_super_slim_shadow_codex_event(&serde_json::json!({
+        "payload": {
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": output,
+            "artifact": {
+                "ref": "prodex://artifact/tool-456"
+            }
+        }
+    }));
+    let summary = lookup_test_path(&shadow, "payload.summary")
+        .and_then(Value::as_str)
+        .expect("tool output summary should exist");
+
+    assert!(summary.starts_with("tool output summary: first useful output line"));
+    assert!(summary.contains("bytes="));
+    assert!(summary.contains("approx_tokens="));
+    assert!(summary.contains("ref=prodex://artifact/tool-456"));
+    assert_eq!(
+        lookup_test_path(&shadow, "payload.metadata.artifact_ref").and_then(Value::as_str),
+        Some("prodex://artifact/tool-456")
+    );
+    assert_eq!(
+        lookup_test_path(&shadow, "payload.output").and_then(Value::as_str),
+        Some("tool output shadowed by prodex super-slim mem; full content omitted")
+    );
+    assert_eq!(
+        resolve_schema_tool_response(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
+        Some(summary)
+    );
+}
+
+#[test]
+fn super_slim_shadow_falls_back_to_local_summary_when_no_summary_or_ref_exists() {
+    let shadow = runtime_mem_super_slim_shadow_codex_event(&serde_json::json!({
+        "payload": {
+            "type": "custom_tool_call_output",
+            "call_id": "call-2",
+            "output": "\n\nplain output only\nsecond line has more detail"
+        }
+    }));
+    let summary = lookup_test_path(&shadow, "payload.summary")
+        .and_then(Value::as_str)
+        .expect("fallback summary should exist");
+
+    assert!(summary.starts_with("tool output summary: plain output only"));
+    assert!(summary.contains("bytes="));
+    assert!(summary.contains("approx_tokens="));
+    assert!(summary.contains("full output omitted"));
+    assert!(!summary.contains("ref="));
+    assert_eq!(
+        resolve_schema_tool_response(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
+        Some(summary)
+    );
+}
+
 fn schema_user_prompt_field(schema: &Value) -> Option<&Value> {
     schema
         .get("events")?
@@ -456,8 +1042,44 @@ fn schema_user_prompt_field(schema: &Value) -> Option<&Value> {
         .get("prompt")
 }
 
+fn schema_assistant_message_field(schema: &Value) -> Option<&Value> {
+    schema
+        .get("events")?
+        .as_array()?
+        .iter()
+        .find(|event| event.get("name").and_then(Value::as_str) == Some("assistant-message"))?
+        .get("fields")?
+        .get("message")
+}
+
+fn schema_tool_response_field(schema: &Value) -> Option<&Value> {
+    schema
+        .get("events")?
+        .as_array()?
+        .iter()
+        .find(|event| event.get("name").and_then(Value::as_str) == Some("tool-result"))?
+        .get("fields")?
+        .get("toolResponse")
+}
+
 fn resolve_schema_user_prompt(schema: &Value, entry: &Value) -> Option<String> {
     let field = schema_user_prompt_field(schema)?;
+    resolve_test_field(field, entry).and_then(|value| match value {
+        Value::String(value) => Some(value),
+        _ => None,
+    })
+}
+
+fn resolve_schema_assistant_message(schema: &Value, entry: &Value) -> Option<String> {
+    let field = schema_assistant_message_field(schema)?;
+    resolve_test_field(field, entry).and_then(|value| match value {
+        Value::String(value) => Some(value),
+        _ => None,
+    })
+}
+
+fn resolve_schema_tool_response(schema: &Value, entry: &Value) -> Option<String> {
+    let field = schema_tool_response_field(schema)?;
     resolve_test_field(field, entry).and_then(|value| match value {
         Value::String(value) => Some(value),
         _ => None,

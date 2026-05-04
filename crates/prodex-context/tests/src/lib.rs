@@ -389,6 +389,290 @@ fn explicit_kind_overrides_auto_detection() {
 }
 
 #[test]
+fn prompt_intent_extraction_finds_paths_symbols_tests_and_error_codes() {
+    let prompt = "\
+Fix `targetWidget` in crates/prodex-context/src/lib.rs and \
+src/runtime_proxy/smart_context.rs:42. Failing test context::intent_extracts_paths \
+plus test_should_compact_tool_output. Rust error E0277 and TS2322 mention \
+ConfigLoader.load and renderWidget.
+";
+
+    let terms = extract_intent_terms_from_prompt(prompt);
+
+    assert_eq!(
+        terms,
+        vec![
+            "targetWidget",
+            "crates/prodex-context/src/lib.rs",
+            "src/runtime_proxy/smart_context.rs",
+            "context::intent_extracts_paths",
+            "test_should_compact_tool_output",
+            "E0277",
+            "TS2322",
+            "ConfigLoader.load",
+            "renderWidget",
+        ]
+    );
+}
+
+#[test]
+fn prompt_intent_extraction_finds_quoted_identifiers_and_file_names() {
+    let prompt = "Open 'README.md', `package.json`, \"handleSubmit\", and \
+`tests::quota::keeps_affinity`; run \"cargo test smart_context::metadata_hint\"; \
+ignore 'the' and `should`.";
+
+    let terms = extract_intent_terms_from_prompt(prompt);
+
+    assert_eq!(
+        terms,
+        vec![
+            "README.md",
+            "package.json",
+            "handleSubmit",
+            "tests::quota::keeps_affinity",
+            "smart_context::metadata_hint",
+        ]
+    );
+}
+
+#[test]
+fn prompt_intent_extraction_is_bounded_deduped_and_stable() {
+    let mut prompt = "symbol_00 symbol_00 SYMBOL_00 ".to_string();
+    for index in 1..40 {
+        prompt.push_str(&format!("symbol_{index:02} "));
+    }
+
+    let terms = extract_intent_terms_from_prompt(&prompt);
+
+    assert_eq!(terms.len(), MAX_EXTRACTED_INTENT_TERMS);
+    assert_eq!(terms.first().map(String::as_str), Some("symbol_00"));
+    assert_eq!(terms.last().map(String::as_str), Some("symbol_31"));
+}
+
+#[test]
+fn prompt_intent_extraction_ignores_noisy_common_words() {
+    let prompt = "Please update the smart context tool output compaction for common \
+words and request prompt without adding noise. Ignore 'the' and `should`.";
+
+    let terms = extract_intent_terms_from_prompt(prompt);
+
+    assert!(terms.is_empty(), "unexpected terms: {terms:?}");
+}
+
+#[test]
+fn extracted_prompt_intent_terms_drive_intent_compaction() {
+    let prompt = "Fix targetWidget in src/target.ts after TS2322.";
+    let terms = extract_intent_terms_from_prompt(prompt);
+    let input = "\
+src/alpha.ts(10,7): error TS2322: Type 'string' is not assignable to type 'number'.
+10 const alpha: number = value;
+src/target.ts(40,7): error TS2322: Type 'string' is not assignable to type 'number'.
+40 const targetWidget: number = value;
+Command failed with exit code 1
+";
+
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::Diagnostics,
+                max_lines: 10,
+                max_line_chars: 180,
+                ..CommandOutputCompactOptions::default()
+            },
+            terms,
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("targetWidget"));
+    assert!(report.output.contains("src/target.ts"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn intent_compaction_empty_terms_matches_existing_options_api() {
+    let input = "\
+line0
+line1
+line2
+line3
+line4
+line5
+line6
+";
+    let options = CommandOutputCompactOptions {
+        kind: CommandOutputKind::Plain,
+        max_lines: 4,
+        head_lines: 1,
+        tail_lines: 1,
+        max_line_chars: 80,
+        ..CommandOutputCompactOptions::default()
+    };
+
+    let existing = compact_command_output_with_options(input, &options);
+    let intent = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions {
+            base: options,
+            intent_terms: vec![String::new(), "   ".to_string()],
+            kind_hint: None,
+        },
+    );
+
+    assert_eq!(intent.detected_kind, existing.detected_kind);
+    assert_eq!(intent.output, existing.output);
+    assert_eq!(intent.compacted_lines, existing.compacted_lines);
+    assert_eq!(
+        intent.estimated_tokens_after,
+        existing.estimated_tokens_after
+    );
+}
+
+#[test]
+fn intent_compaction_prioritizes_matching_diagnostic_lines() {
+    let input = "\
+src/alpha.ts(10,7): error TS2322: Type 'string' is not assignable to type 'number'.
+10 const alpha: number = value;
+src/beta.ts(20,7): error TS2322: Type 'string' is not assignable to type 'number'.
+20 const beta: number = value;
+src/gamma.ts(30,7): error TS2322: Type 'string' is not assignable to type 'number'.
+30 const gamma: number = value;
+src/target.ts(40,7): error TS2322: Type 'string' is not assignable to type 'number'.
+40 const targetWidget: number = value;
+Command failed with exit code 1
+";
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::Diagnostics,
+                max_lines: 18,
+                max_line_chars: 180,
+                ..CommandOutputCompactOptions::default()
+            },
+            vec!["targetWidget".to_string()],
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("targetWidget"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn intent_compaction_prioritizes_matching_search_lines() {
+    let input = "\
+src/lib.rs:10:fn alpha() {}
+src/lib.rs:20:fn target_symbol() {}
+src/lib.rs:30:fn beta() {}
+README.md:3:prodex context helper
+";
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::Search,
+                max_lines: 12,
+                max_search_matches_per_file: 1,
+                max_line_chars: 160,
+                ..CommandOutputCompactOptions::default()
+            },
+            vec!["target_symbol".to_string()],
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Search);
+    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("target_symbol"));
+}
+
+#[test]
+fn intent_compaction_prioritizes_matching_git_diff_lines() {
+    let input = "\
+diff --git a/src/lib.rs b/src/lib.rs
+index 1111111..2222222 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,20 @@
+ old
++new0
++new1
++new2
++new3
++new4
++new5
++new6
++new7
++new8
++pub fn target_symbol() {}
++new10
++new11
++new12
+ context
+";
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::GitDiff,
+                max_lines: 16,
+                max_line_chars: 160,
+                ..CommandOutputCompactOptions::default()
+            },
+            vec!["target_symbol".to_string()],
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::GitDiff);
+    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("+pub fn target_symbol() {}"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn intent_compaction_prioritizes_plain_lines_without_critical_signal_loss() {
+    let input = "\
+setup
+line 1
+line 2
+error: hidden failure
+src/main.rs:22:5
+line 5
+line 6
+test tests::boom ... FAILED
+line 8
+line 9
+interesting_symbol happened here
+line 11
+line 12
+process didn't exit successfully: `cargo test` (exit status: 101)
+tail
+";
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::Plain,
+                max_lines: 12,
+                head_lines: 2,
+                tail_lines: 2,
+                max_line_chars: 160,
+                ..CommandOutputCompactOptions::default()
+            },
+            vec!["interesting_symbol".to_string()],
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Plain);
+    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("interesting_symbol happened here"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
 fn rust_diagnostic_output_preserves_error_code_location_and_exit_status() {
     let input = "\
    Compiling dep_a v0.1.0
@@ -617,6 +901,92 @@ Command failed with exit code 1
     assert!(report.output.contains("TypeError: Cannot read properties"));
     assert!(report.output.contains("Command failed with exit code 1"));
     assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn tight_diagnostics_budget_prioritizes_failure_before_success_noise() {
+    let input = "\
+> web@1.0.0 test /repo
+PASS tests/alpha.test.ts
+PASS tests/beta.test.ts
+src/noisy.ts(1,1): warning TS6133: 'unused' is declared but its value is never read.
+src/target.ts(40,7): error TS2322: Type 'string' is not assignable to type 'number'.
+FAIL tests/target.test.ts
+TypeError: Cannot read properties of undefined (reading 'id')
+    at buildUser (/repo/src/target.ts:40:7)
+Test Suites: 1 failed, 2 passed, 3 total
+Tests:       1 failed, 8 passed, 9 total
+Command failed with exit code 1
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 10,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("error TS2322"));
+    assert!(report.output.contains("src/target.ts:40:7"));
+    assert!(report.output.contains("FAIL tests/target.test.ts"));
+    assert!(report.output.contains("Command failed with exit code 1"));
+    assert!(!report.output.contains("PASS tests/alpha.test.ts"));
+    assert!(!report.output.contains("warning TS6133"));
+    assert!(report.compacted_lines <= 10);
+}
+
+#[test]
+fn tight_rust_budget_prioritizes_failed_test_before_warnings_and_ok_tests() {
+    let input = "\
+warning: unused variable: `noise`
+  --> crates/prodex-context/src/lib.rs:12:9
+running 5 tests
+test context::ok_0 ... ok
+test context::ok_1 ... ok
+test context::critical_failure ... FAILED
+test context::ok_2 ... ok
+test context::ok_3 ... ok
+
+failures:
+
+---- context::critical_failure stdout ----
+thread 'context::critical_failure' panicked at crates/prodex-context/tests/src/lib.rs:311:9:
+assertion failed: left == right
+test result: FAILED. 4 passed; 1 failed; 0 ignored; finished in 0.01s
+error: test failed, to rerun pass `-p prodex-context --lib`
+process didn't exit successfully: `target/debug/deps/prodex_context` (exit status: 101)
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 12,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::RustDiagnostics);
+    assert!(report.output.contains("context::critical_failure"));
+    assert!(
+        report
+            .output
+            .contains("crates/prodex-context/tests/src/lib.rs:311:9")
+    );
+    assert!(
+        report
+            .output
+            .contains("test result: FAILED. 4 passed; 1 failed")
+    );
+    assert!(report.output.contains("exit status: 101"));
+    assert!(!report.output.contains("test context::ok_0 ... ok"));
+    assert!(!report.output.contains("warning: unused variable"));
+    assert!(report.compacted_lines <= 12);
 }
 
 #[test]
@@ -878,6 +1248,124 @@ Ran all test suites.
     assert!(report.output.contains("Tests:       120 passed, 120 total"));
     assert!(!report.output.contains("PASS tests/unit_0.test.ts"));
     assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_compacts_long_install_build_and_list_output() {
+    let mut input = String::new();
+    input.push_str("added 82 packages, and audited 83 packages in 2s\n");
+    input.push_str("found 0 vulnerabilities\n");
+    input.push_str("vite v5.0.0 building for production...\n");
+    for index in 0..30 {
+        input.push_str(&format!("transforming src/module_{index}.ts\n"));
+    }
+    input.push_str("dist/index.html                  0.45 kB\n");
+    input.push_str("dist/assets/app.js             24.12 kB\n");
+    input.push_str("built in 1.42s\n");
+    for index in 0..35 {
+        input.push_str(&format!("src/generated/file_{index}.rs\n"));
+    }
+
+    let report = compact_successful_command_output_with_options(
+        &input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("npm install && npm run build && find src -type f".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 20,
+            max_touched_files: 8,
+            max_key_lines: 8,
+            max_line_chars: 160,
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert_eq!(report.critical_signals.total(), 0);
+    assert!(report.touched_files >= 35);
+    assert!(report.output.contains("successful command output"));
+    assert!(
+        report
+            .output
+            .contains("command: npm install && npm run build && find src -type f")
+    );
+    assert!(report.output.contains("exit: 0"));
+    assert!(report.output.contains("counts:"));
+    assert!(report.output.contains("noise:"));
+    assert!(report.output.contains("touched_files="));
+    assert!(report.output.contains("touched files ("));
+    assert!(report.output.contains("src/generated/file_0.rs"));
+    assert!(report.output.contains("[... "));
+    assert!(!report.output.contains("src/generated/file_34.rs"));
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_preserves_failure_critical_lines_exactly() {
+    let input = "\
+Installing dependencies
+Downloaded package alpha
+error: build script failed
+src/build.rs:42:9
+process didn't exit successfully: `cargo build` (exit status: 101)
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("cargo build".to_string()),
+            exit_code: Some(101),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!report.compacted);
+    assert!(report.failure_suspected);
+    assert!(report.output.contains("error: build script failed"));
+    assert!(report.output.contains("src/build.rs:42:9"));
+    assert!(
+        report
+            .output
+            .contains("process didn't exit successfully: `cargo build` (exit status: 101)")
+    );
+    assert_eq!(report.output, input);
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_is_conservative_when_critical_signal_present() {
+    let mut input = String::new();
+    for index in 0..30 {
+        input.push_str(&format!("PASS tests/unit_{index}.test.ts\n"));
+    }
+    input.push_str("warning: generated bindings changed\n");
+    input.push_str("crates/prodex-context/src/lib.rs:123:5\n");
+    input.push_str("Test Suites: 30 passed, 30 total\n");
+
+    let report = compact_successful_command_output_with_options(
+        &input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("npm test".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!report.compacted);
+    assert!(report.failure_suspected);
+    assert!(
+        report
+            .output
+            .contains("warning: generated bindings changed")
+    );
+    assert!(
+        report
+            .output
+            .contains("crates/prodex-context/src/lib.rs:123:5")
+    );
+    assert!(report.output.contains("PASS tests/unit_0.test.ts"));
+    assert_no_critical_signal_loss(&input, &report.output);
 }
 
 #[test]

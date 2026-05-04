@@ -1,5 +1,6 @@
 use super::*;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 #[test]
 fn smart_context_condenses_tool_output_with_artifact_ref() {
@@ -23,6 +24,7 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
         7,
         runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
         4 * 1024,
+        &RuntimeSmartContextIntentSignals::default(),
         &mut stats,
     );
 
@@ -39,6 +41,111 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
     assert!(!output.contains("artifact_id:"));
     assert_eq!(stats.artifacts_stored, 1);
     assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
+    let hidden_tail = "FULL_TAIL_SHOULD_ONLY_EXIST_IN_ARTIFACT";
+    let original_output = std::iter::once("running 1 test".to_string())
+        .chain(std::iter::once(
+            "---- runtime_proxy::progressive_output stdout ----".to_string(),
+        ))
+        .chain(std::iter::once(
+            "thread 'runtime_proxy::progressive_output' panicked at crates/prodex-app/tests/src/runtime_proxy/smart_context.rs:12:5".to_string(),
+        ))
+        .chain(std::iter::once(
+            "error[E0425]: cannot find value `missing` in this scope".to_string(),
+        ))
+        .chain(std::iter::once(" --> src/lib.rs:42:13".to_string()))
+        .chain((0..420).map(|index| format!("noise line {index}: compile chatter")))
+        .chain(std::iter::once(hidden_tail.to_string()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": original_output
+        }]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        512,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+    runtime_smart_context_append_artifact_manifest_if_useful(&mut value, &store, &stats);
+
+    let output = value["input"][0]["output"].as_str().unwrap();
+    assert!(output.contains("prodex-sc artifact"));
+    assert!(output.contains("summary:"));
+    assert!(output.contains("critical exact ranges:"));
+    assert!(output.contains("prodex-artifact:sc:"));
+    assert!(output.contains("#L"));
+    assert!(output.contains("error[E0425]"));
+    assert!(output.contains("runtime_proxy::progressive_output"));
+    assert!(!output.contains(hidden_tail));
+    assert!(!output.contains("noise line 419"));
+
+    let manifest = value["input"][1]["content"].as_str().unwrap();
+    assert!(manifest.contains("prodex smart context artifact manifest"));
+    assert!(manifest.contains("full content omitted"));
+    assert!(!manifest.contains(hidden_tail));
+    assert_eq!(stats.artifacts_stored, 1);
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_progressive_artifact_ref_rehydrates_full_content_on_explicit_ref() {
+    let original_output = std::iter::once("error: progressive failure".to_string())
+        .chain((0..300).map(|index| format!("artifact body line {index}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": original_output
+        }]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        512,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+    let marker = value["input"][0]["output"].as_str().unwrap().to_string();
+    let artifact = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(marker))
+        .into_iter()
+        .next()
+        .expect("condensed output should include artifact ref");
+    let mut rehydrate_value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("please inspect prodex-artifact:{}", artifact.id)
+        }]
+    });
+    let mut rehydrate_stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value(&mut rehydrate_value, &store, &mut rehydrate_stats);
+
+    assert_eq!(
+        rehydrate_value["input"][0]["content"],
+        format!("please inspect {original_output}")
+    );
+    assert_eq!(rehydrate_stats.rehydrated_refs, 1);
 }
 
 #[test]
@@ -71,6 +178,7 @@ fn smart_context_uses_command_metadata_hint_for_tool_output_compaction() {
         7,
         runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
         256,
+        &RuntimeSmartContextIntentSignals::default(),
         &mut stats,
     );
 
@@ -79,6 +187,289 @@ fn smart_context_uses_command_metadata_hint_for_tool_output_compaction() {
     assert!(output.contains("search summary: 1 matches across 1 files"));
     assert!(output.contains("src/lib.rs (1 matches):"));
     assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_uses_success_summary_for_long_success_tool_output() {
+    let mut original_output = String::new();
+    original_output.push_str("added 82 packages, and audited 83 packages in 2s\n");
+    original_output.push_str("found 0 vulnerabilities\n");
+    original_output.push_str("vite v5.0.0 building for production...\n");
+    for index in 0..60 {
+        original_output.push_str(&format!("transforming src/module_{index}.ts\n"));
+    }
+    original_output.push_str("dist/index.html                  0.45 kB\n");
+    original_output.push_str("dist/assets/app.js             24.12 kB\n");
+    original_output.push_str("built in 1.42s\n");
+    for index in 0..60 {
+        original_output.push_str(&format!("src/generated/file_{index}.rs\n"));
+    }
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"npm install && npm run build && find src -type f\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": original_output
+            }
+        ]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+
+    let output = value["input"][1]["output"].as_str().unwrap();
+    assert!(output.contains("prodex-sc artifact"));
+    assert!(output.contains("successful command output"));
+    assert!(output.contains("command: npm install && npm run build && find src -type f"));
+    assert!(output.contains("exit: (unknown)"));
+    assert!(output.contains("touched files ("));
+    assert!(!output.contains("transforming src/module_59.ts"));
+    assert!(
+        store
+            .artifact_ref_for_exact_text(&original_output)
+            .is_some()
+    );
+    assert_eq!(stats.artifacts_stored, 1);
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_keeps_failure_output_on_critical_preserving_path() {
+    let original_output =
+        std::iter::once("added 82 packages, and audited 83 packages in 2s".to_string())
+            .chain((0..80).map(|index| format!("transforming src/module_{index}.ts")))
+            .chain([
+                "error: build script failed".to_string(),
+                "src/build.rs:42:9".to_string(),
+                "process didn't exit successfully: `cargo build` (exit status: 101)".to_string(),
+            ])
+            .collect::<Vec<_>>()
+            .join("\n");
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"npm install && cargo build\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": original_output
+            }
+        ]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+
+    let output = value["input"][1]["output"].as_str().unwrap();
+    assert!(output.contains("prodex-sc artifact"));
+    assert!(!output.contains("successful command output"));
+    assert!(output.contains("critical exact ranges:"));
+    assert!(output.contains("error: build script failed"));
+    assert!(output.contains("src/build.rs:42:9"));
+    assert!(output.contains("exit status: 101"));
+    assert!(
+        store
+            .artifact_ref_for_exact_text(&original_output)
+            .is_some()
+    );
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_intent_signals_collect_request_terms_metadata_and_refs() {
+    let value = serde_json::json!({
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": "Focus src/runtime_proxy/smart_context.rs error[E0425] smart_context::intent_signal_bus MissingIntentSymbol prodex-artifact:sc:abc123"
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"cargo test smart_context::metadata_hint\"}"
+            }
+        ]
+    });
+
+    let signals = runtime_smart_context_collect_intent_signals(&value);
+
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"src/runtime_proxy/smart_context.rs".to_string())
+    );
+    assert!(signals.intent_terms.contains(&"E0425".to_string()));
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"smart_context::intent_signal_bus".to_string())
+    );
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"MissingIntentSymbol".to_string())
+    );
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"smart_context::metadata_hint".to_string())
+    );
+    assert!(
+        signals
+            .semantic_terms
+            .file_paths
+            .contains("src/runtime_proxy/smart_context.rs")
+    );
+    assert!(signals.semantic_terms.error_codes.contains("E0425"));
+    assert!(
+        signals
+            .semantic_terms
+            .test_symbols
+            .contains("smart_context::intent_signal_bus")
+    );
+    assert_eq!(signals.artifact_refs.len(), 1);
+    assert_eq!(signals.artifact_refs[0].id, "sc:abc123");
+    assert!(signals.command_kind_hints.contains("rust-diagnostics"));
+}
+
+#[test]
+fn smart_context_request_intent_terms_prioritize_tool_output_compaction() {
+    let original_output = std::iter::once("build started".to_string())
+        .chain((0..70).map(|index| format!("early filler line {index}: no signal")))
+        .chain([
+            "src/runtime_proxy/smart_context.rs:314:5: intent path hit".to_string(),
+            "error[E0425]: cannot find value `intent_missing` in this scope".to_string(),
+            "---- smart_context::intent_signal_bus stdout ----".to_string(),
+            "thread 'smart_context::intent_signal_bus' panicked at MissingIntentSymbol".to_string(),
+        ])
+        .chain((0..70).map(|index| format!("late filler line {index}: no signal")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": "Investigate src/runtime_proxy/smart_context.rs E0425 smart_context::intent_signal_bus MissingIntentSymbol"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": original_output
+            }
+        ]
+    });
+    let intent_signals = runtime_smart_context_collect_intent_signals(&value);
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &intent_signals,
+        &mut stats,
+    );
+
+    let output = value["input"][1]["output"].as_str().unwrap();
+    assert!(output.contains("intent matches:"));
+    assert!(output.contains("src/runtime_proxy/smart_context.rs"));
+    assert!(output.contains("error[E0425]"));
+    assert!(output.contains("smart_context::intent_signal_bus"));
+    assert!(output.contains("MissingIntentSymbol"));
+    assert_eq!(stats.artifacts_stored, 1);
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_artifact_manifest_lists_refs_without_full_content() {
+    let secret_line = "SECRET_FULL_ARTIFACT_BODY_SHOULD_NOT_APPEAR";
+    let artifact_text = format!(
+        "running 1 test\n---- tests::hidden_case stdout ----\nthread 'tests::hidden_case' panicked at src/lib.rs:7:3:\nerror[E0425]: cannot find value\n --> src/lib.rs:7:3\n{secret_line}\ntest result: FAILED. 0 passed; 1 failed"
+    );
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(7, &artifact_text).unwrap();
+
+    let manifest =
+        runtime_smart_context_artifact_manifest(&store).expect("artifact manifest should render");
+
+    assert!(manifest.contains("prodex smart context artifact manifest"));
+    assert!(manifest.contains(&format!("prodex-artifact:{}", artifact.id)));
+    assert!(manifest.contains(&format!("bytes={}", artifact_text.len())));
+    assert!(manifest.contains("critical_ranges="));
+    assert!(manifest.contains("semantic_ranges="));
+    assert!(manifest.contains("kind=cargo-test"));
+    assert!(!manifest.contains(secret_line));
+    assert!(!manifest.contains("cannot find value"));
+}
+
+#[test]
+fn smart_context_appends_artifact_manifest_only_when_rewrite_useful() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    store
+        .insert_text(1, "error: compacted output\nsrc/lib.rs:1:1")
+        .unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": "existing prompt"
+        }]
+    });
+
+    assert!(!runtime_smart_context_append_artifact_manifest_if_useful(
+        &mut value,
+        &store,
+        &RuntimeSmartContextTransformStats::default(),
+    ));
+    assert_eq!(value["input"].as_array().unwrap().len(), 1);
+
+    let useful_stats = RuntimeSmartContextTransformStats {
+        tool_outputs_condensed: 1,
+        ..RuntimeSmartContextTransformStats::default()
+    };
+    assert!(runtime_smart_context_append_artifact_manifest_if_useful(
+        &mut value,
+        &store,
+        &useful_stats,
+    ));
+    let input = value["input"].as_array().unwrap();
+    assert_eq!(input.len(), 2);
+    let manifest = input[1]["content"].as_str().unwrap();
+    assert!(manifest.contains("prodex-artifact:sc:"));
+    assert!(!manifest.contains("error: compacted output"));
 }
 
 #[test]
@@ -169,6 +560,145 @@ fn smart_context_rehydrates_artifact_line_ranges() {
 
     assert_eq!(value["input"][0]["content"], "need line two\nline three");
     assert_eq!(stats.rehydrated_refs, 1);
+}
+
+#[test]
+fn smart_context_selective_rehydrate_semantic_terms_append_exact_ranges_only() {
+    let artifact_text = "\
+diff --git a/src/diff.rs b/src/diff.rs
+--- a/src/diff.rs
++++ b/src/diff.rs
+@@ -10,2 +10,3 @@ fn changed()
+-old diff line
++new diff line
+noise before diagnostic
+error[E0425]: cannot find value `missing` in this scope
+src/lib.rs:42:13
+---- runtime_proxy::semantic_rehydrate stdout ----
+thread 'runtime_proxy::semantic_rehydrate' panicked at 'boom', crates/prodex-app/tests/src/runtime_proxy/smart_context.rs:12:5
+test result: FAILED. 0 passed; 1 failed
+unrelated full artifact tail";
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("summary prodex-artifact:{}", artifact.id)
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    let count = runtime_smart_context_selective_rehydrate_semantic_ranges(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &RuntimeSmartContextSelectiveRehydrateTerms {
+            file_paths: BTreeSet::from(["src/lib.rs".to_string()]),
+            error_codes: BTreeSet::from(["E0425".to_string()]),
+            test_symbols: BTreeSet::from(["runtime_proxy::semantic_rehydrate".to_string()]),
+            diff_hunks: Vec::new(),
+        },
+        &mut stats,
+    );
+
+    let content = value["input"][0]["content"].as_str().unwrap();
+    assert_eq!(count, stats.rehydrated_refs);
+    assert!(count >= 3);
+    assert!(content.contains("semantic exact ranges:"));
+    assert!(content.contains(&format!("prodex-artifact:{}#L8-L8", artifact.id)));
+    assert!(content.contains("error[E0425]: cannot find value `missing` in this scope"));
+    assert!(content.contains(&format!("prodex-artifact:{}#L9-L9", artifact.id)));
+    assert!(content.contains("src/lib.rs:42:13"));
+    assert!(content.contains("runtime_proxy::semantic_rehydrate"));
+    assert!(!content.contains("diff --git a/src/diff.rs b/src/diff.rs"));
+    assert!(!content.contains("unrelated full artifact tail"));
+}
+
+#[test]
+fn smart_context_selective_rehydrate_semantic_diff_hunk_term() {
+    let artifact_text = "\
+diff --git a/src/diff.rs b/src/diff.rs
+--- a/src/diff.rs
++++ b/src/diff.rs
+@@ -10,2 +10,3 @@ fn changed()
+-old diff line
++new diff line
+unrelated tail";
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("summary prodex-artifact:{}", artifact.id)
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    let count = runtime_smart_context_selective_rehydrate_semantic_ranges(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &RuntimeSmartContextSelectiveRehydrateTerms {
+            diff_hunks: vec![RuntimeSmartContextSelectiveDiffHunkTerm {
+                path: Some("src/diff.rs".to_string()),
+                old_start: Some(10),
+                new_start: Some(10),
+            }],
+            ..RuntimeSmartContextSelectiveRehydrateTerms::default()
+        },
+        &mut stats,
+    );
+
+    let content = value["input"][0]["content"].as_str().unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(stats.rehydrated_refs, 1);
+    assert!(content.contains(&format!("prodex-artifact:{}#L4-L6", artifact.id)));
+    assert!(content.contains("@@ -10,2 +10,3 @@ fn changed()"));
+    assert!(content.contains("-old diff line"));
+    assert!(content.contains("+new diff line"));
+    assert!(!content.contains("unrelated tail"));
+}
+
+#[test]
+fn smart_context_selective_rehydrate_semantic_terms_respect_exactness_guard() {
+    let artifact_text = "error[E0425]: hidden\nsrc/lib.rs:42:13";
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let original = format!("summary prodex-artifact:{}", artifact.id);
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": original
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    let count = runtime_smart_context_selective_rehydrate_semantic_ranges(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput {
+                previous_response_id: Some("resp_1".to_string()),
+                ..runtime_proxy_crate::SmartContextExactnessInput::default()
+            },
+        ),
+        &RuntimeSmartContextSelectiveRehydrateTerms {
+            error_codes: BTreeSet::from(["E0425".to_string()]),
+            ..RuntimeSmartContextSelectiveRehydrateTerms::default()
+        },
+        &mut stats,
+    );
+
+    assert_eq!(count, 0);
+    assert_eq!(stats.rehydrated_refs, 0);
+    assert_eq!(
+        value["input"][0]["content"].as_str(),
+        Some(original.as_str())
+    );
 }
 
 #[test]
@@ -484,6 +1014,7 @@ fn smart_context_regression_fallback_exact_on_quality_risk() {
         repeat_tool_output_refs: 0,
         blob_outputs_condensed: 0,
         rehydrated_refs: 0,
+        static_context_deltas: 0,
     };
     let before = br#"{"input":[{"content":"error: failed\nsrc/main.rs:10:5"}]}"#;
     let after = br#"{"input":[{"content":"summary"}]}"#;
@@ -627,6 +1158,199 @@ fn smart_context_static_context_fingerprint_drives_exact_policy_on_real_change()
 }
 
 #[test]
+fn smart_context_delta_replaces_unchanged_fresh_static_context_with_marker() {
+    let shared = smart_context_test_shared("static-context-delta");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let instructions = format!(
+        "Use repo rules.\nKeep account affinity.\n{}",
+        "Static instruction line. ".repeat(80)
+    );
+    let input_system = format!(
+        "Input system prefix stays stable.\n{}",
+        "Static system line. ".repeat(80)
+    );
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [
+            {"role": "system", "content": input_system.as_str()},
+            {"role": "user", "content": "first fresh request"}
+        ]
+    }));
+    let second = smart_context_test_request(serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [
+            {"role": "system", "content": input_system.as_str()},
+            {"role": "user", "content": "second fresh request"}
+        ]
+    }));
+
+    let first_prepared =
+        prepare_runtime_smart_context_http_body(90, &first, &shared, RuntimeRouteKind::Responses);
+    assert!(
+        !String::from_utf8_lossy(first_prepared.as_ref())
+            .contains("prodex static context unchanged")
+    );
+
+    let second_prepared =
+        prepare_runtime_smart_context_http_body(91, &second, &shared, RuntimeRouteKind::Responses);
+
+    let Cow::Owned(body) = second_prepared else {
+        panic!("expected static context delta body");
+    };
+    let text = String::from_utf8(body.clone()).unwrap();
+    assert!(text.contains("prodex static context unchanged scpc:"));
+    assert!(!text.contains(&instructions));
+    assert!(!text.contains(&input_system));
+    let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert_eq!(
+        value["input"][1]["content"].as_str(),
+        Some("second fresh request")
+    );
+}
+
+#[test]
+fn smart_context_delta_preserves_exact_static_context() {
+    let shared = smart_context_test_shared("static-context-delta-exact");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let instructions = "Use repo rules.\nKeep exact static content.";
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": instructions,
+        "input": [{"role": "user", "content": "first fresh request"}]
+    }));
+    let exact = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/v1/responses".to_string(),
+        headers: vec![("x-prodex-smart-context".to_string(), "exact".to_string())],
+        body: serde_json::to_vec(&serde_json::json!({
+            "instructions": instructions,
+            "input": [{"role": "user", "content": "exact request"}]
+        }))
+        .unwrap(),
+    };
+
+    let _ =
+        prepare_runtime_smart_context_http_body(92, &first, &shared, RuntimeRouteKind::Responses);
+    let prepared =
+        prepare_runtime_smart_context_http_body(93, &exact, &shared, RuntimeRouteKind::Responses);
+
+    let value = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
+    assert_eq!(value["instructions"].as_str(), Some(instructions));
+    assert!(
+        !String::from_utf8_lossy(prepared.as_ref()).contains("prodex static context unchanged")
+    );
+}
+
+#[test]
+fn smart_context_delta_preserves_changed_static_context() {
+    let shared = smart_context_test_shared("static-context-delta-changed");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": "Use repo rules.\nKeep account affinity.",
+        "input": [{"role": "user", "content": "first fresh request"}]
+    }));
+    let changed = smart_context_test_request(serde_json::json!({
+        "instructions": "Use repo rules.\nAllow account rotation.",
+        "input": [{"role": "user", "content": "changed fresh request"}]
+    }));
+
+    let _ =
+        prepare_runtime_smart_context_http_body(94, &first, &shared, RuntimeRouteKind::Responses);
+    let prepared =
+        prepare_runtime_smart_context_http_body(95, &changed, &shared, RuntimeRouteKind::Responses);
+
+    let value = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
+    assert_eq!(
+        value["instructions"].as_str(),
+        Some("Use repo rules.\nAllow account rotation.")
+    );
+    assert!(
+        !String::from_utf8_lossy(prepared.as_ref()).contains("prodex static context unchanged")
+    );
+}
+
+#[test]
+fn smart_context_prompt_cache_key_prefers_explicit_request_key() {
+    let shared = smart_context_test_shared("prompt-cache-explicit");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let request = smart_context_test_request(serde_json::json!({
+        "prompt_cache_key": " explicit-cache-key ",
+        "instructions": "Static instructions"
+    }));
+
+    let key = runtime_smart_context_effective_prompt_cache_key(&request, &shared, true);
+
+    assert_eq!(key.as_deref(), Some("explicit-cache-key"));
+}
+
+#[test]
+fn smart_context_prompt_cache_key_is_stable_for_same_static_context() {
+    let shared = smart_context_test_shared("prompt-cache-stable");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": "Generated at: 2026-05-04T01:02:03Z\nUse repo rules",
+        "input": [{"type": "message", "content": "first user message"}]
+    }));
+    let second = smart_context_test_request(serde_json::json!({
+        "instructions": "Generated at: 2027-06-07T08:09:10Z\nUse repo rules",
+        "input": [{"type": "message", "content": "different user message"}]
+    }));
+
+    let first_key = runtime_smart_context_effective_prompt_cache_key(&first, &shared, true);
+    let second_key = runtime_smart_context_effective_prompt_cache_key(&second, &shared, true);
+
+    assert!(
+        first_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("scpc:"))
+    );
+    assert_eq!(first_key, second_key);
+}
+
+#[test]
+fn smart_context_prompt_cache_key_absent_when_disabled_or_no_static_context() {
+    let disabled = smart_context_test_shared("prompt-cache-disabled");
+    register_runtime_smart_context_proxy_state(&disabled.log_path, false, None, None);
+    let static_request = smart_context_test_request(serde_json::json!({
+        "instructions": "Static instructions"
+    }));
+    assert_eq!(
+        runtime_smart_context_effective_prompt_cache_key(&static_request, &disabled, true),
+        None
+    );
+
+    let enabled = smart_context_test_shared("prompt-cache-no-static");
+    register_runtime_smart_context_proxy_state(&enabled.log_path, true, None, None);
+    let dynamic_only_request = smart_context_test_request(serde_json::json!({
+        "input": [{"type": "message", "content": "user-only context"}]
+    }));
+    assert_eq!(
+        runtime_smart_context_effective_prompt_cache_key(&dynamic_only_request, &enabled, true),
+        None
+    );
+}
+
+#[test]
+fn smart_context_prompt_cache_key_derivation_does_not_mutate_upstream_payload() {
+    let shared = smart_context_test_shared("prompt-cache-payload");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let request = smart_context_test_request(serde_json::json!({
+        "instructions": "Static instructions",
+        "input": [{"type": "message", "content": "hello"}]
+    }));
+    let before = request.body.clone();
+
+    let key = runtime_smart_context_effective_prompt_cache_key(&request, &shared, true);
+    let prepared =
+        prepare_runtime_smart_context_http_body(88, &request, &shared, RuntimeRouteKind::Responses);
+
+    assert!(key.as_deref().is_some_and(|key| key.starts_with("scpc:")));
+    assert_eq!(request.body, before);
+    assert_eq!(prepared.as_ref(), before.as_slice());
+    let upstream = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
+    assert!(upstream.get("prompt_cache_key").is_none());
+}
+
+#[test]
 fn smart_context_static_context_items_have_stable_id_order() {
     let value = serde_json::json!({
         "developer": "dev rules",
@@ -675,6 +1399,7 @@ fn smart_context_reuses_existing_tool_output_artifact_with_short_ref() {
         2,
         runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
         256,
+        &RuntimeSmartContextIntentSignals::default(),
         &mut stats,
     );
 
@@ -747,6 +1472,7 @@ fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
         repeat_tool_output_refs: 0,
         blob_outputs_condensed: 0,
         rehydrated_refs: 0,
+        static_context_deltas: 0,
     };
 
     let (body, repaired_stats) = runtime_smart_context_try_surgical_rehydrate_critical_ranges(
@@ -910,6 +1636,7 @@ fn smart_context_self_check_passes_through_growth_without_rehydrate() {
         repeat_tool_output_refs: 0,
         blob_outputs_condensed: 0,
         rehydrated_refs: 0,
+        static_context_deltas: 0,
     };
 
     assert_eq!(

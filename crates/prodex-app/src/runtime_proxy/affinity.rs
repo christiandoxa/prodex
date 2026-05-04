@@ -19,6 +19,34 @@ pub(crate) use runtime_proxy_crate::{
 struct RuntimePromptCacheProfileBinding {
     profile_name: String,
     bound_at: i64,
+    cached_input_tokens: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimePromptCacheProfileObservation {
+    NoKey,
+    NoCachedTokens,
+    OwnerInserted,
+    OwnerChanged,
+    OwnerUnchanged,
+    ExistingOwnerPreserved,
+}
+
+impl RuntimePromptCacheProfileObservation {
+    pub(crate) fn log_label(self) -> &'static str {
+        match self {
+            Self::NoKey => "no_key",
+            Self::NoCachedTokens => "no_cached_tokens",
+            Self::OwnerInserted => "owner_inserted",
+            Self::OwnerChanged => "owner_changed",
+            Self::OwnerUnchanged => "owner_unchanged",
+            Self::ExistingOwnerPreserved => "existing_owner_preserved",
+        }
+    }
+
+    fn changed_owner(self) -> bool {
+        matches!(self, Self::OwnerInserted | Self::OwnerChanged)
+    }
 }
 
 static RUNTIME_PROMPT_CACHE_PROFILE_BINDINGS: OnceLock<
@@ -69,8 +97,15 @@ fn remember_runtime_prompt_cache_profile_at(
     let mut bindings = runtime_prompt_cache_profile_bindings()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
     let changed = match bindings.get_mut(&prompt_cache_key) {
         Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < now {
+                binding.bound_at = now;
+            }
+            false
+        }
+        Some(binding) if binding.cached_input_tokens > 0 => {
             if binding.bound_at < now {
                 binding.bound_at = now;
             }
@@ -87,6 +122,7 @@ fn remember_runtime_prompt_cache_profile_at(
                 RuntimePromptCacheProfileBinding {
                     profile_name: profile_name.to_string(),
                     bound_at: now,
+                    cached_input_tokens: 0,
                 },
             );
             true
@@ -94,6 +130,90 @@ fn remember_runtime_prompt_cache_profile_at(
     };
     prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
     changed
+}
+
+fn observe_runtime_prompt_cache_profile_hit_at(
+    profile_name: &str,
+    prompt_cache_key: Option<&str>,
+    cached_input_tokens: u64,
+    now: i64,
+) -> RuntimePromptCacheProfileObservation {
+    if cached_input_tokens == 0 {
+        return RuntimePromptCacheProfileObservation::NoCachedTokens;
+    }
+    let Some(prompt_cache_key) = runtime_normalized_prompt_cache_key(prompt_cache_key) else {
+        return RuntimePromptCacheProfileObservation::NoKey;
+    };
+    let mut bindings = runtime_prompt_cache_profile_bindings()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
+    let observation = match bindings.get_mut(&prompt_cache_key) {
+        Some(binding) if binding.profile_name == profile_name => {
+            if binding.bound_at < now {
+                binding.bound_at = now;
+            }
+            if binding.cached_input_tokens < cached_input_tokens {
+                binding.cached_input_tokens = cached_input_tokens;
+            }
+            RuntimePromptCacheProfileObservation::OwnerUnchanged
+        }
+        Some(binding) if cached_input_tokens > binding.cached_input_tokens => {
+            binding.profile_name = profile_name.to_string();
+            binding.bound_at = now;
+            binding.cached_input_tokens = cached_input_tokens;
+            RuntimePromptCacheProfileObservation::OwnerChanged
+        }
+        Some(binding) => {
+            if binding.bound_at < now {
+                binding.bound_at = now;
+            }
+            RuntimePromptCacheProfileObservation::ExistingOwnerPreserved
+        }
+        None => {
+            bindings.insert(
+                prompt_cache_key,
+                RuntimePromptCacheProfileBinding {
+                    profile_name: profile_name.to_string(),
+                    bound_at: now,
+                    cached_input_tokens,
+                },
+            );
+            RuntimePromptCacheProfileObservation::OwnerInserted
+        }
+    };
+    prune_runtime_prompt_cache_profile_bindings(&mut bindings, now);
+    observation
+}
+
+pub(crate) fn observe_runtime_prompt_cache_profile_hit(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    prompt_cache_key: Option<&str>,
+    cached_input_tokens: u64,
+    route_kind: RuntimeRouteKind,
+) -> RuntimePromptCacheProfileObservation {
+    let observation = observe_runtime_prompt_cache_profile_hit_at(
+        profile_name,
+        prompt_cache_key,
+        cached_input_tokens,
+        Local::now().timestamp(),
+    );
+    if observation.changed_owner() {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "binding_prompt_cache_hit",
+                [
+                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("cached_input_tokens", cached_input_tokens.to_string()),
+                    runtime_proxy_log_field("owner_update", observation.log_label()),
+                ],
+            ),
+        );
+    }
+    observation
 }
 
 pub(crate) fn remember_runtime_prompt_cache_profile(

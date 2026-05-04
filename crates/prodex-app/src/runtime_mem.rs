@@ -11,7 +11,8 @@ pub(crate) use prodex_runtime_mem::{
     runtime_mem_claude_plugin_dir_from_home, runtime_mem_claude_plugin_manifest_path,
     runtime_mem_data_dir_from_home, runtime_mem_default_codex_schema, runtime_mem_extract_mode,
     runtime_mem_extract_mode_with_detail, runtime_mem_full_codex_schema,
-    runtime_mem_settings_path_from_home, runtime_mem_transcript_watch_config_path_from_home,
+    runtime_mem_settings_path_from_home, runtime_mem_super_default_transcript_mode,
+    runtime_mem_transcript_watch_config_path_from_home,
 };
 
 pub(super) fn ensure_runtime_mem_prodex_observer(paths: &AppPaths) -> Result<PathBuf> {

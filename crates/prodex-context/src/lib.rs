@@ -160,6 +160,30 @@ impl CommandOutputCompactOptions {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CommandOutputIntentCompactOptions {
+    pub base: CommandOutputCompactOptions,
+    pub intent_terms: Vec<String>,
+    pub kind_hint: Option<CommandOutputKind>,
+}
+
+impl CommandOutputIntentCompactOptions {
+    pub fn new(base: CommandOutputCompactOptions, intent_terms: Vec<String>) -> Self {
+        Self {
+            base,
+            intent_terms,
+            kind_hint: None,
+        }
+    }
+
+    pub fn with_kind_hint(mut self, kind_hint: Option<CommandOutputKind>) -> Self {
+        self.kind_hint = kind_hint;
+        self
+    }
+}
+
+pub const MAX_EXTRACTED_INTENT_TERMS: usize = 32;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandOutputCompactReport {
     pub requested_kind: CommandOutputKind,
@@ -168,6 +192,40 @@ pub struct CommandOutputCompactReport {
     pub compacted_lines: usize,
     pub estimated_tokens_before: usize,
     pub estimated_tokens_after: usize,
+    pub output: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CommandSuccessOutputCompactOptions {
+    pub command: Option<String>,
+    pub exit_code: Option<i32>,
+    pub min_lines_to_compact: usize,
+    pub max_touched_files: usize,
+    pub max_key_lines: usize,
+    pub max_line_chars: usize,
+}
+
+impl Default for CommandSuccessOutputCompactOptions {
+    fn default() -> Self {
+        Self {
+            command: None,
+            exit_code: None,
+            min_lines_to_compact: 40,
+            max_touched_files: 24,
+            max_key_lines: 12,
+            max_line_chars: 200,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CommandSuccessOutputCompactReport {
+    pub compacted: bool,
+    pub failure_suspected: bool,
+    pub original_lines: usize,
+    pub compacted_lines: usize,
+    pub touched_files: usize,
+    pub critical_signals: CriticalSignalCounts,
     pub output: String,
 }
 
@@ -1259,6 +1317,85 @@ pub fn compact_command_output_with_options_and_kind_hint(
     }
 }
 
+pub fn compact_command_output_with_intent_terms(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+    intent_terms: &[String],
+) -> CommandOutputCompactReport {
+    compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(options.clone(), intent_terms.to_vec()),
+    )
+}
+
+pub fn compact_command_output_with_intent_options(
+    input: &str,
+    options: &CommandOutputIntentCompactOptions,
+) -> CommandOutputCompactReport {
+    let intent_terms = normalize_intent_terms(&options.intent_terms);
+    if intent_terms.is_empty() {
+        return compact_command_output_with_options_and_kind_hint(
+            input,
+            &options.base,
+            options.kind_hint,
+        );
+    }
+
+    let normalized = normalize_command_output(input);
+    let mut report =
+        compact_command_output_with_options_and_kind_hint(input, &options.base, options.kind_hint);
+    let output = compact_command_output_for_intent(
+        &normalized,
+        &report.output,
+        report.detected_kind,
+        &options.base,
+        &intent_terms,
+    );
+    let output = ensure_no_critical_signal_loss_for_intent(&normalized, &output, &options.base);
+    let output = canonicalize_compacted_command_paths(&normalized, &output, report.detected_kind);
+
+    report.compacted_lines = count_text_lines(&output);
+    report.estimated_tokens_after =
+        estimate_context_tokens(output.chars().count(), output.split_whitespace().count());
+    report.output = output;
+    report
+}
+
+pub fn extract_intent_terms_from_prompt(prompt: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut seen = BTreeMap::<String, ()>::new();
+    let mut token = String::new();
+    let mut chars = prompt.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if matches!(ch, '\'' | '"' | '`') {
+            push_prompt_intent_candidate(&mut terms, &mut seen, &token, false);
+            token.clear();
+
+            let quote = ch;
+            let mut quoted = String::new();
+            for next in chars.by_ref() {
+                if next == quote {
+                    break;
+                }
+                quoted.push(next);
+            }
+            push_prompt_intent_candidate(&mut terms, &mut seen, &quoted, true);
+        } else if is_prompt_intent_token_char(ch) {
+            token.push(ch);
+        } else {
+            push_prompt_intent_candidate(&mut terms, &mut seen, &token, false);
+            token.clear();
+        }
+
+        if terms.len() >= MAX_EXTRACTED_INTENT_TERMS {
+            return terms;
+        }
+    }
+    push_prompt_intent_candidate(&mut terms, &mut seen, &token, false);
+    terms
+}
+
 fn compact_git_status_output(input: &str, options: &CommandOutputCompactOptions) -> String {
     let mut summary = GitStatusSummary::default();
     let lines = command_lines(input);
@@ -1792,9 +1929,6 @@ fn compact_rust_diagnostic_output(input: &str, options: &CommandOutputCompactOpt
         summary.exit_statuses.len(),
         noise_counts.values().sum::<usize>(),
     ));
-    if !noise_counts.is_empty() {
-        output.push(format_count_map("noise", &noise_counts, 10));
-    }
     push_labeled_lines(
         &mut output,
         "diagnostics",
@@ -1839,6 +1973,9 @@ fn compact_rust_diagnostic_output(input: &str, options: &CommandOutputCompactOpt
         output.push(format!(
             "[... omitted {omitted_blocks} additional critical blocks ...]"
         ));
+    }
+    if !noise_counts.is_empty() {
+        output.push(format_count_map("noise", &noise_counts, 10));
     }
 
     finalize_compacted_command_output(CommandOutputKind::RustDiagnostics, input, output, options)
@@ -1908,9 +2045,6 @@ fn compact_diagnostic_output(input: &str, options: &CommandOutputCompactOptions)
         summary.exit_statuses.len(),
         noise_counts.values().sum::<usize>(),
     ));
-    if !noise_counts.is_empty() {
-        output.push(format_count_map("noise", &noise_counts, 10));
-    }
     push_labeled_lines(
         &mut output,
         "diagnostics",
@@ -1955,6 +2089,9 @@ fn compact_diagnostic_output(input: &str, options: &CommandOutputCompactOptions)
         output.push(format!(
             "[... omitted {omitted_blocks} additional critical blocks ...]"
         ));
+    }
+    if !noise_counts.is_empty() {
+        output.push(format_count_map("noise", &noise_counts, 10));
     }
 
     finalize_compacted_command_output(CommandOutputKind::Diagnostics, input, output, options)
@@ -2012,6 +2149,258 @@ fn compact_noisy_success_output(input: &str, options: &CommandOutputCompactOptio
     );
 
     finalize_compacted_command_output(CommandOutputKind::NoisySuccess, input, output, options)
+}
+
+pub fn compact_successful_command_output_with_options(
+    input: &str,
+    options: &CommandSuccessOutputCompactOptions,
+) -> CommandSuccessOutputCompactReport {
+    let normalized = normalize_command_output(input);
+    let lines = command_lines(&normalized);
+    let original_lines = count_text_lines(&normalized);
+    let critical_signals = count_critical_signals(&normalized);
+    let failure_suspected =
+        command_success_output_failure_suspected(&lines, critical_signals, options);
+
+    if normalized.is_empty() || failure_suspected {
+        return CommandSuccessOutputCompactReport {
+            compacted: false,
+            failure_suspected,
+            original_lines,
+            compacted_lines: original_lines,
+            touched_files: collect_success_output_touched_files(&lines).len(),
+            critical_signals,
+            output: normalized,
+        };
+    }
+
+    let success_like = command_success_output_success_like(&lines, options);
+    if !success_like || original_lines < options.min_lines_to_compact.max(1) {
+        return CommandSuccessOutputCompactReport {
+            compacted: false,
+            failure_suspected: false,
+            original_lines,
+            compacted_lines: original_lines,
+            touched_files: collect_success_output_touched_files(&lines).len(),
+            critical_signals,
+            output: normalized,
+        };
+    }
+
+    let touched_files = collect_success_output_touched_files(&lines);
+    let mut noise_counts = BTreeMap::<String, usize>::new();
+    let mut key_lines = Vec::<String>::new();
+    for line in &lines {
+        if let Some(label) = noisy_success_label(line) {
+            *noise_counts.entry(label.to_string()).or_default() += 1;
+        }
+        if is_noisy_success_key_line(line) || is_rust_success_summary_line(line) {
+            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+        }
+    }
+
+    let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
+    let noisy_success_lines = noise_counts.values().sum::<usize>();
+    let mut output = Vec::<String>::new();
+    output.push(format!(
+        "# prodex context saver: successful command output ({} -> summary)",
+        original_lines
+    ));
+    output.push(format!(
+        "command: {}",
+        options.command.as_deref().unwrap_or("(unknown)")
+    ));
+    output.push(format!(
+        "exit: {}",
+        options
+            .exit_code
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "(unknown)".to_string())
+    ));
+    output.push(format!(
+        "counts: lines={}, non_empty={}, noisy_success_lines={}, critical_signals={}, touched_files={}",
+        original_lines,
+        non_empty,
+        noisy_success_lines,
+        critical_signals.total(),
+        touched_files.len()
+    ));
+    if !noise_counts.is_empty() {
+        output.push(format_count_map("noise", &noise_counts, 10));
+    }
+
+    let roots = count_success_output_path_roots(&touched_files);
+    if !roots.is_empty() {
+        output.push(format_count_map("top roots", &roots, 8));
+    }
+    let extensions = count_success_output_path_extensions(&touched_files);
+    if !extensions.is_empty() {
+        output.push(format_count_map("extensions", &extensions, 8));
+    }
+
+    push_labeled_lines(
+        &mut output,
+        "key lines",
+        &key_lines,
+        options.max_key_lines.max(1),
+    );
+    push_success_output_touched_files(&mut output, &touched_files, options);
+
+    let output = lines_to_text(output);
+    CommandSuccessOutputCompactReport {
+        compacted: true,
+        failure_suspected: false,
+        original_lines,
+        compacted_lines: count_text_lines(&output),
+        touched_files: touched_files.len(),
+        critical_signals,
+        output,
+    }
+}
+
+fn command_success_output_failure_suspected(
+    lines: &[&str],
+    critical_signals: CriticalSignalCounts,
+    options: &CommandSuccessOutputCompactOptions,
+) -> bool {
+    options.exit_code.is_some_and(|code| code != 0)
+        || !critical_signals.is_empty()
+        || lines.iter().any(|line| {
+            is_error_signal_line(line)
+                || is_test_failure_signal_line(line)
+                || is_diagnostic_failure_summary_line(line)
+        })
+}
+
+fn command_success_output_success_like(
+    lines: &[&str],
+    options: &CommandSuccessOutputCompactOptions,
+) -> bool {
+    options.exit_code == Some(0)
+        || looks_like_noisy_success_output(lines)
+        || options
+            .command
+            .as_deref()
+            .is_some_and(command_name_is_success_output_candidate)
+}
+
+fn command_name_is_success_output_candidate(command: &str) -> bool {
+    let tokens = command_metadata_tokens(command);
+    tokens.iter().any(|token| {
+        matches!(
+            command_metadata_token_command_name(token),
+            "cargo"
+                | "npm"
+                | "pnpm"
+                | "yarn"
+                | "bun"
+                | "make"
+                | "cmake"
+                | "ninja"
+                | "ls"
+                | "find"
+                | "tree"
+                | "du"
+                | "tar"
+                | "unzip"
+        )
+    })
+}
+
+fn collect_success_output_touched_files(lines: &[&str]) -> Vec<String> {
+    let mut paths = BTreeMap::<String, ()>::new();
+    for line in lines {
+        if let Some(path) = parse_file_list_entry_line(line) {
+            insert_success_output_path(&mut paths, &path);
+        }
+        if let Some(search_match) =
+            parse_search_match_line(line).or_else(|| parse_rg_json_match_line(line))
+        {
+            insert_success_output_path(&mut paths, &search_match.path);
+        }
+        for token in line.split_whitespace() {
+            if let Some(path) = success_output_path_from_token(token) {
+                insert_success_output_path(&mut paths, &path);
+            }
+        }
+    }
+    paths.into_keys().collect()
+}
+
+fn insert_success_output_path(paths: &mut BTreeMap<String, ()>, path: &str) {
+    let normalized = path.replace('\\', "/");
+    let normalized = context_noise_strip_path_location_suffix_supplement(&normalized)
+        .trim_start_matches("a/")
+        .trim_start_matches("b/")
+        .trim_start_matches("./")
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
+            )
+        })
+        .trim_matches('/')
+        .to_string();
+    if normalized.len() < 3 || normalized.contains("://") || normalized.contains(' ') {
+        return;
+    }
+    if normalized.starts_with('-') || normalized == "." || normalized == ".." {
+        return;
+    }
+    paths.insert(normalized, ());
+}
+
+fn success_output_path_from_token(token: &str) -> Option<String> {
+    let token = token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
+        )
+    });
+    context_noise_normalize_path_token_supplement(token).or_else(|| {
+        let normalized = context_noise_strip_path_location_suffix_supplement(token);
+        looks_like_bare_path_entry(normalized).then(|| normalized.to_string())
+    })
+}
+
+fn count_success_output_path_roots(paths: &[String]) -> BTreeMap<String, usize> {
+    let mut roots = BTreeMap::<String, usize>::new();
+    for path in paths {
+        *roots.entry(top_level_path_segment(path)).or_default() += 1;
+    }
+    roots
+}
+
+fn count_success_output_path_extensions(paths: &[String]) -> BTreeMap<String, usize> {
+    let mut extensions = BTreeMap::<String, usize>::new();
+    for path in paths {
+        *extensions.entry(path_extension_label(path)).or_default() += 1;
+    }
+    extensions
+}
+
+fn push_success_output_touched_files(
+    output: &mut Vec<String>,
+    paths: &[String],
+    options: &CommandSuccessOutputCompactOptions,
+) {
+    if paths.is_empty() {
+        return;
+    }
+    let limit = options.max_touched_files.max(1);
+    output.push(format!("touched files ({}):", paths.len()));
+    for path in paths.iter().take(limit) {
+        output.push(format!(
+            "  {}",
+            truncate_command_line(path, options.max_line_chars)
+        ));
+    }
+    if paths.len() > limit {
+        output.push(format!(
+            "  [... {} more touched files ...]",
+            paths.len() - limit
+        ));
+    }
 }
 
 fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
@@ -2721,6 +3110,481 @@ fn push_unique_truncated_line(lines: &mut Vec<String>, line: &str, max_chars: us
     push_unique_line(lines, &line);
 }
 
+#[derive(Debug, Clone)]
+struct IntentMatchLine {
+    line_number: usize,
+    text: String,
+}
+
+fn normalize_intent_terms(terms: &[String]) -> Vec<String> {
+    let mut seen = BTreeMap::<String, ()>::new();
+    let mut normalized = Vec::new();
+    for term in terms {
+        let term = normalize_intent_match_text(term.trim());
+        if term.is_empty() || seen.contains_key(&term) {
+            continue;
+        }
+        seen.insert(term.clone(), ());
+        normalized.push(term);
+    }
+    normalized
+}
+
+fn push_prompt_intent_candidate(
+    terms: &mut Vec<String>,
+    seen: &mut BTreeMap<String, ()>,
+    candidate: &str,
+    quoted: bool,
+) {
+    if terms.len() >= MAX_EXTRACTED_INTENT_TERMS {
+        return;
+    }
+    if quoted && candidate.chars().any(char::is_whitespace) {
+        for part in candidate.split_whitespace() {
+            push_prompt_intent_candidate(terms, seen, part, false);
+            if terms.len() >= MAX_EXTRACTED_INTENT_TERMS {
+                break;
+            }
+        }
+        return;
+    }
+
+    let Some(candidate) = normalize_prompt_intent_candidate(candidate) else {
+        return;
+    };
+
+    let term = if let Some(code) = prompt_intent_error_code(&candidate) {
+        Some(code)
+    } else if let Some(path) = prompt_intent_path(&candidate) {
+        Some(path)
+    } else if looks_like_prompt_intent_file_name(&candidate)
+        || looks_like_prompt_intent_symbol(&candidate)
+        || quoted && looks_like_quoted_prompt_intent_identifier(&candidate)
+    {
+        Some(candidate)
+    } else {
+        None
+    };
+
+    let Some(term) = term else {
+        return;
+    };
+    if term.chars().count() > 160 {
+        return;
+    }
+
+    let key = normalize_intent_match_text(&term);
+    if key.is_empty() || seen.contains_key(&key) {
+        return;
+    }
+    seen.insert(key, ());
+    terms.push(term);
+}
+
+fn normalize_prompt_intent_candidate(candidate: &str) -> Option<String> {
+    let candidate = candidate.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ','
+                | ';'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '!'
+                | '?'
+                | '*'
+                | '#'
+                | '='
+                | ':'
+        )
+    });
+    let candidate = candidate.trim_end_matches(['.', ',']);
+    if candidate.is_empty() || candidate.chars().any(char::is_whitespace) {
+        return None;
+    }
+
+    Some(candidate.replace('\\', "/"))
+}
+
+fn is_prompt_intent_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '\\' | ':' | '$' | '[' | ']')
+}
+
+fn prompt_intent_error_code(candidate: &str) -> Option<String> {
+    let chars = candidate.chars().collect::<Vec<_>>();
+    for index in 0..chars.len() {
+        if chars[index].eq_ignore_ascii_case(&'e')
+            && index + 4 < chars.len()
+            && chars[index + 1..=index + 4]
+                .iter()
+                .all(|ch| ch.is_ascii_digit())
+            && prompt_intent_code_boundary(&chars, index.checked_sub(1))
+            && prompt_intent_code_boundary(&chars, Some(index + 5))
+        {
+            return Some(
+                chars[index..=index + 4]
+                    .iter()
+                    .collect::<String>()
+                    .to_ascii_uppercase(),
+            );
+        }
+
+        if chars[index].eq_ignore_ascii_case(&'t')
+            && index + 5 < chars.len()
+            && chars[index + 1].eq_ignore_ascii_case(&'s')
+            && chars[index + 2..=index + 5]
+                .iter()
+                .all(|ch| ch.is_ascii_digit())
+            && prompt_intent_code_boundary(&chars, index.checked_sub(1))
+            && prompt_intent_code_boundary(&chars, Some(index + 6))
+        {
+            return Some(
+                chars[index..=index + 5]
+                    .iter()
+                    .collect::<String>()
+                    .to_ascii_uppercase(),
+            );
+        }
+    }
+    None
+}
+
+fn prompt_intent_code_boundary(chars: &[char], index: Option<usize>) -> bool {
+    index.is_none_or(|index| {
+        chars
+            .get(index)
+            .is_none_or(|ch| !ch.is_ascii_alphanumeric() && *ch != '_')
+    })
+}
+
+fn prompt_intent_path(candidate: &str) -> Option<String> {
+    if candidate.contains("://") || candidate.contains(' ') {
+        return None;
+    }
+
+    let stripped = context_noise_strip_path_location_suffix_supplement(candidate)
+        .trim_start_matches("a/")
+        .trim_start_matches("b/")
+        .trim_start_matches("./")
+        .trim_matches('/');
+    if stripped.len() < 3 || !stripped.contains('/') || !looks_like_location_path(stripped) {
+        return None;
+    }
+
+    Some(stripped.to_string())
+}
+
+fn looks_like_prompt_intent_file_name(candidate: &str) -> bool {
+    if candidate.contains('/') || candidate.contains("://") || candidate.starts_with('-') {
+        return false;
+    }
+    let Some((stem, ext)) = candidate.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && stem.chars().any(|ch| ch.is_ascii_alphanumeric())
+        && !ext.is_empty()
+        && ext.len() <= 12
+        && ext
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+fn looks_like_prompt_intent_symbol(candidate: &str) -> bool {
+    if candidate.contains("://") || candidate.len() < 3 {
+        return false;
+    }
+
+    if candidate.contains("::") {
+        return candidate
+            .split("::")
+            .all(is_prompt_intent_identifier_segment);
+    }
+
+    if candidate.contains('.') && !looks_like_prompt_intent_file_name(candidate) {
+        let segments = candidate.split('.').collect::<Vec<_>>();
+        return segments.len() >= 2
+            && segments
+                .iter()
+                .all(|segment| is_prompt_intent_identifier_segment(segment));
+    }
+
+    if !is_prompt_intent_identifier_segment(candidate) {
+        return false;
+    }
+    let lower = candidate.to_ascii_lowercase();
+    if is_noisy_prompt_intent_word(&lower) {
+        return false;
+    }
+    candidate.starts_with("test_")
+        || candidate.ends_with("_test")
+        || candidate.contains('_')
+        || candidate
+            .chars()
+            .all(|ch| ch.is_ascii_uppercase() || ch == '_' || ch.is_ascii_digit())
+        || has_prompt_intent_camel_shape(candidate)
+}
+
+fn looks_like_quoted_prompt_intent_identifier(candidate: &str) -> bool {
+    if !is_prompt_intent_identifier_segment(candidate) {
+        return false;
+    }
+    !is_noisy_prompt_intent_word(&candidate.to_ascii_lowercase())
+}
+
+fn is_prompt_intent_identifier_segment(segment: &str) -> bool {
+    let mut chars = segment.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_' || first == '$')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$')
+}
+
+fn has_prompt_intent_camel_shape(candidate: &str) -> bool {
+    let uppercase = candidate
+        .chars()
+        .filter(|ch| ch.is_ascii_uppercase())
+        .count();
+    let lowercase = candidate.chars().any(|ch| ch.is_ascii_lowercase());
+    if uppercase == 0 || !lowercase {
+        return false;
+    }
+
+    let mut previous_lowercase = false;
+    for ch in candidate.chars() {
+        if previous_lowercase && ch.is_ascii_uppercase() {
+            return true;
+        }
+        previous_lowercase = ch.is_ascii_lowercase();
+    }
+    uppercase >= 2
+}
+
+fn is_noisy_prompt_intent_word(word: &str) -> bool {
+    matches!(
+        word,
+        "a" | "an"
+            | "and"
+            | "are"
+            | "as"
+            | "at"
+            | "be"
+            | "by"
+            | "for"
+            | "from"
+            | "in"
+            | "into"
+            | "is"
+            | "it"
+            | "of"
+            | "on"
+            | "or"
+            | "the"
+            | "this"
+            | "to"
+            | "with"
+            | "without"
+            | "should"
+            | "when"
+            | "please"
+            | "fix"
+            | "add"
+            | "update"
+            | "change"
+            | "make"
+            | "use"
+            | "using"
+            | "run"
+            | "check"
+            | "test"
+            | "tests"
+            | "error"
+            | "failed"
+            | "failure"
+            | "warning"
+            | "output"
+            | "command"
+            | "context"
+            | "smart"
+            | "tool"
+            | "compaction"
+            | "prompt"
+            | "request"
+            | "ignore"
+            | "common"
+            | "word"
+            | "words"
+            | "file"
+            | "files"
+            | "repo"
+            | "path"
+            | "paths"
+            | "rust"
+            | "python"
+            | "javascript"
+            | "typescript"
+    )
+}
+
+fn compact_command_output_for_intent(
+    original: &str,
+    base_output: &str,
+    kind: CommandOutputKind,
+    options: &CommandOutputCompactOptions,
+    intent_terms: &[String],
+) -> String {
+    if !command_output_kind_supports_intent_compaction(kind) {
+        return base_output.to_string();
+    }
+
+    let intent_matches = collect_intent_matching_lines(original, intent_terms, options);
+    if intent_matches.is_empty() {
+        return base_output.to_string();
+    }
+
+    let base_lines = command_lines(base_output);
+    let max_lines = options.max_lines.saturating_add(1).max(6);
+    let mut output = Vec::new();
+    if let Some(header) = base_lines.first() {
+        output.push((*header).to_string());
+    } else {
+        output.push(format!(
+            "# prodex context saver: {} ({} -> intent lines)",
+            kind.label(),
+            count_text_lines(original),
+        ));
+    }
+
+    output.push(format!(
+        "intent matches: {} lines for {}",
+        intent_matches.len(),
+        truncate_command_line(&intent_terms.join(", "), options.max_line_chars),
+    ));
+
+    let reserved_for_baseline = 3usize.min(max_lines.saturating_sub(output.len()));
+    let mut intent_budget = max_lines
+        .saturating_sub(output.len())
+        .saturating_sub(reserved_for_baseline)
+        .max(1);
+    intent_budget = intent_budget.min(max_lines.saturating_div(2).max(2));
+    for intent_match in intent_matches.iter().take(intent_budget) {
+        output.push(format!(
+            "  L{}: {}",
+            intent_match.line_number,
+            truncate_command_line(&intent_match.text, options.max_line_chars),
+        ));
+    }
+    if intent_matches.len() > intent_budget {
+        output.push(format!(
+            "  [... {} more intent-matching lines ...]",
+            intent_matches.len() - intent_budget
+        ));
+    }
+
+    let remaining = max_lines.saturating_sub(output.len());
+    if remaining >= 2 && base_lines.len() > 1 {
+        output.push("baseline compaction:".to_string());
+        let baseline_budget = max_lines.saturating_sub(output.len()).max(1);
+        let baseline = base_lines
+            .iter()
+            .skip(1)
+            .map(|line| (*line).to_string())
+            .collect::<Vec<_>>();
+        push_head_tail_lines(
+            &mut output,
+            &baseline,
+            baseline_budget,
+            options.max_line_chars,
+            "baseline lines",
+            "  ",
+        );
+    }
+
+    lines_to_text(output)
+}
+
+fn command_output_kind_supports_intent_compaction(kind: CommandOutputKind) -> bool {
+    matches!(
+        kind,
+        CommandOutputKind::GitDiff
+            | CommandOutputKind::RustDiagnostics
+            | CommandOutputKind::Diagnostics
+            | CommandOutputKind::Search
+            | CommandOutputKind::Plain
+    )
+}
+
+fn collect_intent_matching_lines(
+    input: &str,
+    intent_terms: &[String],
+    options: &CommandOutputCompactOptions,
+) -> Vec<IntentMatchLine> {
+    command_lines(input)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || !intent_line_matches(trimmed, intent_terms) {
+                return None;
+            }
+            Some(IntentMatchLine {
+                line_number: index + 1,
+                text: truncate_command_line(trimmed, options.max_line_chars),
+            })
+        })
+        .collect()
+}
+
+fn intent_line_matches(line: &str, intent_terms: &[String]) -> bool {
+    let line = normalize_intent_match_text(line);
+    intent_terms.iter().any(|term| line.contains(term))
+}
+
+fn normalize_intent_match_text(value: &str) -> String {
+    value.replace('\\', "/").trim().to_ascii_lowercase()
+}
+
+fn ensure_no_critical_signal_loss_for_intent(
+    original: &str,
+    candidate: &str,
+    options: &CommandOutputCompactOptions,
+) -> String {
+    if critical_signal_self_check(original, candidate).passed() {
+        return candidate.to_string();
+    }
+
+    let mut output = command_lines(candidate)
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    output.push("critical signal rescue:".to_string());
+    for line in command_lines(original) {
+        if !is_critical_preserve_line(line) {
+            continue;
+        }
+        output.push(truncate_command_line(line.trim(), options.max_line_chars));
+        let text = lines_to_text(output.clone());
+        if critical_signal_self_check(original, &text).passed() {
+            return text;
+        }
+    }
+
+    let text = lines_to_text(output);
+    if critical_signal_self_check(original, &text).passed() {
+        text
+    } else {
+        candidate.to_string()
+    }
+}
+
 fn smart_truncate_command_output(input: &str, options: &CommandOutputCompactOptions) -> String {
     let lines = command_lines(input);
     if lines.is_empty() {
@@ -2769,20 +3633,20 @@ fn smart_truncate_with_critical_lines(
         return None;
     }
 
-    if max_lines < 8 {
+    if max_lines <= 12 {
         let mut output = Vec::new();
         output.push(format!(
             "command output summary: {} lines, {} critical lines preserved",
             lines.len(),
             critical.len()
         ));
-        for (index, line) in critical.iter().take(max_lines.saturating_sub(1).max(1)) {
-            output.push(format!(
-                "L{}: {}",
-                index + 1,
-                truncate_command_line(line.trim(), options.max_line_chars)
-            ));
-        }
+        output.push("critical lines:".to_string());
+        push_numbered_critical_lines(
+            &mut output,
+            &critical,
+            max_lines.saturating_sub(2).max(1),
+            options,
+        );
         return Some(lines_to_text(output));
     }
 
@@ -2861,9 +3725,30 @@ fn push_numbered_critical_lines(
         return;
     }
 
-    let head = budget.div_ceil(2).saturating_sub(1).max(1);
-    let tail = budget.saturating_sub(head).saturating_sub(1);
-    for (index, line) in critical.iter().take(head) {
+    let mut candidates = critical.to_vec();
+    candidates.sort_by_key(|(index, line)| (critical_preserve_priority(line), *index));
+    let selected_budget = budget.saturating_sub(1).max(1);
+    let mut selected = Vec::new();
+    let mut seen = BTreeMap::<String, ()>::new();
+    let failure_present = critical
+        .iter()
+        .any(|(_, line)| is_failure_first_critical_line(line));
+    for candidate in candidates {
+        if failure_present && is_warning_only_signal_line(candidate.1) {
+            continue;
+        }
+        let key = critical_line_selection_key(candidate.1);
+        if seen.insert(key, ()).is_some() {
+            continue;
+        }
+        selected.push(candidate);
+        if selected.len() >= selected_budget {
+            break;
+        }
+    }
+    selected.sort_by_key(|(index, _)| *index);
+
+    for (index, line) in &selected {
         output.push(format!(
             "  L{}: {}",
             index + 1,
@@ -2872,17 +3757,71 @@ fn push_numbered_critical_lines(
     }
     output.push(format!(
         "  [... omitted {} critical lines ...]",
-        critical.len().saturating_sub(head + tail)
+        critical.len().saturating_sub(selected.len())
     ));
-    if tail > 0 {
-        for (index, line) in critical.iter().skip(critical.len().saturating_sub(tail)) {
-            output.push(format!(
-                "  L{}: {}",
-                index + 1,
-                truncate_command_line(line.trim(), options.max_line_chars)
-            ));
-        }
+}
+
+fn critical_line_selection_key(line: &str) -> String {
+    line.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+fn critical_preserve_priority(line: &str) -> u8 {
+    if is_generated_compaction_header_line(line) {
+        return 5;
     }
+    if is_warning_only_signal_line(line) {
+        return 4;
+    }
+    if is_error_signal_line(line)
+        || is_test_failure_signal_line(line)
+        || is_diagnostic_failure_summary_line(line)
+        || is_rust_exit_status_line(line)
+    {
+        return 0;
+    }
+    if count_file_location_signals(line) > 0 || is_stack_signal_line(line) {
+        return 1;
+    }
+    if is_rust_diagnostic_signal_line(line) || is_log_level_signal_line(line) {
+        return 2;
+    }
+    3
+}
+
+fn is_failure_first_critical_line(line: &str) -> bool {
+    !is_warning_only_signal_line(line)
+        && (is_error_signal_line(line)
+            || is_test_failure_signal_line(line)
+            || is_diagnostic_failure_summary_line(line)
+            || is_rust_exit_status_line(line))
+}
+
+fn is_generated_compaction_header_line(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    lower.starts_with("# prodex context saver:")
+        || lower.starts_with("rust/cargo summary:")
+        || lower.starts_with("diagnostic summary:")
+        || lower.starts_with("diagnostics (")
+        || lower.starts_with("locations (")
+        || lower.starts_with("failed tests (")
+        || lower.starts_with("exit statuses (")
+        || lower.starts_with("key lines (")
+        || lower.starts_with("critical blocks:")
+}
+
+fn is_warning_only_signal_line(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    (lower.starts_with("warning")
+        || lower.contains(" warning ")
+        || lower.contains("warning ts")
+        || lower.contains(": warning ts")
+        || lower.contains(" - warning ts"))
+        && !lower.contains("error")
+        && !lower.contains("failed")
+        && !lower.contains("panicked")
 }
 
 fn finalize_compacted_command_output(

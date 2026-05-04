@@ -2156,6 +2156,7 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
         RuntimeResponsesSuccessContext {
             request_id: 1,
             request_previous_response_id: Some("resp-second"),
+            request_prompt_cache_key: None,
             request_session_id: Some("sess-compact"),
             request_turn_state: None,
             turn_state_override: None,
@@ -2396,6 +2397,7 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
         RuntimeResponsesSuccessContext {
             request_id: 1,
             request_previous_response_id: None,
+            request_prompt_cache_key: None,
             request_session_id: Some("sess-compact"),
             request_turn_state: None,
             turn_state_override: None,

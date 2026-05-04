@@ -322,6 +322,7 @@ struct RuntimeResponsesDirectCurrentFallback<'a> {
     shared: &'a RuntimeRotationProxyShared,
     reason: RuntimeResponsesDirectCurrentFallbackReason,
     previous_response_id: Option<&'a str>,
+    prompt_cache_key: Option<&'a str>,
     request_turn_state: Option<&'a str>,
     request_session_id: Option<&'a str>,
     request_requires_previous_response_affinity: bool,
@@ -371,6 +372,7 @@ fn try_runtime_responses_direct_current_profile_fallback(
         fallback.shared,
         &current_profile,
         fallback.request_turn_state,
+        fallback.prompt_cache_key,
     )? {
         RuntimeResponsesAttempt::Success {
             profile_name,
@@ -528,10 +530,16 @@ pub(crate) fn proxy_runtime_responses_request(
     let previous_response_fresh_fallback_shape =
         runtime_request_previous_response_fresh_fallback_shape(&request);
     let previous_response_id = runtime_request_previous_response_id(&request);
-    let prompt_cache_key = runtime_request_prompt_cache_key(&request);
     let mut request_turn_state = runtime_request_turn_state(&request);
     let explicit_request_session_id = runtime_request_explicit_session_id(&request);
     let request_session_id = runtime_request_session_id(&request);
+    let prompt_cache_key = runtime_smart_context_effective_prompt_cache_key(
+        &request,
+        shared,
+        previous_response_id.is_none()
+            && request_turn_state.is_none()
+            && request_session_id.is_none(),
+    );
     let bound_profile = previous_response_id
         .as_deref()
         .map(|response_id| {
@@ -624,6 +632,7 @@ pub(crate) fn proxy_runtime_responses_request(
                     shared,
                     reason: RuntimeResponsesDirectCurrentFallbackReason::PrecommitBudgetExhausted,
                     previous_response_id: previous_response_id.as_deref(),
+                    prompt_cache_key: prompt_cache_key.as_deref(),
                     request_turn_state: request_turn_state.as_deref(),
                     request_session_id: request_session_id.as_deref(),
                     request_requires_previous_response_affinity,
@@ -719,6 +728,7 @@ pub(crate) fn proxy_runtime_responses_request(
                     shared,
                     reason: RuntimeResponsesDirectCurrentFallbackReason::CandidateExhausted,
                     previous_response_id: previous_response_id.as_deref(),
+                    prompt_cache_key: prompt_cache_key.as_deref(),
                     request_turn_state: request_turn_state.as_deref(),
                     request_session_id: request_session_id.as_deref(),
                     request_requires_previous_response_affinity,
@@ -807,6 +817,7 @@ pub(crate) fn proxy_runtime_responses_request(
             shared,
             &candidate_name,
             turn_state_override,
+            prompt_cache_key.as_deref(),
         )? {
             RuntimeResponsesAttempt::Success {
                 profile_name,
@@ -993,10 +1004,13 @@ pub(crate) fn attempt_runtime_responses_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    prompt_cache_key: Option<&str>,
 ) -> Result<RuntimeResponsesAttempt> {
     let request_session_id = runtime_request_session_id(request);
     let request_previous_response_id = runtime_request_previous_response_id(request);
-    let request_prompt_cache_key = runtime_request_prompt_cache_key(request);
+    let request_prompt_cache_key = prompt_cache_key
+        .map(str::to_string)
+        .or_else(|| runtime_request_prompt_cache_key(request));
     let request_turn_state = runtime_request_turn_state(request);
     let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
         shared,
@@ -1111,6 +1125,7 @@ pub(crate) fn attempt_runtime_responses_request(
                 request_id,
                 request_previous_response_id: runtime_request_previous_response_id(request)
                     .as_deref(),
+                request_prompt_cache_key: request_prompt_cache_key.as_deref(),
                 request_session_id: request_session_id.as_deref(),
                 request_turn_state: runtime_request_turn_state(request).as_deref(),
                 turn_state_override,

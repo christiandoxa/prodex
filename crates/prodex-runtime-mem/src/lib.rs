@@ -36,7 +36,26 @@ const RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS: &[&str] = &[
     "payload.artifact_id",
     "payload.artifactId",
 ];
+const RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS: &[&str] =
+    &["payload.summary", "payload.metadata.summary"];
+const RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS: &[&str] = &[
+    "payload.metadata.artifact_ref",
+    "payload.metadata.artifact_id",
+    "payload.metadata.artifactId",
+    "payload.artifact.reference",
+    "payload.artifact.ref",
+    "payload.artifact.id",
+    "payload.artifact_id",
+    "payload.artifactId",
+];
+const RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT: usize = 180;
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
+pub const RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 128;
+pub const RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 512;
+pub const RUNTIME_MEM_DEFAULT_CAPSULE_LARGE_TOKEN_BUDGET: usize = 2_048;
+pub const RUNTIME_MEM_SUPER_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 256;
+pub const RUNTIME_MEM_SUPER_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 1_024;
+pub const RUNTIME_MEM_SUPER_CAPSULE_LARGE_TOKEN_BUDGET: usize = 4_096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMemTranscriptMode {
@@ -61,6 +80,29 @@ pub enum RuntimeMemCapsulePriority {
     Optional,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMemCapsuleBudgetTier {
+    Exact,
+    Large,
+    Condensed,
+    Minimal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMemCapsuleBudgetMode {
+    Default,
+    Super,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMemCapsuleBudget {
+    Explicit(usize),
+    Tier {
+        available_tokens: usize,
+        mode: RuntimeMemCapsuleBudgetMode,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeMemCapsuleMetadata {
     pub id: String,
@@ -69,6 +111,41 @@ pub struct RuntimeMemCapsuleMetadata {
     pub project_path: Option<PathBuf>,
     pub updated_at_seconds: Option<i64>,
     pub relevance: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuntimeMemRecallIntent {
+    pub paths: Vec<PathBuf>,
+    pub symbols: Vec<String>,
+}
+
+impl RuntimeMemRecallIntent {
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty() && self.symbols.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeMemRecallCapsuleMetadata {
+    pub capsule: RuntimeMemCapsuleMetadata,
+    pub paths: Vec<PathBuf>,
+    pub symbols: Vec<String>,
+}
+
+impl RuntimeMemRecallCapsuleMetadata {
+    pub fn new(capsule: RuntimeMemCapsuleMetadata) -> Self {
+        Self {
+            capsule,
+            paths: Vec::new(),
+            symbols: Vec::new(),
+        }
+    }
+}
+
+impl From<RuntimeMemCapsuleMetadata> for RuntimeMemRecallCapsuleMetadata {
+    fn from(capsule: RuntimeMemCapsuleMetadata) -> Self {
+        Self::new(capsule)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +163,41 @@ impl RuntimeMemCapsuleSelectionContext {
             project_root: None,
             now_seconds: None,
             recent_window_seconds: RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeMemAutoCapsuleSelectionContext {
+    pub budget: RuntimeMemCapsuleBudget,
+    pub project_root: Option<PathBuf>,
+    pub now_seconds: Option<i64>,
+    pub recent_window_seconds: u64,
+}
+
+impl RuntimeMemAutoCapsuleSelectionContext {
+    pub fn new(budget: RuntimeMemCapsuleBudget) -> Self {
+        Self {
+            budget,
+            project_root: None,
+            now_seconds: None,
+            recent_window_seconds: RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS,
+        }
+    }
+
+    pub fn super_mode(available_tokens: usize) -> Self {
+        Self::new(RuntimeMemCapsuleBudget::Tier {
+            available_tokens,
+            mode: RuntimeMemCapsuleBudgetMode::Super,
+        })
+    }
+
+    pub fn to_selection_context(&self) -> RuntimeMemCapsuleSelectionContext {
+        RuntimeMemCapsuleSelectionContext {
+            token_budget: runtime_mem_capsule_token_budget(self.budget),
+            project_root: self.project_root.clone(),
+            now_seconds: self.now_seconds,
+            recent_window_seconds: self.recent_window_seconds,
         }
     }
 }
@@ -125,6 +237,119 @@ pub fn runtime_mem_classify_capsule(
         return RuntimeMemCapsulePriority::Recent;
     }
     RuntimeMemCapsulePriority::Optional
+}
+
+pub fn runtime_mem_capsule_budget_tier(available_tokens: usize) -> RuntimeMemCapsuleBudgetTier {
+    match available_tokens {
+        16_000.. => RuntimeMemCapsuleBudgetTier::Exact,
+        8_000..=15_999 => RuntimeMemCapsuleBudgetTier::Large,
+        2_000..=7_999 => RuntimeMemCapsuleBudgetTier::Condensed,
+        _ => RuntimeMemCapsuleBudgetTier::Minimal,
+    }
+}
+
+pub fn runtime_mem_capsule_token_budget(budget: RuntimeMemCapsuleBudget) -> usize {
+    match budget {
+        RuntimeMemCapsuleBudget::Explicit(token_budget) => token_budget,
+        RuntimeMemCapsuleBudget::Tier {
+            available_tokens,
+            mode,
+        } => runtime_mem_capsule_token_budget_for_tier(
+            mode,
+            runtime_mem_capsule_budget_tier(available_tokens),
+        ),
+    }
+}
+
+pub fn runtime_mem_capsule_token_budget_for_tier(
+    mode: RuntimeMemCapsuleBudgetMode,
+    tier: RuntimeMemCapsuleBudgetTier,
+) -> usize {
+    match mode {
+        RuntimeMemCapsuleBudgetMode::Default => match tier {
+            RuntimeMemCapsuleBudgetTier::Minimal => {
+                RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET
+            }
+            RuntimeMemCapsuleBudgetTier::Condensed => {
+                RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET
+            }
+            RuntimeMemCapsuleBudgetTier::Large | RuntimeMemCapsuleBudgetTier::Exact => {
+                RUNTIME_MEM_DEFAULT_CAPSULE_LARGE_TOKEN_BUDGET
+            }
+        },
+        RuntimeMemCapsuleBudgetMode::Super => match tier {
+            RuntimeMemCapsuleBudgetTier::Minimal => RUNTIME_MEM_SUPER_CAPSULE_MINIMAL_TOKEN_BUDGET,
+            RuntimeMemCapsuleBudgetTier::Condensed => {
+                RUNTIME_MEM_SUPER_CAPSULE_CONDENSED_TOKEN_BUDGET
+            }
+            RuntimeMemCapsuleBudgetTier::Large | RuntimeMemCapsuleBudgetTier::Exact => {
+                RUNTIME_MEM_SUPER_CAPSULE_LARGE_TOKEN_BUDGET
+            }
+        },
+    }
+}
+
+pub fn runtime_mem_select_capsules_auto(
+    capsules: impl IntoIterator<Item = RuntimeMemCapsuleMetadata>,
+    context: RuntimeMemAutoCapsuleSelectionContext,
+) -> RuntimeMemCapsuleSelection {
+    runtime_mem_select_capsules(capsules, context.to_selection_context())
+}
+
+pub fn runtime_mem_select_capsules_for_recall_diet(
+    capsules: impl IntoIterator<Item = RuntimeMemRecallCapsuleMetadata>,
+    context: RuntimeMemAutoCapsuleSelectionContext,
+    intent: RuntimeMemRecallIntent,
+) -> RuntimeMemCapsuleSelection {
+    runtime_mem_select_capsules_with_recall_intent(capsules, context.to_selection_context(), intent)
+}
+
+pub fn runtime_mem_select_capsules_with_recall_intent(
+    capsules: impl IntoIterator<Item = RuntimeMemRecallCapsuleMetadata>,
+    context: RuntimeMemCapsuleSelectionContext,
+    intent: RuntimeMemRecallIntent,
+) -> RuntimeMemCapsuleSelection {
+    if intent.is_empty() {
+        return runtime_mem_select_capsules(
+            capsules.into_iter().map(|candidate| candidate.capsule),
+            context,
+        );
+    }
+
+    let mut candidates = capsules
+        .into_iter()
+        .map(|capsule| {
+            let priority = runtime_mem_classify_capsule(&capsule.capsule, &context);
+            let intent_score = runtime_mem_capsule_intent_score(&capsule, &context, &intent);
+            (capsule, priority, intent_score)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(runtime_mem_recall_diet_capsule_order);
+
+    let mut selected = Vec::new();
+    let mut omitted = Vec::new();
+    let mut used_tokens = 0usize;
+
+    for (candidate, priority, _) in candidates {
+        let entry = RuntimeMemCapsuleSelectionEntry {
+            id: candidate.capsule.id,
+            priority,
+            token_cost: candidate.capsule.token_cost,
+        };
+        if used_tokens.saturating_add(entry.token_cost) <= context.token_budget {
+            used_tokens += entry.token_cost;
+            selected.push(entry);
+        } else {
+            omitted.push(entry);
+        }
+    }
+
+    RuntimeMemCapsuleSelection {
+        selected,
+        omitted,
+        used_tokens,
+        token_budget: context.token_budget,
+    }
 }
 
 pub fn runtime_mem_select_capsules(
@@ -169,6 +394,15 @@ pub fn runtime_mem_select_capsules(
 pub fn runtime_mem_extract_mode(args: &[OsString]) -> (bool, Vec<OsString>) {
     let (mode, args) = runtime_mem_extract_mode_with_detail(args);
     (mode.is_some(), args)
+}
+
+pub fn runtime_mem_super_default_transcript_mode(
+    mode: Option<RuntimeMemTranscriptMode>,
+) -> Option<RuntimeMemTranscriptMode> {
+    match mode {
+        Some(RuntimeMemTranscriptMode::Slim) => Some(RuntimeMemTranscriptMode::SuperSlim),
+        other => other,
+    }
 }
 
 pub fn runtime_mem_select_codex_schema_mode_for_event(
@@ -219,6 +453,35 @@ pub fn runtime_mem_event_has_super_slim_prompt_reference(event: &Value) -> bool 
                 runtime_mem_lookup_json_path(event, path).is_some_and(runtime_mem_value_is_text)
             })
         || runtime_mem_value_contains_artifact_marker(event)
+}
+
+pub fn runtime_mem_super_slim_shadow_codex_event(event: &Value) -> Value {
+    let mut shadow = event.clone();
+    let Some(payload_type) = runtime_mem_lookup_json_path(&shadow, "payload.type")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return shadow;
+    };
+
+    match payload_type.as_str() {
+        "user_message" => runtime_mem_shadow_user_message(&mut shadow),
+        "agent_message" => runtime_mem_shadow_assistant_message(&mut shadow),
+        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {
+            runtime_mem_shadow_tool_output(&mut shadow)
+        }
+        _ => {}
+    }
+    shadow
+}
+
+pub fn runtime_mem_super_slim_shadow_codex_events<'a>(
+    events: impl IntoIterator<Item = &'a Value>,
+) -> Vec<Value> {
+    events
+        .into_iter()
+        .map(runtime_mem_super_slim_shadow_codex_event)
+        .collect()
 }
 
 pub fn runtime_mem_extract_mode_with_detail(
@@ -529,7 +792,6 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
                             "payload.artifact.id",
                             "payload.artifact_id",
                             "payload.artifactId",
-                            "payload.message",
                             { "value": "user prompt recorded by prodex super-slim mem; content omitted" }
                         ]
                     }
@@ -569,6 +831,14 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
                         "coalesce": [
                             "payload.summary",
                             "payload.metadata.summary",
+                            "payload.metadata.artifact_ref",
+                            "payload.metadata.artifact_id",
+                            "payload.metadata.artifactId",
+                            "payload.artifact.reference",
+                            "payload.artifact.ref",
+                            "payload.artifact.id",
+                            "payload.artifact_id",
+                            "payload.artifactId",
                             { "value": "tool result recorded by prodex super-slim mem; output omitted" }
                         ]
                     }
@@ -700,6 +970,210 @@ fn runtime_mem_lookup_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a 
     Some(current)
 }
 
+fn runtime_mem_shadow_user_message(event: &mut Value) {
+    let summary =
+        runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS)
+            .or_else(|| {
+                runtime_mem_shadow_summary_for_path(
+                    event,
+                    "payload.message",
+                    "user prompt",
+                    "prompt",
+                )
+            });
+    let artifact_ref =
+        runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS)
+            .or_else(|| runtime_mem_extract_artifact_marker(event));
+
+    if let Some(summary) = summary {
+        runtime_mem_set_json_path(
+            event,
+            "payload.prompt_summary",
+            Value::String(summary.clone()),
+        );
+        runtime_mem_set_json_path(
+            event,
+            "payload.metadata.prompt_summary",
+            Value::String(summary),
+        );
+    }
+    if let Some(artifact_ref) = artifact_ref {
+        runtime_mem_set_json_path(
+            event,
+            "payload.metadata.artifact_ref",
+            Value::String(artifact_ref),
+        );
+    }
+    if runtime_mem_lookup_json_path(event, "payload.message").is_some() {
+        runtime_mem_set_json_path(
+            event,
+            "payload.message",
+            Value::String(
+                "user prompt shadowed by prodex super-slim mem; full content omitted".to_string(),
+            ),
+        );
+    }
+}
+
+fn runtime_mem_shadow_assistant_message(event: &mut Value) {
+    if runtime_mem_lookup_json_path(event, "payload.summary").is_none()
+        && let Some(summary) = runtime_mem_shadow_summary_for_path(
+            event,
+            "payload.message",
+            "assistant response",
+            "message",
+        )
+    {
+        runtime_mem_set_json_path(event, "payload.summary", Value::String(summary));
+    }
+    if runtime_mem_lookup_json_path(event, "payload.message").is_some() {
+        runtime_mem_set_json_path(
+            event,
+            "payload.message",
+            Value::String(
+                "assistant response shadowed by prodex super-slim mem; full content omitted"
+                    .to_string(),
+            ),
+        );
+    }
+}
+
+fn runtime_mem_shadow_tool_output(event: &mut Value) {
+    let summary = runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS)
+        .or_else(|| {
+            runtime_mem_shadow_summary_for_path(event, "payload.output", "tool output", "output")
+        });
+    let artifact_ref =
+        runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS)
+            .or_else(|| runtime_mem_extract_artifact_marker(event));
+
+    if let Some(summary) = summary {
+        runtime_mem_set_json_path(event, "payload.summary", Value::String(summary.clone()));
+        runtime_mem_set_json_path(event, "payload.metadata.summary", Value::String(summary));
+    }
+    if let Some(artifact_ref) = artifact_ref {
+        runtime_mem_set_json_path(
+            event,
+            "payload.metadata.artifact_ref",
+            Value::String(artifact_ref),
+        );
+    }
+    if runtime_mem_lookup_json_path(event, "payload.output").is_some() {
+        runtime_mem_set_json_path(
+            event,
+            "payload.output",
+            Value::String(
+                "tool output shadowed by prodex super-slim mem; full content omitted".to_string(),
+            ),
+        );
+    }
+}
+
+fn runtime_mem_shadow_summary_for_path(
+    event: &Value,
+    path: &str,
+    label: &str,
+    omitted_name: &str,
+) -> Option<String> {
+    let text = runtime_mem_lookup_json_path(event, path)?.as_str()?;
+    Some(runtime_mem_shadow_summary_from_text(
+        text,
+        label,
+        omitted_name,
+        runtime_mem_extract_artifact_marker(event).as_deref(),
+    ))
+}
+
+fn runtime_mem_shadow_summary_from_text(
+    text: &str,
+    label: &str,
+    omitted_name: &str,
+    artifact_ref: Option<&str>,
+) -> String {
+    let first_line = runtime_mem_first_useful_line(text)
+        .map(|line| {
+            runtime_mem_truncate_chars(line, RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT)
+        })
+        .unwrap_or_else(|| "(empty)".to_string());
+    let ref_part = artifact_ref
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("; ref={value}"))
+        .unwrap_or_default();
+    format!(
+        "{label} summary: {first_line} [bytes={}; approx_tokens={}; full {omitted_name} omitted{ref_part}]",
+        text.len(),
+        runtime_mem_approx_token_count(text),
+    )
+}
+
+fn runtime_mem_first_useful_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
+fn runtime_mem_truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
+fn runtime_mem_approx_token_count(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+fn runtime_mem_first_text_at_paths(event: &Value, paths: &[&str]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        runtime_mem_lookup_json_path(event, path)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn runtime_mem_extract_artifact_marker(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => runtime_mem_extract_artifact_marker_from_text(text),
+        Value::Array(values) => values.iter().find_map(runtime_mem_extract_artifact_marker),
+        Value::Object(object) => object
+            .values()
+            .find_map(runtime_mem_extract_artifact_marker),
+        _ => None,
+    }
+}
+
+fn runtime_mem_extract_artifact_marker_from_text(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .map(|part| part.trim_matches(|c: char| c.is_ascii_punctuation() && c != ':' && c != '/'))
+        .find(|part| part.starts_with("prodex-artifact:") || part.starts_with("prodex://artifact/"))
+        .map(str::to_string)
+}
+
+fn runtime_mem_set_json_path(value: &mut Value, path: &str, new_value: Value) {
+    let mut current = value;
+    let mut parts = path.split('.').peekable();
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            if let Value::Object(object) = current {
+                object.insert(part.to_string(), new_value);
+            }
+            return;
+        }
+        if !current.is_object() {
+            *current = serde_json::json!({});
+        }
+        let object = current
+            .as_object_mut()
+            .expect("json path container should be object");
+        current = object
+            .entry(part.to_string())
+            .or_insert_with(|| serde_json::json!({}));
+    }
+}
+
 fn runtime_mem_value_is_text(value: &Value) -> bool {
     value.as_str().is_some_and(|text| !text.trim().is_empty())
 }
@@ -766,6 +1240,48 @@ fn runtime_mem_capsule_order(
         .then_with(|| left.0.id.cmp(&right.0.id))
 }
 
+fn runtime_mem_recall_diet_capsule_order(
+    left: &(
+        RuntimeMemRecallCapsuleMetadata,
+        RuntimeMemCapsulePriority,
+        usize,
+    ),
+    right: &(
+        RuntimeMemRecallCapsuleMetadata,
+        RuntimeMemCapsulePriority,
+        usize,
+    ),
+) -> Ordering {
+    runtime_mem_recall_diet_rank(left.1, left.2)
+        .cmp(&runtime_mem_recall_diet_rank(right.1, right.2))
+        .then_with(|| right.2.cmp(&left.2))
+        .then_with(|| {
+            runtime_mem_relevance_order(right.0.capsule.relevance, left.0.capsule.relevance)
+        })
+        .then_with(|| {
+            right
+                .0
+                .capsule
+                .updated_at_seconds
+                .unwrap_or(i64::MIN)
+                .cmp(&left.0.capsule.updated_at_seconds.unwrap_or(i64::MIN))
+        })
+        .then_with(|| left.0.capsule.token_cost.cmp(&right.0.capsule.token_cost))
+        .then_with(|| left.0.capsule.id.cmp(&right.0.capsule.id))
+}
+
+fn runtime_mem_recall_diet_rank(priority: RuntimeMemCapsulePriority, intent_score: usize) -> u8 {
+    match (priority, intent_score > 0) {
+        (RuntimeMemCapsulePriority::Required, _) => 0,
+        (RuntimeMemCapsulePriority::ProjectLocal, true) => 1,
+        (RuntimeMemCapsulePriority::Recent, true) => 2,
+        (RuntimeMemCapsulePriority::Optional, true) => 3,
+        (RuntimeMemCapsulePriority::ProjectLocal, false) => 4,
+        (RuntimeMemCapsulePriority::Recent, false) => 5,
+        (RuntimeMemCapsulePriority::Optional, false) => 6,
+    }
+}
+
 fn runtime_mem_capsule_priority_rank(priority: RuntimeMemCapsulePriority) -> u8 {
     match priority {
         RuntimeMemCapsulePriority::Required => 0,
@@ -777,6 +1293,77 @@ fn runtime_mem_capsule_priority_rank(priority: RuntimeMemCapsulePriority) -> u8 
 
 fn runtime_mem_relevance_order(left: f32, right: f32) -> Ordering {
     left.partial_cmp(&right).unwrap_or(Ordering::Equal)
+}
+
+fn runtime_mem_capsule_intent_score(
+    capsule: &RuntimeMemRecallCapsuleMetadata,
+    context: &RuntimeMemCapsuleSelectionContext,
+    intent: &RuntimeMemRecallIntent,
+) -> usize {
+    let path_score = intent
+        .paths
+        .iter()
+        .filter(|intent_path| {
+            runtime_mem_capsule_matches_intent_path(capsule, context, intent_path)
+        })
+        .count();
+    let symbol_score = intent
+        .symbols
+        .iter()
+        .filter(|intent_symbol| {
+            capsule.symbols.iter().any(|capsule_symbol| {
+                runtime_mem_symbols_match(capsule_symbol.as_str(), intent_symbol.as_str())
+            })
+        })
+        .count();
+
+    path_score.saturating_add(symbol_score)
+}
+
+fn runtime_mem_capsule_matches_intent_path(
+    capsule: &RuntimeMemRecallCapsuleMetadata,
+    context: &RuntimeMemCapsuleSelectionContext,
+    intent_path: &Path,
+) -> bool {
+    let intent_path =
+        runtime_mem_intent_path_for_matching(intent_path, context.project_root.as_deref());
+    capsule
+        .capsule
+        .project_path
+        .iter()
+        .chain(capsule.paths.iter())
+        .map(|path| runtime_mem_intent_path_for_matching(path, context.project_root.as_deref()))
+        .any(|capsule_path| runtime_mem_paths_overlap(&capsule_path, &intent_path))
+}
+
+fn runtime_mem_intent_path_for_matching(path: &Path, project_root: Option<&Path>) -> PathBuf {
+    if path.is_absolute() {
+        return runtime_mem_normalized_path(path);
+    }
+    project_root
+        .map(|root| runtime_mem_normalized_path(&root.join(path)))
+        .unwrap_or_else(|| runtime_mem_normalized_path(path))
+}
+
+fn runtime_mem_paths_overlap(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
+fn runtime_mem_symbols_match(capsule_symbol: &str, intent_symbol: &str) -> bool {
+    let capsule_symbol = runtime_mem_normalized_symbol(capsule_symbol);
+    let intent_symbol = runtime_mem_normalized_symbol(intent_symbol);
+    if capsule_symbol.is_empty() || intent_symbol.is_empty() {
+        return false;
+    }
+    capsule_symbol == intent_symbol
+        || capsule_symbol.ends_with(&format!("::{intent_symbol}"))
+        || capsule_symbol.ends_with(&format!(".{intent_symbol}"))
+        || intent_symbol.ends_with(&format!("::{capsule_symbol}"))
+        || intent_symbol.ends_with(&format!(".{capsule_symbol}"))
+}
+
+fn runtime_mem_normalized_symbol(symbol: &str) -> String {
+    symbol.trim().trim_matches('`').to_ascii_lowercase()
 }
 
 fn runtime_mem_normalized_path(path: &Path) -> PathBuf {

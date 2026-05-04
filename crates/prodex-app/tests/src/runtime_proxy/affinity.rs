@@ -155,6 +155,131 @@ fn prompt_cache_profile_bindings_prune_by_ttl_and_limit() {
 }
 
 #[test]
+fn prompt_cache_profile_hit_updates_owner_on_higher_cached_tokens() {
+    clear_runtime_prompt_cache_profile_bindings();
+    let now = 1_000_000;
+    let prompt_cache_key = "prompt-cache-hit-owner";
+
+    remember_runtime_prompt_cache_profile_at("main", Some(prompt_cache_key), now);
+    assert_eq!(
+        observe_runtime_prompt_cache_profile_hit_at("main", Some(prompt_cache_key), 128, now + 1),
+        RuntimePromptCacheProfileObservation::OwnerUnchanged
+    );
+    assert_eq!(
+        runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 1).as_deref(),
+        Some("main")
+    );
+
+    remember_runtime_prompt_cache_profile_at("second", Some(prompt_cache_key), now + 2);
+    assert_eq!(
+        runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 2).as_deref(),
+        Some("main")
+    );
+
+    assert_eq!(
+        observe_runtime_prompt_cache_profile_hit_at("second", Some(prompt_cache_key), 64, now + 3),
+        RuntimePromptCacheProfileObservation::ExistingOwnerPreserved
+    );
+    assert_eq!(
+        runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 3).as_deref(),
+        Some("main")
+    );
+
+    assert_eq!(
+        observe_runtime_prompt_cache_profile_hit_at("second", Some(prompt_cache_key), 256, now + 4,),
+        RuntimePromptCacheProfileObservation::OwnerChanged
+    );
+    assert_eq!(
+        runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 4).as_deref(),
+        Some("second")
+    );
+}
+
+#[test]
+fn prompt_cache_profile_hit_ignores_zero_or_absent_cached_tokens() {
+    clear_runtime_prompt_cache_profile_bindings();
+    let shared = runtime_proxy_affinity_test_shared("prompt-cache-zero-hit");
+    let now = 1_000_000;
+    let prompt_cache_key = "prompt-cache-zero-hit";
+
+    remember_runtime_prompt_cache_profile_at("main", Some(prompt_cache_key), now);
+    assert_eq!(
+        observe_runtime_prompt_cache_profile_hit_at("second", Some(prompt_cache_key), 0, now + 1),
+        RuntimePromptCacheProfileObservation::NoCachedTokens
+    );
+    assert_eq!(
+        runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 1).as_deref(),
+        Some("main")
+    );
+
+    super::super::log_runtime_token_usage(
+        &shared,
+        1,
+        "http",
+        "second",
+        "test",
+        Some(prompt_cache_key),
+        None,
+    );
+    assert_eq!(
+        runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 2).as_deref(),
+        Some("main")
+    );
+}
+
+#[test]
+fn prompt_cache_token_usage_logs_bounded_redacted_cache_telemetry() {
+    clear_runtime_prompt_cache_profile_bindings();
+    let shared = runtime_proxy_affinity_test_shared("prompt-cache-token-usage-log");
+    let prompt_cache_key = "raw-cache-key-must-not-leak";
+    let expected_hash = runtime_proxy_crate::smart_context_hash_text(prompt_cache_key);
+
+    super::super::log_runtime_token_usage(
+        &shared,
+        77,
+        "http",
+        "main",
+        "unit-test",
+        Some(prompt_cache_key),
+        Some(RuntimeTokenUsage {
+            input_tokens: 300,
+            cached_input_tokens: 120,
+            output_tokens: 40,
+            reasoning_tokens: 7,
+        }),
+    );
+    super::super::log_runtime_token_usage(
+        &shared,
+        78,
+        "websocket",
+        "main",
+        "unit-test",
+        Some(prompt_cache_key),
+        Some(RuntimeTokenUsage {
+            input_tokens: 320,
+            cached_input_tokens: 100,
+            output_tokens: 41,
+            reasoning_tokens: 8,
+        }),
+    );
+
+    let log = fs::read_to_string(&shared.log_path).expect("token usage log should exist");
+    assert!(log.contains("token_usage"));
+    assert!(log.contains("request=77"));
+    assert!(log.contains("route=responses"));
+    assert!(log.contains("profile=main"));
+    assert!(log.contains("source=unit-test"));
+    assert!(log.contains("prompt_cache_key=present"));
+    assert!(log.contains(&format!("prompt_cache_key_hash={expected_hash}")));
+    assert!(log.contains("prompt_cache_owner=owner_inserted"));
+    assert!(log.contains("prompt_cache_owner=owner_unchanged"));
+    assert!(log.contains("cached_input_tokens=120"));
+    assert!(log.contains("uncached_input_tokens=180"));
+    assert!(log.contains("transport=websocket"));
+    assert!(!log.contains(prompt_cache_key));
+}
+
+#[test]
 fn runtime_proxy_affinity_request_context_prefers_compact_turn_state_over_session() {
     let shared = runtime_proxy_affinity_test_shared("compact-turn-state");
     runtime_proxy_affinity_add_profile(&shared, "session-owner");

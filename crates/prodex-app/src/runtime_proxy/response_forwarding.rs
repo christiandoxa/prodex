@@ -30,6 +30,7 @@ pub(super) fn forward_runtime_proxy_response_with_limit(
 pub(crate) struct RuntimeResponsesSuccessContext<'a> {
     pub(crate) request_id: u64,
     pub(crate) request_previous_response_id: Option<&'a str>,
+    pub(crate) request_prompt_cache_key: Option<&'a str>,
     pub(crate) request_session_id: Option<&'a str>,
     pub(crate) request_turn_state: Option<&'a str>,
     pub(crate) turn_state_override: Option<&'a str>,
@@ -45,6 +46,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
     let RuntimeResponsesSuccessContext {
         request_id,
         request_previous_response_id,
+        request_prompt_cache_key,
         request_session_id,
         request_turn_state,
         turn_state_override,
@@ -125,6 +127,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
             "http",
             profile_name,
             "responses_unary",
+            request_prompt_cache_key,
             extract_runtime_token_usage_from_body_bytes(&parts.body),
         );
         if !response_ids.is_empty() && response_turn_state.is_some() {
@@ -257,6 +260,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
             request_previous_response_id,
             turn_state: response_turn_state.as_deref(),
             request_id,
+            prompt_cache_key: request_prompt_cache_key,
         },
     );
     let response = RuntimeResponsesAttempt::Success {
@@ -279,6 +283,7 @@ fn apply_runtime_sse_tap_effects(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     request_id: u64,
+    prompt_cache_key: Option<&str>,
     effects: Vec<RuntimeSseTapEffect>,
 ) {
     for effect in effects {
@@ -310,6 +315,7 @@ fn apply_runtime_sse_tap_effects(
                     "http",
                     profile_name,
                     "responses_sse",
+                    prompt_cache_key,
                     Some(token_usage),
                 );
             }
@@ -321,6 +327,7 @@ pub(crate) struct RuntimeSseTapReader {
     inner: Box<dyn Read + Send>,
     shared: RuntimeRotationProxyShared,
     profile_name: String,
+    prompt_cache_key: Option<String>,
     request_id: u64,
     state: RuntimeSseTapState,
 }
@@ -399,6 +406,7 @@ pub(crate) struct RuntimeSseTapReaderInit<'a> {
     pub(crate) request_previous_response_id: Option<&'a str>,
     pub(crate) turn_state: Option<&'a str>,
     pub(crate) request_id: u64,
+    pub(crate) prompt_cache_key: Option<&'a str>,
 }
 
 impl RuntimeSseTapReader {
@@ -414,6 +422,7 @@ impl RuntimeSseTapReader {
             request_previous_response_id,
             turn_state,
             request_id,
+            prompt_cache_key,
         } = init;
         let mut state = RuntimeSseTapState::new(RuntimeSseTapStateInit {
             remembered_response_ids,
@@ -421,11 +430,18 @@ impl RuntimeSseTapReader {
             turn_state,
         });
         let effects = state.observe_chunk(prelude);
-        apply_runtime_sse_tap_effects(&shared, &profile_name, request_id, effects);
+        apply_runtime_sse_tap_effects(
+            &shared,
+            &profile_name,
+            request_id,
+            prompt_cache_key,
+            effects,
+        );
         Self {
             inner: Box::new(inner),
             shared,
             profile_name,
+            prompt_cache_key: prompt_cache_key.map(str::to_string),
             request_id,
             state,
         }
@@ -455,12 +471,19 @@ impl Read for RuntimeSseTapReader {
                 &self.shared,
                 &self.profile_name,
                 self.request_id,
+                self.prompt_cache_key.as_deref(),
                 effects,
             );
             return Ok(0);
         }
         let effects = self.state.observe_chunk(&buf[..read]);
-        apply_runtime_sse_tap_effects(&self.shared, &self.profile_name, self.request_id, effects);
+        apply_runtime_sse_tap_effects(
+            &self.shared,
+            &self.profile_name,
+            self.request_id,
+            self.prompt_cache_key.as_deref(),
+            effects,
+        );
         Ok(read)
     }
 }

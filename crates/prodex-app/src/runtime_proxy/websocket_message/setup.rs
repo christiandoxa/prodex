@@ -17,7 +17,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let request_requires_previous_response_affinity =
             request_metadata.requires_previous_response_affinity;
         let previous_response_id = request_metadata.previous_response_id.clone();
-        let prompt_cache_key = request_metadata.prompt_cache_key.clone();
         let mut request_turn_state = runtime_request_turn_state(&handshake_request);
         let explicit_request_session_id = runtime_request_explicit_session_id(&handshake_request);
         let request_session_id_header_present = explicit_request_session_id.is_some();
@@ -30,6 +29,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             .as_ref()
             .map(|session_id| session_id.as_str().to_string())
             .or_else(|| request_metadata.session_id.clone());
+        let prompt_cache_key = runtime_smart_context_effective_websocket_prompt_cache_key(
+            &request_text,
+            request_metadata.prompt_cache_key.as_deref(),
+            shared,
+            previous_response_id.is_none()
+                && request_turn_state.is_none()
+                && request_session_id.is_none(),
+        );
         let bound_profile = previous_response_id
             .as_deref()
             .map(|response_id| {

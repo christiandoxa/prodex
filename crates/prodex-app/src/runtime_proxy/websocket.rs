@@ -1305,6 +1305,7 @@ pub(super) fn attempt_runtime_websocket_request(
                         "websocket",
                         profile_name,
                         "responses_websocket",
+                        request_prompt_cache_key,
                         inspected.token_usage,
                     );
                 }

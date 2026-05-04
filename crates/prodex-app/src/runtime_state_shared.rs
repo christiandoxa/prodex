@@ -80,6 +80,12 @@ const RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES: usize = 256;
 const RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES: usize = 16 * 1024;
+const RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES: usize = 256;
+const RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_FIELD_BYTES: usize = 512;
+const RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS: usize = 256;
+const RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS: usize = 64;
+const RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES: usize = 8;
+const RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES: usize = 32;
 
 static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
     Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
@@ -94,14 +100,31 @@ pub(crate) struct RuntimeSmartContextArtifact {
     pub(crate) sequence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) line_index: Option<RuntimeSmartContextArtifactLineIndex>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) chunk_index: Option<RuntimeSmartContextArtifactChunkIndex>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct RuntimeSmartContextArtifactLineIndex {
     #[serde(default)]
     pub(crate) complete: bool,
+    #[serde(
+        default = "runtime_smart_context_semantic_index_complete_default",
+        skip_serializing_if = "runtime_smart_context_bool_is_true"
+    )]
+    pub(crate) semantic_complete: bool,
     #[serde(default)]
     pub(crate) critical_ranges: Vec<RuntimeSmartContextArtifactLineRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) file_location_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) diff_hunk_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) test_failure_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) error_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) command_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,6 +134,91 @@ pub(crate) struct RuntimeSmartContextArtifactLineRange {
     pub(crate) byte_len: usize,
     pub(crate) content_hash: String,
     pub(crate) text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactSemanticLineRange {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) byte_len: usize,
+    pub(crate) content_hash: String,
+    pub(crate) text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) line: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) column: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) old_start: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) old_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) new_start: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) new_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) symbol: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactChunkIndex {
+    #[serde(default)]
+    pub(crate) complete: bool,
+    #[serde(default)]
+    pub(crate) chunks: Vec<RuntimeSmartContextArtifactChunkFingerprint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) duplicate_chunks: Vec<RuntimeSmartContextArtifactDuplicateChunkFingerprint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactChunkFingerprint {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) byte_len: usize,
+    pub(crate) content_hash: String,
+    pub(crate) kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) symbol: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactDuplicateChunkFingerprint {
+    pub(crate) byte_len: usize,
+    pub(crate) content_hash: String,
+    pub(crate) occurrence_count: usize,
+    #[serde(default)]
+    pub(crate) occurrences: Vec<RuntimeSmartContextArtifactChunkOccurrence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactChunkOccurrence {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactManifestEntry {
+    pub(crate) id: String,
+    pub(crate) byte_len: usize,
+    pub(crate) content_hash: String,
+    pub(crate) critical_range_count: usize,
+    pub(crate) file_location_range_count: usize,
+    pub(crate) diff_hunk_range_count: usize,
+    pub(crate) test_failure_range_count: usize,
+    pub(crate) error_range_count: usize,
+    pub(crate) command_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -159,6 +267,43 @@ impl RuntimeSmartContextArtifactStore {
         self.artifacts.len()
     }
 
+    pub(crate) fn artifact_manifest_entries(
+        &self,
+        limit: usize,
+    ) -> Vec<RuntimeSmartContextArtifactManifestEntry> {
+        if limit == 0 {
+            return Vec::new();
+        }
+        let mut artifacts = self.artifacts.values().collect::<Vec<_>>();
+        artifacts.sort_by(|left, right| {
+            right
+                .sequence
+                .cmp(&left.sequence)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        artifacts
+            .into_iter()
+            .take(limit)
+            .map(|artifact| {
+                let line_index = artifact.line_index.as_ref();
+                RuntimeSmartContextArtifactManifestEntry {
+                    id: artifact.id.clone(),
+                    byte_len: artifact.byte_len,
+                    content_hash: artifact.content_hash.clone(),
+                    critical_range_count: line_index.map_or(0, |index| index.critical_ranges.len()),
+                    file_location_range_count: line_index
+                        .map_or(0, |index| index.file_location_ranges.len()),
+                    diff_hunk_range_count: line_index
+                        .map_or(0, |index| index.diff_hunk_ranges.len()),
+                    test_failure_range_count: line_index
+                        .map_or(0, |index| index.test_failure_ranges.len()),
+                    error_range_count: line_index.map_or(0, |index| index.error_ranges.len()),
+                    command_kind: line_index.and_then(|index| index.command_kind.clone()),
+                }
+            })
+            .collect()
+    }
+
     pub(crate) fn insert_text(
         &mut self,
         sequence: u64,
@@ -174,13 +319,27 @@ impl RuntimeSmartContextArtifactStore {
                 return None;
             }
             existing.sequence = sequence;
-            if existing.line_index.is_none() {
-                existing.line_index = Some(runtime_smart_context_artifact_line_index(text));
+            if existing.line_index.is_none() || existing.chunk_index.is_none() {
+                let line_index = existing
+                    .line_index
+                    .clone()
+                    .unwrap_or_else(|| runtime_smart_context_artifact_line_index(text));
+                if existing.line_index.is_none() {
+                    existing.line_index = Some(line_index.clone());
+                }
+                if existing.chunk_index.is_none() {
+                    existing.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
+                        text,
+                        &line_index,
+                    ));
+                }
             }
             return Some(Self::artifact_ref(existing));
         }
 
         let byte_len = text.len();
+        let line_index = runtime_smart_context_artifact_line_index(text);
+        let chunk_index = runtime_smart_context_artifact_chunk_index(text, &line_index);
         self.artifacts.insert(
             id.clone(),
             RuntimeSmartContextArtifact {
@@ -189,7 +348,8 @@ impl RuntimeSmartContextArtifactStore {
                 content_hash: content_hash.clone(),
                 text: text.to_string(),
                 sequence,
-                line_index: Some(runtime_smart_context_artifact_line_index(text)),
+                line_index: Some(line_index),
+                chunk_index: Some(chunk_index),
             },
         );
         self.total_bytes = self.total_bytes.saturating_add(byte_len);
@@ -209,6 +369,13 @@ impl RuntimeSmartContextArtifactStore {
         self.artifacts
             .get(id)
             .and_then(|artifact| artifact.line_index.as_ref())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn chunk_index(&self, id: &str) -> Option<&RuntimeSmartContextArtifactChunkIndex> {
+        self.artifacts
+            .get(id)
+            .and_then(|artifact| artifact.chunk_index.as_ref())
     }
 
     pub(crate) fn artifact_ref_for_exact_text(
@@ -334,10 +501,593 @@ fn runtime_smart_context_artifact_line_index(text: &str) -> RuntimeSmartContextA
         });
     }
 
+    let semantic_index = runtime_smart_context_artifact_semantic_line_index(&lines);
+
     RuntimeSmartContextArtifactLineIndex {
         complete: index_complete,
+        semantic_complete: semantic_index.complete,
         critical_ranges: indexed_ranges,
+        file_location_ranges: semantic_index.file_location_ranges,
+        diff_hunk_ranges: semantic_index.diff_hunk_ranges,
+        test_failure_ranges: semantic_index.test_failure_ranges,
+        error_ranges: semantic_index.error_ranges,
+        command_kind: runtime_smart_context_infer_command_kind(&lines),
     }
+}
+
+fn runtime_smart_context_artifact_chunk_index(
+    text: &str,
+    line_index: &RuntimeSmartContextArtifactLineIndex,
+) -> RuntimeSmartContextArtifactChunkIndex {
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut chunks = Vec::new();
+    let mut complete = line_index.semantic_complete;
+
+    for range in &line_index.file_location_ranges {
+        runtime_smart_context_push_chunk_fingerprint(&mut chunks, &mut complete, "file", range);
+    }
+    for range in &line_index.diff_hunk_ranges {
+        runtime_smart_context_push_chunk_fingerprint(&mut chunks, &mut complete, "diff", range);
+    }
+    for range in &line_index.test_failure_ranges {
+        runtime_smart_context_push_chunk_fingerprint(&mut chunks, &mut complete, "test", range);
+    }
+    for range in &line_index.error_ranges {
+        runtime_smart_context_push_chunk_fingerprint(&mut chunks, &mut complete, "error", range);
+    }
+
+    if chunks.is_empty() {
+        runtime_smart_context_push_window_chunk_fingerprints(&mut chunks, &mut complete, &lines);
+    }
+
+    let (duplicate_chunks, duplicate_metadata_complete) =
+        runtime_smart_context_duplicate_chunk_fingerprints(&chunks);
+    RuntimeSmartContextArtifactChunkIndex {
+        complete: complete && duplicate_metadata_complete,
+        chunks,
+        duplicate_chunks,
+    }
+}
+
+fn runtime_smart_context_push_chunk_fingerprint(
+    chunks: &mut Vec<RuntimeSmartContextArtifactChunkFingerprint>,
+    complete: &mut bool,
+    kind: &str,
+    range: &RuntimeSmartContextArtifactSemanticLineRange,
+) {
+    if chunks.len() >= RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS {
+        *complete = false;
+        return;
+    }
+    if range.byte_len != range.text.len()
+        || range.content_hash != runtime_proxy_crate::smart_context_hash_text(&range.text)
+    {
+        *complete = false;
+        return;
+    }
+    chunks.push(RuntimeSmartContextArtifactChunkFingerprint {
+        start: range.start,
+        end: range.end,
+        byte_len: range.byte_len,
+        content_hash: range.content_hash.clone(),
+        kind: kind.to_string(),
+        label: range.label.clone(),
+        path: range.path.clone(),
+        code: range.code.clone(),
+        symbol: range.symbol.clone(),
+    });
+}
+
+fn runtime_smart_context_push_window_chunk_fingerprints(
+    chunks: &mut Vec<RuntimeSmartContextArtifactChunkFingerprint>,
+    complete: &mut bool,
+    lines: &[&str],
+) {
+    let mut start = 1usize;
+    while start <= lines.len() {
+        if chunks.len() >= RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS {
+            *complete = false;
+            return;
+        }
+        let end = (start + RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES - 1).min(lines.len());
+        let Some(text) = runtime_smart_context_line_excerpt(lines, start, end) else {
+            *complete = false;
+            start = end.saturating_add(1);
+            continue;
+        };
+        chunks.push(RuntimeSmartContextArtifactChunkFingerprint {
+            start,
+            end,
+            byte_len: text.len(),
+            content_hash: runtime_proxy_crate::smart_context_hash_text(&text),
+            kind: "window".to_string(),
+            label: None,
+            path: None,
+            code: None,
+            symbol: None,
+        });
+        start = end.saturating_add(1);
+    }
+}
+
+fn runtime_smart_context_duplicate_chunk_fingerprints(
+    chunks: &[RuntimeSmartContextArtifactChunkFingerprint],
+) -> (
+    Vec<RuntimeSmartContextArtifactDuplicateChunkFingerprint>,
+    bool,
+) {
+    let mut grouped =
+        BTreeMap::<(String, usize), Vec<&RuntimeSmartContextArtifactChunkFingerprint>>::new();
+    for chunk in chunks {
+        grouped
+            .entry((chunk.content_hash.clone(), chunk.byte_len))
+            .or_default()
+            .push(chunk);
+    }
+
+    let mut duplicates = Vec::new();
+    let mut complete = true;
+    for ((content_hash, byte_len), occurrences) in grouped {
+        if occurrences.len() < 2 {
+            continue;
+        }
+        if duplicates.len() >= RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS {
+            complete = false;
+            break;
+        }
+        let occurrences_complete =
+            occurrences.len() <= RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES;
+        complete &= occurrences_complete;
+        duplicates.push(RuntimeSmartContextArtifactDuplicateChunkFingerprint {
+            byte_len,
+            content_hash,
+            occurrence_count: occurrences.len(),
+            occurrences: occurrences
+                .into_iter()
+                .take(RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES)
+                .map(|chunk| RuntimeSmartContextArtifactChunkOccurrence {
+                    start: chunk.start,
+                    end: chunk.end,
+                    kind: chunk.kind.clone(),
+                })
+                .collect(),
+        });
+    }
+    (duplicates, complete)
+}
+
+#[derive(Default)]
+struct RuntimeSmartContextArtifactSemanticLineIndexParts {
+    file_location_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    diff_hunk_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    test_failure_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    error_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    complete: bool,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeSmartContextParsedFileLocation {
+    path: String,
+    line: usize,
+    column: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeSmartContextParsedDiffHunk {
+    old_start: usize,
+    old_count: usize,
+    new_start: usize,
+    new_count: usize,
+}
+
+#[derive(Default)]
+struct RuntimeSmartContextSemanticRangeMetadata {
+    label: Option<String>,
+    path: Option<String>,
+    line: Option<usize>,
+    column: Option<usize>,
+    old_start: Option<usize>,
+    old_count: Option<usize>,
+    new_start: Option<usize>,
+    new_count: Option<usize>,
+    code: Option<String>,
+    symbol: Option<String>,
+}
+
+fn runtime_smart_context_artifact_semantic_line_index(
+    lines: &[&str],
+) -> RuntimeSmartContextArtifactSemanticLineIndexParts {
+    let mut parts = RuntimeSmartContextArtifactSemanticLineIndexParts {
+        complete: true,
+        ..Default::default()
+    };
+    let mut remaining = RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES;
+    let mut current_diff_path: Option<String> = None;
+
+    for (index, line) in lines.iter().enumerate() {
+        let line_number = index + 1;
+
+        if let Some(path) = runtime_smart_context_parse_diff_file_path(line) {
+            current_diff_path = Some(path);
+        }
+
+        if let Some(hunk) = runtime_smart_context_parse_diff_hunk(line) {
+            let end = runtime_smart_context_diff_hunk_end(lines, index);
+            let metadata = RuntimeSmartContextSemanticRangeMetadata {
+                label: Some("diff_hunk".to_string()),
+                path: current_diff_path.clone(),
+                old_start: Some(hunk.old_start),
+                old_count: Some(hunk.old_count),
+                new_start: Some(hunk.new_start),
+                new_count: Some(hunk.new_count),
+                ..Default::default()
+            };
+            runtime_smart_context_push_semantic_range(
+                &mut parts.diff_hunk_ranges,
+                &mut remaining,
+                &mut parts.complete,
+                lines,
+                line_number,
+                end,
+                metadata,
+            );
+        }
+
+        if let Some(location) = runtime_smart_context_parse_file_location(line) {
+            let metadata = RuntimeSmartContextSemanticRangeMetadata {
+                label: Some("file_location".to_string()),
+                path: Some(location.path),
+                line: Some(location.line),
+                column: location.column,
+                ..Default::default()
+            };
+            runtime_smart_context_push_semantic_range(
+                &mut parts.file_location_ranges,
+                &mut remaining,
+                &mut parts.complete,
+                lines,
+                line_number,
+                line_number,
+                metadata,
+            );
+        }
+
+        if runtime_smart_context_is_test_failure_line(line) {
+            let metadata = RuntimeSmartContextSemanticRangeMetadata {
+                label: Some("test_failure".to_string()),
+                symbol: runtime_smart_context_parse_test_symbol(line),
+                ..Default::default()
+            };
+            runtime_smart_context_push_semantic_range(
+                &mut parts.test_failure_ranges,
+                &mut remaining,
+                &mut parts.complete,
+                lines,
+                line_number.saturating_sub(1).max(1),
+                (line_number + 1).min(lines.len()),
+                metadata,
+            );
+        }
+
+        if let Some(code) = runtime_smart_context_parse_error_code(line) {
+            let metadata = RuntimeSmartContextSemanticRangeMetadata {
+                label: Some("error".to_string()),
+                code: Some(code),
+                ..Default::default()
+            };
+            runtime_smart_context_push_semantic_range(
+                &mut parts.error_ranges,
+                &mut remaining,
+                &mut parts.complete,
+                lines,
+                line_number,
+                line_number,
+                metadata,
+            );
+        }
+    }
+
+    parts
+}
+
+fn runtime_smart_context_push_semantic_range(
+    target: &mut Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    remaining: &mut usize,
+    complete: &mut bool,
+    lines: &[&str],
+    start: usize,
+    end: usize,
+    metadata: RuntimeSmartContextSemanticRangeMetadata,
+) {
+    if *remaining == 0 {
+        *complete = false;
+        return;
+    }
+    let Some(text) = runtime_smart_context_line_excerpt(lines, start, end) else {
+        *complete = false;
+        return;
+    };
+    if target.iter().any(|range| {
+        range.start == start
+            && range.end == end
+            && range.label == metadata.label
+            && range.path == metadata.path
+            && range.code == metadata.code
+            && range.symbol == metadata.symbol
+    }) {
+        return;
+    }
+    let byte_len = text.len();
+    target.push(RuntimeSmartContextArtifactSemanticLineRange {
+        start,
+        end,
+        byte_len,
+        content_hash: runtime_proxy_crate::smart_context_hash_text(&text),
+        text,
+        label: metadata.label,
+        path: metadata.path,
+        line: metadata.line,
+        column: metadata.column,
+        old_start: metadata.old_start,
+        old_count: metadata.old_count,
+        new_start: metadata.new_start,
+        new_count: metadata.new_count,
+        code: metadata.code,
+        symbol: metadata.symbol,
+    });
+    *remaining = remaining.saturating_sub(1);
+}
+
+fn runtime_smart_context_line_excerpt(lines: &[&str], start: usize, end: usize) -> Option<String> {
+    if start == 0 || start > lines.len() || end < start {
+        return None;
+    }
+    let end = end.min(lines.len());
+    let excerpt = lines[start - 1..end].join("\n");
+    (excerpt.len() <= RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES).then_some(excerpt)
+}
+
+fn runtime_smart_context_parse_file_location(
+    line: &str,
+) -> Option<RuntimeSmartContextParsedFileLocation> {
+    line.split_whitespace()
+        .filter_map(runtime_smart_context_parse_file_location_token)
+        .next()
+}
+
+fn runtime_smart_context_parse_file_location_token(
+    token: &str,
+) -> Option<RuntimeSmartContextParsedFileLocation> {
+    let token = token
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+            )
+        })
+        .trim_end_matches(':');
+    let last_colon = token.rfind(':')?;
+    let last_number = token[last_colon + 1..].parse::<usize>().ok()?;
+    let prefix = &token[..last_colon];
+    let (path, line, column) = if let Some(second_colon) = prefix.rfind(':') {
+        if let Ok(line) = prefix[second_colon + 1..].parse::<usize>() {
+            (&prefix[..second_colon], line, Some(last_number))
+        } else {
+            (prefix, last_number, None)
+        }
+    } else {
+        (prefix, last_number, None)
+    };
+    let path = path
+        .trim_start_matches("file://")
+        .trim_start_matches("a/")
+        .trim_start_matches("b/");
+    if !runtime_smart_context_path_looks_like_file(path) {
+        return None;
+    }
+    let path = runtime_smart_context_bounded_string(path)?;
+    Some(RuntimeSmartContextParsedFileLocation { path, line, column })
+}
+
+fn runtime_smart_context_path_looks_like_file(path: &str) -> bool {
+    if path.is_empty() || path.len() > RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_FIELD_BYTES {
+        return false;
+    }
+    path.contains('/')
+        || path.contains('\\')
+        || path.rsplit_once('.').is_some_and(|(_, ext)| {
+            matches!(
+                ext,
+                "rs" | "toml"
+                    | "json"
+                    | "md"
+                    | "ts"
+                    | "tsx"
+                    | "js"
+                    | "jsx"
+                    | "py"
+                    | "go"
+                    | "java"
+                    | "kt"
+                    | "swift"
+                    | "c"
+                    | "cc"
+                    | "cpp"
+                    | "h"
+                    | "hpp"
+                    | "css"
+                    | "scss"
+                    | "html"
+                    | "yml"
+                    | "yaml"
+                    | "sh"
+                    | "bash"
+                    | "zsh"
+                    | "sql"
+                    | "lock"
+            )
+        })
+}
+
+fn runtime_smart_context_parse_diff_file_path(line: &str) -> Option<String> {
+    let path = line
+        .strip_prefix("+++ ")
+        .or_else(|| line.strip_prefix("--- "))?
+        .split_whitespace()
+        .next()?;
+    if path == "/dev/null" {
+        return None;
+    }
+    let path = path
+        .trim_start_matches("a/")
+        .trim_start_matches("b/")
+        .trim_matches('"');
+    runtime_smart_context_bounded_string(path)
+}
+
+fn runtime_smart_context_parse_diff_hunk(line: &str) -> Option<RuntimeSmartContextParsedDiffHunk> {
+    let mut parts = line.split_whitespace();
+    if parts.next()? != "@@" {
+        return None;
+    }
+    let (old_start, old_count) = runtime_smart_context_parse_diff_span(parts.next()?, '-')?;
+    let (new_start, new_count) = runtime_smart_context_parse_diff_span(parts.next()?, '+')?;
+    Some(RuntimeSmartContextParsedDiffHunk {
+        old_start,
+        old_count,
+        new_start,
+        new_count,
+    })
+}
+
+fn runtime_smart_context_parse_diff_span(span: &str, prefix: char) -> Option<(usize, usize)> {
+    let span = span.strip_prefix(prefix)?;
+    let mut parts = span.splitn(2, ',');
+    let start = parts.next()?.parse::<usize>().ok()?;
+    let count = parts
+        .next()
+        .map(|count| count.parse::<usize>().ok())
+        .unwrap_or(Some(1))?;
+    Some((start, count))
+}
+
+fn runtime_smart_context_diff_hunk_end(lines: &[&str], start_index: usize) -> usize {
+    let max_end = (start_index + 24).min(lines.len().saturating_sub(1));
+    for (index, line) in lines
+        .iter()
+        .enumerate()
+        .take(max_end + 1)
+        .skip(start_index + 1)
+    {
+        if line.starts_with("@@ ") || line.starts_with("diff --git ") {
+            return index;
+        }
+        if !(line.starts_with(' ')
+            || line.starts_with('+')
+            || line.starts_with('-')
+            || line.starts_with("\\ No newline"))
+        {
+            return index;
+        }
+    }
+    max_end + 1
+}
+
+fn runtime_smart_context_is_test_failure_line(line: &str) -> bool {
+    line.contains("test result: FAILED")
+        || line == "failures:"
+        || line.starts_with("failures:")
+        || line.starts_with("FAIL ")
+        || line.starts_with("FAILED ")
+        || line.contains(" panicked at ")
+        || (line.starts_with("---- ") && line.ends_with(" stdout ----"))
+}
+
+fn runtime_smart_context_parse_test_symbol(line: &str) -> Option<String> {
+    if let Some(symbol) = line
+        .strip_prefix("---- ")
+        .and_then(|line| line.strip_suffix(" stdout ----"))
+    {
+        return runtime_smart_context_bounded_string(symbol);
+    }
+    if let Some(rest) = line.strip_prefix("thread '")
+        && let Some((symbol, _)) = rest.split_once("' panicked at ")
+    {
+        return runtime_smart_context_bounded_string(symbol);
+    }
+    None
+}
+
+fn runtime_smart_context_parse_error_code(line: &str) -> Option<String> {
+    if let Some(code) = runtime_smart_context_parse_bracketed_error_code(line) {
+        return Some(code);
+    }
+    if line.contains("error:") || line.contains("Error:") || line.contains("ERROR") {
+        return Some("error".to_string());
+    }
+    if let Some((_, rest)) = line.split_once("exit code ") {
+        let code = rest.split_whitespace().next()?;
+        return runtime_smart_context_bounded_string(&format!("exit_code_{code}"));
+    }
+    if let Some((_, rest)) = line.split_once("status code ") {
+        let code = rest.split_whitespace().next()?;
+        return runtime_smart_context_bounded_string(&format!("status_code_{code}"));
+    }
+    None
+}
+
+fn runtime_smart_context_parse_bracketed_error_code(line: &str) -> Option<String> {
+    let start = line.find("error[")? + "error[".len();
+    let rest = &line[start..];
+    let end = rest.find(']')?;
+    runtime_smart_context_bounded_string(&rest[..end])
+}
+
+fn runtime_smart_context_infer_command_kind(lines: &[&str]) -> Option<String> {
+    let mut saw_diff = false;
+    let mut saw_cargo_test = false;
+    let mut saw_cargo_error = false;
+    let mut saw_npm_test = false;
+    for line in lines {
+        if line.starts_with("diff --git ") || line.starts_with("@@ ") {
+            saw_diff = true;
+        }
+        if line.contains("test result:") || line.starts_with("running ") && line.ends_with(" tests")
+        {
+            saw_cargo_test = true;
+        }
+        if line.contains("error: could not compile") {
+            saw_cargo_error = true;
+        }
+        if line.starts_with("npm ERR!") || line.starts_with("FAIL ") {
+            saw_npm_test = true;
+        }
+        if *line == "Traceback (most recent call last):" {
+            return Some("python".to_string());
+        }
+    }
+    if saw_cargo_test {
+        Some("cargo-test".to_string())
+    } else if saw_npm_test {
+        Some("npm-test".to_string())
+    } else if saw_cargo_error {
+        Some("cargo-build".to_string())
+    } else {
+        saw_diff.then(|| "diff".to_string())
+    }
+}
+
+fn runtime_smart_context_bounded_string(value: &str) -> Option<String> {
+    (!value.is_empty() && value.len() <= RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_FIELD_BYTES)
+        .then(|| value.to_string())
+}
+
+fn runtime_smart_context_semantic_index_complete_default() -> bool {
+    true
+}
+
+fn runtime_smart_context_bool_is_true(value: &bool) -> bool {
+    *value
 }
 
 fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {
@@ -457,6 +1207,279 @@ tail";
     }
 
     #[test]
+    fn runtime_smart_context_artifact_insert_stores_semantic_line_index() {
+        let text = "\
+running 1 test
+---- tests::keeps_failure_metadata stdout ----
+thread 'tests::keeps_failure_metadata' panicked at src/main.rs:22:5:
+error[E0277]: trait bound failed
+ --> src/main.rs:22:5
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -20,2 +20,3 @@ fn demo()
+-old
++new
+test result: FAILED. 0 passed; 1 failed";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(1, text).expect("artifact inserted");
+
+        let index = store
+            .line_index(&artifact.id)
+            .expect("new artifacts should carry a line index");
+        assert_eq!(index.command_kind.as_deref(), Some("cargo-test"));
+        assert!(
+            index
+                .file_location_ranges
+                .iter()
+                .any(|range| range.path.as_deref() == Some("src/main.rs")
+                    && range.line == Some(22)
+                    && range.column == Some(5))
+        );
+        assert!(index.diff_hunk_ranges.iter().any(|range| {
+            range.path.as_deref() == Some("src/main.rs")
+                && range.old_start == Some(20)
+                && range.old_count == Some(2)
+                && range.new_start == Some(20)
+                && range.new_count == Some(3)
+                && range.text.contains("+new")
+        }));
+        assert!(index.test_failure_ranges.iter().any(|range| {
+            range.symbol.as_deref() == Some("tests::keeps_failure_metadata")
+                || range.text.contains("test result: FAILED")
+        }));
+        assert!(
+            index
+                .error_ranges
+                .iter()
+                .any(|range| range.code.as_deref() == Some("E0277"))
+        );
+        for range in index
+            .file_location_ranges
+            .iter()
+            .chain(index.diff_hunk_ranges.iter())
+            .chain(index.test_failure_ranges.iter())
+            .chain(index.error_ranges.iter())
+        {
+            assert_eq!(range.byte_len, range.text.len());
+            assert_eq!(
+                range.content_hash,
+                runtime_proxy_crate::smart_context_hash_text(&range.text)
+            );
+            assert!(range.byte_len <= RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES);
+        }
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_semantic_line_index_is_bounded() {
+        let text = (0..400)
+            .map(|index| format!("src/file{index}.rs:{}:1: error[E0001]: failure", index + 1))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(1, &text).expect("artifact inserted");
+
+        let index = store
+            .line_index(&artifact.id)
+            .expect("new artifacts should carry a line index");
+        let semantic_range_count = index.file_location_ranges.len()
+            + index.diff_hunk_ranges.len()
+            + index.test_failure_ranges.len()
+            + index.error_ranges.len();
+        assert!(semantic_range_count <= RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES);
+        assert_eq!(
+            semantic_range_count,
+            RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES
+        );
+        assert!(!index.semantic_complete);
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_insert_stores_chunk_fingerprints() {
+        let text = "\
+running 1 test
+---- tests::stores_chunk_fingerprints stdout ----
+thread 'tests::stores_chunk_fingerprints' panicked at src/main.rs:22:5:
+error[E0277]: trait bound failed
+ --> src/main.rs:22:5
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -20,2 +20,3 @@ fn demo()
+-old
++new
+test result: FAILED. 0 passed; 1 failed";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(1, text).expect("artifact inserted");
+
+        let chunk_index = store
+            .chunk_index(&artifact.id)
+            .expect("new artifacts should carry a chunk index");
+        assert!(chunk_index.complete);
+        assert!(
+            chunk_index
+                .chunks
+                .iter()
+                .any(|chunk| chunk.kind == "file" && chunk.path.as_deref() == Some("src/main.rs"))
+        );
+        assert!(
+            chunk_index
+                .chunks
+                .iter()
+                .any(|chunk| chunk.kind == "diff" && chunk.path.as_deref() == Some("src/main.rs"))
+        );
+        assert!(chunk_index.chunks.iter().any(|chunk| {
+            chunk.kind == "test"
+                && chunk
+                    .symbol
+                    .as_deref()
+                    .is_some_and(|symbol| symbol.contains("stores_chunk_fingerprints"))
+        }));
+        assert!(
+            chunk_index
+                .chunks
+                .iter()
+                .any(|chunk| chunk.kind == "error" && chunk.code.as_deref() == Some("E0277"))
+        );
+
+        let lines = text.lines().collect::<Vec<_>>();
+        for chunk in &chunk_index.chunks {
+            let excerpt = runtime_smart_context_line_excerpt(&lines, chunk.start, chunk.end)
+                .expect("chunk excerpt should resolve");
+            assert_eq!(chunk.byte_len, excerpt.len());
+            assert_eq!(
+                chunk.content_hash,
+                runtime_proxy_crate::smart_context_hash_text(&excerpt)
+            );
+            assert!(chunk.byte_len <= RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES);
+        }
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_chunk_fingerprints_are_bounded() {
+        let text = (0..400)
+            .map(|index| format!("src/file{index}.rs:{}:1: error[E0001]: failure", index + 1))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(1, &text).expect("artifact inserted");
+
+        let chunk_index = store
+            .chunk_index(&artifact.id)
+            .expect("new artifacts should carry a chunk index");
+        assert!(chunk_index.chunks.len() <= RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS);
+        assert_eq!(
+            chunk_index.chunks.len(),
+            RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS
+        );
+        assert!(!chunk_index.complete);
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_chunk_fingerprints_fall_back_to_line_windows() {
+        let text = (1..=70)
+            .map(|line| format!("plain output line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(1, &text).expect("artifact inserted");
+
+        let chunk_index = store
+            .chunk_index(&artifact.id)
+            .expect("new artifacts should carry a chunk index");
+        assert!(chunk_index.complete);
+        assert_eq!(chunk_index.chunks.len(), 3);
+        assert!(
+            chunk_index
+                .chunks
+                .iter()
+                .all(|chunk| chunk.kind == "window")
+        );
+
+        let lines = text.lines().collect::<Vec<_>>();
+        let first = chunk_index.chunks.first().expect("first window chunk");
+        assert_eq!(first.start, 1);
+        assert_eq!(first.end, RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES);
+        let excerpt = runtime_smart_context_line_excerpt(&lines, first.start, first.end)
+            .expect("first window excerpt should resolve");
+        assert_eq!(
+            first.content_hash,
+            runtime_proxy_crate::smart_context_hash_text(&excerpt)
+        );
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_duplicate_chunk_metadata_is_recorded() {
+        let text = "\
+error[E0001]: repeated failure
+ok
+error[E0001]: repeated failure
+ok
+error[E0001]: repeated failure";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(1, text).expect("artifact inserted");
+
+        let chunk_index = store
+            .chunk_index(&artifact.id)
+            .expect("new artifacts should carry a chunk index");
+        let repeated_hash =
+            runtime_proxy_crate::smart_context_hash_text("error[E0001]: repeated failure");
+        let duplicate = chunk_index
+            .duplicate_chunks
+            .iter()
+            .find(|duplicate| duplicate.content_hash == repeated_hash)
+            .expect("repeated semantic chunks should be summarized");
+        assert_eq!(duplicate.occurrence_count, 3);
+        assert_eq!(duplicate.byte_len, "error[E0001]: repeated failure".len());
+        assert_eq!(duplicate.occurrences.len(), 3);
+        assert!(
+            duplicate
+                .occurrences
+                .iter()
+                .all(|occurrence| occurrence.kind == "error")
+        );
+        assert_eq!(
+            duplicate
+                .occurrences
+                .iter()
+                .map(|occurrence| occurrence.start)
+                .collect::<Vec<_>>(),
+            vec![1, 3, 5]
+        );
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_line_index_json_without_semantic_fields_still_loads() {
+        let raw = serde_json::json!({
+            "complete": true,
+            "critical_ranges": [{
+                "start": 1,
+                "end": 1,
+                "byte_len": 12,
+                "content_hash": runtime_proxy_crate::smart_context_hash_text("error: old"),
+                "text": "error: old"
+            }]
+        });
+
+        let index: RuntimeSmartContextArtifactLineIndex =
+            serde_json::from_value(raw).expect("legacy line index should deserialize");
+
+        assert!(index.complete);
+        assert!(index.semantic_complete);
+        assert_eq!(index.critical_ranges.len(), 1);
+        assert!(index.file_location_ranges.is_empty());
+        assert!(index.diff_hunk_ranges.is_empty());
+        assert!(index.test_failure_ranges.is_empty());
+        assert!(index.error_ranges.is_empty());
+        assert!(index.command_kind.is_none());
+
+        let serialized = serde_json::to_value(&index).expect("line index should serialize");
+        assert!(serialized.get("file_location_ranges").is_none());
+        assert!(serialized.get("diff_hunk_ranges").is_none());
+        assert!(serialized.get("test_failure_ranges").is_none());
+        assert!(serialized.get("error_ranges").is_none());
+        assert!(serialized.get("command_kind").is_none());
+    }
+
+    #[test]
     fn runtime_smart_context_artifact_json_without_line_index_still_loads() {
         let text = "error: old failure\nsrc/main.rs:22:5";
         let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
@@ -481,6 +1504,7 @@ tail";
 
         assert_eq!(store.get_text(&content_hash).as_deref(), Some(text));
         assert!(store.line_index(&content_hash).is_none());
+        assert!(store.chunk_index(&content_hash).is_none());
 
         store
             .insert_text(2, text)
@@ -489,6 +1513,11 @@ tail";
         assert!(
             store
                 .line_index(&content_hash)
+                .is_some_and(|index| index.complete)
+        );
+        assert!(
+            store
+                .chunk_index(&content_hash)
                 .is_some_and(|index| index.complete)
         );
         assert_eq!(store.get_text(&content_hash).as_deref(), Some(text));
