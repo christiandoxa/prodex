@@ -10,6 +10,16 @@ fn assert_no_critical_signal_loss(before: &str, after: &str) {
     );
 }
 
+fn test_cwd_prefix() -> String {
+    std::env::current_dir()
+        .expect("test cwd")
+        .display()
+        .to_string()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string()
+}
+
 #[test]
 fn plain_command_output_strips_ansi_and_keeps_head_tail() {
     let input =
@@ -62,6 +72,31 @@ R  old.txt -> new.txt
     assert!(report.output.contains("modified (1): M README.md"));
     assert!(report.output.contains("renamed (1): R old.txt -> new.txt"));
     assert!(report.output.contains("untracked (1): notes.txt"));
+}
+
+#[test]
+fn git_status_output_shortens_repeated_absolute_cwd_prefix() {
+    let cwd = test_cwd_prefix();
+    let input = format!(
+        "\
+## main...origin/main
+ M {cwd}/src/lib.rs
+?? {cwd}/tests/new.rs
+"
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::GitStatus);
+    assert!(report.output.contains("modified (1): M src/lib.rs"));
+    assert!(report.output.contains("untracked (1): tests/new.rs"));
+    assert!(!report.output.contains(&cwd));
 }
 
 #[test]
@@ -135,6 +170,32 @@ README.md:3:prodex context helper
             .output
             .contains("[... 1 more matches in this file ...]")
     );
+}
+
+#[test]
+fn search_output_shortens_repeated_absolute_cwd_prefix() {
+    let cwd = test_cwd_prefix();
+    let input = format!(
+        "\
+{cwd}/src/lib.rs:10:fn alpha() {{}}
+{cwd}/src/lib.rs:20:fn beta() {{}}
+{cwd}/README.md:3:prodex context helper
+"
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_search_matches_per_file: 2,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Search);
+    assert!(report.output.contains("src/lib.rs (2 matches):"));
+    assert!(report.output.contains("README.md (1 matches):"));
+    assert!(!report.output.contains(&cwd));
 }
 
 #[test]
@@ -437,6 +498,88 @@ Command failed with exit code 1
 }
 
 #[test]
+fn diagnostics_compaction_shortens_repeated_absolute_repo_prefixes() {
+    let input = "\
+error: failed
+  --> /home/doxa/IdeaProjects/prodex/crates/prodex-app/src/lib.rs:12:5
+FAIL /home/doxa/IdeaProjects/prodex/tests/runtime_proxy.rs
+Command failed with exit code 1
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Diagnostics,
+            max_lines: 50,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("crates/prodex-app/src/lib.rs:12:5"));
+    assert!(report.output.contains("tests/runtime_proxy.rs"));
+    assert!(!report.output.contains("/home/doxa/IdeaProjects/prodex/"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn diagnostics_output_shortens_repeated_absolute_cwd_prefix_without_signal_loss() {
+    let cwd = test_cwd_prefix();
+    let input = format!(
+        "\
+{cwd}/src/index.ts(12,7): error TS2322: Type 'string' is not assignable to type 'number'.
+TypeError: Cannot read properties of undefined (reading 'id')
+    at buildUser ({cwd}/src/service.ts:44:13)
+    at Object.<anonymous> ({cwd}/tests/service.test.ts:9:5)
+Command failed with exit code 1
+"
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 80,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("src/index.ts(12,7)"));
+    assert!(report.output.contains("src/service.ts:44:13"));
+    assert!(report.output.contains("tests/service.test.ts:9:5"));
+    assert!(!report.output.contains(&cwd));
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn diagnostics_output_keeps_single_absolute_cwd_prefix() {
+    let cwd = test_cwd_prefix();
+    let input = format!(
+        "\
+{cwd}/src/index.ts(12,7): error TS2322: Type 'string' is not assignable to type 'number'.
+Command failed with exit code 1
+"
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 40,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains(&cwd));
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
 fn python_traceback_preserves_pytest_failure_exception_locations_and_exit_code() {
     let input = "\
 ============================= test session starts =============================
@@ -475,7 +618,7 @@ process finished with exit code 1
     assert!(
         report
             .output
-            .contains("File \"/repo/tests/test_math.py\", line 12")
+            .contains("File \"tests/test_math.py\", line 12")
     );
     assert!(
         report
@@ -827,6 +970,76 @@ exit status: 101
     assert!(!check.has_loss());
     assert_eq!(check.lost.total(), 0);
     assert_eq!(check.before.total(), check.after.total());
+}
+
+#[test]
+fn critical_signal_lost_line_ranges_find_small_windows() {
+    let before = "\
+setup
+error: hidden failure
+src/main.rs:22:5
+details
+test tests::boom ... FAILED
+tail
+";
+    let after = "\
+setup
+summary without critical output
+";
+
+    let ranges = critical_signal_lost_line_ranges_with_options(
+        before,
+        after,
+        CriticalSignalLineRangeOptions {
+            context_lines: 1,
+            max_ranges: 8,
+            max_range_lines: 4,
+        },
+    );
+
+    assert_eq!(
+        ranges,
+        vec![
+            CriticalSignalLineRange { start: 1, end: 4 },
+            CriticalSignalLineRange { start: 4, end: 6 },
+        ]
+    );
+}
+
+#[test]
+fn critical_signal_lost_line_ranges_respect_after_duplicates() {
+    let before = "\
+error: same failure
+noise
+error: same failure
+";
+    let after = "error: same failure\n";
+
+    let ranges = critical_signal_lost_line_ranges_with_options(
+        before,
+        after,
+        CriticalSignalLineRangeOptions {
+            context_lines: 0,
+            max_ranges: 8,
+            max_range_lines: 1,
+        },
+    );
+
+    assert_eq!(ranges, vec![CriticalSignalLineRange { start: 3, end: 3 }]);
+}
+
+#[test]
+fn critical_signal_lost_line_ranges_empty_when_counts_preserved() {
+    let before = "\
+error: build failed
+src/main.rs:22:5
+";
+    let after = "\
+error: build failed
+src/main.rs:22:5
+";
+
+    assert!(critical_signal_lost_line_ranges(before, after).is_empty());
 }
 
 #[test]

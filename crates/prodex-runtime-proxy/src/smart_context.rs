@@ -1,7 +1,25 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::RuntimeTokenUsage;
+
+pub fn smart_context_structural_minify_json_body(body: &[u8]) -> Cow<'_, [u8]> {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return Cow::Borrowed(body);
+    };
+    smart_context_structural_minify_json_value_body(body, &value)
+}
+
+pub fn smart_context_structural_minify_json_value_body<'a>(
+    original_body: &'a [u8],
+    value: &serde_json::Value,
+) -> Cow<'a, [u8]> {
+    match serde_json::to_vec(value) {
+        Ok(body) if body != original_body => Cow::Owned(body),
+        _ => Cow::Borrowed(original_body),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmartContextExactnessDecision {
@@ -99,6 +117,21 @@ pub enum SmartContextCondensedToolOutput {
         content_hash: String,
         summary: String,
     },
+}
+
+pub fn smart_context_artifact_marker(
+    artifact: &SmartContextArtifactRef,
+    compacted: &str,
+) -> String {
+    let marker = smart_context_artifact_marker_line("artifact", artifact);
+    if compacted.is_empty() {
+        return marker;
+    }
+    format!("{marker}\n{compacted}")
+}
+
+pub fn smart_context_artifact_reference_marker(artifact: &SmartContextArtifactRef) -> String {
+    smart_context_artifact_marker_line("repeat", artifact)
 }
 
 pub fn smart_context_condense_tool_outputs(
@@ -1142,11 +1175,63 @@ fn smart_context_static_context_item_order(
     left: &SmartContextStableStaticContextItem,
     right: &SmartContextStableStaticContextItem,
 ) -> Ordering {
-    left.id
-        .cmp(&right.id)
+    smart_context_static_context_item_order_key(&left.id)
+        .cmp(&smart_context_static_context_item_order_key(&right.id))
+        .then_with(|| left.id.cmp(&right.id))
         .then_with(|| left.content_hash.cmp(&right.content_hash))
         .then_with(|| left.byte_len.cmp(&right.byte_len))
         .then_with(|| left.canonical_text.cmp(&right.canonical_text))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SmartContextStaticContextItemOrderKey {
+    group: u8,
+    input_index: usize,
+    role_rank: u8,
+    generic_id: String,
+}
+
+fn smart_context_static_context_item_order_key(id: &str) -> SmartContextStaticContextItemOrderKey {
+    match id {
+        "instructions" => smart_context_static_context_order_key(0, 0, 0, ""),
+        "system" => smart_context_static_context_order_key(1, 0, 0, ""),
+        "developer" => smart_context_static_context_order_key(2, 0, 0, ""),
+        _ => smart_context_input_static_context_order_key(id)
+            .unwrap_or_else(|| smart_context_static_context_order_key(100, 0, 0, id)),
+    }
+}
+
+fn smart_context_input_static_context_order_key(
+    id: &str,
+) -> Option<SmartContextStaticContextItemOrderKey> {
+    let rest = id.strip_prefix("input[")?;
+    let (index, rest) = rest.split_once("].")?;
+    let input_index = index.parse::<usize>().ok()?;
+    let role_rank = match rest {
+        "system" => 0,
+        "developer" => 1,
+        _ => return None,
+    };
+    Some(smart_context_static_context_order_key(
+        3,
+        input_index,
+        role_rank,
+        "",
+    ))
+}
+
+fn smart_context_static_context_order_key(
+    group: u8,
+    input_index: usize,
+    role_rank: u8,
+    generic_id: &str,
+) -> SmartContextStaticContextItemOrderKey {
+    SmartContextStaticContextItemOrderKey {
+        group,
+        input_index,
+        role_rank,
+        generic_id: generic_id.to_string(),
+    }
 }
 
 fn smart_context_static_context_prompt_cache_payload(
@@ -1269,6 +1354,13 @@ fn smart_context_summary_prefix(text: &str, byte_limit: usize) -> String {
         summary.push(value);
     }
     summary
+}
+
+fn smart_context_artifact_marker_line(kind: &str, artifact: &SmartContextArtifactRef) -> String {
+    format!(
+        "prodex-sc {kind} prodex-artifact:{} bytes={} hash={}; rehydrate: use prodex-artifact:{} or prodex-artifact:{}#Lstart-Lend",
+        artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, artifact.id
+    )
 }
 
 fn smart_context_capsule_order(

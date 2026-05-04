@@ -149,12 +149,11 @@ impl RuntimeSmartContextArtifactStore {
         let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
         let id = content_hash.clone();
         if let Some(existing) = self.artifacts.get_mut(&id) {
+            if !Self::artifact_matches_text(existing, text, &content_hash) {
+                return None;
+            }
             existing.sequence = sequence;
-            return Some(runtime_proxy_crate::SmartContextArtifactRef {
-                id: existing.id.clone(),
-                byte_len: existing.byte_len,
-                content_hash: existing.content_hash.clone(),
-            });
+            return Some(Self::artifact_ref(existing));
         }
 
         let byte_len = text.len();
@@ -179,6 +178,16 @@ impl RuntimeSmartContextArtifactStore {
 
     pub(crate) fn get_text(&self, id: &str) -> Option<String> {
         self.artifacts.get(id).map(|artifact| artifact.text.clone())
+    }
+
+    pub(crate) fn artifact_ref_for_exact_text(
+        &self,
+        text: &str,
+    ) -> Option<runtime_proxy_crate::SmartContextArtifactRef> {
+        let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
+        let artifact = self.artifacts.get(&content_hash)?;
+        Self::artifact_matches_text(artifact, text, &content_hash)
+            .then(|| Self::artifact_ref(artifact))
     }
 
     pub(crate) fn contains(&self, id: &str) -> bool {
@@ -236,6 +245,26 @@ impl RuntimeSmartContextArtifactStore {
             }
         }
     }
+
+    fn artifact_matches_text(
+        artifact: &RuntimeSmartContextArtifact,
+        text: &str,
+        content_hash: &str,
+    ) -> bool {
+        artifact.content_hash == content_hash
+            && artifact.byte_len == text.len()
+            && artifact.text == text
+    }
+
+    fn artifact_ref(
+        artifact: &RuntimeSmartContextArtifact,
+    ) -> runtime_proxy_crate::SmartContextArtifactRef {
+        runtime_proxy_crate::SmartContextArtifactRef {
+            id: artifact.id.clone(),
+            byte_len: artifact.byte_len,
+            content_hash: artifact.content_hash.clone(),
+        }
+    }
 }
 
 fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {
@@ -277,6 +306,38 @@ mod tests {
         assert_eq!(loaded.get_text(&beta.id).as_deref(), Some("beta"));
 
         remove_smart_context_artifact_temp_files(&path);
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_ref_for_exact_text_requires_exact_hash_match() {
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store
+            .insert_text(1, "repeatable command output")
+            .expect("artifact inserted");
+
+        let found = store
+            .artifact_ref_for_exact_text("repeatable command output")
+            .expect("exact text should resolve to artifact ref");
+        assert_eq!(found.id, artifact.id);
+        assert_eq!(found.content_hash, artifact.content_hash);
+        assert_eq!(found.byte_len, artifact.byte_len);
+        assert!(
+            store
+                .artifact_ref_for_exact_text("repeatable command output with suffix")
+                .is_none(),
+            "near matches must not reuse artifacts"
+        );
+        store
+            .artifacts
+            .get_mut(&artifact.id)
+            .expect("stored artifact")
+            .content_hash = runtime_proxy_crate::smart_context_hash_text("stale content");
+        assert!(
+            store
+                .artifact_ref_for_exact_text("repeatable command output")
+                .is_none(),
+            "stale artifact metadata must not produce an exact ref"
+        );
     }
 
     #[test]

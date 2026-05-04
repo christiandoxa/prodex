@@ -1,4 +1,39 @@
 use super::*;
+use std::borrow::Cow;
+
+#[test]
+fn structural_minify_json_body_removes_json_whitespace_only() {
+    let body = br#"{
+        "message": " keep  spaces \n and { braces } ",
+        "array": [ 1, true, { "nested": " x y " } ]
+    }"#;
+
+    let minified = smart_context_structural_minify_json_body(body);
+    let before = serde_json::from_slice::<serde_json::Value>(body).unwrap();
+    let after = serde_json::from_slice::<serde_json::Value>(minified.as_ref()).unwrap();
+
+    assert!(matches!(&minified, Cow::Owned(_)));
+    assert!(minified.len() < body.len());
+    assert_eq!(after, before);
+    assert_eq!(
+        after["message"].as_str(),
+        Some(" keep  spaces \n and { braces } ")
+    );
+    assert_eq!(
+        minified.as_ref(),
+        serde_json::to_vec(&before).unwrap().as_slice()
+    );
+}
+
+#[test]
+fn structural_minify_json_body_passes_invalid_json_unchanged() {
+    let body = b"{ invalid\n";
+
+    let minified = smart_context_structural_minify_json_body(body);
+
+    assert!(matches!(&minified, Cow::Borrowed(_)));
+    assert_eq!(minified.as_ref(), body);
+}
 
 #[test]
 fn exactness_guard_blocks_context_affinity_and_missing_rehydrate() {
@@ -63,6 +98,50 @@ fn condenser_uses_artifact_only_when_hash_matches() {
         condensed[1],
         SmartContextCondensedToolOutput::Inline { .. }
     ));
+}
+
+#[test]
+fn artifact_marker_is_short_and_preserves_rehydrate_metadata() {
+    let artifact = SmartContextArtifactRef {
+        id: "sc:0123456789abcdef".to_string(),
+        byte_len: 12_345,
+        content_hash: "sc:fedcba9876543210".to_string(),
+    };
+    let compacted = "first compacted line\nlast compacted line";
+
+    let marker = smart_context_artifact_marker(&artifact, compacted);
+    let old_verbose = format!(
+        "# prodex smart context artifact\nartifact_id: prodex-artifact:{}\noriginal_bytes: {}\ncontent_hash: {}\nrehydrate: automatic when exact content is referenced; use prodex-artifact:{}#Lstart-Lend for exact line range\n\n{}",
+        artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, compacted
+    );
+
+    assert!(marker.len() < old_verbose.len());
+    assert!(marker.starts_with("prodex-sc artifact prodex-artifact:sc:0123456789abcdef"));
+    assert!(marker.contains("bytes=12345"));
+    assert!(marker.contains("hash=sc:fedcba9876543210"));
+    assert!(marker.contains(
+        "rehydrate: use prodex-artifact:sc:0123456789abcdef or prodex-artifact:sc:0123456789abcdef#Lstart-Lend"
+    ));
+    assert!(marker.ends_with(compacted));
+    assert!(!marker.contains("artifact_id:"));
+    assert!(!marker.contains("original_bytes:"));
+    assert!(!marker.contains("content_hash:"));
+}
+
+#[test]
+fn artifact_reference_marker_has_same_exact_ref_fields() {
+    let artifact = SmartContextArtifactRef {
+        id: "sc:0123456789abcdef".to_string(),
+        byte_len: 456,
+        content_hash: "sc:fedcba9876543210".to_string(),
+    };
+
+    let marker = smart_context_artifact_reference_marker(&artifact);
+
+    assert_eq!(
+        marker,
+        "prodex-sc repeat prodex-artifact:sc:0123456789abcdef bytes=456 hash=sc:fedcba9876543210; rehydrate: use prodex-artifact:sc:0123456789abcdef or prodex-artifact:sc:0123456789abcdef#Lstart-Lend"
+    );
 }
 
 #[test]
@@ -563,6 +642,57 @@ fn static_context_prompt_cache_fingerprint_is_input_order_stable() {
     assert_eq!(left.items[0].id, "AGENTS.md");
     assert_eq!(left.items[1].id, "README.md");
     assert!(left.content_hash.starts_with("scpc:"));
+}
+
+#[test]
+fn static_context_prompt_cache_fingerprint_uses_prompt_prefix_order() {
+    let fingerprint = smart_context_static_context_prompt_cache_fingerprint([
+        SmartContextStaticContextItem {
+            id: "input[10].developer".to_string(),
+            text: "developer ten".to_string(),
+        },
+        SmartContextStaticContextItem {
+            id: "README.md".to_string(),
+            text: "usage".to_string(),
+        },
+        SmartContextStaticContextItem {
+            id: "developer".to_string(),
+            text: "developer top".to_string(),
+        },
+        SmartContextStaticContextItem {
+            id: "input[2].system".to_string(),
+            text: "system two".to_string(),
+        },
+        SmartContextStaticContextItem {
+            id: "system".to_string(),
+            text: "system top".to_string(),
+        },
+        SmartContextStaticContextItem {
+            id: "instructions".to_string(),
+            text: "instructions top".to_string(),
+        },
+        SmartContextStaticContextItem {
+            id: "input[2].developer".to_string(),
+            text: "developer two".to_string(),
+        },
+    ]);
+
+    assert_eq!(
+        fingerprint
+            .items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "instructions",
+            "system",
+            "developer",
+            "input[2].system",
+            "input[2].developer",
+            "input[10].developer",
+            "README.md",
+        ]
+    );
 }
 
 #[test]

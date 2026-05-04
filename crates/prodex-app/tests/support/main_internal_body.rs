@@ -2300,7 +2300,7 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
     );
     let responses_bodies = backend.responses_bodies();
     assert_eq!(responses_bodies.len(), 1);
-    assert!(responses_bodies[0].contains("prodex smart context artifact"));
+    assert!(responses_bodies[0].contains("prodex-sc artifact"));
     assert!(responses_bodies[0].contains("prodex-artifact:sc:"));
     assert!(
         !responses_bodies[0].contains("line 1200: repeated command output"),
@@ -2391,7 +2391,7 @@ fn runtime_smart_context_proxy_disabled_passes_large_tool_output_unchanged() {
     );
     let responses_bodies = backend.responses_bodies();
     assert_eq!(responses_bodies.len(), 1);
-    assert!(!responses_bodies[0].contains("prodex smart context artifact"));
+    assert!(!responses_bodies[0].contains("prodex-sc artifact"));
     assert!(responses_bodies[0].contains("line 1200: repeated command output"));
     let log = fs::read_to_string(&proxy.log_path).expect("runtime proxy log should be readable");
     assert!(!log.contains("smart_context_autopilot"));

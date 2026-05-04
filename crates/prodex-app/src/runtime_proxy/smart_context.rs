@@ -6,6 +6,9 @@ const SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES: usize = 1024;
 const SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS: u64 = 32_000;
 const SMART_CONTEXT_RESERVED_OUTPUT_TOKENS: u64 = 4_096;
 const SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT: usize = 8;
+const SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES: usize = 12;
+const RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS: [&str; 3] =
+    ["instructions", "system", "developer"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeSmartContextTransport {
@@ -28,6 +31,7 @@ struct RuntimeSmartContextTransformStats {
     tool_outputs_condensed: usize,
     duplicate_texts: usize,
     cross_turn_duplicate_texts: usize,
+    repeat_tool_output_refs: usize,
     blob_outputs_condensed: usize,
     rehydrated_refs: usize,
 }
@@ -234,6 +238,23 @@ fn prepare_runtime_smart_context_body<'a>(
     let tier = budget.tier;
 
     if exactness.decision == runtime_proxy_crate::SmartContextExactnessDecision::RequireExact {
+        if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
+            runtime_smart_context_log(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                runtime_smart_context_tier_label(tier),
+                "require_exact",
+                &runtime_smart_context_reason_labels(&exactness.reasons),
+                request.body.len(),
+                body.len(),
+                RuntimeSmartContextTransformStats::default(),
+                &budget,
+                "ok_minified",
+            );
+            return Cow::Owned(body);
+        }
         runtime_smart_context_log(
             request_id,
             shared,
@@ -281,6 +302,23 @@ fn prepare_runtime_smart_context_body<'a>(
         }
         outcome
     }) else {
+        if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
+            runtime_smart_context_log(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                runtime_smart_context_tier_label(tier),
+                "artifact_store_unavailable",
+                "-",
+                request.body.len(),
+                body.len(),
+                RuntimeSmartContextTransformStats::default(),
+                &budget,
+                "ok_minified",
+            );
+            return Cow::Owned(body);
+        }
         runtime_smart_context_log(
             request_id,
             shared,
@@ -303,6 +341,23 @@ fn prepare_runtime_smart_context_body<'a>(
     }
 
     if stats == RuntimeSmartContextTransformStats::default() {
+        if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
+            runtime_smart_context_log(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                runtime_smart_context_tier_label(tier),
+                "minified",
+                "-",
+                request.body.len(),
+                body.len(),
+                stats,
+                &budget,
+                "ok_minified",
+            );
+            return Cow::Owned(body);
+        }
         runtime_smart_context_log(
             request_id,
             shared,
@@ -331,15 +386,59 @@ fn prepare_runtime_smart_context_body<'a>(
         &request.body,
         &body,
         exactness.clone(),
-        unresolved_rehydrate_refs,
+        unresolved_rehydrate_refs.clone(),
     );
     let critical_signal_check =
         runtime_smart_context_critical_signal_self_check(&request.body, &body);
+    if critical_signal_check.has_loss()
+        && let Some((repaired_body, repaired_stats)) =
+            runtime_smart_context_try_surgical_rehydrate_critical_ranges(
+                &value,
+                shared,
+                &request.body,
+                &exactness,
+                &unresolved_rehydrate_refs,
+                &stats,
+            )
+    {
+        runtime_smart_context_log(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            runtime_smart_context_tier_label(tier),
+            "rewritten",
+            "surgical_rehydrate",
+            request.body.len(),
+            repaired_body.len(),
+            repaired_stats,
+            &budget,
+            "ok_surgical_rehydrate",
+        );
+        return Cow::Owned(repaired_body);
+    }
     if let Some(fallback_reason) = runtime_smart_context_fallback_exact_reason(
         &regression_check,
         critical_signal_check,
         &stats,
     ) {
+        if let Some(body) = runtime_smart_context_minified_json_body_from_original(&request.body) {
+            runtime_smart_context_log(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                runtime_smart_context_tier_label(tier),
+                "self_check_passthrough",
+                "-",
+                request.body.len(),
+                body.len(),
+                stats,
+                &budget,
+                fallback_reason,
+            );
+            return Cow::Owned(body);
+        }
         runtime_smart_context_log(
             request_id,
             shared,
@@ -551,7 +650,7 @@ fn runtime_smart_context_static_context_items(
     value: &serde_json::Value,
 ) -> Vec<runtime_proxy_crate::SmartContextStaticContextItem> {
     let mut items = Vec::new();
-    for key in ["instructions", "system", "developer"] {
+    for key in RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS {
         if let Some(text) = value.get(key).and_then(serde_json::Value::as_str)
             && !text.trim().is_empty()
         {
@@ -573,7 +672,7 @@ fn runtime_smart_context_static_context_items(
             .get("role")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        if !matches!(role, "system" | "developer") {
+        if !runtime_smart_context_static_role_is_prompt_prefix(role) {
             continue;
         }
         if let Some(text) = runtime_smart_context_static_message_text(item)
@@ -585,7 +684,24 @@ fn runtime_smart_context_static_context_items(
             });
         }
     }
+    items.sort_by(|left, right| left.id.cmp(&right.id));
     items
+}
+
+fn runtime_smart_context_static_prompt_field_key(key: &str) -> bool {
+    RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS.contains(&key)
+}
+
+fn runtime_smart_context_static_role_is_prompt_prefix(role: &str) -> bool {
+    matches!(role, "system" | "developer")
+}
+
+fn runtime_smart_context_value_is_static_context_item(value: &serde_json::Value) -> bool {
+    value
+        .as_object()
+        .and_then(|object| object.get("role"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(runtime_smart_context_static_role_is_prompt_prefix)
 }
 
 fn runtime_smart_context_static_message_text(value: &serde_json::Value) -> Option<String> {
@@ -664,7 +780,7 @@ fn runtime_smart_context_missing_artifact_refs(
     value: &serde_json::Value,
     shared: &RuntimeRotationProxyShared,
 ) -> Vec<String> {
-    let ref_ids = runtime_smart_context_collect_artifact_ref_ids(value);
+    let ref_ids = runtime_smart_context_collect_rehydratable_artifact_ref_ids(value);
     if ref_ids.is_empty() {
         return Vec::new();
     }
@@ -677,13 +793,23 @@ fn runtime_smart_context_missing_artifact_refs(
     .unwrap_or_default()
 }
 
-fn runtime_smart_context_collect_artifact_ref_ids(value: &serde_json::Value) -> Vec<String> {
-    runtime_smart_context_collect_artifact_refs(value)
+fn runtime_smart_context_collect_rehydratable_artifact_ref_ids(
+    value: &serde_json::Value,
+) -> Vec<String> {
+    runtime_smart_context_collect_rehydratable_artifact_refs(value)
         .into_iter()
         .map(|reference| reference.id)
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+fn runtime_smart_context_collect_rehydratable_artifact_refs(
+    value: &serde_json::Value,
+) -> Vec<RuntimeSmartContextArtifactReference> {
+    let mut refs = BTreeSet::<RuntimeSmartContextArtifactReference>::new();
+    runtime_smart_context_collect_rehydratable_artifact_refs_from_value(value, &mut refs);
+    refs.into_iter().collect()
 }
 
 fn runtime_smart_context_collect_artifact_refs(
@@ -692,6 +818,31 @@ fn runtime_smart_context_collect_artifact_refs(
     let mut refs = BTreeSet::<RuntimeSmartContextArtifactReference>::new();
     runtime_smart_context_collect_artifact_refs_from_value(value, &mut refs);
     refs.into_iter().collect()
+}
+
+fn runtime_smart_context_collect_rehydratable_artifact_refs_from_value(
+    value: &serde_json::Value,
+    refs: &mut BTreeSet<RuntimeSmartContextArtifactReference>,
+) {
+    if runtime_smart_context_value_is_static_context_item(value) {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, item) in object {
+                if runtime_smart_context_static_prompt_field_key(key) {
+                    continue;
+                }
+                runtime_smart_context_collect_rehydratable_artifact_refs_from_value(item, refs);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                runtime_smart_context_collect_rehydratable_artifact_refs_from_value(item, refs);
+            }
+        }
+        _ => runtime_smart_context_collect_artifact_refs_from_value(value, refs),
+    }
 }
 
 fn runtime_smart_context_collect_artifact_refs_from_value(
@@ -787,7 +938,7 @@ fn runtime_smart_context_auto_rehydrate_plan(
 ) -> runtime_proxy_crate::SmartContextRehydratePlan {
     let mut refs_by_id = BTreeMap::<String, usize>::new();
     let mut available_ids = BTreeSet::<String>::new();
-    for reference in runtime_smart_context_collect_artifact_refs(value) {
+    for reference in runtime_smart_context_collect_rehydratable_artifact_refs(value) {
         if store.contains(&reference.id) {
             available_ids.insert(reference.id.clone());
         }
@@ -877,6 +1028,9 @@ fn runtime_smart_context_rehydrate_value_for_ids(
     rehydrate_ids: &BTreeSet<String>,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
+    if runtime_smart_context_value_is_static_context_item(value) {
+        return;
+    }
     match value {
         serde_json::Value::String(text) => {
             let mut next = text.clone();
@@ -891,7 +1045,16 @@ fn runtime_smart_context_rehydrate_value_for_ids(
                     )
                 {
                     let marker = format!("prodex-artifact:{}", reference.id);
-                    if next.contains(&reference.marker) {
+                    if reference.line_range.is_none()
+                        && runtime_smart_context_text_is_artifact_marker_summary(
+                            &next,
+                            &reference.id,
+                        )
+                    {
+                        next = rehydrated_text;
+                        stats.rehydrated_refs += 1;
+                        break;
+                    } else if next.contains(&reference.marker) {
                         next = next.replace(&reference.marker, &rehydrated_text);
                         stats.rehydrated_refs += 1;
                     } else if next.contains(&marker) {
@@ -911,12 +1074,23 @@ fn runtime_smart_context_rehydrate_value_for_ids(
             }
         }
         serde_json::Value::Object(object) => {
-            for item in object.values_mut() {
+            for (key, item) in object {
+                if runtime_smart_context_static_prompt_field_key(key) {
+                    continue;
+                }
                 runtime_smart_context_rehydrate_value_for_ids(item, store, rehydrate_ids, stats);
             }
         }
         _ => {}
     }
+}
+
+fn runtime_smart_context_text_is_artifact_marker_summary(text: &str, id: &str) -> bool {
+    let Some(first_line) = text.trim_start().lines().next() else {
+        return false;
+    };
+    (first_line.starts_with("prodex-sc artifact ") || first_line.starts_with("prodex-sc repeat "))
+        && first_line.contains(&format!("prodex-artifact:{id}"))
 }
 
 fn runtime_smart_context_rehydrated_artifact_text(
@@ -932,6 +1106,158 @@ fn runtime_smart_context_rehydrated_artifact_text(
     }
     let end = line_range.end.min(lines.len());
     Some(lines[line_range.start - 1..end].join("\n"))
+}
+
+fn runtime_smart_context_try_surgical_rehydrate_critical_ranges(
+    value: &serde_json::Value,
+    shared: &RuntimeRotationProxyShared,
+    request_body: &[u8],
+    exactness: &runtime_proxy_crate::SmartContextExactnessGuard,
+    unresolved_rehydrate_refs: &[String],
+    stats: &RuntimeSmartContextTransformStats,
+) -> Option<(Vec<u8>, RuntimeSmartContextTransformStats)> {
+    with_runtime_smart_context_artifacts(shared, |store| {
+        let mut repaired_value = value.clone();
+        let mut repaired_stats = stats.clone();
+        if runtime_smart_context_rehydrate_lost_critical_ranges(
+            &mut repaired_value,
+            store,
+            &mut repaired_stats,
+        ) == 0
+        {
+            return None;
+        }
+
+        let repaired_body = serde_json::to_vec(&repaired_value).ok()?;
+        let regression_check = runtime_smart_context_regression_self_check(
+            request_body,
+            &repaired_body,
+            exactness.clone(),
+            unresolved_rehydrate_refs.to_vec(),
+        );
+        let critical_signal_check =
+            runtime_smart_context_critical_signal_self_check(request_body, &repaired_body);
+        runtime_smart_context_fallback_exact_reason(
+            &regression_check,
+            critical_signal_check,
+            &repaired_stats,
+        )
+        .is_none()
+        .then_some((repaired_body, repaired_stats))
+    })
+    .flatten()
+}
+
+fn runtime_smart_context_rehydrate_lost_critical_ranges(
+    value: &mut serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
+    stats: &mut RuntimeSmartContextTransformStats,
+) -> usize {
+    if runtime_smart_context_value_is_static_context_item(value) {
+        return 0;
+    }
+    match value {
+        serde_json::Value::String(text) => {
+            runtime_smart_context_rehydrate_lost_critical_ranges_in_text(text, store, stats)
+        }
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .map(|item| runtime_smart_context_rehydrate_lost_critical_ranges(item, store, stats))
+            .sum(),
+        serde_json::Value::Object(object) => {
+            let mut count = 0usize;
+            for (key, item) in object {
+                if runtime_smart_context_static_prompt_field_key(key) {
+                    continue;
+                }
+                count = count.saturating_add(runtime_smart_context_rehydrate_lost_critical_ranges(
+                    item, store, stats,
+                ));
+            }
+            count
+        }
+        _ => 0,
+    }
+}
+
+fn runtime_smart_context_rehydrate_lost_critical_ranges_in_text(
+    text: &mut String,
+    store: &RuntimeSmartContextArtifactStore,
+    stats: &mut RuntimeSmartContextTransformStats,
+) -> usize {
+    let ids = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(text.clone()))
+        .into_iter()
+        .map(|reference| reference.id)
+        .collect::<BTreeSet<_>>();
+    if ids.is_empty() {
+        return 0;
+    }
+
+    let mut next = text.clone();
+    let mut rehydrated_ranges = 0usize;
+    for id in ids {
+        let Some(artifact_text) = store.get_text(&id) else {
+            continue;
+        };
+        let Some((appendix, range_count)) =
+            runtime_smart_context_missing_critical_range_appendix(&id, &artifact_text, &next)
+        else {
+            continue;
+        };
+        if !next.ends_with('\n') {
+            next.push('\n');
+        }
+        next.push('\n');
+        next.push_str(&appendix);
+        rehydrated_ranges = rehydrated_ranges.saturating_add(range_count);
+    }
+
+    if rehydrated_ranges > 0 {
+        *text = next;
+        stats.rehydrated_refs = stats.rehydrated_refs.saturating_add(rehydrated_ranges);
+    }
+    rehydrated_ranges
+}
+
+fn runtime_smart_context_missing_critical_range_appendix(
+    artifact_id: &str,
+    artifact_text: &str,
+    current_text: &str,
+) -> Option<(String, usize)> {
+    let ranges = prodex_context::critical_signal_lost_line_ranges_with_options(
+        artifact_text,
+        current_text,
+        prodex_context::CriticalSignalLineRangeOptions {
+            context_lines: 1,
+            max_ranges: SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES,
+            max_range_lines: 6,
+        },
+    );
+    if ranges.is_empty() {
+        return None;
+    }
+
+    let mut rendered = vec!["critical exact ranges:".to_string()];
+    let mut range_count = 0usize;
+    for range in ranges {
+        let exact = runtime_smart_context_rehydrated_artifact_text(
+            artifact_text,
+            Some(RuntimeSmartContextLineRange {
+                start: range.start,
+                end: range.end,
+            }),
+        )?;
+        if exact.trim().is_empty() {
+            continue;
+        }
+        rendered.push(format!(
+            "prodex-artifact:{artifact_id}#L{}-L{}\n{exact}",
+            range.start, range.end
+        ));
+        range_count = range_count.saturating_add(1);
+    }
+
+    (range_count > 0).then_some((rendered.join("\n"), range_count))
 }
 
 fn runtime_smart_context_condense_tool_outputs(
@@ -970,16 +1296,28 @@ fn runtime_smart_context_condense_tool_outputs(
             if output.len() <= inline_limit.max(256) {
                 continue;
             }
-            let Some(artifact) = store.insert_text(request_id, &output) else {
+            let existing_artifact = store.artifact_ref_for_exact_text(&output);
+            let Some(artifact) = existing_artifact
+                .clone()
+                .or_else(|| store.insert_text(request_id, &output))
+            else {
                 continue;
             };
-            let compacted = runtime_smart_context_compact_tool_output(&output, tier);
-            let replacement = runtime_smart_context_artifact_summary(&artifact, &compacted);
+            let replacement = if existing_artifact.is_some() {
+                stats.repeat_tool_output_refs += 1;
+                runtime_smart_context_artifact_reference_summary(&artifact)
+            } else {
+                let compacted =
+                    runtime_smart_context_compact_tool_output_preserving_critical(&output, tier);
+                runtime_smart_context_artifact_summary(&artifact, &compacted)
+            };
             if replacement.len().saturating_mul(100) >= output.len().saturating_mul(90) {
                 continue;
             }
             object.insert(field.to_string(), serde_json::Value::String(replacement));
-            stats.artifacts_stored += 1;
+            if existing_artifact.is_none() {
+                stats.artifacts_stored += 1;
+            }
             stats.tool_outputs_condensed += 1;
             if runtime_smart_context_likely_blob_or_noise(&output) {
                 stats.blob_outputs_condensed += 1;
@@ -987,6 +1325,18 @@ fn runtime_smart_context_condense_tool_outputs(
             break;
         }
     }
+}
+
+fn runtime_smart_context_compact_tool_output_preserving_critical(
+    text: &str,
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+) -> String {
+    let compacted = runtime_smart_context_compact_tool_output(text, tier);
+    runtime_smart_context_append_missing_critical_ranges(
+        text,
+        compacted,
+        SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES,
+    )
 }
 
 fn runtime_smart_context_compact_tool_output(
@@ -1016,9 +1366,58 @@ fn runtime_smart_context_artifact_summary(
     artifact: &runtime_proxy_crate::SmartContextArtifactRef,
     compacted: &str,
 ) -> String {
+    runtime_proxy_crate::smart_context_artifact_marker(artifact, compacted)
+}
+
+fn runtime_smart_context_artifact_reference_summary(
+    artifact: &runtime_proxy_crate::SmartContextArtifactRef,
+) -> String {
+    format!("prodex-artifact:{}", artifact.id)
+}
+
+fn runtime_smart_context_append_missing_critical_ranges(
+    original: &str,
+    compacted: String,
+    max_ranges: usize,
+) -> String {
+    if !prodex_context::critical_signal_self_check(original, &compacted).has_loss() {
+        return compacted;
+    }
+
+    let ranges = prodex_context::critical_signal_lost_line_ranges_with_options(
+        original,
+        &compacted,
+        prodex_context::CriticalSignalLineRangeOptions {
+            context_lines: 1,
+            max_ranges,
+            max_range_lines: 6,
+        },
+    );
+    if ranges.is_empty() {
+        return compacted;
+    }
+
+    let lines = original.lines().collect::<Vec<_>>();
+    let mut exact_ranges = Vec::new();
+    for range in ranges {
+        if range.start == 0 || range.start > lines.len() {
+            continue;
+        }
+        let end = range.end.min(lines.len());
+        exact_ranges.push(format!(
+            "L{}-L{}:\n{}",
+            range.start,
+            end,
+            lines[range.start - 1..end].join("\n")
+        ));
+    }
+    if exact_ranges.is_empty() {
+        return compacted;
+    }
+
     format!(
-        "# prodex smart context artifact\nartifact_id: prodex-artifact:{}\noriginal_bytes: {}\ncontent_hash: {}\nrehydrate: automatic when exact content is referenced; use prodex-artifact:{}#Lstart-Lend for exact line range\n\n{}",
-        artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, compacted
+        "{compacted}\n\ncritical exact ranges:\n{}",
+        exact_ranges.join("\n")
     )
 }
 
@@ -1036,6 +1435,9 @@ fn runtime_smart_context_dedupe_input_text(
     };
     let mut seen = BTreeMap::<String, usize>::new();
     for (index, item) in input.iter_mut().enumerate() {
+        if runtime_smart_context_value_is_static_context_item(item) {
+            continue;
+        }
         runtime_smart_context_dedupe_value_text(item, index, &mut seen, stats);
     }
     runtime_smart_context_replace_cross_turn_duplicate_refs(value, store, exactness_guard, stats);
@@ -1145,6 +1547,9 @@ fn runtime_smart_context_collect_large_input_text_items(
     };
     let mut items = Vec::new();
     for (index, item) in input.iter().enumerate() {
+        if runtime_smart_context_value_is_static_context_item(item) {
+            continue;
+        }
         runtime_smart_context_collect_large_text_items_from_value(
             item,
             format!("input[{index}]"),
@@ -1208,6 +1613,9 @@ fn runtime_smart_context_apply_text_replacements(
     };
     let mut replaced = 0usize;
     for (index, item) in input.iter_mut().enumerate() {
+        if runtime_smart_context_value_is_static_context_item(item) {
+            continue;
+        }
         replaced += runtime_smart_context_apply_text_replacements_to_value(
             item,
             format!("input[{index}]"),
@@ -1328,6 +1736,7 @@ fn runtime_smart_context_rewrite_is_rehydrate_only(
         && stats.tool_outputs_condensed == 0
         && stats.duplicate_texts == 0
         && stats.cross_turn_duplicate_texts == 0
+        && stats.repeat_tool_output_refs == 0
 }
 
 fn runtime_smart_context_regression_reason_label(
@@ -1451,6 +1860,10 @@ fn runtime_smart_context_log(
                     stats.cross_turn_duplicate_texts.to_string(),
                 ),
                 runtime_proxy_log_field(
+                    "repeat_tool_output_refs",
+                    stats.repeat_tool_output_refs.to_string(),
+                ),
+                runtime_proxy_log_field(
                     "blob_outputs_condensed",
                     stats.blob_outputs_condensed.to_string(),
                 ),
@@ -1525,6 +1938,41 @@ fn runtime_smart_context_rewrite_self_check(
     } else {
         "growth"
     }
+}
+
+fn runtime_smart_context_minified_json_body(
+    value: &serde_json::Value,
+    original_body: &[u8],
+) -> Option<Vec<u8>> {
+    let Cow::Owned(body) =
+        runtime_proxy_crate::smart_context_structural_minify_json_value_body(original_body, value)
+    else {
+        return None;
+    };
+    runtime_smart_context_validated_minified_json_body(body, original_body)
+}
+
+fn runtime_smart_context_minified_json_body_from_original(original_body: &[u8]) -> Option<Vec<u8>> {
+    let Cow::Owned(body) =
+        runtime_proxy_crate::smart_context_structural_minify_json_body(original_body)
+    else {
+        return None;
+    };
+    runtime_smart_context_validated_minified_json_body(body, original_body)
+}
+
+fn runtime_smart_context_validated_minified_json_body(
+    body: Vec<u8>,
+    original_body: &[u8],
+) -> Option<Vec<u8>> {
+    if body.len() >= original_body.len() {
+        return None;
+    }
+    let before = String::from_utf8_lossy(original_body);
+    let after = String::from_utf8_lossy(&body);
+    prodex_context::critical_signal_self_check(&before, &after)
+        .passed()
+        .then_some(body)
 }
 
 #[cfg(test)]

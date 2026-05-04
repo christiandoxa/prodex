@@ -3,11 +3,15 @@ use std::borrow::Cow;
 
 #[test]
 fn smart_context_condenses_tool_output_with_artifact_ref() {
+    let original_output = (0..500)
+        .map(|index| format!("line {index}: repeated command output"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut value = serde_json::json!({
         "input": [{
             "type": "function_call_output",
             "call_id": "call_1",
-            "output": (0..500).map(|index| format!("line {index}: repeated command output")).collect::<Vec<_>>().join("\n")
+            "output": original_output
         }]
     });
     let mut store = RuntimeSmartContextArtifactStore::default();
@@ -23,8 +27,16 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
     );
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("prodex smart context artifact"));
+    assert!(output.contains("prodex-sc artifact"));
     assert!(output.contains("prodex-artifact:sc:"));
+    assert!(output.contains(&format!("bytes={}", original_output.len())));
+    assert!(output.contains(&format!(
+        "hash={}",
+        runtime_proxy_crate::smart_context_hash_text(&original_output)
+    )));
+    assert!(output.contains("rehydrate: use prodex-artifact:"));
+    assert!(output.contains("#Lstart-Lend"));
+    assert!(!output.contains("artifact_id:"));
     assert_eq!(stats.artifacts_stored, 1);
     assert_eq!(stats.tool_outputs_condensed, 1);
 }
@@ -44,6 +56,58 @@ fn smart_context_rehydrates_known_artifact_refs() {
     runtime_smart_context_rehydrate_value(&mut value, &store, &mut stats);
 
     assert_eq!(value["input"][0]["content"], "need exact artifact text");
+    assert_eq!(stats.rehydrated_refs, 1);
+}
+
+#[test]
+fn smart_context_rehydrate_preserves_static_prompt_prefix() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, "exact artifact text").unwrap();
+    let static_ref = format!("keep prodex-artifact:{}", artifact.id);
+    let mut value = serde_json::json!({
+        "instructions": static_ref,
+        "system": format!("system prodex-artifact:{}", artifact.id),
+        "developer": format!("developer prodex-artifact:{}", artifact.id),
+        "input": [
+            {
+                "role": "system",
+                "content": format!("input system prodex-artifact:{}", artifact.id),
+            },
+            {
+                "role": "developer",
+                "content": format!("input developer prodex-artifact:{}", artifact.id),
+            },
+            {
+                "type": "message",
+                "content": format!("need prodex-artifact:{}", artifact.id),
+            }
+        ]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value(&mut value, &store, &mut stats);
+
+    assert_eq!(value["instructions"].as_str(), Some(static_ref.as_str()));
+    assert_eq!(
+        value["system"].as_str(),
+        Some(format!("system prodex-artifact:{}", artifact.id).as_str())
+    );
+    assert_eq!(
+        value["developer"].as_str(),
+        Some(format!("developer prodex-artifact:{}", artifact.id).as_str())
+    );
+    assert_eq!(
+        value["input"][0]["content"].as_str(),
+        Some(format!("input system prodex-artifact:{}", artifact.id).as_str())
+    );
+    assert_eq!(
+        value["input"][1]["content"].as_str(),
+        Some(format!("input developer prodex-artifact:{}", artifact.id).as_str())
+    );
+    assert_eq!(
+        value["input"][2]["content"].as_str(),
+        Some("need exact artifact text")
+    );
     assert_eq!(stats.rehydrated_refs, 1);
 }
 
@@ -96,6 +160,47 @@ fn smart_context_dedupes_repeated_input_text() {
             .contains("prodex smart context duplicate")
     );
     assert_eq!(stats.duplicate_texts, 1);
+}
+
+#[test]
+fn smart_context_dedupe_preserves_static_prompt_prefix() {
+    let repeated = "static prompt prefix ".repeat(120);
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, &repeated).unwrap();
+    let mut value = serde_json::json!({
+        "input": [
+            {"role": "system", "content": repeated},
+            {"role": "developer", "content": repeated},
+            {"type": "message", "content": repeated}
+        ]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_dedupe_input_text(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &mut stats,
+    );
+
+    assert_eq!(
+        value["input"][0]["content"].as_str(),
+        Some(repeated.as_str())
+    );
+    assert_eq!(
+        value["input"][1]["content"].as_str(),
+        Some(repeated.as_str())
+    );
+    assert!(
+        value["input"][2]["content"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("prodex-artifact:{}", artifact.id))
+    );
+    assert_eq!(stats.duplicate_texts, 0);
+    assert_eq!(stats.cross_turn_duplicate_texts, 1);
 }
 
 #[test]
@@ -196,12 +301,62 @@ fn smart_context_prepare_rewrites_when_savings_and_critical_signals_preserved() 
 }
 
 #[test]
+fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
+    let shared = smart_context_test_shared("rewrite-static-prefix");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let instructions = "Generated at: 2026-05-04T01:02:03Z\nKeep exact static prefix.  ";
+    let system = "System prefix line one.\n\nSystem prefix line two.  ";
+    let developer = "Developer prefix stays exact.\nUse repo rules.  ";
+    let input_system = "Input system prefix\nwith blank lines.\n\nDo not rewrite.  ";
+    let output = std::iter::once("error: failed at src/main.rs:10:5".to_string())
+        .chain((0..500).map(|index| format!("line {index}: noisy build output")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let request = smart_context_test_request(serde_json::json!({
+        "instructions": instructions,
+        "system": system,
+        "developer": developer,
+        "input": [
+            {
+                "role": "system",
+                "content": input_system,
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": output,
+            }
+        ]
+    }));
+
+    let rewritten =
+        prepare_runtime_smart_context_http_body(42, &request, &shared, RuntimeRouteKind::Responses);
+
+    let Cow::Owned(body) = rewritten else {
+        panic!("expected rewritten body");
+    };
+    let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert_eq!(value["instructions"].as_str(), Some(instructions));
+    assert_eq!(value["system"].as_str(), Some(system));
+    assert_eq!(value["developer"].as_str(), Some(developer));
+    assert_eq!(value["input"][0]["content"].as_str(), Some(input_system));
+    assert!(
+        value["input"][1]["output"]
+            .as_str()
+            .unwrap()
+            .contains("prodex-artifact:sc:")
+    );
+}
+
+#[test]
 fn smart_context_regression_fallback_exact_on_quality_risk() {
     let stats = RuntimeSmartContextTransformStats {
         artifacts_stored: 1,
         tool_outputs_condensed: 1,
         duplicate_texts: 0,
         cross_turn_duplicate_texts: 0,
+        repeat_tool_output_refs: 0,
         blob_outputs_condensed: 0,
         rehydrated_refs: 0,
     };
@@ -347,12 +502,236 @@ fn smart_context_static_context_fingerprint_drives_exact_policy_on_real_change()
 }
 
 #[test]
+fn smart_context_static_context_items_have_stable_id_order() {
+    let value = serde_json::json!({
+        "developer": "dev rules",
+        "instructions": "root instructions",
+        "input": [
+            {"type": "message", "role": "developer", "content": "input dev"},
+            {"type": "message", "role": "system", "content": "input system"}
+        ],
+        "system": "system prompt"
+    });
+
+    let ids = runtime_smart_context_static_context_items(&value)
+        .into_iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        ids,
+        vec![
+            "developer",
+            "input[0].developer",
+            "input[1].system",
+            "instructions",
+            "system"
+        ]
+    );
+}
+
+#[test]
+fn smart_context_reuses_existing_tool_output_artifact_with_short_ref() {
+    let output = "repeat tool output ".repeat(200);
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, &output).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_repeat",
+            "output": output
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        2,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &mut stats,
+    );
+
+    let rewritten = value["input"][0]["output"].as_str().unwrap();
+    assert_eq!(rewritten, format!("prodex-artifact:{}", artifact.id));
+    assert!(!rewritten.contains("repeat tool output repeat tool output"));
+    assert_eq!(stats.artifacts_stored, 0);
+    assert_eq!(stats.repeat_tool_output_refs, 1);
+    assert_eq!(stats.tool_outputs_condensed, 1);
+
+    let mut rehydrate_stats = RuntimeSmartContextTransformStats::default();
+    runtime_smart_context_rehydrate_value(&mut value, &store, &mut rehydrate_stats);
+    assert_eq!(value["input"][0]["output"].as_str(), Some(output.as_str()));
+    assert_eq!(rehydrate_stats.rehydrated_refs, 1);
+}
+
+#[test]
+fn smart_context_compaction_appends_missing_critical_exact_ranges() {
+    let original = "\
+line 1 noisy
+error: hidden failure
+src/main.rs:22:5
+line 4 noisy
+";
+    let compacted = "summary without failure".to_string();
+
+    let repaired = runtime_smart_context_append_missing_critical_ranges(original, compacted, 8);
+
+    assert!(repaired.contains("critical exact ranges:"));
+    assert!(repaired.contains("L1-L4:"));
+    assert!(repaired.contains("error: hidden failure"));
+    assert!(repaired.contains("src/main.rs:22:5"));
+    assert!(prodex_context::critical_signal_self_check(original, &repaired).passed());
+}
+
+#[test]
+fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
+    let artifact_text = std::iter::once("setup".to_string())
+        .chain(std::iter::once("error: hidden failure".to_string()))
+        .chain(std::iter::once("src/main.rs:22:5".to_string()))
+        .chain((0..200).map(|index| format!("noise line {index}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let shared = smart_context_test_shared("surgical-critical");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let artifact = with_runtime_smart_context_artifacts(&shared, |store| {
+        store.insert_text(1, &artifact_text).unwrap()
+    })
+    .unwrap();
+    let original = serde_json::to_vec(&serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": artifact_text
+        }]
+    }))
+    .unwrap();
+    let value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": format!("prodex-artifact:{}\nsummary without failure", artifact.id)
+        }]
+    });
+    let stats = RuntimeSmartContextTransformStats {
+        artifacts_stored: 1,
+        tool_outputs_condensed: 1,
+        duplicate_texts: 0,
+        cross_turn_duplicate_texts: 0,
+        repeat_tool_output_refs: 0,
+        blob_outputs_condensed: 0,
+        rehydrated_refs: 0,
+    };
+
+    let (body, repaired_stats) = runtime_smart_context_try_surgical_rehydrate_critical_ranges(
+        &value,
+        &shared,
+        &original,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &[],
+        &stats,
+    )
+    .expect("lost critical lines should be surgically rehydrated");
+
+    let text = String::from_utf8(body).unwrap();
+    assert!(text.contains("critical exact ranges"));
+    assert!(text.contains(&format!("prodex-artifact:{}#L1-L4", artifact.id)));
+    assert!(text.contains("error: hidden failure"));
+    assert!(text.contains("src/main.rs:22:5"));
+    assert!(repaired_stats.rehydrated_refs > stats.rehydrated_refs);
+    assert!(
+        prodex_context::critical_signal_self_check(&String::from_utf8_lossy(&original), &text)
+            .passed()
+    );
+}
+
+#[test]
+fn smart_context_minifies_structural_json_without_touching_strings() {
+    let body = br#"{
+      "input": [
+        {
+          "type": "message",
+          "content": "keep  spaces\ninside string"
+        }
+      ]
+    }"#;
+    let value = serde_json::from_slice::<serde_json::Value>(body).unwrap();
+
+    let minified = runtime_smart_context_minified_json_body(&value, body).unwrap();
+    let text = String::from_utf8(minified).unwrap();
+
+    assert!(text.len() < body.len());
+    assert!(text.contains("keep  spaces\\ninside string"));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        value
+    );
+}
+
+#[test]
+fn smart_context_prepare_minifies_exact_json_without_changing_payload() {
+    let shared = smart_context_test_shared("prepare-minify-exact");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/v1/responses".to_string(),
+        headers: vec![("x-prodex-smart-context".to_string(), "exact".to_string())],
+        body: br#"{
+          "input": [
+            {
+              "type": "message",
+              "content": "keep  spaces\ninside string"
+            }
+          ]
+        }"#
+        .to_vec(),
+    };
+    let before = serde_json::from_slice::<serde_json::Value>(&request.body).unwrap();
+
+    let prepared =
+        prepare_runtime_smart_context_http_body(77, &request, &shared, RuntimeRouteKind::Responses);
+
+    let Cow::Owned(body) = prepared else {
+        panic!("expected minified body");
+    };
+    let after = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert!(body.len() < request.body.len());
+    assert_eq!(after, before);
+    assert_eq!(
+        after["input"][0]["content"].as_str(),
+        Some("keep  spaces\ninside string")
+    );
+}
+
+#[test]
+fn smart_context_prepare_passes_invalid_json_unchanged() {
+    let shared = smart_context_test_shared("prepare-invalid-json");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: b"{ invalid\n".to_vec(),
+    };
+
+    let prepared =
+        prepare_runtime_smart_context_http_body(78, &request, &shared, RuntimeRouteKind::Responses);
+
+    assert!(matches!(&prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+}
+
+#[test]
 fn smart_context_self_check_passes_through_growth_without_rehydrate() {
     let stats = RuntimeSmartContextTransformStats {
         artifacts_stored: 1,
         tool_outputs_condensed: 1,
         duplicate_texts: 0,
         cross_turn_duplicate_texts: 0,
+        repeat_tool_output_refs: 0,
         blob_outputs_condensed: 0,
         rehydrated_refs: 0,
     };

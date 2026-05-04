@@ -199,6 +199,36 @@ impl CriticalSignalCounts {
             rust_diagnostics: self.rust_diagnostics.saturating_sub(after.rust_diagnostics),
         }
     }
+
+    fn add_assign(&mut self, other: Self) {
+        self.errors = self.errors.saturating_add(other.errors);
+        self.file_locations = self.file_locations.saturating_add(other.file_locations);
+        self.diff_hunks = self.diff_hunks.saturating_add(other.diff_hunks);
+        self.test_failures = self.test_failures.saturating_add(other.test_failures);
+        self.exit_codes = self.exit_codes.saturating_add(other.exit_codes);
+        self.stack_markers = self.stack_markers.saturating_add(other.stack_markers);
+        self.rust_diagnostics = self.rust_diagnostics.saturating_add(other.rust_diagnostics);
+    }
+
+    fn subtract_assign(&mut self, other: Self) {
+        self.errors = self.errors.saturating_sub(other.errors);
+        self.file_locations = self.file_locations.saturating_sub(other.file_locations);
+        self.diff_hunks = self.diff_hunks.saturating_sub(other.diff_hunks);
+        self.test_failures = self.test_failures.saturating_sub(other.test_failures);
+        self.exit_codes = self.exit_codes.saturating_sub(other.exit_codes);
+        self.stack_markers = self.stack_markers.saturating_sub(other.stack_markers);
+        self.rust_diagnostics = self.rust_diagnostics.saturating_sub(other.rust_diagnostics);
+    }
+
+    fn overlaps(self, other: Self) -> bool {
+        self.errors > 0 && other.errors > 0
+            || self.file_locations > 0 && other.file_locations > 0
+            || self.diff_hunks > 0 && other.diff_hunks > 0
+            || self.test_failures > 0 && other.test_failures > 0
+            || self.exit_codes > 0 && other.exit_codes > 0
+            || self.stack_markers > 0 && other.stack_markers > 0
+            || self.rust_diagnostics > 0 && other.rust_diagnostics > 0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -219,30 +249,35 @@ impl CriticalSignalSelfCheck {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CriticalSignalLineRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CriticalSignalLineRangeOptions {
+    pub context_lines: usize,
+    pub max_ranges: usize,
+    pub max_range_lines: usize,
+}
+
+impl Default for CriticalSignalLineRangeOptions {
+    fn default() -> Self {
+        Self {
+            context_lines: 1,
+            max_ranges: 32,
+            max_range_lines: 6,
+        }
+    }
+}
+
 pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
     let normalized = normalize_command_output(input);
     let mut counts = CriticalSignalCounts::default();
 
     for line in command_lines(&normalized) {
-        if is_error_signal_line(line) {
-            counts.errors += 1;
-        }
-        counts.file_locations += count_file_location_signals(line);
-        if is_diff_hunk_line(line) {
-            counts.diff_hunks += 1;
-        }
-        if is_test_failure_signal_line(line) {
-            counts.test_failures += 1;
-        }
-        if is_rust_exit_status_line(line) {
-            counts.exit_codes += 1;
-        }
-        if is_stack_signal_line(line) {
-            counts.stack_markers += 1;
-        }
-        if is_rust_diagnostic_signal_line(line) {
-            counts.rust_diagnostics += 1;
-        }
+        counts.add_assign(critical_signal_counts_for_line(line));
     }
 
     counts
@@ -257,6 +292,154 @@ pub fn critical_signal_self_check(before: &str, after: &str) -> CriticalSignalSe
         lost: before.saturating_loss(after),
         gained: after.saturating_loss(before),
     }
+}
+
+pub fn critical_signal_lost_line_ranges(before: &str, after: &str) -> Vec<CriticalSignalLineRange> {
+    critical_signal_lost_line_ranges_with_options(
+        before,
+        after,
+        CriticalSignalLineRangeOptions::default(),
+    )
+}
+
+pub fn critical_signal_lost_line_ranges_with_options(
+    before: &str,
+    after: &str,
+    options: CriticalSignalLineRangeOptions,
+) -> Vec<CriticalSignalLineRange> {
+    let check = critical_signal_self_check(before, after);
+    if check.passed() || options.max_ranges == 0 {
+        return Vec::new();
+    }
+
+    let before = normalize_command_output(before);
+    let after = normalize_command_output(after);
+    let before_lines = command_lines(&before);
+    let mut after_available = critical_signal_line_multiset(&after);
+    let mut remaining_loss = check.lost;
+    let mut ranges = Vec::<CriticalSignalLineRange>::new();
+
+    for (line_index, line) in before_lines.iter().enumerate() {
+        if remaining_loss.is_empty() {
+            break;
+        }
+
+        let counts = critical_signal_counts_for_line(line);
+        if counts.is_empty() {
+            continue;
+        }
+
+        let key = critical_signal_line_key(line);
+        if let Some(available) = after_available.get_mut(&key)
+            && *available > 0
+        {
+            *available -= 1;
+            continue;
+        }
+
+        if !counts.overlaps(remaining_loss) {
+            continue;
+        }
+
+        ranges.push(critical_signal_range_around_line(
+            line_index,
+            before_lines.len(),
+            options.context_lines,
+            options.max_range_lines,
+        ));
+        remaining_loss.subtract_assign(counts);
+    }
+
+    merge_critical_signal_ranges(ranges, options.max_ranges)
+}
+
+fn critical_signal_counts_for_line(line: &str) -> CriticalSignalCounts {
+    let mut counts = CriticalSignalCounts::default();
+    if is_error_signal_line(line) {
+        counts.errors += 1;
+    }
+    counts.file_locations += count_file_location_signals(line);
+    if is_diff_hunk_line(line) {
+        counts.diff_hunks += 1;
+    }
+    if is_test_failure_signal_line(line) {
+        counts.test_failures += 1;
+    }
+    if is_rust_exit_status_line(line) {
+        counts.exit_codes += 1;
+    }
+    if is_stack_signal_line(line) {
+        counts.stack_markers += 1;
+    }
+    if is_rust_diagnostic_signal_line(line) {
+        counts.rust_diagnostics += 1;
+    }
+    counts
+}
+
+fn critical_signal_line_multiset(input: &str) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for line in command_lines(input) {
+        if critical_signal_counts_for_line(line).is_empty() {
+            continue;
+        }
+        counts
+            .entry(critical_signal_line_key(line))
+            .and_modify(|count| *count = count.saturating_add(1))
+            .or_insert(1);
+    }
+    counts
+}
+
+fn critical_signal_line_key(line: &str) -> String {
+    line.trim().to_string()
+}
+
+fn critical_signal_range_around_line(
+    line_index: usize,
+    line_count: usize,
+    context_lines: usize,
+    max_range_lines: usize,
+) -> CriticalSignalLineRange {
+    let max_range_lines = max_range_lines.max(1);
+    let signal_line = line_index + 1;
+    let mut start = signal_line.saturating_sub(context_lines).max(1);
+    let mut end = signal_line.saturating_add(context_lines).min(line_count);
+
+    while end.saturating_sub(start).saturating_add(1) > max_range_lines {
+        if signal_line.saturating_sub(start) > end.saturating_sub(signal_line) {
+            start += 1;
+        } else {
+            end = end.saturating_sub(1);
+        }
+    }
+
+    CriticalSignalLineRange { start, end }
+}
+
+fn merge_critical_signal_ranges(
+    mut ranges: Vec<CriticalSignalLineRange>,
+    max_ranges: usize,
+) -> Vec<CriticalSignalLineRange> {
+    if ranges.is_empty() || max_ranges == 0 {
+        return Vec::new();
+    }
+
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged = Vec::<CriticalSignalLineRange>::new();
+    for range in ranges {
+        if let Some(last) = merged.last_mut()
+            && range.start < last.end
+        {
+            last.end = last.end.max(range.end);
+            continue;
+        }
+        if merged.len() >= max_ranges {
+            break;
+        }
+        merged.push(range);
+    }
+    merged
 }
 
 pub fn detect_context_blob_noise(input: &str) -> ContextBlobNoiseReport {
@@ -620,6 +803,7 @@ pub fn compact_command_output_with_options(
         CommandOutputKind::NoisySuccess => compact_noisy_success_output(&normalized, options),
         CommandOutputKind::Plain => smart_truncate_command_output(&normalized, options),
     };
+    let output = canonicalize_compacted_command_paths(&normalized, &output, detected_kind);
 
     let original_lines = count_text_lines(&normalized);
     let compacted_lines = count_text_lines(&output);
@@ -2288,6 +2472,231 @@ fn finalize_compacted_command_output(
     } else {
         text
     }
+}
+
+fn canonicalize_compacted_command_paths(
+    original: &str,
+    output: &str,
+    kind: CommandOutputKind,
+) -> String {
+    if !command_output_kind_allows_repo_relative_paths(kind) {
+        return output.to_string();
+    }
+
+    let prefixes = repeated_repo_relative_path_prefixes(original);
+    if prefixes.is_empty() {
+        return output.to_string();
+    }
+
+    let mut rewritten = output.to_string();
+    for prefix in prefixes {
+        rewritten = replace_absolute_path_prefix(&rewritten, &prefix);
+    }
+
+    if rewritten != output && critical_signal_self_check(output, &rewritten).passed() {
+        rewritten
+    } else {
+        output.to_string()
+    }
+}
+
+fn command_output_kind_allows_repo_relative_paths(kind: CommandOutputKind) -> bool {
+    matches!(
+        kind,
+        CommandOutputKind::GitStatus
+            | CommandOutputKind::GitDiff
+            | CommandOutputKind::RustDiagnostics
+            | CommandOutputKind::Diagnostics
+            | CommandOutputKind::GitLog
+            | CommandOutputKind::Search
+    )
+}
+
+fn repeated_repo_relative_path_prefixes(input: &str) -> Vec<String> {
+    let cwd_prefixes = repeated_current_directory_prefixes(input);
+    if !cwd_prefixes.is_empty() {
+        return cwd_prefixes;
+    }
+    repeated_unambiguous_marker_path_prefixes(input)
+}
+
+fn repeated_current_directory_prefixes(input: &str) -> Vec<String> {
+    let mut prefixes = Vec::<String>::new();
+    if let Ok(cwd) = std::env::current_dir()
+        && let Some(prefix) = normalize_absolute_path_prefix(&cwd)
+    {
+        push_unique_line(&mut prefixes, &prefix);
+    }
+    if let Some(pwd) = std::env::var_os("PWD").map(PathBuf::from)
+        && let Some(prefix) = normalize_absolute_path_prefix(&pwd)
+    {
+        push_unique_line(&mut prefixes, &prefix);
+    }
+
+    prefixes.retain(|prefix| count_absolute_path_prefix_occurrences(input, prefix) >= 2);
+    prefixes.sort_by_key(|prefix| Reverse(prefix.len()));
+
+    let mut selected = Vec::<String>::new();
+    for prefix in prefixes {
+        if selected
+            .iter()
+            .any(|existing| path_prefix_contains(existing, &prefix))
+        {
+            continue;
+        }
+        selected.push(prefix);
+    }
+    selected
+}
+
+fn repeated_unambiguous_marker_path_prefixes(text: &str) -> Vec<String> {
+    const REPO_MARKERS: &[&str] = &[
+        "/crates/",
+        "/src/",
+        "/tests/",
+        "/benches/",
+        "/examples/",
+        "/README.md",
+        "/Cargo.toml",
+    ];
+
+    let mut prefix_counts = BTreeMap::<String, usize>::new();
+    for marker in REPO_MARKERS {
+        let mut search_start = 0usize;
+        while let Some(offset) = text[search_start..].find(marker) {
+            let marker_start = search_start + offset;
+            if let Some(prefix) = absolute_path_prefix_before_marker(text, marker_start) {
+                *prefix_counts.entry(prefix).or_default() += 1;
+            }
+            search_start = marker_start.saturating_add(marker.len());
+            if search_start >= text.len() {
+                break;
+            }
+        }
+    }
+
+    let prefixes = prefix_counts
+        .into_iter()
+        .filter(|(prefix, count)| {
+            *count >= 2 && prefix.len() > 1 && canonicalizable_absolute_path_prefix(prefix)
+        })
+        .map(|(prefix, _)| prefix)
+        .collect::<Vec<_>>();
+    if prefixes.len() != 1 {
+        return Vec::new();
+    }
+    prefixes
+}
+
+fn normalize_absolute_path_prefix(path: &Path) -> Option<String> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let prefix = path.display().to_string().replace('\\', "/");
+    let prefix = prefix.trim_end_matches('/').to_string();
+    if prefix.is_empty() || prefix == "/" {
+        return None;
+    }
+    Some(prefix)
+}
+
+fn path_prefix_contains(parent: &str, child: &str) -> bool {
+    child == parent
+        || child
+            .strip_prefix(parent)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn count_absolute_path_prefix_occurrences(text: &str, prefix: &str) -> usize {
+    absolute_path_prefix_occurrences(text, prefix).len()
+}
+
+fn replace_absolute_path_prefix(text: &str, prefix: &str) -> String {
+    let occurrences = absolute_path_prefix_occurrences(text, prefix);
+    if occurrences.is_empty() {
+        return text.to_string();
+    }
+
+    let marker_len = prefix.len() + 1;
+    let mut output = String::with_capacity(text.len());
+    let mut cursor = 0usize;
+    for start in occurrences {
+        output.push_str(&text[cursor..start]);
+        cursor = start + marker_len;
+    }
+    output.push_str(&text[cursor..]);
+    output
+}
+
+fn absolute_path_prefix_occurrences(text: &str, prefix: &str) -> Vec<usize> {
+    let marker = format!("{prefix}/");
+    let mut occurrences = Vec::new();
+    let mut search_start = 0usize;
+    while let Some(relative_start) = text[search_start..].find(&marker) {
+        let start = search_start + relative_start;
+        let suffix_start = start + marker.len();
+        if is_absolute_path_prefix_boundary(text, start)
+            && is_repo_relative_suffix_candidate(&text[suffix_start..])
+        {
+            occurrences.push(start);
+        }
+        search_start = suffix_start;
+    }
+    occurrences
+}
+
+fn is_absolute_path_prefix_boundary(text: &str, start: usize) -> bool {
+    let Some(previous) = text[..start].chars().next_back() else {
+        return true;
+    };
+    if previous != '/' && previous != '\\' {
+        return !previous.is_ascii_alphanumeric();
+    }
+
+    let before = &text[..start];
+    before.ends_with("a/") || before.ends_with("b/")
+}
+
+fn is_repo_relative_suffix_candidate(suffix: &str) -> bool {
+    let first_segment = suffix
+        .split(|ch: char| {
+            ch == '/'
+                || ch == '\\'
+                || ch == ':'
+                || ch == '"'
+                || ch == '\''
+                || ch == '`'
+                || ch == ')'
+                || ch == ']'
+                || ch == '}'
+                || ch.is_whitespace()
+        })
+        .next()
+        .unwrap_or_default();
+    !matches!(first_segment, "" | "." | "..")
+}
+
+fn absolute_path_prefix_before_marker(text: &str, marker_start: usize) -> Option<String> {
+    let before = text.get(..marker_start)?;
+    let path_start = before
+        .char_indices()
+        .rev()
+        .find(|(_, ch)| !is_absolute_path_prefix_char(*ch))
+        .map(|(index, ch)| index + ch.len_utf8())
+        .unwrap_or(0);
+    let prefix = text.get(path_start..marker_start)?;
+    (prefix.starts_with('/') && prefix.len() > 1).then(|| prefix.to_string())
+}
+
+fn is_absolute_path_prefix_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-')
+}
+
+fn canonicalizable_absolute_path_prefix(prefix: &str) -> bool {
+    !prefix.contains("/rustc/")
+        && !prefix.contains("/.rustup/")
+        && !prefix.contains("/.cargo/registry/")
+        && !prefix.contains("/.cargo/git/")
 }
 
 fn detect_command_output_kind(input: &str) -> CommandOutputKind {
