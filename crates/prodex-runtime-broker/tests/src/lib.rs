@@ -219,6 +219,7 @@ fn broker_process_args_encode_optional_boolean_switches() {
         include_code_review: true,
         upstream_no_proxy: true,
         smart_context_enabled: true,
+        model_context_window_tokens: Some(65_536),
         broker_key: "key",
         instance_token: "broker-token",
         admin_token: "admin-token",
@@ -230,6 +231,8 @@ fn broker_process_args_encode_optional_boolean_switches() {
     assert!(args.contains(&OsString::from("--include-code-review")));
     assert!(args.contains(&OsString::from("--upstream-no-proxy")));
     assert!(args.contains(&OsString::from("--smart-context")));
+    assert!(args.contains(&OsString::from("--model-context-window-tokens")));
+    assert!(args.contains(&OsString::from("65536")));
     assert!(args.contains(&OsString::from("--listen-addr")));
     assert!(args.contains(&OsString::from("127.0.0.1:4567")));
 
@@ -245,6 +248,7 @@ fn broker_process_args_encode_optional_boolean_switches() {
         ..config
     });
     assert!(!disabled_args.contains(&OsString::from("--smart-context")));
+    assert!(!disabled_args.contains(&OsString::from("--model-context-window-tokens")));
 }
 
 #[test]
@@ -254,6 +258,7 @@ fn broker_key_is_scoped_to_smart_context_mode() {
         true,
         false,
         false,
+        None,
         "/backend-api/prodex",
         "version=0.7.0;sha256=abc123",
     );
@@ -262,11 +267,36 @@ fn broker_key_is_scoped_to_smart_context_mode() {
         true,
         false,
         true,
+        None,
         "/backend-api/prodex",
         "version=0.7.0;sha256=abc123",
     );
 
     assert_ne!(normal, smart);
+}
+
+#[test]
+fn broker_key_is_scoped_to_smart_context_window_when_enabled() {
+    let default_window = runtime_broker_key_for_binary_identity(
+        "https://upstream.example",
+        true,
+        false,
+        true,
+        None,
+        "/backend-api/prodex",
+        "version=0.7.0;sha256=abc123",
+    );
+    let custom_window = runtime_broker_key_for_binary_identity(
+        "https://upstream.example",
+        true,
+        false,
+        true,
+        Some(65_536),
+        "/backend-api/prodex",
+        "version=0.7.0;sha256=abc123",
+    );
+
+    assert_ne!(default_window, custom_window);
 }
 
 #[test]

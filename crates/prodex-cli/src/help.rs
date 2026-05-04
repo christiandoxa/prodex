@@ -105,10 +105,11 @@ Examples:
 Notes:
   `prodex super` is a shortcut for `prodex caveman mem --full-access`.
   It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, and launch-time full access.
+  Use `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies in Claude-Mem recall.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
-  When `--url` is set, Prodex injects a temporary `prodex-local` model provider and skips quota/proxy routing.
+  When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
-  Additional Codex args are appended after the implied `mem` prefix.";
+  Additional Codex args are appended after the implied mem schema prefix.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
   prodex doctor

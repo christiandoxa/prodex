@@ -22,6 +22,7 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit(
         include_code_review,
         upstream_no_proxy,
         false,
+        None,
     )
 }
 
@@ -33,7 +34,9 @@ pub(crate) fn wait_for_existing_runtime_broker_recovery_or_exit_with_smart_conte
     include_code_review: bool,
     upstream_no_proxy: bool,
     smart_context_enabled: bool,
+    model_context_window_tokens: Option<u64>,
 ) -> Result<Option<RuntimeBrokerRegistry>> {
+    let _ = model_context_window_tokens;
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
     let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
@@ -102,6 +105,7 @@ pub(crate) fn find_compatible_runtime_broker_registry(
         include_code_review,
         upstream_no_proxy,
         false,
+        None,
     )
 }
 
@@ -113,7 +117,12 @@ pub(crate) fn find_compatible_runtime_broker_registry_with_smart_context(
     include_code_review: bool,
     upstream_no_proxy: bool,
     smart_context_enabled: bool,
+    model_context_window_tokens: Option<u64>,
 ) -> Result<Option<(String, RuntimeBrokerRegistry)>> {
+    if model_context_window_tokens.is_some() {
+        return Ok(None);
+    }
+
     let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
         upstream_base_url,
         include_code_review,
@@ -225,12 +234,14 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
     include_code_review: bool,
     upstream_no_proxy: bool,
     smart_context_enabled: bool,
+    model_context_window_tokens: Option<u64>,
 ) -> Result<RuntimeProxyEndpoint> {
     let broker_key = runtime_broker_key_with_smart_context(
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
         smart_context_enabled,
+        model_context_window_tokens,
     );
     let launch_config = prodex_runtime_broker::RuntimeBrokerLaunchConfig {
         upstream_base_url,
@@ -251,6 +262,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         include_code_review,
         upstream_no_proxy,
         smart_context_enabled,
+        model_context_window_tokens,
     )? {
         activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
         return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
@@ -301,6 +313,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
             include_code_review,
             upstream_no_proxy,
             smart_context_enabled,
+            model_context_window_tokens,
         )?
     {
         activate_runtime_broker_profile(&broker_client, &existing, current_profile)?;
@@ -317,6 +330,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
             include_code_review,
             upstream_no_proxy,
             smart_context_enabled,
+            model_context_window_tokens,
             broker_key: &broker_key,
             instance_token: &instance_token,
             admin_token: &admin_token,

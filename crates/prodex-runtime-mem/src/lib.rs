@@ -20,12 +20,15 @@ const PRODEX_CLAUDE_MEM_DIR_NAME: &str = "claude-mem";
 const PRODEX_CLAUDE_MEM_WRAPPER_NAME: &str = "prodex-claude";
 const CLAUDE_MEM_PREFIX: &str = "mem";
 const CLAUDE_MEM_FULL_PREFIX: &str = "mem-full";
+const CLAUDE_MEM_SUPER_SLIM_PREFIX: &str = "mem-super-slim";
 const CLAUDE_MEM_FULL_FLAG: &str = "--mem-full";
+const CLAUDE_MEM_SUPER_SLIM_FLAG: &str = "--mem-super-slim";
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeMemTranscriptMode {
     Slim,
+    SuperSlim,
     Full,
 }
 
@@ -153,11 +156,27 @@ pub fn runtime_mem_extract_mode_with_detail(
     let Some(first) = args.first().and_then(|arg| arg.to_str()) else {
         return (None, args.to_vec());
     };
+    if first == CLAUDE_MEM_SUPER_SLIM_PREFIX {
+        return (
+            Some(RuntimeMemTranscriptMode::SuperSlim),
+            args[1..].to_vec(),
+        );
+    }
     if first == CLAUDE_MEM_FULL_PREFIX {
         return (Some(RuntimeMemTranscriptMode::Full), args[1..].to_vec());
     }
     if first != CLAUDE_MEM_PREFIX {
         return (None, args.to_vec());
+    }
+    if args
+        .get(1)
+        .and_then(|arg| arg.to_str())
+        .is_some_and(|arg| arg == CLAUDE_MEM_SUPER_SLIM_FLAG)
+    {
+        return (
+            Some(RuntimeMemTranscriptMode::SuperSlim),
+            args[2..].to_vec(),
+        );
     }
     if args
         .get(1)
@@ -414,6 +433,79 @@ pub fn runtime_mem_full_codex_schema() -> serde_json::Value {
     })
 }
 
+pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
+    serde_json::json!({
+        "name": CLAUDE_MEM_CODEX_SCHEMA_NAME,
+        "version": "0.5-super-slim",
+        "description": "Super-slim schema for Codex session JSONL files under ~/.codex/sessions.",
+        "events": [
+            { "name": "session-meta", "match": { "path": "type", "equals": "session_meta" }, "action": "session_context", "fields": { "sessionId": "payload.id", "cwd": "payload.cwd" } },
+            { "name": "turn-context", "match": { "path": "type", "equals": "turn_context" }, "action": "session_context", "fields": { "cwd": "payload.cwd" } },
+            {
+                "name": "user-message",
+                "match": { "path": "payload.type", "equals": "user_message" },
+                "action": "session_init",
+                "fields": {
+                    "prompt": {
+                        "coalesce": [
+                            "payload.summary",
+                            "payload.metadata.prompt_summary",
+                            "payload.metadata.summary",
+                            "payload.metadata.artifact_ref",
+                            "payload.metadata.artifact_id",
+                            "payload.metadata.artifactId",
+                            "payload.artifact.reference",
+                            "payload.artifact.id",
+                            "payload.artifact_id",
+                            { "value": "user prompt recorded by prodex super-slim mem; content omitted" }
+                        ]
+                    }
+                }
+            },
+            {
+                "name": "assistant-message",
+                "match": { "path": "payload.type", "equals": "agent_message" },
+                "action": "assistant_message",
+                "fields": {
+                    "message": {
+                        "coalesce": [
+                            "payload.summary",
+                            "payload.title",
+                            { "value": "assistant response recorded by prodex super-slim mem" }
+                        ]
+                    }
+                }
+            },
+            {
+                "name": "tool-use",
+                "match": { "path": "payload.type", "in": ["function_call", "custom_tool_call", "web_search_call", "exec_command"] },
+                "action": "tool_use",
+                "fields": {
+                    "toolId": "payload.call_id",
+                    "toolName": { "coalesce": ["payload.name", "payload.type", { "value": "web_search" }] },
+                    "toolInput": { "coalesce": ["payload.command", "payload.action", "payload.name", { "value": "tool call" }] }
+                }
+            },
+            {
+                "name": "tool-result",
+                "match": { "path": "payload.type", "in": ["function_call_output", "custom_tool_call_output", "exec_command_output"] },
+                "action": "tool_result",
+                "fields": {
+                    "toolId": "payload.call_id",
+                    "toolResponse": {
+                        "coalesce": [
+                            "payload.summary",
+                            "payload.metadata.summary",
+                            { "value": "tool result recorded by prodex super-slim mem; output omitted" }
+                        ]
+                    }
+                }
+            },
+            { "name": "session-end", "match": { "path": "payload.type", "in": ["turn_aborted", "turn_completed"] }, "action": "session_end" }
+        ]
+    })
+}
+
 fn write_runtime_mem_prodex_claude_wrapper(wrapper_path: &Path, prodex_exe: &Path) -> Result<()> {
     if let Some(parent) = wrapper_path.parent() {
         fs::create_dir_all(parent)
@@ -522,6 +614,7 @@ fn runtime_mem_codex_watch_definition(name: &str, path: &str) -> serde_json::Val
 fn runtime_mem_codex_schema_for_mode(mode: RuntimeMemTranscriptMode) -> serde_json::Value {
     match mode {
         RuntimeMemTranscriptMode::Slim => runtime_mem_slim_codex_schema(),
+        RuntimeMemTranscriptMode::SuperSlim => runtime_mem_super_slim_codex_schema(),
         RuntimeMemTranscriptMode::Full => runtime_mem_full_codex_schema(),
     }
 }

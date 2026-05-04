@@ -1945,6 +1945,7 @@ fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
     let endpoint = RuntimeProxyEndpoint {
         listen_addr: "127.0.0.1:33475".parse().expect("listen addr should parse"),
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        local_model_provider_id: None,
         lease_dir: lease_dir.clone(),
         _lease: None,
         _direct_proxy: None,
@@ -2037,6 +2038,7 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
         include_code_review: false,
         upstream_no_proxy: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         broker_key: "broker-key",
         instance_token: "instance",
         admin_token: "admin",
@@ -2059,6 +2061,7 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
         include_code_review: true,
         upstream_no_proxy: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         broker_key: "broker-key",
         instance_token: "instance",
         admin_token: "admin",
@@ -2093,6 +2096,7 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
         include_code_review: false,
         upstream_no_proxy: true,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         broker_key: "broker-key",
         instance_token: "instance",
         admin_token: "admin",
@@ -2115,6 +2119,7 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
         include_code_review: false,
         upstream_no_proxy: false,
         smart_context_enabled: true,
+        model_context_window_tokens: Some(65_536),
         broker_key: "broker-key",
         instance_token: "instance",
         admin_token: "admin",
@@ -2129,6 +2134,12 @@ fn runtime_broker_process_args_encode_optional_boolean_switches() {
             .iter()
             .any(|value| value == "--smart-context"),
         "smart context mode should be encoded as a clap boolean switch"
+    );
+    assert!(
+        with_smart_context
+            .windows(2)
+            .any(|pair| pair == ["--model-context-window-tokens", "65536"]),
+        "smart context model window should be forwarded when known"
     );
 }
 
@@ -2190,6 +2201,7 @@ fn runtime_broker_key_is_scoped_to_smart_context_mode() {
         false,
         false,
         false,
+        None,
         "version=0.71.0;sha256=alpha",
     );
     let smart = runtime_broker_key_for_binary_identity_with_smart_context(
@@ -2197,6 +2209,7 @@ fn runtime_broker_key_is_scoped_to_smart_context_mode() {
         false,
         false,
         true,
+        None,
         "version=0.71.0;sha256=alpha",
     );
 
@@ -2242,6 +2255,7 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
         false,
         false,
         true,
+        None,
         None,
     )
     .expect("runtime proxy should start with smart context enabled");
@@ -2540,6 +2554,7 @@ fn runtime_broker_and_update_commands_skip_prodex_update_notice() {
         include_code_review: false,
         upstream_no_proxy: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         broker_key: "broker".to_string(),
         instance_token: "instance".to_string(),
         admin_token: "admin".to_string(),

@@ -30,6 +30,7 @@ pub struct RuntimeLaunchRequest<'a> {
     pub upstream_no_proxy: bool,
     pub include_code_review: bool,
     pub smart_context_enabled: bool,
+    pub model_context_window_tokens: Option<u64>,
     pub force_runtime_proxy: bool,
     pub model_provider_override: Option<&'a str>,
 }
@@ -151,6 +152,7 @@ pub fn dry_run_caveman_home_placeholder(
 pub struct RuntimeProxyCodexEndpoint<'a> {
     pub listen_addr: SocketAddr,
     pub openai_mount_path: &'a str,
+    pub local_model_provider_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone)]
@@ -325,7 +327,14 @@ pub fn runtime_proxy_codex_passthrough_args(
 ) -> Vec<OsString> {
     runtime_proxy
         .map(|proxy| {
-            if proxy.openai_mount_path == runtime_proxy::RUNTIME_PROXY_OPENAI_MOUNT_PATH {
+            if let Some(local_provider_id) = proxy.local_model_provider_id {
+                runtime_proxy_local_model_provider_codex_args(
+                    proxy.listen_addr,
+                    proxy.openai_mount_path,
+                    local_provider_id,
+                    user_args,
+                )
+            } else if proxy.openai_mount_path == runtime_proxy::RUNTIME_PROXY_OPENAI_MOUNT_PATH {
                 runtime_proxy_codex_args(proxy.listen_addr, user_args)
             } else {
                 runtime_proxy_codex_args_with_mount_path(
@@ -399,6 +408,94 @@ pub fn runtime_proxy_codex_args_with_mount_path(
     }
     args.extend(user_args.iter().cloned());
     args
+}
+
+pub fn runtime_proxy_local_model_provider_codex_args(
+    listen_addr: std::net::SocketAddr,
+    mount_path: &str,
+    local_provider_id: &str,
+    user_args: &[OsString],
+) -> Vec<OsString> {
+    let proxy_base = format!("http://{listen_addr}{}", normalize_mount_path(mount_path));
+    let provider_base_key = format!("model_providers.{local_provider_id}.base_url");
+    let provider_base_override =
+        format!("{}={}", provider_base_key, toml_string_literal(&proxy_base));
+    let mut args = Vec::with_capacity(user_args.len() + 2);
+    let mut replaced = false;
+    let mut index = 0;
+    while index < user_args.len() {
+        let Some(arg) = user_args[index].to_str() else {
+            args.push(user_args[index].clone());
+            index += 1;
+            continue;
+        };
+
+        if matches!(arg, "-c" | "--config") {
+            args.push(user_args[index].clone());
+            index += 1;
+            if index < user_args.len() {
+                if config_assignment_key(user_args[index].to_str())
+                    == Some(provider_base_key.as_str())
+                {
+                    args.push(OsString::from(provider_base_override.clone()));
+                    replaced = true;
+                } else {
+                    args.push(user_args[index].clone());
+                }
+            }
+            index += 1;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("--config=") {
+            if config_assignment_key(Some(value)) == Some(provider_base_key.as_str()) {
+                args.push(OsString::from(format!("--config={provider_base_override}")));
+                replaced = true;
+            } else {
+                args.push(user_args[index].clone());
+            }
+            index += 1;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("-c")
+            && !value.is_empty()
+            && value.contains('=')
+        {
+            if config_assignment_key(Some(value)) == Some(provider_base_key.as_str()) {
+                args.push(OsString::from(format!("-c{provider_base_override}")));
+                replaced = true;
+            } else {
+                args.push(user_args[index].clone());
+            }
+            index += 1;
+            continue;
+        }
+
+        args.push(user_args[index].clone());
+        index += 1;
+    }
+
+    if !replaced {
+        args.push(OsString::from("-c"));
+        args.push(OsString::from(provider_base_override));
+    }
+    args
+}
+
+fn normalize_mount_path(mount_path: &str) -> String {
+    let trimmed = mount_path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return String::new();
+    }
+    format!("/{}", trimmed.trim_matches('/'))
+}
+
+fn config_assignment_key(assignment: Option<&str>) -> Option<&str> {
+    assignment
+        .and_then(|assignment| assignment.split_once('='))
+        .map(|(key, _)| key.trim())
+        .filter(|key| !key.is_empty())
 }
 
 pub fn prepare_codex_launch_args(

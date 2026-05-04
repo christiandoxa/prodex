@@ -136,6 +136,7 @@ fn runtime_proxy_passthrough_args_follow_endpoint_mount_path() {
     let endpoint = RuntimeProxyEndpoint {
         listen_addr: "127.0.0.1:4455".parse().expect("listen addr"),
         openai_mount_path: "/backend-api/prodex/v0.2.99".to_string(),
+        local_model_provider_id: None,
         lease_dir: temp_dir.path.join("leases"),
         _lease: None,
         _direct_proxy: None,

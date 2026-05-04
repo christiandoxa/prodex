@@ -11,6 +11,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         args.include_code_review,
         args.upstream_no_proxy,
         args.smart_context_enabled,
+        args.model_context_window_tokens,
         args.listen_addr.as_deref(),
     )?;
     if proxy.owner_lock.is_none() {
@@ -24,6 +25,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
             args.include_code_review,
             args.upstream_no_proxy,
             args.smart_context_enabled,
+            args.model_context_window_tokens,
         ),
         listen_addr: proxy.listen_addr.to_string(),
         started_at: Local::now().timestamp(),

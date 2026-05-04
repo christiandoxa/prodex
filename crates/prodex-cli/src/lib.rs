@@ -571,8 +571,11 @@ pub struct SuperArgs {
     )]
     pub local_auto_compact_token_limit: Option<usize>,
     /// Use the full Claude-Mem Codex transcript schema instead of Prodex's slim default.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "mem_super_slim")]
     pub mem_full: bool,
+    /// Use Prodex's super-slim mem schema that stores prompt summaries/references instead of full prompts.
+    #[arg(long, conflicts_with = "mem_full")]
+    pub mem_super_slim: bool,
     /// Arguments passed through to `codex` after the implied `mem` prefix.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
@@ -580,6 +583,7 @@ pub struct SuperArgs {
 
 impl SuperArgs {
     pub fn into_caveman_args(self) -> CavemanArgs {
+        let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
         let local_provider_args = self
             .url
             .as_deref()
@@ -597,7 +601,9 @@ impl SuperArgs {
 
         let mut codex_args =
             Vec::with_capacity(self.codex_args.len() + 1 + local_provider_args.len());
-        codex_args.push(OsString::from(if self.mem_full {
+        codex_args.push(OsString::from(if self.mem_super_slim {
+            "mem-super-slim"
+        } else if self.mem_full {
             "mem-full"
         } else {
             "mem"
@@ -611,7 +617,7 @@ impl SuperArgs {
             skip_quota_check,
             full_access: true,
             dry_run: self.dry_run,
-            base_url: self.base_url,
+            base_url: self.base_url.or(local_upstream_base_url),
             no_proxy: self.no_proxy,
             smart_context: true,
             codex_args,
@@ -728,6 +734,8 @@ pub struct RuntimeBrokerArgs {
     pub upstream_no_proxy: bool,
     #[arg(long = "smart-context", default_value_t = false)]
     pub smart_context_enabled: bool,
+    #[arg(long = "model-context-window-tokens", hide = true)]
+    pub model_context_window_tokens: Option<u64>,
     #[arg(long)]
     pub broker_key: String,
     #[arg(long)]

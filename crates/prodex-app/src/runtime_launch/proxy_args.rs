@@ -14,6 +14,7 @@ pub(crate) fn runtime_proxy_codex_passthrough_args(
         runtime_proxy.map(|proxy| prodex_runtime_launch::RuntimeProxyCodexEndpoint {
             listen_addr: proxy.listen_addr,
             openai_mount_path: &proxy.openai_mount_path,
+            local_model_provider_id: proxy.local_model_provider_id.as_deref(),
         }),
         user_args,
     )

@@ -73,6 +73,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);
     let model_provider_override = codex_cli_config_override_value(&codex_args, "model_provider");
+    let model_context_window_tokens = runtime_launch_cli_model_context_window_tokens(&codex_args);
     let request = RuntimeLaunchRequest {
         profile: args.profile.as_deref(),
         allow_auto_rotate: !args.no_auto_rotate,
@@ -81,6 +82,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         upstream_no_proxy: args.no_proxy,
         include_code_review,
         smart_context_enabled: args.smart_context,
+        model_context_window_tokens,
         force_runtime_proxy: false,
         model_provider_override: model_provider_override.as_deref(),
     };
@@ -124,5 +126,6 @@ fn runtime_proxy_codex_endpoint(
     runtime_proxy.map(|proxy| prodex_runtime_launch::RuntimeProxyCodexEndpoint {
         listen_addr: proxy.listen_addr,
         openai_mount_path: &proxy.openai_mount_path,
+        local_model_provider_id: proxy.local_model_provider_id.as_deref(),
     })
 }

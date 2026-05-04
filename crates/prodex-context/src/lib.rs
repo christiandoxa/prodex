@@ -59,8 +59,11 @@ pub enum CommandOutputKind {
     GitStatus,
     GitDiff,
     RustDiagnostics,
+    Diagnostics,
+    GitLog,
     Search,
     FileList,
+    NoisySuccess,
     Plain,
 }
 
@@ -610,8 +613,11 @@ pub fn compact_command_output_with_options(
         CommandOutputKind::GitStatus => compact_git_status_output(&normalized, options),
         CommandOutputKind::GitDiff => compact_git_diff_output(&normalized, options),
         CommandOutputKind::RustDiagnostics => compact_rust_diagnostic_output(&normalized, options),
+        CommandOutputKind::Diagnostics => compact_diagnostic_output(&normalized, options),
+        CommandOutputKind::GitLog => compact_git_log_stat_output(&normalized, options),
         CommandOutputKind::Search => compact_search_output(&normalized, options),
         CommandOutputKind::FileList => compact_file_list_output(&normalized, options),
+        CommandOutputKind::NoisySuccess => compact_noisy_success_output(&normalized, options),
         CommandOutputKind::Plain => smart_truncate_command_output(&normalized, options),
     };
 
@@ -755,6 +761,83 @@ fn compact_git_diff_output(input: &str, options: &CommandOutputCompactOptions) -
     }
 
     finalize_compacted_command_output(CommandOutputKind::GitDiff, input, output, options)
+}
+
+fn compact_git_log_stat_output(input: &str, options: &CommandOutputCompactOptions) -> String {
+    let lines = command_lines(input);
+    let commits = parse_git_log_stat_commits(&lines);
+    if commits.is_empty() {
+        return smart_truncate_command_output(input, options);
+    }
+
+    let stat_files = commits
+        .iter()
+        .map(|commit| commit.stat_lines.len())
+        .sum::<usize>();
+    let mut output = Vec::new();
+    output.push(format!(
+        "git log --stat summary: {} commits, {} stat file entries",
+        commits.len(),
+        stat_files,
+    ));
+
+    let commit_limit = options
+        .max_lines
+        .max(24)
+        .saturating_div(8)
+        .max(2)
+        .min(commits.len());
+    let per_commit_stat_limit = options
+        .max_path_entries
+        .max(1)
+        .checked_div(commit_limit.max(1))
+        .unwrap_or(1)
+        .clamp(2, 8);
+
+    for commit in commits.iter().take(commit_limit) {
+        output.push(format!(
+            "commit: {}",
+            truncate_command_line(&commit.header, options.max_line_chars)
+        ));
+        for meta in commit.metadata.iter().take(2) {
+            output.push(format!(
+                "  {}",
+                truncate_command_line(meta, options.max_line_chars)
+            ));
+        }
+        for subject in commit.subject.iter().take(2) {
+            output.push(format!(
+                "  subject: {}",
+                truncate_command_line(subject, options.max_line_chars)
+            ));
+        }
+        for summary in &commit.stat_summaries {
+            output.push(format!(
+                "  stat totals: {}",
+                truncate_command_line(summary, options.max_line_chars)
+            ));
+        }
+        if !commit.stat_lines.is_empty() {
+            output.push(format!("  stat files ({}):", commit.stat_lines.len()));
+            push_head_tail_lines(
+                &mut output,
+                &commit.stat_lines,
+                per_commit_stat_limit,
+                options.max_line_chars,
+                "stat entries",
+                "    ",
+            );
+        }
+    }
+
+    if commits.len() > commit_limit {
+        output.push(format!(
+            "[... omitted {} commits ...]",
+            commits.len() - commit_limit
+        ));
+    }
+
+    finalize_compacted_command_output(CommandOutputKind::GitLog, input, output, options)
 }
 
 fn compact_search_output(input: &str, options: &CommandOutputCompactOptions) -> String {
@@ -1142,6 +1225,176 @@ fn compact_rust_diagnostic_output(input: &str, options: &CommandOutputCompactOpt
     finalize_compacted_command_output(CommandOutputKind::RustDiagnostics, input, output, options)
 }
 
+fn compact_diagnostic_output(input: &str, options: &CommandOutputCompactOptions) -> String {
+    let lines = command_lines(input);
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut summary = CommandDiagnosticSummary::default();
+    let mut noise_counts = BTreeMap::<String, usize>::new();
+    let mut key_lines = Vec::<String>::new();
+    let mut blocks = Vec::<CommandCriticalBlock>::new();
+    let block_limit = diagnostic_block_line_limit(options);
+    let block_budget = options.max_lines.max(24).saturating_div(3).max(6);
+    let mut used_block_lines = 0usize;
+    let mut omitted_blocks = 0usize;
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let line = lines[index];
+        if let Some(label) = diagnostic_noise_label(line) {
+            *noise_counts.entry(label.to_string()).or_default() += 1;
+            if is_diagnostic_key_line(line) {
+                push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            }
+            index += 1;
+            continue;
+        }
+
+        if is_diagnostic_block_start(line) {
+            summary.record_line(line);
+            let (block, next_index) = collect_diagnostic_block(&lines, index, block_limit);
+            summary.record_block_signals(&block);
+            if used_block_lines.saturating_add(block.lines.len()) <= block_budget
+                || blocks.is_empty()
+            {
+                used_block_lines = used_block_lines.saturating_add(block.lines.len());
+                blocks.push(block);
+            } else {
+                omitted_blocks += 1;
+            }
+            index = next_index;
+            continue;
+        }
+
+        if is_critical_preserve_line(line) || count_file_location_signals(line) > 0 {
+            summary.record_line(line);
+            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+        }
+        index += 1;
+    }
+
+    if summary.is_empty() && noise_counts.is_empty() && key_lines.is_empty() && blocks.is_empty() {
+        return smart_truncate_command_output(input, options);
+    }
+
+    let mut output = Vec::new();
+    output.push(format!(
+        "diagnostic summary: errors={}, failed_tests={}, locations={}, stack_markers={}, exit_statuses={}, noisy_success_lines={}",
+        summary.errors,
+        summary.failed_tests.len(),
+        summary.locations.len(),
+        summary.stack_markers,
+        summary.exit_statuses.len(),
+        noise_counts.values().sum::<usize>(),
+    ));
+    if !noise_counts.is_empty() {
+        output.push(format_count_map("noise", &noise_counts, 10));
+    }
+    push_labeled_lines(
+        &mut output,
+        "diagnostics",
+        &summary.diagnostic_headers,
+        options.max_lines.max(24).saturating_div(4).max(4),
+    );
+    push_labeled_lines(
+        &mut output,
+        "locations",
+        &summary.locations,
+        options.max_lines.max(24).saturating_div(5).max(4),
+    );
+    push_labeled_lines(
+        &mut output,
+        "failed tests",
+        &summary.failed_tests,
+        options.max_lines.max(24).saturating_div(5).max(4),
+    );
+    push_labeled_lines(
+        &mut output,
+        "exit statuses",
+        &summary.exit_statuses,
+        options.max_lines.max(24).saturating_div(6).max(3),
+    );
+    push_labeled_lines(
+        &mut output,
+        "key lines",
+        &key_lines,
+        options.max_lines.max(24).saturating_div(6).max(3),
+    );
+
+    if !blocks.is_empty() {
+        output.push("critical blocks:".to_string());
+        for block in blocks {
+            output.push(format!("-- {} --", block.label));
+            for line in block.lines {
+                output.push(truncate_command_line(&line, options.max_line_chars));
+            }
+        }
+    }
+    if omitted_blocks > 0 {
+        output.push(format!(
+            "[... omitted {omitted_blocks} additional critical blocks ...]"
+        ));
+    }
+
+    finalize_compacted_command_output(CommandOutputKind::Diagnostics, input, output, options)
+}
+
+fn compact_noisy_success_output(input: &str, options: &CommandOutputCompactOptions) -> String {
+    let lines = command_lines(input);
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut noise_counts = BTreeMap::<String, usize>::new();
+    let mut key_lines = Vec::<String>::new();
+    let mut critical_lines = Vec::<String>::new();
+    for line in lines {
+        if let Some(label) = noisy_success_label(line) {
+            *noise_counts.entry(label.to_string()).or_default() += 1;
+            if is_noisy_success_key_line(line) {
+                push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            }
+            continue;
+        }
+        if is_noisy_success_key_line(line) {
+            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+        }
+        if is_critical_preserve_line(line) {
+            push_unique_truncated_line(&mut critical_lines, line, options.max_line_chars);
+        }
+    }
+
+    if noise_counts.is_empty() && key_lines.is_empty() && critical_lines.is_empty() {
+        return smart_truncate_command_output(input, options);
+    }
+
+    let mut output = Vec::new();
+    output.push(format!(
+        "success output summary: noisy_success_lines={}, critical_lines={}",
+        noise_counts.values().sum::<usize>(),
+        critical_lines.len(),
+    ));
+    if !noise_counts.is_empty() {
+        output.push(format_count_map("noise", &noise_counts, 10));
+    }
+    push_labeled_lines(
+        &mut output,
+        "key lines",
+        &key_lines,
+        options.max_lines.max(24).saturating_div(3).max(4),
+    );
+    push_labeled_lines(
+        &mut output,
+        "critical lines",
+        &critical_lines,
+        options.max_lines.max(24).saturating_div(4).max(4),
+    );
+
+    finalize_compacted_command_output(CommandOutputKind::NoisySuccess, input, output, options)
+}
+
 fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
     let mut strong_signals = 0usize;
     let mut cargo_noise_signals = 0usize;
@@ -1193,7 +1446,86 @@ fn looks_like_rust_diagnostic_output(lines: &[&str]) -> bool {
     cargo_noise_signals >= 4
 }
 
+fn looks_like_diagnostic_output(lines: &[&str]) -> bool {
+    let mut strong_signals = 0usize;
+    let mut location_signals = 0usize;
+    let mut stack_signals = 0usize;
+    let mut exit_signals = 0usize;
+    let mut noise_signals = 0usize;
+
+    for line in lines {
+        if is_diagnostic_detection_start(line) {
+            strong_signals += 1;
+        }
+        if count_file_location_signals(line) > 0 {
+            location_signals += 1;
+        }
+        if is_stack_signal_line(line) {
+            stack_signals += 1;
+        }
+        if is_rust_exit_status_line(line) {
+            exit_signals += 1;
+        }
+        if diagnostic_noise_label(line).is_some() {
+            noise_signals += 1;
+        }
+    }
+
+    if strong_signals > 0 {
+        return strong_signals + location_signals + stack_signals + exit_signals + noise_signals
+            >= 2;
+    }
+    stack_signals > 0 && location_signals > 0
+}
+
+fn looks_like_log_stream_output(lines: &[&str]) -> bool {
+    let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
+    if non_empty < 8 {
+        return false;
+    }
+    let log_level_lines = lines
+        .iter()
+        .filter(|line| {
+            let lower = line.trim_start().to_ascii_lowercase();
+            contains_json_log_level(&lower, "info")
+                || contains_json_log_level(&lower, "debug")
+                || contains_json_log_level(&lower, "trace")
+                || contains_json_log_level(&lower, "error")
+                || contains_json_log_level(&lower, "fatal")
+                || contains_json_log_level(&lower, "warn")
+        })
+        .count();
+    log_level_lines.saturating_mul(2) >= non_empty
+}
+
+fn looks_like_noisy_success_output(lines: &[&str]) -> bool {
+    let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
+    if non_empty < 8 {
+        return false;
+    }
+    if lines
+        .iter()
+        .any(|line| is_error_signal_line(line) || is_test_failure_signal_line(line))
+    {
+        return false;
+    }
+
+    let success_signals = lines
+        .iter()
+        .filter(|line| noisy_success_label(line).is_some())
+        .count();
+    let key_lines = lines
+        .iter()
+        .filter(|line| is_noisy_success_key_line(line))
+        .count();
+    success_signals >= 4 || (key_lines > 0 && success_signals >= 2)
+}
+
 fn rust_block_line_limit(options: &CommandOutputCompactOptions) -> usize {
+    options.max_lines.max(24).saturating_div(5).clamp(8, 32)
+}
+
+fn diagnostic_block_line_limit(options: &CommandOutputCompactOptions) -> usize {
     options.max_lines.max(24).saturating_div(5).clamp(8, 32)
 }
 
@@ -1220,6 +1552,116 @@ fn rust_noise_label(line: &str) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+fn diagnostic_noise_label(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed.starts_with("> ") {
+        Some("npm_script")
+    } else if lower.starts_with("collecting ") {
+        Some("pytest_collecting")
+    } else if lower.starts_with("collected ") && lower.contains(" item") {
+        Some("pytest_collected")
+    } else if is_pytest_progress_line(trimmed) {
+        Some("pytest_progress")
+    } else {
+        noisy_success_label(line)
+    }
+}
+
+fn noisy_success_label(line: &str) -> Option<&'static str> {
+    let trimmed = line.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed.starts_with("PASS ") {
+        Some("passed_suites")
+    } else if lower.starts_with("test suites:") && lower.contains("passed") {
+        Some("test_suites")
+    } else if lower.starts_with("tests:") && lower.contains("passed") {
+        Some("test_cases")
+    } else if lower.starts_with("snapshots:") && lower.contains("passed") {
+        Some("snapshots")
+    } else if lower.starts_with("time:") {
+        Some("test_time")
+    } else if lower.starts_with("ran all test suites") {
+        Some("test_runner_summary")
+    } else if lower.starts_with("done in ") {
+        Some("done")
+    } else if lower.starts_with("added ") && lower.contains(" package") {
+        Some("packages_added")
+    } else if lower.starts_with("audited ") && lower.contains(" package") {
+        Some("packages_audited")
+    } else if lower == "up to date" || lower.starts_with("up to date in ") {
+        Some("packages_up_to_date")
+    } else if lower.starts_with("found 0 vulnerabilities") {
+        Some("vulnerability_summary")
+    } else if lower.starts_with("all files pass") {
+        Some("formatter_summary")
+    } else if lower.starts_with("built in ") || lower.contains(" built in ") {
+        Some("build_summary")
+    } else if lower.starts_with("compiled successfully") {
+        Some("compile_summary")
+    } else if lower.starts_with("tests/") && lower.contains(" passed") {
+        Some("passed_tests")
+    } else if lower.contains("::test_") && lower.ends_with(" passed") {
+        Some("passed_tests")
+    } else if is_pytest_progress_line(trimmed) {
+        Some("pytest_progress")
+    } else {
+        None
+    }
+}
+
+fn is_pytest_progress_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.len() >= 8
+        && trimmed
+            .chars()
+            .all(|ch| matches!(ch, '.' | 's' | 'S' | 'x' | 'X'))
+        && trimmed.chars().any(|ch| ch == '.')
+}
+
+fn is_diagnostic_key_line(line: &str) -> bool {
+    is_diagnostic_success_summary_line(line)
+        || is_diagnostic_failure_summary_line(line)
+        || is_noisy_success_key_line(line)
+}
+
+fn is_diagnostic_success_summary_line(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    lower.starts_with("test suites:")
+        || lower.starts_with("tests:")
+        || lower.starts_with("snapshots:")
+        || lower.starts_with("ran all test suites")
+        || lower.starts_with("found 0 vulnerabilities")
+        || lower.contains(" passed in ")
+}
+
+fn is_diagnostic_failure_summary_line(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    lower.starts_with("test suites:") && lower.contains("failed")
+        || lower.starts_with("tests:") && lower.contains("failed")
+        || lower.contains(" failed, ")
+        || lower.starts_with("failed ")
+        || lower.starts_with("error summary")
+}
+
+fn is_noisy_success_key_line(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    lower.starts_with("test suites:")
+        || lower.starts_with("tests:")
+        || lower.starts_with("snapshots:")
+        || lower.starts_with("ran all test suites")
+        || lower.starts_with("done in ")
+        || lower.starts_with("added ")
+        || lower.starts_with("audited ")
+        || lower.starts_with("found 0 vulnerabilities")
+        || lower == "up to date"
+        || lower.starts_with("up to date in ")
+        || lower.starts_with("all files pass")
+        || lower.starts_with("built in ")
+        || lower.contains(" passed in ")
+        || lower.starts_with("compiled successfully")
 }
 
 fn is_rust_success_summary_line(line: &str) -> bool {
@@ -1268,6 +1710,48 @@ fn rust_failure_separator_name(line: &str) -> Option<&str> {
         .strip_suffix(" stdout")
         .or_else(|| inner.strip_suffix(" stderr"))
         .unwrap_or(inner)
+        .trim();
+    (!name.is_empty()).then_some(name)
+}
+
+fn generic_failed_test_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    if let Some(name) = trimmed.strip_prefix("FAIL ") {
+        return non_empty_prefix(name);
+    }
+    if let Some(name) = trimmed.strip_prefix("FAILED ") {
+        return non_empty_prefix(name);
+    }
+    if let Some((name, status)) = trimmed.rsplit_once(' ')
+        && status == "FAILED"
+        && (name.contains("::") || looks_like_location_path(name))
+    {
+        return non_empty_prefix(name);
+    }
+    if trimmed.starts_with("Test Suites:") && trimmed.contains("failed") {
+        return Some(trimmed);
+    }
+    if trimmed.starts_with("Tests:") && trimmed.contains("failed") {
+        return Some(trimmed);
+    }
+    if trimmed.contains(" failed, ") || trimmed.starts_with("failed ") {
+        return Some(trimmed);
+    }
+    None
+}
+
+fn non_empty_prefix(input: &str) -> Option<&str> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let name = trimmed
+        .split(" - ")
+        .next()
+        .unwrap_or(trimmed)
+        .split(" (")
+        .next()
+        .unwrap_or(trimmed)
         .trim();
     (!name.is_empty()).then_some(name)
 }
@@ -1323,6 +1807,76 @@ fn is_rust_failure_summary_line(line: &str) -> bool {
         || trimmed == "failures:"
         || trimmed.starts_with("failures:")
         || trimmed.starts_with("error: aborting")
+}
+
+fn is_diagnostic_block_start(line: &str) -> bool {
+    is_typescript_diagnostic_line(line)
+        || is_exception_signal_line(line)
+        || is_node_stack_error_line(line)
+        || is_test_failure_signal_line(line)
+        || is_stack_signal_line(line)
+        || is_error_signal_line(line)
+}
+
+fn is_diagnostic_detection_start(line: &str) -> bool {
+    is_typescript_diagnostic_line(line)
+        || is_exception_signal_line(line)
+        || is_node_stack_error_line(line)
+        || is_test_failure_signal_line(line)
+        || is_stack_signal_line(line)
+        || line
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("npm err!")
+}
+
+fn is_typescript_diagnostic_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    (lower.contains("error ts")
+        || lower.contains("warning ts")
+        || lower.contains(" - error ts")
+        || lower.contains(": error ts")
+        || lower.contains(" - warning ts")
+        || lower.contains(": warning ts"))
+        && count_file_location_signals(trimmed) > 0
+}
+
+fn is_exception_signal_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.starts_with("E   ") {
+        return true;
+    }
+    let Some((prefix, _)) = trimmed.split_once(':') else {
+        return false;
+    };
+    let prefix = prefix.trim();
+    if prefix.is_empty() || prefix.contains(' ') && !prefix.ends_with("Error") {
+        return false;
+    }
+    matches!(
+        prefix,
+        "Error"
+            | "AssertionError"
+            | "ImportError"
+            | "ModuleNotFoundError"
+            | "NameError"
+            | "RuntimeError"
+            | "SyntaxError"
+            | "TypeError"
+            | "ValueError"
+            | "ZeroDivisionError"
+            | "ReferenceError"
+            | "RangeError"
+            | "URIError"
+            | "EvalError"
+    ) || prefix.ends_with("Error")
+        || prefix.ends_with("Exception")
+}
+
+fn is_node_stack_error_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("at ") && count_file_location_signals(trimmed) > 0
 }
 
 fn collect_rust_diagnostic_block(
@@ -1406,7 +1960,40 @@ fn collect_rust_failure_block(
     )
 }
 
+fn collect_diagnostic_block(
+    lines: &[&str],
+    start: usize,
+    max_lines: usize,
+) -> (CommandCriticalBlock, usize) {
+    let mut end = start + 1;
+    while end < lines.len() {
+        let line = lines[end];
+        if end > start + 1 && is_diagnostic_block_start(line) {
+            break;
+        }
+        if diagnostic_noise_label(line).is_some() && !is_diagnostic_key_line(line) {
+            break;
+        }
+        end += 1;
+        if end.saturating_sub(start) >= max_lines.saturating_mul(4) {
+            break;
+        }
+    }
+
+    (
+        CommandCriticalBlock {
+            label: diagnostic_critical_label(lines[start]),
+            lines: compact_command_block_lines(&lines[start..end], max_lines),
+        },
+        end,
+    )
+}
+
 fn compact_rust_block_lines(lines: &[&str], max_lines: usize) -> Vec<String> {
+    compact_command_block_lines(lines, max_lines)
+}
+
+fn compact_command_block_lines(lines: &[&str], max_lines: usize) -> Vec<String> {
     if lines.len() <= max_lines {
         return lines.iter().map(|line| (*line).to_string()).collect();
     }
@@ -1435,6 +2022,19 @@ fn rust_critical_label(line: &str) -> String {
     truncate_command_line(line.trim(), 96)
 }
 
+fn diagnostic_critical_label(line: &str) -> String {
+    if is_stack_signal_line(line) {
+        return "stack trace".to_string();
+    }
+    if let Some(test_name) = generic_failed_test_name(line) {
+        return format!("failed test: {test_name}");
+    }
+    if is_exception_signal_line(line) {
+        return format!("exception: {}", truncate_command_line(line.trim(), 96));
+    }
+    format!("diagnostic: {}", truncate_command_line(line.trim(), 96))
+}
+
 fn push_labeled_lines(output: &mut Vec<String>, label: &str, lines: &[String], limit: usize) {
     if lines.is_empty() {
         return;
@@ -1448,6 +2048,45 @@ fn push_labeled_lines(output: &mut Vec<String>, label: &str, lines: &[String], l
         output.push(format!(
             "  [... {} more {label} ...]",
             lines.len() - limit.max(1)
+        ));
+    }
+}
+
+fn push_head_tail_lines(
+    output: &mut Vec<String>,
+    lines: &[String],
+    limit: usize,
+    max_line_chars: usize,
+    omitted_label: &str,
+    prefix: &str,
+) {
+    let limit = limit.max(1);
+    if lines.len() <= limit {
+        for line in lines {
+            output.push(format!(
+                "{prefix}{}",
+                truncate_command_line(line, max_line_chars)
+            ));
+        }
+        return;
+    }
+
+    let head = limit.div_ceil(2);
+    let tail = limit.saturating_sub(head);
+    for line in lines.iter().take(head) {
+        output.push(format!(
+            "{prefix}{}",
+            truncate_command_line(line, max_line_chars)
+        ));
+    }
+    output.push(format!(
+        "{prefix}[... omitted {} {omitted_label} ...]",
+        lines.len().saturating_sub(head + tail)
+    ));
+    for line in lines.iter().skip(lines.len().saturating_sub(tail)) {
+        output.push(format!(
+            "{prefix}{}",
+            truncate_command_line(line, max_line_chars)
         ));
     }
 }
@@ -1653,12 +2292,24 @@ fn finalize_compacted_command_output(
 
 fn detect_command_output_kind(input: &str) -> CommandOutputKind {
     let lines = command_lines(input);
+    if looks_like_git_log_stat_output(&lines) {
+        return CommandOutputKind::GitLog;
+    }
+
     if looks_like_git_diff_output(&lines) {
         return CommandOutputKind::GitDiff;
     }
 
     if looks_like_rust_diagnostic_output(&lines) {
         return CommandOutputKind::RustDiagnostics;
+    }
+
+    if looks_like_log_stream_output(&lines) {
+        return CommandOutputKind::Plain;
+    }
+
+    if looks_like_diagnostic_output(&lines) {
+        return CommandOutputKind::Diagnostics;
     }
 
     if lines.iter().any(|line| {
@@ -1705,6 +2356,10 @@ fn detect_command_output_kind(input: &str) -> CommandOutputKind {
         return CommandOutputKind::FileList;
     }
 
+    if looks_like_noisy_success_output(&lines) {
+        return CommandOutputKind::NoisySuccess;
+    }
+
     CommandOutputKind::Plain
 }
 
@@ -1717,8 +2372,14 @@ fn is_error_signal_line(line: &str) -> bool {
         || lower.starts_with("error\t")
         || lower.starts_with("fatal:")
         || lower.starts_with("panic:")
+        || lower.starts_with("npm err!")
+        || lower.starts_with("failed ")
+        || lower.starts_with("fail ")
+        || trimmed.starts_with("E   ")
         || lower.starts_with("thread '") && lower.contains("' panicked at")
         || is_rust_panic_line(line)
+        || is_typescript_diagnostic_line(line)
+        || is_exception_signal_line(line)
         || is_log_level_signal_line(line)
     {
         return true;
@@ -1742,9 +2403,13 @@ fn contains_jsonish_error_key(line: &str) -> bool {
 }
 
 fn count_file_location_signals(line: &str) -> usize {
-    line.split_whitespace()
+    let token_locations = line
+        .split_whitespace()
         .filter(|token| token_contains_file_location(token))
-        .count()
+        .count();
+    let python_location = usize::from(contains_python_file_location(line));
+    let paren_location = usize::from(contains_paren_file_location(line));
+    token_locations + python_location + paren_location
 }
 
 fn token_contains_file_location(token: &str) -> bool {
@@ -1775,6 +2440,55 @@ fn token_contains_file_location(token: &str) -> bool {
     looks_like_location_path(middle)
 }
 
+fn contains_python_file_location(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let (quote, rest) = if let Some(rest) = trimmed.strip_prefix("File \"") {
+        ('"', rest)
+    } else if let Some(rest) = trimmed.strip_prefix("File '") {
+        ('\'', rest)
+    } else {
+        return false;
+    };
+    let Some((path, after_path)) = rest.split_once(quote) else {
+        return false;
+    };
+    if !looks_like_location_path(path) || !after_path.contains(", line ") {
+        return false;
+    }
+    let Some((_, after_line)) = after_path.split_once(", line ") else {
+        return false;
+    };
+    after_line
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_digit())
+}
+
+fn contains_paren_file_location(line: &str) -> bool {
+    line.split_whitespace()
+        .any(|token| token_contains_paren_file_location(token))
+}
+
+fn token_contains_paren_file_location(token: &str) -> bool {
+    let token = token.trim_matches(|ch: char| {
+        matches!(ch, '"' | '\'' | '`' | ',' | ';' | '[' | ']' | '{' | '}')
+    });
+    let Some((path, rest)) = token.split_once('(') else {
+        return false;
+    };
+    let Some((location, _)) = rest.split_once(')') else {
+        return false;
+    };
+    let Some((line, column)) = location.split_once(',') else {
+        return false;
+    };
+    looks_like_location_path(path)
+        && !line.trim().is_empty()
+        && line.trim().chars().all(|ch| ch.is_ascii_digit())
+        && !column.trim().is_empty()
+        && column.trim().chars().all(|ch| ch.is_ascii_digit())
+}
+
 fn looks_like_location_path(path: &str) -> bool {
     let path = path.trim_matches(|ch: char| matches!(ch, '<' | '>' | '-' | ':' | ' '));
     if path.is_empty() {
@@ -1802,6 +2516,7 @@ fn is_test_failure_signal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     rust_failed_test_name(trimmed).is_some()
         || rust_failure_separator_name(trimmed).is_some()
+        || generic_failed_test_name(trimmed).is_some()
         || is_rust_failure_summary_line(trimmed)
         || trimmed.starts_with("test result: FAILED")
         || trimmed.starts_with("failures:")
@@ -2804,6 +3519,67 @@ struct RustCriticalBlock {
     lines: Vec<String>,
 }
 
+#[derive(Default)]
+struct CommandDiagnosticSummary {
+    errors: usize,
+    stack_markers: usize,
+    diagnostic_headers: Vec<String>,
+    locations: Vec<String>,
+    failed_tests: Vec<String>,
+    exit_statuses: Vec<String>,
+}
+
+impl CommandDiagnosticSummary {
+    fn is_empty(&self) -> bool {
+        self.errors == 0
+            && self.stack_markers == 0
+            && self.diagnostic_headers.is_empty()
+            && self.locations.is_empty()
+            && self.failed_tests.is_empty()
+            && self.exit_statuses.is_empty()
+    }
+
+    fn record_line(&mut self, line: &str) {
+        if is_error_signal_line(line) || is_typescript_diagnostic_line(line) {
+            self.errors += 1;
+            push_unique_truncated_line(&mut self.diagnostic_headers, line, 240);
+        }
+        if let Some(test_name) = generic_failed_test_name(line) {
+            push_unique_line(&mut self.failed_tests, test_name);
+        }
+        if count_file_location_signals(line) > 0 {
+            push_unique_truncated_line(&mut self.locations, line, 240);
+        }
+        if is_rust_exit_status_line(line) {
+            push_unique_truncated_line(&mut self.exit_statuses, line, 240);
+        }
+        if is_stack_signal_line(line) {
+            self.stack_markers += 1;
+            push_unique_truncated_line(&mut self.diagnostic_headers, line, 240);
+        }
+    }
+
+    fn record_block_signals(&mut self, block: &CommandCriticalBlock) {
+        for line in &block.lines {
+            self.record_line(line);
+        }
+    }
+}
+
+struct CommandCriticalBlock {
+    label: String,
+    lines: Vec<String>,
+}
+
+#[derive(Default)]
+struct GitLogCommitSummary {
+    header: String,
+    metadata: Vec<String>,
+    subject: Vec<String>,
+    stat_lines: Vec<String>,
+    stat_summaries: Vec<String>,
+}
+
 fn split_git_diff_sections<'a>(lines: &'a [&'a str]) -> Vec<Vec<&'a str>> {
     let mut sections = Vec::new();
     let mut current = Vec::new();
@@ -2926,6 +3702,89 @@ fn looks_like_git_diff_stat_summary(line: &str) -> bool {
         || trimmed.contains(" files changed")
         || trimmed.contains(" insertion")
         || trimmed.contains(" deletion")
+}
+
+fn looks_like_git_log_stat_output(lines: &[&str]) -> bool {
+    let commit_headers = lines
+        .iter()
+        .filter(|line| parse_git_log_commit_header(line).is_some())
+        .count();
+    if commit_headers == 0 {
+        return false;
+    }
+    let stat_lines = lines
+        .iter()
+        .filter(|line| looks_like_git_diff_stat_line(line))
+        .count();
+    let stat_summaries = lines
+        .iter()
+        .filter(|line| looks_like_git_diff_stat_summary(line))
+        .count();
+    stat_lines > 0 || stat_summaries > 0
+}
+
+fn parse_git_log_stat_commits(lines: &[&str]) -> Vec<GitLogCommitSummary> {
+    let mut commits = Vec::new();
+    let mut current = None::<GitLogCommitSummary>;
+
+    for line in lines {
+        if let Some(header) = parse_git_log_commit_header(line) {
+            if let Some(commit) = current.take()
+                && (!commit.stat_lines.is_empty() || !commit.stat_summaries.is_empty())
+            {
+                commits.push(commit);
+            }
+            current = Some(GitLogCommitSummary {
+                header,
+                ..GitLogCommitSummary::default()
+            });
+            continue;
+        }
+
+        let Some(commit) = current.as_mut() else {
+            continue;
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("Author:") || trimmed.starts_with("Date:") {
+            push_unique_line(&mut commit.metadata, trimmed);
+        } else if looks_like_git_diff_stat_line(line) {
+            push_unique_line(&mut commit.stat_lines, trimmed);
+        } else if looks_like_git_diff_stat_summary(line) {
+            push_unique_line(&mut commit.stat_summaries, trimmed);
+        } else if line.starts_with("    ") && commit.subject.len() < 2 {
+            push_unique_line(&mut commit.subject, trimmed);
+        }
+    }
+
+    if let Some(commit) = current.take()
+        && (!commit.stat_lines.is_empty() || !commit.stat_summaries.is_empty())
+    {
+        commits.push(commit);
+    }
+    commits
+}
+
+fn parse_git_log_commit_header(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if let Some(hash) = trimmed.strip_prefix("commit ") {
+        let hash = hash.split_whitespace().next().unwrap_or_default();
+        if looks_like_git_hash(hash) {
+            return Some(format!("commit {hash}"));
+        }
+    }
+
+    let (hash, subject) = trimmed.split_once(' ')?;
+    if looks_like_git_hash(hash) && !subject.trim().is_empty() {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
+fn looks_like_git_hash(input: &str) -> bool {
+    (7..=64).contains(&input.len()) && input.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 #[derive(Clone)]
@@ -3316,8 +4175,11 @@ impl CommandOutputKind {
             CommandOutputKind::GitStatus => "git status",
             CommandOutputKind::GitDiff => "git diff",
             CommandOutputKind::RustDiagnostics => "rust diagnostics",
+            CommandOutputKind::Diagnostics => "diagnostics",
+            CommandOutputKind::GitLog => "git log",
             CommandOutputKind::Search => "search",
             CommandOutputKind::FileList => "file list",
+            CommandOutputKind::NoisySuccess => "noisy success",
             CommandOutputKind::Plain => "plain",
         }
     }

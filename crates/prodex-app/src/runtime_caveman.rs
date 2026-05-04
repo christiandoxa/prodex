@@ -2,27 +2,31 @@ use super::*;
 #[allow(unused_imports)]
 pub(crate) use prodex_caveman_assets::PRODEX_CAVEMAN_FULL_ASSETS_ENV;
 
-struct CavemanLaunchStrategy {
+pub(crate) struct CavemanLaunchStrategy {
     args: CavemanArgs,
     codex_args: Vec<OsString>,
     include_code_review: bool,
     mem_mode: Option<RuntimeMemTranscriptMode>,
     model_provider_override: Option<String>,
+    model_context_window_tokens: Option<u64>,
 }
 
 impl CavemanLaunchStrategy {
-    fn new(args: CavemanArgs) -> Self {
+    pub(crate) fn new(args: CavemanArgs) -> Self {
         let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
         let (codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
             codex_cli_config_override_value(&codex_args, "model_provider");
+        let model_context_window_tokens =
+            runtime_launch_cli_model_context_window_tokens(&codex_args);
         Self {
             args,
             codex_args,
             include_code_review,
             mem_mode,
             model_provider_override,
+            model_context_window_tokens,
         }
     }
 }
@@ -37,6 +41,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
             smart_context_enabled: self.args.smart_context,
+            model_context_window_tokens: self.model_context_window_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
         }

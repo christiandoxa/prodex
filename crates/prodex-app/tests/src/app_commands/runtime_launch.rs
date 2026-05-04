@@ -54,6 +54,7 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
     })
@@ -99,6 +100,7 @@ fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         force_runtime_proxy: true,
         model_provider_override: None,
     }) {
@@ -165,6 +167,7 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
     })
@@ -202,6 +205,7 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
     })
@@ -214,6 +218,47 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
     assert!(
         !paths.state_file.exists(),
         "profileless local launch should not persist synthetic profile selection"
+    );
+}
+
+#[test]
+fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_context() {
+    let root = temp_dir("profileless-local-smart-context-proxy");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: true,
+        skip_quota_check: true,
+        base_url: Some("http://127.0.0.1:8131/v1"),
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: true,
+        model_context_window_tokens: Some(65_536),
+        force_runtime_proxy: false,
+        model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
+    })
+    .unwrap();
+
+    assert_eq!(prepared.codex_home, paths.shared_codex_root);
+    assert!(prepared.codex_home.is_dir());
+    assert!(!prepared.managed);
+    let runtime_proxy = prepared
+        .runtime_proxy
+        .as_ref()
+        .expect("prodex-local Smart Context should use local rewrite proxy");
+    assert_eq!(
+        runtime_proxy.local_model_provider_id.as_deref(),
+        Some(SUPER_LOCAL_PROVIDER_ID)
+    );
+    assert_eq!(
+        runtime_proxy.openai_mount_path,
+        RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH
+    );
+    assert!(
+        !paths.state_file.exists(),
+        "profileless local proxy launch should not persist synthetic profile selection"
     );
 }
 
@@ -248,6 +293,7 @@ fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
     })
@@ -289,6 +335,7 @@ fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_overrid
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
     })
@@ -335,6 +382,7 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
     })
@@ -351,6 +399,45 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
 }
 
 #[test]
+fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_smart_context() {
+    let root = temp_dir("dry-run-local-smart-context-proxy");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+
+    let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: true,
+        skip_quota_check: true,
+        base_url: Some("http://127.0.0.1:8131/v1"),
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: true,
+        model_context_window_tokens: Some(65_536),
+        force_runtime_proxy: false,
+        model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
+    })
+    .unwrap();
+
+    let runtime_proxy = prepared
+        .runtime_proxy
+        .as_ref()
+        .expect("dry-run should preview local rewrite proxy");
+    assert_eq!(runtime_proxy.listen_addr.port(), 0);
+    assert_eq!(
+        runtime_proxy.local_model_provider_id.as_deref(),
+        Some(SUPER_LOCAL_PROVIDER_ID)
+    );
+    assert_eq!(
+        runtime_proxy.openai_mount_path,
+        RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH
+    );
+    let paths = AppPaths::discover().unwrap();
+    assert!(
+        !paths.state_file.exists(),
+        "dry-run local proxy preview must not persist synthetic profile selection"
+    );
+}
+
+#[test]
 fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
     let root = temp_dir("profileless-local-force-proxy");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
@@ -363,6 +450,7 @@ fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        model_context_window_tokens: None,
         force_runtime_proxy: true,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
     }) {
@@ -404,6 +492,7 @@ fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
             upstream_no_proxy: false,
             include_code_review: false,
             smart_context_enabled: false,
+            model_context_window_tokens: None,
             force_runtime_proxy: false,
             model_provider_override: None,
         },
@@ -444,6 +533,7 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
             upstream_no_proxy: false,
             include_code_review: false,
             smart_context_enabled: false,
+            model_context_window_tokens: None,
             force_runtime_proxy: false,
             model_provider_override: None,
         },
@@ -466,6 +556,17 @@ fn run_command_strategy_keeps_smart_context_autopilot_disabled() {
     });
 
     assert!(!strategy.runtime_request().smart_context_enabled);
+}
+
+#[test]
+fn runtime_launch_parses_model_context_window_override() {
+    assert_eq!(
+        runtime_launch_cli_model_context_window_tokens(&[
+            OsString::from("-c"),
+            OsString::from("model_context_window=65536"),
+        ]),
+        Some(65_536)
+    );
 }
 
 fn write_state(root: &Path, state: AppState) {

@@ -85,9 +85,45 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
 }
 
 #[test]
+fn super_mem_super_slim_expands_to_super_slim_mem_prefix() {
+    let args = parse_super_as_caveman(&["prodex", "super", "--mem-super-slim", "exec", "review"]);
+
+    assert_eq!(
+        args.codex_args,
+        vec![
+            OsString::from("mem-super-slim"),
+            OsString::from("exec"),
+            OsString::from("review")
+        ]
+    );
+}
+
+#[test]
+fn super_rejects_conflicting_mem_schema_flags() {
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "super",
+            "--mem-full",
+            "--mem-super-slim",
+            "exec",
+            "review",
+        ])
+        .is_err()
+    );
+}
+
+#[test]
 fn super_and_s_enable_smart_context_autopilot() {
     assert!(parse_super_as_caveman(&["prodex", "super"]).smart_context);
     assert!(parse_super_as_caveman(&["prodex", "s"]).smart_context);
+}
+
+#[test]
+fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
+    let args = parse_super_as_caveman(&["prodex", "super", "--url", "http://127.0.0.1:8131"]);
+
+    assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8131/v1"));
 }
 
 #[test]

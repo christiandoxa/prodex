@@ -327,6 +327,40 @@ fn runtime_proxy_codex_args_preserve_user_overrides_after_proxy_overrides() {
 }
 
 #[test]
+fn runtime_proxy_passthrough_args_rewrite_local_provider_base_url() {
+    let args = runtime_proxy_codex_passthrough_args(
+        Some(RuntimeProxyCodexEndpoint {
+            listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
+            openai_mount_path: "/v1",
+            local_model_provider_id: Some("prodex-local"),
+        }),
+        &[
+            OsString::from("mem"),
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-local\""),
+            OsString::from("-c"),
+            OsString::from("model_providers.prodex-local.base_url=\"http://127.0.0.1:8131/v1\""),
+            OsString::from("exec"),
+        ],
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+
+    assert_eq!(
+        args,
+        vec![
+            "mem".to_string(),
+            "-c".to_string(),
+            "model_provider=\"prodex-local\"".to_string(),
+            "-c".to_string(),
+            "model_providers.prodex-local.base_url=\"http://127.0.0.1:4455/v1\"".to_string(),
+            "exec".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn prepare_codex_launch_args_extracts_full_access_and_normalizes_resume() {
     let (args, include_code_review) = prepare_codex_launch_args(
         &[

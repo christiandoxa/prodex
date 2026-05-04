@@ -8,6 +8,7 @@ struct RunCommandStrategy {
     mem_mode: Option<RuntimeMemTranscriptMode>,
     dry_run: bool,
     model_provider_override: Option<String>,
+    model_context_window_tokens: Option<u64>,
 }
 
 impl RunCommandStrategy {
@@ -18,6 +19,8 @@ impl RunCommandStrategy {
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
             codex_cli_config_override_value(&codex_args, "model_provider");
+        let model_context_window_tokens =
+            runtime_launch_cli_model_context_window_tokens(&codex_args);
         let dry_run = args.dry_run || dry_run_arg;
         Self {
             args,
@@ -26,6 +29,7 @@ impl RunCommandStrategy {
             mem_mode,
             dry_run,
             model_provider_override,
+            model_context_window_tokens,
         }
     }
 }
@@ -40,6 +44,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
             smart_context_enabled: false,
+            model_context_window_tokens: self.model_context_window_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
         }
@@ -248,6 +253,14 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             );
         }
 
+        if local_rewrite_proxy_upstream_base_url(&self.selection, &self.request).is_some() {
+            print_wrapped_stderr(&section_header("Runtime Provider"));
+            print_wrapped_stderr(
+                "Using prodex-local through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.",
+            );
+            return Ok(());
+        }
+
         print_wrapped_stderr(&section_header("Runtime Provider"));
         print_wrapped_stderr(&format_runtime_provider_direct_launch_message(
             setting.provider_id.as_str(),
@@ -294,6 +307,18 @@ impl RuntimeProxyStartupFactory {
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if let Some(local_upstream_base_url) =
+            local_rewrite_proxy_upstream_base_url(selection, request)
+        {
+            return Ok(Some(start_local_rewrite_proxy_endpoint(
+                paths,
+                state,
+                selection,
+                request,
+                local_upstream_base_url,
+            )?));
+        }
+
         if selection.non_openai_model_provider.is_some() {
             return Ok(None);
         }
@@ -322,6 +347,7 @@ impl RuntimeProxyStartupFactory {
                 request.include_code_review,
                 request.upstream_no_proxy,
                 request.smart_context_enabled,
+                runtime_launch_effective_model_context_window_tokens(request, selection),
             )?));
         }
 
@@ -334,6 +360,10 @@ impl RuntimeProxyStartupFactory {
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if local_rewrite_proxy_upstream_base_url(selection, request).is_some() {
+            return Ok(Some(runtime_local_rewrite_proxy_dry_run_endpoint(paths)?));
+        }
+
         if selection.non_openai_model_provider.is_some() {
             return Ok(None);
         }
@@ -394,7 +424,21 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
             .parse()
             .context("failed to build dry-run runtime proxy address")?,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        local_model_provider_id: None,
         lease_dir: paths.root.join("runtime-broker-dry-run-leases"),
+        _lease: None,
+        _direct_proxy: None,
+    })
+}
+
+fn runtime_local_rewrite_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoint> {
+    Ok(RuntimeProxyEndpoint {
+        listen_addr: "127.0.0.1:0"
+            .parse()
+            .context("failed to build dry-run runtime local rewrite proxy address")?,
+        openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
+        local_model_provider_id: Some(SUPER_LOCAL_PROVIDER_ID.to_string()),
+        lease_dir: paths.root.join("runtime-local-proxy-dry-run-leases"),
         _lease: None,
         _direct_proxy: None,
     })
@@ -407,6 +451,8 @@ fn start_fixed_runtime_proxy_endpoint(
     request: &RuntimeLaunchRequest<'_>,
     runtime_upstream_base_url: String,
 ) -> Result<RuntimeProxyEndpoint> {
+    let model_context_window_tokens =
+        runtime_launch_effective_model_context_window_tokens(request, selection);
     let fixed_state = fixed_runtime_proxy_state(state, &selection.selected_profile_name)?;
     let proxy = start_runtime_rotation_proxy_with_options(
         paths,
@@ -416,19 +462,86 @@ fn start_fixed_runtime_proxy_endpoint(
         request.include_code_review,
         request.upstream_no_proxy,
         request.smart_context_enabled,
+        model_context_window_tokens,
         None,
     )?;
     Ok(RuntimeProxyEndpoint {
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        local_model_provider_id: None,
         lease_dir: paths.root.join("runtime-fixed-proxy-leases"),
         _lease: None,
         _direct_proxy: Some(proxy),
     })
 }
 
+fn start_local_rewrite_proxy_endpoint(
+    paths: &AppPaths,
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+    upstream_base_url: String,
+) -> Result<RuntimeProxyEndpoint> {
+    let model_context_window_tokens =
+        runtime_launch_effective_model_context_window_tokens(request, selection);
+    let proxy = start_runtime_local_rewrite_proxy(
+        paths,
+        state,
+        upstream_base_url,
+        request.upstream_no_proxy,
+        request.smart_context_enabled,
+        model_context_window_tokens,
+    )?;
+    Ok(RuntimeProxyEndpoint {
+        listen_addr: proxy.listen_addr,
+        openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
+        local_model_provider_id: Some(SUPER_LOCAL_PROVIDER_ID.to_string()),
+        lease_dir: paths.root.join("runtime-local-proxy-leases"),
+        _lease: None,
+        _direct_proxy: Some(proxy),
+    })
+}
+
+fn local_rewrite_proxy_upstream_base_url(
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Option<String> {
+    if request.force_runtime_proxy || !request.smart_context_enabled {
+        return None;
+    }
+    let provider = selection.non_openai_model_provider.as_ref()?;
+    if !provider
+        .provider_id
+        .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)
+    {
+        return None;
+    }
+    request
+        .base_url
+        .map(str::to_string)
+        .or_else(|| {
+            codex_config_value(
+                &selection.codex_home,
+                &format!("model_providers.{}.base_url", provider.provider_id.as_str()),
+            )
+        })
+        .filter(|base_url| !base_url.trim().is_empty())
+}
+
 fn fixed_runtime_proxy_state(state: &AppState, profile_name: &str) -> Result<AppState> {
     prodex_runtime_launch::fixed_runtime_proxy_state(state, profile_name)
+}
+
+fn runtime_launch_effective_model_context_window_tokens(
+    request: &RuntimeLaunchRequest<'_>,
+    selection: &RuntimeLaunchSelection,
+) -> Option<u64> {
+    if !request.smart_context_enabled {
+        return None;
+    }
+    request
+        .model_context_window_tokens
+        .or_else(|| runtime_launch_config_model_context_window_tokens(&selection.codex_home))
 }
 
 fn select_runtime_launch_profile(

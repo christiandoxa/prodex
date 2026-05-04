@@ -486,14 +486,15 @@ pub(crate) fn schedule_runtime_smart_context_artifact_save(
     }
 
     if cfg!(test) {
-        match store.save_to_path(&path) {
-            Ok(()) => runtime_proxy_log(
+        match store.save_merged_to_path(&path) {
+            Ok(merged) => runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
                     "smart_context_artifact_save_ok",
                     [
                         runtime_proxy_log_field("reason", reason),
                         runtime_proxy_log_field("lag_ms", "0"),
+                        runtime_proxy_log_field("artifacts", merged.artifact_count().to_string()),
                     ],
                 ),
             ),
@@ -949,8 +950,8 @@ pub(crate) fn runtime_smart_context_artifact_save_worker_loop(
                 queued_at,
                 ready_at: _,
             } = job;
-            match store.save_to_path(&path) {
-                Ok(()) => runtime_proxy_log_to_path(
+            match store.save_merged_to_path(&path) {
+                Ok(merged) => runtime_proxy_log_to_path(
                     &log_path,
                     &runtime_proxy_structured_log_message(
                         "smart_context_artifact_save_ok",
@@ -959,6 +960,10 @@ pub(crate) fn runtime_smart_context_artifact_save_worker_loop(
                             runtime_proxy_log_field(
                                 "lag_ms",
                                 queued_at.elapsed().as_millis().to_string(),
+                            ),
+                            runtime_proxy_log_field(
+                                "artifacts",
+                                merged.artifact_count().to_string(),
                             ),
                         ],
                     ),

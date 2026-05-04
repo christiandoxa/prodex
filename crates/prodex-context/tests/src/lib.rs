@@ -1,5 +1,15 @@
 use super::*;
 
+fn assert_no_critical_signal_loss(before: &str, after: &str) {
+    let check = critical_signal_self_check(before, after);
+    assert!(
+        check.passed(),
+        "lost critical signals: {:?}\ncompacted output:\n{}",
+        check.lost,
+        after
+    );
+}
+
 #[test]
 fn plain_command_output_strips_ansi_and_keeps_head_tail() {
     let input =
@@ -384,6 +394,225 @@ fn git_diff_stat_output_detects_git_diff_and_keeps_totals() {
             .contains("stat totals: 2 files changed, 7 insertions(+), 5 deletions(-)")
     );
     assert!(report.output.contains("src/lib.rs | 10 +++++-----"));
+}
+
+#[test]
+fn typescript_node_diagnostics_preserve_errors_locations_tests_and_exit_code() {
+    let input = "\
+> web@1.0.0 test /repo
+> tsc --noEmit && jest --runInBand
+src/index.ts(12,7): error TS2322: Type 'string' is not assignable to type 'number'.
+src/service.ts:44:13 - error TS2345: Argument of type 'undefined' is not assignable.
+FAIL tests/service.test.ts
+  service
+    rejects bad input
+
+TypeError: Cannot read properties of undefined (reading 'id')
+    at buildUser (/repo/src/service.ts:44:13)
+    at Object.<anonymous> (/repo/tests/service.test.ts:9:5)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 4 passed, 5 total
+Command failed with exit code 1
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 90,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("error TS2322"));
+    assert!(report.output.contains("src/index.ts(12,7)"));
+    assert!(report.output.contains("src/service.ts:44:13"));
+    assert!(report.output.contains("FAIL tests/service.test.ts"));
+    assert!(report.output.contains("TypeError: Cannot read properties"));
+    assert!(report.output.contains("Command failed with exit code 1"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn python_traceback_preserves_pytest_failure_exception_locations_and_exit_code() {
+    let input = "\
+============================= test session starts =============================
+collected 3 items
+
+tests/test_math.py::test_add PASSED
+tests/test_math.py::test_divide FAILED
+tests/test_api.py::test_timeout PASSED
+
+================================== FAILURES ===================================
+_______________________________ test_divide ________________________________
+Traceback (most recent call last):
+  File \"/repo/tests/test_math.py\", line 12, in test_divide
+    divide(1, 0)
+  File \"/repo/src/math_utils.py\", line 5, in divide
+    return a / b
+ZeroDivisionError: division by zero
+
+FAILED tests/test_math.py::test_divide - ZeroDivisionError: division by zero
+=========================== 1 failed, 2 passed in 0.12s ===========================
+process finished with exit code 1
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 90,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("Traceback (most recent call last):"));
+    assert!(
+        report
+            .output
+            .contains("File \"/repo/tests/test_math.py\", line 12")
+    );
+    assert!(
+        report
+            .output
+            .contains("ZeroDivisionError: division by zero")
+    );
+    assert!(
+        report
+            .output
+            .contains("FAILED tests/test_math.py::test_divide")
+    );
+    assert!(report.output.contains("exit code 1"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn generic_test_failure_preserves_failed_names_assertion_location_and_exit_status() {
+    let input = "\
+[runner] start
+FAIL integration/login.spec
+  case: rejects locked user
+AssertionError: expected 403 but got 200
+    at integration/login.spec:33:11
+FAILED smoke::cli_can_report_status
+Tests: 2 failed, 8 passed, 10 total
+process exited with exit status 1
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 70,
+            max_line_chars: 180,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("FAIL integration/login.spec"));
+    assert!(report.output.contains("AssertionError: expected 403"));
+    assert!(report.output.contains("integration/login.spec:33:11"));
+    assert!(
+        report
+            .output
+            .contains("FAILED smoke::cli_can_report_status")
+    );
+    assert!(report.output.contains("exit status 1"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn git_log_stat_output_summarizes_commits_and_stat_files() {
+    let input = "\
+commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Author: Dev <dev@example.com>
+Date:   Mon May 4 10:00:00 2026 +0700
+
+    add diagnostics compaction
+
+ crates/prodex-context/src/lib.rs       | 120 +++++++++++++++++++++++++
+ crates/prodex-context/tests/src/lib.rs |  80 ++++++++++++++++
+ 2 files changed, 200 insertions(+)
+
+commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+Author: Dev <dev@example.com>
+Date:   Mon May 4 09:00:00 2026 +0700
+
+    tune docs
+
+ README.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 50,
+            max_path_entries: 8,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::GitLog);
+    assert!(
+        report
+            .output
+            .contains("git log --stat summary: 2 commits, 3 stat file entries")
+    );
+    assert!(report.output.contains("commit: commit aaaaaaaaa"));
+    assert!(
+        report
+            .output
+            .contains("subject: add diagnostics compaction")
+    );
+    assert!(report.output.contains("2 files changed, 200 insertions(+)"));
+    assert!(report.output.contains("README.md | 2 +-"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn noisy_success_output_summarizes_success_spam_without_losing_key_summary() {
+    let input = "\
+PASS tests/unit_0.test.ts
+PASS tests/unit_1.test.ts
+PASS tests/unit_2.test.ts
+PASS tests/unit_3.test.ts
+PASS tests/unit_4.test.ts
+PASS tests/unit_5.test.ts
+PASS tests/unit_6.test.ts
+PASS tests/unit_7.test.ts
+PASS tests/unit_8.test.ts
+PASS tests/unit_9.test.ts
+Test Suites: 10 passed, 10 total
+Tests:       120 passed, 120 total
+Snapshots:   0 total
+Time:        4.12 s
+Ran all test suites.
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 20,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::NoisySuccess);
+    assert!(report.output.contains("success output summary"));
+    assert!(report.output.contains("passed_suites=10"));
+    assert!(report.output.contains("Test Suites: 10 passed, 10 total"));
+    assert!(report.output.contains("Tests:       120 passed, 120 total"));
+    assert!(!report.output.contains("PASS tests/unit_0.test.ts"));
+    assert_no_critical_signal_loss(input, &report.output);
 }
 
 #[test]

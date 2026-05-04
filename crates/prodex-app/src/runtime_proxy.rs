@@ -59,7 +59,8 @@ pub(crate) use self::selection::*;
 pub(crate) use self::selection_plan::*;
 use self::smart_context::*;
 pub(crate) use self::smart_context::{
-    observe_runtime_smart_context_token_usage, register_runtime_smart_context_proxy_state,
+    observe_runtime_smart_context_token_usage, prepare_runtime_smart_context_http_body,
+    register_runtime_smart_context_proxy_state,
 };
 pub(crate) use self::standard::*;
 pub(super) use self::transport_failure::*;

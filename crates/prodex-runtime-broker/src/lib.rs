@@ -1042,6 +1042,7 @@ pub struct RuntimeBrokerSpawnConfig<'a> {
     pub include_code_review: bool,
     pub upstream_no_proxy: bool,
     pub smart_context_enabled: bool,
+    pub model_context_window_tokens: Option<u64>,
     pub broker_key: &'a str,
     pub instance_token: &'a str,
     pub admin_token: &'a str,
@@ -1071,6 +1072,10 @@ pub fn runtime_broker_process_args(config: RuntimeBrokerSpawnConfig<'_>) -> Vec<
     }
     if config.smart_context_enabled {
         args.push(OsString::from("--smart-context"));
+        if let Some(model_context_window_tokens) = config.model_context_window_tokens {
+            args.push(OsString::from("--model-context-window-tokens"));
+            args.push(OsString::from(model_context_window_tokens.to_string()));
+        }
     }
     args.extend([
         OsString::from("--broker-key"),
@@ -1140,14 +1145,19 @@ pub fn runtime_broker_key_for_binary_identity(
     include_code_review: bool,
     upstream_no_proxy: bool,
     smart_context_enabled: bool,
+    model_context_window_tokens: Option<u64>,
     openai_mount_path: &str,
     binary_identity_key: &str,
 ) -> String {
     let mut hasher = DefaultHasher::new();
+    let model_context_window_tokens = smart_context_enabled
+        .then_some(model_context_window_tokens)
+        .flatten();
     upstream_base_url.hash(&mut hasher);
     include_code_review.hash(&mut hasher);
     upstream_no_proxy.hash(&mut hasher);
     smart_context_enabled.hash(&mut hasher);
+    model_context_window_tokens.hash(&mut hasher);
     openai_mount_path.hash(&mut hasher);
     binary_identity_key.hash(&mut hasher);
     format!("{:016x}", hasher.finish())

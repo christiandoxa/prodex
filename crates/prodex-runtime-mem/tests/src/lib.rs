@@ -1,4 +1,6 @@
 use super::*;
+use serde_json::Value;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 fn capsule(
@@ -181,4 +183,169 @@ fn selection_sorts_same_priority_by_relevance_recency_cost_then_id() {
             .collect::<Vec<_>>(),
         vec!["best", "newer", "a", "b", "c"]
     );
+}
+
+#[test]
+fn extract_mode_keeps_slim_and_full_behavior_and_accepts_super_slim() {
+    let (mem_mode, codex_args) =
+        runtime_mem_extract_mode(&[OsString::from("mem"), OsString::from("exec")]);
+    assert!(mem_mode);
+    assert_eq!(codex_args, vec![OsString::from("exec")]);
+
+    let (mem_mode, codex_args) =
+        runtime_mem_extract_mode_with_detail(&[OsString::from("mem-full"), OsString::from("exec")]);
+    assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
+    assert_eq!(codex_args, vec![OsString::from("exec")]);
+
+    let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&[
+        OsString::from("mem"),
+        OsString::from("--mem-full"),
+        OsString::from("exec"),
+    ]);
+    assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
+    assert_eq!(codex_args, vec![OsString::from("exec")]);
+
+    let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&[
+        OsString::from("mem-super-slim"),
+        OsString::from("exec"),
+    ]);
+    assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
+    assert_eq!(codex_args, vec![OsString::from("exec")]);
+
+    let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&[
+        OsString::from("mem"),
+        OsString::from("--mem-super-slim"),
+        OsString::from("exec"),
+    ]);
+    assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
+    assert_eq!(codex_args, vec![OsString::from("exec")]);
+
+    let (mem_mode, codex_args) =
+        runtime_mem_extract_mode(&[OsString::from("exec"), OsString::from("mem")]);
+    assert!(!mem_mode);
+    assert_eq!(
+        codex_args,
+        vec![OsString::from("exec"), OsString::from("mem")]
+    );
+}
+
+#[test]
+fn slim_and_full_schema_outputs_stay_unchanged() {
+    let slim = runtime_mem_default_codex_schema().to_string();
+    assert!(slim.contains("0.4-slim"));
+    assert!(slim.contains("\"prompt\":\"payload.message\""));
+    assert!(slim.contains("output omitted"));
+    assert!(!slim.contains("\"toolResponse\":\"payload.output\""));
+
+    let full = runtime_mem_full_codex_schema().to_string();
+    assert!(full.contains("Full schema"));
+    assert!(full.contains("\"prompt\":\"payload.message\""));
+    assert!(full.contains("\"toolResponse\":\"payload.output\""));
+    assert!(full.contains("\"message\":\"payload.message\""));
+}
+
+#[test]
+fn super_slim_schema_prefers_prompt_summary_or_refs_and_omits_large_prompt_body() {
+    let large_prompt = "repeat ".repeat(8_000);
+    let slim_prompt = resolve_schema_user_prompt(
+        &runtime_mem_default_codex_schema(),
+        &serde_json::json!({
+            "payload": {
+                "type": "user_message",
+                "message": large_prompt
+            }
+        }),
+    )
+    .expect("slim prompt should resolve");
+    let super_slim_schema = runtime_mem_super_slim_codex_schema();
+    let super_slim_prompt = resolve_schema_user_prompt(
+        &super_slim_schema,
+        &serde_json::json!({
+            "payload": {
+                "type": "user_message",
+                "message": large_prompt
+            }
+        }),
+    )
+    .expect("super-slim prompt should resolve");
+
+    assert_eq!(slim_prompt, large_prompt);
+    assert_eq!(
+        super_slim_prompt,
+        "user prompt recorded by prodex super-slim mem; content omitted"
+    );
+    assert!(super_slim_prompt.len() < slim_prompt.len() / 100);
+
+    let summarized = resolve_schema_user_prompt(
+        &super_slim_schema,
+        &serde_json::json!({
+            "payload": {
+                "type": "user_message",
+                "message": large_prompt,
+                "metadata": {
+                    "prompt_summary": "Task summary and artifact prodex://artifact/prompt-1"
+                }
+            }
+        }),
+    )
+    .expect("super-slim summary prompt should resolve");
+    assert_eq!(
+        summarized,
+        "Task summary and artifact prodex://artifact/prompt-1"
+    );
+
+    let prompt_field = schema_user_prompt_field(&super_slim_schema)
+        .expect("super-slim schema should define prompt field")
+        .to_string();
+    assert!(!prompt_field.contains("payload.message"));
+    assert!(prompt_field.contains("metadata.prompt_summary"));
+    assert!(prompt_field.contains("artifact"));
+}
+
+fn schema_user_prompt_field(schema: &Value) -> Option<&Value> {
+    schema
+        .get("events")?
+        .as_array()?
+        .iter()
+        .find(|event| event.get("name").and_then(Value::as_str) == Some("user-message"))?
+        .get("fields")?
+        .get("prompt")
+}
+
+fn resolve_schema_user_prompt(schema: &Value, entry: &Value) -> Option<String> {
+    let field = schema_user_prompt_field(schema)?;
+    resolve_test_field(field, entry).and_then(|value| match value {
+        Value::String(value) => Some(value),
+        _ => None,
+    })
+}
+
+fn resolve_test_field(spec: &Value, entry: &Value) -> Option<Value> {
+    if let Some(path) = spec.as_str() {
+        return lookup_test_path(entry, path).cloned();
+    }
+    if let Some(value) = spec.get("value") {
+        return Some(value.clone());
+    }
+    if let Some(path) = spec.get("path").and_then(Value::as_str) {
+        return lookup_test_path(entry, path).cloned();
+    }
+    if let Some(coalesce) = spec.get("coalesce").and_then(Value::as_array) {
+        for candidate in coalesce {
+            if let Some(value) = resolve_test_field(candidate, entry) {
+                if !value.as_str().is_some_and(str::is_empty) {
+                    return Some(value);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn lookup_test_path<'a>(entry: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut current = entry;
+    for part in path.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current)
 }

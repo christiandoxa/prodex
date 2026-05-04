@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime as TokioRuntime;
 
@@ -79,6 +79,10 @@ const RUNTIME_SMART_CONTEXT_MAX_ARTIFACTS: usize = 128;
 const RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 
+static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
+    Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
+> = OnceLock::new();
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RuntimeSmartContextArtifact {
     pub(crate) id: String,
@@ -107,13 +111,31 @@ impl RuntimeSmartContextArtifactStore {
         store
     }
 
+    #[cfg(test)]
     pub(crate) fn save_to_path(&self, path: &Path) -> anyhow::Result<()> {
-        if let Some(parent) = path.parent() {
+        self.save_merged_to_path(path).map(|_| ())
+    }
+
+    pub(crate) fn save_merged_to_path(&self, path: &Path) -> anyhow::Result<Self> {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             fs::create_dir_all(parent)?;
         }
-        let raw = serde_json::to_vec(self)?;
-        fs::write(path, raw)?;
-        Ok(())
+        let process_lock = runtime_smart_context_artifact_process_lock(path);
+        let _process_guard = process_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _lock = crate::runtime_store::acquire_json_file_lock(path)?;
+        let mut merged = Self::load_from_path(path);
+        merged.merge_from(self);
+        merged.write_to_path_unlocked(path)?;
+        Ok(merged)
+    }
+
+    pub(crate) fn artifact_count(&self) -> usize {
+        self.artifacts.len()
     }
 
     pub(crate) fn insert_text(
@@ -163,6 +185,32 @@ impl RuntimeSmartContextArtifactStore {
         self.artifacts.contains_key(id)
     }
 
+    fn merge_from(&mut self, incoming: &Self) {
+        for (id, incoming_artifact) in &incoming.artifacts {
+            self.artifacts
+                .entry(id.clone())
+                .and_modify(|current| {
+                    if incoming_artifact.sequence >= current.sequence {
+                        *current = incoming_artifact.clone();
+                    }
+                })
+                .or_insert_with(|| incoming_artifact.clone());
+        }
+        self.recompute_total_bytes();
+        self.enforce_limits();
+    }
+
+    fn write_to_path_unlocked(&self, path: &Path) -> anyhow::Result<()> {
+        let raw = serde_json::to_vec(self)?;
+        let temp_path = crate::runtime_store::unique_state_temp_file_path(path);
+        fs::write(&temp_path, raw)?;
+        if let Err(err) = fs::rename(&temp_path, path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(err.into());
+        }
+        Ok(())
+    }
+
     fn recompute_total_bytes(&mut self) {
         self.total_bytes = self
             .artifacts
@@ -187,6 +235,102 @@ impl RuntimeSmartContextArtifactStore {
                 self.total_bytes = self.total_bytes.saturating_sub(removed.byte_len);
             }
         }
+    }
+}
+
+fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {
+    let locks =
+        RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut locks = locks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Arc::clone(
+        locks
+            .entry(path.to_path_buf())
+            .or_insert_with(|| Arc::new(Mutex::new(()))),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn runtime_smart_context_artifact_save_merges_existing_file() {
+        let path = smart_context_artifact_temp_path("merge-save");
+        remove_smart_context_artifact_temp_files(&path);
+
+        let mut first = RuntimeSmartContextArtifactStore::default();
+        let alpha = first.insert_text(1, "alpha").expect("alpha artifact");
+        first.save_to_path(&path).expect("first store saved");
+
+        let mut second = RuntimeSmartContextArtifactStore::default();
+        let beta = second.insert_text(2, "beta").expect("beta artifact");
+        second.save_to_path(&path).expect("second store saved");
+
+        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
+        assert_eq!(loaded.artifact_count(), 2);
+        assert_eq!(loaded.get_text(&alpha.id).as_deref(), Some("alpha"));
+        assert_eq!(loaded.get_text(&beta.id).as_deref(), Some("beta"));
+
+        remove_smart_context_artifact_temp_files(&path);
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_concurrent_saves_keep_all_artifacts() {
+        let path = Arc::new(smart_context_artifact_temp_path("concurrent-merge-save"));
+        remove_smart_context_artifact_temp_files(path.as_ref());
+        let thread_count = 8;
+        let barrier = Arc::new(Barrier::new(thread_count));
+
+        let handles = (0..thread_count)
+            .map(|index| {
+                let path = Arc::clone(&path);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    let text = format!("artifact-{index}");
+                    let mut store = RuntimeSmartContextArtifactStore::default();
+                    let artifact = store
+                        .insert_text(index as u64 + 1, &text)
+                        .expect("artifact inserted");
+                    barrier.wait();
+                    store.save_to_path(path.as_ref()).expect("store saved");
+                    (artifact.id, text)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let expected = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("save thread joined"))
+            .collect::<Vec<_>>();
+
+        let loaded = RuntimeSmartContextArtifactStore::load_from_path(path.as_ref());
+        assert_eq!(loaded.artifact_count(), thread_count);
+        for (id, text) in expected {
+            assert_eq!(loaded.get_text(&id).as_deref(), Some(text.as_str()));
+        }
+
+        remove_smart_context_artifact_temp_files(path.as_ref());
+    }
+
+    fn smart_context_artifact_temp_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "prodex-app-smart-context-artifacts-{name}-{}-{nanos}.json",
+            std::process::id()
+        ))
+    }
+
+    fn remove_smart_context_artifact_temp_files(path: &Path) {
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(crate::runtime_store::json_lock_file_path(path));
     }
 }
 
