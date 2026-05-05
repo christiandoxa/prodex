@@ -1784,6 +1784,8 @@ fn smart_context_golden_prodex_traces() -> Vec<SmartContextGoldenProdexTrace> {
     vec![
         smart_context_golden_prodex_s_trace(),
         smart_context_golden_prodex_super_trace(),
+        smart_context_golden_prodex_s_runtime_stall_trace(),
+        smart_context_golden_prodex_super_quota_trace(),
     ]
 }
 
@@ -1882,6 +1884,134 @@ fn smart_context_golden_prodex_super_trace() -> SmartContextGoldenProdexTrace {
         rehydrate_refs: vec!["psc:prodex-super-runtime#L31-L44"],
         max_after_token_ratio_percent: 15,
         min_saved_tokens: 12_000,
+    }
+}
+
+fn smart_context_golden_prodex_s_runtime_stall_trace() -> SmartContextGoldenProdexTrace {
+    let static_context = format!(
+        "Prodex S runtime stall triage context.\n{}\nInspect runtime logs before changing proxy selection behavior.",
+        "Preserve previous_response_id affinity, x-codex-turn-state affinity, session_id compact affinity, and terminal silence. ".repeat(240)
+    );
+    let static_summary =
+        "Prodex S stall context stored as artifact. Preserve affinity and inspect runtime logs first."
+            .to_string();
+    let critical_block = [
+        "$ prodex doctor --runtime --json",
+        r#"{"log_path":"/tmp/prodex-runtime-20260505-031455.log","latest_pointer":"/tmp/prodex-runtime-latest.path","profile_count":6}"#,
+        "$ tail -n 160 /tmp/prodex-runtime-20260505-031455.log",
+        "2026-05-05T03:14:58.102Z INFO route=responses profile=s-east request_id=req_s_7a1 first_upstream_chunk elapsed_ms=821",
+        "2026-05-05T03:14:59.447Z WARN runtime_proxy_lane_limit_reached lane=responses active=8 limit=8 request_id=req_s_7a2",
+        "2026-05-05T03:14:59.450Z WARN profile_transport_backoff profile=s-east route=responses ttl_ms=1500 error=stream_read_error",
+        "2026-05-05T03:15:01.036Z ERROR stream_read_error route=responses profile=s-east request_id=req_s_7a1 error=connection reset before first_local_chunk",
+        "critical: no first_local_chunk emitted for req_s_7a1",
+        "artifact psc:prodex-s-runtime-stall#L88-L104 should be rehydrated before editing selection",
+        "artifact psc:prodex-s-runtime-stall#L88-L104 referenced again by failing terminal transcript",
+        "terminal transcript: /home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/src/selection.rs:392:21 still pending",
+        "test failure: runtime_proxy_stall_preserves_affinity panicked at crates/prodex-runtime-proxy/tests/src/smart_context.rs:2044:9",
+    ]
+    .join("\n");
+    let tool_output = format!(
+        "{critical_block}\n{}",
+        (0..360)
+            .map(|index| format!(
+                "2026-05-05T03:{:02}:{:02}.{:03}Z DEBUG pid={} cwd=/home/doxa/IdeaProjects/prodex cmd='cargo test -q -p prodex-runtime-proxy runtime_proxy_ -- --test-threads=1' target/debug/deps/prodex_runtime_proxy-{} lane=responses route=responses poll={} path=crates/prodex-runtime-proxy/src/runtime_proxy.rs:{}",
+                15 + (index / 60),
+                index % 60,
+                (index * 17) % 1000,
+                42000 + index,
+                index % 17,
+                index,
+                310 + (index % 90)
+            ))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    SmartContextGoldenProdexTrace {
+        name: "prodex-s-runtime-stall-real-trace",
+        model: "gpt-5",
+        call_id: "call-prodex-s-runtime-stall",
+        static_artifact_id: "sc:prodex-s-runtime-stall-static-context",
+        tool_artifact_id: "sc:prodex-s-runtime-stall",
+        user_request: "Investigate the Prodex S stall. Keep psc:prodex-s-runtime-stall#L88-L104 and psc:prodex-s-runtime-stall#L88-L104 available for exact rehydrate if selection logic is touched.".to_string(),
+        static_context,
+        static_summary,
+        tool_output,
+        tool_summary: critical_block,
+        critical_signals: vec![
+            "runtime_proxy_lane_limit_reached lane=responses active=8 limit=8",
+            "profile_transport_backoff profile=s-east route=responses",
+            "stream_read_error route=responses profile=s-east",
+            "critical: no first_local_chunk emitted for req_s_7a1",
+            "/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/src/selection.rs:392:21",
+            "runtime_proxy_stall_preserves_affinity",
+        ],
+        rehydrate_refs: vec!["psc:prodex-s-runtime-stall#L88-L104"],
+        max_after_token_ratio_percent: 18,
+        min_saved_tokens: 8_000,
+    }
+}
+
+fn smart_context_golden_prodex_super_quota_trace() -> SmartContextGoldenProdexTrace {
+    let static_context = format!(
+        "Prodex Super quota and compaction trace context.\n{}\nGeneric 429 bodies must pass through unless an explicit quota code is present.",
+        "Remote compact may rotate only before commit, but hard session affinity and previous_response_id ownership must stay authoritative. ".repeat(420)
+    );
+    let static_summary =
+        "Prodex Super quota context stored as artifact. Preserve explicit quota classification and hard affinity."
+            .to_string();
+    let critical_block = [
+        "$ cargo test -q -p prodex-runtime-proxy smart_context -- --test-threads=1",
+        "---- runtime_proxy::compact_quota_real_trace stdout ----",
+        "request POST /responses/compact session_id=sess_super_492 previous_response_id=resp_super_abcd",
+        "selected profile=super-west route=compact affinity=session_id source=session_profile_bindings",
+        "HTTP/1.1 429 Too Many Requests",
+        r#"body={"error":{"type":"insufficient_quota","code":"insufficient_quota","message":"quota exceeded for account"}}"#,
+        "quota_classification=account_quota route=compact profile=super-west rotate_allowed=true committed=false",
+        "critical: generic_429_passthrough=false explicit_quota_code=true",
+        "artifact psc:prodex-super-quota#L41-L63 contains sanitized upstream response",
+        "artifact psc:prodex-super-quota#L41-L63 repeated in pytest-style failure footer",
+        "thread 'runtime_proxy::compact_quota_real_trace' panicked at crates/prodex-runtime-proxy/tests/src/smart_context.rs:2121:13",
+        "left: Synthetic429 right: UpstreamPassThrough at /home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/src/quota.rs:277:18",
+    ]
+    .join("\n");
+    let tool_output = format!(
+        "{critical_block}\n{}",
+        (0..640)
+            .map(|index| format!(
+                "running test case {:04}: profile=super-west session_id=sess_super_492 previous_response_id=resp_super_abcd artifact=psc:prodex-super-quota-noise#L{}-L{} file=/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/tests/fixtures/sanitized/compact_quota_{:04}.json stdout='poll compact retry {}' stderr='warning: unused retry budget sample'",
+                index,
+                200 + index,
+                201 + index,
+                index % 23,
+                index % 5
+            ))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    SmartContextGoldenProdexTrace {
+        name: "prodex-super-quota-real-trace",
+        model: "gpt-5.2",
+        call_id: "call-prodex-super-quota",
+        static_artifact_id: "sc:prodex-super-quota-static-context",
+        tool_artifact_id: "sc:prodex-super-quota",
+        user_request: "Debug Prodex Super compact quota behavior. Preserve psc:prodex-super-quota#L41-L63 and psc:prodex-super-quota#L41-L63 for exact rehydrate before changing 429 classification.".to_string(),
+        static_context,
+        static_summary,
+        tool_output,
+        tool_summary: critical_block,
+        critical_signals: vec![
+            "request POST /responses/compact session_id=sess_super_492 previous_response_id=resp_super_abcd",
+            "selected profile=super-west route=compact affinity=session_id source=session_profile_bindings",
+            r#""code":"insufficient_quota""#,
+            "quota_classification=account_quota route=compact profile=super-west",
+            "critical: generic_429_passthrough=false explicit_quota_code=true",
+            "/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/src/quota.rs:277:18",
+        ],
+        rehydrate_refs: vec!["psc:prodex-super-quota#L41-L63"],
+        max_after_token_ratio_percent: 12,
+        min_saved_tokens: 18_000,
     }
 }
 

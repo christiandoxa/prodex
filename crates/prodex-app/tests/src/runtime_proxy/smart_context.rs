@@ -668,8 +668,8 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
         tool_outputs_condensed: 1,
         ..RuntimeSmartContextTransformStats::default()
     };
-    let manifest_intent = RuntimeSmartContextIntentSignals {
-        intent_terms: vec!["manifest".to_string()],
+    let relevant_intent = RuntimeSmartContextIntentSignals {
+        command_kind_hints: BTreeSet::from(["test".to_string()]),
         ..RuntimeSmartContextIntentSignals::default()
     };
 
@@ -686,7 +686,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut first,
                 state,
                 &useful_stats,
-                &manifest_intent,
+                &relevant_intent,
             )
         );
         assert_eq!(first["input"].as_array().unwrap().len(), 2);
@@ -699,11 +699,14 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut unchanged,
                 state,
                 &useful_stats,
-                &manifest_intent,
+                &relevant_intent,
             )
         );
         assert_eq!(unchanged["input"].as_array().unwrap().len(), 1);
 
+        state.last_artifact_manifest_emitted_at = Some(
+            Instant::now() - Duration::from_millis(SMART_CONTEXT_ARTIFACT_MANIFEST_COOLDOWN_MS + 1),
+        );
         state
             .artifacts
             .insert_text(2, "second artifact\nerror: two")
@@ -716,10 +719,132 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut changed,
                 state,
                 &useful_stats,
-                &manifest_intent,
+                &relevant_intent,
             )
         );
         assert_eq!(changed["input"].as_array().unwrap().len(), 2);
+        let changed_manifest = changed["input"][1]["content"].as_str().unwrap();
+        assert!(!changed_manifest.contains("first artifact"));
+        assert!(changed_manifest.contains("unchanged=1"));
+        assert_eq!(changed_manifest.matches("psc:").count(), 1);
+    })
+    .unwrap();
+}
+
+#[test]
+fn smart_context_explicit_manifest_request_keeps_full_manifest() {
+    let shared = smart_context_test_shared("manifest-delta-explicit-full");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let useful_stats = RuntimeSmartContextTransformStats {
+        tool_outputs_condensed: 1,
+        ..RuntimeSmartContextTransformStats::default()
+    };
+    let manifest_intent = RuntimeSmartContextIntentSignals {
+        intent_terms: vec!["manifest".to_string()],
+        ..RuntimeSmartContextIntentSignals::default()
+    };
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        state.artifacts.insert_text(1, "first artifact").unwrap();
+        let mut first = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "manifest"}]
+        });
+        assert!(
+            runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut first,
+                state,
+                &useful_stats,
+                &manifest_intent,
+            )
+        );
+
+        state.artifacts.insert_text(2, "second artifact").unwrap();
+        let mut second = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "manifest"}]
+        });
+        assert!(
+            runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut second,
+                state,
+                &useful_stats,
+                &manifest_intent,
+            )
+        );
+        let manifest = second["input"][1]["content"].as_str().unwrap();
+        assert!(manifest.contains("unchanged=1"));
+        assert_eq!(manifest.matches("psc:").count(), 2);
+    })
+    .unwrap();
+}
+
+#[test]
+fn smart_context_manifest_delta_suppressed_for_resolved_explicit_ref() {
+    let shared = smart_context_test_shared("manifest-delta-explicit-ref");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let useful_stats = RuntimeSmartContextTransformStats {
+        tool_outputs_condensed: 1,
+        ..RuntimeSmartContextTransformStats::default()
+    };
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        let artifact = state.artifacts.insert_text(1, "first artifact").unwrap();
+        let reference = runtime_smart_context_artifact_ref(&artifact.id);
+        let intent = RuntimeSmartContextIntentSignals {
+            artifact_refs: vec![RuntimeSmartContextArtifactReference {
+                id: artifact.id.clone(),
+                marker: reference.clone(),
+                line_range: None,
+            }],
+            intent_terms: vec![artifact.id.clone()],
+            command_kind_hints: BTreeSet::from(["test".to_string()]),
+            ..RuntimeSmartContextIntentSignals::default()
+        };
+        let mut value = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": format!("inspect {reference}")}]
+        });
+        assert!(!runtime_smart_context_append_artifact_manifest_delta_if_useful(
+            &mut value,
+            state,
+            &useful_stats,
+            &intent,
+        ));
+        assert_eq!(value["input"].as_array().unwrap().len(), 1);
+    })
+    .unwrap();
+}
+
+#[test]
+fn smart_context_manifest_delta_kept_for_missing_explicit_ref() {
+    let shared = smart_context_test_shared("manifest-delta-missing-ref");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let useful_stats = RuntimeSmartContextTransformStats {
+        tool_outputs_condensed: 1,
+        ..RuntimeSmartContextTransformStats::default()
+    };
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        state.artifacts.insert_text(1, "first artifact").unwrap();
+        let intent = RuntimeSmartContextIntentSignals {
+            artifact_refs: vec![RuntimeSmartContextArtifactReference {
+                id: "sc:missing".to_string(),
+                marker: "psc:missing".to_string(),
+                line_range: None,
+            }],
+            command_kind_hints: BTreeSet::from(["test".to_string()]),
+            ..RuntimeSmartContextIntentSignals::default()
+        };
+        let mut value = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "inspect psc:missing"}]
+        });
+        assert!(
+            runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut value,
+                state,
+                &useful_stats,
+                &intent,
+            )
+        );
+        assert_eq!(value["input"].as_array().unwrap().len(), 2);
     })
     .unwrap();
 }
@@ -1022,6 +1147,60 @@ fn smart_context_generated_summary_dedupes_existing_alias_legend() {
     let output = value["input"][0]["output"].as_str().unwrap();
     assert_eq!(output.matches("psc a ").count(), 1);
     assert!(output.contains("@0#L1-L1"));
+}
+
+#[test]
+fn smart_context_generated_summary_keeps_stateful_artifact_alias_stable() {
+    let shared = smart_context_test_shared("stable-artifact-alias");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let first_artifact = store
+        .insert_text(1, "line one\nline two\nline three\nline four")
+        .unwrap();
+    let second_artifact = store.insert_text(2, "alpha\nbeta\ngamma\ndelta").unwrap();
+    let first_refs = (1usize..=8)
+        .map(|line| {
+            runtime_smart_context_artifact_line_ref(&first_artifact.id, line.min(4), line.min(4))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let second_refs = (1usize..=8)
+        .map(|line| {
+            runtime_smart_context_artifact_line_ref(&second_artifact.id, line.min(4), line.min(4))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        let mut first = serde_json::json!({
+            "input": [{"type": "function_call_output", "output": format!("psc m refs-only\n{first_refs}")}]
+        });
+        assert!(runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
+            &mut first,
+            state,
+        ));
+        assert!(
+            first["input"][0]["output"]
+                .as_str()
+                .unwrap()
+                .contains("psc a @0=psc:")
+        );
+
+        let mut second = serde_json::json!({
+            "input": [{"type": "function_call_output", "output": format!("psc m refs-only\n{second_refs}\n{first_refs}")}]
+        });
+        assert!(runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
+            &mut second,
+            state,
+        ));
+        let output = second["input"][0]["output"].as_str().unwrap();
+        assert!(output.contains(&format!(
+            "@0={}",
+            runtime_smart_context_artifact_ref(&first_artifact.id)
+        )));
+        assert!(output.contains("@0#L1-L1"));
+    })
+    .unwrap();
 }
 
 #[test]
@@ -1919,6 +2098,144 @@ fn smart_context_static_context_chunk_dedupe_replaces_repeated_chunk_only() {
     assert!(system_after.contains(SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX));
     assert!(!system_after.contains(&shared_chunk));
     assert_eq!(stats.static_context_deltas, 1);
+}
+
+#[test]
+fn smart_context_static_context_section_dedupe_replaces_later_identical_heading_section() {
+    let body = (0..80)
+        .map(|index| format!("Shared section rule {index} remains exact."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let repeated_section = format!("## Runtime Proxy\n{body}\n");
+    assert!(repeated_section.len() >= SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES);
+    let instructions = format!(
+        "# One\nunique intro\n\n{repeated_section}\n## Other\nunique tail\n\n{repeated_section}"
+    );
+    let sections = runtime_smart_context_static_context_heading_sections(&instructions);
+    assert_eq!(sections.len(), 2);
+    assert_eq!(
+        instructions[sections[0].start..sections[0].end].trim(),
+        instructions[sections[1].start..sections[1].end].trim()
+    );
+    let mut value = serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [
+            {"role": "user", "content": "do work"}
+        ]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_apply_static_context_section_dedupe(
+        &mut value,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &mut stats,
+    );
+
+    let after = value["instructions"].as_str().unwrap();
+    assert!(after.contains(SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX));
+    assert_eq!(after.matches("## Runtime Proxy").count(), 2);
+    assert_eq!(
+        after
+            .matches("Shared section rule 79 remains exact.")
+            .count(),
+        1
+    );
+    assert!(after.contains("## Other"));
+    assert_eq!(stats.static_context_deltas, 1);
+}
+
+#[test]
+fn smart_context_static_context_section_dedupe_respects_require_exact() {
+    let body = (0..80)
+        .map(|index| format!("Shared exact section rule {index}."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let instructions = format!("## Same\n{body}\n## Same\n{body}");
+    let mut value = serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [
+            {"role": "user", "content": "do work"}
+        ]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_apply_static_context_section_dedupe(
+        &mut value,
+        &runtime_proxy_crate::SmartContextExactnessGuard {
+            decision: runtime_proxy_crate::SmartContextExactnessDecision::RequireExact,
+            reasons: Vec::new(),
+        },
+        &mut stats,
+    );
+
+    assert_eq!(value["instructions"].as_str(), Some(instructions.as_str()));
+    assert_eq!(stats.static_context_deltas, 0);
+}
+
+#[test]
+fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
+    let shared = smart_context_test_shared("rewrite-telemetry");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let budget = runtime_smart_context_budget(
+        &shared,
+        br#"{"input":"test"}"#,
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        Some("main"),
+        runtime_proxy_crate::SmartContextExactnessGuard {
+            decision: runtime_proxy_crate::SmartContextExactnessDecision::Allow,
+            reasons: Vec::new(),
+        },
+        Vec::new(),
+        false,
+    );
+
+    for index in 0..(SMART_CONTEXT_REWRITE_TELEMETRY_HISTORY_LIMIT + 2) {
+        runtime_smart_context_log(
+            index as u64,
+            &shared,
+            RuntimeRouteKind::Responses,
+            RuntimeSmartContextTransport::Http,
+            "minimal",
+            "self_check_passthrough",
+            "-",
+            400 + index,
+            300,
+            RuntimeSmartContextTransformStats::default(),
+            &budget,
+            "critical_signal_loss",
+        );
+    }
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        assert_eq!(
+            state.rewrite_telemetry_history.len(),
+            SMART_CONTEXT_REWRITE_TELEMETRY_HISTORY_LIMIT
+        );
+        let first = state.rewrite_telemetry_history.first().unwrap();
+        assert_eq!(first.body_bytes_before, 402);
+        let last = state.rewrite_telemetry_history.last().unwrap();
+        assert_eq!(
+            last.estimated_tokens_before,
+            runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(
+                last.body_bytes_before
+            )
+        );
+        assert_eq!(last.rewrite_kind, "self_check_passthrough");
+        assert_eq!(last.status, "critical_signal_loss");
+        assert_eq!(
+            last.fallback_reason.as_deref(),
+            Some("critical_signal_loss")
+        );
+    })
+    .unwrap();
+
+    let log_text = std::fs::read_to_string(&shared.log_path).unwrap();
+    assert!(log_text.contains("estimated_tokens_before="));
+    assert!(log_text.contains("rewrite_kind=self_check_passthrough"));
+    assert!(log_text.contains("fallback_reason=critical_signal_loss"));
 }
 
 #[test]

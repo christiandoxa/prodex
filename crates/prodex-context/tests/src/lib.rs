@@ -2082,6 +2082,82 @@ ok  \tgithub.com/acme/prodex/pkg/foo\t0.123s
             .as_slice(),
             "=== RUN   TestAlpha",
         ),
+        (
+            "pnpm test --reporter=dot",
+            "\
+............................................................
+
+60 passed in 1.23s
+",
+            ["dot_progress=1", "passed_tests=1"].as_slice(),
+            "............................................................",
+        ),
+        (
+            "bun test",
+            "\
+bun test v1.2.0
+tests/math.test.ts:
+(pass) adds numbers [1.00ms]
+(pass) subtracts numbers [1.00ms]
+ 2 pass
+ 0 fail
+ 4 expect() calls
+Ran 2 tests across 1 files. [12.00ms]
+",
+            ["bun_test=8"].as_slice(),
+            "(pass) adds numbers",
+        ),
+        (
+            "uv run pytest -q",
+            "\
+........................................                              [100%]
+40 passed, 2 skipped in 0.42s
+",
+            ["pytest_progress=1", "passed_tests=1"].as_slice(),
+            "........................................",
+        ),
+        (
+            "cargo nextest run",
+            "\
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+------------
+ Nextest run ID 123
+    Starting 3 tests across 1 binary
+        PASS [   0.001s] prodex_context tests::alpha
+        PASS [   0.001s] prodex_context tests::beta
+        PASS [   0.001s] prodex_context tests::gamma
+------------
+     Summary [   0.010s] 3 tests run: 3 passed, 0 skipped
+",
+            ["finished=1", "nextest_pass=3", "nextest_summary=1"].as_slice(),
+            "prodex_context tests::alpha",
+        ),
+        (
+            "swift test",
+            "\
+Building for debugging...
+Build complete! (0.12s)
+Test Suite 'All tests' started at 2026-05-05 00:00:00.000
+Test Suite 'ProdexTests.xctest' passed at 2026-05-05 00:00:00.100.
+Test Case '-[ProdexTests testAlpha]' passed (0.001 seconds).
+Test Case '-[ProdexTests testBeta]' passed (0.001 seconds).
+Test Suite 'All tests' passed at 2026-05-05 00:00:00.101.
+Executed 2 tests, with 0 failures (0 unexpected) in 0.002 seconds
+",
+            ["swift_test=6"].as_slice(),
+            "testAlpha",
+        ),
+        (
+            "zig build test",
+            "\
+test
+└─ run test
+   └─ zig test Debug native 2 passed 0 skipped
+Build Summary: 3/3 steps succeeded; 2/2 tests passed
+",
+            ["zig_test=4"].as_slice(),
+            "zig test Debug native",
+        ),
     ];
 
     for (command, input, expected_labels, omitted_line) in cases {
@@ -2172,6 +2248,59 @@ Finished in 12ms on 42 files with 1 warning.
 === RUN   TestAlpha
 --- FAIL: TestAlpha (0.00s)
 FAIL
+",
+            Some(0),
+        ),
+        (
+            "pnpm test --reporter=dot",
+            "\
+..F.
+1 failed, 3 passed in 0.12s
+",
+            Some(0),
+        ),
+        (
+            "bun test",
+            "\
+bun test v1.2.0
+tests/math.test.ts:
+(fail) adds numbers [1.00ms]
+ 1 pass
+ 1 fail
+",
+            Some(0),
+        ),
+        (
+            "uv run pytest -q",
+            "\
+Traceback (most recent call last):
+  File \"tests/test_app.py\", line 1, in test_app
+AssertionError: boom
+",
+            Some(0),
+        ),
+        (
+            "cargo nextest run",
+            "\
+        FAIL [   0.001s] prodex_context tests::alpha
+     Summary [   0.010s] 1 test run: 0 passed, 1 failed
+",
+            Some(0),
+        ),
+        (
+            "swift test",
+            "\
+warning: 'prodex': found 1 file which is unhandled
+Test Suite 'All tests' passed at 2026-05-05 00:00:00.101.
+Executed 2 tests, with 0 failures (0 unexpected) in 0.002 seconds
+",
+            Some(0),
+        ),
+        (
+            "zig build test",
+            "\
+warning: unreachable code
+Build Summary: 3/3 steps succeeded; 2/2 tests passed
 ",
             Some(0),
         ),

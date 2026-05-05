@@ -2454,6 +2454,8 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
                 | "oxlint"
                 | "pytest"
                 | "py.test"
+                | "swift"
+                | "zig"
                 | "tsc"
                 | "vitest"
                 | "jest"
@@ -2518,8 +2520,20 @@ fn command_name_is_short_success_output_candidate(command: &str) -> bool {
             return true;
         }
         if command == "cargo"
-            && command_metadata_subcommand_after(&tokens, index)
-                .is_some_and(|subcommand| matches!(subcommand, "clippy" | "doc" | "fmt" | "fix"))
+            && command_metadata_subcommand_after(&tokens, index).is_some_and(|subcommand| {
+                matches!(subcommand, "clippy" | "doc" | "fmt" | "fix" | "nextest")
+            })
+        {
+            return true;
+        }
+        if matches!(command, "bun" | "swift" | "zig")
+            || command == "uv"
+                && command_metadata_subcommand_after(&tokens, index) == Some("run")
+                && tokens
+                    .iter()
+                    .skip(index + 2)
+                    .map(|token| command_metadata_token_command_name(token))
+                    .any(|token| matches!(token, "pytest" | "py.test"))
         {
             return true;
         }
@@ -2932,10 +2946,10 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("coverage")
     } else if is_junit_xml_success_line(trimmed, &lower) {
         Some("junit_xml")
+    } else if is_swift_test_success_line(&lower) {
+        Some("swift_test")
     } else if is_playwright_success_line(trimmed, &lower) {
         Some("playwright")
-    } else if is_cypress_success_line(trimmed, &lower) {
-        Some("cypress")
     } else if is_biome_success_summary_line(&lower) {
         Some("biome_summary")
     } else if is_oxlint_success_summary_line(&lower) {
@@ -2948,6 +2962,14 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("vite")
     } else if is_next_success_line(trimmed, &lower) {
         Some("next")
+    } else if is_dot_reporter_success_line(trimmed) {
+        Some("dot_progress")
+    } else if is_bun_test_success_line(trimmed, &lower) {
+        Some("bun_test")
+    } else if is_cypress_success_line(trimmed, &lower) {
+        Some("cypress")
+    } else if is_zig_test_success_line(&lower) {
+        Some("zig_test")
     } else if trimmed.starts_with("PASS ") {
         Some("passed_suites")
     } else if lower.starts_with("ok ") && lower.split_whitespace().count() >= 2 {
@@ -3102,6 +3124,64 @@ fn docker_compose_success_state(lower: &str) -> bool {
         || lower.contains(" created")
         || lower.contains(" done")
         || lower.contains(" pulled")
+}
+
+fn is_dot_reporter_success_line(trimmed: &str) -> bool {
+    trimmed.len() >= 4 && trimmed.chars().all(|ch| ch == '.')
+}
+
+fn is_bun_test_success_line(trimmed: &str, lower: &str) -> bool {
+    lower.starts_with("bun test v")
+        || lower.starts_with("(pass) ")
+        || lower.starts_with("ran ") && lower.contains(" tests across ") && lower.contains(" file")
+        || zero_count_summary_line(lower, "fail")
+        || is_count_word_line(lower, "pass")
+        || lower.contains(" expect() call")
+        || trimmed.ends_with(".test.ts:")
+        || trimmed.ends_with(".test.tsx:")
+        || trimmed.ends_with(".test.js:")
+        || trimmed.ends_with(".test.jsx:")
+}
+
+fn is_swift_test_success_line(lower: &str) -> bool {
+    lower.starts_with("build complete!")
+        || (lower.starts_with("test suite ") || lower.contains(" test suite "))
+            && lower.contains(" passed at ")
+        || (lower.starts_with("test case ") || lower.contains(" test case "))
+            && lower.contains(" passed (")
+        || lower.starts_with("executed ")
+            && lower.contains(" tests")
+            && lower.contains("with 0 failures")
+}
+
+fn is_zig_test_success_line(lower: &str) -> bool {
+    lower == "test"
+        || lower.starts_with("run test")
+        || lower.contains(" run test")
+        || lower.contains(" zig test ") && lower.contains(" passed")
+        || lower.contains(" steps succeeded")
+        || lower.contains(" tests passed")
+        || lower.starts_with("build summary:")
+            && lower.contains("succeeded")
+            && !has_nonzero_summary_count(lower, &["failed", "failures", "error", "errors"])
+}
+
+fn zero_count_summary_line(lower: &str, word: &str) -> bool {
+    lower.match_indices(word).any(|(index, matched)| {
+        count_after_word(lower, index + matched.len()).or_else(|| count_before_word(lower, index))
+            == Some(0)
+    })
+}
+
+fn is_count_word_line(lower: &str, expected_word: &str) -> bool {
+    let mut words = lower.split_whitespace();
+    let Some(count) = words.next() else {
+        return false;
+    };
+    let Some(word) = words.next() else {
+        return false;
+    };
+    words.next().is_none() && count.chars().all(|ch| ch.is_ascii_digit()) && word == expected_word
 }
 
 fn is_typescript_success_line(trimmed: &str, lower: &str) -> bool {
@@ -3391,7 +3471,9 @@ fn is_success_output_failure_signal_line(line: &str) -> bool {
         || lower.contains("build did not complete")
         || lower.starts_with("info: build failed")
         || lower.starts_with("failed:")
+        || lower.starts_with("fail:")
         || lower.starts_with("--- fail:")
+        || lower.starts_with("(fail) ")
         || lower.starts_with("failed tests:")
         || lower.starts_with("there were failing")
         || lower.starts_with("there were test failures")
@@ -3401,11 +3483,23 @@ fn is_success_output_failure_signal_line(line: &str) -> bool {
         || lower.contains("failed to compile")
         || lower.contains("failed to load")
         || lower.contains("failed with")
+        || is_nonzero_fail_count_line(&lower)
         || is_junit_xml_failure_line(line)
         || has_nonzero_summary_count(
             &lower,
             &["failed", "failures", "failing", "error", "errors"],
         )
+}
+
+fn is_nonzero_fail_count_line(lower: &str) -> bool {
+    lower.match_indices("fail").any(|(index, matched)| {
+        let count = count_after_word(lower, index + matched.len())
+            .or_else(|| count_before_word(lower, index));
+        count.is_some_and(|count| count > 0)
+            && lower
+                .split_whitespace()
+                .all(|word| word.chars().all(|ch| ch.is_ascii_digit()) || word == "fail")
+    })
 }
 
 fn is_success_output_warning_signal_line(line: &str) -> bool {

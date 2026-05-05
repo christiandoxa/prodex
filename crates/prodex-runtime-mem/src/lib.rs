@@ -60,10 +60,13 @@ const RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_NAME: &str = "tool";
 const RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_INPUT: &str = "tool call";
 const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD: &str = "p";
 const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER: &str = "ss:ref=prev";
+const RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD: &str = "@";
+const RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD: &str = "@p";
 const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "ss:omit";
 const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
 const RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED: &str = "ss:omit=tool";
+const RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS: usize = 12;
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 128;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 512;
@@ -603,7 +606,8 @@ fn runtime_mem_event_has_super_slim_v2_prompt_reference(event: &Value) -> bool {
         && ["s", "r", RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD]
             .iter()
             .any(|path| {
-                runtime_mem_lookup_json_path(event, path).is_some_and(runtime_mem_value_is_text)
+                runtime_mem_lookup_json_path(event, path)
+                    .is_some_and(runtime_mem_value_is_text_or_v2_intern_marker)
             })
 }
 
@@ -650,10 +654,22 @@ pub fn runtime_mem_super_slim_v2_shadow_codex_events<'a>(
     events: impl IntoIterator<Item = &'a Value>,
 ) -> Vec<Value> {
     let mut ref_dedupe_state = RuntimeMemSuperSlimV2ArtifactRefDedupeState::default();
+    let mut intern_state = RuntimeMemSuperSlimV2InternState::default();
     runtime_mem_super_slim_shadow_codex_events(events)
         .iter()
         .map(runtime_mem_super_slim_v2_shadow_from_v1_shadow)
         .map(|event| ref_dedupe_state.dedupe_consecutive_event_ref(event))
+        .map(|event| intern_state.compact_event(event))
+        .collect()
+}
+
+pub fn runtime_mem_super_slim_v2_expand_interned_events(
+    events: impl IntoIterator<Item = Value>,
+) -> Vec<Value> {
+    let mut intern_state = RuntimeMemSuperSlimV2InternState::default();
+    events
+        .into_iter()
+        .map(|event| intern_state.expand_event(event))
         .collect()
 }
 
@@ -1603,6 +1619,183 @@ impl RuntimeMemSuperSlimV2ArtifactRefDedupeState {
     }
 }
 
+#[derive(Debug, Default)]
+struct RuntimeMemSuperSlimV2InternState {
+    exact_values: HashMap<String, Vec<String>>,
+    prefix_values: HashMap<String, Vec<String>>,
+    previous_full_values: HashMap<String, Vec<String>>,
+}
+
+impl RuntimeMemSuperSlimV2InternState {
+    fn compact_event(&mut self, mut event: Value) -> Value {
+        let Some(event_type) = runtime_mem_lookup_json_path(&event, "t").and_then(Value::as_str)
+        else {
+            return event;
+        };
+
+        let fields: &[&str] = match event_type {
+            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE => &["i", "n", "c"],
+            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => &["i", "r"],
+            RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => &["r"],
+            _ => &[],
+        };
+        for field in fields {
+            self.compact_field(&mut event, field);
+        }
+        event
+    }
+
+    fn expand_event(&mut self, mut event: Value) -> Value {
+        let Some(event_type) = runtime_mem_lookup_json_path(&event, "t").and_then(Value::as_str)
+        else {
+            return event;
+        };
+
+        let fields: &[&str] = match event_type {
+            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE => &["i", "n", "c"],
+            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => &["i", "r"],
+            RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => &["r"],
+            _ => &[],
+        };
+        for field in fields {
+            self.expand_field(&mut event, field);
+        }
+        event
+    }
+
+    fn compact_field(&mut self, event: &mut Value, field: &str) {
+        let Some(value) = event.get(field).and_then(Value::as_str).map(str::to_string) else {
+            return;
+        };
+
+        let candidate = if field == "n" {
+            self.exact_marker(field, &value)
+        } else {
+            self.prefix_marker(field, &value)
+        };
+        if let Some(candidate) = candidate
+            && runtime_mem_json_value_len(&candidate) < runtime_mem_json_string_len(&value)
+        {
+            if let Some(object) = event.as_object_mut() {
+                object.insert(field.to_string(), candidate);
+            }
+            self.remember_resolved(field, &value);
+            return;
+        }
+
+        self.remember_resolved(field, &value);
+    }
+
+    fn expand_field(&mut self, event: &mut Value, field: &str) {
+        let Some(raw_value) = event.get(field).cloned() else {
+            return;
+        };
+        let Some(value) = self.resolve_marker(field, &raw_value) else {
+            if let Some(value) = raw_value.as_str() {
+                self.remember_resolved(field, value);
+            }
+            return;
+        };
+
+        if let Some(object) = event.as_object_mut() {
+            object.insert(field.to_string(), Value::String(value.clone()));
+        }
+        self.remember_resolved(field, &value);
+    }
+
+    fn exact_marker(&self, field: &str, value: &str) -> Option<Value> {
+        let index = self
+            .exact_values
+            .get(field)?
+            .iter()
+            .position(|candidate| candidate == value)?;
+        let mut marker = serde_json::Map::new();
+        marker.insert(
+            RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD.to_string(),
+            Value::from(index),
+        );
+        Some(Value::Object(marker))
+    }
+
+    fn prefix_marker(&self, field: &str, value: &str) -> Option<Value> {
+        let prefixes = self.prefix_values.get(field)?;
+        let (index, prefix) = prefixes
+            .iter()
+            .enumerate()
+            .filter(|(_, prefix)| value.starts_with(prefix.as_str()))
+            .max_by_key(|(_, prefix)| prefix.len())?;
+        let suffix = value.strip_prefix(prefix)?;
+        let mut marker = serde_json::Map::new();
+        marker.insert(
+            RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD.to_string(),
+            Value::Array(vec![Value::from(index), Value::String(suffix.to_string())]),
+        );
+        Some(Value::Object(marker))
+    }
+
+    fn resolve_marker(&self, field: &str, value: &Value) -> Option<String> {
+        if let Some(index) = value
+            .get(RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD)
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())
+        {
+            return self
+                .exact_values
+                .get(field)
+                .and_then(|values| values.get(index))
+                .cloned();
+        }
+
+        let marker = value
+            .get(RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD)
+            .and_then(Value::as_array)?;
+        let index = marker
+            .first()
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())?;
+        let suffix = marker.get(1).and_then(Value::as_str)?;
+        self.prefix_values
+            .get(field)
+            .and_then(|prefixes| prefixes.get(index))
+            .map(|prefix| format!("{prefix}{suffix}"))
+    }
+
+    fn remember_resolved(&mut self, field: &str, value: &str) {
+        self.remember_exact(field, value);
+        self.remember_prefixes(field, value);
+        self.previous_full_values
+            .entry(field.to_string())
+            .or_default()
+            .push(value.to_string());
+    }
+
+    fn remember_exact(&mut self, field: &str, value: &str) {
+        let values = self.exact_values.entry(field.to_string()).or_default();
+        if !values.iter().any(|candidate| candidate == value) {
+            values.push(value.to_string());
+        }
+    }
+
+    fn remember_prefixes(&mut self, field: &str, value: &str) {
+        let Some(previous_values) = self.previous_full_values.get(field) else {
+            return;
+        };
+        let learned = previous_values
+            .iter()
+            .filter_map(|previous| runtime_mem_common_char_prefix(previous, value))
+            .collect::<Vec<_>>();
+        if learned.is_empty() {
+            return;
+        }
+        let prefixes = self.prefix_values.entry(field.to_string()).or_default();
+        for prefix in learned {
+            if !prefixes.iter().any(|candidate| candidate == &prefix) {
+                prefixes.push(prefix);
+            }
+        }
+    }
+}
+
 fn runtime_mem_super_slim_v2_emitted_artifact_ref(event: &Value) -> Option<String> {
     let event_type = runtime_mem_lookup_json_path(event, "t")?.as_str()?;
     if !matches!(
@@ -1617,6 +1810,48 @@ fn runtime_mem_super_slim_v2_emitted_artifact_ref(event: &Value) -> Option<Strin
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn runtime_mem_common_char_prefix(left: &str, right: &str) -> Option<String> {
+    let mut prefix_len = 0usize;
+    for ((left_index, left_char), (right_index, right_char)) in
+        left.char_indices().zip(right.char_indices())
+    {
+        if left_char != right_char {
+            break;
+        }
+        prefix_len = left_index + left_char.len_utf8();
+        if left_index != right_index {
+            break;
+        }
+    }
+    if prefix_len < RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS {
+        return None;
+    }
+    Some(left[..prefix_len].to_string())
+}
+
+fn runtime_mem_json_string_len(value: &str) -> usize {
+    runtime_mem_json_value_len(&Value::String(value.to_string()))
+}
+
+fn runtime_mem_json_value_len(value: &Value) -> usize {
+    serde_json::to_string(value).map_or(usize::MAX, |value| value.len())
+}
+
+fn runtime_mem_value_is_text_or_v2_intern_marker(value: &Value) -> bool {
+    runtime_mem_value_is_text(value)
+        || value
+            .get(RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD)
+            .and_then(Value::as_u64)
+            .is_some()
+        || value
+            .get(RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD)
+            .and_then(Value::as_array)
+            .is_some_and(|marker| {
+                marker.first().and_then(Value::as_u64).is_some()
+                    && marker.get(1).and_then(Value::as_str).is_some()
+            })
 }
 
 fn runtime_mem_insert_super_slim_v2_tool_use_fields(
@@ -2574,6 +2809,179 @@ mod compact_v2_runtime_memory_tests {
         assert_eq!(
             resolve_v2_schema_string(&fields["toolInput"], &legacy).as_deref(),
             Some("cargo test -q")
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_interns_repeated_tool_names_when_smaller() {
+        let tool_name = "very_long_custom_repo_tool_name";
+        let events = [
+            serde_json::json!({
+                "payload": {
+                    "type": "custom_tool_call",
+                    "call_id": "call-tool-name-1",
+                    "name": tool_name,
+                    "action": "first action"
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "custom_tool_call",
+                    "call_id": "call-tool-name-2",
+                    "name": tool_name,
+                    "action": "second action"
+                }
+            }),
+        ];
+
+        let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+
+        assert_eq!(shadows[0]["n"].as_str(), Some(tool_name));
+        assert!(shadows[1]["n"].is_object());
+        assert!(
+            runtime_mem_json_value_len(&shadows[1]["n"]) < runtime_mem_json_string_len(tool_name)
+        );
+
+        let expanded = runtime_mem_super_slim_v2_expand_interned_events(shadows.clone());
+        let fields = v2_schema_fields("prodex-v2-tool-use");
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolName"], &expanded[1]).as_deref(),
+            Some(tool_name)
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_interns_command_and_repo_path_prefixes_when_smaller() {
+        let command_prefix = "cargo test -q -p prodex-runtime-mem ";
+        let repo_prefix = "/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-mem/src/";
+        let events = [
+            serde_json::json!({
+                "payload": {
+                    "type": "exec_command",
+                    "call_id": "call-cmd-a",
+                    "command": format!("{command_prefix}tests::alpha")
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "exec_command",
+                    "call_id": "call-cmd-b",
+                    "command": format!("{command_prefix}tests::beta")
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "exec_command",
+                    "call_id": "call-cmd-c",
+                    "command": format!("{command_prefix}tests::gamma")
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "user_message",
+                    "message": "first path ref",
+                    "metadata": {
+                        "artifact_ref": format!("{repo_prefix}lib.rs")
+                    }
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "user_message",
+                    "message": "second path ref",
+                    "metadata": {
+                        "artifact_ref": format!("{repo_prefix}tests.rs")
+                    }
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "user_message",
+                    "message": "third path ref",
+                    "metadata": {
+                        "artifact_ref": format!("{repo_prefix}schema.rs")
+                    }
+                }
+            }),
+        ];
+
+        let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+
+        assert!(shadows[2]["c"].is_object());
+        assert!(shadows[5]["r"].is_object());
+        let expanded = runtime_mem_super_slim_v2_expand_interned_events(shadows);
+        let tool_fields = v2_schema_fields("prodex-v2-tool-use");
+        let user_fields = v2_schema_fields("prodex-v2-user-message");
+        assert_eq!(
+            resolve_v2_schema_string(&tool_fields["toolInput"], &expanded[2]).as_deref(),
+            Some(format!("{command_prefix}tests::gamma").as_str())
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&user_fields["prompt"], &expanded[5]).as_deref(),
+            Some(format!("{repo_prefix}schema.rs").as_str())
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_interns_call_id_prefixes_when_smaller() {
+        let call_id_prefix = "call_01HF97R8Y9_prodex_runtime_mem_";
+        let events = [
+            serde_json::json!({
+                "payload": {
+                    "type": "function_call",
+                    "call_id": format!("{call_id_prefix}alpha"),
+                    "name": "search_repo"
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "function_call",
+                    "call_id": format!("{call_id_prefix}beta"),
+                    "name": "search_repo"
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "function_call",
+                    "call_id": format!("{call_id_prefix}gamma"),
+                    "name": "search_repo"
+                }
+            }),
+        ];
+
+        let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+
+        assert!(shadows[2]["i"].is_object());
+        let expanded = runtime_mem_super_slim_v2_expand_interned_events(shadows);
+        let fields = v2_schema_fields("prodex-v2-tool-use");
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolId"], &expanded[2]).as_deref(),
+            Some(format!("{call_id_prefix}gamma").as_str())
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_intern_expansion_preserves_legacy_explicit_events() {
+        let legacy = serde_json::json!({
+            "t": RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE,
+            "i": "call-legacy-explicit",
+            "n": "exec_command",
+            "c": "cargo test -q -p prodex-runtime-mem --lib"
+        });
+
+        let expanded = runtime_mem_super_slim_v2_expand_interned_events([legacy]);
+        let fields = v2_schema_fields("prodex-v2-tool-use");
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolId"], &expanded[0]).as_deref(),
+            Some("call-legacy-explicit")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolName"], &expanded[0]).as_deref(),
+            Some("exec_command")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolInput"], &expanded[0]).as_deref(),
+            Some("cargo test -q -p prodex-runtime-mem --lib")
         );
     }
 
