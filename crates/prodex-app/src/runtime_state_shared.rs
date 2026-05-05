@@ -4,6 +4,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
@@ -91,6 +92,7 @@ const RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS: usize = 64;
 const RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES: usize = 8;
 const RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES: usize = 32;
 const RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES: usize = 256;
+const RUNTIME_SMART_CONTEXT_REPO_MAP_PREWARM_SCHEMA_VERSION: u8 = 1;
 
 static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
     Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
@@ -236,19 +238,27 @@ pub(crate) struct RuntimeSmartContextArtifactManifestEntry {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct RuntimeSmartContextArtifactRepoMap {
+    #[serde(default)]
     pub(crate) complete: bool,
+    #[serde(default)]
     pub(crate) entries: Vec<RuntimeSmartContextArtifactRepoMapEntry>,
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct RuntimeSmartContextArtifactRepoMapEntry {
     pub(crate) kind: RuntimeSmartContextArtifactRepoMapEntryKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) module: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) symbol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) line: Option<usize>,
     pub(crate) artifact_id: String,
     pub(crate) sequence: u64,
@@ -257,12 +267,14 @@ pub(crate) struct RuntimeSmartContextArtifactRepoMapEntry {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum RuntimeSmartContextArtifactRepoMapEntryKind {
     Path,
     Module,
     Symbol,
     Test,
+    Error,
 }
 
 type RuntimeSmartContextArtifactRepoMapKey = (
@@ -270,7 +282,20 @@ type RuntimeSmartContextArtifactRepoMapKey = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeSmartContextArtifactProjectionKind {
+    Repo,
+    Symbol,
+}
+
+impl RuntimeSmartContextArtifactProjectionKind {
+    fn includes_paths(self) -> bool {
+        self == Self::Repo
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct RuntimeSmartContextArtifactStore {
@@ -280,6 +305,22 @@ pub(crate) struct RuntimeSmartContextArtifactStore {
     static_context_fingerprints: Vec<RuntimeSmartContextStaticFingerprintMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     static_context_prompt_cache_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    repo_map_prewarm: Option<RuntimeSmartContextArtifactProjectionPrewarm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    symbol_map_prewarm: Option<RuntimeSmartContextArtifactProjectionPrewarm>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RuntimeSmartContextArtifactProjectionPrewarm {
+    #[serde(default, skip_serializing_if = "runtime_smart_context_u8_is_zero")]
+    schema_version: u8,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    source_hash: String,
+    #[serde(default)]
+    limit: usize,
+    #[serde(default)]
+    projection: RuntimeSmartContextArtifactRepoMap,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -300,6 +341,7 @@ impl RuntimeSmartContextArtifactStore {
         store.validate_loaded_metadata();
         store.recompute_total_bytes();
         store.enforce_limits();
+        store.refresh_prewarmed_projections();
         store
     }
 
@@ -410,6 +452,28 @@ impl RuntimeSmartContextArtifactStore {
 
     #[allow(dead_code)]
     pub(crate) fn repo_map_projection(&self, limit: usize) -> RuntimeSmartContextArtifactRepoMap {
+        self.map_projection_from_prewarm_or_build(
+            limit,
+            self.repo_map_prewarm.as_ref(),
+            RuntimeSmartContextArtifactProjectionKind::Repo,
+        )
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn symbol_map_projection(&self, limit: usize) -> RuntimeSmartContextArtifactRepoMap {
+        self.map_projection_from_prewarm_or_build(
+            limit,
+            self.symbol_map_prewarm.as_ref(),
+            RuntimeSmartContextArtifactProjectionKind::Symbol,
+        )
+    }
+
+    fn map_projection_from_prewarm_or_build(
+        &self,
+        limit: usize,
+        prewarm: Option<&RuntimeSmartContextArtifactProjectionPrewarm>,
+        projection_kind: RuntimeSmartContextArtifactProjectionKind,
+    ) -> RuntimeSmartContextArtifactRepoMap {
         let limit = limit.min(RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES);
         if limit == 0 {
             return RuntimeSmartContextArtifactRepoMap {
@@ -418,6 +482,20 @@ impl RuntimeSmartContextArtifactStore {
             };
         }
 
+        if let Some(prewarm) = prewarm
+            && self.projection_prewarm_valid(prewarm)
+        {
+            return runtime_smart_context_limited_repo_map(prewarm.projection.clone(), limit);
+        }
+
+        self.build_map_projection(limit, projection_kind)
+    }
+
+    fn build_map_projection(
+        &self,
+        limit: usize,
+        projection_kind: RuntimeSmartContextArtifactProjectionKind,
+    ) -> RuntimeSmartContextArtifactRepoMap {
         let mut entries = BTreeMap::<
             RuntimeSmartContextArtifactRepoMapKey,
             RuntimeSmartContextArtifactRepoMapEntry,
@@ -440,21 +518,28 @@ impl RuntimeSmartContextArtifactStore {
 
             let paths = runtime_smart_context_repo_map_paths(line_index);
             let primary_path = (paths.len() == 1).then(|| paths[0].clone());
-            for path in paths {
-                runtime_smart_context_insert_repo_map_entry(
-                    &mut entries,
-                    RuntimeSmartContextArtifactRepoMapEntry {
-                        kind: RuntimeSmartContextArtifactRepoMapEntryKind::Path,
-                        module: runtime_smart_context_repo_map_module_from_path(&path),
-                        symbol: None,
-                        line: runtime_smart_context_repo_map_first_path_line(line_index, &path),
-                        path: Some(path),
-                        artifact_id: artifact.id.clone(),
-                        sequence: artifact.sequence,
-                        range_start: 0,
-                        range_end: 0,
-                    },
-                );
+            if projection_kind.includes_paths() {
+                for path in paths {
+                    let first_path_range =
+                        runtime_smart_context_repo_map_first_path_range(line_index, &path);
+                    runtime_smart_context_insert_repo_map_entry(
+                        &mut entries,
+                        RuntimeSmartContextArtifactRepoMapEntry {
+                            kind: RuntimeSmartContextArtifactRepoMapEntryKind::Path,
+                            module: runtime_smart_context_repo_map_module_from_path(&path),
+                            symbol: None,
+                            code: None,
+                            line: first_path_range.and_then(|range| {
+                                range.line.or(range.new_start).or(range.old_start)
+                            }),
+                            path: Some(path),
+                            artifact_id: artifact.id.clone(),
+                            sequence: artifact.sequence,
+                            range_start: first_path_range.map_or(0, |range| range.start),
+                            range_end: first_path_range.map_or(0, |range| range.end),
+                        },
+                    );
+                }
             }
 
             for range in &line_index.symbol_ranges {
@@ -462,7 +547,8 @@ impl RuntimeSmartContextArtifactStore {
                     continue;
                 };
                 let kind = runtime_smart_context_repo_map_symbol_kind(range);
-                let path = primary_path.clone();
+                let path = runtime_smart_context_repo_map_nearest_path(line_index, range.start)
+                    .or_else(|| primary_path.clone());
                 runtime_smart_context_insert_repo_map_entry(
                     &mut entries,
                     RuntimeSmartContextArtifactRepoMapEntry {
@@ -473,7 +559,33 @@ impl RuntimeSmartContextArtifactStore {
                             &symbol,
                         ),
                         symbol: Some(symbol),
+                        code: None,
                         line: range.line,
+                        path,
+                        artifact_id: artifact.id.clone(),
+                        sequence: artifact.sequence,
+                        range_start: range.start,
+                        range_end: range.end,
+                    },
+                );
+            }
+
+            for range in &line_index.error_ranges {
+                let Some(code) = range.code.clone() else {
+                    continue;
+                };
+                let path = runtime_smart_context_repo_map_nearest_path(line_index, range.start)
+                    .or_else(|| primary_path.clone());
+                runtime_smart_context_insert_repo_map_entry(
+                    &mut entries,
+                    RuntimeSmartContextArtifactRepoMapEntry {
+                        kind: RuntimeSmartContextArtifactRepoMapEntryKind::Error,
+                        module: path
+                            .as_deref()
+                            .and_then(runtime_smart_context_repo_map_module_from_path),
+                        symbol: None,
+                        code: Some(code),
+                        line: Some(range.start),
                         path,
                         artifact_id: artifact.id.clone(),
                         sequence: artifact.sequence,
@@ -503,34 +615,46 @@ impl RuntimeSmartContextArtifactStore {
         }
         let content_hash = runtime_proxy_crate::smart_context_hash_text(text);
         let id = content_hash.clone();
-        if let Some(existing) = self.artifacts.get_mut(&id) {
-            if !Self::artifact_matches_text(existing, text, &content_hash) {
-                return None;
-            }
-            existing.sequence = sequence;
-            let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
-                existing.line_index.as_ref(),
-            );
-            if refresh_line_index || existing.chunk_index.is_none() {
-                let line_index = if refresh_line_index {
-                    runtime_smart_context_artifact_line_index(text)
-                } else {
-                    existing
-                        .line_index
-                        .clone()
-                        .expect("line index should exist when refresh is not needed")
-                };
-                if refresh_line_index {
-                    existing.line_index = Some(line_index.clone());
+        if self.artifacts.contains_key(&id) {
+            let (artifact_ref, projection_dirty) = {
+                let existing = self
+                    .artifacts
+                    .get_mut(&id)
+                    .expect("contains_key should guarantee artifact lookup");
+                if !Self::artifact_matches_text(existing, text, &content_hash) {
+                    return None;
                 }
+                let mut projection_dirty = existing.sequence != sequence;
+                existing.sequence = sequence;
+                let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
+                    existing.line_index.as_ref(),
+                );
                 if refresh_line_index || existing.chunk_index.is_none() {
-                    existing.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
-                        text,
-                        &line_index,
-                    ));
+                    let line_index = if refresh_line_index {
+                        runtime_smart_context_artifact_line_index(text)
+                    } else {
+                        existing
+                            .line_index
+                            .clone()
+                            .expect("line index should exist when refresh is not needed")
+                    };
+                    if refresh_line_index {
+                        existing.line_index = Some(line_index.clone());
+                        projection_dirty = true;
+                    }
+                    if refresh_line_index || existing.chunk_index.is_none() {
+                        existing.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
+                            text,
+                            &line_index,
+                        ));
+                    }
                 }
+                (Self::artifact_ref(existing), projection_dirty)
+            };
+            if projection_dirty {
+                self.invalidate_prewarmed_projections();
             }
-            return Some(Self::artifact_ref(existing));
+            return Some(artifact_ref);
         }
 
         let byte_len = text.len();
@@ -549,6 +673,7 @@ impl RuntimeSmartContextArtifactStore {
             },
         );
         self.total_bytes = self.total_bytes.saturating_add(byte_len);
+        self.invalidate_prewarmed_projections();
         self.enforce_limits();
         Some(runtime_proxy_crate::SmartContextArtifactRef {
             id,
@@ -608,6 +733,7 @@ impl RuntimeSmartContextArtifactStore {
         }
         self.recompute_total_bytes();
         self.enforce_limits();
+        self.refresh_prewarmed_projections();
     }
 
     fn write_to_path_unlocked(&self, path: &Path) -> anyhow::Result<()> {
@@ -685,6 +811,119 @@ impl RuntimeSmartContextArtifactStore {
                 self.total_bytes = self.total_bytes.saturating_sub(removed.byte_len);
             }
         }
+    }
+
+    fn invalidate_prewarmed_projections(&mut self) {
+        self.repo_map_prewarm = None;
+        self.symbol_map_prewarm = None;
+    }
+
+    fn refresh_prewarmed_projections(&mut self) {
+        let source_hash = self.projection_source_hash();
+        let repo_valid = self
+            .repo_map_prewarm
+            .as_ref()
+            .is_some_and(|prewarm| self.projection_prewarm_valid_for_source(prewarm, &source_hash));
+        if !repo_valid {
+            self.repo_map_prewarm = Some(RuntimeSmartContextArtifactProjectionPrewarm {
+                schema_version: RUNTIME_SMART_CONTEXT_REPO_MAP_PREWARM_SCHEMA_VERSION,
+                source_hash: source_hash.clone(),
+                limit: RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES,
+                projection: self.build_map_projection(
+                    RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES,
+                    RuntimeSmartContextArtifactProjectionKind::Repo,
+                ),
+            });
+        }
+
+        let symbol_valid = self
+            .symbol_map_prewarm
+            .as_ref()
+            .is_some_and(|prewarm| self.projection_prewarm_valid_for_source(prewarm, &source_hash));
+        if !symbol_valid {
+            self.symbol_map_prewarm = Some(RuntimeSmartContextArtifactProjectionPrewarm {
+                schema_version: RUNTIME_SMART_CONTEXT_REPO_MAP_PREWARM_SCHEMA_VERSION,
+                source_hash,
+                limit: RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES,
+                projection: self.build_map_projection(
+                    RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES,
+                    RuntimeSmartContextArtifactProjectionKind::Symbol,
+                ),
+            });
+        }
+    }
+
+    fn projection_prewarm_valid(
+        &self,
+        prewarm: &RuntimeSmartContextArtifactProjectionPrewarm,
+    ) -> bool {
+        let source_hash = self.projection_source_hash();
+        self.projection_prewarm_valid_for_source(prewarm, &source_hash)
+    }
+
+    fn projection_prewarm_valid_for_source(
+        &self,
+        prewarm: &RuntimeSmartContextArtifactProjectionPrewarm,
+        source_hash: &str,
+    ) -> bool {
+        prewarm.schema_version == RUNTIME_SMART_CONTEXT_REPO_MAP_PREWARM_SCHEMA_VERSION
+            && prewarm.limit >= RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES
+            && prewarm.source_hash == source_hash
+    }
+
+    fn projection_source_hash(&self) -> String {
+        let mut source = String::new();
+        let _ = writeln!(
+            source,
+            "schema={}",
+            RUNTIME_SMART_CONTEXT_REPO_MAP_PREWARM_SCHEMA_VERSION
+        );
+        for artifact in self.artifacts.values() {
+            let _ = writeln!(
+                source,
+                "artifact\t{}\t{}\t{}\t{}",
+                artifact.id, artifact.content_hash, artifact.byte_len, artifact.sequence
+            );
+            let Some(line_index) = artifact.line_index.as_ref() else {
+                source.push_str("line_index\tmissing\n");
+                continue;
+            };
+            let _ = writeln!(
+                source,
+                "line_index\t{}\t{}\t{}\t{}\t{}",
+                line_index.semantic_schema_version,
+                line_index.complete,
+                line_index.semantic_complete,
+                line_index.symbol_complete,
+                line_index.command_kind.as_deref().unwrap_or_default()
+            );
+            runtime_smart_context_push_projection_source_ranges(
+                &mut source,
+                "file",
+                &line_index.file_location_ranges,
+            );
+            runtime_smart_context_push_projection_source_ranges(
+                &mut source,
+                "diff",
+                &line_index.diff_hunk_ranges,
+            );
+            runtime_smart_context_push_projection_source_ranges(
+                &mut source,
+                "test",
+                &line_index.test_failure_ranges,
+            );
+            runtime_smart_context_push_projection_source_ranges(
+                &mut source,
+                "error",
+                &line_index.error_ranges,
+            );
+            runtime_smart_context_push_projection_source_ranges(
+                &mut source,
+                "symbol",
+                &line_index.symbol_ranges,
+            );
+        }
+        runtime_proxy_crate::smart_context_hash_text(&source)
     }
 
     fn artifact_matches_text(
@@ -916,6 +1155,43 @@ fn runtime_smart_context_duplicate_chunk_fingerprints(
     (duplicates, complete)
 }
 
+fn runtime_smart_context_limited_repo_map(
+    mut repo_map: RuntimeSmartContextArtifactRepoMap,
+    limit: usize,
+) -> RuntimeSmartContextArtifactRepoMap {
+    if repo_map.entries.len() > limit {
+        repo_map.entries.truncate(limit);
+        repo_map.complete = false;
+    }
+    repo_map
+}
+
+fn runtime_smart_context_push_projection_source_ranges(
+    source: &mut String,
+    kind: &str,
+    ranges: &[RuntimeSmartContextArtifactSemanticLineRange],
+) {
+    for range in ranges {
+        let _ = writeln!(
+            source,
+            "{kind}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            range.start,
+            range.end,
+            range.content_hash,
+            range.label.as_deref().unwrap_or_default(),
+            range.path.as_deref().unwrap_or_default(),
+            range.line.unwrap_or_default(),
+            range.column.unwrap_or_default(),
+            range.old_start.unwrap_or_default(),
+            range.new_start.unwrap_or_default(),
+            range.code.as_deref().unwrap_or_default(),
+            range.symbol.as_deref().unwrap_or_default(),
+            range.old_count.unwrap_or_default(),
+            range.new_count.unwrap_or_default()
+        );
+    }
+}
+
 fn runtime_smart_context_repo_map_paths(
     line_index: &RuntimeSmartContextArtifactLineIndex,
 ) -> Vec<String> {
@@ -932,16 +1208,36 @@ fn runtime_smart_context_repo_map_paths(
     paths.into_iter().collect()
 }
 
-fn runtime_smart_context_repo_map_first_path_line(
-    line_index: &RuntimeSmartContextArtifactLineIndex,
+fn runtime_smart_context_repo_map_first_path_range<'a>(
+    line_index: &'a RuntimeSmartContextArtifactLineIndex,
     path: &str,
-) -> Option<usize> {
+) -> Option<&'a RuntimeSmartContextArtifactSemanticLineRange> {
     line_index
         .file_location_ranges
         .iter()
         .chain(line_index.diff_hunk_ranges.iter())
         .find(|range| range.path.as_deref() == Some(path))
-        .and_then(|range| range.line.or(range.new_start).or(range.old_start))
+}
+
+fn runtime_smart_context_repo_map_nearest_path(
+    line_index: &RuntimeSmartContextArtifactLineIndex,
+    line: usize,
+) -> Option<String> {
+    line_index
+        .file_location_ranges
+        .iter()
+        .chain(line_index.diff_hunk_ranges.iter())
+        .filter_map(|range| {
+            let path = range.path.as_ref()?.clone();
+            let distance = if range.start <= line && line <= range.end {
+                0
+            } else {
+                range.start.abs_diff(line).min(range.end.abs_diff(line))
+            };
+            Some((distance, range.start, path))
+        })
+        .min_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)))
+        .map(|(_, _, path)| path)
 }
 
 fn runtime_smart_context_repo_map_symbol_kind(
@@ -1031,6 +1327,7 @@ fn runtime_smart_context_insert_repo_map_entry(
         entry.path.clone(),
         entry.module.clone(),
         entry.symbol.clone(),
+        entry.code.clone(),
     );
     entries
         .entry(key)
@@ -2081,6 +2378,51 @@ async def load_profile():
     }
 
     #[test]
+    fn runtime_smart_context_map_projections_include_error_entries_and_symbol_map() {
+        let text = "\
+error[E0425]: cannot find value `missing` in this scope
+ --> src/lib.rs:7:3
+fn target_symbol() {
+}
+#[test]
+fn target_test() {
+}";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        store.insert_text(1, text).expect("artifact inserted");
+
+        let repo_map = store.repo_map_projection(64);
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Error
+                && entry.code.as_deref() == Some("E0425")
+                && entry.path.as_deref() == Some("src/lib.rs")
+                && entry.range_start == 1
+        }));
+
+        let symbol_map = store.symbol_map_projection(64);
+        assert!(symbol_map.complete);
+        assert!(
+            symbol_map
+                .entries
+                .iter()
+                .all(|entry| entry.kind != RuntimeSmartContextArtifactRepoMapEntryKind::Path)
+        );
+        assert!(symbol_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Symbol
+                && entry.symbol.as_deref() == Some("target_symbol")
+                && entry.path.as_deref() == Some("src/lib.rs")
+        }));
+        assert!(symbol_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Test
+                && entry.symbol.as_deref() == Some("target_test")
+                && entry.path.as_deref() == Some("src/lib.rs")
+        }));
+        assert!(symbol_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Error
+                && entry.code.as_deref() == Some("E0425")
+        }));
+    }
+
+    #[test]
     fn runtime_smart_context_repo_map_projection_is_bounded_and_deterministic() {
         let text = (0..80)
             .flat_map(|index| {
@@ -2106,6 +2448,46 @@ async def load_profile():
                 .iter()
                 .all(|entry| entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path)
         );
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_save_prewarms_repo_and_symbol_maps() {
+        let path = smart_context_artifact_temp_path("projection-prewarm");
+        remove_smart_context_artifact_temp_files(&path);
+
+        let text = "\
+error[E0425]: missing value
+ --> src/lib.rs:7:3
+pub mod runtime {
+}
+fn launch_super() {
+}";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        store.insert_text(1, text).expect("artifact inserted");
+        store.save_to_path(&path).expect("store saved");
+
+        let raw = std::fs::read_to_string(&path).expect("store json should exist");
+        assert!(raw.contains("repo_map_prewarm"));
+        assert!(raw.contains("symbol_map_prewarm"));
+
+        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
+        let repo_map = loaded.repo_map_projection(64);
+        let symbol_map = loaded.symbol_map_projection(64);
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path
+                && entry.path.as_deref() == Some("src/lib.rs")
+                && entry.range_start > 0
+        }));
+        assert!(symbol_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Module
+                && entry.symbol.as_deref() == Some("runtime")
+        }));
+        assert!(symbol_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Error
+                && entry.code.as_deref() == Some("E0425")
+        }));
+
+        remove_smart_context_artifact_temp_files(&path);
     }
 
     #[test]

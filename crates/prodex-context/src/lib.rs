@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::Value;
 use std::cmp::Reverse;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use terminal_ui::{fit_cell, section_header, section_header_with_width};
@@ -2351,7 +2351,7 @@ fn compact_log_stream_output(input: &str, options: &CommandOutputCompactOptions)
     }
 
     let level_counts = count_log_stream_levels(&lines);
-    let preserved = collect_log_stream_preserved_lines(&lines);
+    let preserved = collect_log_stream_preserved_lines(&lines, options);
     let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
     let mut output = Vec::<String>::new();
     output.push(format!("pcs: logs ({}->sum)", count_text_lines(input)));
@@ -3287,7 +3287,10 @@ fn count_log_stream_levels(lines: &[&str]) -> BTreeMap<String, usize> {
     counts
 }
 
-fn collect_log_stream_preserved_lines(lines: &[&str]) -> Vec<String> {
+fn collect_log_stream_preserved_lines(
+    lines: &[&str],
+    options: &CommandOutputCompactOptions,
+) -> Vec<String> {
     let mut preserved = Vec::<String>::new();
     let mut index = 0usize;
     while index < lines.len() {
@@ -3299,13 +3302,72 @@ fn collect_log_stream_preserved_lines(lines: &[&str]) -> Vec<String> {
 
         preserved.push(line.to_string());
         let mut next = index + 1;
+        let mut context = Vec::<&str>::new();
         while next < lines.len() && is_log_stream_stack_context_line(lines[next]) {
-            preserved.push(lines[next].to_string());
+            context.push(lines[next]);
             next += 1;
         }
+        push_log_stream_stack_context_lines(&mut preserved, &context, options);
         index = next;
     }
     preserved
+}
+
+fn push_log_stream_stack_context_lines(
+    output: &mut Vec<String>,
+    context: &[&str],
+    options: &CommandOutputCompactOptions,
+) {
+    if context.is_empty() {
+        return;
+    }
+
+    let limit = log_stream_stack_context_line_limit(options);
+    if context.len() <= limit {
+        output.extend(context.iter().map(|line| (*line).to_string()));
+        return;
+    }
+
+    let mut selected = BTreeSet::<usize>::new();
+    for (index, line) in context.iter().enumerate() {
+        if is_critical_preserve_line(line) {
+            selected.insert(index);
+        }
+    }
+
+    let remaining = limit.saturating_sub(selected.len());
+    let head = remaining.div_ceil(2);
+    let tail = remaining.saturating_sub(head);
+    for index in 0..head.min(context.len()) {
+        selected.insert(index);
+    }
+    for index in context.len().saturating_sub(tail)..context.len() {
+        selected.insert(index);
+    }
+
+    let mut omitted = 0usize;
+    for (index, line) in context.iter().enumerate() {
+        if selected.contains(&index) {
+            if omitted > 0 {
+                output.push(format!(
+                    "[... omitted {omitted} non-critical stack context lines ...]"
+                ));
+                omitted = 0;
+            }
+            output.push((*line).to_string());
+        } else {
+            omitted += 1;
+        }
+    }
+    if omitted > 0 {
+        output.push(format!(
+            "[... omitted {omitted} non-critical stack context lines ...]"
+        ));
+    }
+}
+
+fn log_stream_stack_context_line_limit(options: &CommandOutputCompactOptions) -> usize {
+    options.max_lines.max(18).saturating_div(3).clamp(6, 18)
 }
 
 fn is_log_stream_preserve_line(line: &str) -> bool {

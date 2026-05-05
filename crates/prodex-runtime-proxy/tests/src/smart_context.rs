@@ -199,9 +199,115 @@ fn conversation_dedupe_keeps_first_hash_ref() {
         SmartContextDedupeItem::Duplicate {
             id: "c".to_string(),
             ref_id: "a".to_string(),
-            content_hash: smart_context_hash_text("same"),
+            content_hash: smart_context_normalized_command_output_hash_text("same"),
         }
     );
+}
+
+#[test]
+fn volatile_command_output_normalizer_stabilizes_hash_only() {
+    let first = "\x1b[32mFinished\x1b[0m at 2026-05-04T01:02:03Z in 1.23s /tmp/prodex-a/run-123 1/10 10% request_id=123e4567-e89b-12d3-a456-426614174000\n";
+    let second = "\x1b[31mFinished\x1b[0m at 2026-05-05T09:08:07Z in 12345ms /tmp/prodex-b-long/run-999999 10/100 100% request_id=123e4567-e89b-12d3-a456-426614174999\n";
+
+    let normalized = smart_context_normalize_volatile_command_output(first);
+
+    assert_eq!(
+        normalized.as_ref(),
+        "Finished at <timestamp> in <duration> <tmp-path> <progress> <progress> request_id=<id>\n"
+    );
+    assert_eq!(
+        smart_context_normalized_command_output_hash_text(first),
+        smart_context_normalized_command_output_hash_text(second)
+    );
+    assert_ne!(
+        smart_context_hash_text(first),
+        smart_context_hash_text(second)
+    );
+}
+
+#[test]
+fn command_output_cache_matches_outputs_that_only_differ_by_volatile_values() {
+    let previous_text = "Finished at 2026-05-04T01:02:03Z in 1.23s /tmp/prodex-a/run-123 1/10 10% request_id=123e4567-e89b-12d3-a456-426614174000\n".repeat(20);
+    let current_text = "Finished at 2026-05-05T09:08:07Z in 12345ms /tmp/prodex-b-long/run-999999 10/100 100% request_id=123e4567-e89b-12d3-a456-426614174999\n".repeat(20);
+    let previous = smart_context_command_output_cache_record("cmd-a", &previous_text);
+
+    let rewrite = smart_context_command_output_cache_rewrite(SmartContextCommandOutputCacheInput {
+        id: "cmd-b".to_string(),
+        text: current_text.clone(),
+        previous_records: vec![previous.clone()],
+        min_replacement_bytes: 1024,
+    });
+
+    assert_ne!(previous_text, current_text);
+    assert_ne!(previous.byte_len, current_text.len());
+    assert_eq!(rewrite.record.byte_len, current_text.len());
+    assert_eq!(rewrite.record.content_hash, previous.content_hash);
+    assert!(matches!(
+        rewrite.action,
+        SmartContextCommandOutputCacheAction::ReplaceWithUnchangedSummary {
+            ref_id,
+            saved_tokens,
+            critical_signal_count: 0,
+        } if ref_id == "cmd-a" && saved_tokens > 0
+    ));
+    assert_ne!(rewrite.output, current_text);
+    assert!(
+        rewrite
+            .output
+            .contains("volatile-normalized repeat omitted")
+    );
+}
+
+#[test]
+fn conversation_dedupe_uses_volatile_normalized_decision_hash() {
+    let first = "ok at 2026-05-04T01:02:03Z in 1.23s /tmp/prodex-a/run-123\n".repeat(20);
+    let second = "ok at 2026-05-05T09:08:07Z in 987ms /tmp/prodex-b/run-999\n".repeat(20);
+
+    let deduped = smart_context_conversation_dedupe([
+        SmartContextConversationItem {
+            id: "first".to_string(),
+            text: first.clone(),
+        },
+        SmartContextConversationItem {
+            id: "second".to_string(),
+            text: second.clone(),
+        },
+    ]);
+
+    let decision_hash = smart_context_normalized_command_output_hash_text(&first);
+    assert_eq!(
+        decision_hash,
+        smart_context_normalized_command_output_hash_text(&second)
+    );
+    assert_eq!(
+        deduped[1],
+        SmartContextDedupeItem::Duplicate {
+            id: "second".to_string(),
+            ref_id: "first".to_string(),
+            content_hash: decision_hash,
+        }
+    );
+}
+
+#[test]
+fn volatile_normalization_does_not_change_exact_artifact_hashing() {
+    let first = "line at 2026-05-04T01:02:03Z in 1.23s /tmp/prodex-a";
+    let second = "line at 2026-05-05T09:08:07Z in 987ms /tmp/prodex-b";
+    let artifact = SmartContextArtifactRef {
+        id: "artifact-a".to_string(),
+        byte_len: first.len(),
+        content_hash: smart_context_hash_text(first),
+    };
+
+    assert_eq!(
+        smart_context_normalized_command_output_hash_text(first),
+        smart_context_normalized_command_output_hash_text(second)
+    );
+    assert_ne!(
+        smart_context_hash_text(first),
+        smart_context_hash_text(second)
+    );
+    assert!(smart_context_artifact_line_range(&artifact, second, 1, 1).is_none());
 }
 
 #[test]
@@ -1709,6 +1815,271 @@ fn rewrite_budget_application_respects_bounds() {
     assert_eq!(relaxed.max_inline_tool_output_bytes, 375);
     assert_eq!(relaxed.max_inline_bytes, 375);
     assert_eq!(relaxed.max_rehydrate_tokens, 2);
+}
+
+#[test]
+fn learned_rewrite_policy_relaxes_for_matching_route_model_profile_samples() {
+    let bucket = smart_context_test_rewrite_bucket("responses", "GPT_5", "alpha");
+    let learned = smart_context_test_learned_rewrite_policy(
+        Some(bucket.clone()),
+        SmartContextRecentRewriteSafety::default(),
+        vec![
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                bucket.clone(),
+                smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000),
+            ),
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                bucket.clone(),
+                smart_context_test_rewrite_telemetry_sample(8_000, 3_200, 2_000, 800),
+            ),
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                smart_context_test_rewrite_bucket("responses", "gpt-5", "beta"),
+                SmartContextRewriteTelemetrySample {
+                    fallback: true,
+                    ..smart_context_test_rewrite_telemetry_sample(10_000, 9_000, 2_500, 2_400)
+                },
+            ),
+        ],
+    );
+
+    assert_eq!(learned.decision, SmartContextRewriteBudgetDecision::Relax);
+    assert_eq!(
+        learned.reasons,
+        vec![SmartContextLearnedRewritePolicyReason::LearnedRelax]
+    );
+    assert_eq!(learned.matching_telemetry_samples, 2);
+    assert_eq!(learned.policy.mode, SmartContextBudgetMode::LargeLossless);
+    assert_eq!(learned.policy.max_inline_tool_output_bytes, 64 * 1024);
+}
+
+#[test]
+fn learned_rewrite_policy_tightens_for_confident_weak_matching_savings() {
+    let bucket = smart_context_test_rewrite_bucket("responses", "gpt-5", "alpha");
+    let learned = smart_context_test_learned_rewrite_policy(
+        Some(bucket.clone()),
+        SmartContextRecentRewriteSafety::default(),
+        vec![
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                bucket.clone(),
+                smart_context_test_rewrite_telemetry_sample(10_000, 9_000, 2_500, 2_400),
+            ),
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                bucket,
+                smart_context_test_rewrite_telemetry_sample(8_000, 7_200, 2_000, 1_900),
+            ),
+        ],
+    );
+
+    assert_eq!(learned.decision, SmartContextRewriteBudgetDecision::Tighten);
+    assert_eq!(
+        learned.reasons,
+        vec![SmartContextLearnedRewritePolicyReason::LearnedTighten]
+    );
+    assert_eq!(learned.policy.mode, SmartContextBudgetMode::LargeLossless);
+    assert_eq!(
+        learned.policy.max_inline_tool_output_bytes,
+        (32 * 1024) * 9 / 10
+    );
+    assert!(learned.policy.max_rehydrate_tokens < 12_000);
+}
+
+#[test]
+fn learned_rewrite_policy_exact_passes_through_without_bucket_confidence() {
+    let learned = smart_context_test_learned_rewrite_policy(
+        Some(smart_context_test_rewrite_bucket(
+            "responses",
+            "gpt-5",
+            "alpha",
+        )),
+        SmartContextRecentRewriteSafety::default(),
+        vec![
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                smart_context_test_rewrite_bucket("responses", "gpt-5", "beta"),
+                smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000),
+            ),
+            SmartContextBucketedRewriteTelemetrySample {
+                bucket_key: None,
+                sample: smart_context_test_rewrite_telemetry_sample(8_000, 3_200, 2_000, 800),
+            },
+        ],
+    );
+
+    assert_eq!(
+        learned.decision,
+        SmartContextRewriteBudgetDecision::NoChange
+    );
+    assert_eq!(
+        learned.reasons,
+        vec![SmartContextLearnedRewritePolicyReason::MissingBucketConfidence]
+    );
+    assert_eq!(learned.matching_telemetry_samples, 0);
+    assert_eq!(
+        learned.policy.mode,
+        SmartContextBudgetMode::ExactPassThrough
+    );
+    assert_eq!(learned.policy.max_inline_tool_output_bytes, usize::MAX);
+}
+
+#[test]
+fn learned_rewrite_policy_exact_passes_through_on_unsafe_matching_sample() {
+    let bucket = smart_context_test_rewrite_bucket("compact", "gpt-5.2", "alpha");
+    let learned = smart_context_test_learned_rewrite_policy(
+        Some(bucket.clone()),
+        SmartContextRecentRewriteSafety::default(),
+        vec![
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                bucket,
+                SmartContextRewriteTelemetrySample {
+                    fallback: true,
+                    ..smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000)
+                },
+            ),
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                smart_context_test_rewrite_bucket("compact", "gpt-5.2", "beta"),
+                smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000),
+            ),
+        ],
+    );
+
+    assert_eq!(
+        learned.reasons,
+        vec![SmartContextLearnedRewritePolicyReason::UnsafeRewriteSample]
+    );
+    assert_eq!(learned.matching_telemetry_samples, 1);
+    assert_eq!(
+        learned.policy.mode,
+        SmartContextBudgetMode::ExactPassThrough
+    );
+    assert_eq!(learned.policy.max_inline_bytes, usize::MAX);
+}
+
+#[test]
+fn learned_rewrite_policy_can_use_recent_safety_when_bucket_samples_are_absent() {
+    let learned = smart_context_test_learned_rewrite_policy(
+        Some(smart_context_test_rewrite_bucket(
+            "responses",
+            "gpt-5",
+            "alpha",
+        )),
+        SmartContextRecentRewriteSafety {
+            safe_rewrites: 2,
+            fallback_rewrites: 0,
+            saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS * 2,
+        },
+        Vec::new(),
+    );
+
+    assert_eq!(learned.decision, SmartContextRewriteBudgetDecision::Relax);
+    assert_eq!(
+        learned.reasons,
+        vec![
+            SmartContextLearnedRewritePolicyReason::RecentSafetyFallback,
+            SmartContextLearnedRewritePolicyReason::LearnedRelax,
+        ]
+    );
+    assert_eq!(learned.matching_telemetry_samples, 0);
+    assert_eq!(learned.safety_samples, 2);
+    assert_eq!(learned.policy.max_inline_tool_output_bytes, 64 * 1024);
+}
+
+#[test]
+fn learned_rewrite_policy_keeps_base_exact_when_exactness_required() {
+    let accounting = smart_context_test_large_budget_accounting();
+    let learned = smart_context_learned_rewrite_policy(SmartContextLearnedRewritePolicyInput {
+        adaptive_policy_input: SmartContextAdaptiveBudgetPolicyInput {
+            exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput {
+                previous_response_id: Some("resp-owned".to_string()),
+                ..SmartContextExactnessInput::default()
+            }),
+            accounting,
+            recent_rewrite_safety: SmartContextRecentRewriteSafety {
+                safe_rewrites: 2,
+                fallback_rewrites: 0,
+                saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS * 2,
+            },
+            static_context_changed: false,
+            missing_rehydrate_refs: Vec::new(),
+        },
+        bucket_key: Some(smart_context_test_rewrite_bucket(
+            "responses",
+            "gpt-5",
+            "alpha",
+        )),
+        telemetry_samples: vec![
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                smart_context_test_rewrite_bucket("responses", "gpt-5", "alpha"),
+                smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000),
+            ),
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                smart_context_test_rewrite_bucket("responses", "gpt-5", "alpha"),
+                smart_context_test_rewrite_telemetry_sample(8_000, 3_200, 2_000, 800),
+            ),
+        ],
+    });
+
+    assert_eq!(
+        learned.reasons,
+        vec![SmartContextLearnedRewritePolicyReason::BasePolicyExactPassThrough]
+    );
+    assert_eq!(
+        learned.policy.mode,
+        SmartContextBudgetMode::ExactPassThrough
+    );
+    assert_eq!(
+        learned.policy.reasons,
+        vec![SmartContextBudgetPolicyReason::ExactnessRequired]
+    );
+}
+
+fn smart_context_test_learned_rewrite_policy(
+    bucket_key: Option<SmartContextRewritePolicyBucketKey>,
+    recent_rewrite_safety: SmartContextRecentRewriteSafety,
+    telemetry_samples: Vec<SmartContextBucketedRewriteTelemetrySample>,
+) -> SmartContextLearnedRewritePolicy {
+    smart_context_learned_rewrite_policy(SmartContextLearnedRewritePolicyInput {
+        adaptive_policy_input: SmartContextAdaptiveBudgetPolicyInput {
+            exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
+            accounting: smart_context_test_large_budget_accounting(),
+            recent_rewrite_safety,
+            static_context_changed: false,
+            missing_rehydrate_refs: Vec::new(),
+        },
+        bucket_key,
+        telemetry_samples,
+    })
+}
+
+fn smart_context_test_large_budget_accounting() -> SmartContextObservedTokenAccounting {
+    smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+        model_context_window_tokens: Some(64_000),
+        reserved_output_tokens: 4_096,
+        current_input_tokens: 48_000,
+        current_request_body_bytes: 0,
+        current_request_estimated_tokens: None,
+        observed_usage: Vec::new(),
+    })
+}
+
+fn smart_context_test_rewrite_bucket(
+    route: &str,
+    model: &str,
+    profile: &str,
+) -> SmartContextRewritePolicyBucketKey {
+    SmartContextRewritePolicyBucketKey {
+        route: Some(route.to_string()),
+        model: Some(model.to_string()),
+        profile: Some(profile.to_string()),
+    }
+}
+
+fn smart_context_test_bucketed_rewrite_telemetry_sample(
+    bucket_key: SmartContextRewritePolicyBucketKey,
+    sample: SmartContextRewriteTelemetrySample,
+) -> SmartContextBucketedRewriteTelemetrySample {
+    SmartContextBucketedRewriteTelemetrySample {
+        bucket_key: Some(bucket_key),
+        sample,
+    }
 }
 
 fn smart_context_test_rewrite_telemetry_sample(

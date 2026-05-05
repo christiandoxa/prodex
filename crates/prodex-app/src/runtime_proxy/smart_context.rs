@@ -26,6 +26,9 @@ const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES: usize = 12;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS: usize = 1_600;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_COOLDOWN_MS: u64 = 30_000;
 const SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES: usize = 2 * 1024;
+const SMART_CONTEXT_TOOL_ARGS_DIFF_MIN_COMMON_BYTES: usize = 1024;
+const SMART_CONTEXT_TOOL_ARGS_DIFF_MIN_COMMON_RATIO_PERCENT: usize = 70;
+const SMART_CONTEXT_TOOL_ARGS_DIFF_MAX_CHANGED_RATIO_PERCENT: usize = 35;
 const SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES: usize = 12;
 const SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES: usize = 4;
 const SMART_CONTEXT_BUDGET_AWARE_REHYDRATE_MAX_RANGES: usize = 8;
@@ -132,6 +135,7 @@ struct RuntimeSmartContextSelectiveRehydrateTerms {
     file_paths: BTreeSet<String>,
     error_codes: BTreeSet<String>,
     test_symbols: BTreeSet<String>,
+    command_kinds: BTreeSet<String>,
     diff_hunks: Vec<RuntimeSmartContextSelectiveDiffHunkTerm>,
 }
 
@@ -162,6 +166,25 @@ struct RuntimeSmartContextToolOutputCompactionMetadata {
     kind_hint: Option<prodex_context::CommandOutputKind>,
     command: Option<String>,
     exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeSmartContextToolArgumentCandidate {
+    artifact: runtime_proxy_crate::SmartContextArtifactRef,
+    text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeSmartContextToolArgumentDelta {
+    base_artifact: runtime_proxy_crate::SmartContextArtifactRef,
+    prefix_bytes: usize,
+    suffix_bytes: usize,
+    removed_bytes: usize,
+    inserted_bytes: usize,
+    inserted_hash: String,
+    inserted_preview: String,
+    common_bytes: usize,
+    changed_bytes: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2954,15 +2977,30 @@ fn runtime_smart_context_collect_intent_signals(
 impl RuntimeSmartContextIntentSignals {
     fn add_intent_text(&mut self, text: &str) {
         for term in prodex_context::extract_intent_terms_from_prompt(text) {
-            if self.intent_terms.iter().any(|existing| existing == &term) {
-                continue;
-            }
-            self.add_semantic_term(&term);
-            self.intent_terms.push(term);
-            if self.intent_terms.len() >= prodex_context::MAX_EXTRACTED_INTENT_TERMS {
+            if !self.add_intent_term(term) {
                 break;
             }
         }
+        for term in runtime_smart_context_error_code_terms_from_intent_text(text) {
+            if !self.add_intent_term(term) {
+                break;
+            }
+        }
+        for kind in runtime_smart_context_command_kinds_from_intent_text(text) {
+            self.semantic_terms.command_kinds.insert(kind.to_string());
+        }
+    }
+
+    fn add_intent_term(&mut self, term: String) -> bool {
+        if self.intent_terms.iter().any(|existing| existing == &term) {
+            return true;
+        }
+        if self.intent_terms.len() >= prodex_context::MAX_EXTRACTED_INTENT_TERMS {
+            return false;
+        }
+        self.add_semantic_term(&term);
+        self.intent_terms.push(term);
+        self.intent_terms.len() < prodex_context::MAX_EXTRACTED_INTENT_TERMS
     }
 
     fn add_command_kind_hint(&mut self, hint: prodex_context::CommandOutputKind) {
@@ -3081,11 +3119,22 @@ fn runtime_smart_context_collect_intent_text_parts(
 }
 
 fn runtime_smart_context_intent_term_is_error_code(term: &str) -> bool {
+    if term.eq_ignore_ascii_case("error")
+        || runtime_smart_context_numeric_error_term(term, "exit_code_")
+        || runtime_smart_context_numeric_error_term(term, "status_code_")
+    {
+        return true;
+    }
     let rest = term
         .strip_prefix('E')
         .or_else(|| term.strip_prefix("TS"))
         .or_else(|| term.strip_prefix('F'));
     rest.is_some_and(|value| value.len() >= 3 && value.chars().all(|ch| ch.is_ascii_digit()))
+}
+
+fn runtime_smart_context_numeric_error_term(term: &str, prefix: &str) -> bool {
+    term.strip_prefix(prefix)
+        .is_some_and(|value| !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 fn runtime_smart_context_intent_term_is_path(term: &str) -> bool {
@@ -3116,7 +3165,138 @@ fn runtime_smart_context_intent_term_is_path(term: &str) -> bool {
 }
 
 fn runtime_smart_context_intent_term_is_symbol(term: &str) -> bool {
-    term.contains("::") || term.contains('#')
+    if term.contains("::") || term.contains('#') {
+        return true;
+    }
+    if term.contains('.') && !runtime_smart_context_intent_term_is_path(term) {
+        return term
+            .split('.')
+            .all(runtime_smart_context_intent_symbol_segment);
+    }
+    runtime_smart_context_intent_symbol_segment(term)
+        && (term.starts_with("test_")
+            || term.ends_with("_test")
+            || term.contains('_')
+            || runtime_smart_context_intent_symbol_has_camel_shape(term))
+}
+
+fn runtime_smart_context_intent_symbol_segment(term: &str) -> bool {
+    let mut chars = term.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_' || first == '$')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$')
+}
+
+fn runtime_smart_context_intent_symbol_has_camel_shape(term: &str) -> bool {
+    let mut previous_lowercase = false;
+    for ch in term.chars() {
+        if previous_lowercase && ch.is_ascii_uppercase() {
+            return true;
+        }
+        previous_lowercase = ch.is_ascii_lowercase();
+    }
+    false
+}
+
+fn runtime_smart_context_error_code_terms_from_intent_text(text: &str) -> Vec<String> {
+    let lower = text.to_ascii_lowercase();
+    let mut terms = Vec::new();
+    runtime_smart_context_push_numeric_error_terms(&lower, "exit code", "exit_code_", &mut terms);
+    runtime_smart_context_push_numeric_error_terms(&lower, "exit_code", "exit_code_", &mut terms);
+    runtime_smart_context_push_numeric_error_terms(
+        &lower,
+        "status code",
+        "status_code_",
+        &mut terms,
+    );
+    runtime_smart_context_push_numeric_error_terms(
+        &lower,
+        "status_code",
+        "status_code_",
+        &mut terms,
+    );
+    terms
+}
+
+fn runtime_smart_context_push_numeric_error_terms(
+    text: &str,
+    marker: &str,
+    prefix: &str,
+    terms: &mut Vec<String>,
+) {
+    let mut remaining = text;
+    while let Some(index) = remaining.find(marker) {
+        let after_marker = &remaining[index + marker.len()..];
+        let after_separator = after_marker
+            .trim_start_matches(|ch: char| ch.is_ascii_whitespace() || ch == ':' || ch == '=');
+        let digits = after_separator
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>();
+        if !digits.is_empty() {
+            let term = format!("{prefix}{digits}");
+            if !terms.iter().any(|existing| existing == &term) {
+                terms.push(term);
+            }
+        }
+        remaining = after_marker;
+    }
+}
+
+fn runtime_smart_context_command_kinds_from_intent_text(text: &str) -> Vec<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    let mut kinds = Vec::new();
+    runtime_smart_context_push_command_kind_if(
+        &mut kinds,
+        runtime_smart_context_text_contains_any(
+            &lower,
+            &["cargo test", "cargo nextest", "nextest run"],
+        ),
+        "cargo-test",
+    );
+    runtime_smart_context_push_command_kind_if(
+        &mut kinds,
+        runtime_smart_context_text_contains_any(
+            &lower,
+            &["cargo check", "cargo build", "cargo clippy"],
+        ),
+        "cargo-build",
+    );
+    runtime_smart_context_push_command_kind_if(
+        &mut kinds,
+        runtime_smart_context_text_contains_any(
+            &lower,
+            &["npm test", "pnpm test", "yarn test", "vitest", "jest"],
+        ),
+        "npm-test",
+    );
+    runtime_smart_context_push_command_kind_if(
+        &mut kinds,
+        runtime_smart_context_text_contains_any(&lower, &["git diff", "git show"]),
+        "diff",
+    );
+    runtime_smart_context_push_command_kind_if(
+        &mut kinds,
+        runtime_smart_context_text_contains_any(&lower, &["pytest", "python -m pytest"]),
+        "python",
+    );
+    kinds
+}
+
+fn runtime_smart_context_text_contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn runtime_smart_context_push_command_kind_if(
+    kinds: &mut Vec<&'static str>,
+    condition: bool,
+    kind: &'static str,
+) {
+    if condition && !kinds.contains(&kind) {
+        kinds.push(kind);
+    }
 }
 
 fn runtime_smart_context_command_kind_hint_label(
@@ -3752,9 +3932,8 @@ fn runtime_smart_context_selective_rehydrate_budget_aware_ranges(
     }
 
     let mut remaining_tokens = token_budget;
-    let mut count = if runtime_smart_context_selective_rehydrate_terms_empty(terms) {
-        0
-    } else {
+    let strong_terms = runtime_smart_context_selective_rehydrate_terms_strong(terms);
+    let mut count = if strong_terms {
         runtime_smart_context_selective_rehydrate_semantic_ranges_inner(
             value,
             store,
@@ -3762,10 +3941,12 @@ fn runtime_smart_context_selective_rehydrate_budget_aware_ranges(
             &mut remaining_tokens,
             stats,
         )
+    } else {
+        0
     };
 
     let deferred_ids = runtime_smart_context_token_budget_deferred_rehydrate_ids(plan);
-    if !deferred_ids.is_empty() && remaining_tokens > 0 {
+    if strong_terms && !deferred_ids.is_empty() && remaining_tokens > 0 {
         count = count.saturating_add(
             runtime_smart_context_selective_rehydrate_deferred_read_plan(
                 value,
@@ -4079,7 +4260,12 @@ fn runtime_smart_context_deferred_read_plan_appendix(
                 ),
                 body: range.text.clone(),
             },
-            runtime_smart_context_semantic_range_score(range, terms).saturating_add(200),
+            runtime_smart_context_semantic_range_score_with_command(
+                range,
+                terms,
+                line_index.command_kind.as_deref(),
+            )
+            .saturating_add(200),
         );
     }
 
@@ -4273,22 +4459,39 @@ fn runtime_smart_context_matching_semantic_range_appendix_with_budget(
         return None;
     }
 
+    let exact_ranges = ranges
+        .iter()
+        .map(|range| RuntimeSmartContextExactAppendixRange {
+            reference: runtime_smart_context_artifact_line_ref(artifact_id, range.start, range.end),
+            body: range.text.clone(),
+        })
+        .collect::<Vec<_>>();
+    let scored_ranges = ranges
+        .iter()
+        .zip(exact_ranges.iter())
+        .map(
+            |(range, exact)| RuntimeSmartContextScoredExactAppendixRange {
+                range: exact.clone(),
+                score: runtime_smart_context_semantic_range_score_with_command(
+                    range,
+                    terms,
+                    line_index.command_kind.as_deref(),
+                ),
+            },
+        )
+        .collect::<Vec<_>>();
+
     runtime_smart_context_render_budgeted_scored_exact_appendix(
         SMART_CONTEXT_LABEL_SEMANTIC_EXACT,
-        ranges
-            .iter()
-            .map(|range| RuntimeSmartContextExactAppendixRange {
-                reference: runtime_smart_context_artifact_line_ref(
-                    artifact_id,
-                    range.start,
-                    range.end,
-                ),
-                body: range.text.clone(),
-            })
-            .collect(),
+        exact_ranges,
         runtime_smart_context_semantic_rehydrate_range_cap(terms),
         token_budget,
-        |range| runtime_smart_context_semantic_exact_appendix_score(range, terms),
+        |range| {
+            scored_ranges
+                .iter()
+                .find(|candidate| candidate.range.eq(range))
+                .map_or(0, |candidate| candidate.score)
+        },
     )
 }
 
@@ -4329,7 +4532,11 @@ fn runtime_smart_context_matching_semantic_ranges<'a>(
     }
     ranges.sort_by_key(|range| {
         (
-            std::cmp::Reverse(runtime_smart_context_semantic_range_score(range, terms)),
+            std::cmp::Reverse(runtime_smart_context_semantic_range_score_with_command(
+                range,
+                terms,
+                line_index.command_kind.as_deref(),
+            )),
             range.start,
             range.end,
         )
@@ -4337,29 +4544,10 @@ fn runtime_smart_context_matching_semantic_ranges<'a>(
     ranges
 }
 
-fn runtime_smart_context_semantic_exact_appendix_score(
-    range: &RuntimeSmartContextExactAppendixRange,
-    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
-) -> usize {
-    let mut score = prodex_context::count_critical_signals(&range.body)
-        .total()
-        .saturating_mul(20);
-    for term in terms
-        .error_codes
-        .iter()
-        .chain(terms.test_symbols.iter())
-        .chain(terms.file_paths.iter())
-    {
-        if range.body.contains(term) {
-            score = score.saturating_add(100);
-        }
-    }
-    score.saturating_add(10_000usize.saturating_sub(range.body.len().min(10_000)) / 100)
-}
-
-fn runtime_smart_context_semantic_range_score(
+fn runtime_smart_context_semantic_range_score_with_command(
     range: &RuntimeSmartContextArtifactSemanticLineRange,
     terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    command_kind: Option<&str>,
 ) -> usize {
     let mut score = prodex_context::count_critical_signals(&range.text)
         .total()
@@ -4367,7 +4555,7 @@ fn runtime_smart_context_semantic_range_score(
     if range
         .code
         .as_deref()
-        .is_some_and(|code| terms.error_codes.contains(code))
+        .is_some_and(|code| runtime_smart_context_error_code_matches_terms(code, terms))
     {
         score = score.saturating_add(120);
     }
@@ -4381,9 +4569,17 @@ fn runtime_smart_context_semantic_range_score(
     if range
         .path
         .as_deref()
-        .is_some_and(|path| terms.file_paths.contains(path))
+        .is_some_and(|path| runtime_smart_context_path_matches_terms(path, terms))
     {
         score = score.saturating_add(90);
+    }
+    if command_kind.is_some_and(|kind| terms.command_kinds.contains(kind)) {
+        score = score.saturating_add(match range.label.as_deref() {
+            Some("test_failure" | "error") => 70,
+            Some("diff_hunk") => 50,
+            Some("file_location") => 30,
+            _ => 20,
+        });
     }
     if terms
         .diff_hunks
@@ -4406,20 +4602,78 @@ fn runtime_smart_context_symbol_matches_terms(
 }
 
 fn runtime_smart_context_symbol_matches_term(symbol: &str, term: &str) -> bool {
+    let symbol = symbol.trim_end_matches("()");
     let term = term.trim_end_matches("()");
     symbol == term
         || term
             .rsplit("::")
             .next()
             .is_some_and(|suffix| suffix == symbol)
+        || symbol
+            .rsplit("::")
+            .next()
+            .is_some_and(|suffix| suffix == term)
         || term
             .rsplit('#')
             .next()
             .is_some_and(|suffix| suffix == symbol)
+        || symbol
+            .rsplit('#')
+            .next()
+            .is_some_and(|suffix| suffix == term)
         || term
             .rsplit('.')
             .next()
             .is_some_and(|suffix| suffix == symbol)
+        || symbol
+            .rsplit('.')
+            .next()
+            .is_some_and(|suffix| suffix == term)
+}
+
+fn runtime_smart_context_path_matches_terms(
+    path: &str,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> bool {
+    terms
+        .file_paths
+        .iter()
+        .any(|term| runtime_smart_context_path_matches_term(path, term))
+}
+
+fn runtime_smart_context_path_matches_term(path: &str, term: &str) -> bool {
+    let Some(path) = runtime_smart_context_normalized_intent_path(path) else {
+        return false;
+    };
+    let Some(term) = runtime_smart_context_normalized_intent_path(term) else {
+        return false;
+    };
+    path == term
+        || path.ends_with(&format!("/{term}"))
+        || term.ends_with(&format!("/{path}"))
+        || !term.contains('/') && path.rsplit('/').next() == Some(term.as_str())
+}
+
+fn runtime_smart_context_normalized_intent_path(value: &str) -> Option<String> {
+    let normalized = value.trim().replace('\\', "/");
+    let path = normalized
+        .as_str()
+        .trim_start_matches("a/")
+        .trim_start_matches("b/")
+        .trim_start_matches("./")
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | '/' | ':' | ',' | ';'))
+        .to_string();
+    (!path.is_empty()).then_some(path)
+}
+
+fn runtime_smart_context_error_code_matches_terms(
+    code: &str,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> bool {
+    terms
+        .error_codes
+        .iter()
+        .any(|term| code.eq_ignore_ascii_case(term))
 }
 
 fn runtime_smart_context_semantic_rehydrate_range_cap(
@@ -4450,7 +4704,17 @@ fn runtime_smart_context_selective_rehydrate_terms_empty(
     terms.file_paths.is_empty()
         && terms.error_codes.is_empty()
         && terms.test_symbols.is_empty()
+        && terms.command_kinds.is_empty()
         && terms.diff_hunks.is_empty()
+}
+
+fn runtime_smart_context_selective_rehydrate_terms_strong(
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> bool {
+    !terms.file_paths.is_empty()
+        || !terms.error_codes.is_empty()
+        || !terms.test_symbols.is_empty()
+        || !terms.diff_hunks.is_empty()
 }
 
 fn runtime_smart_context_semantic_range_matches_terms(
@@ -4460,11 +4724,11 @@ fn runtime_smart_context_semantic_range_matches_terms(
     range
         .path
         .as_deref()
-        .is_some_and(|path| terms.file_paths.contains(path))
+        .is_some_and(|path| runtime_smart_context_path_matches_terms(path, terms))
         || range
             .code
             .as_deref()
-            .is_some_and(|code| terms.error_codes.contains(code))
+            .is_some_and(|code| runtime_smart_context_error_code_matches_terms(code, terms))
         || range
             .symbol
             .as_deref()
@@ -4903,6 +5167,7 @@ fn runtime_smart_context_condense_historical_tool_call_arguments(
         return;
     }
 
+    let mut previous_arguments = Vec::<RuntimeSmartContextToolArgumentCandidate>::new();
     for item in input {
         let Some(object) = item.as_object_mut() else {
             continue;
@@ -4939,9 +5204,19 @@ fn runtime_smart_context_condense_historical_tool_call_arguments(
             else {
                 continue;
             };
-            let replacement =
-                runtime_smart_context_tool_argument_summary(&artifact, &arguments_text, tier);
+            let replacement = runtime_smart_context_tool_argument_replacement(
+                &artifact,
+                &arguments_text,
+                tier,
+                existing_artifact.is_some(),
+                &previous_arguments,
+            );
+            let candidate = RuntimeSmartContextToolArgumentCandidate {
+                artifact: artifact.clone(),
+                text: arguments_text.clone(),
+            };
             if replacement.len().saturating_mul(100) >= arguments_text.len().saturating_mul(75) {
+                previous_arguments.push(candidate);
                 continue;
             }
             object.insert(field.to_string(), serde_json::Value::String(replacement));
@@ -4949,6 +5224,7 @@ fn runtime_smart_context_condense_historical_tool_call_arguments(
                 stats.artifacts_stored = stats.artifacts_stored.saturating_add(1);
             }
             stats.tool_call_args_condensed = stats.tool_call_args_condensed.saturating_add(1);
+            previous_arguments.push(candidate);
             break;
         }
     }
@@ -4962,6 +5238,31 @@ fn runtime_smart_context_tool_argument_text(value: &serde_json::Value) -> Option
         }
         _ => None,
     }
+}
+
+fn runtime_smart_context_tool_argument_replacement(
+    artifact: &runtime_proxy_crate::SmartContextArtifactRef,
+    text: &str,
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+    already_stored: bool,
+    previous_arguments: &[RuntimeSmartContextToolArgumentCandidate],
+) -> String {
+    if let Some(previous) = previous_arguments
+        .iter()
+        .find(|previous| previous.text == text)
+    {
+        return runtime_smart_context_tool_argument_repeat_summary(
+            artifact,
+            Some(&previous.artifact),
+        );
+    }
+    if already_stored {
+        return runtime_smart_context_tool_argument_repeat_summary(artifact, None);
+    }
+    if let Some(delta) = runtime_smart_context_tool_argument_delta(text, previous_arguments, tier) {
+        return runtime_smart_context_tool_argument_delta_summary(artifact, &delta);
+    }
+    runtime_smart_context_tool_argument_summary(artifact, text, tier)
 }
 
 fn runtime_smart_context_tool_argument_summary(
@@ -4979,6 +5280,156 @@ fn runtime_smart_context_tool_argument_summary(
         artifact.byte_len,
         preview.trim()
     )
+}
+
+fn runtime_smart_context_tool_argument_repeat_summary(
+    artifact: &runtime_proxy_crate::SmartContextArtifactRef,
+    previous_artifact: Option<&runtime_proxy_crate::SmartContextArtifactRef>,
+) -> String {
+    let reference = runtime_smart_context_artifact_ref(&artifact.id);
+    let base_reference = previous_artifact
+        .filter(|previous| previous.id != artifact.id)
+        .map(|previous| {
+            format!(
+                " same-as={}",
+                runtime_smart_context_artifact_ref(&previous.id)
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "psc args repeat {reference} b={}{}",
+        artifact.byte_len, base_reference
+    )
+}
+
+fn runtime_smart_context_tool_argument_delta_summary(
+    artifact: &runtime_proxy_crate::SmartContextArtifactRef,
+    delta: &RuntimeSmartContextToolArgumentDelta,
+) -> String {
+    let reference = runtime_smart_context_artifact_ref(&artifact.id);
+    let base_reference = runtime_smart_context_artifact_ref(&delta.base_artifact.id);
+    let preview = if delta.inserted_preview.is_empty() {
+        String::new()
+    } else {
+        format!(" p: {}", delta.inserted_preview.trim())
+    };
+    format!(
+        "psc args delta {reference} b={} base={base_reference} pre={} suf={} -{} +{} ih={}{}",
+        artifact.byte_len,
+        delta.prefix_bytes,
+        delta.suffix_bytes,
+        delta.removed_bytes,
+        delta.inserted_bytes,
+        delta.inserted_hash,
+        preview
+    )
+}
+
+fn runtime_smart_context_tool_argument_delta(
+    text: &str,
+    previous_arguments: &[RuntimeSmartContextToolArgumentCandidate],
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+) -> Option<RuntimeSmartContextToolArgumentDelta> {
+    previous_arguments
+        .iter()
+        .filter_map(|previous| {
+            runtime_smart_context_tool_argument_delta_against(text, previous, tier)
+        })
+        .max_by(|left, right| {
+            left.common_bytes
+                .cmp(&right.common_bytes)
+                .then_with(|| right.changed_bytes.cmp(&left.changed_bytes))
+                .then_with(|| left.base_artifact.id.cmp(&right.base_artifact.id))
+        })
+}
+
+fn runtime_smart_context_tool_argument_delta_against(
+    text: &str,
+    previous: &RuntimeSmartContextToolArgumentCandidate,
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+) -> Option<RuntimeSmartContextToolArgumentDelta> {
+    let base = previous.text.as_str();
+    if text == base {
+        return None;
+    }
+
+    let prefix_bytes = runtime_smart_context_common_prefix_boundary_len(text, base);
+    let suffix_bytes = runtime_smart_context_common_suffix_boundary_len(text, base, prefix_bytes);
+    let common_bytes = prefix_bytes.saturating_add(suffix_bytes);
+    let max_len = text.len().max(base.len());
+    if common_bytes < SMART_CONTEXT_TOOL_ARGS_DIFF_MIN_COMMON_BYTES
+        || common_bytes.saturating_mul(100)
+            < max_len.saturating_mul(SMART_CONTEXT_TOOL_ARGS_DIFF_MIN_COMMON_RATIO_PERCENT)
+    {
+        return None;
+    }
+
+    let removed_bytes = base
+        .len()
+        .saturating_sub(prefix_bytes)
+        .saturating_sub(suffix_bytes);
+    let inserted_bytes = text
+        .len()
+        .saturating_sub(prefix_bytes)
+        .saturating_sub(suffix_bytes);
+    let changed_bytes = removed_bytes.saturating_add(inserted_bytes);
+    if changed_bytes.saturating_mul(100)
+        > max_len.saturating_mul(SMART_CONTEXT_TOOL_ARGS_DIFF_MAX_CHANGED_RATIO_PERCENT)
+    {
+        return None;
+    }
+
+    let inserted_end = text.len().saturating_sub(suffix_bytes);
+    let inserted = text.get(prefix_bytes..inserted_end)?;
+    let inserted_preview = inserted
+        .chars()
+        .take(runtime_smart_context_tool_args_preview_max_chars(tier))
+        .collect::<String>();
+    Some(RuntimeSmartContextToolArgumentDelta {
+        base_artifact: previous.artifact.clone(),
+        prefix_bytes,
+        suffix_bytes,
+        removed_bytes,
+        inserted_bytes,
+        inserted_hash: runtime_proxy_crate::smart_context_hash_text(inserted),
+        inserted_preview,
+        common_bytes,
+        changed_bytes,
+    })
+}
+
+fn runtime_smart_context_common_prefix_boundary_len(left: &str, right: &str) -> usize {
+    let max_len = left.len().min(right.len());
+    let mut len = 0usize;
+    let left_bytes = left.as_bytes();
+    let right_bytes = right.as_bytes();
+    while len < max_len && left_bytes[len] == right_bytes[len] {
+        len += 1;
+    }
+    while len > 0 && (!left.is_char_boundary(len) || !right.is_char_boundary(len)) {
+        len -= 1;
+    }
+    len
+}
+
+fn runtime_smart_context_common_suffix_boundary_len(
+    left: &str,
+    right: &str,
+    prefix_bytes: usize,
+) -> usize {
+    let max_len = left.len().min(right.len()).saturating_sub(prefix_bytes);
+    let mut len = 0usize;
+    let left_bytes = left.as_bytes();
+    let right_bytes = right.as_bytes();
+    while len < max_len && left_bytes[left.len() - len - 1] == right_bytes[right.len() - len - 1] {
+        len += 1;
+    }
+    while len > 0
+        && (!left.is_char_boundary(left.len() - len) || !right.is_char_boundary(right.len() - len))
+    {
+        len -= 1;
+    }
+    len
 }
 
 fn runtime_smart_context_tool_args_preview_max_chars(

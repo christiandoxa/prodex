@@ -181,7 +181,7 @@ pub fn smart_context_command_output_cache_record(
 ) -> SmartContextCommandOutputCacheRecord {
     SmartContextCommandOutputCacheRecord {
         id: id.into(),
-        content_hash: smart_context_hash_text(text),
+        content_hash: smart_context_normalized_command_output_hash_text(text),
         byte_len: text.len(),
         estimated_tokens: smart_context_estimate_tokens_from_body(text.as_bytes()),
     }
@@ -219,9 +219,10 @@ pub fn smart_context_command_output_cache_rewrite(
             .then_with(|| left.byte_len.cmp(&right.byte_len))
     });
 
-    if let Some(previous) = previous_records.iter().find(|previous| {
-        previous.content_hash == record.content_hash && previous.byte_len == record.byte_len
-    }) {
+    if let Some(previous) = previous_records
+        .iter()
+        .find(|previous| previous.content_hash == record.content_hash)
+    {
         let summary =
             smart_context_command_output_unchanged_summary(&record, previous, &input.text);
         let summary_estimated_tokens = smart_context_estimate_tokens_from_body(summary.as_bytes());
@@ -377,7 +378,7 @@ pub fn smart_context_conversation_dedupe(
     items
         .into_iter()
         .map(|item| {
-            let content_hash = smart_context_hash_text(&item.text);
+            let content_hash = smart_context_normalized_command_output_hash_text(&item.text);
             if let Some(ref_id) = seen.get(&content_hash) {
                 SmartContextDedupeItem::Duplicate {
                     id: item.id,
@@ -1522,6 +1523,23 @@ pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_DENOMINATOR: u64 = 10;
 pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_INLINE_BYTES: usize = 256;
 pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_REHYDRATE_TOKENS: u64 = 1;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SmartContextRewritePolicyBucketKey {
+    pub route: Option<String>,
+    pub model: Option<String>,
+    pub profile: Option<String>,
+}
+
+impl From<SmartContextTokenCalibrationBucketKey> for SmartContextRewritePolicyBucketKey {
+    fn from(value: SmartContextTokenCalibrationBucketKey) -> Self {
+        Self {
+            route: value.route,
+            model: value.model,
+            profile: value.profile,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SmartContextRewriteBudgetDecision {
     #[default]
@@ -1544,6 +1562,40 @@ pub struct SmartContextRewriteTelemetrySample {
 pub struct SmartContextRewriteTelemetryBudgetInput {
     pub recent_rewrite_safety: SmartContextRecentRewriteSafety,
     pub telemetry_samples: Vec<SmartContextRewriteTelemetrySample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextBucketedRewriteTelemetrySample {
+    pub bucket_key: Option<SmartContextRewritePolicyBucketKey>,
+    pub sample: SmartContextRewriteTelemetrySample,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmartContextLearnedRewritePolicyReason {
+    BasePolicyExactPassThrough,
+    MissingBucketKey,
+    MissingBucketConfidence,
+    UnsafeRewriteSample,
+    RecentSafetyFallback,
+    LearnedNoChange,
+    LearnedRelax,
+    LearnedTighten,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextLearnedRewritePolicyInput {
+    pub adaptive_policy_input: SmartContextAdaptiveBudgetPolicyInput,
+    pub bucket_key: Option<SmartContextRewritePolicyBucketKey>,
+    pub telemetry_samples: Vec<SmartContextBucketedRewriteTelemetrySample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextLearnedRewritePolicy {
+    pub policy: SmartContextAdaptiveBudgetPolicy,
+    pub decision: SmartContextRewriteBudgetDecision,
+    pub reasons: Vec<SmartContextLearnedRewritePolicyReason>,
+    pub matching_telemetry_samples: usize,
+    pub safety_samples: usize,
 }
 
 pub fn smart_context_recent_rewrite_safety_allows_larger_preview(
@@ -1621,6 +1673,119 @@ pub fn smart_context_rewrite_telemetry_budget_decision(
         SmartContextRewriteBudgetDecision::Tighten
     } else {
         SmartContextRewriteBudgetDecision::NoChange
+    }
+}
+
+pub fn smart_context_learned_rewrite_policy(
+    input: SmartContextLearnedRewritePolicyInput,
+) -> SmartContextLearnedRewritePolicy {
+    let SmartContextLearnedRewritePolicyInput {
+        mut adaptive_policy_input,
+        bucket_key,
+        telemetry_samples,
+    } = input;
+    let recent_rewrite_safety = adaptive_policy_input.recent_rewrite_safety;
+    let safety_samples = recent_rewrite_safety
+        .safe_rewrites
+        .saturating_add(recent_rewrite_safety.fallback_rewrites);
+    let available_context_tokens = adaptive_policy_input.accounting.available_context_tokens;
+
+    adaptive_policy_input.recent_rewrite_safety = SmartContextRecentRewriteSafety::default();
+    let base_policy = smart_context_adaptive_budget_policy(adaptive_policy_input);
+    if base_policy.mode == SmartContextBudgetMode::ExactPassThrough {
+        return SmartContextLearnedRewritePolicy {
+            policy: base_policy,
+            decision: SmartContextRewriteBudgetDecision::NoChange,
+            reasons: vec![SmartContextLearnedRewritePolicyReason::BasePolicyExactPassThrough],
+            matching_telemetry_samples: 0,
+            safety_samples,
+        };
+    }
+
+    let Some(bucket_key) = bucket_key
+        .as_ref()
+        .filter(|bucket_key| smart_context_rewrite_policy_bucket_key_complete(bucket_key))
+    else {
+        return smart_context_learned_rewrite_policy_exact(
+            base_policy,
+            SmartContextLearnedRewritePolicyReason::MissingBucketKey,
+            0,
+            safety_samples,
+            available_context_tokens,
+        );
+    };
+
+    let matching_telemetry_samples = telemetry_samples
+        .into_iter()
+        .filter(|sample| {
+            smart_context_rewrite_policy_bucket_key_matches(bucket_key, sample.bucket_key.as_ref())
+        })
+        .map(|sample| sample.sample)
+        .collect::<Vec<_>>();
+    let matching_sample_count = matching_telemetry_samples.len();
+    let telemetry_confident =
+        matching_sample_count >= SMART_CONTEXT_REWRITE_TELEMETRY_MIN_SAMPLE_COUNT;
+    let safety_confident = matching_sample_count == 0
+        && safety_samples >= SMART_CONTEXT_REWRITE_TELEMETRY_MIN_SAMPLE_COUNT;
+
+    if matching_telemetry_samples
+        .iter()
+        .any(|sample| sample.fallback || !smart_context_rewrite_telemetry_sample_safe_saved(sample))
+        || recent_rewrite_safety.fallback_rewrites > 0
+    {
+        return smart_context_learned_rewrite_policy_exact(
+            base_policy,
+            SmartContextLearnedRewritePolicyReason::UnsafeRewriteSample,
+            matching_sample_count,
+            safety_samples,
+            available_context_tokens,
+        );
+    }
+    if !telemetry_confident && !safety_confident {
+        return smart_context_learned_rewrite_policy_exact(
+            base_policy,
+            SmartContextLearnedRewritePolicyReason::MissingBucketConfidence,
+            matching_sample_count,
+            safety_samples,
+            available_context_tokens,
+        );
+    }
+
+    let decision = if telemetry_confident {
+        smart_context_rewrite_telemetry_budget_decision(SmartContextRewriteTelemetryBudgetInput {
+            recent_rewrite_safety,
+            telemetry_samples: matching_telemetry_samples,
+        })
+    } else {
+        smart_context_recent_rewrite_safety_budget_decision(&recent_rewrite_safety)
+    };
+    let policy = smart_context_apply_rewrite_budget_decision(
+        base_policy,
+        decision,
+        available_context_tokens,
+    );
+    let mut reasons = Vec::new();
+    if safety_confident {
+        reasons.push(SmartContextLearnedRewritePolicyReason::RecentSafetyFallback);
+    }
+    reasons.push(match decision {
+        SmartContextRewriteBudgetDecision::NoChange => {
+            SmartContextLearnedRewritePolicyReason::LearnedNoChange
+        }
+        SmartContextRewriteBudgetDecision::Relax => {
+            SmartContextLearnedRewritePolicyReason::LearnedRelax
+        }
+        SmartContextRewriteBudgetDecision::Tighten => {
+            SmartContextLearnedRewritePolicyReason::LearnedTighten
+        }
+    });
+
+    SmartContextLearnedRewritePolicy {
+        policy,
+        decision,
+        reasons,
+        matching_telemetry_samples: matching_sample_count,
+        safety_samples,
     }
 }
 
@@ -1872,6 +2037,79 @@ pub fn smart_context_hash_text(text: &str) -> String {
     format!("sc:{:016x}", smart_context_fnv1a64(text.as_bytes()))
 }
 
+pub fn smart_context_normalized_command_output_hash_text(text: &str) -> String {
+    let normalized = smart_context_normalize_volatile_command_output(text);
+    format!(
+        "scv:{:016x}",
+        smart_context_fnv1a64(normalized.as_ref().as_bytes())
+    )
+}
+
+pub fn smart_context_normalize_volatile_command_output(text: &str) -> Cow<'_, str> {
+    let mut normalized = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut index = 0usize;
+
+    while index < text.len() {
+        let rest = &text[index..];
+        let previous = smart_context_previous_char(text, index);
+
+        if let Some(len) = smart_context_ansi_escape_len(rest) {
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some(len) = smart_context_temp_path_len(rest) {
+            normalized.push_str("<tmp-path>");
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some(len) = smart_context_timestamp_len(rest, previous) {
+            normalized.push_str("<timestamp>");
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some(len) = smart_context_progress_counter_len(rest, previous) {
+            normalized.push_str("<progress>");
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some((len, replacement)) =
+            smart_context_labeled_random_id_replacement(rest, previous)
+        {
+            normalized.push_str(&replacement);
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some(len) = smart_context_uuid_len(rest, previous) {
+            normalized.push_str("<id>");
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some(len) = smart_context_duration_len(rest, previous) {
+            normalized.push_str("<duration>");
+            index += len;
+            changed = true;
+            continue;
+        }
+
+        let ch = rest.chars().next().expect("index is within string");
+        normalized.push(ch);
+        index += ch.len_utf8();
+    }
+
+    if changed {
+        Cow::Owned(normalized)
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 fn smart_context_effective_input_source(
     current_input_tokens: u64,
     estimated_current_request_tokens: u64,
@@ -1962,6 +2200,73 @@ fn smart_context_memory_capsule_policy_allows_bounded_budget(
 fn smart_context_recent_rewrite_min_saved_tokens(rewrite_count: usize) -> u64 {
     SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS
         .saturating_mul(u64::try_from(rewrite_count).unwrap_or(u64::MAX))
+}
+
+fn smart_context_learned_rewrite_policy_exact(
+    base_policy: SmartContextAdaptiveBudgetPolicy,
+    reason: SmartContextLearnedRewritePolicyReason,
+    matching_telemetry_samples: usize,
+    safety_samples: usize,
+    available_context_tokens: Option<u64>,
+) -> SmartContextLearnedRewritePolicy {
+    SmartContextLearnedRewritePolicy {
+        policy: SmartContextAdaptiveBudgetPolicy {
+            tier: base_policy.tier,
+            mode: SmartContextBudgetMode::ExactPassThrough,
+            max_inline_bytes: usize::MAX,
+            max_inline_tool_output_bytes: usize::MAX,
+            max_rehydrate_tokens: available_context_tokens.unwrap_or(u64::MAX),
+            reasons: base_policy.reasons,
+        },
+        decision: SmartContextRewriteBudgetDecision::NoChange,
+        reasons: vec![reason],
+        matching_telemetry_samples,
+        safety_samples,
+    }
+}
+
+fn smart_context_rewrite_policy_bucket_key_complete(
+    bucket_key: &SmartContextRewritePolicyBucketKey,
+) -> bool {
+    bucket_key.route.as_deref().is_some_and(non_empty)
+        && bucket_key
+            .model
+            .as_deref()
+            .and_then(|model| smart_context_token_calibration_normalized_model(Some(model)))
+            .is_some()
+        && bucket_key.profile.as_deref().is_some_and(non_empty)
+}
+
+fn smart_context_rewrite_policy_bucket_key_matches(
+    target: &SmartContextRewritePolicyBucketKey,
+    sample: Option<&SmartContextRewritePolicyBucketKey>,
+) -> bool {
+    let Some(sample) = sample else {
+        return false;
+    };
+    smart_context_rewrite_policy_field_matches(&target.route, &sample.route)
+        && smart_context_rewrite_policy_model_matches(&target.model, &sample.model)
+        && smart_context_rewrite_policy_field_matches(&target.profile, &sample.profile)
+}
+
+fn smart_context_rewrite_policy_field_matches(
+    target: &Option<String>,
+    sample: &Option<String>,
+) -> bool {
+    target.as_deref().is_some_and(non_empty) && target == sample
+}
+
+fn smart_context_rewrite_policy_model_matches(
+    target: &Option<String>,
+    sample: &Option<String>,
+) -> bool {
+    let Some(target) = smart_context_token_calibration_normalized_model(target.as_deref()) else {
+        return false;
+    };
+    let Some(sample) = smart_context_token_calibration_normalized_model(sample.as_deref()) else {
+        return false;
+    };
+    target == sample
 }
 
 fn smart_context_rewrite_telemetry_sample_safe_saved(
@@ -2126,7 +2431,7 @@ fn smart_context_command_output_unchanged_summary(
     text: &str,
 ) -> String {
     let mut summary = format!(
-        "psc cmdout unchanged id={} ref={} h={} b={} tok={}; exact repeat omitted",
+        "psc cmdout unchanged id={} ref={} h={} b={} tok={}; volatile-normalized repeat omitted",
         smart_context_command_output_label(&current.id),
         smart_context_command_output_label(&previous.id),
         current.content_hash,
@@ -2413,6 +2718,454 @@ fn smart_context_static_context_noise_value_looks_volatile(value: &str) -> bool 
         value.to_ascii_lowercase().as_str(),
         "now" | "today" | "yesterday" | "tomorrow"
     )
+}
+
+fn smart_context_previous_char(text: &str, index: usize) -> Option<char> {
+    if index == 0 {
+        None
+    } else {
+        text[..index].chars().next_back()
+    }
+}
+
+fn smart_context_ansi_escape_len(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.first().copied()? != 0x1b {
+        return None;
+    }
+
+    match bytes.get(1).copied() {
+        Some(b'[') => bytes
+            .iter()
+            .enumerate()
+            .skip(2)
+            .find(|(_, byte)| (0x40u8..=0x7e).contains(*byte))
+            .map(|(index, _)| index + 1)
+            .or(Some(bytes.len())),
+        Some(b']') => {
+            let mut index = 2usize;
+            while index < bytes.len() {
+                if bytes[index] == 0x07 {
+                    return Some(index + 1);
+                }
+                if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+                    return Some(index + 2);
+                }
+                index += 1;
+            }
+            Some(bytes.len())
+        }
+        Some(_) => Some(2.min(bytes.len())),
+        None => Some(1),
+    }
+}
+
+fn smart_context_temp_path_len(text: &str) -> Option<usize> {
+    for prefix in [
+        "/tmp/",
+        "/var/tmp/",
+        "/private/tmp/",
+        "/var/folders/",
+        "$TMPDIR/",
+        "%TEMP%\\",
+        "%TMP%\\",
+    ] {
+        if text.starts_with(prefix) {
+            return Some(smart_context_path_token_len(text));
+        }
+    }
+
+    let bytes = text.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+    {
+        let token_len = smart_context_path_token_len(text);
+        let token = text[..token_len].replace('/', "\\").to_ascii_lowercase();
+        if token.contains("\\appdata\\local\\temp\\") || token.starts_with("c:\\temp\\") {
+            return Some(token_len);
+        }
+    }
+
+    None
+}
+
+fn smart_context_path_token_len(text: &str) -> usize {
+    text.char_indices()
+        .find(|(index, ch)| *index > 0 && smart_context_path_token_delimiter(*ch))
+        .map(|(index, _)| index)
+        .unwrap_or(text.len())
+}
+
+fn smart_context_path_token_delimiter(ch: char) -> bool {
+    ch.is_whitespace()
+        || ch.is_control()
+        || matches!(
+            ch,
+            '"' | '\'' | '`' | '<' | '>' | '|' | '(' | ')' | '[' | ']' | '{' | '}'
+        )
+}
+
+fn smart_context_timestamp_len(text: &str, previous: Option<char>) -> Option<usize> {
+    if !smart_context_token_boundary(previous) {
+        return None;
+    }
+
+    let bytes = text.as_bytes();
+    if bytes.len() < 16
+        || !smart_context_ascii_digits(bytes, 0, 4)
+        || bytes[4] != b'-'
+        || !smart_context_ascii_digits(bytes, 5, 2)
+        || bytes[7] != b'-'
+        || !smart_context_ascii_digits(bytes, 8, 2)
+        || !matches!(bytes[10], b'T' | b' ')
+        || !smart_context_ascii_digits(bytes, 11, 2)
+        || bytes[13] != b':'
+        || !smart_context_ascii_digits(bytes, 14, 2)
+    {
+        return None;
+    }
+
+    let mut index = 16usize;
+    if bytes.get(index) == Some(&b':') {
+        if !smart_context_ascii_digits(bytes, index + 1, 2) {
+            return None;
+        }
+        index += 3;
+        if bytes.get(index) == Some(&b'.') {
+            let fraction_start = index + 1;
+            index = fraction_start;
+            while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+                index += 1;
+            }
+            if index == fraction_start {
+                return None;
+            }
+        }
+    }
+
+    if bytes.get(index) == Some(&b'Z') {
+        index += 1;
+    } else if matches!(bytes.get(index), Some(b'+') | Some(b'-')) {
+        if !smart_context_ascii_digits(bytes, index + 1, 2) {
+            return None;
+        }
+        index += 3;
+        if bytes.get(index) == Some(&b':') {
+            if !smart_context_ascii_digits(bytes, index + 1, 2) {
+                return None;
+            }
+            index += 3;
+        } else if smart_context_ascii_digits(bytes, index, 2) {
+            index += 2;
+        }
+    }
+
+    smart_context_after_token_boundary(text, index).then_some(index)
+}
+
+fn smart_context_progress_counter_len(text: &str, previous: Option<char>) -> Option<usize> {
+    if !smart_context_token_boundary(previous) {
+        return None;
+    }
+
+    smart_context_percent_progress_len(text)
+        .or_else(|| smart_context_slash_progress_len(text))
+        .or_else(|| smart_context_of_progress_len(text))
+}
+
+fn smart_context_percent_progress_len(text: &str) -> Option<usize> {
+    let (mut index, _) = smart_context_parse_unsigned_ascii_int(text, 0)?;
+    if text.as_bytes().get(index) == Some(&b'.') {
+        let fraction_start = index + 1;
+        index = fraction_start;
+        while text.as_bytes().get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == fraction_start {
+            return None;
+        }
+    }
+    if text.as_bytes().get(index) != Some(&b'%') {
+        return None;
+    }
+    index += 1;
+    smart_context_after_token_boundary(text, index).then_some(index)
+}
+
+fn smart_context_slash_progress_len(text: &str) -> Option<usize> {
+    let (left_end, left) = smart_context_parse_unsigned_ascii_int(text, 0)?;
+    if text.as_bytes().get(left_end) != Some(&b'/') {
+        return None;
+    }
+    let (right_end, right) = smart_context_parse_unsigned_ascii_int(text, left_end + 1)?;
+    if left > right || right == 0 {
+        return None;
+    }
+    smart_context_after_token_boundary(text, right_end).then_some(right_end)
+}
+
+fn smart_context_of_progress_len(text: &str) -> Option<usize> {
+    let (left_end, left) = smart_context_parse_unsigned_ascii_int(text, 0)?;
+    let mut index = smart_context_skip_ascii_spaces(text, left_end);
+    if !text[index..].starts_with("of") {
+        return None;
+    }
+    index += 2;
+    if !text
+        .as_bytes()
+        .get(index)
+        .is_some_and(u8::is_ascii_whitespace)
+    {
+        return None;
+    }
+    index = smart_context_skip_ascii_spaces(text, index);
+    let (right_end, right) = smart_context_parse_unsigned_ascii_int(text, index)?;
+    if left > right || right == 0 {
+        return None;
+    }
+    smart_context_after_token_boundary(text, right_end).then_some(right_end)
+}
+
+fn smart_context_labeled_random_id_replacement(
+    text: &str,
+    previous: Option<char>,
+) -> Option<(usize, String)> {
+    if !smart_context_token_boundary(previous) {
+        return None;
+    }
+
+    let mut separator_index = None;
+    for (index, ch) in text.char_indices().take(64) {
+        if matches!(ch, ':' | '=') {
+            separator_index = Some(index);
+            break;
+        }
+        if !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ' ')) {
+            return None;
+        }
+    }
+    let separator_index = separator_index?;
+    let key = smart_context_static_context_noise_key(&text[..separator_index]);
+    if !smart_context_random_id_key_is_volatile(&key) {
+        return None;
+    }
+
+    let mut value_start = smart_context_skip_ascii_spaces(text, separator_index + 1);
+    if matches!(text.as_bytes().get(value_start), Some(b'"') | Some(b'\'')) {
+        value_start += 1;
+    }
+    let value_len = smart_context_random_id_value_len(&text[value_start..])?;
+    let value_end = value_start + value_len;
+    let value = &text[value_start..value_end];
+    if !smart_context_random_id_value_looks_volatile_for_key(&key, value) {
+        return None;
+    }
+
+    let mut replacement = String::with_capacity(value_start + 4);
+    replacement.push_str(&text[..value_start]);
+    replacement.push_str("<id>");
+    Some((value_end, replacement))
+}
+
+fn smart_context_uuid_len(text: &str, previous: Option<char>) -> Option<usize> {
+    if !smart_context_token_boundary(previous) || text.len() < 36 {
+        return None;
+    }
+    let candidate = &text[..36];
+    if !smart_context_uuid_token_exact(candidate) || !smart_context_after_token_boundary(text, 36) {
+        return None;
+    }
+    Some(36)
+}
+
+fn smart_context_duration_len(text: &str, previous: Option<char>) -> Option<usize> {
+    if !smart_context_token_boundary(previous) {
+        return None;
+    }
+
+    let (mut index, _) = smart_context_parse_unsigned_ascii_int(text, 0)?;
+    if text.as_bytes().get(index) == Some(&b'.') {
+        let fraction_start = index + 1;
+        index = fraction_start;
+        while text.as_bytes().get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == fraction_start {
+            return None;
+        }
+    }
+    index = smart_context_skip_ascii_spaces(text, index);
+    let unit_len = smart_context_duration_unit_len(&text[index..])?;
+    let end = index + unit_len;
+    smart_context_after_token_boundary(text, end).then_some(end)
+}
+
+fn smart_context_duration_unit_len(text: &str) -> Option<usize> {
+    for unit in [
+        "milliseconds",
+        "millisecond",
+        "microseconds",
+        "microsecond",
+        "nanoseconds",
+        "nanosecond",
+        "seconds",
+        "second",
+        "minutes",
+        "minute",
+        "hours",
+        "hour",
+        "msecs",
+        "msec",
+        "usecs",
+        "usec",
+        "nsecs",
+        "nsec",
+        "secs",
+        "sec",
+        "mins",
+        "min",
+        "hrs",
+        "hr",
+        "ms",
+        "us",
+        "ns",
+        "s",
+        "m",
+        "h",
+    ] {
+        if smart_context_ascii_case_prefix(text, unit) {
+            return Some(unit.len());
+        }
+    }
+    None
+}
+
+fn smart_context_random_id_key_is_volatile(key: &str) -> bool {
+    matches!(
+        key,
+        "request id"
+            | "trace id"
+            | "run id"
+            | "span id"
+            | "correlation id"
+            | "invocation id"
+            | "execution id"
+            | "operation id"
+            | "job id"
+            | "build id"
+            | "uuid"
+            | "id"
+    )
+}
+
+fn smart_context_random_id_value_len(text: &str) -> Option<usize> {
+    let len = text
+        .char_indices()
+        .find(|(_, ch)| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':')))
+        .map(|(index, _)| index)
+        .unwrap_or(text.len());
+    (len > 0).then_some(len)
+}
+
+fn smart_context_random_id_value_looks_volatile_for_key(key: &str, value: &str) -> bool {
+    if smart_context_uuid_token_exact(value) {
+        return true;
+    }
+    if key == "id" && value.len() < 20 {
+        return false;
+    }
+    if value.len() < 12 {
+        return false;
+    }
+
+    let mut alpha = false;
+    let mut digit = false;
+    let mut hex_like = true;
+    let mut entropy_marks = 0usize;
+    for ch in value.chars() {
+        if ch.is_ascii_alphabetic() {
+            alpha = true;
+            if !ch.is_ascii_hexdigit() {
+                hex_like = false;
+            }
+        } else if ch.is_ascii_digit() {
+            digit = true;
+        } else if matches!(ch, '_' | '-' | '.' | ':') {
+            entropy_marks += 1;
+        } else {
+            return false;
+        }
+    }
+
+    (hex_like && value.len() >= 16) || (alpha && digit && (value.len() >= 16 || entropy_marks > 0))
+}
+
+fn smart_context_uuid_token_exact(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 8 | 13 | 18 | 23) {
+            if *byte != b'-' {
+                return false;
+            }
+        } else if !byte.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
+}
+
+fn smart_context_parse_unsigned_ascii_int(text: &str, start: usize) -> Option<(usize, u64)> {
+    let bytes = text.as_bytes();
+    let mut index = start;
+    let mut value = 0u64;
+    let mut digits = 0usize;
+    while let Some(byte) = bytes.get(index).copied() {
+        if !byte.is_ascii_digit() {
+            break;
+        }
+        value = value
+            .saturating_mul(10)
+            .saturating_add(u64::from(byte - b'0'));
+        index += 1;
+        digits += 1;
+    }
+    (digits > 0).then_some((index, value))
+}
+
+fn smart_context_skip_ascii_spaces(text: &str, start: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut index = start;
+    while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index += 1;
+    }
+    index
+}
+
+fn smart_context_ascii_digits(bytes: &[u8], start: usize, len: usize) -> bool {
+    bytes
+        .get(start..start.saturating_add(len))
+        .is_some_and(|value| value.iter().all(u8::is_ascii_digit))
+}
+
+fn smart_context_ascii_case_prefix(text: &str, prefix: &str) -> bool {
+    text.get(..prefix.len())
+        .is_some_and(|value| value.eq_ignore_ascii_case(prefix))
+}
+
+fn smart_context_token_boundary(ch: Option<char>) -> bool {
+    ch.is_none_or(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/')))
+}
+
+fn smart_context_after_token_boundary(text: &str, index: usize) -> bool {
+    text[index..]
+        .chars()
+        .next()
+        .is_none_or(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/')))
 }
 
 fn smart_context_summary_prefix(text: &str, byte_limit: usize) -> String {

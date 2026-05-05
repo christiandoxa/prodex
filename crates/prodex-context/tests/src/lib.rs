@@ -10,6 +10,33 @@ fn assert_no_critical_signal_loss(before: &str, after: &str) {
     );
 }
 
+fn assert_token_regression_budget(
+    before: &str,
+    report: &CommandOutputCompactReport,
+    min_saved_percent: usize,
+) {
+    assert_no_critical_signal_loss(before, &report.output);
+    assert!(
+        report.estimated_tokens_after < report.estimated_tokens_before,
+        "compaction did not save tokens: before={}, after={}\n{}",
+        report.estimated_tokens_before,
+        report.estimated_tokens_after,
+        report.output
+    );
+    let saved = report
+        .estimated_tokens_before
+        .saturating_sub(report.estimated_tokens_after);
+    assert!(
+        saved.saturating_mul(100)
+            >= report
+                .estimated_tokens_before
+                .saturating_mul(min_saved_percent),
+        "saved {saved}/{} tokens, expected at least {min_saved_percent}%\n{}",
+        report.estimated_tokens_before,
+        report.output
+    );
+}
+
 fn test_cwd_prefix() -> String {
     std::env::current_dir()
         .expect("test cwd")
@@ -3165,6 +3192,91 @@ fn text_log_stream_preserves_warn_fatal_locations_and_stack_trace() {
     );
     assert!(!report.output.contains("worker heartbeat 0"));
     assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn log_stream_compaction_keeps_stack_head_tail_and_drops_middle_noise() {
+    let mut input = String::new();
+    for index in 0..16 {
+        input.push_str(&format!(
+            "2026-05-05T00:00:{index:02}Z INFO worker heartbeat {index}\n"
+        ));
+    }
+    input.push_str("2026-05-05T00:01:00Z ERROR request failed\n");
+    input.push_str("Stack trace:\n");
+    for index in 0..60 {
+        input.push_str(&format!("    at middleware_frame_{index}\n"));
+    }
+    input.push_str("2026-05-05T00:01:01Z FATAL shutdown after failure\n");
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::LogStream,
+            max_lines: 18,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::LogStream);
+    assert!(report.output.contains("ERROR request failed"));
+    assert!(report.output.contains("Stack trace:"));
+    assert!(report.output.contains("middleware_frame_0"));
+    assert!(report.output.contains("middleware_frame_59"));
+    assert!(report.output.contains("omitted"));
+    assert!(!report.output.contains("middleware_frame_30"));
+    assert!(report.output.contains("FATAL shutdown after failure"));
+    assert!(report.estimated_tokens_after < report.estimated_tokens_before / 2);
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn token_regression_harness_guards_noisy_failure_compaction() {
+    let mut input = String::from(
+        "\
+> app@1.0.0 test /repo
+",
+    );
+    for index in 0..90 {
+        input.push_str(&format!(
+            "PASS tests/noisy_{index}.test.ts ({} ms)\n",
+            index + 10
+        ));
+    }
+    input.push_str(
+        "\
+FAIL tests/payment.test.ts
+AssertionError: expected status 201, received 500
+    at createPayment (/repo/src/payment.ts:88:13)
+    at Object.<anonymous> (/repo/tests/payment.test.ts:42:5)
+Test Suites: 1 failed, 90 passed, 91 total
+Tests:       1 failed, 270 passed, 271 total
+Command failed with exit code 1
+",
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 24,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("FAIL tests/payment.test.ts"));
+    assert!(
+        report
+            .output
+            .contains("AssertionError: expected status 201")
+    );
+    assert!(report.output.contains("src/payment.ts:88:13"));
+    assert!(report.output.contains("Command failed with exit code 1"));
+    assert!(!report.output.contains("PASS tests/noisy_89.test.ts"));
+    assert_token_regression_budget(&input, &report, 70);
 }
 
 #[test]
