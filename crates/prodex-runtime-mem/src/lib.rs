@@ -62,6 +62,10 @@ const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD: &str = "p";
 const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER: &str = "ss:ref=prev";
 const RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD: &str = "@";
 const RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD: &str = "@p";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE: &str = "pm2:d";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX: &str = "ss:dict:";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT: &str = "exact";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX: &str = "prefix";
 const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "ss:omit";
 const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
@@ -654,13 +658,12 @@ pub fn runtime_mem_super_slim_v2_shadow_codex_events<'a>(
     events: impl IntoIterator<Item = &'a Value>,
 ) -> Vec<Value> {
     let mut ref_dedupe_state = RuntimeMemSuperSlimV2ArtifactRefDedupeState::default();
-    let mut intern_state = RuntimeMemSuperSlimV2InternState::default();
-    runtime_mem_super_slim_shadow_codex_events(events)
+    let events = runtime_mem_super_slim_shadow_codex_events(events)
         .iter()
         .map(runtime_mem_super_slim_v2_shadow_from_v1_shadow)
         .map(|event| ref_dedupe_state.dedupe_consecutive_event_ref(event))
-        .map(|event| intern_state.compact_event(event))
-        .collect()
+        .collect();
+    runtime_mem_super_slim_v2_compact_dictionary_events(events)
 }
 
 pub fn runtime_mem_super_slim_v2_expand_interned_events(
@@ -669,7 +672,7 @@ pub fn runtime_mem_super_slim_v2_expand_interned_events(
     let mut intern_state = RuntimeMemSuperSlimV2InternState::default();
     events
         .into_iter()
-        .map(|event| intern_state.expand_event(event))
+        .filter_map(|event| intern_state.expand_event(event))
         .collect()
 }
 
@@ -1016,6 +1019,18 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
                 "toolResponse": {
                     "coalesce": ["s", "r", RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD, { "value": RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED }]
                 }
+            }
+        }),
+        serde_json::json!({
+            "name": "prodex-v2-dictionary-entry",
+            "match": { "path": "t", "equals": RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE },
+            "action": "session_context",
+            "fields": {
+                "dictionary": "s",
+                "dictionaryKey": "k",
+                "dictionaryIndex": "i",
+                "dictionaryMode": "m",
+                "dictionaryValue": "v"
             }
         }),
     ];
@@ -1624,32 +1639,20 @@ struct RuntimeMemSuperSlimV2InternState {
     exact_values: HashMap<String, Vec<String>>,
     prefix_values: HashMap<String, Vec<String>>,
     previous_full_values: HashMap<String, Vec<String>>,
+    dictionary_values: HashMap<String, HashMap<usize, RuntimeMemSuperSlimV2DictionaryEntry>>,
 }
 
 impl RuntimeMemSuperSlimV2InternState {
-    fn compact_event(&mut self, mut event: Value) -> Value {
+    fn expand_event(&mut self, mut event: Value) -> Option<Value> {
         let Some(event_type) = runtime_mem_lookup_json_path(&event, "t").and_then(Value::as_str)
         else {
-            return event;
+            return Some(event);
         };
 
-        let fields: &[&str] = match event_type {
-            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE => &["i", "n", "c"],
-            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => &["i", "r"],
-            RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => &["r"],
-            _ => &[],
-        };
-        for field in fields {
-            self.compact_field(&mut event, field);
+        if event_type == RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE {
+            self.remember_dictionary_event(&event);
+            return None;
         }
-        event
-    }
-
-    fn expand_event(&mut self, mut event: Value) -> Value {
-        let Some(event_type) = runtime_mem_lookup_json_path(&event, "t").and_then(Value::as_str)
-        else {
-            return event;
-        };
 
         let fields: &[&str] = match event_type {
             RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE => &["i", "n", "c"],
@@ -1660,40 +1663,26 @@ impl RuntimeMemSuperSlimV2InternState {
         for field in fields {
             self.expand_field(&mut event, field);
         }
-        event
-    }
-
-    fn compact_field(&mut self, event: &mut Value, field: &str) {
-        let Some(value) = event.get(field).and_then(Value::as_str).map(str::to_string) else {
-            return;
-        };
-
-        let candidate = if field == "n" {
-            self.exact_marker(field, &value)
-        } else {
-            self.prefix_marker(field, &value)
-        };
-        if let Some(candidate) = candidate
-            && runtime_mem_json_value_len(&candidate) < runtime_mem_json_string_len(&value)
-        {
-            if let Some(object) = event.as_object_mut() {
-                object.insert(field.to_string(), candidate);
-            }
-            self.remember_resolved(field, &value);
-            return;
-        }
-
-        self.remember_resolved(field, &value);
+        Some(event)
     }
 
     fn expand_field(&mut self, event: &mut Value, field: &str) {
         let Some(raw_value) = event.get(field).cloned() else {
             return;
         };
-        let Some(value) = self.resolve_marker(field, &raw_value) else {
-            if let Some(value) = raw_value.as_str() {
+        if let Some(value) = raw_value.as_str() {
+            if let Some(resolved) = self.resolve_dictionary_ref(field, value) {
+                if let Some(object) = event.as_object_mut() {
+                    object.insert(field.to_string(), Value::String(resolved.clone()));
+                }
+                self.remember_resolved(field, &resolved);
+            } else if runtime_mem_super_slim_v2_parse_dictionary_ref(value).is_none() {
                 self.remember_resolved(field, value);
             }
+            return;
+        }
+
+        let Some(value) = self.resolve_marker(field, &raw_value) else {
             return;
         };
 
@@ -1701,36 +1690,6 @@ impl RuntimeMemSuperSlimV2InternState {
             object.insert(field.to_string(), Value::String(value.clone()));
         }
         self.remember_resolved(field, &value);
-    }
-
-    fn exact_marker(&self, field: &str, value: &str) -> Option<Value> {
-        let index = self
-            .exact_values
-            .get(field)?
-            .iter()
-            .position(|candidate| candidate == value)?;
-        let mut marker = serde_json::Map::new();
-        marker.insert(
-            RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD.to_string(),
-            Value::from(index),
-        );
-        Some(Value::Object(marker))
-    }
-
-    fn prefix_marker(&self, field: &str, value: &str) -> Option<Value> {
-        let prefixes = self.prefix_values.get(field)?;
-        let (index, prefix) = prefixes
-            .iter()
-            .enumerate()
-            .filter(|(_, prefix)| value.starts_with(prefix.as_str()))
-            .max_by_key(|(_, prefix)| prefix.len())?;
-        let suffix = value.strip_prefix(prefix)?;
-        let mut marker = serde_json::Map::new();
-        marker.insert(
-            RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD.to_string(),
-            Value::Array(vec![Value::from(index), Value::String(suffix.to_string())]),
-        );
-        Some(Value::Object(marker))
     }
 
     fn resolve_marker(&self, field: &str, value: &Value) -> Option<String> {
@@ -1758,6 +1717,61 @@ impl RuntimeMemSuperSlimV2InternState {
             .get(field)
             .and_then(|prefixes| prefixes.get(index))
             .map(|prefix| format!("{prefix}{suffix}"))
+    }
+
+    fn remember_dictionary_event(&mut self, event: &Value) {
+        let Some(field) = runtime_mem_lookup_json_path(event, "k")
+            .and_then(Value::as_str)
+            .filter(|field| !field.is_empty())
+        else {
+            return;
+        };
+        let Some(index) = runtime_mem_lookup_json_path(event, "i")
+            .and_then(runtime_mem_super_slim_v2_dictionary_index)
+        else {
+            return;
+        };
+        let Some(mode) = runtime_mem_lookup_json_path(event, "m")
+            .and_then(Value::as_str)
+            .and_then(RuntimeMemSuperSlimV2DictionaryMode::from_str)
+        else {
+            return;
+        };
+        let Some(value) = runtime_mem_lookup_json_path(event, "v")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            return;
+        };
+        self.dictionary_values
+            .entry(field.to_string())
+            .or_default()
+            .insert(
+                index,
+                RuntimeMemSuperSlimV2DictionaryEntry {
+                    mode,
+                    value: value.to_string(),
+                },
+            );
+    }
+
+    fn resolve_dictionary_ref(&self, field: &str, value: &str) -> Option<String> {
+        let reference = runtime_mem_super_slim_v2_parse_dictionary_ref(value)?;
+        if reference.field != field {
+            return None;
+        }
+        let entry = self
+            .dictionary_values
+            .get(field)
+            .and_then(|entries| entries.get(&reference.index))?;
+        match (entry.mode, reference.suffix) {
+            (RuntimeMemSuperSlimV2DictionaryMode::Exact, None) => Some(entry.value.clone()),
+            (RuntimeMemSuperSlimV2DictionaryMode::Prefix, Some(suffix)) => {
+                Some(format!("{}{suffix}", entry.value))
+            }
+            (RuntimeMemSuperSlimV2DictionaryMode::Prefix, None) => Some(entry.value.clone()),
+            (RuntimeMemSuperSlimV2DictionaryMode::Exact, Some(_)) => None,
+        }
     }
 
     fn remember_resolved(&mut self, field: &str, value: &str) {
@@ -1796,6 +1810,314 @@ impl RuntimeMemSuperSlimV2InternState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeMemSuperSlimV2DictionaryMode {
+    Exact,
+    Prefix,
+}
+
+impl RuntimeMemSuperSlimV2DictionaryMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT,
+            Self::Prefix => RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX,
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT => Some(Self::Exact),
+            RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX => Some(Self::Prefix),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeMemSuperSlimV2DictionaryEntry {
+    mode: RuntimeMemSuperSlimV2DictionaryMode,
+    value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeMemSuperSlimV2DictionaryCandidate {
+    field: String,
+    mode: RuntimeMemSuperSlimV2DictionaryMode,
+    value: String,
+    event_indexes: Vec<usize>,
+}
+
+impl RuntimeMemSuperSlimV2DictionaryCandidate {
+    fn compact_ref(&self, dictionary_index: usize, value: &str) -> Option<String> {
+        let base_ref = runtime_mem_super_slim_v2_dictionary_ref(&self.field, dictionary_index);
+        match self.mode {
+            RuntimeMemSuperSlimV2DictionaryMode::Exact => (value == self.value).then_some(base_ref),
+            RuntimeMemSuperSlimV2DictionaryMode::Prefix => value
+                .strip_prefix(&self.value)
+                .filter(|suffix| !suffix.is_empty())
+                .map(|suffix| format!("{base_ref}+{suffix}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeMemSuperSlimV2DictionaryRef<'a> {
+    field: &'a str,
+    index: usize,
+    suffix: Option<&'a str>,
+}
+
+fn runtime_mem_super_slim_v2_compact_dictionary_events(mut events: Vec<Value>) -> Vec<Value> {
+    while let Some(candidate) = runtime_mem_super_slim_v2_best_dictionary_candidate(&events) {
+        let compacted =
+            runtime_mem_super_slim_v2_apply_dictionary_candidate(events.clone(), &candidate);
+        if runtime_mem_jsonl_events_len(&compacted) >= runtime_mem_jsonl_events_len(&events) {
+            break;
+        }
+        events = compacted;
+    }
+    events
+}
+
+fn runtime_mem_super_slim_v2_best_dictionary_candidate(
+    events: &[Value],
+) -> Option<RuntimeMemSuperSlimV2DictionaryCandidate> {
+    let base_len = runtime_mem_jsonl_events_len(events);
+    runtime_mem_super_slim_v2_dictionary_candidates(events)
+        .into_iter()
+        .filter_map(|candidate| {
+            let compacted =
+                runtime_mem_super_slim_v2_apply_dictionary_candidate(events.to_vec(), &candidate);
+            let compacted_len = runtime_mem_jsonl_events_len(&compacted);
+            if compacted_len < base_len {
+                Some((candidate, base_len - compacted_len))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(candidate, savings)| {
+            (
+                *savings,
+                candidate.event_indexes.len(),
+                candidate.value.len(),
+            )
+        })
+        .map(|(candidate, _)| candidate)
+}
+
+fn runtime_mem_super_slim_v2_dictionary_candidates(
+    events: &[Value],
+) -> Vec<RuntimeMemSuperSlimV2DictionaryCandidate> {
+    let mut candidates = runtime_mem_super_slim_v2_exact_dictionary_candidates(events, "n");
+    for field in ["i", "c", "r"] {
+        candidates.extend(runtime_mem_super_slim_v2_prefix_dictionary_candidates(
+            events, field,
+        ));
+    }
+    candidates
+}
+
+fn runtime_mem_super_slim_v2_exact_dictionary_candidates(
+    events: &[Value],
+    field: &str,
+) -> Vec<RuntimeMemSuperSlimV2DictionaryCandidate> {
+    let mut values = HashMap::<String, Vec<usize>>::new();
+    for (event_index, value) in runtime_mem_super_slim_v2_field_strings(events, field) {
+        values.entry(value).or_default().push(event_index);
+    }
+    values
+        .into_iter()
+        .filter(|(_, event_indexes)| event_indexes.len() > 1)
+        .map(
+            |(value, event_indexes)| RuntimeMemSuperSlimV2DictionaryCandidate {
+                field: field.to_string(),
+                mode: RuntimeMemSuperSlimV2DictionaryMode::Exact,
+                value,
+                event_indexes,
+            },
+        )
+        .collect()
+}
+
+fn runtime_mem_super_slim_v2_prefix_dictionary_candidates(
+    events: &[Value],
+    field: &str,
+) -> Vec<RuntimeMemSuperSlimV2DictionaryCandidate> {
+    let values = runtime_mem_super_slim_v2_field_strings(events, field);
+    let mut prefixes = Vec::<String>::new();
+    for left_index in 0..values.len() {
+        for right_index in (left_index + 1)..values.len() {
+            let Some(prefix) =
+                runtime_mem_common_char_prefix(&values[left_index].1, &values[right_index].1)
+            else {
+                continue;
+            };
+            if !prefixes.iter().any(|candidate| candidate == &prefix) {
+                prefixes.push(prefix);
+            }
+        }
+    }
+
+    prefixes
+        .into_iter()
+        .filter_map(|prefix| {
+            let event_indexes = values
+                .iter()
+                .filter(|(_, value)| value.starts_with(&prefix) && value.len() > prefix.len())
+                .map(|(event_index, _)| *event_index)
+                .collect::<Vec<_>>();
+            (event_indexes.len() > 1).then_some(RuntimeMemSuperSlimV2DictionaryCandidate {
+                field: field.to_string(),
+                mode: RuntimeMemSuperSlimV2DictionaryMode::Prefix,
+                value: prefix,
+                event_indexes,
+            })
+        })
+        .collect()
+}
+
+fn runtime_mem_super_slim_v2_field_strings(events: &[Value], field: &str) -> Vec<(usize, String)> {
+    events
+        .iter()
+        .enumerate()
+        .filter_map(|(event_index, event)| {
+            let event_type = runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str)?;
+            if !runtime_mem_super_slim_v2_field_can_use_dictionary(event_type, field) {
+                return None;
+            }
+            let value = event.get(field)?.as_str()?;
+            if value.is_empty() || runtime_mem_super_slim_v2_parse_dictionary_ref(value).is_some() {
+                return None;
+            }
+            Some((event_index, value.to_string()))
+        })
+        .collect()
+}
+
+fn runtime_mem_super_slim_v2_field_can_use_dictionary(event_type: &str, field: &str) -> bool {
+    match event_type {
+        RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE => matches!(field, "i" | "n" | "c"),
+        RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => matches!(field, "i" | "r"),
+        RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => field == "r",
+        _ => false,
+    }
+}
+
+fn runtime_mem_super_slim_v2_apply_dictionary_candidate(
+    mut events: Vec<Value>,
+    candidate: &RuntimeMemSuperSlimV2DictionaryCandidate,
+) -> Vec<Value> {
+    let Some(insert_at) = candidate.event_indexes.iter().copied().min() else {
+        return events;
+    };
+    let dictionary_index =
+        runtime_mem_super_slim_v2_next_dictionary_index(&events, &candidate.field);
+
+    for event_index in &candidate.event_indexes {
+        let Some(value) = events
+            .get(*event_index)
+            .and_then(|event| event.get(&candidate.field))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Some(compact_ref) = candidate.compact_ref(dictionary_index, &value) else {
+            continue;
+        };
+        if let Some(object) = events.get_mut(*event_index).and_then(Value::as_object_mut) {
+            object.insert(candidate.field.clone(), Value::String(compact_ref));
+        }
+    }
+
+    events.insert(
+        insert_at,
+        runtime_mem_super_slim_v2_dictionary_event(
+            &candidate.field,
+            dictionary_index,
+            candidate.mode,
+            &candidate.value,
+        ),
+    );
+    events
+}
+
+fn runtime_mem_super_slim_v2_next_dictionary_index(events: &[Value], field: &str) -> usize {
+    events
+        .iter()
+        .filter(|event| {
+            runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str)
+                == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE)
+        })
+        .filter(|event| {
+            runtime_mem_lookup_json_path(event, "k").and_then(Value::as_str) == Some(field)
+        })
+        .filter_map(|event| {
+            runtime_mem_lookup_json_path(event, "i")
+                .and_then(runtime_mem_super_slim_v2_dictionary_index)
+        })
+        .max()
+        .map_or(0, |index| index + 1)
+}
+
+fn runtime_mem_super_slim_v2_dictionary_event(
+    field: &str,
+    dictionary_index: usize,
+    mode: RuntimeMemSuperSlimV2DictionaryMode,
+    value: &str,
+) -> Value {
+    let mut event = runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE);
+    let index = dictionary_index.to_string();
+    event.insert("k".to_string(), Value::String(field.to_string()));
+    event.insert("i".to_string(), Value::String(index.clone()));
+    event.insert("m".to_string(), Value::String(mode.as_str().to_string()));
+    event.insert("v".to_string(), Value::String(value.to_string()));
+    event.insert(
+        "s".to_string(),
+        Value::String(format!("dict {field}#{index} {}={value}", mode.as_str())),
+    );
+    Value::Object(event)
+}
+
+fn runtime_mem_super_slim_v2_dictionary_ref(field: &str, dictionary_index: usize) -> String {
+    format!("{RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX}{field}#{dictionary_index}")
+}
+
+fn runtime_mem_super_slim_v2_parse_dictionary_ref(
+    value: &str,
+) -> Option<RuntimeMemSuperSlimV2DictionaryRef<'_>> {
+    let rest = value.strip_prefix(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX)?;
+    let (field, index_and_suffix) = rest.split_once('#')?;
+    if field.is_empty() || !field.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let (index, suffix) = index_and_suffix
+        .split_once('+')
+        .map_or((index_and_suffix, None), |(index, suffix)| {
+            (index, Some(suffix))
+        });
+    let index = index.parse::<usize>().ok()?;
+    Some(RuntimeMemSuperSlimV2DictionaryRef {
+        field,
+        index,
+        suffix,
+    })
+}
+
+fn runtime_mem_super_slim_v2_dictionary_index(value: &Value) -> Option<usize> {
+    value
+        .as_str()
+        .and_then(|value| value.parse::<usize>().ok())
+        .or_else(|| value.as_u64().and_then(|value| usize::try_from(value).ok()))
+}
+
+fn runtime_mem_jsonl_events_len(events: &[Value]) -> usize {
+    events
+        .iter()
+        .map(|event| runtime_mem_json_value_len(event).saturating_add(1))
+        .sum()
+}
+
 fn runtime_mem_super_slim_v2_emitted_artifact_ref(event: &Value) -> Option<String> {
     let event_type = runtime_mem_lookup_json_path(event, "t")?.as_str()?;
     if !matches!(
@@ -1829,10 +2151,6 @@ fn runtime_mem_common_char_prefix(left: &str, right: &str) -> Option<String> {
         return None;
     }
     Some(left[..prefix_len].to_string())
-}
-
-fn runtime_mem_json_string_len(value: &str) -> usize {
-    runtime_mem_json_value_len(&Value::String(value.to_string()))
 }
 
 fn runtime_mem_json_value_len(value: &Value) -> usize {
@@ -2814,150 +3132,210 @@ mod compact_v2_runtime_memory_tests {
 
     #[test]
     fn super_slim_v2_interns_repeated_tool_names_when_smaller() {
-        let tool_name = "very_long_custom_repo_tool_name";
-        let events = [
-            serde_json::json!({
+        let tool_name = "very_long_custom_repo_tool_name_for_runtime_mem_schema_native_dictionary";
+        let events = (0..8)
+            .map(|index| {
+                serde_json::json!({
                 "payload": {
                     "type": "custom_tool_call",
-                    "call_id": "call-tool-name-1",
+                    "call_id": format!("call-tool-name-{index}"),
                     "name": tool_name,
-                    "action": "first action"
+                    "action": format!("action {index}")
                 }
-            }),
-            serde_json::json!({
-                "payload": {
-                    "type": "custom_tool_call",
-                    "call_id": "call-tool-name-2",
-                    "name": tool_name,
-                    "action": "second action"
-                }
-            }),
-        ];
+                })
+            })
+            .collect::<Vec<_>>();
 
+        let base_shadows = v2_shadow_events_without_dictionary(events.iter());
         let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
 
-        assert_eq!(shadows[0]["n"].as_str(), Some(tool_name));
-        assert!(shadows[1]["n"].is_object());
         assert!(
-            runtime_mem_json_value_len(&shadows[1]["n"]) < runtime_mem_json_string_len(tool_name)
+            runtime_mem_jsonl_events_len(&shadows) < runtime_mem_jsonl_events_len(&base_shadows)
         );
+        assert!(v2_dictionary_events(&shadows).iter().any(|event| {
+            event.get("k").and_then(Value::as_str) == Some("n")
+                && event.get("m").and_then(Value::as_str)
+                    == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT)
+                && event.get("v").and_then(Value::as_str) == Some(tool_name)
+        }));
+        assert!(v2_tool_use_events(&shadows).iter().any(|event| {
+            event
+                .get("n")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.starts_with("ss:dict:n#"))
+        }));
+        assert_v2_raw_events_schema_addressable(&shadows);
+        assert_v2_compact_fields_are_strings(&shadows);
 
-        let expanded = runtime_mem_super_slim_v2_expand_interned_events(shadows.clone());
+        let expanded = expanded_non_dictionary_events(shadows.clone());
         let fields = v2_schema_fields("prodex-v2-tool-use");
-        assert_eq!(
-            resolve_v2_schema_string(&fields["toolName"], &expanded[1]).as_deref(),
-            Some(tool_name)
-        );
+        for event in v2_tool_use_events(&expanded) {
+            assert_eq!(
+                resolve_v2_schema_string(&fields["toolName"], event).as_deref(),
+                Some(tool_name)
+            );
+        }
     }
 
     #[test]
     fn super_slim_v2_interns_command_and_repo_path_prefixes_when_smaller() {
-        let command_prefix = "cargo test -q -p prodex-runtime-mem ";
-        let repo_prefix = "/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-mem/src/";
-        let events = [
-            serde_json::json!({
+        let command_prefix =
+            "cargo test -q -p prodex-runtime-mem --lib compact_v2_runtime_memory_tests::";
+        let repo_prefix =
+            "/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-mem/src/runtime/schema/native/";
+        let mut events = Vec::new();
+        for name in [
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+        ] {
+            events.push(serde_json::json!({
                 "payload": {
                     "type": "exec_command",
-                    "call_id": "call-cmd-a",
-                    "command": format!("{command_prefix}tests::alpha")
+                    "call_id": format!("call-cmd-{name}"),
+                    "command": format!("{command_prefix}{name}")
                 }
-            }),
-            serde_json::json!({
-                "payload": {
-                    "type": "exec_command",
-                    "call_id": "call-cmd-b",
-                    "command": format!("{command_prefix}tests::beta")
-                }
-            }),
-            serde_json::json!({
-                "payload": {
-                    "type": "exec_command",
-                    "call_id": "call-cmd-c",
-                    "command": format!("{command_prefix}tests::gamma")
-                }
-            }),
-            serde_json::json!({
+            }));
+        }
+        for name in [
+            "lib.rs",
+            "tests.rs",
+            "schema.rs",
+            "dictionary.rs",
+            "prefix.rs",
+            "call_id.rs",
+            "shadow.rs",
+            "expand.rs",
+        ] {
+            events.push(serde_json::json!({
                 "payload": {
                     "type": "user_message",
-                    "message": "first path ref",
+                    "message": format!("path ref {name}"),
                     "metadata": {
-                        "artifact_ref": format!("{repo_prefix}lib.rs")
+                        "artifact_ref": format!("{repo_prefix}{name}")
                     }
                 }
-            }),
-            serde_json::json!({
-                "payload": {
-                    "type": "user_message",
-                    "message": "second path ref",
-                    "metadata": {
-                        "artifact_ref": format!("{repo_prefix}tests.rs")
-                    }
-                }
-            }),
-            serde_json::json!({
-                "payload": {
-                    "type": "user_message",
-                    "message": "third path ref",
-                    "metadata": {
-                        "artifact_ref": format!("{repo_prefix}schema.rs")
-                    }
-                }
-            }),
-        ];
+            }));
+        }
 
+        let base_shadows = v2_shadow_events_without_dictionary(events.iter());
         let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
 
-        assert!(shadows[2]["c"].is_object());
-        assert!(shadows[5]["r"].is_object());
-        let expanded = runtime_mem_super_slim_v2_expand_interned_events(shadows);
+        assert!(
+            runtime_mem_jsonl_events_len(&shadows) < runtime_mem_jsonl_events_len(&base_shadows)
+        );
+        assert!(v2_dictionary_events(&shadows).iter().any(|event| {
+            event.get("k").and_then(Value::as_str) == Some("c")
+                && event.get("m").and_then(Value::as_str)
+                    == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX)
+        }));
+        assert!(v2_dictionary_events(&shadows).iter().any(|event| {
+            event.get("k").and_then(Value::as_str) == Some("r")
+                && event.get("m").and_then(Value::as_str)
+                    == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX)
+        }));
+        assert!(v2_tool_use_events(&shadows).iter().any(|event| {
+            event
+                .get("c")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.starts_with("ss:dict:c#"))
+        }));
+        assert!(v2_user_events(&shadows).iter().any(|event| {
+            event
+                .get("r")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.starts_with("ss:dict:r#"))
+        }));
+        assert_v2_raw_events_schema_addressable(&shadows);
+        assert_v2_compact_fields_are_strings(&shadows);
+
+        let expanded = expanded_non_dictionary_events(shadows);
         let tool_fields = v2_schema_fields("prodex-v2-tool-use");
         let user_fields = v2_schema_fields("prodex-v2-user-message");
-        assert_eq!(
-            resolve_v2_schema_string(&tool_fields["toolInput"], &expanded[2]).as_deref(),
-            Some(format!("{command_prefix}tests::gamma").as_str())
-        );
-        assert_eq!(
-            resolve_v2_schema_string(&user_fields["prompt"], &expanded[5]).as_deref(),
-            Some(format!("{repo_prefix}schema.rs").as_str())
-        );
+        let tool_inputs = v2_tool_use_events(&expanded)
+            .iter()
+            .filter_map(|event| resolve_v2_schema_string(&tool_fields["toolInput"], event))
+            .collect::<Vec<_>>();
+        let user_prompts = v2_user_events(&expanded)
+            .iter()
+            .filter_map(|event| resolve_v2_schema_string(&user_fields["prompt"], event))
+            .collect::<Vec<_>>();
+        assert!(tool_inputs.contains(&format!("{command_prefix}theta")));
+        assert!(user_prompts.contains(&format!("{repo_prefix}expand.rs")));
     }
 
     #[test]
     fn super_slim_v2_interns_call_id_prefixes_when_smaller() {
-        let call_id_prefix = "call_01HF97R8Y9_prodex_runtime_mem_";
+        let call_id_prefix = "call_01HF97R8Y9_prodex_runtime_mem_schema_native_dictionary_";
+        let events = [
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+        ]
+        .into_iter()
+        .map(|suffix| {
+            serde_json::json!({
+                "payload": {
+                    "type": "function_call",
+                    "call_id": format!("{call_id_prefix}{suffix}"),
+                    "name": "tool"
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+        let base_shadows = v2_shadow_events_without_dictionary(events.iter());
+        let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+
+        assert!(
+            runtime_mem_jsonl_events_len(&shadows) < runtime_mem_jsonl_events_len(&base_shadows)
+        );
+        assert!(v2_dictionary_events(&shadows).iter().any(|event| {
+            event.get("k").and_then(Value::as_str) == Some("i")
+                && event.get("m").and_then(Value::as_str)
+                    == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX)
+        }));
+        assert!(v2_tool_use_events(&shadows).iter().any(|event| {
+            event
+                .get("i")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.starts_with("ss:dict:i#"))
+        }));
+        assert_v2_raw_events_schema_addressable(&shadows);
+        assert_v2_compact_fields_are_strings(&shadows);
+
+        let expanded = expanded_non_dictionary_events(shadows);
+        let fields = v2_schema_fields("prodex-v2-tool-use");
+        let tool_ids = v2_tool_use_events(&expanded)
+            .iter()
+            .filter_map(|event| resolve_v2_schema_string(&fields["toolId"], event))
+            .collect::<Vec<_>>();
+        assert!(tool_ids.contains(&format!("{call_id_prefix}theta")));
+    }
+
+    #[test]
+    fn super_slim_v2_dictionary_skips_compaction_when_not_smaller() {
         let events = [
             serde_json::json!({
                 "payload": {
-                    "type": "function_call",
-                    "call_id": format!("{call_id_prefix}alpha"),
-                    "name": "search_repo"
+                    "type": "custom_tool_call",
+                    "call_id": "call-a",
+                    "name": "sh",
+                    "action": "a"
                 }
             }),
             serde_json::json!({
                 "payload": {
-                    "type": "function_call",
-                    "call_id": format!("{call_id_prefix}beta"),
-                    "name": "search_repo"
-                }
-            }),
-            serde_json::json!({
-                "payload": {
-                    "type": "function_call",
-                    "call_id": format!("{call_id_prefix}gamma"),
-                    "name": "search_repo"
+                    "type": "custom_tool_call",
+                    "call_id": "call-b",
+                    "name": "sh",
+                    "action": "b"
                 }
             }),
         ];
 
+        let base_shadows = v2_shadow_events_without_dictionary(events.iter());
         let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
 
-        assert!(shadows[2]["i"].is_object());
-        let expanded = runtime_mem_super_slim_v2_expand_interned_events(shadows);
-        let fields = v2_schema_fields("prodex-v2-tool-use");
-        assert_eq!(
-            resolve_v2_schema_string(&fields["toolId"], &expanded[2]).as_deref(),
-            Some(format!("{call_id_prefix}gamma").as_str())
-        );
+        assert_eq!(shadows, base_shadows);
+        assert!(v2_dictionary_events(&shadows).is_empty());
+        assert_v2_raw_events_schema_addressable(&shadows);
     }
 
     #[test]
@@ -2983,6 +3361,136 @@ mod compact_v2_runtime_memory_tests {
             resolve_v2_schema_string(&fields["toolInput"], &expanded[0]).as_deref(),
             Some("cargo test -q -p prodex-runtime-mem --lib")
         );
+    }
+
+    fn v2_shadow_events_without_dictionary<'a>(
+        events: impl IntoIterator<Item = &'a Value>,
+    ) -> Vec<Value> {
+        let mut ref_dedupe_state = RuntimeMemSuperSlimV2ArtifactRefDedupeState::default();
+        runtime_mem_super_slim_shadow_codex_events(events)
+            .iter()
+            .map(runtime_mem_super_slim_v2_shadow_from_v1_shadow)
+            .map(|event| ref_dedupe_state.dedupe_consecutive_event_ref(event))
+            .collect()
+    }
+
+    fn v2_dictionary_events(events: &[Value]) -> Vec<&Value> {
+        events
+            .iter()
+            .filter(|event| {
+                runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str)
+                    == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE)
+            })
+            .collect()
+    }
+
+    fn v2_tool_use_events(events: &[Value]) -> Vec<&Value> {
+        v2_events_of_type(events, RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE)
+    }
+
+    fn v2_user_events(events: &[Value]) -> Vec<&Value> {
+        v2_events_of_type(events, RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE)
+    }
+
+    fn v2_events_of_type<'a>(events: &'a [Value], event_type: &str) -> Vec<&'a Value> {
+        events
+            .iter()
+            .filter(|event| {
+                runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str) == Some(event_type)
+            })
+            .collect()
+    }
+
+    fn expanded_non_dictionary_events(events: Vec<Value>) -> Vec<Value> {
+        runtime_mem_super_slim_v2_expand_interned_events(events)
+            .into_iter()
+            .filter(|event| {
+                runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str)
+                    != Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE)
+            })
+            .collect()
+    }
+
+    fn assert_v2_raw_events_schema_addressable(events: &[Value]) {
+        for event in events {
+            match runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str) {
+                Some(RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE) => {
+                    assert_v2_schema_fields_are_strings(
+                        "prodex-v2-user-message",
+                        event,
+                        &["prompt"],
+                    );
+                }
+                Some(RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE) => {
+                    assert_v2_schema_fields_are_strings(
+                        "prodex-v2-assistant-message",
+                        event,
+                        &["message"],
+                    );
+                }
+                Some(RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE) => {
+                    assert_v2_schema_fields_are_strings(
+                        "prodex-v2-tool-use",
+                        event,
+                        &["toolId", "toolName", "toolInput"],
+                    );
+                }
+                Some(RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE) => {
+                    assert_v2_schema_fields_are_strings(
+                        "prodex-v2-tool-result",
+                        event,
+                        &["toolId", "toolResponse"],
+                    );
+                }
+                Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE) => {
+                    assert_v2_schema_fields_are_strings(
+                        "prodex-v2-dictionary-entry",
+                        event,
+                        &[
+                            "dictionary",
+                            "dictionaryKey",
+                            "dictionaryIndex",
+                            "dictionaryMode",
+                            "dictionaryValue",
+                        ],
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn assert_v2_schema_fields_are_strings(event_name: &str, event: &Value, field_names: &[&str]) {
+        let fields = v2_schema_fields(event_name);
+        for field_name in field_names {
+            let value = resolve_v2_schema_string(&fields[*field_name], event)
+                .unwrap_or_else(|| panic!("{event_name}.{field_name} should resolve: {event}"));
+            assert!(
+                !value.trim().is_empty(),
+                "{event_name}.{field_name} should be meaningful: {event}"
+            );
+        }
+    }
+
+    fn assert_v2_compact_fields_are_strings(events: &[Value]) {
+        for event in events {
+            for field in [
+                "i",
+                "n",
+                "c",
+                "r",
+                "s",
+                "p",
+                "k",
+                "m",
+                "v",
+                RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD,
+            ] {
+                if let Some(value) = event.get(field) {
+                    assert!(value.is_string(), "{field} should stay string: {event}");
+                }
+            }
+        }
     }
 
     fn v2_schema_fields(event_name: &str) -> Value {

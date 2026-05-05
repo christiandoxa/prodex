@@ -2944,6 +2944,16 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
 
     if is_coverage_noise_line(trimmed, &lower) {
         Some("coverage")
+    } else if is_gradle_test_success_line(trimmed, &lower) {
+        Some("gradle_test")
+    } else if is_maven_test_success_line(trimmed, &lower) {
+        Some("maven_test")
+    } else if is_package_install_success_line(&lower) {
+        Some("package_install")
+    } else if is_docker_buildx_success_line(&lower) {
+        Some("docker_buildx")
+    } else if is_bazel_test_success_line(&lower) {
+        Some("bazel_test")
     } else if is_junit_xml_success_line(trimmed, &lower) {
         Some("junit_xml")
     } else if is_swift_test_success_line(&lower) {
@@ -3034,7 +3044,7 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("nx_summary")
     } else if lower.starts_with("tasks:") && lower.contains("successful") {
         Some("turbo_summary")
-    } else if lower.contains("actionable tasks:") {
+    } else if lower.contains("actionable tasks:") || lower.contains("actionable task:") {
         Some("gradle_tasks")
     } else if lower.starts_with("[info] total time:")
         || lower.starts_with("[info] finished at:")
@@ -3166,6 +3176,70 @@ fn is_zig_test_success_line(lower: &str) -> bool {
             && !has_nonzero_summary_count(lower, &["failed", "failures", "error", "errors"])
 }
 
+fn is_gradle_test_success_line(trimmed: &str, lower: &str) -> bool {
+    lower.starts_with("> task ") && lower.contains(":test") && !lower.ends_with(" failed")
+        || lower.contains(" > ") && (lower.ends_with(" passed") || lower.ends_with(" skipped"))
+        || lower.starts_with("test run finished after")
+        || lower.starts_with("[") && lower.contains(" tests successful")
+        || lower.starts_with("[") && lower.contains(" tests skipped")
+        || lower.ends_with(" tests completed")
+        || lower.contains(" tests completed, 0 failed")
+        || trimmed == "BUILD SUCCESSFUL"
+}
+
+fn is_maven_test_success_line(_trimmed: &str, lower: &str) -> bool {
+    let info_body = lower.strip_prefix("[info]").map(str::trim_start);
+    lower.starts_with("[info] running ")
+        || lower.starts_with("[info] results:")
+        || lower.starts_with("[info] surefire report directory:")
+        || lower.starts_with("[info] tests run:")
+            && !has_nonzero_summary_count(lower, &["failures", "errors"])
+        || lower.starts_with("[info] t e s t s")
+        || info_body.is_some_and(|body| {
+            body.len() >= 8 && body.chars().all(|ch| ch == '-' || ch.is_ascii_whitespace())
+        })
+}
+
+fn is_package_install_success_line(lower: &str) -> bool {
+    lower.starts_with("yarn install v")
+        || lower.starts_with("[1/4] resolving packages")
+        || lower.starts_with("[2/4] fetching packages")
+        || lower.starts_with("[3/4] linking dependencies")
+        || lower.starts_with("[4/4] building fresh packages")
+        || lower.starts_with("success saved lockfile")
+        || lower.starts_with("success already up-to-date")
+        || lower.starts_with("saved lockfile")
+        || lower.starts_with("bun install v")
+        || lower.starts_with("resolved, downloaded and extracted")
+        || lower.contains(" packages installed")
+        || lower.starts_with("scope: all ") && lower.contains("workspace project")
+        || lower.starts_with("done in ") && lower.contains(" using pnpm ")
+}
+
+fn is_docker_buildx_success_line(lower: &str) -> bool {
+    lower.starts_with('#')
+        && (lower.contains(" building with ")
+            || lower.contains(" transferring ")
+            || lower.contains(" exporting ")
+            || lower.contains(" importing cache manifest")
+            || lower.contains(" resolving provenance")
+            || lower.contains(" writing image sha256:")
+            || lower.contains(" naming to ")
+            || lower.contains(" pushing layers")
+            || lower.contains(" pushing manifest")
+            || lower.ends_with(" cached"))
+}
+
+fn is_bazel_test_success_line(lower: &str) -> bool {
+    lower.starts_with("//") && (lower.contains(" passed in ") || lower.ends_with(" passed"))
+        || lower.starts_with("executed ")
+            && lower.contains(" out of ")
+            && lower.contains(" tests")
+            && (lower.contains(" tests pass") || lower.contains(" test passes"))
+        || lower.starts_with("info: found ") && lower.contains(" test target")
+        || lower.starts_with("info: ") && lower.contains(" processes:")
+}
+
 fn zero_count_summary_line(lower: &str, word: &str) -> bool {
     lower.match_indices(word).any(|(index, matched)| {
         count_after_word(lower, index + matched.len()).or_else(|| count_before_word(lower, index))
@@ -3238,7 +3312,17 @@ fn is_coverage_noise_line(trimmed: &str, lower: &str) -> bool {
         || lower.starts_with("branches")
         || lower.starts_with("functions")
         || lower.starts_with("lines")
+        || lower.contains(" coverage: platform ")
+        || lower.starts_with("name ") && lower.contains(" stmts ") && lower.contains(" cover")
+        || lower.starts_with("total ") && lower.contains('%')
+        || lower.starts_with("required test coverage") && lower.contains(" reached")
+        || lower.starts_with("coverage html written")
+        || lower.starts_with("coverage xml written")
+        || lower.starts_with("coverage json written")
     {
+        return true;
+    }
+    if looks_like_pytest_coverage_table_row(trimmed, lower) {
         return true;
     }
     trimmed.contains('|')
@@ -3247,6 +3331,26 @@ fn is_coverage_noise_line(trimmed: &str, lower: &str) -> bool {
             || lower.contains("% funcs")
             || lower.contains("% lines")
             || lower.contains("uncovered line"))
+}
+
+fn looks_like_pytest_coverage_table_row(trimmed: &str, lower: &str) -> bool {
+    let mut columns = lower.split_whitespace();
+    let Some(path) = columns.next() else {
+        return false;
+    };
+    looks_like_location_path(path)
+        && lower.contains('%')
+        && trimmed
+            .split_whitespace()
+            .skip(1)
+            .filter(|column| {
+                column
+                    .trim_end_matches('%')
+                    .chars()
+                    .all(|ch| ch.is_ascii_digit() || ch == '.')
+            })
+            .count()
+            >= 3
 }
 
 fn is_junit_xml_success_line(trimmed: &str, lower: &str) -> bool {
@@ -3404,13 +3508,17 @@ fn is_noisy_success_key_line(line: &str) -> bool {
         || lower.contains("successfully ran targets")
         || (lower.starts_with("tasks:") && lower.contains("successful"))
         || lower.contains("actionable tasks:")
+        || lower.contains("actionable task:")
+        || is_gradle_test_success_line(line.trim_start(), &lower)
         || lower.starts_with("[info] tests run:")
+        || is_maven_test_success_line(line.trim_start(), &lower)
         || lower.starts_with("successfully built ")
         || lower.starts_with("successfully tagged ")
         || lower.starts_with("[+] running ")
         || (lower.starts_with("container ") && docker_compose_success_state(&lower))
         || lower.contains("writing image sha256:")
         || lower.contains("naming to ")
+        || is_docker_buildx_success_line(&lower)
         || lower.contains("all matched files use prettier code style")
         || lower.contains("eslint found no problems")
         || lower.starts_with("found 0 vulnerabilities")
@@ -3418,6 +3526,7 @@ fn is_noisy_success_key_line(line: &str) -> bool {
         || lower.starts_with("up to date in ")
         || lower.starts_with("lockfile is up to date")
         || lower.starts_with("already up to date")
+        || is_package_install_success_line(&lower)
         || lower.starts_with("successfully installed")
         || (lower.starts_with("resolved ") && lower.contains(" package"))
         || (lower.starts_with("prepared ") && lower.contains(" package"))
@@ -3429,6 +3538,7 @@ fn is_noisy_success_key_line(line: &str) -> bool {
         || lower.starts_with("found 0 issues")
         || lower.starts_with("built in ")
         || lower.contains(" passed in ")
+        || is_bazel_test_success_line(&lower)
         || is_common_success_summary_line(&lower)
         || lower.starts_with("compiled successfully")
         || is_coverage_noise_line(line.trim_start(), &lower)
@@ -3442,6 +3552,7 @@ fn is_common_success_summary_line(lower: &str) -> bool {
         || lower.contains(" build success")
         || lower.starts_with("[info] build success")
         || lower.contains("actionable tasks:")
+        || lower.contains("actionable task:")
         || lower.starts_with("[info] tests run:")
         || lower.starts_with("successfully built ")
         || lower.starts_with("successfully tagged ")
@@ -3483,11 +3594,19 @@ fn is_success_output_failure_signal_line(line: &str) -> bool {
         || lower.contains("failed to compile")
         || lower.contains("failed to load")
         || lower.contains("failed with")
+        || lower.contains("execution failed")
+        || lower.contains("failed to solve")
+        || lower.contains("executor failed running")
+        || lower.starts_with("> task ") && lower.ends_with(" failed")
+        || lower.starts_with("//") && lower.contains(" failed")
+        || lower.starts_with('#') && lower.contains(" error")
+        || lower.starts_with("err_pnpm_")
+        || lower.contains("required test coverage") && lower.contains("not reached")
         || is_nonzero_fail_count_line(&lower)
         || is_junit_xml_failure_line(line)
         || has_nonzero_summary_count(
             &lower,
-            &["failed", "failures", "failing", "error", "errors"],
+            &["failed", "failures", "failing", "fails", "error", "errors"],
         )
 }
 
@@ -3511,6 +3630,12 @@ fn is_success_output_warning_signal_line(line: &str) -> bool {
     lower.starts_with("warning")
         || lower.starts_with("warn ")
         || lower.starts_with("warn:")
+        || lower.starts_with("[warning]")
+        || lower.starts_with("[warn]")
+        || lower.starts_with("npm warn")
+        || lower.starts_with("pnpm warn")
+        || lower.starts_with("yarn warning")
+        || lower.starts_with("bun warning")
         || has_nonzero_summary_count(&lower, &["warning", "warnings"])
         || lower.contains(" warning ")
         || lower.contains(" warnings")
@@ -5494,6 +5619,19 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
         ) {
             return Some(CommandOutputKind::NoisySuccess);
         }
+        if matches!(command, "gradle" | "gradlew")
+            && command_metadata_subcommand_after(tokens, index)
+                .is_some_and(|subcommand| matches!(subcommand, "test" | "check" | "build"))
+        {
+            return Some(CommandOutputKind::NoisySuccess);
+        }
+        if matches!(command, "mvn" | "mvnw")
+            && command_metadata_subcommand_after(tokens, index).is_some_and(|subcommand| {
+                matches!(subcommand, "test" | "verify" | "package" | "install")
+            })
+        {
+            return Some(CommandOutputKind::NoisySuccess);
+        }
         if matches!(command, "journalctl" | "tail")
             || command == "kubectl"
                 && command_metadata_subcommand_after(tokens, index) == Some("logs")
@@ -5744,6 +5882,11 @@ fn is_error_signal_line(line: &str) -> bool {
         || lower.starts_with("fatal:")
         || lower.starts_with("panic:")
         || lower.starts_with("npm err!")
+        || lower.starts_with("npm error")
+        || lower.starts_with("pnpm error")
+        || lower.starts_with("yarn error")
+        || lower.starts_with("bun error")
+        || lower.starts_with('#') && lower.contains(" error")
         || lower.starts_with("failed ")
         || lower.starts_with("fail ")
         || trimmed.starts_with("E   ")

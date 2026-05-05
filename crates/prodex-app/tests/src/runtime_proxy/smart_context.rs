@@ -168,11 +168,7 @@ fn smart_context_progressive_summary_replaces_exact_duplicate_chunks_with_refs()
         1,
         CHUNK_LINES
     )));
-    assert!(deduped.contains(&runtime_smart_context_artifact_line_ref(
-        &artifact.id,
-        CHUNK_LINES + 1,
-        CHUNK_LINES * 2
-    )));
+    assert!(deduped.contains(&format!(",L{}-L{}", CHUNK_LINES + 1, CHUNK_LINES * 2)));
     assert_eq!(deduped.match_indices(&chunk).count(), 1);
     assert!(deduped.len() < summary.len());
 }
@@ -562,6 +558,7 @@ fn smart_context_artifact_manifest_lists_refs_without_full_content() {
         runtime_smart_context_artifact_manifest(&store).expect("artifact manifest should render");
 
     assert!(manifest.contains("psc m"));
+    assert!(manifest.contains(" set="));
     assert!(manifest.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
     assert!(manifest.contains(&format!("b={}", artifact_text.len())));
     assert!(!manifest.contains(" h="));
@@ -654,6 +651,7 @@ fn smart_context_manifest_default_omits_detail_fields_until_requested() {
 
     let manifest = value["input"][1]["content"].as_str().unwrap();
     assert!(manifest.starts_with("psc m refs-only"));
+    assert!(manifest.contains(" set="));
     assert!(manifest.contains("b="));
     assert!(!manifest.contains("cr="));
     assert!(!manifest.contains("sr="));
@@ -724,6 +722,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
         );
         assert_eq!(changed["input"].as_array().unwrap().len(), 2);
         let changed_manifest = changed["input"][1]["content"].as_str().unwrap();
+        assert!(changed_manifest.contains(" set="));
         assert!(!changed_manifest.contains("first artifact"));
         assert!(changed_manifest.contains("unchanged=1"));
         assert_eq!(changed_manifest.matches("psc:").count(), 1);
@@ -794,6 +793,7 @@ fn smart_context_manifest_delta_suppressed_for_resolved_explicit_ref() {
                 id: artifact.id.clone(),
                 marker: reference.clone(),
                 line_range: None,
+                line_ranges: Vec::new(),
             }],
             intent_terms: vec![artifact.id.clone()],
             command_kind_hints: BTreeSet::from(["test".to_string()]),
@@ -829,6 +829,7 @@ fn smart_context_manifest_delta_kept_for_missing_explicit_ref() {
                 id: "sc:missing".to_string(),
                 marker: "psc:missing".to_string(),
                 line_range: None,
+                line_ranges: Vec::new(),
             }],
             command_kind_hints: BTreeSet::from(["test".to_string()]),
             ..RuntimeSmartContextIntentSignals::default()
@@ -1004,6 +1005,29 @@ fn smart_context_rehydrates_artifact_line_ranges() {
 }
 
 #[test]
+fn smart_context_rehydrates_compact_multi_line_ranges() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store
+        .insert_text(1, "line one\nline two\nline three\nline four\nline five")
+        .unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("need {}#L1-L2,L4-L5", runtime_smart_context_artifact_ref(&artifact.id))
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value(&mut value, &store, &mut stats);
+
+    assert_eq!(
+        value["input"][0]["content"],
+        "need line one\nline two\nline four\nline five"
+    );
+    assert_eq!(stats.rehydrated_refs, 1);
+}
+
+#[test]
 fn smart_context_parser_accepts_short_and_legacy_artifact_refs() {
     let refs = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(
         "new psc:abc123#L2-L4 full psc:sc:def456 old prodex-artifact:sc:789abc?lines=L1-L1"
@@ -1022,6 +1046,20 @@ fn smart_context_parser_accepts_short_and_legacy_artifact_refs() {
         reference.id == "sc:789abc"
             && reference.line_range == Some(RuntimeSmartContextLineRange { start: 1, end: 1 })
     }));
+    let multi = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(
+        "multi psc:abc123#L1-L2,L4-L5".to_string(),
+    ));
+    let multi = multi
+        .iter()
+        .find(|reference| reference.id == "sc:abc123")
+        .unwrap();
+    assert_eq!(
+        multi.line_ranges,
+        vec![
+            RuntimeSmartContextLineRange { start: 1, end: 2 },
+            RuntimeSmartContextLineRange { start: 4, end: 5 },
+        ]
+    );
 }
 
 #[test]
@@ -1201,6 +1239,77 @@ fn smart_context_generated_summary_keeps_stateful_artifact_alias_stable() {
         assert!(output.contains("@0#L1-L1"));
     })
     .unwrap();
+}
+
+#[test]
+fn smart_context_persists_stateful_artifact_aliases_across_start() {
+    let first_shared = smart_context_test_shared("stable-artifact-alias-persist-first");
+    let artifact_path = first_shared
+        .log_path
+        .with_file_name("stable-artifact-alias-persist-artifacts.json");
+    let calibration_path = runtime_smart_context_token_calibration_path(&artifact_path);
+    let _ = std::fs::remove_file(&artifact_path);
+    let _ = std::fs::remove_file(&calibration_path);
+    register_runtime_smart_context_proxy_state(
+        &first_shared.log_path,
+        true,
+        None,
+        Some(artifact_path.clone()),
+    );
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store
+        .insert_text(1, "line one\nline two\nline three\nline four")
+        .unwrap();
+    let refs = (1usize..=8)
+        .map(|line| runtime_smart_context_artifact_line_ref(&artifact.id, line.min(4), line.min(4)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    with_runtime_smart_context_proxy_state(&first_shared, |state| {
+        let mut value = serde_json::json!({
+            "input": [{"type": "function_call_output", "output": format!("psc m refs-only\n{refs}")}]
+        });
+        assert!(runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
+            &mut value,
+            state,
+        ));
+    })
+    .unwrap();
+    persist_runtime_smart_context_token_calibration_metadata(
+        &first_shared,
+        "smart_context_artifact_aliases",
+    );
+
+    let fresh_shared = smart_context_test_shared("stable-artifact-alias-persist-fresh");
+    register_runtime_smart_context_proxy_state(
+        &fresh_shared.log_path,
+        true,
+        None,
+        Some(artifact_path.clone()),
+    );
+    with_runtime_smart_context_proxy_state(&fresh_shared, |state| {
+        let mut value = serde_json::json!({
+            "input": [{"type": "function_call_output", "output": format!("psc m refs-only\n{refs}")}]
+        });
+        assert!(runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
+            &mut value,
+            state,
+        ));
+        let output = value["input"][0]["output"].as_str().unwrap();
+        assert!(output.contains(&format!(
+            "psc a @0={}",
+            runtime_smart_context_artifact_ref(&artifact.id)
+        )));
+        assert!(output.contains("@0#L1-L1"));
+    })
+    .unwrap();
+
+    let raw = std::fs::read_to_string(&calibration_path).unwrap();
+    assert!(raw.contains("\"artifact_aliases\""));
+    assert!(!raw.contains("line one"));
+    let _ = std::fs::remove_file(&artifact_path);
+    let _ = std::fs::remove_file(&calibration_path);
+    let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&artifact_path));
+    let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&calibration_path));
 }
 
 #[test]
@@ -1924,6 +2033,149 @@ fn smart_context_budget_loads_persisted_recent_safe_rewrite() {
 }
 
 #[test]
+fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
+    let shared = smart_context_test_shared("budget-telemetry-relax");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    observe_runtime_smart_context_token_usage(
+        &shared,
+        RuntimeTokenUsage {
+            input_tokens: 48_000,
+            ..RuntimeTokenUsage::default()
+        },
+    );
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        state
+            .rewrite_telemetry_history
+            .push(RuntimeSmartContextRewriteTelemetryRecord {
+                body_bytes_before: 8_000,
+                body_bytes_after: 3_000,
+                estimated_tokens_before: 2_000,
+                estimated_tokens_after: 750,
+                rewrite_kind: "rewritten".to_string(),
+                status: "ok_saved".to_string(),
+                fallback_reason: None,
+            });
+        state
+            .rewrite_telemetry_history
+            .push(RuntimeSmartContextRewriteTelemetryRecord {
+                body_bytes_before: 7_000,
+                body_bytes_after: 2_800,
+                estimated_tokens_before: 1_750,
+                estimated_tokens_after: 700,
+                rewrite_kind: "rewritten".to_string(),
+                status: "ok_saved".to_string(),
+                fallback_reason: None,
+            });
+    })
+    .unwrap();
+
+    let budget = runtime_smart_context_budget(
+        &shared,
+        b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        None,
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+
+    assert_eq!(
+        budget.tier,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Large
+    );
+    assert_eq!(budget.policy.max_inline_tool_output_bytes, 40 * 1024);
+    assert_eq!(budget.policy.max_rehydrate_tokens, 11_904);
+}
+
+#[test]
+fn smart_context_budget_tightens_only_for_safe_marginal_saving_telemetry() {
+    let shared = smart_context_test_shared("budget-telemetry-tighten");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    observe_runtime_smart_context_token_usage(
+        &shared,
+        RuntimeTokenUsage {
+            input_tokens: 48_000,
+            ..RuntimeTokenUsage::default()
+        },
+    );
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        state
+            .rewrite_telemetry_history
+            .push(RuntimeSmartContextRewriteTelemetryRecord {
+                body_bytes_before: 10_000,
+                body_bytes_after: 9_000,
+                estimated_tokens_before: 2_500,
+                estimated_tokens_after: 2_250,
+                rewrite_kind: "rewritten".to_string(),
+                status: "ok_saved".to_string(),
+                fallback_reason: None,
+            });
+        state
+            .rewrite_telemetry_history
+            .push(RuntimeSmartContextRewriteTelemetryRecord {
+                body_bytes_before: 8_000,
+                body_bytes_after: 7_200,
+                estimated_tokens_before: 2_000,
+                estimated_tokens_after: 1_800,
+                rewrite_kind: "rewritten".to_string(),
+                status: "ok_saved".to_string(),
+                fallback_reason: None,
+            });
+    })
+    .unwrap();
+
+    let budget = runtime_smart_context_budget(
+        &shared,
+        b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        None,
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+    assert_eq!(
+        budget.policy.max_inline_tool_output_bytes,
+        (32 * 1024) * 9 / 10
+    );
+    assert_eq!(budget.policy.max_rehydrate_tokens, 10_713);
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        state
+            .rewrite_telemetry_history
+            .push(RuntimeSmartContextRewriteTelemetryRecord {
+                body_bytes_before: 8_000,
+                body_bytes_after: 3_000,
+                estimated_tokens_before: 2_000,
+                estimated_tokens_after: 750,
+                rewrite_kind: "self_check_passthrough".to_string(),
+                status: "critical_signal_loss".to_string(),
+                fallback_reason: Some("critical_signal_loss".to_string()),
+            });
+    })
+    .unwrap();
+    let neutral = runtime_smart_context_budget(
+        &shared,
+        b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        None,
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+    assert_eq!(neutral.policy.max_inline_tool_output_bytes, 32 * 1024);
+    assert_eq!(neutral.policy.max_rehydrate_tokens, 11_904);
+}
+
+#[test]
 fn smart_context_tool_preview_lines_follow_budget_tier_and_limit() {
     assert_eq!(
         runtime_smart_context_tool_preview_max_lines(
@@ -2172,6 +2424,77 @@ fn smart_context_static_context_section_dedupe_respects_require_exact() {
 
     assert_eq!(value["instructions"].as_str(), Some(instructions.as_str()));
     assert_eq!(stats.static_context_deltas, 0);
+}
+
+#[test]
+fn smart_context_persisted_static_section_fingerprints_dedupe_fresh_start() {
+    let first_shared = smart_context_test_shared("static-section-persist-first");
+    let artifact_path = first_shared
+        .log_path
+        .with_file_name("static-section-persist-artifacts.json");
+    let calibration_path = runtime_smart_context_token_calibration_path(&artifact_path);
+    let _ = std::fs::remove_file(&artifact_path);
+    let _ = std::fs::remove_file(&calibration_path);
+    let body = (0..90)
+        .map(|index| format!("Stable section guidance {index}."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let instructions = format!("# Stable Section\n{body}\n");
+    register_runtime_smart_context_proxy_state(
+        &first_shared.log_path,
+        true,
+        None,
+        Some(artifact_path.clone()),
+    );
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [{"role": "user", "content": "first request"}]
+    }));
+
+    let first_prepared = prepare_runtime_smart_context_http_body(
+        120,
+        &first,
+        &first_shared,
+        RuntimeRouteKind::Responses,
+    );
+    let first_value = serde_json::from_slice::<serde_json::Value>(first_prepared.as_ref()).unwrap();
+    assert_eq!(
+        first_value["instructions"].as_str(),
+        Some(instructions.as_str())
+    );
+    assert!(
+        std::fs::read_to_string(&calibration_path)
+            .unwrap()
+            .contains("static_section_fingerprints")
+    );
+
+    let fresh_shared = smart_context_test_shared("static-section-persist-fresh");
+    register_runtime_smart_context_proxy_state(
+        &fresh_shared.log_path,
+        true,
+        None,
+        Some(artifact_path.clone()),
+    );
+    let fresh = smart_context_test_request(serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [{"role": "user", "content": "fresh request"}]
+    }));
+
+    let fresh_prepared = prepare_runtime_smart_context_http_body(
+        121,
+        &fresh,
+        &fresh_shared,
+        RuntimeRouteKind::Responses,
+    );
+    let fresh_text = String::from_utf8_lossy(fresh_prepared.as_ref());
+    assert!(fresh_text.contains(SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX));
+    assert!(!fresh_text.contains("Stable section guidance 89."));
+    assert!(prodex_context::critical_signal_self_check(&instructions, &fresh_text).passed());
+
+    let _ = std::fs::remove_file(&artifact_path);
+    let _ = std::fs::remove_file(&calibration_path);
+    let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&artifact_path));
+    let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&calibration_path));
 }
 
 #[test]
@@ -2872,6 +3195,50 @@ fn smart_context_exact_appendices_merge_adjacent_line_ranges() {
     assert!(appendix.contains("error: first"));
     assert!(appendix.contains("panic: second"));
     assert_eq!(appendix.matches("psc:abc#L").count(), 1);
+}
+
+#[test]
+fn smart_context_exact_ref_lists_emit_compact_multi_ranges_when_shorter() {
+    let refs = vec![
+        "psc:abc#L1-L4".to_string(),
+        "psc:abc#L9-L12".to_string(),
+        "psc:abc#L20-L24".to_string(),
+    ];
+
+    let compact = runtime_smart_context_compact_line_refs_if_shorter(&refs);
+    let parsed = runtime_smart_context_parse_non_alias_artifact_reference(&compact).unwrap();
+
+    assert_eq!(compact, "psc:abc#L1-L4,L9-L12,L20-L24");
+    assert_eq!(parsed.line_ranges.len(), 3);
+    assert!(compact.len() < refs.join(",").len());
+}
+
+#[test]
+fn smart_context_scored_exact_appendix_keeps_high_signal_and_refs_overflow() {
+    let ranges = (1usize..=14)
+        .map(|index| RuntimeSmartContextExactAppendixRange {
+            reference: runtime_smart_context_artifact_line_ref("sc:abc", index, index),
+            body: if index == 13 {
+                "error[E0425]: cannot find value\nsrc/lib.rs:13:5".to_string()
+            } else {
+                format!("context line {index}")
+            },
+        })
+        .collect::<Vec<_>>();
+
+    let (appendix, count) = runtime_smart_context_render_scored_exact_appendix(
+        SMART_CONTEXT_LABEL_SEMANTIC_EXACT,
+        ranges,
+        4,
+        runtime_smart_context_critical_exact_appendix_score,
+    )
+    .unwrap();
+
+    assert_eq!(count, 4);
+    assert!(appendix.contains("error[E0425]"));
+    assert!(appendix.contains("refs-only: psc:abc#"));
+    assert!(appendix.contains(",L"));
+    assert!(appendix.matches("context line ").count() <= 4);
 }
 
 #[test]

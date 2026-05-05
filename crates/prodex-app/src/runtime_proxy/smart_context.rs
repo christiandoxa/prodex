@@ -15,6 +15,8 @@ const SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS: u64 = 250;
 const SMART_CONTEXT_REWRITE_TELEMETRY_HISTORY_LIMIT: usize = 16;
 const SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT: usize = 4;
 const SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS: u64 = 6 * 60 * 60;
+const SMART_CONTEXT_PERSISTED_ARTIFACT_ALIAS_LIMIT: usize = 64;
+const SMART_CONTEXT_PERSISTED_STATIC_SECTION_LIMIT: usize = 128;
 const SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES: usize = 12;
 const SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES: usize = 512;
 const SMART_CONTEXT_TOOL_PREVIEW_ESTIMATED_LINE_BYTES: usize = 256;
@@ -118,6 +120,7 @@ struct RuntimeSmartContextArtifactReference {
     id: String,
     marker: String,
     line_range: Option<RuntimeSmartContextLineRange>,
+    line_ranges: Vec<RuntimeSmartContextLineRange>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -190,6 +193,15 @@ struct RuntimeSmartContextArtifactAlias {
     alias: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct RuntimeSmartContextStaticSectionFingerprint {
+    item_id: String,
+    heading: String,
+    ordinal: usize,
+    content_hash: String,
+    byte_len: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeSmartContextRewriteTelemetryRecord {
     body_bytes_before: usize,
@@ -224,6 +236,7 @@ struct RuntimeSmartContextProxyState {
     last_artifact_manifest_emitted_at: Option<Instant>,
     artifact_aliases: BTreeMap<String, String>,
     next_artifact_alias_index: usize,
+    static_section_fingerprints: BTreeMap<String, RuntimeSmartContextStaticSectionFingerprint>,
 }
 
 static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
@@ -240,6 +253,10 @@ struct RuntimeSmartContextPersistedTokenCalibration {
     token_calibration_history: Vec<RuntimeSmartContextPersistedTokenCalibrationObservation>,
     #[serde(default)]
     rewrite_safety_history: Vec<RuntimeSmartContextPersistedRewriteSafetyObservation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    artifact_aliases: Vec<RuntimeSmartContextPersistedArtifactAlias>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    static_section_fingerprints: Vec<RuntimeSmartContextPersistedStaticSectionFingerprint>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -270,6 +287,28 @@ struct RuntimeSmartContextPersistedRewriteSafetyObservation {
     saved_tokens: u64,
     #[serde(default)]
     observed_at_unix_secs: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeSmartContextPersistedArtifactAlias {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    alias: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeSmartContextPersistedStaticSectionFingerprint {
+    #[serde(default)]
+    item_id: String,
+    #[serde(default)]
+    heading: String,
+    #[serde(default)]
+    ordinal: usize,
+    #[serde(default)]
+    content_hash: String,
+    #[serde(default)]
+    byte_len: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -399,6 +438,34 @@ impl From<RuntimeSmartContextRewriteSafetyRecord>
     }
 }
 
+impl From<RuntimeSmartContextStaticSectionFingerprint>
+    for RuntimeSmartContextPersistedStaticSectionFingerprint
+{
+    fn from(value: RuntimeSmartContextStaticSectionFingerprint) -> Self {
+        Self {
+            item_id: value.item_id,
+            heading: value.heading,
+            ordinal: value.ordinal,
+            content_hash: value.content_hash,
+            byte_len: value.byte_len,
+        }
+    }
+}
+
+impl From<RuntimeSmartContextPersistedStaticSectionFingerprint>
+    for RuntimeSmartContextStaticSectionFingerprint
+{
+    fn from(value: RuntimeSmartContextPersistedStaticSectionFingerprint) -> Self {
+        Self {
+            item_id: value.item_id,
+            heading: value.heading,
+            ordinal: value.ordinal,
+            content_hash: value.content_hash,
+            byte_len: value.byte_len,
+        }
+    }
+}
+
 impl prodex_runtime_state::RuntimeScheduledSaveJob for RuntimeSmartContextTokenCalibrationSaveJob {
     fn ready_at(&self) -> Instant {
         self.ready_at
@@ -420,19 +487,7 @@ fn runtime_smart_context_load_token_calibration_for_artifact_path(
     artifact_path: &Path,
 ) -> RuntimeSmartContextPersistedTokenCalibration {
     let path = runtime_smart_context_token_calibration_path(artifact_path);
-    let Ok(bytes) = fs::read(path) else {
-        return RuntimeSmartContextPersistedTokenCalibration::default();
-    };
-    let Ok(calibration) =
-        serde_json::from_slice::<RuntimeSmartContextPersistedTokenCalibration>(&bytes)
-    else {
-        return RuntimeSmartContextPersistedTokenCalibration::default();
-    };
-    if calibration.version == SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION {
-        calibration
-    } else {
-        RuntimeSmartContextPersistedTokenCalibration::default()
-    }
+    runtime_smart_context_load_token_calibration_path(&path)
 }
 
 fn runtime_smart_context_token_calibration_snapshot(
@@ -458,6 +513,14 @@ fn runtime_smart_context_token_calibration_snapshot(
             .copied()
             .filter(|record| runtime_smart_context_rewrite_safety_record_fresh(*record, now))
             .map(RuntimeSmartContextPersistedRewriteSafetyObservation::from)
+            .collect(),
+        artifact_aliases: runtime_smart_context_persisted_artifact_aliases(state),
+        static_section_fingerprints: state
+            .static_section_fingerprints
+            .values()
+            .take(SMART_CONTEXT_PERSISTED_STATIC_SECTION_LIMIT)
+            .cloned()
+            .map(RuntimeSmartContextPersistedStaticSectionFingerprint::from)
             .collect(),
     }
 }
@@ -673,8 +736,98 @@ fn runtime_smart_context_save_token_calibration_snapshot(
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let bytes = serde_json::to_vec(snapshot).context("failed to encode token calibration")?;
+    let _lock = crate::runtime_store::acquire_json_file_lock(path)?;
+    let existing = runtime_smart_context_load_token_calibration_path(path);
+    let merged =
+        runtime_smart_context_merge_persisted_token_calibration(existing, snapshot.clone());
+    let bytes = serde_json::to_vec(&merged).context("failed to encode token calibration")?;
     fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn runtime_smart_context_load_token_calibration_path(
+    path: &Path,
+) -> RuntimeSmartContextPersistedTokenCalibration {
+    let Ok(bytes) = fs::read(path) else {
+        return RuntimeSmartContextPersistedTokenCalibration::default();
+    };
+    let Ok(calibration) =
+        serde_json::from_slice::<RuntimeSmartContextPersistedTokenCalibration>(&bytes)
+    else {
+        return RuntimeSmartContextPersistedTokenCalibration::default();
+    };
+    if calibration.version == SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION {
+        calibration
+    } else {
+        RuntimeSmartContextPersistedTokenCalibration::default()
+    }
+}
+
+fn runtime_smart_context_merge_persisted_token_calibration(
+    mut existing: RuntimeSmartContextPersistedTokenCalibration,
+    incoming: RuntimeSmartContextPersistedTokenCalibration,
+) -> RuntimeSmartContextPersistedTokenCalibration {
+    existing.version = SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION;
+    runtime_smart_context_extend_unique_tail(
+        &mut existing.token_usage_history,
+        incoming.token_usage_history,
+    );
+    runtime_smart_context_truncate_vec_tail(
+        &mut existing.token_usage_history,
+        SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT,
+    );
+
+    runtime_smart_context_extend_unique_tail(
+        &mut existing.token_calibration_history,
+        incoming.token_calibration_history,
+    );
+    runtime_smart_context_truncate_vec_tail(
+        &mut existing.token_calibration_history,
+        SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT,
+    );
+
+    let now = runtime_smart_context_unix_secs_now();
+    existing
+        .rewrite_safety_history
+        .extend(incoming.rewrite_safety_history);
+    existing.rewrite_safety_history.retain(|record| {
+        runtime_smart_context_rewrite_safety_record_fresh(
+            RuntimeSmartContextRewriteSafetyRecord::from(record.clone()),
+            now,
+        )
+    });
+    existing
+        .rewrite_safety_history
+        .sort_by_key(|record| record.observed_at_unix_secs);
+    runtime_smart_context_truncate_vec_tail(
+        &mut existing.rewrite_safety_history,
+        SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT,
+    );
+
+    existing.artifact_aliases = runtime_smart_context_merge_persisted_artifact_aliases(
+        existing.artifact_aliases,
+        incoming.artifact_aliases,
+    );
+    existing.static_section_fingerprints =
+        runtime_smart_context_merge_persisted_static_section_fingerprints(
+            existing.static_section_fingerprints,
+            incoming.static_section_fingerprints,
+        );
+    existing
+}
+
+fn runtime_smart_context_truncate_vec_tail<T>(items: &mut Vec<T>, limit: usize) {
+    if items.len() > limit {
+        let overflow = items.len().saturating_sub(limit);
+        items.drain(0..overflow);
+    }
+}
+
+fn runtime_smart_context_extend_unique_tail<T: PartialEq>(items: &mut Vec<T>, incoming: Vec<T>) {
+    for item in incoming {
+        if !items.contains(&item) {
+            items.push(item);
+        }
+    }
 }
 
 pub(crate) fn register_runtime_smart_context_proxy_state(
@@ -729,6 +882,12 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
         .into_iter()
         .rev()
         .collect::<Vec<_>>();
+    let (artifact_aliases, next_artifact_alias_index) =
+        runtime_smart_context_artifact_alias_state_from_persisted(calibration.artifact_aliases);
+    let static_section_fingerprints =
+        runtime_smart_context_static_section_fingerprint_state_from_persisted(
+            calibration.static_section_fingerprints,
+        );
     states.insert(
         log_path.to_path_buf(),
         RuntimeSmartContextProxyState {
@@ -745,8 +904,9 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
             last_static_context_prompt_cache_hash: None,
             last_artifact_manifest_ids: BTreeSet::new(),
             last_artifact_manifest_emitted_at: None,
-            artifact_aliases: BTreeMap::new(),
-            next_artifact_alias_index: 0,
+            artifact_aliases,
+            next_artifact_alias_index,
+            static_section_fingerprints,
         },
     );
 }
@@ -909,6 +1069,33 @@ fn observe_runtime_smart_context_rewrite_safety(
             "smart_context_rewrite_safety",
         );
     }
+}
+
+fn persist_runtime_smart_context_token_calibration_metadata(
+    shared: &RuntimeRotationProxyShared,
+    reason: &str,
+) {
+    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+        return;
+    };
+    let Ok(states) = states.lock() else {
+        return;
+    };
+    let Some(state) = states.get(&shared.log_path) else {
+        return;
+    };
+    if !state.enabled {
+        return;
+    }
+    let Some(artifact_path) = state.artifact_path.as_deref() else {
+        return;
+    };
+    let save_job = (
+        runtime_smart_context_token_calibration_path(artifact_path),
+        runtime_smart_context_token_calibration_snapshot(state),
+    );
+    drop(states);
+    schedule_runtime_smart_context_token_calibration_save(shared, save_job.0, save_job.1, reason);
 }
 
 pub(crate) fn prepare_runtime_smart_context_http_body<'a>(
@@ -1168,6 +1355,12 @@ fn prepare_runtime_smart_context_body<'a>(
         );
         return Cow::Borrowed(&request.body);
     };
+    runtime_smart_context_apply_static_context_persistent_section_dedupe(
+        &mut value,
+        shared,
+        &exactness,
+        &mut outcome.stats,
+    );
     runtime_smart_context_apply_static_context_section_dedupe(
         &mut value,
         &exactness,
@@ -1190,11 +1383,18 @@ fn prepare_runtime_smart_context_body<'a>(
         &mut outcome.stats,
     );
     if outcome.stats != RuntimeSmartContextTransformStats::default() {
-        with_runtime_smart_context_proxy_state(shared, |state| {
+        let aliases_used = with_runtime_smart_context_proxy_state(shared, |state| {
             runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
                 &mut value, state,
+            )
+        })
+        .unwrap_or(false);
+        if aliases_used {
+            persist_runtime_smart_context_token_calibration_metadata(
+                shared,
+                "smart_context_artifact_aliases",
             );
-        });
+        }
         runtime_smart_context_apply_path_aliases_to_generated_texts(&mut value);
     }
     let stats = outcome.stats.clone();
@@ -1369,6 +1569,14 @@ struct RuntimeSmartContextBudget {
     token_usage_source: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum RuntimeSmartContextRewriteTelemetryTuning {
+    #[default]
+    Neutral,
+    Relax,
+    Tighten,
+}
+
 fn runtime_smart_context_budget(
     shared: &RuntimeRotationProxyShared,
     body: &[u8],
@@ -1392,6 +1600,7 @@ fn runtime_smart_context_budget(
         calibration_samples,
         configured_context_window_tokens,
         recent_rewrite_safety,
+        rewrite_telemetry_tuning,
     ) = runtime_smart_context_budget_inputs(shared, &bucket_key);
     let history = if bucket_history.is_empty() {
         global_history
@@ -1422,7 +1631,8 @@ fn runtime_smart_context_budget(
             calibration_samples,
         },
     );
-    let policy = runtime_proxy_crate::smart_context_adaptive_budget_policy(
+    let available_context_tokens = accounting.available_context_tokens;
+    let mut policy = runtime_proxy_crate::smart_context_adaptive_budget_policy(
         runtime_proxy_crate::SmartContextAdaptiveBudgetPolicyInput {
             exactness_guard,
             accounting,
@@ -1430,6 +1640,11 @@ fn runtime_smart_context_budget(
             static_context_changed,
             missing_rehydrate_refs,
         },
+    );
+    runtime_smart_context_apply_rewrite_telemetry_tuning(
+        &mut policy,
+        rewrite_telemetry_tuning,
+        available_context_tokens,
     );
     let available_tokens = policy
         .max_rehydrate_tokens
@@ -1562,12 +1777,27 @@ fn runtime_smart_context_budget_inputs(
     Vec<runtime_proxy_crate::SmartContextTokenCalibrationSample>,
     Option<u64>,
     runtime_proxy_crate::SmartContextRecentRewriteSafety,
+    RuntimeSmartContextRewriteTelemetryTuning,
 ) {
     let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
-        return (Vec::new(), Vec::new(), Vec::new(), None, Default::default());
+        return (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            None,
+            Default::default(),
+            RuntimeSmartContextRewriteTelemetryTuning::Neutral,
+        );
     };
     let Ok(states) = states.lock() else {
-        return (Vec::new(), Vec::new(), Vec::new(), None, Default::default());
+        return (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            None,
+            Default::default(),
+            RuntimeSmartContextRewriteTelemetryTuning::Neutral,
+        );
     };
     states
         .get(&shared.log_path)
@@ -1594,6 +1824,7 @@ fn runtime_smart_context_budget_inputs(
                 calibration_samples,
                 state.model_context_window_tokens,
                 runtime_smart_context_recent_rewrite_safety(&state.rewrite_safety_history),
+                runtime_smart_context_rewrite_telemetry_tuning(&state.rewrite_telemetry_history),
             )
         })
         .unwrap_or_default()
@@ -1617,6 +1848,89 @@ fn runtime_smart_context_recent_rewrite_safety(
         }
     }
     safety
+}
+
+fn runtime_smart_context_rewrite_telemetry_tuning(
+    history: &[RuntimeSmartContextRewriteTelemetryRecord],
+) -> RuntimeSmartContextRewriteTelemetryTuning {
+    let recent = history
+        .iter()
+        .rev()
+        .take(SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT)
+        .collect::<Vec<_>>();
+    if recent.len() < 2 {
+        return RuntimeSmartContextRewriteTelemetryTuning::Neutral;
+    }
+    let mut saved_tokens = 0u64;
+    let mut ratio_sum = 0usize;
+    for record in &recent {
+        if !runtime_smart_context_rewrite_telemetry_record_safe_saved(record) {
+            return RuntimeSmartContextRewriteTelemetryTuning::Neutral;
+        }
+        saved_tokens = saved_tokens.saturating_add(
+            record
+                .estimated_tokens_before
+                .saturating_sub(record.estimated_tokens_after),
+        );
+        ratio_sum = ratio_sum.saturating_add(runtime_smart_context_rewrite_ratio_percent(
+            record.body_bytes_before,
+            record.body_bytes_after,
+        ));
+    }
+    let average_ratio = ratio_sum / recent.len();
+    if saved_tokens
+        >= runtime_proxy_crate::SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS
+            .saturating_mul(recent.len() as u64)
+        && average_ratio <= 70
+    {
+        RuntimeSmartContextRewriteTelemetryTuning::Relax
+    } else if average_ratio >= 85 {
+        RuntimeSmartContextRewriteTelemetryTuning::Tighten
+    } else {
+        RuntimeSmartContextRewriteTelemetryTuning::Neutral
+    }
+}
+
+fn runtime_smart_context_rewrite_telemetry_record_safe_saved(
+    record: &RuntimeSmartContextRewriteTelemetryRecord,
+) -> bool {
+    record.fallback_reason.is_none()
+        && matches!(record.rewrite_kind.as_str(), "rewritten" | "minified")
+        && matches!(
+            record.status.as_str(),
+            "ok_saved" | "ok_surgical_rehydrate" | "ok_minified"
+        )
+        && record.estimated_tokens_after < record.estimated_tokens_before
+}
+
+fn runtime_smart_context_apply_rewrite_telemetry_tuning(
+    policy: &mut runtime_proxy_crate::SmartContextAdaptiveBudgetPolicy,
+    tuning: RuntimeSmartContextRewriteTelemetryTuning,
+    available_context_tokens: Option<u64>,
+) {
+    if policy.mode == runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough {
+        return;
+    }
+    match tuning {
+        RuntimeSmartContextRewriteTelemetryTuning::Neutral => {}
+        RuntimeSmartContextRewriteTelemetryTuning::Relax => {
+            policy.max_inline_tool_output_bytes =
+                policy.max_inline_tool_output_bytes.saturating_mul(5) / 4;
+            policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
+            policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.saturating_mul(5) / 4;
+            if let Some(available) = available_context_tokens {
+                policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.min(available);
+            }
+        }
+        RuntimeSmartContextRewriteTelemetryTuning::Tighten => {
+            policy.max_inline_tool_output_bytes =
+                policy.max_inline_tool_output_bytes.saturating_mul(9) / 10;
+            policy.max_inline_tool_output_bytes = policy.max_inline_tool_output_bytes.max(256);
+            policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
+            policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.saturating_mul(9) / 10;
+            policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.max(1);
+        }
+    }
 }
 
 fn runtime_smart_context_observe_static_context(
@@ -1795,6 +2109,144 @@ fn runtime_smart_context_apply_static_context_section_dedupe(
     );
 }
 
+fn runtime_smart_context_apply_static_context_persistent_section_dedupe(
+    value: &mut serde_json::Value,
+    shared: &RuntimeRotationProxyShared,
+    exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    if exactness_guard.decision != runtime_proxy_crate::SmartContextExactnessDecision::Allow {
+        return;
+    }
+    let current = runtime_smart_context_static_section_fingerprints_from_value(value);
+    if current.is_empty() {
+        return;
+    }
+    let Some((replacements, changed)) = with_runtime_smart_context_proxy_state(shared, |state| {
+        let replacements = runtime_smart_context_persistent_static_section_replacements(
+            value,
+            &state.static_section_fingerprints,
+            &current,
+        );
+        let next = current
+            .iter()
+            .cloned()
+            .map(|fingerprint| {
+                (
+                    runtime_smart_context_static_section_fingerprint_key(&fingerprint),
+                    fingerprint,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let changed = state.static_section_fingerprints != next;
+        if changed {
+            state.static_section_fingerprints = next;
+        }
+        (replacements, changed)
+    }) else {
+        return;
+    };
+
+    if !replacements.is_empty() {
+        stats.static_context_deltas = stats.static_context_deltas.saturating_add(
+            runtime_smart_context_replace_static_context_item_texts(value, &replacements),
+        );
+    }
+    if changed {
+        persist_runtime_smart_context_token_calibration_metadata(
+            shared,
+            "smart_context_static_sections",
+        );
+    }
+}
+
+fn runtime_smart_context_persistent_static_section_replacements(
+    value: &serde_json::Value,
+    previous: &BTreeMap<String, RuntimeSmartContextStaticSectionFingerprint>,
+    current: &[RuntimeSmartContextStaticSectionFingerprint],
+) -> BTreeMap<String, String> {
+    if previous.is_empty() {
+        return BTreeMap::new();
+    }
+    let current_by_key = current
+        .iter()
+        .map(|fingerprint| {
+            (
+                runtime_smart_context_static_section_fingerprint_key(fingerprint),
+                fingerprint,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut replacements = BTreeMap::new();
+    for item in runtime_smart_context_static_context_items(value) {
+        let Some(next_text) = runtime_smart_context_static_context_persistent_section_deduped_text(
+            &item.id,
+            &item.text,
+            previous,
+            &current_by_key,
+        ) else {
+            continue;
+        };
+        replacements.insert(item.id, next_text);
+    }
+    replacements
+}
+
+fn runtime_smart_context_static_context_persistent_section_deduped_text(
+    item_id: &str,
+    text: &str,
+    previous: &BTreeMap<String, RuntimeSmartContextStaticSectionFingerprint>,
+    current_by_key: &BTreeMap<String, &RuntimeSmartContextStaticSectionFingerprint>,
+) -> Option<String> {
+    let sections = runtime_smart_context_static_context_heading_sections(text);
+    if sections.is_empty() {
+        return None;
+    }
+    let mut candidate = String::new();
+    let mut cursor = 0usize;
+    let mut changed = false;
+    for section in sections {
+        if section.start < cursor || section.end > text.len() {
+            continue;
+        }
+        candidate.push_str(&text[cursor..section.start]);
+        let body = &text[section.start..section.end];
+        let key =
+            runtime_smart_context_static_section_key(item_id, &section.heading, section.ordinal);
+        let marker = previous
+            .get(&key)
+            .zip(current_by_key.get(&key))
+            .filter(|(previous, current)| {
+                previous.content_hash == current.content_hash
+                    && previous.byte_len == current.byte_len
+                    && previous.heading == current.heading
+            })
+            .map(|(previous, _)| {
+                runtime_smart_context_static_context_section_dup_marker(
+                    &format!("{}:{}", previous.item_id, previous.ordinal),
+                    &previous.content_hash,
+                    &section.heading,
+                )
+            });
+        if let Some(marker) = marker
+            && marker.len() < body.len()
+        {
+            candidate.push_str(&marker);
+            changed = true;
+        } else {
+            candidate.push_str(body);
+        }
+        cursor = section.end;
+    }
+    candidate.push_str(&text[cursor..]);
+    if !changed || candidate.len() >= text.len() {
+        return None;
+    }
+    prodex_context::critical_signal_self_check(text, &candidate)
+        .passed()
+        .then_some(candidate)
+}
+
 fn runtime_smart_context_static_context_section_deduped_text(
     item_id: &str,
     text: &str,
@@ -1847,6 +2299,97 @@ fn runtime_smart_context_static_context_section_deduped_text(
     }
     candidate.push_str(&text[cursor..]);
     (changed && candidate.len() < text.len()).then_some(candidate)
+}
+
+fn runtime_smart_context_static_section_fingerprints_from_value(
+    value: &serde_json::Value,
+) -> Vec<RuntimeSmartContextStaticSectionFingerprint> {
+    let mut fingerprints = Vec::new();
+    for item in runtime_smart_context_static_context_items(value) {
+        for section in runtime_smart_context_static_context_heading_sections(&item.text) {
+            if section.start >= section.end || section.end > item.text.len() {
+                continue;
+            }
+            let body = item.text[section.start..section.end].trim();
+            if body.is_empty() {
+                continue;
+            }
+            fingerprints.push(RuntimeSmartContextStaticSectionFingerprint {
+                item_id: item.id.clone(),
+                heading: section.heading.clone(),
+                ordinal: section.ordinal,
+                content_hash: runtime_proxy_crate::smart_context_hash_text(body),
+                byte_len: body.len(),
+            });
+        }
+    }
+    fingerprints.sort_by_key(runtime_smart_context_static_section_fingerprint_key);
+    fingerprints.truncate(SMART_CONTEXT_PERSISTED_STATIC_SECTION_LIMIT);
+    fingerprints
+}
+
+fn runtime_smart_context_static_section_fingerprint_state_from_persisted(
+    persisted: Vec<RuntimeSmartContextPersistedStaticSectionFingerprint>,
+) -> BTreeMap<String, RuntimeSmartContextStaticSectionFingerprint> {
+    runtime_smart_context_merge_persisted_static_section_fingerprints(Vec::new(), persisted)
+        .into_iter()
+        .map(RuntimeSmartContextStaticSectionFingerprint::from)
+        .map(|fingerprint| {
+            (
+                runtime_smart_context_static_section_fingerprint_key(&fingerprint),
+                fingerprint,
+            )
+        })
+        .collect()
+}
+
+fn runtime_smart_context_merge_persisted_static_section_fingerprints(
+    existing: Vec<RuntimeSmartContextPersistedStaticSectionFingerprint>,
+    incoming: Vec<RuntimeSmartContextPersistedStaticSectionFingerprint>,
+) -> Vec<RuntimeSmartContextPersistedStaticSectionFingerprint> {
+    let mut by_key = BTreeMap::<String, RuntimeSmartContextStaticSectionFingerprint>::new();
+    for fingerprint in existing.into_iter().chain(incoming) {
+        let fingerprint = RuntimeSmartContextStaticSectionFingerprint::from(fingerprint);
+        if !runtime_smart_context_static_section_fingerprint_valid(&fingerprint) {
+            continue;
+        }
+        by_key.insert(
+            runtime_smart_context_static_section_fingerprint_key(&fingerprint),
+            fingerprint,
+        );
+    }
+    by_key
+        .into_values()
+        .take(SMART_CONTEXT_PERSISTED_STATIC_SECTION_LIMIT)
+        .map(RuntimeSmartContextPersistedStaticSectionFingerprint::from)
+        .collect()
+}
+
+fn runtime_smart_context_static_section_fingerprint_valid(
+    fingerprint: &RuntimeSmartContextStaticSectionFingerprint,
+) -> bool {
+    !fingerprint.item_id.trim().is_empty()
+        && !fingerprint.heading.trim().is_empty()
+        && !fingerprint.content_hash.trim().is_empty()
+        && fingerprint.byte_len >= SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES
+}
+
+fn runtime_smart_context_static_section_fingerprint_key(
+    fingerprint: &RuntimeSmartContextStaticSectionFingerprint,
+) -> String {
+    runtime_smart_context_static_section_key(
+        &fingerprint.item_id,
+        &fingerprint.heading,
+        fingerprint.ordinal,
+    )
+}
+
+fn runtime_smart_context_static_section_key(
+    item_id: &str,
+    heading: &str,
+    ordinal: usize,
+) -> String {
+    format!("{item_id}\n{}\n{ordinal}", heading.to_ascii_lowercase())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2816,7 +3359,7 @@ fn runtime_smart_context_artifact_ref_occurrences_from_text(
 }
 
 fn runtime_smart_context_artifact_ref_tokens(text: &str) -> Vec<&str> {
-    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ')' | ']' | '}'))
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ')' | ']' | '}'))
         .collect()
 }
 
@@ -2850,10 +3393,12 @@ fn runtime_smart_context_parse_alias_artifact_reference(
 ) -> Option<RuntimeSmartContextArtifactReference> {
     let (alias, suffix) = runtime_smart_context_split_artifact_alias_ref(token)?;
     let id = aliases.get(alias)?;
+    let line_ranges = runtime_smart_context_parse_line_ranges(suffix);
     Some(RuntimeSmartContextArtifactReference {
         id: id.clone(),
         marker: token.to_string(),
-        line_range: runtime_smart_context_parse_line_range(suffix),
+        line_range: line_ranges.first().copied(),
+        line_ranges,
     })
 }
 
@@ -2886,6 +3431,7 @@ fn runtime_smart_context_trim_artifact_ref_token(token: &str) -> &str {
                 | ':'
                 | ';'
                 | '.'
+                | ','
                 | '!'
                 | '?'
                 | '('
@@ -2932,19 +3478,33 @@ fn runtime_smart_context_parse_non_alias_artifact_reference(
         return None;
     }
 
+    let line_ranges = runtime_smart_context_parse_line_ranges(&raw[id_end..]);
     Some(RuntimeSmartContextArtifactReference {
         id: raw[..id_end].to_string(),
         marker: token.to_string(),
-        line_range: runtime_smart_context_parse_line_range(&raw[id_end..]),
+        line_range: line_ranges.first().copied(),
+        line_ranges,
     })
 }
 
-fn runtime_smart_context_parse_line_range(suffix: &str) -> Option<RuntimeSmartContextLineRange> {
-    let suffix = suffix
+fn runtime_smart_context_parse_line_ranges(suffix: &str) -> Vec<RuntimeSmartContextLineRange> {
+    let Some(suffix) = suffix
         .strip_prefix('#')
         .or_else(|| suffix.strip_prefix(':'))
-        .or_else(|| suffix.strip_prefix('?'))?;
+        .or_else(|| suffix.strip_prefix('?'))
+    else {
+        return Vec::new();
+    };
     let suffix = suffix.strip_prefix("lines=").unwrap_or(suffix);
+    suffix
+        .split(',')
+        .filter_map(runtime_smart_context_parse_line_range_segment)
+        .collect()
+}
+
+fn runtime_smart_context_parse_line_range_segment(
+    suffix: &str,
+) -> Option<RuntimeSmartContextLineRange> {
     let suffix = suffix
         .strip_prefix('L')
         .or_else(|| suffix.strip_prefix('l'))
@@ -3004,7 +3564,7 @@ fn runtime_smart_context_rehydrate_ref_token_cost(
 ) -> Option<usize> {
     let artifact_text = store.get_text(&reference.id)?;
     let rehydrated =
-        runtime_smart_context_rehydrated_artifact_text(&artifact_text, reference.line_range)?;
+        runtime_smart_context_rehydrated_artifact_reference_text(&artifact_text, reference)?;
     runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(rehydrated.len())
         .try_into()
         .ok()
@@ -3074,10 +3634,11 @@ fn runtime_smart_context_rehydrate_value_for_ids(
             {
                 if rehydrate_ids.contains(&reference.id)
                     && let Some(artifact_text) = store.get_text(&reference.id)
-                    && let Some(rehydrated_text) = runtime_smart_context_rehydrated_artifact_text(
-                        &artifact_text,
-                        reference.line_range,
-                    )
+                    && let Some(rehydrated_text) =
+                        runtime_smart_context_rehydrated_artifact_reference_text(
+                            &artifact_text,
+                            &reference,
+                        )
                 {
                     let legacy_marker = format!("prodex-artifact:{}", reference.id);
                     let short_marker = runtime_smart_context_artifact_ref(&reference.id);
@@ -3164,6 +3725,23 @@ fn runtime_smart_context_rehydrated_artifact_text(
     }
     let end = line_range.end.min(lines.len());
     Some(lines[line_range.start - 1..end].join("\n"))
+}
+
+fn runtime_smart_context_rehydrated_artifact_reference_text(
+    artifact_text: &str,
+    reference: &RuntimeSmartContextArtifactReference,
+) -> Option<String> {
+    if reference.line_ranges.is_empty() {
+        return runtime_smart_context_rehydrated_artifact_text(artifact_text, reference.line_range);
+    }
+    let mut parts = Vec::new();
+    for range in &reference.line_ranges {
+        parts.push(runtime_smart_context_rehydrated_artifact_text(
+            artifact_text,
+            Some(*range),
+        )?);
+    }
+    Some(parts.join("\n"))
 }
 
 fn runtime_smart_context_selective_rehydrate_semantic_ranges(
@@ -3278,7 +3856,7 @@ fn runtime_smart_context_matching_semantic_range_appendix(
         return None;
     }
 
-    runtime_smart_context_render_exact_appendix(
+    runtime_smart_context_render_scored_exact_appendix(
         SMART_CONTEXT_LABEL_SEMANTIC_EXACT,
         ranges
             .iter()
@@ -3291,6 +3869,8 @@ fn runtime_smart_context_matching_semantic_range_appendix(
                 body: range.text.clone(),
             })
             .collect(),
+        runtime_smart_context_semantic_rehydrate_range_cap(terms),
+        |range| runtime_smart_context_semantic_exact_appendix_score(range, terms),
     )
 }
 
@@ -3328,9 +3908,72 @@ fn runtime_smart_context_matching_semantic_ranges<'a>(
             ranges.push(range);
         }
     }
-    ranges.sort_by_key(|range| (range.start, range.end));
-    ranges.truncate(runtime_smart_context_semantic_rehydrate_range_cap(terms));
+    ranges.sort_by_key(|range| {
+        (
+            std::cmp::Reverse(runtime_smart_context_semantic_range_score(range, terms)),
+            range.start,
+            range.end,
+        )
+    });
     ranges
+}
+
+fn runtime_smart_context_semantic_exact_appendix_score(
+    range: &RuntimeSmartContextExactAppendixRange,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> usize {
+    let mut score = prodex_context::count_critical_signals(&range.body)
+        .total()
+        .saturating_mul(20);
+    for term in terms
+        .error_codes
+        .iter()
+        .chain(terms.test_symbols.iter())
+        .chain(terms.file_paths.iter())
+    {
+        if range.body.contains(term) {
+            score = score.saturating_add(100);
+        }
+    }
+    score.saturating_add(10_000usize.saturating_sub(range.body.len().min(10_000)) / 100)
+}
+
+fn runtime_smart_context_semantic_range_score(
+    range: &RuntimeSmartContextArtifactSemanticLineRange,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> usize {
+    let mut score = prodex_context::count_critical_signals(&range.text)
+        .total()
+        .saturating_mul(20);
+    if range
+        .code
+        .as_deref()
+        .is_some_and(|code| terms.error_codes.contains(code))
+    {
+        score = score.saturating_add(120);
+    }
+    if range
+        .symbol
+        .as_deref()
+        .is_some_and(|symbol| terms.test_symbols.contains(symbol))
+    {
+        score = score.saturating_add(110);
+    }
+    if range
+        .path
+        .as_deref()
+        .is_some_and(|path| terms.file_paths.contains(path))
+    {
+        score = score.saturating_add(90);
+    }
+    if terms
+        .diff_hunks
+        .iter()
+        .any(|term| runtime_smart_context_diff_hunk_range_matches_term(range, term))
+    {
+        score = score.saturating_add(80);
+    }
+    score.saturating_add(10_000usize.saturating_sub(range.byte_len.min(10_000)) / 100)
 }
 
 fn runtime_smart_context_semantic_rehydrate_range_cap(
@@ -4024,7 +4667,7 @@ fn runtime_smart_context_dedupe_progressive_summary_chunks(
             plan.content_hash,
             plan.byte_len,
             plan.occurrence_count,
-            plan.refs.join(",")
+            runtime_smart_context_compact_line_refs_if_shorter(&plan.refs)
         );
         let removed_bytes = plan.text.len().saturating_mul(matches.saturating_sub(1));
         let added_bytes = marker
@@ -4137,6 +4780,63 @@ fn runtime_smart_context_render_exact_appendix(
     Some((rendered.join("\n"), range_count))
 }
 
+fn runtime_smart_context_render_scored_exact_appendix(
+    label: &str,
+    ranges: Vec<RuntimeSmartContextExactAppendixRange>,
+    max_exact_ranges: usize,
+    score: impl Fn(&RuntimeSmartContextExactAppendixRange) -> usize,
+) -> Option<(String, usize)> {
+    let ranges = ranges
+        .into_iter()
+        .filter(|range| !range.body.trim().is_empty())
+        .collect::<Vec<_>>();
+    let range_count = ranges.len();
+    if range_count == 0 {
+        return None;
+    }
+    let max_exact_ranges = max_exact_ranges.max(1);
+    if range_count <= max_exact_ranges {
+        return runtime_smart_context_render_exact_appendix(label, ranges);
+    }
+
+    let mut ranked = ranges
+        .iter()
+        .enumerate()
+        .map(|(index, range)| (index, score(range)))
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(index, score)| (std::cmp::Reverse(*score), *index));
+    let selected_indexes = ranked
+        .iter()
+        .take(max_exact_ranges)
+        .map(|(index, _)| *index)
+        .collect::<BTreeSet<_>>();
+
+    let mut selected = Vec::new();
+    let mut fallback_refs = Vec::new();
+    for (index, range) in ranges.into_iter().enumerate() {
+        if selected_indexes.contains(&index) {
+            selected.push(range);
+        } else {
+            fallback_refs.push(range.reference);
+        }
+    }
+    let selected_count = selected.len();
+
+    let Some((mut appendix, _)) = runtime_smart_context_render_exact_appendix(label, selected)
+    else {
+        let refs = runtime_smart_context_compact_line_refs_if_shorter(&fallback_refs);
+        return Some((format!("{label}\nrefs-only: {refs}"), selected_count));
+    };
+    if !fallback_refs.is_empty() {
+        appendix.push('\n');
+        appendix.push_str("refs-only: ");
+        appendix.push_str(&runtime_smart_context_compact_line_refs_if_shorter(
+            &fallback_refs,
+        ));
+    }
+    Some((appendix, selected_count))
+}
+
 fn runtime_smart_context_merge_exact_appendix_ranges(
     ranges: Vec<RuntimeSmartContextExactAppendixRange>,
 ) -> Vec<RuntimeSmartContextExactAppendixRange> {
@@ -4206,6 +4906,51 @@ fn runtime_smart_context_parse_artifact_line_ref(
     ))
 }
 
+fn runtime_smart_context_compact_line_refs_if_shorter(refs: &[String]) -> String {
+    let joined = refs.join(",");
+    let Some((base, ranges)) = runtime_smart_context_line_refs_same_base(refs) else {
+        return joined;
+    };
+    if ranges.len() < 2 {
+        return joined;
+    }
+    let compact = format!(
+        "{base}#{}",
+        ranges
+            .iter()
+            .map(|range| format!("L{}-L{}", range.start, range.end))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    if compact.len() < joined.len()
+        && runtime_smart_context_parse_non_alias_artifact_reference(&compact)
+            .is_some_and(|reference| reference.line_ranges.len() == ranges.len())
+    {
+        compact
+    } else {
+        joined
+    }
+}
+
+fn runtime_smart_context_line_refs_same_base(
+    refs: &[String],
+) -> Option<(String, Vec<RuntimeSmartContextLineRange>)> {
+    let mut base: Option<String> = None;
+    let mut ranges = Vec::new();
+    for reference in refs {
+        let (next_base, range) = runtime_smart_context_parse_artifact_line_ref(reference)?;
+        if let Some(base) = base.as_ref() {
+            if base != &next_base {
+                return None;
+            }
+        } else {
+            base = Some(next_base);
+        }
+        ranges.push(range);
+    }
+    Some((base?, ranges))
+}
+
 fn runtime_smart_context_render_exact_appendix_range(
     range: &RuntimeSmartContextExactAppendixRange,
     seen: &mut BTreeMap<(String, usize), Vec<RuntimeSmartContextSeenExactAppendixBody>>,
@@ -4218,7 +4963,7 @@ fn runtime_smart_context_render_exact_appendix_range(
     {
         let marker = format!(
             "[psc exact dup h={content_hash} b={byte_len} refs={}]",
-            existing.refs.join(",")
+            runtime_smart_context_compact_line_refs_if_shorter(&existing.refs)
         );
         let candidate = format!("{}\n{marker}", range.reference);
         let original = format!("{}\n{}", range.reference, range.body);
@@ -4287,11 +5032,7 @@ fn runtime_smart_context_progressive_critical_exact_ranges(
 ) -> Option<String> {
     let mut exact_ranges = Vec::new();
     if let Some(line_index) = line_index {
-        for range in line_index
-            .critical_ranges
-            .iter()
-            .take(SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES)
-        {
+        for range in &line_index.critical_ranges {
             if !runtime_smart_context_artifact_line_index_range_valid(range)
                 || range.text.trim().is_empty()
             {
@@ -4329,8 +5070,22 @@ fn runtime_smart_context_progressive_critical_exact_ranges(
         }
     }
 
-    runtime_smart_context_render_exact_appendix(SMART_CONTEXT_LABEL_CRITICAL_EXACT, exact_ranges)
-        .map(|(appendix, _)| appendix)
+    runtime_smart_context_render_scored_exact_appendix(
+        SMART_CONTEXT_LABEL_CRITICAL_EXACT,
+        exact_ranges,
+        SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES,
+        runtime_smart_context_critical_exact_appendix_score,
+    )
+    .map(|(appendix, _)| appendix)
+}
+
+fn runtime_smart_context_critical_exact_appendix_score(
+    range: &RuntimeSmartContextExactAppendixRange,
+) -> usize {
+    prodex_context::count_critical_signals(&range.body)
+        .total()
+        .saturating_mul(100)
+        .saturating_add(10_000usize.saturating_sub(range.body.len().min(10_000)) / 100)
 }
 
 fn runtime_smart_context_compact_successful_tool_output(
@@ -4872,6 +5627,8 @@ fn runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
     state: &mut RuntimeSmartContextProxyState,
 ) -> bool {
     let counts = runtime_smart_context_generated_artifact_ref_counts(value);
+    let previous_aliases = state.artifact_aliases.clone();
+    let previous_next_index = state.next_artifact_alias_index;
     let aliases = runtime_smart_context_artifact_alias_plan(counts, Some(state));
     if aliases.is_empty() {
         return false;
@@ -4879,9 +5636,16 @@ fn runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
     let replacement_count =
         runtime_smart_context_replace_generated_artifact_refs_with_aliases(value, &aliases);
     if replacement_count == 0 {
+        state.artifact_aliases = previous_aliases;
+        state.next_artifact_alias_index = previous_next_index;
         return false;
     }
-    runtime_smart_context_insert_artifact_alias_legend(value, &aliases)
+    if !runtime_smart_context_insert_artifact_alias_legend(value, &aliases) {
+        state.artifact_aliases = previous_aliases;
+        state.next_artifact_alias_index = previous_next_index;
+        return false;
+    }
+    true
 }
 
 fn runtime_smart_context_generated_artifact_ref_counts(
@@ -4946,7 +5710,7 @@ fn runtime_smart_context_artifact_alias_plan(
     let mut aliases = Vec::new();
     for (id, count, reference, _) in candidates {
         let alias = if let Some(state) = state.as_deref_mut() {
-            runtime_smart_context_stable_artifact_alias(state, &id)
+            runtime_smart_context_stable_artifact_alias_candidate(state, &id, &aliases)
         } else {
             format!("@{}", aliases.len())
         };
@@ -4972,30 +5736,140 @@ fn runtime_smart_context_artifact_alias_plan(
         if replacement_savings <= legend_cost {
             continue;
         }
+        if let Some(state) = state.as_deref_mut() {
+            runtime_smart_context_commit_stable_artifact_alias(state, &id, &alias);
+        }
         aliases.push(RuntimeSmartContextArtifactAlias { id, alias });
     }
     aliases
 }
 
-fn runtime_smart_context_stable_artifact_alias(
+fn runtime_smart_context_stable_artifact_alias_candidate(
     state: &mut RuntimeSmartContextProxyState,
     id: &str,
+    planned_aliases: &[RuntimeSmartContextArtifactAlias],
 ) -> String {
     if let Some(alias) = state.artifact_aliases.get(id) {
         return alias.clone();
     }
+    let mut index = state.next_artifact_alias_index;
     loop {
-        let alias = format!("@{}", state.next_artifact_alias_index);
-        state.next_artifact_alias_index = state.next_artifact_alias_index.saturating_add(1);
+        let alias = format!("@{index}");
+        index = index.saturating_add(1);
         if state
             .artifact_aliases
             .values()
             .all(|existing| existing != &alias)
+            && planned_aliases.iter().all(|planned| planned.alias != alias)
         {
-            state.artifact_aliases.insert(id.to_string(), alias.clone());
             return alias;
         }
     }
+}
+
+fn runtime_smart_context_commit_stable_artifact_alias(
+    state: &mut RuntimeSmartContextProxyState,
+    id: &str,
+    alias: &str,
+) {
+    if state
+        .artifact_aliases
+        .get(id)
+        .is_some_and(|existing| existing == alias)
+    {
+        return;
+    }
+    state
+        .artifact_aliases
+        .insert(id.to_string(), alias.to_string());
+    if let Some(index) = runtime_smart_context_artifact_alias_index(alias) {
+        state.next_artifact_alias_index = state.next_artifact_alias_index.max(index + 1);
+    }
+}
+
+fn runtime_smart_context_artifact_alias_index(alias: &str) -> Option<usize> {
+    alias.strip_prefix('@')?.parse::<usize>().ok()
+}
+
+fn runtime_smart_context_persisted_artifact_aliases(
+    state: &RuntimeSmartContextProxyState,
+) -> Vec<RuntimeSmartContextPersistedArtifactAlias> {
+    let mut aliases = state
+        .artifact_aliases
+        .iter()
+        .filter(|(id, alias)| {
+            runtime_smart_context_artifact_id_valid(id)
+                && runtime_smart_context_artifact_alias_valid(alias)
+        })
+        .map(|(id, alias)| RuntimeSmartContextPersistedArtifactAlias {
+            id: id.clone(),
+            alias: alias.clone(),
+        })
+        .collect::<Vec<_>>();
+    aliases.sort_by_key(|entry| {
+        (
+            runtime_smart_context_artifact_alias_index(&entry.alias).unwrap_or(usize::MAX),
+            entry.id.clone(),
+        )
+    });
+    aliases.truncate(SMART_CONTEXT_PERSISTED_ARTIFACT_ALIAS_LIMIT);
+    aliases
+}
+
+fn runtime_smart_context_artifact_alias_state_from_persisted(
+    persisted: Vec<RuntimeSmartContextPersistedArtifactAlias>,
+) -> (BTreeMap<String, String>, usize) {
+    let aliases = runtime_smart_context_merge_persisted_artifact_aliases(Vec::new(), persisted);
+    let mut map = BTreeMap::new();
+    let mut next_index = 0usize;
+    for entry in aliases {
+        if let Some(index) = runtime_smart_context_artifact_alias_index(&entry.alias) {
+            next_index = next_index.max(index + 1);
+        }
+        map.insert(entry.id, entry.alias);
+    }
+    (map, next_index)
+}
+
+fn runtime_smart_context_merge_persisted_artifact_aliases(
+    existing: Vec<RuntimeSmartContextPersistedArtifactAlias>,
+    incoming: Vec<RuntimeSmartContextPersistedArtifactAlias>,
+) -> Vec<RuntimeSmartContextPersistedArtifactAlias> {
+    let mut by_id = BTreeMap::<String, String>::new();
+    let mut alias_owner = BTreeMap::<String, String>::new();
+    for entry in existing.into_iter().chain(incoming) {
+        if !runtime_smart_context_artifact_id_valid(&entry.id)
+            || !runtime_smart_context_artifact_alias_valid(&entry.alias)
+        {
+            continue;
+        }
+        if let Some(owner) = alias_owner.get(&entry.alias)
+            && owner != &entry.id
+        {
+            continue;
+        }
+        if let Some(previous_alias) = by_id.insert(entry.id.clone(), entry.alias.clone()) {
+            alias_owner.remove(&previous_alias);
+        }
+        alias_owner.insert(entry.alias, entry.id);
+    }
+    let mut aliases = by_id
+        .into_iter()
+        .map(|(id, alias)| RuntimeSmartContextPersistedArtifactAlias { id, alias })
+        .collect::<Vec<_>>();
+    aliases.sort_by_key(|entry| {
+        (
+            runtime_smart_context_artifact_alias_index(&entry.alias).unwrap_or(usize::MAX),
+            entry.id.clone(),
+        )
+    });
+    aliases.truncate(SMART_CONTEXT_PERSISTED_ARTIFACT_ALIAS_LIMIT);
+    aliases
+}
+
+fn runtime_smart_context_artifact_id_valid(id: &str) -> bool {
+    id.strip_prefix("sc:")
+        .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_hexdigit()))
 }
 
 fn runtime_smart_context_replace_generated_artifact_refs_with_aliases(
@@ -5299,6 +6173,7 @@ fn runtime_smart_context_append_artifact_manifest_delta_if_useful(
         manifest_entries,
         detailed_manifest,
         unchanged_count,
+        Some(runtime_smart_context_manifest_set_checksum(&ids)),
     ) else {
         return false;
     };
@@ -5454,22 +6329,39 @@ fn runtime_smart_context_artifact_manifest_from_entries(
     entries: Vec<RuntimeSmartContextArtifactManifestEntry>,
     detailed: bool,
 ) -> Option<String> {
-    runtime_smart_context_artifact_manifest_delta_from_entries(entries, detailed, 0)
+    let ids = entries
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<BTreeSet<_>>();
+    runtime_smart_context_artifact_manifest_delta_from_entries(
+        entries,
+        detailed,
+        0,
+        Some(runtime_smart_context_manifest_set_checksum(&ids)),
+    )
 }
 
 fn runtime_smart_context_artifact_manifest_delta_from_entries(
     entries: Vec<RuntimeSmartContextArtifactManifestEntry>,
     detailed: bool,
     unchanged_count: usize,
+    set_checksum: Option<String>,
 ) -> Option<String> {
     if entries.is_empty() {
         if unchanged_count == 0 {
             return None;
         }
-        return Some(format!("psc m refs-only unchanged={unchanged_count}"));
+        let set = set_checksum
+            .filter(|checksum| !checksum.is_empty())
+            .map(|checksum| format!(" set={checksum}"))
+            .unwrap_or_default();
+        return Some(format!("psc m refs-only{set} unchanged={unchanged_count}"));
     }
 
     let mut header = "psc m refs-only".to_string();
+    if let Some(checksum) = set_checksum.filter(|checksum| !checksum.is_empty()) {
+        header.push_str(&format!(" set={checksum}"));
+    }
     if unchanged_count > 0 {
         header.push_str(&format!(" unchanged={unchanged_count}"));
     }
@@ -5515,6 +6407,19 @@ fn runtime_smart_context_artifact_manifest_delta_from_entries(
         lines.push(line);
     }
     Some(lines.join("\n"))
+}
+
+fn runtime_smart_context_manifest_set_checksum(ids: &BTreeSet<String>) -> String {
+    if ids.is_empty() {
+        return String::new();
+    }
+    let joined = ids.iter().cloned().collect::<Vec<_>>().join("\n");
+    let hash = runtime_proxy_crate::smart_context_hash_text(&joined);
+    hash.strip_prefix("sc:")
+        .unwrap_or(hash.as_str())
+        .chars()
+        .take(12)
+        .collect()
 }
 
 fn runtime_smart_context_append_input_manifest(
