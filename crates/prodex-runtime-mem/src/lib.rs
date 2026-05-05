@@ -1733,7 +1733,7 @@ fn runtime_mem_conversation_normalize_path_fact(raw: &str) -> Option<String> {
         .trim_matches('"')
         .trim_matches('\'')
         .trim_matches(|ch: char| matches!(ch, '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'))
-        .trim_end_matches(|ch: char| matches!(ch, '.' | ',' | ';' | '!' | '?'));
+        .trim_end_matches(['.', ',', ';', '!', '?']);
     while let Some((head, tail)) = term.rsplit_once(':') {
         if tail.is_empty() || !tail.chars().all(|ch| ch.is_ascii_digit()) {
             break;
@@ -3314,7 +3314,7 @@ fn runtime_mem_normalize_prompt_term(raw: &str) -> Option<String> {
         .trim_matches('`')
         .trim_matches('"')
         .trim_matches('\'')
-        .trim_end_matches(|ch: char| matches!(ch, '.' | ':' | '!' | '?' | ','));
+        .trim_end_matches(['.', ':', '!', '?', ',']);
     (!term.is_empty()).then(|| term.to_string())
 }
 

@@ -1585,9 +1585,9 @@ fn compact_git_diff_output_with_intent(
             select_git_diff_detail_line_indexes(section, section_budget, intent_terms);
         let mut omitted_detail = 0usize;
         for (line_index, line) in section.iter().enumerate() {
-            if is_git_diff_excerpt_structural_line(line, intent_focused) {
-                output.push(truncate_command_line(line, options.max_line_chars));
-            } else if selected_detail.contains_key(&line_index) {
+            if is_git_diff_excerpt_structural_line(line, intent_focused)
+                || selected_detail.contains_key(&line_index)
+            {
                 output.push(truncate_command_line(line, options.max_line_chars));
             } else {
                 omitted_detail += 1;
@@ -1672,10 +1672,7 @@ fn git_diff_intent_context_radius() -> usize {
 fn is_git_diff_changed_detail_line(line: &str) -> bool {
     (line.starts_with('+') && !line.starts_with("+++")
         || line.starts_with('-') && !line.starts_with("---"))
-        && !line
-            .trim_start_matches(|ch| matches!(ch, '+' | '-'))
-            .trim()
-            .is_empty()
+        && !line.trim_start_matches(['+', '-']).trim().is_empty()
 }
 
 fn compact_git_log_stat_output(input: &str, options: &CommandOutputCompactOptions) -> String {
@@ -7780,9 +7777,7 @@ fn git_diff_semantic_context_line(line: &str) -> Option<String> {
         }
     }
 
-    let trimmed = line
-        .trim_start_matches(|ch| matches!(ch, '+' | '-' | ' '))
-        .trim();
+    let trimmed = line.trim_start_matches(['+', '-', ' ']).trim();
     if trimmed.is_empty()
         || trimmed.starts_with("//")
         || trimmed.starts_with('#') && !trimmed.starts_with("#[")

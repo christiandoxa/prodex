@@ -1583,6 +1583,15 @@ struct RuntimeSmartContextBudget {
     token_usage_source: &'static str,
 }
 
+type RuntimeSmartContextBudgetInputs = (
+    Vec<RuntimeTokenUsage>,
+    Vec<RuntimeTokenUsage>,
+    Vec<runtime_proxy_crate::SmartContextTokenCalibrationSample>,
+    Option<u64>,
+    runtime_proxy_crate::SmartContextRecentRewriteSafety,
+    Vec<runtime_proxy_crate::SmartContextRewriteTelemetrySample>,
+);
+
 #[allow(clippy::too_many_arguments)]
 fn runtime_smart_context_budget(
     shared: &RuntimeRotationProxyShared,
@@ -1784,14 +1793,7 @@ pub(crate) fn runtime_smart_context_normalized_model_name(value: Option<&str>) -
 fn runtime_smart_context_budget_inputs(
     shared: &RuntimeRotationProxyShared,
     bucket_key: &runtime_proxy_crate::SmartContextTokenCalibrationBucketKey,
-) -> (
-    Vec<RuntimeTokenUsage>,
-    Vec<RuntimeTokenUsage>,
-    Vec<runtime_proxy_crate::SmartContextTokenCalibrationSample>,
-    Option<u64>,
-    runtime_proxy_crate::SmartContextRecentRewriteSafety,
-    Vec<runtime_proxy_crate::SmartContextRewriteTelemetrySample>,
-) {
+) -> RuntimeSmartContextBudgetInputs {
     let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
         return (
             Vec::new(),
@@ -3916,15 +3918,12 @@ fn runtime_smart_context_token_budget_deferred_rehydrate_ids(
     plan.actions
         .iter()
         .filter_map(|action| match action {
-            runtime_proxy_crate::SmartContextRehydrateAction::Defer { id, reason }
-                if matches!(
-                    reason,
+            runtime_proxy_crate::SmartContextRehydrateAction::Defer {
+                id,
+                reason:
                     runtime_proxy_crate::SmartContextRehydrateDeferReason::TokenBudgetExceeded
-                        | runtime_proxy_crate::SmartContextRehydrateDeferReason::MinimalBudgetTier
-                ) =>
-            {
-                Some(id.clone())
-            }
+                    | runtime_proxy_crate::SmartContextRehydrateDeferReason::MinimalBudgetTier,
+            } => Some(id.clone()),
             _ => None,
         })
         .collect()

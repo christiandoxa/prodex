@@ -265,6 +265,13 @@ pub(crate) enum RuntimeSmartContextArtifactRepoMapEntryKind {
     Test,
 }
 
+type RuntimeSmartContextArtifactRepoMapKey = (
+    RuntimeSmartContextArtifactRepoMapEntryKind,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct RuntimeSmartContextArtifactStore {
     artifacts: BTreeMap<String, RuntimeSmartContextArtifact>,
@@ -412,12 +419,7 @@ impl RuntimeSmartContextArtifactStore {
         }
 
         let mut entries = BTreeMap::<
-            (
-                RuntimeSmartContextArtifactRepoMapEntryKind,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-            ),
+            RuntimeSmartContextArtifactRepoMapKey,
             RuntimeSmartContextArtifactRepoMapEntry,
         >::new();
         let mut complete = true;
@@ -1019,12 +1021,7 @@ fn runtime_smart_context_repo_map_module_from_path(path: &str) -> Option<String>
 
 fn runtime_smart_context_insert_repo_map_entry(
     entries: &mut BTreeMap<
-        (
-            RuntimeSmartContextArtifactRepoMapEntryKind,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-        ),
+        RuntimeSmartContextArtifactRepoMapKey,
         RuntimeSmartContextArtifactRepoMapEntry,
     >,
     entry: RuntimeSmartContextArtifactRepoMapEntry,
@@ -1479,9 +1476,7 @@ fn runtime_smart_context_parse_js_function_symbol(line: &str) -> Option<String> 
     if let Some(symbol) = runtime_smart_context_identifier_after_keyword(line, "function") {
         return Some(symbol);
     }
-    let Some((left, right)) = line.split_once('=') else {
-        return None;
-    };
+    let (left, right) = line.split_once('=')?;
     if !right.contains("=>") && !right.trim_start().starts_with("function") {
         return None;
     }
