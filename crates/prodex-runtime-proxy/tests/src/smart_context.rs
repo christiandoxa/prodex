@@ -664,13 +664,104 @@ fn observed_token_accounting_calibrates_body_estimate_from_recent_usage_with_flo
             }],
         });
 
-    assert_eq!(accounting.estimated_current_request_tokens, 10_000);
-    assert_eq!(accounting.current_request_accounted_tokens, 10_000);
+    assert_eq!(accounting.estimated_current_request_tokens, 10_064);
+    assert_eq!(accounting.current_request_accounted_tokens, 10_064);
     assert_eq!(
         accounting.effective_input_source,
         SmartContextTokenAccountingSource::CurrentRequestBodyEstimate
     );
-    assert_eq!(accounting.available_context_tokens, Some(50_000));
+    assert_eq!(accounting.available_context_tokens, Some(49_936));
+}
+
+#[test]
+fn observed_token_accounting_with_calibration_preserves_unbucketed_behavior() {
+    let input = SmartContextObservedTokenAccountingInput {
+        model_context_window_tokens: Some(64_000),
+        reserved_output_tokens: 4_000,
+        current_input_tokens: 0,
+        current_request_body_bytes: 80_000,
+        current_request_estimated_tokens: Some(20_000),
+        observed_usage: vec![RuntimeTokenUsage {
+            input_tokens: 8_000,
+            ..RuntimeTokenUsage::default()
+        }],
+    };
+
+    let legacy = smart_context_observed_token_accounting(input.clone());
+    let explicit = smart_context_observed_token_accounting_with_calibration(
+        SmartContextObservedTokenAccountingCalibrationInput {
+            accounting: input,
+            calibration_bucket_key: None,
+            calibration_samples: Vec::new(),
+        },
+    );
+
+    assert_eq!(explicit, legacy);
+    assert_eq!(explicit.estimated_current_request_tokens, 10_064);
+}
+
+#[test]
+fn observed_token_accounting_calibrates_separately_by_bucket() {
+    let responses_bucket = SmartContextTokenCalibrationBucketKey {
+        route: Some("responses".to_string()),
+        model: Some("gpt-5".to_string()),
+        profile: Some("alpha".to_string()),
+        transport: Some("http".to_string()),
+    };
+    let compact_bucket = SmartContextTokenCalibrationBucketKey {
+        route: Some("compact".to_string()),
+        model: Some("gpt-5".to_string()),
+        profile: Some("alpha".to_string()),
+        transport: Some("http".to_string()),
+    };
+    let samples = vec![
+        SmartContextTokenCalibrationSample {
+            bucket_key: Some(compact_bucket.clone()),
+            usage: RuntimeTokenUsage {
+                input_tokens: 30_000,
+                ..RuntimeTokenUsage::default()
+            },
+        },
+        SmartContextTokenCalibrationSample {
+            bucket_key: Some(responses_bucket.clone()),
+            usage: RuntimeTokenUsage {
+                input_tokens: 8_000,
+                ..RuntimeTokenUsage::default()
+            },
+        },
+    ];
+
+    let responses = smart_context_observed_token_accounting_with_calibration(
+        SmartContextObservedTokenAccountingCalibrationInput {
+            accounting: SmartContextObservedTokenAccountingInput {
+                model_context_window_tokens: Some(64_000),
+                reserved_output_tokens: 4_000,
+                current_input_tokens: 0,
+                current_request_body_bytes: 80_000,
+                current_request_estimated_tokens: Some(20_000),
+                observed_usage: Vec::new(),
+            },
+            calibration_bucket_key: Some(responses_bucket),
+            calibration_samples: samples.clone(),
+        },
+    );
+    let compact = smart_context_observed_token_accounting_with_calibration(
+        SmartContextObservedTokenAccountingCalibrationInput {
+            accounting: SmartContextObservedTokenAccountingInput {
+                model_context_window_tokens: Some(64_000),
+                reserved_output_tokens: 4_000,
+                current_input_tokens: 0,
+                current_request_body_bytes: 80_000,
+                current_request_estimated_tokens: Some(20_000),
+                observed_usage: Vec::new(),
+            },
+            calibration_bucket_key: Some(compact_bucket),
+            calibration_samples: samples,
+        },
+    );
+
+    assert_eq!(responses.estimated_current_request_tokens, 10_064);
+    assert_eq!(compact.estimated_current_request_tokens, 20_000);
 }
 
 #[test]
@@ -699,6 +790,31 @@ fn observed_token_accounting_uses_recent_high_water_mark_for_calibration_safety(
         "recent high-water usage should prevent unsafe over-shrink"
     );
     assert_eq!(accounting.available_context_tokens, Some(40_000));
+}
+
+#[test]
+fn observed_token_accounting_does_not_inflate_small_body_from_history_calibration() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(64_000),
+            reserved_output_tokens: 4_000,
+            current_input_tokens: 48_000,
+            current_request_body_bytes: b"small current request body payload".len(),
+            current_request_estimated_tokens: Some(smart_context_estimate_tokens_from_body(
+                b"small current request body payload",
+            )),
+            observed_usage: vec![RuntimeTokenUsage {
+                input_tokens: 48_000,
+                ..RuntimeTokenUsage::default()
+            }],
+        });
+
+    assert!(
+        accounting.estimated_current_request_tokens < 100,
+        "history calibration must not inflate a small current body into prior context size"
+    );
+    assert_eq!(accounting.current_request_accounted_tokens, 48_000);
+    assert_eq!(accounting.available_context_tokens, Some(12_000));
 }
 
 #[test]

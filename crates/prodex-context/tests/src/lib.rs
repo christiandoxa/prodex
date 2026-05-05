@@ -1728,6 +1728,58 @@ fn successful_command_output_summary_compacts_long_install_build_and_list_output
 }
 
 #[test]
+fn successful_command_output_summary_omits_touched_files_for_pure_success_noise() {
+    let mut input = String::new();
+    input.push_str("added 82 packages, and audited 83 packages in 2s\n");
+    input.push_str("found 0 vulnerabilities\n");
+    input.push_str("vite v5.0.0 building for production...\n");
+    for index in 0..30 {
+        input.push_str(&format!("transforming src/module_{index}.ts\n"));
+    }
+    input.push_str("dist/index.html                  0.45 kB\n");
+    input.push_str("dist/assets/app.js             24.12 kB\n");
+    input.push_str("built in 1.42s\n");
+    for index in 0..35 {
+        input.push_str(&format!("emitted src/generated/file_{index}.rs\n"));
+    }
+    input.push_str("Test Suites: 4 passed, 4 total\n");
+    input.push_str("Tests:       20 passed, 0 failed, 20 total\n");
+    input.push_str("found 0 errors\n");
+
+    let report = compact_successful_command_output_with_options(
+        &input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("npm install && npm run build && npm test".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 20,
+            max_touched_files: 8,
+            max_key_lines: 8,
+            max_line_chars: 160,
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert_eq!(report.critical_signals.total(), 0);
+    assert!(report.touched_files >= 35);
+    assert!(report.compacted_lines < 14);
+    assert!(report.output.contains("success cmd"));
+    assert!(report.output.contains("counts:"));
+    assert!(report.output.contains("noise:"));
+    assert!(
+        report
+            .output
+            .contains("Tests:       20 passed, 0 failed, 20 total")
+    );
+    assert!(report.output.contains("found 0 errors"));
+    assert!(!report.output.contains("top roots:"));
+    assert!(!report.output.contains("extensions:"));
+    assert!(!report.output.contains("touched files ("));
+    assert!(!report.output.contains("src/generated/file_0.rs"));
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
 fn successful_command_output_summary_compacts_common_tool_success_without_exit_code() {
     let mut input = String::new();
     for index in 0..24 {
@@ -1755,6 +1807,68 @@ fn successful_command_output_summary_compacts_common_tool_success_without_exit_c
     assert!(report.output.contains("noise: go_test_ok=24"));
     assert!(report.output.contains("24 passed (9.2s)"));
     assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_allows_zero_failed_and_error_counts() {
+    let mut input = String::new();
+    for index in 0..24 {
+        input.push_str(&format!("PASS tests/unit_{index}.test.ts\n"));
+    }
+    input.push_str("Test Suites: 24 passed, 0 failed, 24 total\n");
+    input.push_str("Tests:       120 passed, 0 failed, 120 total\n");
+    input.push_str("Error: 0\n");
+    input.push_str("found 0 errors\n");
+
+    let report = compact_successful_command_output_with_options(
+        &input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("npm test".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert_eq!(report.critical_signals.total(), 0);
+    assert!(
+        report
+            .output
+            .contains("Test Suites: 24 passed, 0 failed, 24 total")
+    );
+    assert!(
+        report
+            .output
+            .contains("Tests:       120 passed, 0 failed, 120 total")
+    );
+    assert!(report.output.contains("found 0 errors"));
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_keeps_nonzero_failed_and_error_counts_exact() {
+    let input = "\
+Test Suites: 23 passed, 1 failed, 24 total
+Tests:       118 passed, 2 failed, 120 total
+Errors: 1
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("npm test".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!report.compacted);
+    assert!(report.failure_suspected);
+    assert_eq!(report.output, input);
+    assert_no_critical_signal_loss(input, &report.output);
 }
 
 #[test]

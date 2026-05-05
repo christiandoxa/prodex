@@ -101,6 +101,48 @@ fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
 }
 
 #[test]
+fn smart_context_condenses_completed_tool_call_arguments() {
+    let arguments = serde_json::json!({
+        "command": "python3",
+        "script": "print('large historical argument')\n".repeat(160),
+    });
+    let argument_text = serde_json::to_string(&arguments).unwrap();
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "arguments": arguments
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "completed"
+            }
+        ]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_historical_tool_call_arguments(
+        &mut value,
+        &mut store,
+        9,
+        8 * 1024,
+        &mut stats,
+    );
+
+    let replacement = value["input"][0]["arguments"].as_str().unwrap();
+    assert!(replacement.starts_with("psc tool args psc:"));
+    assert!(replacement.contains("b="));
+    assert!(replacement.contains("preview:"));
+    assert!(replacement.len().saturating_mul(4) < argument_text.len());
+    assert!(store.artifact_ref_for_exact_text(&argument_text).is_some());
+    assert_eq!(stats.artifacts_stored, 1);
+    assert_eq!(stats.tool_call_args_condensed, 1);
+}
+
+#[test]
 fn smart_context_progressive_summary_replaces_exact_duplicate_chunks_with_refs() {
     const CHUNK_LINES: usize = 32;
     let chunk = (1..=CHUNK_LINES)
@@ -839,6 +881,30 @@ fn smart_context_generated_summary_uses_aliases_only_when_shorter() {
 }
 
 #[test]
+fn smart_context_generated_summary_uses_path_aliases_only_when_shorter() {
+    let repo = "/home/doxa/IdeaProjects/prodex";
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": format!(
+                "psc manifest 4 artifacts\n{repo}/crates/prodex-app/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-app/tests/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-runtime-proxy/src/smart_context.rs\n{repo}/crates/prodex-runtime-mem/src/lib.rs"
+            )
+        }]
+    });
+    let before = value["input"][0]["output"].as_str().unwrap().len();
+
+    assert!(runtime_smart_context_apply_path_aliases_to_generated_texts(
+        &mut value
+    ));
+
+    let output = value["input"][0]["output"].as_str().unwrap();
+    assert!(output.contains("psc path aliases $R=/home/doxa/IdeaProjects/prodex"));
+    assert!(output.contains("$R/crates/prodex-app/src/runtime_proxy/smart_context.rs"));
+    assert!(output.len() < before);
+}
+
+#[test]
 fn smart_context_rehydrates_short_artifact_refs_and_line_ranges() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store
@@ -986,6 +1052,88 @@ unrelated tail";
     assert!(content.contains("-old diff line"));
     assert!(content.contains("+new diff line"));
     assert!(!content.contains("unrelated tail"));
+}
+
+#[test]
+fn smart_context_selective_rehydrate_semantic_terms_cap_narrow_matches() {
+    let artifact_text = (0..16)
+        .map(|index| format!("error[E0001]: repeated failure {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, &artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("summary prodex-artifact:{}", artifact.id)
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    let count = runtime_smart_context_selective_rehydrate_semantic_ranges(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &RuntimeSmartContextSelectiveRehydrateTerms {
+            error_codes: BTreeSet::from(["E0001".to_string()]),
+            ..RuntimeSmartContextSelectiveRehydrateTerms::default()
+        },
+        &mut stats,
+    );
+
+    let content = value["input"][0]["content"].as_str().unwrap();
+    assert_eq!(count, SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES);
+    assert_eq!(
+        stats.rehydrated_refs,
+        SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES
+    );
+    assert!(content.contains("repeated failure 0"));
+    assert!(content.contains("repeated failure 3"));
+    assert!(!content.contains("repeated failure 4"));
+}
+
+#[test]
+fn smart_context_selective_rehydrate_semantic_terms_cap_broad_matches() {
+    let artifact_text = (0..20)
+        .map(|index| {
+            let code = if index % 2 == 0 { "E0001" } else { "E0002" };
+            format!("error[{code}]: repeated failure {index}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, &artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("summary prodex-artifact:{}", artifact.id)
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    let count = runtime_smart_context_selective_rehydrate_semantic_ranges(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &RuntimeSmartContextSelectiveRehydrateTerms {
+            error_codes: BTreeSet::from(["E0001".to_string(), "E0002".to_string()]),
+            ..RuntimeSmartContextSelectiveRehydrateTerms::default()
+        },
+        &mut stats,
+    );
+
+    let content = value["input"][0]["content"].as_str().unwrap();
+    assert_eq!(count, SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES);
+    assert_eq!(
+        stats.rehydrated_refs,
+        SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES
+    );
+    assert!(content.contains("repeated failure 11"));
+    assert!(!content.contains("repeated failure 12"));
 }
 
 #[test]
@@ -1373,6 +1521,7 @@ fn smart_context_regression_fallback_exact_on_quality_risk() {
     let stats = RuntimeSmartContextTransformStats {
         artifacts_stored: 1,
         tool_outputs_condensed: 1,
+        tool_call_args_condensed: 0,
         duplicate_texts: 0,
         cross_turn_duplicate_texts: 0,
         repeat_tool_output_refs: 0,
@@ -2026,6 +2175,7 @@ fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
     let stats = RuntimeSmartContextTransformStats {
         artifacts_stored: 1,
         tool_outputs_condensed: 1,
+        tool_call_args_condensed: 0,
         duplicate_texts: 0,
         cross_turn_duplicate_texts: 0,
         repeat_tool_output_refs: 0,
@@ -2190,6 +2340,7 @@ fn smart_context_self_check_passes_through_growth_without_rehydrate() {
     let stats = RuntimeSmartContextTransformStats {
         artifacts_stored: 1,
         tool_outputs_condensed: 1,
+        tool_call_args_condensed: 0,
         duplicate_texts: 0,
         cross_turn_duplicate_texts: 0,
         repeat_tool_output_refs: 0,

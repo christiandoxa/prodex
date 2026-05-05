@@ -574,6 +574,27 @@ pub struct SmartContextObservedTokenAccountingInput {
     pub observed_usage: Vec<RuntimeTokenUsage>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SmartContextTokenCalibrationBucketKey {
+    pub route: Option<String>,
+    pub model: Option<String>,
+    pub profile: Option<String>,
+    pub transport: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextTokenCalibrationSample {
+    pub bucket_key: Option<SmartContextTokenCalibrationBucketKey>,
+    pub usage: RuntimeTokenUsage,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SmartContextObservedTokenAccountingCalibrationInput {
+    pub accounting: SmartContextObservedTokenAccountingInput,
+    pub calibration_bucket_key: Option<SmartContextTokenCalibrationBucketKey>,
+    pub calibration_samples: Vec<SmartContextTokenCalibrationSample>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmartContextObservedTokenAccounting {
     pub model_context_window_tokens: Option<u64>,
@@ -601,6 +622,23 @@ pub struct SmartContextObservedTokenAccounting {
 pub fn smart_context_observed_token_accounting(
     input: SmartContextObservedTokenAccountingInput,
 ) -> SmartContextObservedTokenAccounting {
+    smart_context_observed_token_accounting_with_calibration(
+        SmartContextObservedTokenAccountingCalibrationInput {
+            accounting: input,
+            calibration_bucket_key: None,
+            calibration_samples: Vec::new(),
+        },
+    )
+}
+
+pub fn smart_context_observed_token_accounting_with_calibration(
+    input: SmartContextObservedTokenAccountingCalibrationInput,
+) -> SmartContextObservedTokenAccounting {
+    let SmartContextObservedTokenAccountingCalibrationInput {
+        accounting: input,
+        calibration_bucket_key,
+        calibration_samples,
+    } = input;
     let mut observed_input_tokens = 0u64;
     let mut observed_cached_input_tokens = 0u64;
     let mut observed_output_tokens = 0u64;
@@ -634,6 +672,8 @@ pub fn smart_context_observed_token_accounting(
         input.current_request_body_bytes,
         baseline_estimated_current_request_tokens,
         &input.observed_usage,
+        calibration_bucket_key.as_ref(),
+        &calibration_samples,
     );
     let current_request_accounted_tokens = input
         .current_input_tokens
@@ -691,35 +731,63 @@ fn smart_context_observed_calibrated_request_estimate(
     body_bytes: usize,
     baseline_estimate: u64,
     observed_usage: &[RuntimeTokenUsage],
+    calibration_bucket_key: Option<&SmartContextTokenCalibrationBucketKey>,
+    calibration_samples: &[SmartContextTokenCalibrationSample],
 ) -> u64 {
     if baseline_estimate == 0 {
         return 0;
     }
-    let Some(recent_accounted_input) =
-        smart_context_recent_accounted_input_calibration(observed_usage)
-    else {
+    let Some(recent_accounted_input) = smart_context_recent_accounted_input_calibration(
+        observed_usage,
+        calibration_bucket_key,
+        calibration_samples,
+    ) else {
         return baseline_estimate;
     };
     let raw_floor = smart_context_estimate_tokens_from_body_bytes(body_bytes)
         .saturating_add(1)
         .saturating_div(2)
         .max(1);
+    let raw_floor_with_margin =
+        raw_floor.saturating_add(SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS);
     let observed_with_margin = recent_accounted_input
         .saturating_mul(SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_NUMERATOR)
         .saturating_add(SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR - 1)
         / SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR;
     let observed_with_margin =
         observed_with_margin.saturating_add(SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS);
-    baseline_estimate.min(observed_with_margin.max(raw_floor))
+    baseline_estimate.min(observed_with_margin.max(raw_floor_with_margin))
 }
 
 fn smart_context_recent_accounted_input_calibration(
     observed_usage: &[RuntimeTokenUsage],
+    calibration_bucket_key: Option<&SmartContextTokenCalibrationBucketKey>,
+    calibration_samples: &[SmartContextTokenCalibrationSample],
 ) -> Option<u64> {
+    if !calibration_samples.is_empty() {
+        return smart_context_recent_accounted_input_calibration_for_bucket(
+            calibration_bucket_key,
+            calibration_samples,
+        );
+    }
+
     observed_usage
         .iter()
         .rev()
         .filter_map(|usage| smart_context_accounted_input_tokens(*usage))
+        .take(SMART_CONTEXT_ADAPTIVE_ESTIMATE_RECENT_USAGE_LIMIT)
+        .max()
+}
+
+fn smart_context_recent_accounted_input_calibration_for_bucket(
+    calibration_bucket_key: Option<&SmartContextTokenCalibrationBucketKey>,
+    calibration_samples: &[SmartContextTokenCalibrationSample],
+) -> Option<u64> {
+    calibration_samples
+        .iter()
+        .rev()
+        .filter(|sample| sample.bucket_key.as_ref() == calibration_bucket_key)
+        .filter_map(|sample| smart_context_accounted_input_tokens(sample.usage))
         .take(SMART_CONTEXT_ADAPTIVE_ESTIMATE_RECENT_USAGE_LIMIT)
         .max()
 }

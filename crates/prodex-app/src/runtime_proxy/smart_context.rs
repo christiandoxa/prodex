@@ -13,6 +13,10 @@ const SMART_CONTEXT_TOOL_PREVIEW_MAX_LINE_CHARS: usize = 220;
 const SMART_CONTEXT_TOOL_PROGRESSIVE_SUMMARY_MAX_BYTES: usize = 8 * 1024;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES: usize = 12;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS: usize = 1_600;
+const SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES: usize = 2 * 1024;
+const SMART_CONTEXT_TOOL_ARGS_PREVIEW_MAX_CHARS: usize = 480;
+const SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES: usize = 12;
+const SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES: usize = 4;
 const SMART_CONTEXT_LABEL_SUMMARY: &str = "sum:";
 const SMART_CONTEXT_LABEL_CRITICAL_EXACT: &str = "crit exact:";
 const SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY: &str = "critical exact ranges:";
@@ -23,6 +27,7 @@ const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
     "prodex static context unchanged ";
 const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX: &str = "psc aliases ";
+const SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX: &str = "psc path aliases ";
 const RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS: [&str; 3] =
     ["instructions", "system", "developer"];
 
@@ -45,6 +50,7 @@ impl RuntimeSmartContextTransport {
 struct RuntimeSmartContextTransformStats {
     artifacts_stored: usize,
     tool_outputs_condensed: usize,
+    tool_call_args_condensed: usize,
     duplicate_texts: usize,
     cross_turn_duplicate_texts: usize,
     repeat_tool_output_refs: usize,
@@ -481,6 +487,13 @@ fn prepare_runtime_smart_context_body<'a>(
                     &intent_signals,
                     &mut outcome.stats,
                 );
+                runtime_smart_context_condense_historical_tool_call_arguments(
+                    &mut value,
+                    store,
+                    request_id,
+                    budget.policy.max_inline_tool_output_bytes,
+                    &mut outcome.stats,
+                );
                 runtime_smart_context_dedupe_input_text(
                     &mut value,
                     store,
@@ -540,6 +553,7 @@ fn prepare_runtime_smart_context_body<'a>(
     );
     if outcome.stats != RuntimeSmartContextTransformStats::default() {
         runtime_smart_context_apply_artifact_aliases_to_generated_texts(&mut value);
+        runtime_smart_context_apply_path_aliases_to_generated_texts(&mut value);
     }
     let stats = outcome.stats.clone();
     if stats.artifacts_stored > 0 {
@@ -2105,7 +2119,30 @@ fn runtime_smart_context_matching_semantic_ranges<'a>(
         }
     }
     ranges.sort_by_key(|range| (range.start, range.end));
+    ranges.truncate(runtime_smart_context_semantic_rehydrate_range_cap(terms));
     ranges
+}
+
+fn runtime_smart_context_semantic_rehydrate_range_cap(
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> usize {
+    if runtime_smart_context_selective_rehydrate_terms_narrow(terms) {
+        SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES
+    } else {
+        SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES
+    }
+}
+
+fn runtime_smart_context_selective_rehydrate_terms_narrow(
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> bool {
+    let term_count = terms
+        .file_paths
+        .len()
+        .saturating_add(terms.error_codes.len())
+        .saturating_add(terms.test_symbols.len())
+        .saturating_add(terms.diff_hunks.len());
+    term_count == 1
 }
 
 fn runtime_smart_context_selective_rehydrate_terms_empty(
@@ -2528,6 +2565,117 @@ fn runtime_smart_context_condense_tool_outputs(
             break;
         }
     }
+}
+
+fn runtime_smart_context_condense_historical_tool_call_arguments(
+    value: &mut serde_json::Value,
+    store: &mut RuntimeSmartContextArtifactStore,
+    request_id: u64,
+    inline_limit: usize,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    let Some(input) = value
+        .get_mut("input")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    let completed_call_ids = input
+        .iter()
+        .filter_map(|item| {
+            let object = item.as_object()?;
+            let item_type = object
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            item_type
+                .ends_with("_call_output")
+                .then(|| runtime_smart_context_tool_call_id(object))
+                .flatten()
+                .map(str::to_string)
+        })
+        .collect::<BTreeSet<_>>();
+    if completed_call_ids.is_empty() {
+        return;
+    }
+
+    for item in input {
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(call_id) = runtime_smart_context_tool_call_id(object) else {
+            continue;
+        };
+        if !completed_call_ids.contains(call_id) {
+            continue;
+        }
+        let item_type = object
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if item_type.ends_with("_call_output") {
+            continue;
+        }
+        for field in ["arguments", "input", "payload"] {
+            let Some(arguments) = object.get(field) else {
+                continue;
+            };
+            let Some(arguments_text) = runtime_smart_context_tool_argument_text(arguments) else {
+                continue;
+            };
+            if arguments_text.len()
+                <= inline_limit
+                    .min(SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES)
+                    .max(256)
+            {
+                continue;
+            }
+            let existing_artifact = store.artifact_ref_for_exact_text(&arguments_text);
+            let Some(artifact) = existing_artifact
+                .clone()
+                .or_else(|| store.insert_text(request_id, &arguments_text))
+            else {
+                continue;
+            };
+            let replacement =
+                runtime_smart_context_tool_argument_summary(&artifact, &arguments_text);
+            if replacement.len().saturating_mul(100) >= arguments_text.len().saturating_mul(75) {
+                continue;
+            }
+            object.insert(field.to_string(), serde_json::Value::String(replacement));
+            if existing_artifact.is_none() {
+                stats.artifacts_stored = stats.artifacts_stored.saturating_add(1);
+            }
+            stats.tool_call_args_condensed = stats.tool_call_args_condensed.saturating_add(1);
+            break;
+        }
+    }
+}
+
+fn runtime_smart_context_tool_argument_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) if !text.trim().is_empty() => Some(text.clone()),
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+            serde_json::to_string(value).ok()
+        }
+        _ => None,
+    }
+}
+
+fn runtime_smart_context_tool_argument_summary(
+    artifact: &runtime_proxy_crate::SmartContextArtifactRef,
+    text: &str,
+) -> String {
+    let reference = runtime_smart_context_artifact_ref(&artifact.id);
+    let preview = text
+        .chars()
+        .take(SMART_CONTEXT_TOOL_ARGS_PREVIEW_MAX_CHARS)
+        .collect::<String>();
+    format!(
+        "psc tool args {reference} b={}; preview: {}",
+        artifact.byte_len,
+        preview.trim()
+    )
 }
 
 fn runtime_smart_context_progressive_tool_output_summary(
@@ -3601,6 +3749,128 @@ fn runtime_smart_context_insert_artifact_alias_legend_in_text(text: &str, legend
     } else {
         format!("{text}\n{legend}")
     }
+}
+
+fn runtime_smart_context_apply_path_aliases_to_generated_texts(
+    value: &mut serde_json::Value,
+) -> bool {
+    match value {
+        serde_json::Value::String(text)
+            if runtime_smart_context_text_is_generated_summary_or_manifest(text) =>
+        {
+            let Some(next) = runtime_smart_context_path_aliased_generated_text(text) else {
+                return false;
+            };
+            *text = next;
+            true
+        }
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .any(runtime_smart_context_apply_path_aliases_to_generated_texts),
+        serde_json::Value::Object(object) => object
+            .values_mut()
+            .any(runtime_smart_context_apply_path_aliases_to_generated_texts),
+        _ => false,
+    }
+}
+
+fn runtime_smart_context_path_aliased_generated_text(text: &str) -> Option<String> {
+    let aliases = runtime_smart_context_path_aliases(text);
+    if aliases.is_empty() {
+        return None;
+    }
+    let mut candidate = text.to_string();
+    for (alias, prefix) in &aliases {
+        candidate = candidate.replace(prefix, alias);
+    }
+    if candidate == text || candidate.len() >= text.len() {
+        return None;
+    }
+    let legend = aliases
+        .iter()
+        .map(|(alias, prefix)| format!("{alias}={prefix}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    candidate = runtime_smart_context_insert_artifact_alias_legend_in_text(
+        &candidate,
+        &format!("{SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX}{legend}"),
+    );
+    if candidate.len() < text.len()
+        && prodex_context::critical_signal_self_check(text, &candidate).passed()
+    {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn runtime_smart_context_path_aliases(text: &str) -> Vec<(String, String)> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for token in text.split_whitespace() {
+        let token = token.trim_matches(|ch: char| {
+            ch.is_ascii_punctuation() && !matches!(ch, '/' | '_' | '-' | '.')
+        });
+        if let Some(prefix) = runtime_smart_context_repeated_path_prefix(token) {
+            *counts.entry(prefix).or_default() += 1;
+        }
+    }
+    let mut candidates = counts
+        .into_iter()
+        .filter(|(prefix, count)| *count >= 2 && prefix.len() > 8)
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        right
+            .0
+            .len()
+            .saturating_mul(right.1)
+            .cmp(&left.0.len().saturating_mul(left.1))
+    });
+    candidates
+        .into_iter()
+        .take(4)
+        .enumerate()
+        .filter_map(|(index, (prefix, count))| {
+            let alias = if index == 0 {
+                "$R".to_string()
+            } else {
+                format!("$P{index}")
+            };
+            let saved = prefix
+                .len()
+                .saturating_sub(alias.len())
+                .saturating_mul(count);
+            let cost = alias.len().saturating_add(prefix.len()).saturating_add(2);
+            (saved > cost).then_some((alias, prefix))
+        })
+        .collect()
+}
+
+fn runtime_smart_context_repeated_path_prefix(token: &str) -> Option<String> {
+    if !token.starts_with('/') {
+        return None;
+    }
+    for marker in [
+        "/crates/",
+        "/src/",
+        "/tests/",
+        "/test/",
+        "/dist/",
+        "/target/",
+        "/apps/",
+        "/packages/",
+    ] {
+        if let Some(index) = token.find(marker) {
+            let prefix = &token[..index];
+            if prefix.matches('/').count() >= 2 {
+                return Some(prefix.to_string());
+            }
+        }
+    }
+    token
+        .rsplit_once('/')
+        .map(|(prefix, _)| prefix)
+        .filter(|prefix| prefix.matches('/').count() >= 3)
+        .map(str::to_string)
 }
 
 fn runtime_smart_context_text_is_generated_summary_or_manifest(text: &str) -> bool {

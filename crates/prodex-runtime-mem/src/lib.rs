@@ -51,7 +51,11 @@ const RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS: &[&str] = &[
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS: &[&str] = &["payload.summary"];
 const RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT: usize = 180;
 const RUNTIME_MEM_SUPER_SLIM_REFERENCED_SUMMARY_PREFIX_CHAR_LIMIT: usize = 72;
-const RUNTIME_MEM_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
+const RUNTIME_MEM_SHORT_ARTIFACT_REF_PREFIXES: &[&str] = &["p:", "psc:"];
+const RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE: &str = "pm2:u";
+const RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE: &str = "pm2:a";
+const RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE: &str = "pm2:tu";
+const RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE: &str = "pm2:tr";
 const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "ss:omit";
 const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
@@ -573,6 +577,9 @@ pub fn runtime_mem_codex_schema_for_safe_auto_event(
 }
 
 pub fn runtime_mem_event_has_super_slim_prompt_reference(event: &Value) -> bool {
+    if runtime_mem_event_has_super_slim_v2_prompt_reference(event) {
+        return true;
+    }
     RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS
         .iter()
         .any(|path| {
@@ -584,6 +591,14 @@ pub fn runtime_mem_event_has_super_slim_prompt_reference(event: &Value) -> bool 
                 runtime_mem_lookup_json_path(event, path).is_some_and(runtime_mem_value_is_text)
             })
         || runtime_mem_value_contains_artifact_marker(event)
+}
+
+fn runtime_mem_event_has_super_slim_v2_prompt_reference(event: &Value) -> bool {
+    runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str)
+        == Some(RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE)
+        && ["s", "r"].iter().any(|path| {
+            runtime_mem_lookup_json_path(event, path).is_some_and(runtime_mem_value_is_text)
+        })
 }
 
 pub fn runtime_mem_super_slim_shadow_codex_event(event: &Value) -> Value {
@@ -616,6 +631,21 @@ pub fn runtime_mem_super_slim_shadow_codex_events<'a>(
         .map(|(index, event)| {
             runtime_mem_super_slim_shadow_codex_event_with_dedupe(event, index, &mut dedupe_state)
         })
+        .collect()
+}
+
+pub fn runtime_mem_super_slim_v2_shadow_codex_event(event: &Value) -> Value {
+    runtime_mem_super_slim_v2_shadow_from_v1_shadow(&runtime_mem_super_slim_shadow_codex_event(
+        event,
+    ))
+}
+
+pub fn runtime_mem_super_slim_v2_shadow_codex_events<'a>(
+    events: impl IntoIterator<Item = &'a Value>,
+) -> Vec<Value> {
+    runtime_mem_super_slim_shadow_codex_events(events)
+        .iter()
+        .map(runtime_mem_super_slim_v2_shadow_from_v1_shadow)
         .collect()
 }
 
@@ -903,6 +933,74 @@ pub fn runtime_mem_full_codex_schema() -> serde_json::Value {
 }
 
 pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
+    let mut schema = runtime_mem_super_slim_v1_codex_schema();
+    let Some(object) = schema.as_object_mut() else {
+        return schema;
+    };
+    let legacy_events = object
+        .get("events")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    object.insert(
+        "version".to_string(),
+        serde_json::json!("0.7-super-slim-v2"),
+    );
+    object.insert(
+        "description".to_string(),
+        serde_json::json!(
+            "Prodex super-slim v2 schema for Codex session JSONL files under ~/.codex/sessions."
+        ),
+    );
+    let mut events = vec![
+        serde_json::json!({
+            "name": "prodex-v2-user-message",
+            "match": { "path": "t", "equals": RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE },
+            "action": "session_init",
+            "fields": {
+                "prompt": {
+                    "coalesce": ["s", "r", { "value": RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED }]
+                }
+            }
+        }),
+        serde_json::json!({
+            "name": "prodex-v2-assistant-message",
+            "match": { "path": "t", "equals": RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE },
+            "action": "assistant_message",
+            "fields": {
+                "message": {
+                    "coalesce": ["s", { "value": RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED }]
+                }
+            }
+        }),
+        serde_json::json!({
+            "name": "prodex-v2-tool-use",
+            "match": { "path": "t", "equals": RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE },
+            "action": "tool_use",
+            "fields": {
+                "toolId": "i",
+                "toolName": { "coalesce": ["n", { "value": "tool" }] },
+                "toolInput": { "coalesce": ["c", "n", { "value": "tool call" }] }
+            }
+        }),
+        serde_json::json!({
+            "name": "prodex-v2-tool-result",
+            "match": { "path": "t", "equals": RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE },
+            "action": "tool_result",
+            "fields": {
+                "toolId": "i",
+                "toolResponse": {
+                    "coalesce": ["s", "r", { "value": RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED }]
+                }
+            }
+        }),
+    ];
+    events.extend(legacy_events);
+    object.insert("events".to_string(), Value::Array(events));
+    schema
+}
+
+pub fn runtime_mem_super_slim_v1_codex_schema() -> serde_json::Value {
     serde_json::json!({
         "name": CLAUDE_MEM_CODEX_SCHEMA_NAME,
         "version": "0.6-super-slim",
@@ -1386,6 +1484,89 @@ fn runtime_mem_shadow_tool_output(event: &mut Value) {
     }
 }
 
+fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
+    let Some(payload_type) =
+        runtime_mem_lookup_json_path(event, "payload.type").and_then(Value::as_str)
+    else {
+        return event.clone();
+    };
+
+    match payload_type {
+        "user_message" => {
+            let mut shadow =
+                runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE);
+            if let Some(summary) =
+                runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS)
+            {
+                shadow.insert("s".to_string(), Value::String(summary));
+            }
+            if let Some(artifact_ref) = runtime_mem_first_artifact_ref_text_at_paths(
+                event,
+                RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS,
+            ) {
+                shadow.insert("r".to_string(), Value::String(artifact_ref));
+            }
+            Value::Object(shadow)
+        }
+        "agent_message" => {
+            let mut shadow =
+                runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE);
+            if let Some(summary) = runtime_mem_first_text_at_paths(
+                event,
+                RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS,
+            ) {
+                shadow.insert("s".to_string(), Value::String(summary));
+            }
+            Value::Object(shadow)
+        }
+        "function_call" | "custom_tool_call" | "web_search_call" | "exec_command" => {
+            let mut shadow =
+                runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE);
+            if let Some(tool_id) = runtime_mem_first_text_at_paths(event, &["payload.call_id"]) {
+                shadow.insert("i".to_string(), Value::String(tool_id));
+            }
+            if let Some(tool_name) =
+                runtime_mem_first_text_at_paths(event, &["payload.name", "payload.type"])
+            {
+                shadow.insert("n".to_string(), Value::String(tool_name));
+            }
+            if let Some(tool_input) = runtime_mem_first_text_at_paths(
+                event,
+                &["payload.command", "payload.action", "payload.name"],
+            ) {
+                shadow.insert("c".to_string(), Value::String(tool_input));
+            }
+            Value::Object(shadow)
+        }
+        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {
+            let mut shadow =
+                runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE);
+            if let Some(tool_id) = runtime_mem_first_text_at_paths(event, &["payload.call_id"]) {
+                shadow.insert("i".to_string(), Value::String(tool_id));
+            }
+            if let Some(summary) =
+                runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS)
+            {
+                shadow.insert("s".to_string(), Value::String(summary));
+            }
+            if let Some(artifact_ref) = runtime_mem_first_artifact_ref_text_at_paths(
+                event,
+                RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
+            ) {
+                shadow.insert("r".to_string(), Value::String(artifact_ref));
+            }
+            Value::Object(shadow)
+        }
+        _ => event.clone(),
+    }
+}
+
+fn runtime_mem_short_shadow_event(event_type: &str) -> serde_json::Map<String, Value> {
+    let mut shadow = serde_json::Map::new();
+    shadow.insert("t".to_string(), Value::String(event_type.to_string()));
+    shadow
+}
+
 fn runtime_mem_shadow_summary_for_path(
     event: &Value,
     path: &str,
@@ -1697,11 +1878,13 @@ fn runtime_mem_parse_non_alias_artifact_ref(token: &str) -> Option<String> {
         return Some(token.to_string());
     }
 
-    if token
-        .strip_prefix(RUNTIME_MEM_SHORT_ARTIFACT_REF_PREFIX)
-        .is_some_and(runtime_mem_short_artifact_ref_tail_valid)
-    {
-        return Some(token.to_string());
+    for prefix in RUNTIME_MEM_SHORT_ARTIFACT_REF_PREFIXES {
+        if token
+            .strip_prefix(prefix)
+            .is_some_and(runtime_mem_short_artifact_ref_tail_valid)
+        {
+            return Some(token.to_string());
+        }
     }
 
     None

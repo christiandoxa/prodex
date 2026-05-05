@@ -661,6 +661,10 @@ fn prodex_artifact_ref_helpers_accept_short_and_alias_refs() {
         Some("psc:0123456789abcdef".to_string())
     );
     assert_eq!(
+        runtime_mem_normalize_prodex_artifact_ref("p:0123456789abcdef"),
+        Some("p:0123456789abcdef".to_string())
+    );
+    assert_eq!(
         runtime_mem_normalize_prodex_artifact_ref("prodex-artifact:sc:legacy"),
         Some("prodex-artifact:sc:legacy".to_string())
     );
@@ -681,6 +685,13 @@ fn prodex_artifact_ref_helpers_accept_short_and_alias_refs() {
         &serde_json::json!({
             "payload": {
                 "message": "refer to psc:0123456789abcdef"
+            }
+        })
+    ));
+    assert!(runtime_mem_value_contains_artifact_marker(
+        &serde_json::json!({
+            "payload": {
+                "message": "refer to p:0123456789abcdef"
             }
         })
     ));
@@ -863,8 +874,9 @@ fn transcript_watch_super_slim_schema_is_shadow_safe_and_full_mode_remains_full(
     let super_slim_schema_text = super_slim_schema.to_string();
     assert_eq!(
         super_slim_schema["version"].as_str(),
-        Some("0.6-super-slim")
+        Some("0.7-super-slim-v2")
     );
+    assert!(super_slim_schema_text.contains("pm2:u"));
     assert!(super_slim_schema_text.contains("prompt_summary"));
     assert!(!super_slim_schema_text.contains("payload.message"));
     assert!(!super_slim_schema_text.contains("payload.output"));
@@ -1011,8 +1023,67 @@ fn safe_auto_schema_policy_and_schema_helper_are_ready_for_app_integration() {
         runtime_mem_codex_schema_for_safe_auto_event(RuntimeMemTranscriptMode::Slim, &event);
     assert_eq!(
         schema.get("version").and_then(Value::as_str),
-        Some("0.6-super-slim")
+        Some("0.7-super-slim-v2")
     );
+}
+
+#[test]
+fn super_slim_v2_shadow_events_are_short_and_schema_addressable() {
+    let user_prompt = "Implement concise memory bridge\n".to_string() + &"detail ".repeat(120);
+    let tool_output = "cargo test passed\n".to_string() + &"ok ".repeat(120);
+    let events = vec![
+        serde_json::json!({
+            "payload": {
+                "type": "user_message",
+                "message": user_prompt,
+                "metadata": {
+                    "artifact_ref": "p:0123456789abcdef"
+                }
+            }
+        }),
+        serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "message": "Long assistant body",
+                "summary": "assistant concise summary"
+            }
+        }),
+        serde_json::json!({
+            "payload": {
+                "type": "exec_command",
+                "call_id": "call-1",
+                "command": "cargo test -q"
+            }
+        }),
+        serde_json::json!({
+            "payload": {
+                "type": "exec_command_output",
+                "call_id": "call-1",
+                "output": tool_output,
+                "metadata": {
+                    "artifact_ref": "psc:fedcba9876543210"
+                }
+            }
+        }),
+    ];
+
+    let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+    assert_eq!(shadows.len(), 4);
+    assert_eq!(shadows[0]["t"].as_str(), Some("pm2:u"));
+    assert_eq!(shadows[1]["t"].as_str(), Some("pm2:a"));
+    assert_eq!(shadows[2]["t"].as_str(), Some("pm2:tu"));
+    assert_eq!(shadows[3]["t"].as_str(), Some("pm2:tr"));
+    assert_eq!(shadows[0]["r"].as_str(), Some("p:0123456789abcdef"));
+    assert_eq!(shadows[3]["r"].as_str(), Some("psc:fedcba9876543210"));
+    assert!(runtime_mem_event_has_super_slim_prompt_reference(
+        &shadows[0]
+    ));
+    assert!(!shadows[0].to_string().contains("detail detail detail"));
+    assert!(!shadows[3].to_string().contains("ok ok ok"));
+
+    let schema_text = runtime_mem_super_slim_codex_schema().to_string();
+    assert!(schema_text.contains("prodex-v2-user-message"));
+    assert!(schema_text.contains("prodex-v2-tool-result"));
 }
 
 #[test]

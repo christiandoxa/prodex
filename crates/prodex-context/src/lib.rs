@@ -2283,13 +2283,17 @@ pub fn compact_successful_command_output_with_options(
         output.push(format_count_map("noise", &noise_counts, 10));
     }
 
-    let roots = count_success_output_path_roots(&touched_files);
-    if !roots.is_empty() {
-        output.push(format_count_map("top roots", &roots, 8));
-    }
-    let extensions = count_success_output_path_extensions(&touched_files);
-    if !extensions.is_empty() {
-        output.push(format_count_map("extensions", &extensions, 8));
+    let include_path_summary =
+        command_success_output_path_summary_useful(&lines, &touched_files, options);
+    if include_path_summary {
+        let roots = count_success_output_path_roots(&touched_files);
+        if !roots.is_empty() {
+            output.push(format_count_map("top roots", &roots, 8));
+        }
+        let extensions = count_success_output_path_extensions(&touched_files);
+        if !extensions.is_empty() {
+            output.push(format_count_map("extensions", &extensions, 8));
+        }
     }
 
     push_labeled_lines(
@@ -2298,7 +2302,9 @@ pub fn compact_successful_command_output_with_options(
         &key_lines,
         options.max_key_lines.max(1),
     );
-    push_success_output_touched_files(&mut output, &touched_files, options);
+    if include_path_summary {
+        push_success_output_touched_files(&mut output, &touched_files, options);
+    }
 
     let output = lines_to_text(output);
     let output =
@@ -2401,6 +2407,40 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
             && command_metadata_subcommand_after(&tokens, index).is_some_and(|subcommand| {
                 matches!(subcommand, "build" | "buildx" | "pull" | "compose")
             })
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn command_success_output_path_summary_useful(
+    lines: &[&str],
+    paths: &[String],
+    options: &CommandSuccessOutputCompactOptions,
+) -> bool {
+    !paths.is_empty()
+        && (options
+            .command
+            .as_deref()
+            .is_some_and(command_name_is_path_relevant_success_output)
+            || lines.iter().any(|line| {
+                parse_file_list_entry_line(line).is_some()
+                    || parse_search_match_line(line).is_some()
+                    || parse_rg_json_match_line(line).is_some()
+            }))
+}
+
+fn command_name_is_path_relevant_success_output(command: &str) -> bool {
+    let tokens = command_metadata_tokens(command);
+    for index in 0..tokens.len() {
+        let command = command_metadata_token_command_name(&tokens[index]);
+        if matches!(command, "ls" | "find" | "tree" | "du" | "rg" | "grep") {
+            return true;
+        }
+        if command == "go"
+            && command_metadata_subcommand_after(&tokens, index)
+                .is_some_and(|subcommand| matches!(subcommand, "list"))
         {
             return true;
         }
@@ -3007,11 +3047,13 @@ fn is_diagnostic_success_summary_line(line: &str) -> bool {
 
 fn is_diagnostic_failure_summary_line(line: &str) -> bool {
     let lower = line.trim_start().to_ascii_lowercase();
-    lower.starts_with("test suites:") && lower.contains("failed")
-        || lower.starts_with("tests:") && lower.contains("failed")
-        || lower.contains(" failed, ")
+    lower.starts_with("test suites:") && has_nonzero_summary_count(&lower, &["failed"])
+        || lower.starts_with("tests:") && has_nonzero_summary_count(&lower, &["failed"])
+        || lower.contains(" failed, ") && has_nonzero_summary_count(&lower, &["failed"])
         || lower.starts_with("failed ")
+            && !has_zero_only_summary_count(&lower, &["failed", "failures"])
         || lower.starts_with("error summary")
+            && !has_zero_only_summary_count(&lower, &["error", "errors"])
         || is_junit_xml_failure_line(line)
 }
 
@@ -3127,6 +3169,24 @@ fn has_nonzero_summary_count(lower: &str, words: &[&str]) -> bool {
     })
 }
 
+fn has_zero_only_summary_count(lower: &str, words: &[&str]) -> bool {
+    let mut saw_count = false;
+    for word in words {
+        for (index, matched) in lower.match_indices(word) {
+            let count = count_after_word(lower, index + matched.len())
+                .or_else(|| count_before_word(lower, index));
+            let Some(count) = count else {
+                continue;
+            };
+            saw_count = true;
+            if count > 0 {
+                return false;
+            }
+        }
+    }
+    saw_count
+}
+
 fn count_after_word(lower: &str, after_word_index: usize) -> Option<usize> {
     let after = lower.get(after_word_index..)?.trim_start();
     let after = if let Some(rest) = after.strip_prefix(':') {
@@ -3213,6 +3273,7 @@ fn rust_failure_separator_name(line: &str) -> Option<&str> {
 
 fn generic_failed_test_name(line: &str) -> Option<&str> {
     let trimmed = line.trim();
+    let lower = trimmed.to_ascii_lowercase();
     if let Some(name) = trimmed.strip_prefix("FAIL ") {
         return non_empty_prefix(name);
     }
@@ -3225,13 +3286,16 @@ fn generic_failed_test_name(line: &str) -> Option<&str> {
     {
         return non_empty_prefix(name);
     }
-    if trimmed.starts_with("Test Suites:") && trimmed.contains("failed") {
+    if trimmed.starts_with("Test Suites:") && has_nonzero_summary_count(&lower, &["failed"]) {
         return Some(trimmed);
     }
-    if trimmed.starts_with("Tests:") && trimmed.contains("failed") {
+    if trimmed.starts_with("Tests:") && has_nonzero_summary_count(&lower, &["failed"]) {
         return Some(trimmed);
     }
-    if trimmed.contains(" failed, ") || trimmed.starts_with("failed ") {
+    if trimmed.contains(" failed, ") && has_nonzero_summary_count(&lower, &["failed"]) {
+        return Some(trimmed);
+    }
+    if trimmed.starts_with("failed ") && !has_zero_only_summary_count(&lower, &["failed"]) {
         return Some(trimmed);
     }
     None
@@ -5287,6 +5351,9 @@ fn command_metadata_tokens(metadata: &str) -> Vec<String> {
 fn is_error_signal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     let lower = trimmed.to_ascii_lowercase();
+    if has_zero_only_summary_count(&lower, &["error", "errors"]) {
+        return false;
+    }
     if lower.starts_with("error:")
         || lower.starts_with("error[")
         || lower.starts_with("error ")
