@@ -56,6 +56,8 @@ const RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE: &str = "pm2:u";
 const RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE: &str = "pm2:a";
 const RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE: &str = "pm2:tu";
 const RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE: &str = "pm2:tr";
+const RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_NAME: &str = "tool";
+const RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_INPUT: &str = "tool call";
 const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "ss:omit";
 const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
@@ -979,8 +981,8 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
             "action": "tool_use",
             "fields": {
                 "toolId": "i",
-                "toolName": { "coalesce": ["n", { "value": "tool" }] },
-                "toolInput": { "coalesce": ["c", "n", { "value": "tool call" }] }
+                "toolName": { "coalesce": ["n", { "value": RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_NAME }] },
+                "toolInput": { "coalesce": ["c", "n", { "value": RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_INPUT }] }
             }
         }),
         serde_json::json!({
@@ -1530,17 +1532,13 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
             if let Some(tool_id) = runtime_mem_first_text_at_paths(event, &["payload.call_id"]) {
                 shadow.insert("i".to_string(), Value::String(tool_id));
             }
-            if let Some(tool_name) =
-                runtime_mem_first_text_at_paths(event, &["payload.name", "payload.type"])
-            {
-                shadow.insert("n".to_string(), Value::String(tool_name));
-            }
-            if let Some(tool_input) = runtime_mem_first_text_at_paths(
+            let tool_name =
+                runtime_mem_first_text_at_paths(event, &["payload.name", "payload.type"]);
+            let tool_input = runtime_mem_first_text_at_paths(
                 event,
                 &["payload.command", "payload.action", "payload.name"],
-            ) {
-                shadow.insert("c".to_string(), Value::String(tool_input));
-            }
+            );
+            runtime_mem_insert_super_slim_v2_tool_use_fields(&mut shadow, tool_name, tool_input);
             Value::Object(shadow)
         }
         "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {
@@ -1568,6 +1566,37 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
             Value::Object(shadow)
         }
         _ => event.clone(),
+    }
+}
+
+fn runtime_mem_insert_super_slim_v2_tool_use_fields(
+    shadow: &mut serde_json::Map<String, Value>,
+    tool_name: Option<String>,
+    tool_input: Option<String>,
+) {
+    match (tool_name, tool_input) {
+        (Some(tool_name), Some(tool_input))
+            if tool_name == RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_NAME
+                && tool_input == RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_INPUT => {}
+        (Some(tool_name), Some(tool_input))
+            if tool_name == RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_NAME =>
+        {
+            shadow.insert("c".to_string(), Value::String(tool_input));
+        }
+        (Some(tool_name), Some(tool_input)) if tool_input == tool_name => {
+            shadow.insert("n".to_string(), Value::String(tool_name));
+        }
+        (Some(tool_name), Some(tool_input)) => {
+            shadow.insert("n".to_string(), Value::String(tool_name));
+            shadow.insert("c".to_string(), Value::String(tool_input));
+        }
+        (Some(tool_name), None) => {
+            shadow.insert("n".to_string(), Value::String(tool_name));
+        }
+        (None, Some(tool_input)) if tool_input != RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_INPUT => {
+            shadow.insert("c".to_string(), Value::String(tool_input));
+        }
+        (None, Some(_)) | (None, None) => {}
     }
 }
 
@@ -2258,3 +2287,149 @@ fn runtime_mem_slim_codex_schema() -> serde_json::Value {
 #[cfg(test)]
 #[path = "../tests/src/lib.rs"]
 mod tests;
+
+#[cfg(test)]
+mod compact_v2_runtime_memory_tests {
+    use super::*;
+
+    #[test]
+    fn super_slim_v2_omits_tool_name_and_input_when_both_match_schema_defaults() {
+        let shadow = runtime_mem_super_slim_v2_shadow_codex_event(&serde_json::json!({
+            "payload": {
+                "type": "custom_tool_call",
+                "call_id": "call-default",
+                "name": "tool",
+                "action": "tool call"
+            }
+        }));
+
+        assert_eq!(shadow["t"].as_str(), Some("pm2:tu"));
+        assert_eq!(shadow.get("n"), None);
+        assert_eq!(shadow.get("c"), None);
+
+        let fields = v2_schema_fields("prodex-v2-tool-use");
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolName"], &shadow).as_deref(),
+            Some("tool")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolInput"], &shadow).as_deref(),
+            Some("tool call")
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_omits_tool_input_when_it_duplicates_tool_name() {
+        let shadow = runtime_mem_super_slim_v2_shadow_codex_event(&serde_json::json!({
+            "payload": {
+                "type": "function_call",
+                "call_id": "call-dup",
+                "name": "web_search"
+            }
+        }));
+
+        assert_eq!(shadow["t"].as_str(), Some("pm2:tu"));
+        assert_eq!(shadow["n"].as_str(), Some("web_search"));
+        assert_eq!(shadow.get("c"), None);
+
+        let fields = v2_schema_fields("prodex-v2-tool-use");
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolName"], &shadow).as_deref(),
+            Some("web_search")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolInput"], &shadow).as_deref(),
+            Some("web_search")
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_omits_default_tool_name_when_input_preserves_reader_output() {
+        let shadow = runtime_mem_super_slim_v2_shadow_codex_event(&serde_json::json!({
+            "payload": {
+                "type": "custom_tool_call",
+                "call_id": "call-tool",
+                "name": "tool",
+                "action": "run diagnostics"
+            }
+        }));
+
+        assert_eq!(shadow["t"].as_str(), Some("pm2:tu"));
+        assert_eq!(shadow.get("n"), None);
+        assert_eq!(shadow["c"].as_str(), Some("run diagnostics"));
+
+        let fields = v2_schema_fields("prodex-v2-tool-use");
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolName"], &shadow).as_deref(),
+            Some("tool")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolInput"], &shadow).as_deref(),
+            Some("run diagnostics")
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_schema_still_reads_legacy_tool_name_and_input_fields() {
+        let legacy = serde_json::json!({
+            "t": "pm2:tu",
+            "i": "call-legacy",
+            "n": "exec_command",
+            "c": "cargo test -q"
+        });
+        let fields = v2_schema_fields("prodex-v2-tool-use");
+
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolId"], &legacy).as_deref(),
+            Some("call-legacy")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolName"], &legacy).as_deref(),
+            Some("exec_command")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolInput"], &legacy).as_deref(),
+            Some("cargo test -q")
+        );
+    }
+
+    fn v2_schema_fields(event_name: &str) -> Value {
+        runtime_mem_super_slim_codex_schema()
+            .get("events")
+            .and_then(Value::as_array)
+            .and_then(|events| {
+                events
+                    .iter()
+                    .find(|event| event.get("name").and_then(Value::as_str) == Some(event_name))
+            })
+            .and_then(|event| event.get("fields"))
+            .cloned()
+            .expect("v2 schema fields should exist")
+    }
+
+    fn resolve_v2_schema_string(spec: &Value, entry: &Value) -> Option<String> {
+        resolve_v2_schema_field(spec, entry).and_then(|value| match value {
+            Value::String(value) => Some(value),
+            _ => None,
+        })
+    }
+
+    fn resolve_v2_schema_field(spec: &Value, entry: &Value) -> Option<Value> {
+        if let Some(path) = spec.as_str() {
+            return runtime_mem_lookup_json_path(entry, path).cloned();
+        }
+        if let Some(value) = spec.get("value") {
+            return Some(value.clone());
+        }
+        if let Some(coalesce) = spec.get("coalesce").and_then(Value::as_array) {
+            for candidate in coalesce {
+                if let Some(value) = resolve_v2_schema_field(candidate, entry)
+                    && !value.as_str().is_some_and(str::is_empty)
+                {
+                    return Some(value);
+                }
+            }
+        }
+        None
+    }
+}

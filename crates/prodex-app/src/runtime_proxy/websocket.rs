@@ -907,6 +907,7 @@ pub(super) fn attempt_runtime_websocket_request(
         turn_state_override,
         promote_committed_profile,
     } = attempt;
+    let request_model_name = runtime_smart_context_model_name_from_body(request_text.as_bytes());
 
     let realtime_websocket = is_runtime_realtime_websocket_path(&handshake_request.path_and_query);
     let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
@@ -1307,6 +1308,7 @@ pub(super) fn attempt_runtime_websocket_request(
                         profile_name,
                         "responses_websocket",
                         request_prompt_cache_key,
+                        request_model_name.as_deref(),
                         inspected.token_usage,
                     );
                 }

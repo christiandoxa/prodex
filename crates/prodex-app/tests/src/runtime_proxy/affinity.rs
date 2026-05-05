@@ -220,6 +220,7 @@ fn prompt_cache_profile_hit_ignores_zero_or_absent_cached_tokens() {
         "test",
         Some(prompt_cache_key),
         None,
+        None,
     );
     assert_eq!(
         runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 2).as_deref(),
@@ -241,6 +242,7 @@ fn prompt_cache_token_usage_logs_bounded_redacted_cache_telemetry() {
         "main",
         "unit-test",
         Some(prompt_cache_key),
+        None,
         Some(RuntimeTokenUsage {
             input_tokens: 300,
             cached_input_tokens: 120,
@@ -255,6 +257,7 @@ fn prompt_cache_token_usage_logs_bounded_redacted_cache_telemetry() {
         "main",
         "unit-test",
         Some(prompt_cache_key),
+        None,
         Some(RuntimeTokenUsage {
             input_tokens: 320,
             cached_input_tokens: 100,

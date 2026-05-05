@@ -1384,6 +1384,107 @@ fn regression_self_check_passes_when_condense_saves_and_signals_preserved() {
     assert_eq!(check.saved_tokens, 300);
 }
 
+#[test]
+fn golden_prodex_s_and_super_rewrite_corpus_saves_tokens_preserves_signals_and_refs() {
+    for trace in smart_context_golden_prodex_traces() {
+        let rewrite = trace.rewrite();
+        let before_text = std::str::from_utf8(&rewrite.before_body).unwrap();
+        let after_text = std::str::from_utf8(&rewrite.after_body).unwrap();
+        let before_body_tokens = smart_context_estimate_tokens_from_body(&rewrite.before_body);
+        let after_body_tokens = smart_context_estimate_tokens_from_body(&rewrite.after_body);
+        let before_context_tokens =
+            smart_context_estimate_tokens_from_body(rewrite.before_context.as_bytes());
+        let after_context_tokens =
+            smart_context_estimate_tokens_from_body(rewrite.after_context.as_bytes());
+        let before_output_tokens =
+            smart_context_estimate_tokens_from_body(rewrite.before_tool_output.as_bytes());
+        let after_output_tokens =
+            smart_context_estimate_tokens_from_body(rewrite.after_tool_output.as_bytes());
+
+        assert!(
+            rewrite.after_body.len() < rewrite.before_body.len(),
+            "{}: rewritten body should be smaller, before={} after={}",
+            trace.name,
+            rewrite.before_body.len(),
+            rewrite.after_body.len()
+        );
+        assert!(
+            after_body_tokens < before_body_tokens,
+            "{}: rewritten body should save estimated tokens, before={before_body_tokens} after={after_body_tokens}",
+            trace.name
+        );
+        assert!(
+            after_body_tokens.saturating_mul(100)
+                <= before_body_tokens.saturating_mul(trace.max_after_token_ratio_percent),
+            "{}: rewritten body token ratio regressed, before={before_body_tokens} after={after_body_tokens} max_ratio={}%",
+            trace.name,
+            trace.max_after_token_ratio_percent
+        );
+        assert!(
+            after_context_tokens < before_context_tokens,
+            "{}: rewritten static context should save estimated tokens, before={before_context_tokens} after={after_context_tokens}",
+            trace.name
+        );
+        assert!(
+            after_output_tokens < before_output_tokens,
+            "{}: rewritten tool output should save estimated tokens, before={before_output_tokens} after={after_output_tokens}",
+            trace.name
+        );
+
+        for signal in &trace.critical_signals {
+            assert_eq!(
+                smart_context_golden_occurrences(before_text, signal),
+                smart_context_golden_occurrences(after_text, signal),
+                "{}: critical signal changed: {signal}",
+                trace.name
+            );
+        }
+        for reference in &trace.rehydrate_refs {
+            assert_eq!(
+                smart_context_golden_occurrences(before_text, reference),
+                smart_context_golden_occurrences(after_text, reference),
+                "{}: rehydrate ref changed: {reference}",
+                trace.name
+            );
+        }
+
+        let missing_rehydrate_refs = trace
+            .rehydrate_refs
+            .iter()
+            .filter(|reference| !after_text.contains(**reference))
+            .map(|reference| (*reference).to_string())
+            .collect::<Vec<_>>();
+        let regression =
+            smart_context_regression_self_check(SmartContextRegressionSelfCheckInput {
+                exactness_guard: smart_context_exactness_guard(
+                    SmartContextExactnessInput::default(),
+                ),
+                before_hash: smart_context_hash_text(before_text),
+                after_hash: smart_context_hash_text(after_text),
+                before_estimated_tokens: before_body_tokens,
+                after_estimated_tokens: after_body_tokens,
+                before_critical_signal_count: trace.critical_signal_count(before_text),
+                after_critical_signal_count: trace.critical_signal_count(after_text),
+                missing_rehydrate_refs,
+            });
+
+        assert_eq!(
+            regression.decision,
+            SmartContextRegressionSelfCheckDecision::Pass,
+            "{}: regression self-check failed: {:?}",
+            trace.name,
+            regression.reasons
+        );
+        assert!(
+            regression.saved_tokens >= trace.min_saved_tokens,
+            "{}: saved token floor regressed, saved={} floor={}",
+            trace.name,
+            regression.saved_tokens,
+            trace.min_saved_tokens
+        );
+    }
+}
+
 fn smart_context_memory_capsule_policy_for_available_tokens(
     available_tokens: u64,
 ) -> (
@@ -1408,4 +1509,211 @@ fn smart_context_memory_capsule_policy_for_available_tokens(
     });
 
     (accounting, policy)
+}
+
+struct SmartContextGoldenProdexTrace {
+    name: &'static str,
+    model: &'static str,
+    call_id: &'static str,
+    static_artifact_id: &'static str,
+    tool_artifact_id: &'static str,
+    user_request: String,
+    static_context: String,
+    static_summary: String,
+    tool_output: String,
+    tool_summary: String,
+    critical_signals: Vec<&'static str>,
+    rehydrate_refs: Vec<&'static str>,
+    max_after_token_ratio_percent: u64,
+    min_saved_tokens: u64,
+}
+
+struct SmartContextGoldenProdexRewrite {
+    before_body: Vec<u8>,
+    after_body: Vec<u8>,
+    before_context: String,
+    after_context: String,
+    before_tool_output: String,
+    after_tool_output: String,
+}
+
+impl SmartContextGoldenProdexTrace {
+    fn rewrite(&self) -> SmartContextGoldenProdexRewrite {
+        let static_artifact =
+            smart_context_golden_artifact(self.static_artifact_id, &self.static_context);
+        let tool_artifact = smart_context_golden_artifact(self.tool_artifact_id, &self.tool_output);
+        let after_context = smart_context_artifact_marker(&static_artifact, &self.static_summary);
+        let after_tool_output = smart_context_artifact_marker(&tool_artifact, &self.tool_summary);
+        let before_value = serde_json::json!({
+            "model": self.model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": self.static_context.as_str(),
+                },
+                {
+                    "role": "user",
+                    "content": self.user_request.as_str(),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": self.call_id,
+                    "output": self.tool_output.as_str(),
+                },
+            ],
+            "store": true,
+        });
+        let after_value = serde_json::json!({
+            "model": self.model,
+            "input": [
+                {
+                    "role": "system",
+                    "content": after_context.as_str(),
+                },
+                {
+                    "role": "user",
+                    "content": self.user_request.as_str(),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": self.call_id,
+                    "output": after_tool_output.as_str(),
+                },
+            ],
+            "store": true,
+        });
+
+        SmartContextGoldenProdexRewrite {
+            before_body: serde_json::to_vec(&before_value).unwrap(),
+            after_body: serde_json::to_vec(&after_value).unwrap(),
+            before_context: self.static_context.clone(),
+            after_context,
+            before_tool_output: self.tool_output.clone(),
+            after_tool_output,
+        }
+    }
+
+    fn critical_signal_count(&self, text: &str) -> usize {
+        self.critical_signals
+            .iter()
+            .map(|signal| smart_context_golden_occurrences(text, signal))
+            .sum()
+    }
+}
+
+fn smart_context_golden_prodex_traces() -> Vec<SmartContextGoldenProdexTrace> {
+    vec![
+        smart_context_golden_prodex_s_trace(),
+        smart_context_golden_prodex_super_trace(),
+    ]
+}
+
+fn smart_context_golden_prodex_s_trace() -> SmartContextGoldenProdexTrace {
+    let static_context = format!(
+        "Prodex S runtime proxy instructions.\n{}\nKeep profile affinity and preserve upstream metadata.",
+        "Never print while Codex TUI is active. ".repeat(180)
+    );
+    let static_summary =
+        "Prodex S static context stored as artifact. Keep profile affinity and upstream metadata."
+            .to_string();
+    let diagnostics = [
+        "Compiling prodex v0.0.0 (/workspace/prodex)",
+        "error[E0425]: cannot find value `MISSING_CONTEXT` in this scope",
+        "  --> crates/prodex-runtime-proxy/src/smart_context.rs:1710:9",
+        "   |",
+        "1710 |         MISSING_CONTEXT",
+        "   |         ^^^^^^^^^^^^^^^ not found in this scope",
+        "---- smart_context::golden_prodex_s_trace stdout ----",
+        "thread 'smart_context::golden_prodex_s_trace' panicked at crates/prodex-runtime-proxy/src/smart_context.rs:1710:9",
+    ]
+    .join("\n");
+    let tool_output = format!(
+        "{diagnostics}\n{}",
+        (0..220)
+            .map(|index| format!("line {index}: noisy cargo build progress for prodex s profile"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    SmartContextGoldenProdexTrace {
+        name: "prodex-s-build-trace",
+        model: "gpt-5",
+        call_id: "call-prodex-s-build",
+        static_artifact_id: "sc:prodex-s-static-context",
+        tool_artifact_id: "sc:prodex-s-build-output",
+        user_request: "Run focused runtime proxy test for Prodex s and inspect psc:prodex-s-build#L12-L18 only if needed.".to_string(),
+        static_context,
+        static_summary,
+        tool_output,
+        tool_summary: diagnostics,
+        critical_signals: vec![
+            "error[E0425]: cannot find value `MISSING_CONTEXT` in this scope",
+            "crates/prodex-runtime-proxy/src/smart_context.rs:1710:9",
+            "smart_context::golden_prodex_s_trace",
+        ],
+        rehydrate_refs: vec!["psc:prodex-s-build#L12-L18"],
+        max_after_token_ratio_percent: 25,
+        min_saved_tokens: 2_000,
+    }
+}
+
+fn smart_context_golden_prodex_super_trace() -> SmartContextGoldenProdexTrace {
+    let static_context = format!(
+        "Prodex Super runtime context.\n{}\nSmart Context Autopilot remains transport-transparent.",
+        "Preserve auto-rotate boundaries, runtime hot paths, and terminal silence. ".repeat(360)
+    );
+    let static_summary =
+        "Prodex Super static context stored as artifact. Preserve rotate boundaries and terminal silence."
+            .to_string();
+    let runtime_signals = [
+        "runtime_proxy_queue_overloaded lane=responses active=32 limit=32",
+        "profile_inflight_saturated profile=super-a route=responses in_flight=4 cap=4",
+        "prodex-runtime-latest.path=/tmp/prodex-runtime-latest.path",
+        "thread 'runtime_proxy::super_golden_trace' panicked at crates/prodex-app/src/runtime_proxy/smart_context.rs:4702:17",
+        "error: upstream stream ended before first_local_chunk",
+    ]
+    .join("\n");
+    let tool_output = format!(
+        "{runtime_signals}\n{}",
+        (0..520)
+            .map(|index| format!("2026-05-04T00:{:02}:00Z trace_id=req-super-{index:03} websocket keepalive and scheduler noise", index % 60))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    SmartContextGoldenProdexTrace {
+        name: "prodex-super-runtime-trace",
+        model: "gpt-5.2",
+        call_id: "call-prodex-super-runtime",
+        static_artifact_id: "sc:prodex-super-static-context",
+        tool_artifact_id: "sc:prodex-super-runtime-output",
+        user_request: "Diagnose Prodex Super runtime pressure. Rehydrate psc:prodex-super-runtime#L31-L44 only if exact log lines are needed.".to_string(),
+        static_context,
+        static_summary,
+        tool_output,
+        tool_summary: runtime_signals,
+        critical_signals: vec![
+            "runtime_proxy_queue_overloaded lane=responses active=32 limit=32",
+            "profile_inflight_saturated profile=super-a route=responses in_flight=4 cap=4",
+            "prodex-runtime-latest.path=/tmp/prodex-runtime-latest.path",
+            "runtime_proxy::super_golden_trace",
+            "crates/prodex-app/src/runtime_proxy/smart_context.rs:4702:17",
+            "error: upstream stream ended before first_local_chunk",
+        ],
+        rehydrate_refs: vec!["psc:prodex-super-runtime#L31-L44"],
+        max_after_token_ratio_percent: 15,
+        min_saved_tokens: 12_000,
+    }
+}
+
+fn smart_context_golden_artifact(id: &str, text: &str) -> SmartContextArtifactRef {
+    SmartContextArtifactRef {
+        id: id.to_string(),
+        byte_len: text.len(),
+        content_hash: smart_context_hash_text(text),
+    }
+}
+
+fn smart_context_golden_occurrences(haystack: &str, needle: &str) -> usize {
+    haystack.match_indices(needle).count()
 }

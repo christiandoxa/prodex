@@ -1120,9 +1120,11 @@ pub(crate) fn attempt_runtime_responses_request(
                 response,
             });
         }
+        let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
         let prepared = prepare_runtime_proxy_responses_success(
             RuntimeResponsesSuccessContext {
                 request_id,
+                request_model_name: request_model_name.as_deref(),
                 request_previous_response_id: runtime_request_previous_response_id(request)
                     .as_deref(),
                 request_prompt_cache_key: request_prompt_cache_key.as_deref(),

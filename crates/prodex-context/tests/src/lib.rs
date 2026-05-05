@@ -1814,6 +1814,135 @@ fn successful_command_output_summary_uses_short_form_for_pure_noise() {
 }
 
 #[test]
+fn successful_command_output_summary_uses_short_form_for_tsc_success() {
+    let input = "\
+Projects in this build:
+    * tsconfig.json
+Building project 'tsconfig.json'...
+Project 'tsconfig.json' is up to date because newest input is older than output
+Updating unchanged output timestamps of project 'tsconfig.json'...
+Projects in this build:
+    * packages/app/tsconfig.json
+Project 'packages/app/tsconfig.json' is up to date
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("npx tsc --build --pretty false".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            max_line_chars: 160,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert!(report.output.contains("pcs: ok"));
+    assert!(report.output.contains("typecheck_summary="));
+    assert!(!report.output.contains("packages/app/tsconfig.json"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_uses_short_form_for_next_build_success() {
+    let input = "\
+Next.js 15.3.1
+Creating an optimized production build ...
+Compiled successfully
+Linting and checking validity of types
+Collecting page data
+Generating static pages (4/4)
+Finalizing page optimization
+Collecting build traces
++ First Load JS shared by all 87.1 kB
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("next build --profile".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            max_line_chars: 160,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert!(report.output.contains("pcs: ok"));
+    assert!(report.output.contains("next="));
+    assert!(
+        !report
+            .output
+            .contains("Creating an optimized production build")
+    );
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_uses_short_form_for_cargo_doc_success_with_paths() {
+    let input = "\
+Documenting prodex v0.77.0 (/workspace/prodex)
+Documenting prodex-context v0.77.0 (/workspace/prodex/crates/prodex-context)
+Generated /workspace/prodex/target/doc/prodex/index.html
+Generated /workspace/prodex/target/doc/prodex_context/index.html
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.14s
+Documenting prodex-cli v0.77.0 (/workspace/prodex/crates/prodex-cli)
+Generated /workspace/prodex/target/doc/prodex_cli/index.html
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.32s
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("cargo doc --workspace --no-deps".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            max_line_chars: 160,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert!(report.output.contains("pcs: ok"));
+    assert!(report.output.contains("documenting="));
+    assert!(!report.output.contains("target/doc/prodex_cli/index.html"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_refuses_warning_only_build_output() {
+    let input = "\
+Next.js 15.3.1
+Creating an optimized production build ...
+Compiled with warnings
+warning TS6133: 'unused' is declared but its value is never read.
+Linting and checking validity of types
+Collecting page data
+Generating static pages (4/4)
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("next build".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!report.compacted);
+    assert!(report.failure_suspected);
+    assert_eq!(report.output, input);
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
 fn successful_command_output_summary_compacts_common_tool_success_without_exit_code() {
     let mut input = String::new();
     for index in 0..24 {

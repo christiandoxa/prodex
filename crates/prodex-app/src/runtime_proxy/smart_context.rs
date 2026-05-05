@@ -1,12 +1,17 @@
 use super::*;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 const SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES: usize = 1024;
 const SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS: u64 = 32_000;
 const SMART_CONTEXT_RESERVED_OUTPUT_TOKENS: u64 = 4_096;
+const SMART_CONTEXT_MODEL_SCAN_MAX_BYTES: usize = 4 * 1024;
+const SMART_CONTEXT_MODEL_NAME_MAX_BYTES: usize = 128;
 const SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT: usize = 8;
 const SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT: usize = 16;
+const SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION: u32 = 1;
+const SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS: u64 = 250;
 const SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT: usize = 4;
 const SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES: usize = 12;
 const SMART_CONTEXT_TOOL_PREVIEW_ESTIMATED_LINE_BYTES: usize = 256;
@@ -192,6 +197,392 @@ static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimeSmartContextProxyState>>,
 > = OnceLock::new();
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RuntimeSmartContextPersistedTokenCalibration {
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    token_usage_history: Vec<RuntimeSmartContextPersistedTokenUsage>,
+    #[serde(default)]
+    token_calibration_history: Vec<RuntimeSmartContextPersistedTokenCalibrationObservation>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeSmartContextPersistedTokenUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    cached_input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    reasoning_tokens: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeSmartContextPersistedTokenCalibrationObservation {
+    #[serde(default)]
+    bucket_key: RuntimeSmartContextPersistedTokenCalibrationBucketKey,
+    #[serde(default)]
+    usage: RuntimeSmartContextPersistedTokenUsage,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+struct RuntimeSmartContextPersistedTokenCalibrationBucketKey {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    route: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transport: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeSmartContextTokenCalibrationSaveJob {
+    path: PathBuf,
+    snapshot: RuntimeSmartContextPersistedTokenCalibration,
+    log_path: PathBuf,
+    reason: String,
+    queued_at: Instant,
+    ready_at: Instant,
+}
+
+struct RuntimeSmartContextTokenCalibrationSaveQueue {
+    pending: Mutex<BTreeMap<PathBuf, RuntimeSmartContextTokenCalibrationSaveJob>>,
+    wake: Condvar,
+}
+
+static RUNTIME_SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_QUEUE: OnceLock<
+    Arc<RuntimeSmartContextTokenCalibrationSaveQueue>,
+> = OnceLock::new();
+
+impl From<RuntimeSmartContextPersistedTokenUsage> for RuntimeTokenUsage {
+    fn from(value: RuntimeSmartContextPersistedTokenUsage) -> Self {
+        Self {
+            input_tokens: value.input_tokens,
+            cached_input_tokens: value.cached_input_tokens,
+            output_tokens: value.output_tokens,
+            reasoning_tokens: value.reasoning_tokens,
+        }
+    }
+}
+
+impl From<RuntimeTokenUsage> for RuntimeSmartContextPersistedTokenUsage {
+    fn from(value: RuntimeTokenUsage) -> Self {
+        Self {
+            input_tokens: value.input_tokens,
+            cached_input_tokens: value.cached_input_tokens,
+            output_tokens: value.output_tokens,
+            reasoning_tokens: value.reasoning_tokens,
+        }
+    }
+}
+
+impl From<RuntimeSmartContextPersistedTokenCalibrationBucketKey>
+    for runtime_proxy_crate::SmartContextTokenCalibrationBucketKey
+{
+    fn from(value: RuntimeSmartContextPersistedTokenCalibrationBucketKey) -> Self {
+        Self {
+            route: value.route,
+            model: value.model,
+            profile: value.profile,
+            transport: value.transport,
+        }
+    }
+}
+
+impl From<runtime_proxy_crate::SmartContextTokenCalibrationBucketKey>
+    for RuntimeSmartContextPersistedTokenCalibrationBucketKey
+{
+    fn from(value: runtime_proxy_crate::SmartContextTokenCalibrationBucketKey) -> Self {
+        Self {
+            route: value.route,
+            model: value.model,
+            profile: value.profile,
+            transport: value.transport,
+        }
+    }
+}
+
+impl From<RuntimeSmartContextPersistedTokenCalibrationObservation>
+    for RuntimeSmartContextTokenCalibrationObservation
+{
+    fn from(value: RuntimeSmartContextPersistedTokenCalibrationObservation) -> Self {
+        Self {
+            bucket_key: value.bucket_key.into(),
+            usage: value.usage.into(),
+        }
+    }
+}
+
+impl From<&RuntimeSmartContextTokenCalibrationObservation>
+    for RuntimeSmartContextPersistedTokenCalibrationObservation
+{
+    fn from(value: &RuntimeSmartContextTokenCalibrationObservation) -> Self {
+        Self {
+            bucket_key: value.bucket_key.clone().into(),
+            usage: value.usage.into(),
+        }
+    }
+}
+
+impl prodex_runtime_state::RuntimeScheduledSaveJob for RuntimeSmartContextTokenCalibrationSaveJob {
+    fn ready_at(&self) -> Instant {
+        self.ready_at
+    }
+}
+
+fn runtime_smart_context_token_calibration_path(artifact_path: &Path) -> PathBuf {
+    let mut path = artifact_path.to_path_buf();
+    let file_name = artifact_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| format!("{value}.token-calibration.json"))
+        .unwrap_or_else(|| "smart-context-token-calibration.json".to_string());
+    path.set_file_name(file_name);
+    path
+}
+
+fn runtime_smart_context_load_token_calibration_for_artifact_path(
+    artifact_path: &Path,
+) -> RuntimeSmartContextPersistedTokenCalibration {
+    let path = runtime_smart_context_token_calibration_path(artifact_path);
+    let Ok(bytes) = fs::read(path) else {
+        return RuntimeSmartContextPersistedTokenCalibration::default();
+    };
+    let Ok(calibration) =
+        serde_json::from_slice::<RuntimeSmartContextPersistedTokenCalibration>(&bytes)
+    else {
+        return RuntimeSmartContextPersistedTokenCalibration::default();
+    };
+    if calibration.version == SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION {
+        calibration
+    } else {
+        RuntimeSmartContextPersistedTokenCalibration::default()
+    }
+}
+
+fn runtime_smart_context_token_calibration_snapshot(
+    state: &RuntimeSmartContextProxyState,
+) -> RuntimeSmartContextPersistedTokenCalibration {
+    RuntimeSmartContextPersistedTokenCalibration {
+        version: SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION,
+        token_usage_history: state
+            .token_usage_history
+            .iter()
+            .copied()
+            .map(RuntimeSmartContextPersistedTokenUsage::from)
+            .collect(),
+        token_calibration_history: state
+            .token_calibration_history
+            .iter()
+            .map(RuntimeSmartContextPersistedTokenCalibrationObservation::from)
+            .collect(),
+    }
+}
+
+fn schedule_runtime_smart_context_token_calibration_save(
+    shared: &RuntimeRotationProxyShared,
+    path: PathBuf,
+    snapshot: RuntimeSmartContextPersistedTokenCalibration,
+    reason: &str,
+) {
+    if !runtime_proxy_persistence_enabled(shared) {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "smart_context_token_calibration_save_suppressed",
+                [
+                    runtime_proxy_log_field("role", "follower"),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("path", path.display().to_string()),
+                ],
+            ),
+        );
+        return;
+    }
+
+    if cfg!(test) {
+        match runtime_smart_context_save_token_calibration_snapshot(&path, &snapshot) {
+            Ok(()) => runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "smart_context_token_calibration_save_ok",
+                    [
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("lag_ms", "0"),
+                        runtime_proxy_log_field(
+                            "samples",
+                            snapshot.token_calibration_history.len().to_string(),
+                        ),
+                    ],
+                ),
+            ),
+            Err(err) => runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "smart_context_token_calibration_save_error",
+                    [
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("lag_ms", "0"),
+                        runtime_proxy_log_field("stage", "write"),
+                        runtime_proxy_log_field("error", format!("{err:#}")),
+                    ],
+                ),
+            ),
+        }
+        return;
+    }
+
+    let queue = runtime_smart_context_token_calibration_save_queue();
+    let queued_at = Instant::now();
+    let ready_at = queued_at + Duration::from_millis(SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS);
+    let mut pending = queue
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    pending.insert(
+        path.clone(),
+        RuntimeSmartContextTokenCalibrationSaveJob {
+            path,
+            snapshot,
+            log_path: shared.log_path.clone(),
+            reason: reason.to_string(),
+            queued_at,
+            ready_at,
+        },
+    );
+    let backlog = pending.len();
+    drop(pending);
+    queue.wake.notify_one();
+
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "smart_context_token_calibration_save_queued",
+            [
+                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("backlog", backlog.to_string()),
+                runtime_proxy_log_field(
+                    "ready_in_ms",
+                    SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS.to_string(),
+                ),
+            ],
+        ),
+    );
+}
+
+fn runtime_smart_context_token_calibration_save_queue()
+-> Arc<RuntimeSmartContextTokenCalibrationSaveQueue> {
+    Arc::clone(
+        RUNTIME_SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_QUEUE.get_or_init(|| {
+            let queue = Arc::new(RuntimeSmartContextTokenCalibrationSaveQueue {
+                pending: Mutex::new(BTreeMap::new()),
+                wake: Condvar::new(),
+            });
+            let worker_queue = Arc::clone(&queue);
+            thread::spawn(move || {
+                runtime_smart_context_token_calibration_save_worker_loop(worker_queue)
+            });
+            queue
+        }),
+    )
+}
+
+fn runtime_smart_context_token_calibration_save_worker_loop(
+    queue: Arc<RuntimeSmartContextTokenCalibrationSaveQueue>,
+) {
+    loop {
+        let job = runtime_smart_context_next_token_calibration_save_job(&queue);
+        let RuntimeSmartContextTokenCalibrationSaveJob {
+            path,
+            snapshot,
+            log_path,
+            reason,
+            queued_at,
+            ready_at: _,
+        } = job;
+        match runtime_smart_context_save_token_calibration_snapshot(&path, &snapshot) {
+            Ok(()) => runtime_proxy_log_to_path(
+                &log_path,
+                &runtime_proxy_structured_log_message(
+                    "smart_context_token_calibration_save_ok",
+                    [
+                        runtime_proxy_log_field("reason", reason.as_str()),
+                        runtime_proxy_log_field(
+                            "lag_ms",
+                            queued_at.elapsed().as_millis().to_string(),
+                        ),
+                        runtime_proxy_log_field(
+                            "samples",
+                            snapshot.token_calibration_history.len().to_string(),
+                        ),
+                    ],
+                ),
+            ),
+            Err(err) => runtime_proxy_log_to_path(
+                &log_path,
+                &runtime_proxy_structured_log_message(
+                    "smart_context_token_calibration_save_error",
+                    [
+                        runtime_proxy_log_field("reason", reason.as_str()),
+                        runtime_proxy_log_field(
+                            "lag_ms",
+                            queued_at.elapsed().as_millis().to_string(),
+                        ),
+                        runtime_proxy_log_field("stage", "write"),
+                        runtime_proxy_log_field("error", format!("{err:#}")),
+                    ],
+                ),
+            ),
+        }
+        runtime_allocator_trim_best_effort();
+    }
+}
+
+fn runtime_smart_context_next_token_calibration_save_job(
+    queue: &RuntimeSmartContextTokenCalibrationSaveQueue,
+) -> RuntimeSmartContextTokenCalibrationSaveJob {
+    let mut pending = queue
+        .pending
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        if let Some(path) = pending
+            .iter()
+            .filter(|(_, job)| job.ready_at <= Instant::now())
+            .map(|(path, _)| path.clone())
+            .next()
+        {
+            return pending.remove(&path).expect("ready job should exist");
+        }
+        let wait = pending
+            .values()
+            .map(|job| job.ready_at.saturating_duration_since(Instant::now()))
+            .min()
+            .unwrap_or_else(|| Duration::from_secs(60));
+        let (next_pending, _) = queue
+            .wake
+            .wait_timeout(pending, wait)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        pending = next_pending;
+    }
+}
+
+fn runtime_smart_context_save_token_calibration_snapshot(
+    path: &Path,
+    snapshot: &RuntimeSmartContextPersistedTokenCalibration,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let bytes = serde_json::to_vec(snapshot).context("failed to encode token calibration")?;
+    fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))
+}
+
 pub(crate) fn register_runtime_smart_context_proxy_state(
     log_path: &Path,
     enabled: bool,
@@ -207,6 +598,31 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
         .filter(|_| enabled)
         .map(RuntimeSmartContextArtifactStore::load_from_path)
         .unwrap_or_default();
+    let calibration = artifact_path
+        .as_deref()
+        .filter(|_| enabled)
+        .map(runtime_smart_context_load_token_calibration_for_artifact_path)
+        .unwrap_or_default();
+    let token_usage_history = calibration
+        .token_usage_history
+        .into_iter()
+        .map(RuntimeTokenUsage::from)
+        .rev()
+        .take(SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    let token_calibration_history = calibration
+        .token_calibration_history
+        .into_iter()
+        .map(RuntimeSmartContextTokenCalibrationObservation::from)
+        .rev()
+        .take(SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
     states.insert(
         log_path.to_path_buf(),
         RuntimeSmartContextProxyState {
@@ -214,9 +630,9 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
             model_context_window_tokens,
             artifacts,
             artifact_path,
-            last_token_usage: None,
-            token_usage_history: Vec::new(),
-            token_calibration_history: Vec::new(),
+            last_token_usage: token_usage_history.last().copied(),
+            token_usage_history,
+            token_calibration_history,
             rewrite_safety_history: Vec::new(),
             last_static_context_fingerprints: Vec::new(),
             last_static_context_prompt_cache_hash: None,
@@ -244,6 +660,7 @@ pub(crate) fn observe_runtime_smart_context_token_usage_for_bucket(
     let Ok(mut states) = states.lock() else {
         return;
     };
+    let mut save_job = None;
     if let Some(state) = states.get_mut(&shared.log_path)
         && state.enabled
     {
@@ -269,6 +686,21 @@ pub(crate) fn observe_runtime_smart_context_token_usage_for_bucket(
                 state.token_calibration_history.drain(0..overflow);
             }
         }
+        save_job = state.artifact_path.as_deref().map(|artifact_path| {
+            (
+                runtime_smart_context_token_calibration_path(artifact_path),
+                runtime_smart_context_token_calibration_snapshot(state),
+            )
+        });
+    }
+    drop(states);
+    if let Some((path, snapshot)) = save_job {
+        schedule_runtime_smart_context_token_calibration_save(
+            shared,
+            path,
+            snapshot,
+            "smart_context_token_calibration",
+        );
     }
 }
 
@@ -798,8 +1230,13 @@ fn runtime_smart_context_budget(
     missing_rehydrate_refs: Vec<String>,
     static_context_changed: bool,
 ) -> RuntimeSmartContextBudget {
-    let bucket_key =
-        runtime_smart_context_token_calibration_bucket_key(route_kind, transport, profile_name);
+    let model_name = runtime_smart_context_model_name_from_body(body);
+    let bucket_key = runtime_smart_context_token_calibration_bucket_key_with_model(
+        route_kind,
+        transport,
+        profile_name,
+        model_name.as_deref(),
+    );
     let (
         global_history,
         bucket_history,
@@ -881,20 +1318,90 @@ fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
         .is_some_and(|state| state.enabled)
 }
 
+#[cfg(test)]
 fn runtime_smart_context_token_calibration_bucket_key(
     route_kind: RuntimeRouteKind,
     transport: RuntimeSmartContextTransport,
     profile_name: Option<&str>,
 ) -> runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
+    runtime_smart_context_token_calibration_bucket_key_with_model(
+        route_kind,
+        transport,
+        profile_name,
+        None,
+    )
+}
+
+fn runtime_smart_context_token_calibration_bucket_key_with_model(
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
+    model_name: Option<&str>,
+) -> runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
     runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
         route: Some(runtime_route_kind_label(route_kind).to_string()),
-        model: None,
+        model: runtime_smart_context_normalized_model_name(model_name),
         profile: profile_name
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string),
         transport: Some(transport.label().to_string()),
     }
+}
+
+pub(crate) fn runtime_smart_context_model_name_from_body(body: &[u8]) -> Option<String> {
+    if body.is_empty() {
+        return None;
+    }
+    if body.len() <= SMART_CONTEXT_MODEL_SCAN_MAX_BYTES
+        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
+    {
+        return runtime_smart_context_model_name_from_value(&value);
+    }
+    let scan_len = body.len().min(SMART_CONTEXT_MODEL_SCAN_MAX_BYTES);
+    let scan = std::str::from_utf8(&body[..scan_len]).ok()?;
+    runtime_smart_context_model_name_from_json_prefix(scan)
+}
+
+fn runtime_smart_context_model_name_from_value(value: &serde_json::Value) -> Option<String> {
+    runtime_smart_context_normalized_model_name(value.get("model")?.as_str())
+}
+
+fn runtime_smart_context_model_name_from_json_prefix(text: &str) -> Option<String> {
+    let (_, after_key) = text.split_once("\"model\"")?;
+    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
+    let mut chars = after_colon.strip_prefix('"')?.chars();
+    let mut model = String::new();
+    let mut escaped = false;
+    for ch in chars.by_ref() {
+        if escaped {
+            model.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            return runtime_smart_context_normalized_model_name(Some(&model));
+        } else if ch.is_control() {
+            return None;
+        } else {
+            model.push(ch);
+        }
+        if model.len() > SMART_CONTEXT_MODEL_NAME_MAX_BYTES {
+            return None;
+        }
+    }
+    None
+}
+
+pub(crate) fn runtime_smart_context_normalized_model_name(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty()
+        || value.len() > SMART_CONTEXT_MODEL_NAME_MAX_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 fn runtime_smart_context_budget_inputs(
@@ -3134,20 +3641,94 @@ fn runtime_smart_context_render_exact_appendix(
     label: &str,
     ranges: Vec<RuntimeSmartContextExactAppendixRange>,
 ) -> Option<(String, usize)> {
+    let range_count = ranges
+        .iter()
+        .filter(|range| !range.body.trim().is_empty())
+        .count();
+    if range_count == 0 {
+        return None;
+    }
     let mut rendered = vec![label.to_string()];
     let mut seen =
         BTreeMap::<(String, usize), Vec<RuntimeSmartContextSeenExactAppendixBody>>::new();
-    let mut range_count = 0usize;
-    for range in ranges {
+    for range in runtime_smart_context_merge_exact_appendix_ranges(ranges) {
         if range.body.trim().is_empty() {
             continue;
         }
         rendered.push(runtime_smart_context_render_exact_appendix_range(
             &range, &mut seen,
         ));
-        range_count = range_count.saturating_add(1);
     }
-    (range_count > 0).then_some((rendered.join("\n"), range_count))
+    Some((rendered.join("\n"), range_count))
+}
+
+fn runtime_smart_context_merge_exact_appendix_ranges(
+    ranges: Vec<RuntimeSmartContextExactAppendixRange>,
+) -> Vec<RuntimeSmartContextExactAppendixRange> {
+    let mut merged = Vec::<RuntimeSmartContextExactAppendixRange>::new();
+    for range in ranges {
+        let Some((range_base, range_lines)) =
+            runtime_smart_context_parse_artifact_line_ref(&range.reference)
+        else {
+            merged.push(range);
+            continue;
+        };
+        let Some(last) = merged.last_mut() else {
+            merged.push(range);
+            continue;
+        };
+        let Some((last_base, last_lines)) =
+            runtime_smart_context_parse_artifact_line_ref(&last.reference)
+        else {
+            merged.push(range);
+            continue;
+        };
+        if last_base != range_base
+            || range_lines.start > last_lines.end.saturating_add(1)
+            || range_lines.end < last_lines.start
+        {
+            merged.push(range);
+            continue;
+        }
+
+        let overlap = if range_lines.start <= last_lines.end {
+            last_lines
+                .end
+                .saturating_sub(range_lines.start)
+                .saturating_add(1)
+        } else {
+            0
+        };
+        let next_line_count = range.body.lines().count();
+        if overlap >= next_line_count && range_lines.end > last_lines.end {
+            merged.push(range);
+            continue;
+        }
+        let next_lines = range.body.lines().collect::<Vec<_>>();
+        if overlap < next_lines.len() {
+            if !last.body.is_empty() {
+                last.body.push('\n');
+            }
+            last.body.push_str(&next_lines[overlap..].join("\n"));
+        }
+        let end = last_lines.end.max(range_lines.end);
+        last.reference = format!("{last_base}#L{}-L{end}", last_lines.start);
+    }
+    merged
+}
+
+fn runtime_smart_context_parse_artifact_line_ref(
+    reference: &str,
+) -> Option<(String, RuntimeSmartContextLineRange)> {
+    let (base, range) = reference.rsplit_once("#L")?;
+    let (start, end) = range.split_once("-L")?;
+    Some((
+        base.to_string(),
+        RuntimeSmartContextLineRange {
+            start: start.parse().ok()?,
+            end: end.parse().ok()?,
+        },
+    ))
 }
 
 fn runtime_smart_context_render_exact_appendix_range(

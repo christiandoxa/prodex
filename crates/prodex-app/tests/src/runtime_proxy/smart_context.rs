@@ -1050,9 +1050,11 @@ unrelated full artifact tail";
     assert_eq!(count, stats.rehydrated_refs);
     assert!(count >= 3);
     assert!(content.contains(SMART_CONTEXT_LABEL_SEMANTIC_EXACT));
-    assert!(content.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 8, 8)));
+    assert!(content.contains(&format!(
+        "{}#L8-L",
+        runtime_smart_context_artifact_ref(&artifact.id)
+    )));
     assert!(content.contains("error[E0425]: cannot find value `missing` in this scope"));
-    assert!(content.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 9, 9)));
     assert!(content.contains("src/lib.rs:42:13"));
     assert!(content.contains("runtime_proxy::semantic_rehydrate"));
     assert!(!content.contains("diff --git a/src/diff.rs b/src/diff.rs"));
@@ -1474,6 +1476,77 @@ fn smart_context_budget_uses_matching_token_calibration_bucket() {
         runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed
     );
     assert_eq!(beta.observed_context_tokens, Some(56_000));
+}
+
+#[test]
+fn smart_context_budget_uses_model_specific_token_calibration_bucket() {
+    let shared = smart_context_test_shared("budget-model-bucket");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    observe_runtime_smart_context_token_usage_for_bucket(
+        &shared,
+        RuntimeTokenUsage {
+            input_tokens: 44_000,
+            ..RuntimeTokenUsage::default()
+        },
+        Some(
+            runtime_smart_context_token_calibration_bucket_key_with_model(
+                RuntimeRouteKind::Responses,
+                RuntimeSmartContextTransport::Http,
+                Some("alpha"),
+                Some("gpt-5"),
+            ),
+        ),
+    );
+    observe_runtime_smart_context_token_usage_for_bucket(
+        &shared,
+        RuntimeTokenUsage {
+            input_tokens: 56_000,
+            ..RuntimeTokenUsage::default()
+        },
+        Some(
+            runtime_smart_context_token_calibration_bucket_key_with_model(
+                RuntimeRouteKind::Responses,
+                RuntimeSmartContextTransport::Http,
+                Some("alpha"),
+                Some("gpt-5.2"),
+            ),
+        ),
+    );
+
+    let gpt5 = runtime_smart_context_budget(
+        &shared,
+        br#"{"model":"gpt-5","input":"small current request body payload"}"#,
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        Some("alpha"),
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+    let gpt52 = runtime_smart_context_budget(
+        &shared,
+        br#"{"model":"gpt-5.2","input":"small current request body payload"}"#,
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        Some("alpha"),
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+
+    assert_eq!(gpt5.observed_context_tokens, Some(44_000));
+    assert_eq!(gpt52.observed_context_tokens, Some(56_000));
+    assert_eq!(
+        runtime_smart_context_model_name_from_body(
+            br#"{"model":"gpt-5.2","input":"small current request body payload"}"#
+        )
+        .as_deref(),
+        Some("gpt-5.2")
+    );
 }
 
 #[test]
@@ -2252,12 +2325,12 @@ fn smart_context_exact_appendices_dedupe_duplicate_range_bodies_when_shorter() {
             body: duplicate.clone(),
         },
         RuntimeSmartContextExactAppendixRange {
-            reference: "psc:abc#L25-L48".to_string(),
+            reference: "psc:abc#L49-L72".to_string(),
             body: duplicate.clone(),
         },
     ];
     let naive = format!(
-        "{SMART_CONTEXT_LABEL_CRITICAL_EXACT}\npsc:abc#L1-L24\n{duplicate}\npsc:abc#L25-L48\n{duplicate}"
+        "{SMART_CONTEXT_LABEL_CRITICAL_EXACT}\npsc:abc#L1-L24\n{duplicate}\npsc:abc#L49-L72\n{duplicate}"
     );
 
     let (crit, count) =
@@ -2271,7 +2344,7 @@ fn smart_context_exact_appendices_dedupe_duplicate_range_bodies_when_shorter() {
                 body: duplicate.clone(),
             },
             RuntimeSmartContextExactAppendixRange {
-                reference: "psc:abc#L25-L48".to_string(),
+                reference: "psc:abc#L49-L72".to_string(),
                 body: duplicate.clone(),
             },
         ],
@@ -2287,6 +2360,30 @@ fn smart_context_exact_appendices_dedupe_duplicate_range_bodies_when_shorter() {
     assert!(crit.contains("refs=psc:abc#L1-L24"));
     assert!(sem.contains(SMART_CONTEXT_LABEL_SEMANTIC_EXACT));
     assert_eq!(sem.match_indices(&duplicate).count(), 1);
+}
+
+#[test]
+fn smart_context_exact_appendices_merge_adjacent_line_ranges() {
+    let ranges = vec![
+        RuntimeSmartContextExactAppendixRange {
+            reference: "psc:abc#L10-L12".to_string(),
+            body: "error: first\nsrc/lib.rs:10:5\ncontext".to_string(),
+        },
+        RuntimeSmartContextExactAppendixRange {
+            reference: "psc:abc#L13-L14".to_string(),
+            body: "panic: second\nsrc/lib.rs:14:5".to_string(),
+        },
+    ];
+
+    let (appendix, count) =
+        runtime_smart_context_render_exact_appendix(SMART_CONTEXT_LABEL_CRITICAL_EXACT, ranges)
+            .unwrap();
+
+    assert_eq!(count, 2);
+    assert!(appendix.contains("psc:abc#L10-L14"));
+    assert!(appendix.contains("error: first"));
+    assert!(appendix.contains("panic: second"));
+    assert_eq!(appendix.matches("psc:abc#L").count(), 1);
 }
 
 #[test]

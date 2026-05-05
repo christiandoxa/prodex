@@ -2118,9 +2118,10 @@ fn compact_noisy_success_output(input: &str, options: &CommandOutputCompactOptio
         return String::new();
     }
     if !count_critical_signals(input).is_empty()
-        || lines
-            .iter()
-            .any(|line| is_success_output_failure_signal_line(line))
+        || lines.iter().any(|line| {
+            is_success_output_failure_signal_line(line)
+                || is_success_output_warning_signal_line(line)
+        })
     {
         return smart_truncate_command_output(input, options);
     }
@@ -2301,6 +2302,7 @@ pub fn compact_successful_command_output_with_options(
         include_path_summary,
         touched_files.len(),
         &key_lines,
+        options,
     ) {
         let mut short = Vec::<String>::new();
         short.push(format!(
@@ -2363,13 +2365,23 @@ fn command_success_output_can_use_short_success_summary(
     include_path_summary: bool,
     touched_files: usize,
     key_lines: &[String],
+    options: &CommandSuccessOutputCompactOptions,
 ) -> bool {
-    critical_signals.total() == 0
-        && !include_path_summary
-        && touched_files == 0
-        && key_lines
+    let short_candidate = options
+        .command
+        .as_deref()
+        .is_some_and(command_name_is_short_success_output_candidate);
+
+    if critical_signals.total() != 0
+        || include_path_summary && !short_candidate
+        || !key_lines
             .iter()
-            .all(|line| noisy_success_label(line).is_some())
+            .all(|line| noisy_success_label(line).is_some() || is_rust_success_summary_line(line))
+    {
+        return false;
+    }
+
+    touched_files == 0 || short_candidate
 }
 
 fn command_success_output_failure_suspected(
@@ -2383,6 +2395,7 @@ fn command_success_output_failure_suspected(
             is_error_signal_line(line)
                 || is_test_failure_signal_line(line)
                 || is_success_output_failure_signal_line(line)
+                || is_success_output_warning_signal_line(line)
                 || is_diagnostic_failure_summary_line(line)
         })
 }
@@ -2429,10 +2442,13 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
                 | "mypy"
                 | "pytest"
                 | "py.test"
+                | "tsc"
                 | "vitest"
                 | "jest"
                 | "eslint"
                 | "prettier"
+                | "vite"
+                | "next"
                 | "playwright"
                 | "cypress"
                 | "nyc"
@@ -2449,6 +2465,9 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
         ) {
             return true;
         }
+        if command.ends_with("-tsc") || command.ends_with("_tsc") {
+            return true;
+        }
         if command == "go"
             && command_metadata_subcommand_after(&tokens, index)
                 .is_some_and(|subcommand| matches!(subcommand, "test" | "build" | "vet" | "list"))
@@ -2459,6 +2478,28 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
             && command_metadata_subcommand_after(&tokens, index).is_some_and(|subcommand| {
                 matches!(subcommand, "build" | "buildx" | "pull" | "compose")
             })
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn command_name_is_short_success_output_candidate(command: &str) -> bool {
+    let tokens = command_metadata_tokens(command);
+    for index in 0..tokens.len() {
+        let command = command_metadata_token_command_name(&tokens[index]);
+        if matches!(
+            command,
+            "tsc" | "vitest" | "jest" | "vite" | "next" | "playwright" | "cypress"
+        ) || command.ends_with("-tsc")
+            || command.ends_with("_tsc")
+        {
+            return true;
+        }
+        if command == "cargo"
+            && command_metadata_subcommand_after(&tokens, index)
+                .is_some_and(|subcommand| matches!(subcommand, "clippy" | "doc"))
         {
             return true;
         }
@@ -2772,6 +2813,7 @@ fn looks_like_noisy_success_output(lines: &[&str]) -> bool {
         is_error_signal_line(line)
             || is_test_failure_signal_line(line)
             || is_success_output_failure_signal_line(line)
+            || is_success_output_warning_signal_line(line)
     }) {
         return false;
     }
@@ -2803,6 +2845,10 @@ fn rust_noise_label(line: &str) -> Option<&'static str> {
         Some("checking")
     } else if trimmed.starts_with("Fresh ") {
         Some("fresh")
+    } else if trimmed.starts_with("Documenting ") {
+        Some("documenting")
+    } else if trimmed.starts_with("Generated ") {
+        Some("generated_docs")
     } else if trimmed.starts_with("Finished ") {
         Some("finished")
     } else if trimmed.starts_with("Running ") {
@@ -2851,6 +2897,14 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("playwright")
     } else if is_cypress_success_line(trimmed, &lower) {
         Some("cypress")
+    } else if let Some(label) = rust_noise_label(line) {
+        Some(label)
+    } else if is_typescript_success_line(trimmed, &lower) {
+        Some("typecheck_summary")
+    } else if is_vite_success_line(trimmed, &lower) {
+        Some("vite")
+    } else if is_next_success_line(trimmed, &lower) {
+        Some("next")
     } else if trimmed.starts_with("PASS ") {
         Some("passed_suites")
     } else if lower.starts_with("ok ") && lower.split_whitespace().count() >= 2 {
@@ -2869,7 +2923,9 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("nextest_summary")
     } else if trimmed.starts_with("PASS [") {
         Some("nextest_pass")
-    } else if lower.starts_with("snapshots:") && lower.contains("passed") {
+    } else if lower.starts_with("snapshots:")
+        && (lower.contains("passed") || lower.contains("0 total"))
+    {
         Some("snapshots")
     } else if lower.starts_with("test files") && lower.contains("passed") {
         Some("test_files")
@@ -2988,6 +3044,53 @@ fn docker_compose_success_state(lower: &str) -> bool {
         || lower.contains(" created")
         || lower.contains(" done")
         || lower.contains(" pulled")
+}
+
+fn is_typescript_success_line(trimmed: &str, lower: &str) -> bool {
+    lower.starts_with("project '") && lower.contains(" is up to date")
+        || lower.starts_with("building project '")
+        || lower.starts_with("updating unchanged output timestamps")
+        || lower.starts_with("projects in this build:")
+        || looks_like_typescript_project_line(trimmed)
+}
+
+fn looks_like_typescript_project_line(trimmed: &str) -> bool {
+    let trimmed = trimmed.trim_matches(|ch| matches!(ch, '\'' | '"' | '`' | ',' | ';'));
+    trimmed.ends_with("tsconfig.json") || trimmed.ends_with("tsconfig.tsbuildinfo")
+}
+
+fn is_vite_success_line(trimmed: &str, lower: &str) -> bool {
+    lower.starts_with("vite ") && lower.contains(" building for production")
+        || lower == "transforming..."
+        || lower == "rendering chunks..."
+        || lower == "computing gzip size..."
+        || lower.contains(" modules transformed")
+        || lower.starts_with("dist/") && (lower.contains(" kb") || lower.contains("gzip:"))
+        || trimmed.starts_with('✓') && lower.contains("built in ")
+}
+
+fn is_next_success_line(trimmed: &str, lower: &str) -> bool {
+    lower.starts_with("▲ next.js")
+        || lower.starts_with("next.js ")
+        || lower.starts_with("creating an optimized production build")
+        || lower.starts_with("compiled successfully")
+        || lower.contains("compiled successfully")
+        || lower.starts_with("linting and checking validity of types")
+        || lower.starts_with("collecting page data")
+        || lower.starts_with("generating static pages")
+        || lower.starts_with("finalizing page optimization")
+        || lower.starts_with("collecting build traces")
+        || lower.starts_with("route ") && lower.contains("first load js")
+        || lower.starts_with("+ first load js")
+        || lower.contains("first load js shared by all")
+        || is_next_route_table_line(trimmed, lower)
+}
+
+fn is_next_route_table_line(trimmed: &str, lower: &str) -> bool {
+    matches!(
+        trimmed.chars().next(),
+        Some('┌' | '├' | '└' | '│' | '○' | '●' | 'ƒ' | '+')
+    ) && (lower.contains(" kb") || lower.contains("first load js") || lower.contains("static"))
 }
 
 fn is_coverage_noise_line(trimmed: &str, lower: &str) -> bool {
@@ -3203,11 +3306,34 @@ fn is_success_output_failure_signal_line(line: &str) -> bool {
         || lower.starts_with("there were test failures")
         || lower.contains(" test failures")
         || lower.contains("tests failed")
+        || lower.starts_with("type error")
         || lower.contains("failed to compile")
         || lower.contains("failed to load")
         || lower.contains("failed with")
         || is_junit_xml_failure_line(line)
-        || has_nonzero_summary_count(&lower, &["failed", "failures", "error", "errors"])
+        || has_nonzero_summary_count(
+            &lower,
+            &["failed", "failures", "failing", "error", "errors"],
+        )
+}
+
+fn is_success_output_warning_signal_line(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    if lower.is_empty() || has_zero_only_summary_count(&lower, &["warning", "warnings"]) {
+        return false;
+    }
+
+    lower.starts_with("warning")
+        || lower.starts_with("warn ")
+        || lower.starts_with("warn:")
+        || lower.contains(" warning ")
+        || lower.contains(" warnings")
+        || lower.contains("with warnings")
+        || lower.contains("compiled with warning")
+        || lower.contains("compiled with warnings")
+        || lower.contains("warning ts")
+        || lower.contains(": warning ts")
+        || lower.contains(" - warning ts")
 }
 
 fn has_nonzero_summary_count(lower: &str, words: &[&str]) -> bool {
@@ -5159,7 +5285,17 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
         }
         if matches!(
             command,
-            "bazel" | "bazelisk" | "nx" | "turbo" | "pip" | "pip3" | "uv" | "nyc" | "c8"
+            "bazel"
+                | "bazelisk"
+                | "nx"
+                | "turbo"
+                | "pip"
+                | "pip3"
+                | "uv"
+                | "nyc"
+                | "c8"
+                | "vite"
+                | "next"
         ) {
             return Some(CommandOutputKind::NoisySuccess);
         }
@@ -5179,7 +5315,7 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
             && command_metadata_subcommand_after(tokens, index).is_some_and(|subcommand| {
                 matches!(
                     subcommand,
-                    "test" | "check" | "clippy" | "build" | "nextest" | "fmt"
+                    "test" | "check" | "clippy" | "build" | "doc" | "nextest" | "fmt"
                 )
             })
         {
@@ -7424,6 +7560,161 @@ fn context_backup_path(path: &Path) -> PathBuf {
 
 fn format_count<T: std::fmt::Display>(value: T) -> String {
     value.to_string()
+}
+
+#[cfg(test)]
+mod success_short_form_tests {
+    use super::*;
+
+    fn success_options(command: &str) -> CommandSuccessOutputCompactOptions {
+        CommandSuccessOutputCompactOptions {
+            command: Some(command.to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            max_touched_files: 4,
+            max_key_lines: 4,
+            max_line_chars: 160,
+        }
+    }
+
+    fn assert_short_success(report: &CommandSuccessOutputCompactReport, command: &str) {
+        assert!(report.compacted, "{command}");
+        assert!(!report.failure_suspected, "{command}");
+        assert_eq!(report.critical_signals.total(), 0, "{command}");
+        assert!(
+            report.output.starts_with("pcs: ok "),
+            "{command}: {}",
+            report.output
+        );
+        assert!(report.output.contains("cmd:"), "{command}");
+    }
+
+    #[test]
+    fn successful_command_output_short_forms_cargo_clippy_and_doc_noise() {
+        let mut clippy = String::new();
+        for index in 0..12 {
+            clippy.push_str(&format!("    Checking crate_{index} v0.1.0\n"));
+        }
+        clippy.push_str("    Finished `dev` profile [unoptimized] target(s) in 1.23s\n");
+
+        let report = compact_successful_command_output_with_options(
+            &clippy,
+            &success_options("cargo clippy --workspace --all-targets"),
+        );
+        assert_short_success(&report, "cargo clippy");
+        assert!(report.output.contains("checking=12"));
+        assert!(!report.output.contains("Checking crate_0"));
+
+        let mut docs = String::new();
+        for index in 0..12 {
+            docs.push_str(&format!(" Documenting crate_{index} v0.1.0\n"));
+        }
+        docs.push_str("    Finished `dev` profile [unoptimized] target(s) in 2.34s\n");
+        docs.push_str("   Generated /repo/target/doc/prodex/index.html\n");
+
+        let report =
+            compact_successful_command_output_with_options(&docs, &success_options("cargo doc"));
+        assert_short_success(&report, "cargo doc");
+        assert!(report.touched_files > 0);
+        assert!(report.output.contains("documenting=12"));
+        assert!(!report.output.contains("/repo/target/doc/prodex/index.html"));
+    }
+
+    #[test]
+    fn successful_command_output_short_forms_common_frontend_success_noise() {
+        let tsc = "\
+Projects in this build:
+    * tsconfig.json
+Project 'tsconfig.json' is up to date because newest input 'src/app.ts' is older than output 'tsconfig.tsbuildinfo'
+Found 0 errors.
+";
+        let vite = "\
+vite v5.4.19 building for production...
+transforming...
+✓ 42 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.45 kB │ gzip: 0.29 kB
+dist/assets/index-abc.js        24.12 kB │ gzip: 8.00 kB
+✓ built in 1.23s
+";
+        let next = "\
+▲ Next.js 15.3.1
+Creating an optimized production build ...
+✓ Compiled successfully in 1000ms
+Linting and checking validity of types ...
+Collecting page data ...
+Generating static pages (0/5) ...
+✓ Generating static pages (5/5)
+Finalizing page optimization ...
+Collecting build traces ...
+Route (app)                              Size     First Load JS
+┌ ○ /                                 5.56 kB         105 kB
++ First Load JS shared by all          99.6 kB
+";
+        let playwright = "\
+Running 3 tests using 2 workers
+✓ home page renders (120ms)
+✓ settings page renders (130ms)
+✓ login page renders (140ms)
+3 passed (1.2s)
+";
+        let cypress = "\
+Spec                                              Tests  Passing  Failing  Pending  Skipped
+tests/app.cy.ts                                      4        4        0        0        0
+Passing: 4
+Failing: 0
+All specs passed!
+";
+        let jest = "\
+PASS tests/unit_0.test.ts
+PASS tests/unit_1.test.ts
+PASS tests/unit_2.test.ts
+Test Suites: 3 passed, 3 total
+Tests:       18 passed, 18 total
+Snapshots:   0 total
+Time:        1.23 s
+Ran all test suites.
+";
+
+        for (command, input, omitted_line) in [
+            ("npx tsc --noEmit", tsc, "Project 'tsconfig.json'"),
+            ("vite build", vite, "dist/assets/index-abc.js"),
+            ("next build", next, "Route (app)"),
+            ("playwright test", playwright, "home page renders"),
+            ("cypress run", cypress, "tests/app.cy.ts"),
+            ("jest --runInBand", jest, "PASS tests/unit_0.test.ts"),
+        ] {
+            let report =
+                compact_successful_command_output_with_options(input, &success_options(command));
+            assert_short_success(&report, command);
+            assert!(!report.output.contains(omitted_line), "{command}");
+        }
+    }
+
+    #[test]
+    fn successful_command_output_short_form_refuses_common_tool_warnings_and_failures() {
+        for (command, input) in [
+            (
+                "next build",
+                "Compiled with warnings\napp/page.tsx imports a large dependency\n",
+            ),
+            (
+                "cypress run",
+                "Spec Tests Passing Failing Pending Skipped\nFailing: 1\n",
+            ),
+            (
+                "next build",
+                "Type error: Page \"app/page.tsx\" has an invalid default export\n",
+            ),
+        ] {
+            let report =
+                compact_successful_command_output_with_options(input, &success_options(command));
+            assert!(!report.compacted, "{command}");
+            assert!(report.failure_suspected, "{command}");
+            assert_eq!(report.output, input, "{command}");
+        }
+    }
 }
 
 #[cfg(test)]

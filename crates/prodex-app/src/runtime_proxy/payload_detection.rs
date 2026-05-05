@@ -76,6 +76,7 @@ pub(crate) fn log_runtime_token_usage(
     profile_name: &str,
     source: &'static str,
     prompt_cache_key: Option<&str>,
+    model_name: Option<&str>,
     usage: Option<RuntimeTokenUsage>,
 ) {
     let Some(usage) = usage else {
@@ -97,7 +98,7 @@ pub(crate) fn log_runtime_token_usage(
         usage,
         Some(runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
             route: Some(runtime_route_kind_label(route_kind).to_string()),
-            model: None,
+            model: runtime_smart_context_normalized_model_name(model_name),
             profile: Some(profile_name.to_string()),
             transport: Some(transport.to_string()),
         }),

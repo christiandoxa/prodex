@@ -29,6 +29,7 @@ pub(super) fn forward_runtime_proxy_response_with_limit(
 
 pub(crate) struct RuntimeResponsesSuccessContext<'a> {
     pub(crate) request_id: u64,
+    pub(crate) request_model_name: Option<&'a str>,
     pub(crate) request_previous_response_id: Option<&'a str>,
     pub(crate) request_prompt_cache_key: Option<&'a str>,
     pub(crate) request_session_id: Option<&'a str>,
@@ -45,6 +46,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
 ) -> Result<RuntimeResponsesAttempt> {
     let RuntimeResponsesSuccessContext {
         request_id,
+        request_model_name,
         request_previous_response_id,
         request_prompt_cache_key,
         request_session_id,
@@ -128,6 +130,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
             profile_name,
             "responses_unary",
             request_prompt_cache_key,
+            request_model_name,
             extract_runtime_token_usage_from_body_bytes(&parts.body),
         );
         if !response_ids.is_empty() && response_turn_state.is_some() {
@@ -261,6 +264,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
             turn_state: response_turn_state.as_deref(),
             request_id,
             prompt_cache_key: request_prompt_cache_key,
+            model_name: request_model_name,
         },
     );
     let response = RuntimeResponsesAttempt::Success {
@@ -284,6 +288,7 @@ fn apply_runtime_sse_tap_effects(
     profile_name: &str,
     request_id: u64,
     prompt_cache_key: Option<&str>,
+    model_name: Option<&str>,
     effects: Vec<RuntimeSseTapEffect>,
 ) {
     for effect in effects {
@@ -316,6 +321,7 @@ fn apply_runtime_sse_tap_effects(
                     profile_name,
                     "responses_sse",
                     prompt_cache_key,
+                    model_name,
                     Some(token_usage),
                 );
             }
@@ -328,6 +334,7 @@ pub(crate) struct RuntimeSseTapReader {
     shared: RuntimeRotationProxyShared,
     profile_name: String,
     prompt_cache_key: Option<String>,
+    model_name: Option<String>,
     request_id: u64,
     state: RuntimeSseTapState,
 }
@@ -407,6 +414,7 @@ pub(crate) struct RuntimeSseTapReaderInit<'a> {
     pub(crate) turn_state: Option<&'a str>,
     pub(crate) request_id: u64,
     pub(crate) prompt_cache_key: Option<&'a str>,
+    pub(crate) model_name: Option<&'a str>,
 }
 
 impl RuntimeSseTapReader {
@@ -423,6 +431,7 @@ impl RuntimeSseTapReader {
             turn_state,
             request_id,
             prompt_cache_key,
+            model_name,
         } = init;
         let mut state = RuntimeSseTapState::new(RuntimeSseTapStateInit {
             remembered_response_ids,
@@ -435,6 +444,7 @@ impl RuntimeSseTapReader {
             &profile_name,
             request_id,
             prompt_cache_key,
+            model_name,
             effects,
         );
         Self {
@@ -442,6 +452,7 @@ impl RuntimeSseTapReader {
             shared,
             profile_name,
             prompt_cache_key: prompt_cache_key.map(str::to_string),
+            model_name: model_name.map(str::to_string),
             request_id,
             state,
         }
@@ -472,6 +483,7 @@ impl Read for RuntimeSseTapReader {
                 &self.profile_name,
                 self.request_id,
                 self.prompt_cache_key.as_deref(),
+                self.model_name.as_deref(),
                 effects,
             );
             return Ok(0);
@@ -482,6 +494,7 @@ impl Read for RuntimeSseTapReader {
             &self.profile_name,
             self.request_id,
             self.prompt_cache_key.as_deref(),
+            self.model_name.as_deref(),
             effects,
         );
         Ok(read)
