@@ -50,6 +50,7 @@ const RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS: &[&str] = &[
 ];
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS: &[&str] = &["payload.summary"];
 const RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT: usize = 180;
+const RUNTIME_MEM_SUPER_SLIM_REFERENCED_SUMMARY_PREFIX_CHAR_LIMIT: usize = 72;
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 128;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 512;
@@ -1106,7 +1107,8 @@ struct RuntimeMemSeenEventContent {
 
 #[derive(Debug, Default)]
 struct RuntimeMemEventDedupeState {
-    seen: HashMap<String, RuntimeMemSeenEventContent>,
+    seen_content: HashMap<String, RuntimeMemSeenEventContent>,
+    seen_assistant_summary: HashMap<String, RuntimeMemSeenEventContent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1116,46 +1118,68 @@ struct RuntimeMemDedupeReplacement {
 }
 
 impl RuntimeMemEventDedupeState {
-    fn replacement_for_optional(
+    fn replacement_for_optional_content(
         &mut self,
         id: String,
         content: &str,
         artifact_ref: Option<String>,
     ) -> Option<RuntimeMemDedupeReplacement> {
-        if let Some(seen) = self.seen.get_mut(content) {
-            if seen.artifact_ref.is_none() {
-                seen.artifact_ref = artifact_ref.clone();
-            }
-            let content_hash = runtime_mem_content_hash(content);
-            if let Some(artifact_ref) = artifact_ref.or_else(|| seen.artifact_ref.clone()) {
-                return Some(RuntimeMemDedupeReplacement {
-                    summary: runtime_mem_artifact_recall_summary(
-                        &artifact_ref,
-                        &content_hash,
-                        content.len(),
-                    ),
-                    artifact_ref: Some(artifact_ref),
-                });
-            }
+        runtime_mem_replacement_for_optional_seen(&mut self.seen_content, id, content, artifact_ref)
+    }
+
+    fn replacement_for_optional_assistant_summary(
+        &mut self,
+        id: String,
+        summary: &str,
+    ) -> Option<RuntimeMemDedupeReplacement> {
+        runtime_mem_replacement_for_optional_seen(
+            &mut self.seen_assistant_summary,
+            id,
+            summary,
+            runtime_mem_prodex_artifact_ref(None, summary),
+        )
+    }
+}
+
+fn runtime_mem_replacement_for_optional_seen(
+    seen_by_content: &mut HashMap<String, RuntimeMemSeenEventContent>,
+    id: String,
+    content: &str,
+    artifact_ref: Option<String>,
+) -> Option<RuntimeMemDedupeReplacement> {
+    if let Some(seen) = seen_by_content.get_mut(content) {
+        if seen.artifact_ref.is_none() {
+            seen.artifact_ref = artifact_ref.clone();
+        }
+        let content_hash = runtime_mem_content_hash(content);
+        if let Some(artifact_ref) = artifact_ref.or_else(|| seen.artifact_ref.clone()) {
             return Some(RuntimeMemDedupeReplacement {
-                summary: runtime_mem_duplicate_recall_summary(
-                    &seen.original_id,
+                summary: runtime_mem_artifact_recall_summary(
+                    &artifact_ref,
                     &content_hash,
                     content.len(),
                 ),
-                artifact_ref: None,
+                artifact_ref: Some(artifact_ref),
             });
         }
-
-        self.seen.insert(
-            content.to_string(),
-            RuntimeMemSeenEventContent {
-                original_id: id,
-                artifact_ref,
-            },
-        );
-        None
+        return Some(RuntimeMemDedupeReplacement {
+            summary: runtime_mem_duplicate_recall_summary(
+                &seen.original_id,
+                &content_hash,
+                content.len(),
+            ),
+            artifact_ref: None,
+        });
     }
+
+    seen_by_content.insert(
+        content.to_string(),
+        RuntimeMemSeenEventContent {
+            original_id: id,
+            artifact_ref,
+        },
+    );
+    None
 }
 
 fn runtime_mem_super_slim_shadow_codex_event_with_dedupe(
@@ -1165,15 +1189,24 @@ fn runtime_mem_super_slim_shadow_codex_event_with_dedupe(
 ) -> Value {
     let spec = runtime_mem_event_content_spec(event);
     let replacement = spec.and_then(|spec| {
-        let content = runtime_mem_lookup_json_path(event, spec.content_path)?.as_str()?;
-        let artifact_ref =
-            runtime_mem_first_prodex_artifact_ref_at_paths(event, spec.artifact_ref_paths, content);
-        dedupe_state
-            .replacement_for_optional(
-                runtime_mem_event_dedupe_id(event, index),
-                content,
-                artifact_ref,
-            )
+        let content_replacement = runtime_mem_lookup_json_path(event, spec.content_path)
+            .and_then(Value::as_str)
+            .and_then(|content| {
+                let artifact_ref = runtime_mem_first_prodex_artifact_ref_at_paths(
+                    event,
+                    spec.artifact_ref_paths,
+                    content,
+                );
+                dedupe_state.replacement_for_optional_content(
+                    runtime_mem_event_dedupe_id(event, index),
+                    content,
+                    artifact_ref,
+                )
+            });
+        content_replacement
+            .or_else(|| {
+                runtime_mem_assistant_summary_duplicate_replacement(event, index, dedupe_state)
+            })
             .map(|replacement| (spec, replacement))
     });
     let mut shadow = runtime_mem_super_slim_shadow_codex_event(event);
@@ -1194,6 +1227,27 @@ fn runtime_mem_super_slim_shadow_codex_event_with_dedupe(
         }
     }
     shadow
+}
+
+fn runtime_mem_assistant_summary_duplicate_replacement(
+    event: &Value,
+    index: usize,
+    dedupe_state: &mut RuntimeMemEventDedupeState,
+) -> Option<RuntimeMemDedupeReplacement> {
+    let payload_type = runtime_mem_lookup_json_path(event, "payload.type")?.as_str()?;
+    if payload_type != "agent_message" {
+        return None;
+    }
+    let summary = runtime_mem_lookup_json_path(event, "payload.summary")?
+        .as_str()?
+        .trim();
+    if summary.is_empty() {
+        return None;
+    }
+    dedupe_state.replacement_for_optional_assistant_summary(
+        runtime_mem_event_dedupe_id(event, index),
+        summary,
+    )
 }
 
 fn runtime_mem_event_content_spec(event: &Value) -> Option<RuntimeMemEventContentSpec> {
@@ -1339,11 +1393,12 @@ fn runtime_mem_shadow_summary_for_path(
     omitted_name: &str,
 ) -> Option<String> {
     let text = runtime_mem_lookup_json_path(event, path)?.as_str()?;
+    let artifact_ref = runtime_mem_extract_artifact_marker(event);
     Some(runtime_mem_shadow_summary_from_text(
         text,
         label,
         omitted_name,
-        runtime_mem_extract_artifact_marker(event).as_deref(),
+        artifact_ref.as_deref(),
     ))
 }
 
@@ -1353,10 +1408,9 @@ fn runtime_mem_shadow_summary_from_text(
     omitted_name: &str,
     artifact_ref: Option<&str>,
 ) -> String {
+    let prefix_limit = runtime_mem_shadow_summary_prefix_char_limit(artifact_ref);
     let first_line = runtime_mem_first_useful_line(text)
-        .map(|line| {
-            runtime_mem_truncate_chars(line, RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT)
-        })
+        .map(|line| runtime_mem_truncate_chars(line, prefix_limit))
         .unwrap_or_else(|| "(empty)".to_string());
     let ref_part = artifact_ref
         .filter(|value| !value.trim().is_empty())
@@ -1367,6 +1421,15 @@ fn runtime_mem_shadow_summary_from_text(
         text.len(),
         runtime_mem_approx_token_count(text),
     )
+}
+
+fn runtime_mem_shadow_summary_prefix_char_limit(artifact_ref: Option<&str>) -> usize {
+    if artifact_ref.is_some_and(|value| runtime_mem_normalize_prodex_artifact_ref(value).is_some())
+    {
+        RUNTIME_MEM_SUPER_SLIM_REFERENCED_SUMMARY_PREFIX_CHAR_LIMIT
+    } else {
+        RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT
+    }
 }
 
 fn runtime_mem_first_useful_line(text: &str) -> Option<&str> {
@@ -1435,7 +1498,7 @@ fn runtime_mem_artifact_recall_summary(
     original_bytes: usize,
 ) -> String {
     format!(
-        "{artifact_ref} [prodex mem artifact ref; content_hash={content_hash}; original_bytes={original_bytes}]"
+        "{artifact_ref} [mem art; content_hash={content_hash}; original_bytes={original_bytes}]"
     )
 }
 
@@ -1445,7 +1508,7 @@ fn runtime_mem_duplicate_recall_summary(
     original_bytes: usize,
 ) -> String {
     format!(
-        "prodex mem duplicate: original={original_id}; content_hash={content_hash}; original_bytes={original_bytes}"
+        "mem dup: original={original_id}; content_hash={content_hash}; original_bytes={original_bytes}"
     )
 }
 

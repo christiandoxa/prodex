@@ -114,6 +114,7 @@ pub enum CommandOutputKind {
     GitLog,
     Search,
     FileList,
+    LogStream,
     NoisySuccess,
     Plain,
 }
@@ -1299,6 +1300,7 @@ pub fn compact_command_output_with_options_and_kind_hint(
         CommandOutputKind::GitLog => compact_git_log_stat_output(&normalized, options),
         CommandOutputKind::Search => compact_search_output(&normalized, options),
         CommandOutputKind::FileList => compact_file_list_output(&normalized, options),
+        CommandOutputKind::LogStream => compact_log_stream_output(&normalized, options),
         CommandOutputKind::NoisySuccess => compact_noisy_success_output(&normalized, options),
         CommandOutputKind::Plain => smart_truncate_command_output(&normalized, options),
     };
@@ -1420,7 +1422,7 @@ fn compact_git_status_output(input: &str, options: &CommandOutputCompactOptions)
 
     let category_limit = options.max_path_entries.max(1).div_ceil(6).max(4);
     let mut output = Vec::new();
-    output.push("git status summary".to_string());
+    output.push("sum: git status".to_string());
     if let Some(branch) = summary.branch {
         output.push(format!("branch: {branch}"));
     }
@@ -1485,7 +1487,7 @@ fn compact_git_diff_output(input: &str, options: &CommandOutputCompactOptions) -
 
     let mut output = Vec::new();
     output.push(format!(
-        "git diff summary: {} files, +{}, -{}, {} hunks",
+        "sum: git diff files={}, +{}, -{}, hunks={}",
         summaries.len(),
         total_added,
         total_removed,
@@ -1538,7 +1540,7 @@ fn compact_git_log_stat_output(input: &str, options: &CommandOutputCompactOption
         .sum::<usize>();
     let mut output = Vec::new();
     output.push(format!(
-        "git log --stat summary: {} commits, {} stat file entries",
+        "sum: git log --stat commits={}, stat_files={}",
         commits.len(),
         stat_files,
     ));
@@ -1612,7 +1614,7 @@ fn compact_search_output(input: &str, options: &CommandOutputCompactOptions) -> 
 
     let mut output = Vec::new();
     output.push(format!(
-        "search summary: {} matches across {} files",
+        "sum: search matches={}, files={}",
         total_matches,
         files.len(),
     ));
@@ -1672,7 +1674,7 @@ fn compact_file_list_output(input: &str, options: &CommandOutputCompactOptions) 
     }
 
     let mut output = Vec::new();
-    output.push(format!("file list summary: {} entries", entries.len()));
+    output.push(format!("sum: files entries={}", entries.len()));
     output.push(format_count_map("top roots", &roots, 8));
     output.push(format_count_map("extensions", &extensions, 8));
     output.push("entries:".to_string());
@@ -1765,7 +1767,7 @@ fn compact_git_diff_stat_output(
         .collect::<Vec<_>>();
     let mut output = Vec::new();
     output.push(format!(
-        "git diff summary: stat-only, {} file entries",
+        "sum: git diff stat_only entries={}",
         stat_lines.len()
     ));
     for line in summary_lines {
@@ -1934,7 +1936,7 @@ fn compact_rust_diagnostic_output(input: &str, options: &CommandOutputCompactOpt
 
     let mut output = Vec::new();
     output.push(format!(
-        "rust/cargo summary: errors={}, warnings={}, failed_tests={}, panics={}, exit_statuses={}, noisy_success_lines={}",
+        "sum: rust errors={}, warnings={}, failed_tests={}, panics={}, exit_statuses={}, noisy={}",
         summary.errors,
         summary.warnings,
         summary.failed_tests.len(),
@@ -2050,7 +2052,7 @@ fn compact_diagnostic_output(input: &str, options: &CommandOutputCompactOptions)
 
     let mut output = Vec::new();
     output.push(format!(
-        "diagnostic summary: errors={}, failed_tests={}, locations={}, stack_markers={}, exit_statuses={}, noisy_success_lines={}",
+        "sum: diag errors={}, failed_tests={}, locations={}, stack={}, exit_statuses={}, noisy={}",
         summary.errors,
         summary.failed_tests.len(),
         summary.locations.len(),
@@ -2148,7 +2150,7 @@ fn compact_noisy_success_output(input: &str, options: &CommandOutputCompactOptio
 
     let mut output = Vec::new();
     output.push(format!(
-        "success output summary: noisy_success_lines={}, critical_lines={}",
+        "sum: success noisy={}, critical={}",
         noise_counts.values().sum::<usize>(),
         critical_lines.len(),
     ));
@@ -2169,6 +2171,41 @@ fn compact_noisy_success_output(input: &str, options: &CommandOutputCompactOptio
     );
 
     finalize_compacted_command_output(CommandOutputKind::NoisySuccess, input, output, options)
+}
+
+fn compact_log_stream_output(input: &str, options: &CommandOutputCompactOptions) -> String {
+    let lines = command_lines(input);
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let level_counts = count_log_stream_levels(&lines);
+    let preserved = collect_log_stream_preserved_lines(&lines);
+    let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
+    let mut output = Vec::<String>::new();
+    output.push(format!("pcs: logs ({}->sum)", count_text_lines(input)));
+    output.push(format!(
+        "sum: logs lines={}, non_empty={}, preserved={}",
+        lines.len(),
+        non_empty,
+        preserved.len()
+    ));
+    if !level_counts.is_empty() {
+        output.push(format_count_map("levels", &level_counts, 10));
+    }
+    if !preserved.is_empty() {
+        output.push("preserved:".to_string());
+        for line in preserved {
+            output.push(line);
+        }
+    }
+
+    let text = lines_to_text(output);
+    if critical_signal_self_check(input, &text).passed() {
+        text
+    } else {
+        smart_truncate_command_output(input, options)
+    }
 }
 
 pub fn compact_successful_command_output_with_options(
@@ -2222,10 +2259,7 @@ pub fn compact_successful_command_output_with_options(
     let non_empty = lines.iter().filter(|line| !line.trim().is_empty()).count();
     let noisy_success_lines = noise_counts.values().sum::<usize>();
     let mut output = Vec::<String>::new();
-    output.push(format!(
-        "# prodex context saver: successful command output ({} -> summary)",
-        original_lines
-    ));
+    output.push(format!("pcs: success cmd ({}->sum)", original_lines));
     output.push(format!(
         "command: {}",
         options.command.as_deref().unwrap_or("(unknown)")
@@ -2333,6 +2367,8 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
                 | "uv"
                 | "pipenv"
                 | "poetry"
+                | "ruff"
+                | "mypy"
                 | "pytest"
                 | "py.test"
                 | "vitest"
@@ -2344,6 +2380,11 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
                 | "mvnw"
                 | "gradle"
                 | "gradlew"
+                | "bazel"
+                | "bazelisk"
+                | "nx"
+                | "turbo"
+                | "docker-compose"
         ) {
             return true;
         }
@@ -2548,19 +2589,77 @@ fn looks_like_log_stream_output(lines: &[&str]) -> bool {
     if non_empty < 8 {
         return false;
     }
-    let log_level_lines = lines
+    let counts = count_log_stream_levels(lines);
+    let log_level_lines = counts.values().sum::<usize>();
+    let routine = ["info", "debug", "trace"]
         .iter()
-        .filter(|line| {
-            let lower = line.trim_start().to_ascii_lowercase();
-            contains_json_log_level(&lower, "info")
-                || contains_json_log_level(&lower, "debug")
-                || contains_json_log_level(&lower, "trace")
-                || contains_json_log_level(&lower, "error")
-                || contains_json_log_level(&lower, "fatal")
-                || contains_json_log_level(&lower, "warn")
-        })
-        .count();
-    log_level_lines.saturating_mul(2) >= non_empty
+        .map(|level| counts.get(*level).copied().unwrap_or_default())
+        .sum::<usize>();
+    let critical = ["warn", "error", "fatal"]
+        .iter()
+        .map(|level| counts.get(*level).copied().unwrap_or_default())
+        .sum::<usize>();
+    log_level_lines.saturating_mul(2) >= non_empty && (routine >= 4 || critical > 0)
+}
+
+fn count_log_stream_levels(lines: &[&str]) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for line in lines {
+        if let Some(level) = log_stream_level_label(line) {
+            *counts.entry(level.to_string()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn collect_log_stream_preserved_lines(lines: &[&str]) -> Vec<String> {
+    let mut preserved = Vec::<String>::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        if !is_log_stream_preserve_line(line) {
+            index += 1;
+            continue;
+        }
+
+        preserved.push(line.to_string());
+        let mut next = index + 1;
+        while next < lines.len() && is_log_stream_stack_context_line(lines[next]) {
+            preserved.push(lines[next].to_string());
+            next += 1;
+        }
+        index = next;
+    }
+    preserved
+}
+
+fn is_log_stream_preserve_line(line: &str) -> bool {
+    matches!(
+        log_stream_level_label(line),
+        Some("warn" | "error" | "fatal")
+    ) || is_critical_preserve_line(line)
+        || is_log_stream_critical_text_line(line)
+}
+
+fn is_log_stream_stack_context_line(line: &str) -> bool {
+    if line.trim().is_empty() || log_stream_level_label(line).is_some() {
+        return false;
+    }
+    let trimmed = line.trim_start();
+    line.chars().next().is_some_and(char::is_whitespace)
+        || trimmed.starts_with("at ")
+        || trimmed.starts_with("File ")
+        || trimmed.starts_with("Caused by:")
+        || trimmed.starts_with("Traceback ")
+        || trimmed.starts_with("Stack trace:")
+        || trimmed.starts_with("stack trace:")
+        || count_file_location_signals(line) > 0
+        || is_exception_signal_line(line)
+}
+
+fn is_log_stream_critical_text_line(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    lower.contains("critical") || lower.contains("panic") || lower.contains("exception")
 }
 
 fn looks_like_noisy_success_output(lines: &[&str]) -> bool {
@@ -2613,6 +2712,10 @@ fn rust_noise_label(line: &str) -> Option<&'static str> {
         Some("running_tests")
     } else if trimmed.starts_with("test ") && trimmed.contains(" ... ok") {
         Some("passed_tests")
+    } else if trimmed.starts_with("PASS [") {
+        Some("nextest_pass")
+    } else if trimmed.starts_with("Summary [") && trimmed.contains(" passed") {
+        Some("nextest_summary")
     } else if trimmed.starts_with("test result: ok") {
         Some("test_result_ok")
     } else {
@@ -2653,6 +2756,10 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("test_suites")
     } else if lower.starts_with("tests:") && lower.contains("passed") {
         Some("test_cases")
+    } else if lower.starts_with("summary [") && lower.contains(" passed") {
+        Some("nextest_summary")
+    } else if trimmed.starts_with("PASS [") {
+        Some("nextest_pass")
     } else if lower.starts_with("snapshots:") && lower.contains("passed") {
         Some("snapshots")
     } else if lower.starts_with("test files") && lower.contains("passed") {
@@ -2674,6 +2781,22 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("build_success")
     } else if lower.starts_with("[info] --- ") || lower.starts_with("> task ") {
         Some("build_steps")
+    } else if lower.starts_with("info: analyzed target")
+        || lower.starts_with("info: found ")
+        || lower.starts_with("info: elapsed time:")
+    {
+        Some("bazel_steps")
+    } else if (lower.starts_with("target ") && lower.contains("up-to-date"))
+        || lower.starts_with("info: build completed successfully")
+    {
+        Some("bazel_summary")
+    } else if lower.contains("successfully ran target")
+        || lower.contains("successfully ran targets")
+        || lower.starts_with("nx successfully ran")
+    {
+        Some("nx_summary")
+    } else if lower.starts_with("tasks:") && lower.contains("successful") {
+        Some("turbo_summary")
     } else if lower.contains("actionable tasks:") {
         Some("gradle_tasks")
     } else if lower.starts_with("[info] total time:")
@@ -2685,6 +2808,12 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("docker_steps")
     } else if lower.starts_with("=> ") || lower.starts_with("=>=> ") {
         Some("docker_steps")
+    } else if lower.starts_with("[+] running ")
+        || (lower.starts_with("container ") && docker_compose_success_state(&lower))
+        || (lower.starts_with("network ") && lower.contains("created"))
+        || (lower.starts_with("volume ") && lower.contains("created"))
+    {
+        Some("docker_compose")
     } else if lower.starts_with("successfully built ")
         || lower.starts_with("successfully tagged ")
         || lower.contains("writing image sha256:")
@@ -2707,6 +2836,9 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
     } else if lower.starts_with("requirement already satisfied")
         || lower.starts_with("successfully installed")
         || lower.starts_with("installing collected packages")
+        || (lower.starts_with("resolved ") && lower.contains(" package"))
+        || (lower.starts_with("prepared ") && lower.contains(" package"))
+        || (lower.starts_with("installed ") && lower.contains(" package"))
     {
         Some("python_packages")
     } else if lower == "up to date" || lower.starts_with("up to date in ") {
@@ -2717,8 +2849,14 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("formatter_summary")
     } else if lower.contains("all matched files use prettier code style")
         || lower.contains("eslint found no problems")
+        || lower.starts_with("all checks passed")
     {
         Some("formatter_summary")
+    } else if lower.starts_with("success: no issues found")
+        || lower.starts_with("found 0 errors")
+        || lower.starts_with("found 0 issues")
+    {
+        Some("typecheck_summary")
     } else if lower.starts_with("built in ") || lower.contains(" built in ") {
         Some("build_summary")
     } else if lower.starts_with("compiled successfully") {
@@ -2733,6 +2871,15 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+fn docker_compose_success_state(lower: &str) -> bool {
+    lower.contains(" started")
+        || lower.contains(" running")
+        || lower.contains(" healthy")
+        || lower.contains(" created")
+        || lower.contains(" done")
+        || lower.contains(" pulled")
 }
 
 fn is_pytest_progress_line(line: &str) -> bool {
@@ -2784,6 +2931,7 @@ fn is_noisy_success_key_line(line: &str) -> bool {
         || lower.starts_with("tests:")
         || lower.starts_with("snapshots:")
         || lower.starts_with("test files")
+        || lower.starts_with("summary [") && lower.contains(" passed")
         || lower.starts_with("ran all test suites")
         || lower.starts_with("done in ")
         || lower.starts_with("added ")
@@ -2792,10 +2940,17 @@ fn is_noisy_success_key_line(line: &str) -> bool {
         || lower.starts_with("build successful")
         || lower.contains(" build success")
         || lower.starts_with("[info] build success")
+        || lower.starts_with("info: build completed successfully")
+        || (lower.starts_with("target ") && lower.contains("up-to-date"))
+        || lower.contains("successfully ran target")
+        || lower.contains("successfully ran targets")
+        || (lower.starts_with("tasks:") && lower.contains("successful"))
         || lower.contains("actionable tasks:")
         || lower.starts_with("[info] tests run:")
         || lower.starts_with("successfully built ")
         || lower.starts_with("successfully tagged ")
+        || lower.starts_with("[+] running ")
+        || (lower.starts_with("container ") && docker_compose_success_state(&lower))
         || lower.contains("writing image sha256:")
         || lower.contains("naming to ")
         || lower.contains("all matched files use prettier code style")
@@ -2806,7 +2961,14 @@ fn is_noisy_success_key_line(line: &str) -> bool {
         || lower.starts_with("lockfile is up to date")
         || lower.starts_with("already up to date")
         || lower.starts_with("successfully installed")
+        || (lower.starts_with("resolved ") && lower.contains(" package"))
+        || (lower.starts_with("prepared ") && lower.contains(" package"))
+        || (lower.starts_with("installed ") && lower.contains(" package"))
         || lower.starts_with("all files pass")
+        || lower.starts_with("all checks passed")
+        || lower.starts_with("success: no issues found")
+        || lower.starts_with("found 0 errors")
+        || lower.starts_with("found 0 issues")
         || lower.starts_with("built in ")
         || lower.contains(" passed in ")
         || is_common_success_summary_line(&lower)
@@ -2821,9 +2983,17 @@ fn is_common_success_summary_line(lower: &str) -> bool {
         || lower.starts_with("[info] tests run:")
         || lower.starts_with("successfully built ")
         || lower.starts_with("successfully tagged ")
+        || lower.starts_with("info: build completed successfully")
+        || lower.contains("successfully ran target")
+        || lower.contains("successfully ran targets")
+        || (lower.starts_with("tasks:") && lower.contains("successful"))
+        || (lower.starts_with("summary [") && lower.contains(" passed"))
+        || lower.starts_with("success: no issues found")
+        || lower.starts_with("found 0 errors")
+        || lower.starts_with("all checks passed")
         || lower.contains("all matched files use prettier code style")
         || lower.contains("eslint found no problems")
-        || lower.starts_with("test files") && lower.contains("passed")
+        || (lower.starts_with("test files") && lower.contains("passed"))
         || lower.contains(" passed (")
 }
 
@@ -2834,6 +3004,10 @@ fn is_success_output_failure_signal_line(line: &str) -> bool {
     }
     lower.starts_with("build failure")
         || lower.starts_with("build failed")
+        || lower.contains("build did not complete successfully")
+        || lower.contains("build did not complete")
+        || lower.starts_with("info: build failed")
+        || lower.starts_with("failed:")
         || lower.starts_with("--- fail:")
         || lower.starts_with("failed tests:")
         || lower.starts_with("there were failing")
@@ -2891,7 +3065,9 @@ fn count_before_word(lower: &str, word_index: usize) -> Option<usize> {
 
 fn is_rust_success_summary_line(line: &str) -> bool {
     let trimmed = line.trim_start();
-    trimmed.starts_with("Finished ") || trimmed.starts_with("test result: ok")
+    trimmed.starts_with("Finished ")
+        || trimmed.starts_with("test result: ok")
+        || trimmed.starts_with("Summary [") && trimmed.contains(" passed")
 }
 
 fn rust_diagnostic_severity(line: &str) -> Option<RustDiagnosticSeverity> {
@@ -3680,14 +3856,14 @@ fn compact_command_output_for_intent(
         output.push((*header).to_string());
     } else {
         output.push(format!(
-            "# prodex context saver: {} ({} -> intent lines)",
+            "pcs: {} ({}->intent)",
             kind.label(),
             count_text_lines(original),
         ));
     }
 
     output.push(format!(
-        "intent matches: {} lines for {}",
+        "int: {} lines for {}",
         intent_matches.len(),
         truncate_command_line(&intent_terms.join(", "), options.max_line_chars),
     ));
@@ -3714,7 +3890,7 @@ fn compact_command_output_for_intent(
 
     let remaining = max_lines.saturating_sub(output.len());
     if remaining >= 2 && base_lines.len() > 1 {
-        output.push("baseline compaction:".to_string());
+        output.push("base:".to_string());
         let baseline_budget = max_lines.saturating_sub(output.len()).max(1);
         let baseline = base_lines
             .iter()
@@ -3802,16 +3978,16 @@ fn compact_search_output_for_intent(
         .map(|(_, _, matches)| matches.len())
         .sum::<usize>();
     output.push(format!(
-        "intent matches: {} search matches across {} files for {}",
+        "int: {} search matches across {} files for {}",
         relevant_matches,
         relevant.len(),
         truncate_command_line(&intent_terms.join(", "), options.max_line_chars),
     ));
     output.push(format!(
-        "search overflow: {} other matches across {} files",
+        "overflow: {} other matches across {} files",
         other_matches, other_files,
     ));
-    output.push("relevant search matches:".to_string());
+    output.push("rel search:".to_string());
 
     let mut budget = max_lines.saturating_sub(output.len()).max(1);
     let reserve = usize::from(other_matches > 0).saturating_add(usize::from(base_lines.len() > 1));
@@ -3891,21 +4067,18 @@ fn compact_file_list_output_for_intent(
         original,
     );
     output.push(format!(
-        "intent matches: {} paths for {}",
+        "int: {} paths for {}",
         relevant.len(),
         truncate_command_line(&intent_terms.join(", "), options.max_line_chars),
     ));
     if !overflow.is_empty() {
         let roots = count_success_output_path_roots(&overflow);
         let extensions = count_success_output_path_extensions(&overflow);
-        output.push(format!(
-            "file-list overflow: {} other entries",
-            overflow.len()
-        ));
+        output.push(format!("overflow: {} other file entries", overflow.len()));
         output.push(format_count_map("overflow roots", &roots, 6));
         output.push(format_count_map("overflow extensions", &extensions, 6));
     }
-    output.push("relevant paths:".to_string());
+    output.push("rel paths:".to_string());
 
     let mut budget = max_lines.saturating_sub(output.len()).max(1);
     let reserve = usize::from(base_lines.len() > 1);
@@ -3937,7 +4110,7 @@ fn push_intent_header(
         output.push((*header).to_string());
     } else {
         output.push(format!(
-            "# prodex context saver: {} ({} -> intent lines)",
+            "pcs: {} ({}->intent)",
             kind.label(),
             count_text_lines(original),
         ));
@@ -3954,7 +4127,7 @@ fn push_intent_baseline_tail(
     if remaining < 3 || base_lines.len() <= 1 {
         return;
     }
-    output.push("baseline compaction:".to_string());
+    output.push("base:".to_string());
     let baseline = base_lines
         .iter()
         .skip(1)
@@ -4104,7 +4277,7 @@ fn smart_truncate_with_critical_lines(
     if max_lines <= 12 {
         let mut output = Vec::new();
         output.push(format!(
-            "command output summary: {} lines, {} critical lines preserved",
+            "sum: output lines={}, critical={}",
             lines.len(),
             critical.len()
         ));
@@ -4136,7 +4309,7 @@ fn smart_truncate_with_critical_lines(
 
     let mut output = Vec::new();
     output.push(format!(
-        "command output summary: {} lines, {} critical lines preserved",
+        "sum: output lines={}, critical={}",
         lines.len(),
         critical.len()
     ));
@@ -4269,9 +4442,17 @@ fn is_failure_first_critical_line(line: &str) -> bool {
 
 fn is_generated_compaction_header_line(line: &str) -> bool {
     let lower = line.trim_start().to_ascii_lowercase();
-    lower.starts_with("# prodex context saver:")
+    lower.starts_with("pcs:")
+        || lower.starts_with("# prodex context saver:")
+        || lower.starts_with("sum:")
         || lower.starts_with("rust/cargo summary:")
         || lower.starts_with("diagnostic summary:")
+        || lower.starts_with("success output summary:")
+        || lower.starts_with("command output summary:")
+        || lower.starts_with("baseline compaction:")
+        || lower.starts_with("base:")
+        || lower.starts_with("intent matches:")
+        || lower.starts_with("int:")
         || lower.starts_with("diagnostics (")
         || lower.starts_with("locations (")
         || lower.starts_with("failed tests (")
@@ -4302,7 +4483,7 @@ fn finalize_compacted_command_output(
     let body_lines = lines.len();
     let mut output = Vec::new();
     output.push(format!(
-        "# prodex context saver: {} ({} -> {} lines)",
+        "pcs: {} ({}->{})",
         kind.label(),
         original_lines,
         body_lines,
@@ -4428,7 +4609,7 @@ fn insert_path_alias_mapping_line(output: &str, mapping_line: &str) -> String {
     let insert_at = usize::from(
         lines
             .first()
-            .is_some_and(|line| line.starts_with("# prodex context saver:")),
+            .is_some_and(|line| is_generated_compaction_header_line(line)),
     );
     lines.insert(insert_at, mapping_line.to_string());
     lines_to_text(lines)
@@ -4654,8 +4835,12 @@ fn detect_command_output_kind(input: &str) -> CommandOutputKind {
         return CommandOutputKind::RustDiagnostics;
     }
 
+    if looks_like_noisy_success_output(&lines) {
+        return CommandOutputKind::NoisySuccess;
+    }
+
     if looks_like_log_stream_output(&lines) {
-        return CommandOutputKind::Plain;
+        return CommandOutputKind::LogStream;
     }
 
     if looks_like_diagnostic_output(&lines) {
@@ -4706,10 +4891,6 @@ fn detect_command_output_kind(input: &str) -> CommandOutputKind {
         return CommandOutputKind::FileList;
     }
 
-    if looks_like_noisy_success_output(&lines) {
-        return CommandOutputKind::NoisySuccess;
-    }
-
     CommandOutputKind::Plain
 }
 
@@ -4741,9 +4922,27 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
         if matches!(command, "ls" | "find" | "tree") {
             return Some(CommandOutputKind::FileList);
         }
-        if matches!(command, "pytest" | "py.test" | "tsc")
+        if matches!(command, "pytest" | "py.test" | "tsc" | "ruff" | "mypy")
             || command.ends_with("-tsc")
             || command.ends_with("_tsc")
+        {
+            return Some(CommandOutputKind::Diagnostics);
+        }
+        if matches!(
+            command,
+            "bazel" | "bazelisk" | "nx" | "turbo" | "pip" | "pip3" | "uv"
+        ) {
+            return Some(CommandOutputKind::NoisySuccess);
+        }
+        if matches!(command, "journalctl" | "tail")
+            || command == "kubectl"
+                && command_metadata_subcommand_after(tokens, index) == Some("logs")
+        {
+            return Some(CommandOutputKind::LogStream);
+        }
+        if command == "go"
+            && command_metadata_subcommand_after(tokens, index)
+                .is_some_and(|subcommand| matches!(subcommand, "vet" | "test" | "build"))
         {
             return Some(CommandOutputKind::Diagnostics);
         }
@@ -4769,10 +4968,18 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
                 _ => {}
             }
         }
+        if command == "docker"
+            && command_metadata_subcommand_after(tokens, index) == Some("compose")
+        {
+            return Some(CommandOutputKind::NoisySuccess);
+        }
         if matches!(command, "npm" | "pnpm" | "yarn" | "bun")
             && command_metadata_package_script_after(tokens, index).is_some()
         {
             return Some(CommandOutputKind::Diagnostics);
+        }
+        if matches!(command, "docker-compose") {
+            return Some(CommandOutputKind::NoisySuccess);
         }
     }
     None
@@ -6698,9 +6905,7 @@ fn is_critical_preserve_line(line: &str) -> bool {
 fn is_log_level_signal_line(line: &str) -> bool {
     let trimmed = line.trim_start();
     let lower = trimmed.to_ascii_lowercase();
-    contains_json_log_level(&lower, "error")
-        || contains_json_log_level(&lower, "fatal")
-        || contains_json_log_level(&lower, "warn")
+    matches!(log_stream_level_label(line), Some("error" | "fatal"))
         || lower.starts_with("error ")
         || lower.starts_with("warn ")
         || lower.starts_with("warning ")
@@ -6710,6 +6915,28 @@ fn is_log_level_signal_line(line: &str) -> bool {
         || lower.contains(" error ")
         || lower.contains(" fatal ")
         || lower.contains(" warn ")
+}
+
+fn log_stream_level_label(line: &str) -> Option<&'static str> {
+    let lower = line.trim_start().to_ascii_lowercase();
+    for (level, label) in [
+        ("fatal", "fatal"),
+        ("error", "error"),
+        ("warn", "warn"),
+        ("warning", "warn"),
+        ("info", "info"),
+        ("debug", "debug"),
+        ("trace", "trace"),
+    ] {
+        if contains_json_log_level(&lower, level)
+            || contains_kv_log_level(&lower, level)
+            || starts_with_log_level_token(&lower, level)
+            || contains_delimited_log_level(&lower, level)
+        {
+            return Some(label);
+        }
+    }
+    None
 }
 
 fn contains_json_log_level(lower: &str, level: &str) -> bool {
@@ -6723,18 +6950,44 @@ fn contains_json_log_level(lower: &str, level: &str) -> bool {
     false
 }
 
+fn contains_kv_log_level(lower: &str, level: &str) -> bool {
+    for field in ["level", "severity", "status"] {
+        if lower.contains(&format!("{field}={level}"))
+            || lower.contains(&format!("{field}: {level}"))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn starts_with_log_level_token(lower: &str, level: &str) -> bool {
+    lower.starts_with(&format!("[{level}]"))
+        || lower.starts_with(&format!("{level} "))
+        || lower.starts_with(&format!("{level}:"))
+        || lower.starts_with(&format!("{level}\t"))
+}
+
+fn contains_delimited_log_level(lower: &str, level: &str) -> bool {
+    lower.contains(&format!(" {level} "))
+        || lower.contains(&format!(" {level}:"))
+        || lower.contains(&format!(" [{level}]"))
+        || lower.contains(&format!(" {level}\t"))
+}
+
 impl CommandOutputKind {
     fn label(self) -> &'static str {
         match self {
             CommandOutputKind::Auto => "auto",
-            CommandOutputKind::GitStatus => "git status",
-            CommandOutputKind::GitDiff => "git diff",
-            CommandOutputKind::RustDiagnostics => "rust diagnostics",
-            CommandOutputKind::Diagnostics => "diagnostics",
-            CommandOutputKind::GitLog => "git log",
+            CommandOutputKind::GitStatus => "git-status",
+            CommandOutputKind::GitDiff => "git-diff",
+            CommandOutputKind::RustDiagnostics => "rust-diag",
+            CommandOutputKind::Diagnostics => "diag",
+            CommandOutputKind::GitLog => "git-log",
             CommandOutputKind::Search => "search",
-            CommandOutputKind::FileList => "file list",
-            CommandOutputKind::NoisySuccess => "noisy success",
+            CommandOutputKind::FileList => "files",
+            CommandOutputKind::LogStream => "logs",
+            CommandOutputKind::NoisySuccess => "success",
             CommandOutputKind::Plain => "plain",
         }
     }

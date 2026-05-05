@@ -13,6 +13,11 @@ const SMART_CONTEXT_TOOL_PREVIEW_MAX_LINE_CHARS: usize = 220;
 const SMART_CONTEXT_TOOL_PROGRESSIVE_SUMMARY_MAX_BYTES: usize = 8 * 1024;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES: usize = 12;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS: usize = 1_600;
+const SMART_CONTEXT_LABEL_SUMMARY: &str = "sum:";
+const SMART_CONTEXT_LABEL_CRITICAL_EXACT: &str = "crit exact:";
+const SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY: &str = "critical exact ranges:";
+const SMART_CONTEXT_LABEL_SEMANTIC_EXACT: &str = "sem exact:";
+const SMART_CONTEXT_LABEL_DUPLICATE_CHUNKS: &str = "dup exact chunks:";
 const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
 const RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS: [&str; 3] =
     ["instructions", "system", "developer"];
@@ -103,9 +108,9 @@ struct RuntimeSmartContextIntentSignals {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct RuntimeSmartContextToolCallMetadata {
-    text: String,
     command: Option<String>,
     exit_code: Option<i32>,
+    kind_hint: Option<prodex_context::CommandOutputKind>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -113,6 +118,15 @@ struct RuntimeSmartContextToolOutputCompactionMetadata {
     kind_hint: Option<prodex_context::CommandOutputKind>,
     command: Option<String>,
     exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeSmartContextDuplicateChunkSummaryPlan {
+    text: String,
+    content_hash: String,
+    byte_len: usize,
+    occurrence_count: usize,
+    refs: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -835,6 +849,23 @@ fn runtime_smart_context_observe_static_context(
     };
     state.last_static_context_fingerprints = current;
     state.last_static_context_prompt_cache_hash = Some(cache.content_hash);
+    state.artifacts.set_static_context_fingerprints(
+        observation.prompt_cache_hash.clone(),
+        state.last_static_context_fingerprints.clone(),
+    );
+    let save_job = state
+        .artifact_path
+        .clone()
+        .map(|path| (path, state.artifacts.clone()));
+    drop(states);
+    if let Some((path, store)) = save_job {
+        schedule_runtime_smart_context_artifact_save(
+            shared,
+            path,
+            store,
+            "smart_context_static_fingerprints",
+        );
+    }
     observation
 }
 
@@ -1155,10 +1186,11 @@ fn runtime_smart_context_collect_tool_intent_metadata(
         if item_type.ends_with("_call_output") {
             continue;
         }
-        let metadata = runtime_smart_context_tool_output_metadata(object);
-        signals.add_intent_text(&metadata);
-        if let Some(kind_hint) = prodex_context::infer_command_output_kind_from_metadata(&metadata)
-        {
+        let metadata = runtime_smart_context_tool_item_metadata(object);
+        if let Some(command) = metadata.command.as_deref() {
+            signals.add_intent_text(command);
+        }
+        if let Some(kind_hint) = metadata.kind_hint {
             signals.add_command_kind_hint(kind_hint);
         }
     }
@@ -1237,6 +1269,7 @@ fn runtime_smart_context_command_kind_hint_label(
         prodex_context::CommandOutputKind::GitLog => "git-log",
         prodex_context::CommandOutputKind::Search => "search",
         prodex_context::CommandOutputKind::FileList => "file-list",
+        prodex_context::CommandOutputKind::LogStream => "log-stream",
         prodex_context::CommandOutputKind::NoisySuccess => "noisy-success",
         prodex_context::CommandOutputKind::Plain => "plain",
     }
@@ -1763,7 +1796,7 @@ fn runtime_smart_context_matching_semantic_range_appendix(
         return None;
     }
 
-    let mut rendered = vec!["semantic exact ranges:".to_string()];
+    let mut rendered = vec![SMART_CONTEXT_LABEL_SEMANTIC_EXACT.to_string()];
     for range in &ranges {
         rendered.push(format!(
             "{}\n{}",
@@ -2027,7 +2060,7 @@ fn runtime_smart_context_missing_critical_range_appendix(
         return None;
     }
 
-    let mut rendered = vec!["critical exact ranges:".to_string()];
+    let mut rendered = vec![SMART_CONTEXT_LABEL_CRITICAL_EXACT.to_string()];
     let mut range_count = 0usize;
     for range in ranges {
         let exact = runtime_smart_context_rehydrated_artifact_text(
@@ -2119,7 +2152,7 @@ fn runtime_smart_context_missing_indexed_critical_range_appendix(
         }
     }
 
-    let mut rendered = vec!["critical exact ranges:".to_string()];
+    let mut rendered = vec![SMART_CONTEXT_LABEL_CRITICAL_EXACT.to_string()];
     for range_index in &selected {
         let range = &line_index.critical_ranges[*range_index];
         if range.text.trim().is_empty() {
@@ -2209,6 +2242,7 @@ fn runtime_smart_context_condense_tool_outputs(
                     &artifact,
                     &output,
                     store.line_index(&artifact.id),
+                    store.chunk_index(&artifact.id),
                     tier,
                     inline_limit,
                     &compaction_metadata,
@@ -2236,6 +2270,7 @@ fn runtime_smart_context_progressive_tool_output_summary(
     artifact: &runtime_proxy_crate::SmartContextArtifactRef,
     text: &str,
     line_index: Option<&RuntimeSmartContextArtifactLineIndex>,
+    chunk_index: Option<&RuntimeSmartContextArtifactChunkIndex>,
     tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
     preview_byte_limit: usize,
     metadata: &RuntimeSmartContextToolOutputCompactionMetadata,
@@ -2257,9 +2292,18 @@ fn runtime_smart_context_progressive_tool_output_summary(
         )
     });
     let summary = runtime_smart_context_progressive_summary_excerpt(&compacted);
+    let summary = runtime_smart_context_dedupe_progressive_summary_chunks(
+        &artifact.id,
+        text,
+        &summary,
+        chunk_index,
+    );
     let mut sections = Vec::new();
     if !summary.trim().is_empty() {
-        sections.push(format!("summary:\n{}", summary.trim_end()));
+        sections.push(format!(
+            "{SMART_CONTEXT_LABEL_SUMMARY}\n{}",
+            summary.trim_end()
+        ));
     }
     if let Some(critical_ranges) = runtime_smart_context_progressive_critical_exact_ranges(
         &artifact.id,
@@ -2270,10 +2314,9 @@ fn runtime_smart_context_progressive_tool_output_summary(
         sections.push(critical_ranges);
     }
     if sections.is_empty() {
-        sections.push(
-            "summary:\nlarge tool output omitted; use artifact ref or line refs to rehydrate"
-                .to_string(),
-        );
+        sections.push(format!(
+            "{SMART_CONTEXT_LABEL_SUMMARY}\nlarge tool output omitted; use artifact ref or line refs to rehydrate"
+        ));
     }
     sections.join("\n\n")
 }
@@ -2307,13 +2350,183 @@ fn runtime_smart_context_progressive_summary_excerpt(text: &str) -> String {
     summary
 }
 
+fn runtime_smart_context_dedupe_progressive_summary_chunks(
+    artifact_id: &str,
+    original: &str,
+    summary: &str,
+    chunk_index: Option<&RuntimeSmartContextArtifactChunkIndex>,
+) -> String {
+    let Some(chunk_index) = chunk_index.filter(|index| index.complete) else {
+        return summary.to_string();
+    };
+    if chunk_index.duplicate_chunks.is_empty() {
+        return summary.to_string();
+    }
+    let lines = original.lines().collect::<Vec<_>>();
+    let plans = chunk_index
+        .duplicate_chunks
+        .iter()
+        .filter_map(|duplicate| {
+            runtime_smart_context_duplicate_chunk_summary_plan(artifact_id, &lines, duplicate)
+        })
+        .collect::<Vec<_>>();
+    if plans.is_empty() {
+        return summary.to_string();
+    }
+
+    let mut candidate = summary.to_string();
+    let mut entries = Vec::new();
+    for plan in plans {
+        let matches = candidate.match_indices(&plan.text).count();
+        if matches < 2 {
+            continue;
+        }
+        let marker = format!(
+            "[psc dup chunk h={} b={} refs below]",
+            plan.content_hash, plan.byte_len
+        );
+        let entry = format!(
+            "- h={} b={} x={} refs={}",
+            plan.content_hash,
+            plan.byte_len,
+            plan.occurrence_count,
+            plan.refs.join(",")
+        );
+        let removed_bytes = plan.text.len().saturating_mul(matches.saturating_sub(1));
+        let added_bytes = marker
+            .len()
+            .saturating_mul(matches.saturating_sub(1))
+            .saturating_add(entry.len())
+            .saturating_add(1);
+        if added_bytes >= removed_bytes {
+            continue;
+        }
+        candidate = runtime_smart_context_replace_repeated_exact_text_after_first(
+            &candidate, &plan.text, &marker,
+        );
+        entries.push(entry);
+    }
+
+    if entries.is_empty() {
+        return summary.to_string();
+    }
+    candidate.push_str("\n\n");
+    candidate.push_str(SMART_CONTEXT_LABEL_DUPLICATE_CHUNKS);
+    candidate.push('\n');
+    candidate.push_str(&entries.join("\n"));
+    if candidate.len() < summary.len() {
+        candidate
+    } else {
+        summary.to_string()
+    }
+}
+
+fn runtime_smart_context_duplicate_chunk_summary_plan(
+    artifact_id: &str,
+    lines: &[&str],
+    duplicate: &RuntimeSmartContextArtifactDuplicateChunkFingerprint,
+) -> Option<RuntimeSmartContextDuplicateChunkSummaryPlan> {
+    if duplicate.occurrence_count < 2
+        || duplicate.occurrence_count != duplicate.occurrences.len()
+        || duplicate.byte_len == 0
+    {
+        return None;
+    }
+    let mut refs = Vec::new();
+    let mut ranges = BTreeSet::<(usize, usize)>::new();
+    let mut exact_text: Option<String> = None;
+    for occurrence in &duplicate.occurrences {
+        if occurrence.start == 0
+            || occurrence.end < occurrence.start
+            || !ranges.insert((occurrence.start, occurrence.end))
+        {
+            return None;
+        }
+        let text = runtime_smart_context_line_excerpt(lines, occurrence.start, occurrence.end)?;
+        if text.len() != duplicate.byte_len
+            || runtime_proxy_crate::smart_context_hash_text(&text) != duplicate.content_hash
+        {
+            return None;
+        }
+        if let Some(existing) = exact_text.as_ref() {
+            if existing != &text {
+                return None;
+            }
+        } else {
+            exact_text = Some(text);
+        }
+        refs.push(runtime_smart_context_artifact_line_ref(
+            artifact_id,
+            occurrence.start,
+            occurrence.end,
+        ));
+    }
+    Some(RuntimeSmartContextDuplicateChunkSummaryPlan {
+        text: exact_text?,
+        content_hash: duplicate.content_hash.clone(),
+        byte_len: duplicate.byte_len,
+        occurrence_count: duplicate.occurrence_count,
+        refs,
+    })
+}
+
+fn runtime_smart_context_line_excerpt(lines: &[&str], start: usize, end: usize) -> Option<String> {
+    if start == 0 || start > lines.len() || end < start {
+        return None;
+    }
+    let end = end.min(lines.len());
+    Some(lines[start - 1..end].join("\n"))
+}
+
+fn runtime_smart_context_replace_repeated_exact_text_after_first(
+    text: &str,
+    needle: &str,
+    replacement: &str,
+) -> String {
+    if needle.is_empty() {
+        return text.to_string();
+    }
+    let mut rendered = String::with_capacity(text.len());
+    let mut cursor = 0usize;
+    let mut seen = 0usize;
+    for (offset, _) in text.match_indices(needle) {
+        rendered.push_str(&text[cursor..offset]);
+        seen = seen.saturating_add(1);
+        if seen == 1 {
+            rendered.push_str(needle);
+        } else {
+            rendered.push_str(replacement);
+        }
+        cursor = offset.saturating_add(needle.len());
+    }
+    rendered.push_str(&text[cursor..]);
+    rendered
+}
+
+fn runtime_smart_context_labeled_section_body<'a>(
+    text: &'a str,
+    labels: &[&str],
+) -> Option<&'a str> {
+    for label in labels {
+        let section_needle = format!("\n\n{label}\n");
+        if let Some((_, body)) = text.split_once(&section_needle) {
+            return Some(body);
+        }
+        let prefix_needle = format!("{label}\n");
+        if let Some(body) = text.strip_prefix(&prefix_needle) {
+            return Some(body);
+        }
+    }
+    None
+}
+
 fn runtime_smart_context_progressive_critical_exact_ranges(
     artifact_id: &str,
     original: &str,
     line_index: Option<&RuntimeSmartContextArtifactLineIndex>,
     summary: &str,
 ) -> Option<String> {
-    let mut rendered = vec!["critical exact ranges:".to_string()];
+    let mut rendered = vec![SMART_CONTEXT_LABEL_CRITICAL_EXACT.to_string()];
     if let Some(line_index) = line_index {
         for range in line_index
             .critical_ranges
@@ -2340,7 +2553,13 @@ fn runtime_smart_context_progressive_critical_exact_ranges(
             compacted,
             SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES,
         );
-        if let Some((_, exact_ranges)) = repaired.split_once("\n\ncritical exact ranges:\n") {
+        if let Some(exact_ranges) = runtime_smart_context_labeled_section_body(
+            &repaired,
+            &[
+                SMART_CONTEXT_LABEL_CRITICAL_EXACT,
+                SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY,
+            ],
+        ) {
             rendered.push(exact_ranges.to_string());
         }
     }
@@ -2459,18 +2678,12 @@ fn runtime_smart_context_tool_call_metadata_by_call_id(
         if item_type.ends_with("_call_output") {
             continue;
         }
-        let metadata = runtime_smart_context_tool_output_metadata(object);
-        let command = runtime_smart_context_tool_command_hint(object);
-        let exit_code = runtime_smart_context_tool_exit_code_hint(object);
-        if !metadata.trim().is_empty() || command.is_some() || exit_code.is_some() {
-            metadata_by_call_id.insert(
-                call_id.to_string(),
-                RuntimeSmartContextToolCallMetadata {
-                    text: metadata,
-                    command,
-                    exit_code,
-                },
-            );
+        let metadata = runtime_smart_context_tool_item_metadata(object);
+        if metadata.command.is_some()
+            || metadata.exit_code.is_some()
+            || metadata.kind_hint.is_some()
+        {
+            metadata_by_call_id.insert(call_id.to_string(), metadata);
         }
     }
     metadata_by_call_id
@@ -2480,47 +2693,58 @@ fn runtime_smart_context_tool_output_compaction_metadata(
     object: &serde_json::Map<String, serde_json::Value>,
     linked_metadata: Option<&RuntimeSmartContextToolCallMetadata>,
 ) -> RuntimeSmartContextToolOutputCompactionMetadata {
-    let mut metadata = linked_metadata
-        .map(|metadata| metadata.text.clone())
-        .unwrap_or_default();
-    runtime_smart_context_push_tool_output_metadata(
-        &runtime_smart_context_tool_output_metadata(object),
-        &mut metadata,
-        SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS,
-    );
+    let local_metadata = runtime_smart_context_tool_item_metadata(object);
     let command = linked_metadata
         .and_then(|metadata| metadata.command.clone())
-        .or_else(|| runtime_smart_context_tool_command_hint(object))
-        .or_else(|| runtime_smart_context_bounded_tool_command(&metadata));
-    let exit_code = runtime_smart_context_tool_exit_code_hint(object)
+        .or(local_metadata.command);
+    let exit_code = local_metadata
+        .exit_code
         .or_else(|| linked_metadata.and_then(|metadata| metadata.exit_code));
+    let kind_hint = local_metadata
+        .kind_hint
+        .or_else(|| linked_metadata.and_then(|metadata| metadata.kind_hint))
+        .or_else(|| {
+            command
+                .as_deref()
+                .and_then(prodex_context::command_output_kind_hint_for_command)
+        });
     RuntimeSmartContextToolOutputCompactionMetadata {
-        kind_hint: prodex_context::infer_command_output_kind_from_metadata(&metadata),
+        kind_hint,
         command,
         exit_code,
     }
 }
 
-const SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS: usize = 8192;
 const SMART_CONTEXT_TOOL_COMMAND_HINT_MAX_CHARS: usize = 512;
+const SMART_CONTEXT_TOOL_METADATA_SCAN_MAX_DEPTH: usize = 8;
 
-fn runtime_smart_context_tool_output_metadata(
+fn runtime_smart_context_tool_item_metadata(
     object: &serde_json::Map<String, serde_json::Value>,
-) -> String {
-    let mut metadata = String::new();
-    for (field, child) in object {
-        runtime_smart_context_collect_tool_output_metadata(child, Some(field), 0, &mut metadata);
-        if metadata.len() >= SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS {
-            break;
-        }
+) -> RuntimeSmartContextToolCallMetadata {
+    let command = runtime_smart_context_tool_command_hint(object);
+    let exit_code = runtime_smart_context_tool_exit_code_hint(object);
+    let kind_hint = runtime_smart_context_tool_kind_hint(object, command.as_deref());
+    RuntimeSmartContextToolCallMetadata {
+        command,
+        exit_code,
+        kind_hint,
     }
-    metadata
 }
 
 fn runtime_smart_context_tool_command_hint(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<String> {
-    for key in ["cmd", "command", "shell_command", "shellCommand"] {
+    runtime_smart_context_tool_command_hint_from_object(object, 0)
+}
+
+fn runtime_smart_context_tool_command_hint_from_object(
+    object: &serde_json::Map<String, serde_json::Value>,
+    depth: usize,
+) -> Option<String> {
+    if depth > SMART_CONTEXT_TOOL_METADATA_SCAN_MAX_DEPTH {
+        return None;
+    }
+    for key in runtime_smart_context_tool_command_keys() {
         if let Some(command) = object
             .get(key)
             .and_then(serde_json::Value::as_str)
@@ -2529,37 +2753,62 @@ fn runtime_smart_context_tool_command_hint(
             return Some(command);
         }
     }
-    object
-        .get("arguments")
-        .and_then(runtime_smart_context_tool_command_hint_from_value)
+    if let Some(command) = object.get("arguments").and_then(|value| {
+        runtime_smart_context_tool_command_hint_from_value(value, depth + 1, true)
+    }) {
+        return Some(command);
+    }
+    for (field, child) in object {
+        if field == "arguments" || runtime_smart_context_tool_output_payload_field(field) {
+            continue;
+        }
+        if let Some(command) =
+            runtime_smart_context_tool_command_hint_from_value(child, depth + 1, false)
+        {
+            return Some(command);
+        }
+    }
+    None
 }
 
-fn runtime_smart_context_tool_command_hint_from_value(value: &serde_json::Value) -> Option<String> {
+fn runtime_smart_context_tool_command_hint_from_value(
+    value: &serde_json::Value,
+    depth: usize,
+    allow_plain_command: bool,
+) -> Option<String> {
+    if depth > SMART_CONTEXT_TOOL_METADATA_SCAN_MAX_DEPTH {
+        return None;
+    }
     match value {
         serde_json::Value::String(text) => {
             if let Some(command) = runtime_smart_context_bounded_tool_command(text)
+                && allow_plain_command
                 && !text.trim_start().starts_with('{')
             {
                 return Some(command);
             }
             serde_json::from_str::<serde_json::Value>(text)
                 .ok()
-                .and_then(|value| runtime_smart_context_tool_command_hint_from_value(&value))
+                .and_then(|value| {
+                    runtime_smart_context_tool_command_hint_from_value(
+                        &value,
+                        depth + 1,
+                        allow_plain_command,
+                    )
+                })
         }
         serde_json::Value::Object(object) => {
-            for key in ["cmd", "command", "shell_command", "shellCommand"] {
-                if let Some(command) = object
-                    .get(key)
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(runtime_smart_context_bounded_tool_command)
-                {
-                    return Some(command);
-                }
-            }
-            None
+            runtime_smart_context_tool_command_hint_from_object(object, depth + 1)
         }
+        serde_json::Value::Array(items) => items.iter().find_map(|item| {
+            runtime_smart_context_tool_command_hint_from_value(item, depth + 1, allow_plain_command)
+        }),
         _ => None,
     }
+}
+
+fn runtime_smart_context_tool_command_keys() -> [&'static str; 4] {
+    ["cmd", "command", "shell_command", "shellCommand"]
 }
 
 fn runtime_smart_context_bounded_tool_command(text: &str) -> Option<String> {
@@ -2578,15 +2827,17 @@ fn runtime_smart_context_bounded_tool_command(text: &str) -> Option<String> {
 fn runtime_smart_context_tool_exit_code_hint(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<i32> {
-    for key in [
-        "exit_code",
-        "exitCode",
-        "exit_status",
-        "exitStatus",
-        "status_code",
-        "statusCode",
-        "status",
-    ] {
+    runtime_smart_context_tool_exit_code_hint_from_object(object, 0)
+}
+
+fn runtime_smart_context_tool_exit_code_hint_from_object(
+    object: &serde_json::Map<String, serde_json::Value>,
+    depth: usize,
+) -> Option<i32> {
+    if depth > SMART_CONTEXT_TOOL_METADATA_SCAN_MAX_DEPTH {
+        return None;
+    }
+    for key in runtime_smart_context_tool_exit_code_keys() {
         if let Some(exit_code) = object
             .get(key)
             .and_then(runtime_smart_context_i32_from_json_value)
@@ -2594,19 +2845,179 @@ fn runtime_smart_context_tool_exit_code_hint(
             return Some(exit_code);
         }
     }
-    object
-        .get("arguments")
-        .and_then(runtime_smart_context_tool_exit_code_hint_from_value)
+    if let Some(exit_code) = object.get("arguments").and_then(|value| {
+        runtime_smart_context_tool_exit_code_hint_from_value(value, depth + 1, true)
+    }) {
+        return Some(exit_code);
+    }
+    for (field, child) in object {
+        if field == "arguments" || runtime_smart_context_tool_output_payload_field(field) {
+            continue;
+        }
+        if let Some(exit_code) =
+            runtime_smart_context_tool_exit_code_hint_from_value(child, depth + 1, false)
+        {
+            return Some(exit_code);
+        }
+    }
+    None
 }
 
-fn runtime_smart_context_tool_exit_code_hint_from_value(value: &serde_json::Value) -> Option<i32> {
+fn runtime_smart_context_tool_exit_code_hint_from_value(
+    value: &serde_json::Value,
+    depth: usize,
+    allow_plain_exit_code: bool,
+) -> Option<i32> {
+    if depth > SMART_CONTEXT_TOOL_METADATA_SCAN_MAX_DEPTH {
+        return None;
+    }
     match value {
         serde_json::Value::String(text) => serde_json::from_str::<serde_json::Value>(text)
             .ok()
-            .and_then(|value| runtime_smart_context_tool_exit_code_hint_from_value(&value)),
-        serde_json::Value::Object(object) => runtime_smart_context_tool_exit_code_hint(object),
-        _ => runtime_smart_context_i32_from_json_value(value),
+            .and_then(|value| {
+                runtime_smart_context_tool_exit_code_hint_from_value(
+                    &value,
+                    depth + 1,
+                    allow_plain_exit_code,
+                )
+            }),
+        serde_json::Value::Object(object) => {
+            runtime_smart_context_tool_exit_code_hint_from_object(object, depth + 1)
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|item| {
+            runtime_smart_context_tool_exit_code_hint_from_value(
+                item,
+                depth + 1,
+                allow_plain_exit_code,
+            )
+        }),
+        _ => allow_plain_exit_code
+            .then(|| runtime_smart_context_i32_from_json_value(value))
+            .flatten(),
     }
+}
+
+fn runtime_smart_context_tool_exit_code_keys() -> [&'static str; 7] {
+    [
+        "exit_code",
+        "exitCode",
+        "exit_status",
+        "exitStatus",
+        "status_code",
+        "statusCode",
+        "status",
+    ]
+}
+
+fn runtime_smart_context_tool_kind_hint(
+    object: &serde_json::Map<String, serde_json::Value>,
+    command: Option<&str>,
+) -> Option<prodex_context::CommandOutputKind> {
+    command
+        .and_then(prodex_context::command_output_kind_hint_for_command)
+        .or_else(|| runtime_smart_context_tool_kind_hint_from_object(object, 0))
+}
+
+fn runtime_smart_context_tool_kind_hint_from_object(
+    object: &serde_json::Map<String, serde_json::Value>,
+    depth: usize,
+) -> Option<prodex_context::CommandOutputKind> {
+    if depth > SMART_CONTEXT_TOOL_METADATA_SCAN_MAX_DEPTH {
+        return None;
+    }
+    for key in runtime_smart_context_tool_kind_keys() {
+        if let Some(kind) = object
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .and_then(runtime_smart_context_tool_kind_hint_from_text)
+        {
+            return Some(kind);
+        }
+    }
+    if let Some(kind) = object
+        .get("arguments")
+        .and_then(|value| runtime_smart_context_tool_kind_hint_from_value(value, depth + 1, true))
+    {
+        return Some(kind);
+    }
+    for (field, child) in object {
+        if field == "arguments" || runtime_smart_context_tool_output_payload_field(field) {
+            continue;
+        }
+        if let Some(kind) = runtime_smart_context_tool_kind_hint_from_value(child, depth + 1, false)
+        {
+            return Some(kind);
+        }
+    }
+    None
+}
+
+fn runtime_smart_context_tool_kind_hint_from_value(
+    value: &serde_json::Value,
+    depth: usize,
+    allow_plain_kind: bool,
+) -> Option<prodex_context::CommandOutputKind> {
+    if depth > SMART_CONTEXT_TOOL_METADATA_SCAN_MAX_DEPTH {
+        return None;
+    }
+    match value {
+        serde_json::Value::String(text) => serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|value| {
+                runtime_smart_context_tool_kind_hint_from_value(&value, depth + 1, allow_plain_kind)
+            })
+            .or_else(|| {
+                allow_plain_kind
+                    .then(|| runtime_smart_context_tool_kind_hint_from_text(text))
+                    .flatten()
+            }),
+        serde_json::Value::Object(object) => {
+            runtime_smart_context_tool_kind_hint_from_object(object, depth + 1)
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|item| {
+            runtime_smart_context_tool_kind_hint_from_value(item, depth + 1, allow_plain_kind)
+        }),
+        _ => None,
+    }
+}
+
+fn runtime_smart_context_tool_kind_hint_from_text(
+    text: &str,
+) -> Option<prodex_context::CommandOutputKind> {
+    if text.len() > SMART_CONTEXT_TOOL_COMMAND_HINT_MAX_CHARS {
+        return None;
+    }
+    let normalized = text.trim().to_ascii_lowercase().replace('_', "-");
+    match normalized.as_str() {
+        "git-status" | "status" => Some(prodex_context::CommandOutputKind::GitStatus),
+        "git-diff" | "diff" | "git-show" => Some(prodex_context::CommandOutputKind::GitDiff),
+        "rust-diagnostics" | "cargo-test" | "cargo-check" | "cargo-clippy" | "rust" => {
+            Some(prodex_context::CommandOutputKind::RustDiagnostics)
+        }
+        "diagnostics" | "test" | "typecheck" | "type-check" => {
+            Some(prodex_context::CommandOutputKind::Diagnostics)
+        }
+        "git-log" => Some(prodex_context::CommandOutputKind::GitLog),
+        "search" | "rg" | "grep" => Some(prodex_context::CommandOutputKind::Search),
+        "file-list" | "find" | "tree" => Some(prodex_context::CommandOutputKind::FileList),
+        "log-stream" => Some(prodex_context::CommandOutputKind::LogStream),
+        "noisy-success" => Some(prodex_context::CommandOutputKind::NoisySuccess),
+        "plain" => Some(prodex_context::CommandOutputKind::Plain),
+        _ => prodex_context::infer_command_output_kind_from_metadata(&normalized),
+    }
+}
+
+fn runtime_smart_context_tool_kind_keys() -> [&'static str; 8] {
+    [
+        "kind",
+        "output_kind",
+        "outputKind",
+        "command_kind",
+        "commandKind",
+        "detected_kind",
+        "detectedKind",
+        "name",
+    ]
 }
 
 fn runtime_smart_context_i32_from_json_value(value: &serde_json::Value) -> Option<i32> {
@@ -2628,77 +3039,8 @@ fn runtime_smart_context_tool_call_id(
         .filter(|value| !value.trim().is_empty())
 }
 
-fn runtime_smart_context_collect_tool_output_metadata(
-    value: &serde_json::Value,
-    key: Option<&str>,
-    depth: usize,
-    metadata: &mut String,
-) {
-    const MAX_DEPTH: usize = 8;
-
-    if metadata.len() >= SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS || depth > MAX_DEPTH {
-        return;
-    }
-    if key.is_some_and(runtime_smart_context_tool_output_payload_field) {
-        return;
-    }
-    if let Some(key) = key {
-        runtime_smart_context_push_tool_output_metadata(
-            key,
-            metadata,
-            SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS,
-        );
-    }
-    match value {
-        serde_json::Value::String(text) => {
-            runtime_smart_context_push_tool_output_metadata(
-                text,
-                metadata,
-                SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS,
-            );
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                runtime_smart_context_collect_tool_output_metadata(item, None, depth + 1, metadata);
-                if metadata.len() >= SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS {
-                    break;
-                }
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for (field, child) in map {
-                runtime_smart_context_collect_tool_output_metadata(
-                    child,
-                    Some(field),
-                    depth + 1,
-                    metadata,
-                );
-                if metadata.len() >= SMART_CONTEXT_TOOL_METADATA_HINT_MAX_CHARS {
-                    break;
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
 fn runtime_smart_context_tool_output_payload_field(key: &str) -> bool {
     matches!(key, "output" | "content")
-}
-
-fn runtime_smart_context_push_tool_output_metadata(
-    text: &str,
-    metadata: &mut String,
-    max_chars: usize,
-) {
-    if metadata.len() >= max_chars {
-        return;
-    }
-    if !metadata.is_empty() {
-        metadata.push(' ');
-    }
-    let remaining = max_chars.saturating_sub(metadata.len());
-    metadata.extend(text.chars().take(remaining));
 }
 
 fn runtime_smart_context_artifact_summary(
@@ -2865,7 +3207,7 @@ fn runtime_smart_context_append_missing_critical_ranges(
     }
 
     format!(
-        "{compacted}\n\ncritical exact ranges:\n{}",
+        "{compacted}\n\n{SMART_CONTEXT_LABEL_CRITICAL_EXACT}\n{}",
         exact_ranges.join("\n")
     )
 }
@@ -2931,7 +3273,7 @@ fn runtime_smart_context_replace_cross_turn_duplicate_refs(
     exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
-    let items = runtime_smart_context_collect_large_input_text_items(value);
+    let items = runtime_smart_context_collect_large_rehydratable_text_items(value);
     if items.is_empty() {
         return;
     }
@@ -2991,31 +3333,34 @@ fn runtime_smart_context_available_artifacts_for_text_items<'a>(
         .collect()
 }
 
-fn runtime_smart_context_collect_large_input_text_items(
+fn runtime_smart_context_collect_large_rehydratable_text_items(
     value: &serde_json::Value,
 ) -> Vec<runtime_proxy_crate::SmartContextConversationItem> {
-    let Some(input) = value.get("input").and_then(serde_json::Value::as_array) else {
-        return Vec::new();
-    };
     let mut items = Vec::new();
-    for (index, item) in input.iter().enumerate() {
-        if runtime_smart_context_value_is_static_context_item(item) {
+    let Some(object) = value.as_object() else {
+        return items;
+    };
+    let mut keys = object.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    for key in keys {
+        if runtime_smart_context_static_prompt_field_key(&key) {
             continue;
         }
-        runtime_smart_context_collect_large_text_items_from_value(
-            item,
-            format!("input[{index}]"),
-            &mut items,
-        );
+        if let Some(item) = object.get(&key) {
+            runtime_smart_context_collect_large_text_items_from_value(key, item, &mut items);
+        }
     }
     items
 }
 
 fn runtime_smart_context_collect_large_text_items_from_value(
-    value: &serde_json::Value,
     id: String,
+    value: &serde_json::Value,
     items: &mut Vec<runtime_proxy_crate::SmartContextConversationItem>,
 ) {
+    if runtime_smart_context_value_is_static_context_item(value) {
+        return;
+    }
     match value {
         serde_json::Value::String(text)
             if text.len() >= SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES
@@ -3032,8 +3377,8 @@ fn runtime_smart_context_collect_large_text_items_from_value(
         serde_json::Value::Array(values) => {
             for (index, item) in values.iter().enumerate() {
                 runtime_smart_context_collect_large_text_items_from_value(
-                    item,
                     format!("{id}[{index}]"),
+                    item,
                     items,
                 );
             }
@@ -3043,9 +3388,12 @@ fn runtime_smart_context_collect_large_text_items_from_value(
             keys.sort();
             for key in keys {
                 if let Some(item) = object.get(&key) {
+                    if runtime_smart_context_static_prompt_field_key(&key) {
+                        continue;
+                    }
                     runtime_smart_context_collect_large_text_items_from_value(
-                        item,
                         format!("{id}.{key}"),
+                        item,
                         items,
                     );
                 }
@@ -3059,22 +3407,20 @@ fn runtime_smart_context_apply_text_replacements(
     value: &mut serde_json::Value,
     replacements: &BTreeMap<String, String>,
 ) -> usize {
-    let Some(input) = value
-        .get_mut("input")
-        .and_then(serde_json::Value::as_array_mut)
-    else {
+    let Some(object) = value.as_object_mut() else {
         return 0;
     };
     let mut replaced = 0usize;
-    for (index, item) in input.iter_mut().enumerate() {
-        if runtime_smart_context_value_is_static_context_item(item) {
+    let mut keys = object.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    for key in keys {
+        if runtime_smart_context_static_prompt_field_key(&key) {
             continue;
         }
-        replaced += runtime_smart_context_apply_text_replacements_to_value(
-            item,
-            format!("input[{index}]"),
-            replacements,
-        );
+        if let Some(item) = object.get_mut(&key) {
+            replaced +=
+                runtime_smart_context_apply_text_replacements_to_value(item, key, replacements);
+        }
     }
     replaced
 }
@@ -3084,6 +3430,9 @@ fn runtime_smart_context_apply_text_replacements_to_value(
     id: String,
     replacements: &BTreeMap<String, String>,
 ) -> usize {
+    if runtime_smart_context_value_is_static_context_item(value) {
+        return 0;
+    }
     match value {
         serde_json::Value::String(text) => {
             if let Some(replacement) = replacements.get(&id) {
@@ -3109,6 +3458,9 @@ fn runtime_smart_context_apply_text_replacements_to_value(
             keys.sort();
             keys.into_iter()
                 .filter_map(|key| {
+                    if runtime_smart_context_static_prompt_field_key(&key) {
+                        return None;
+                    }
                     object.get_mut(&key).map(|item| {
                         runtime_smart_context_apply_text_replacements_to_value(
                             item,

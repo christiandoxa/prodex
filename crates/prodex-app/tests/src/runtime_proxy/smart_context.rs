@@ -85,8 +85,8 @@ fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
 
     let output = value["input"][0]["output"].as_str().unwrap();
     assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
-    assert!(output.contains("summary:"));
-    assert!(output.contains("critical exact ranges:"));
+    assert!(output.contains(SMART_CONTEXT_LABEL_SUMMARY));
+    assert!(output.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
     assert!(output.contains("psc:"));
     assert!(output.contains("#L"));
     assert!(output.contains("error[E0425]"));
@@ -100,6 +100,40 @@ fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     assert!(!manifest.contains(hidden_tail));
     assert_eq!(stats.artifacts_stored, 1);
     assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_progressive_summary_replaces_exact_duplicate_chunks_with_refs() {
+    const CHUNK_LINES: usize = 32;
+    let chunk = (1..=CHUNK_LINES)
+        .map(|line| format!("duplicate block line {line}: exact payload"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let original_output = [chunk.as_str(), chunk.as_str(), chunk.as_str()].join("\n");
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(7, &original_output).unwrap();
+    let summary = [chunk.as_str(), chunk.as_str()].join("\n");
+
+    let deduped = runtime_smart_context_dedupe_progressive_summary_chunks(
+        &artifact.id,
+        &original_output,
+        &summary,
+        store.chunk_index(&artifact.id),
+    );
+
+    assert!(deduped.contains(SMART_CONTEXT_LABEL_DUPLICATE_CHUNKS));
+    assert!(deduped.contains(&runtime_smart_context_artifact_line_ref(
+        &artifact.id,
+        1,
+        CHUNK_LINES
+    )));
+    assert!(deduped.contains(&runtime_smart_context_artifact_line_ref(
+        &artifact.id,
+        CHUNK_LINES + 1,
+        CHUNK_LINES * 2
+    )));
+    assert_eq!(deduped.match_indices(&chunk).count(), 1);
+    assert!(deduped.len() < summary.len());
 }
 
 #[test]
@@ -185,9 +219,69 @@ fn smart_context_uses_command_metadata_hint_for_tool_output_compaction() {
 
     let output = value["input"][1]["output"].as_str().unwrap();
     assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
-    assert!(output.contains("search summary: 1 matches across 1 files"));
+    assert!(output.contains("sum: search matches=1, files=1"));
     assert!(output.contains("src/lib.rs (1 matches):"));
     assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_tool_metadata_diet_keeps_command_exit_kind_without_huge_hint() {
+    let huge_metadata_path = "src/huge_metadata_should_not_leak.rs";
+    let value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": serde_json::json!({
+                    "cmd": "cargo test smart_context::metadata_hint",
+                    "exit_code": 101,
+                    "metadata": format!("{huge_metadata_path}\n{}", "noise ".repeat(4000))
+                }).to_string()
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_2",
+                "name": "exec_command",
+                "arguments": serde_json::json!({
+                    "kind": "search",
+                    "metadata": "ignored compact metadata"
+                }).to_string()
+            }
+        ]
+    });
+
+    let first = value["input"][0].as_object().unwrap();
+    let second = value["input"][1].as_object().unwrap();
+    let first_metadata = runtime_smart_context_tool_item_metadata(first);
+    let second_metadata = runtime_smart_context_tool_item_metadata(second);
+    let signals = runtime_smart_context_collect_intent_signals(&value);
+
+    assert_eq!(
+        first_metadata.command.as_deref(),
+        Some("cargo test smart_context::metadata_hint")
+    );
+    assert_eq!(first_metadata.exit_code, Some(101));
+    assert_eq!(
+        first_metadata.kind_hint,
+        Some(prodex_context::CommandOutputKind::RustDiagnostics)
+    );
+    assert_eq!(
+        second_metadata.kind_hint,
+        Some(prodex_context::CommandOutputKind::Search)
+    );
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"smart_context::metadata_hint".to_string())
+    );
+    assert!(
+        !signals
+            .intent_terms
+            .contains(&huge_metadata_path.to_string())
+    );
+    assert!(signals.command_kind_hints.contains("rust-diagnostics"));
+    assert!(signals.command_kind_hints.contains("search"));
 }
 
 #[test]
@@ -235,7 +329,7 @@ fn smart_context_uses_success_summary_for_long_success_tool_output() {
 
     let output = value["input"][1]["output"].as_str().unwrap();
     assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
-    assert!(output.contains("successful command output"));
+    assert!(output.contains("pcs: success cmd"));
     assert!(output.contains("command: npm install && npm run build && find src -type f"));
     assert!(output.contains("exit: (unknown)"));
     assert!(output.contains("touched files ("));
@@ -292,7 +386,7 @@ fn smart_context_keeps_failure_output_on_critical_preserving_path() {
     let output = value["input"][1]["output"].as_str().unwrap();
     assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
     assert!(!output.contains("successful command output"));
-    assert!(output.contains("critical exact ranges:"));
+    assert!(output.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
     assert!(output.contains("error: build script failed"));
     assert!(output.contains("src/build.rs:42:9"));
     assert!(output.contains("exit status: 101"));
@@ -405,7 +499,7 @@ fn smart_context_request_intent_terms_prioritize_tool_output_compaction() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("intent matches:"));
+    assert!(output.contains("int:"));
     assert!(output.contains("src/runtime_proxy/smart_context.rs"));
     assert!(output.contains("error[E0425]"));
     assert!(output.contains("smart_context::intent_signal_bus"));
@@ -677,7 +771,7 @@ unrelated full artifact tail";
     let content = value["input"][0]["content"].as_str().unwrap();
     assert_eq!(count, stats.rehydrated_refs);
     assert!(count >= 3);
-    assert!(content.contains("semantic exact ranges:"));
+    assert!(content.contains(SMART_CONTEXT_LABEL_SEMANTIC_EXACT));
     assert!(content.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 8, 8)));
     assert!(content.contains("error[E0425]: cannot find value `missing` in this scope"));
     assert!(content.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 9, 9)));
@@ -841,6 +935,45 @@ fn smart_context_dedupe_preserves_static_prompt_prefix() {
             .contains(&runtime_smart_context_artifact_ref(&artifact.id))
     );
     assert_eq!(stats.duplicate_texts, 0);
+    assert_eq!(stats.cross_turn_duplicate_texts, 1);
+}
+
+#[test]
+fn smart_context_dedupes_large_exact_text_outside_top_level_input() {
+    let repeated = "external exact metadata ".repeat(140);
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, &repeated).unwrap();
+    let mut value = serde_json::json!({
+        "instructions": repeated.as_str(),
+        "metadata": {
+            "transcript": repeated.as_str()
+        },
+        "input": [
+            {"type": "message", "content": "use the exact external transcript if needed"}
+        ]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_dedupe_input_text(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &mut stats,
+    );
+
+    assert_eq!(
+        value["instructions"].as_str(),
+        Some(repeated.as_str()),
+        "static prompt fields must not be rewritten from persisted fingerprints"
+    );
+    assert!(
+        value["metadata"]["transcript"]
+            .as_str()
+            .unwrap()
+            .contains(&runtime_smart_context_artifact_ref(&artifact.id))
+    );
     assert_eq!(stats.cross_turn_duplicate_texts, 1);
 }
 
@@ -1340,6 +1473,79 @@ fn smart_context_delta_preserves_changed_static_context() {
 }
 
 #[test]
+fn smart_context_persists_static_fingerprints_but_does_not_delta_on_fresh_start() {
+    let first_shared = smart_context_test_shared("static-persist-first");
+    let artifact_path = first_shared
+        .log_path
+        .with_file_name("static-persist-artifacts.json");
+    let _ = std::fs::remove_file(&artifact_path);
+    register_runtime_smart_context_proxy_state(
+        &first_shared.log_path,
+        true,
+        None,
+        Some(artifact_path.clone()),
+    );
+    let instructions = format!("Persistent static context\n{}", "stable rule ".repeat(120));
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [{"role": "user", "content": "first request"}]
+    }));
+
+    let _ = prepare_runtime_smart_context_http_body(
+        96,
+        &first,
+        &first_shared,
+        RuntimeRouteKind::Responses,
+    );
+    let loaded = RuntimeSmartContextArtifactStore::load_from_path(&artifact_path);
+    assert!(
+        loaded
+            .static_context_prompt_cache_hash()
+            .is_some_and(|hash| hash.starts_with("scpc:"))
+    );
+    assert_eq!(loaded.static_context_fingerprints().len(), 1);
+
+    let fresh_shared = smart_context_test_shared("static-persist-fresh");
+    register_runtime_smart_context_proxy_state(
+        &fresh_shared.log_path,
+        true,
+        None,
+        Some(artifact_path.clone()),
+    );
+    let fresh_first = smart_context_test_request(serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [{"role": "user", "content": "fresh request"}]
+    }));
+    let fresh_prepared = prepare_runtime_smart_context_http_body(
+        97,
+        &fresh_first,
+        &fresh_shared,
+        RuntimeRouteKind::Responses,
+    );
+    let fresh_text = String::from_utf8_lossy(fresh_prepared.as_ref());
+    assert!(fresh_text.contains("Persistent static context"));
+    assert!(!fresh_text.contains("prodex static context unchanged"));
+
+    let fresh_second = smart_context_test_request(serde_json::json!({
+        "instructions": instructions.as_str(),
+        "input": [{"role": "user", "content": "fresh second request"}]
+    }));
+    let second_prepared = prepare_runtime_smart_context_http_body(
+        98,
+        &fresh_second,
+        &fresh_shared,
+        RuntimeRouteKind::Responses,
+    );
+    assert!(
+        String::from_utf8_lossy(second_prepared.as_ref())
+            .contains("prodex static context unchanged scpc:")
+    );
+
+    let _ = std::fs::remove_file(&artifact_path);
+    let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&artifact_path));
+}
+
+#[test]
 fn smart_context_prompt_cache_key_prefers_explicit_request_key() {
     let shared = smart_context_test_shared("prompt-cache-explicit");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
@@ -1488,6 +1694,56 @@ fn smart_context_reuses_existing_tool_output_artifact_with_short_ref() {
 }
 
 #[test]
+fn smart_context_reuses_hash_guarded_persisted_artifact_after_restart() {
+    let shared = smart_context_test_shared("artifact-persist-reuse");
+    let artifact_path = shared
+        .log_path
+        .with_file_name("artifact-persist-reuse.json");
+    let _ = std::fs::remove_file(&artifact_path);
+    let output = "persisted exact tool output ".repeat(160);
+    let mut persisted = RuntimeSmartContextArtifactStore::default();
+    let artifact = persisted.insert_text(1, &output).unwrap();
+    persisted.save_to_path(&artifact_path).unwrap();
+    register_runtime_smart_context_proxy_state(
+        &shared.log_path,
+        true,
+        None,
+        Some(artifact_path.clone()),
+    );
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_repeat",
+            "output": output
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    with_runtime_smart_context_artifacts(&shared, |store| {
+        runtime_smart_context_condense_tool_outputs(
+            &mut value,
+            store,
+            2,
+            runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+            256,
+            &RuntimeSmartContextIntentSignals::default(),
+            &mut stats,
+        );
+    })
+    .unwrap();
+
+    assert_eq!(
+        value["input"][0]["output"].as_str(),
+        Some(runtime_smart_context_artifact_ref(&artifact.id).as_str())
+    );
+    assert_eq!(stats.artifacts_stored, 0);
+    assert_eq!(stats.repeat_tool_output_refs, 1);
+
+    let _ = std::fs::remove_file(&artifact_path);
+    let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&artifact_path));
+}
+
+#[test]
 fn smart_context_compaction_appends_missing_critical_exact_ranges() {
     let original = "\
 line 1 noisy
@@ -1499,11 +1755,26 @@ line 4 noisy
 
     let repaired = runtime_smart_context_append_missing_critical_ranges(original, compacted, 8);
 
-    assert!(repaired.contains("critical exact ranges:"));
+    assert!(repaired.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
     assert!(repaired.contains("L1-L4:"));
     assert!(repaired.contains("error: hidden failure"));
     assert!(repaired.contains("src/main.rs:22:5"));
     assert!(prodex_context::critical_signal_self_check(original, &repaired).passed());
+}
+
+#[test]
+fn smart_context_exact_range_label_parser_accepts_legacy_critical_label() {
+    let legacy = "old summary\n\ncritical exact ranges:\nL1-L1:\nerror: legacy";
+
+    let body = runtime_smart_context_labeled_section_body(
+        legacy,
+        &[
+            SMART_CONTEXT_LABEL_CRITICAL_EXACT,
+            SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY,
+        ],
+    );
+
+    assert_eq!(body, Some("L1-L1:\nerror: legacy"));
 }
 
 #[test]
@@ -1559,7 +1830,7 @@ fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
     .expect("lost critical lines should be surgically rehydrated");
 
     let text = String::from_utf8(body).unwrap();
-    assert!(text.contains("critical exact ranges"));
+    assert!(text.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
     assert!(text.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 1, 4)));
     assert!(text.contains("error: hidden failure"));
     assert!(text.contains("src/main.rs:22:5"));
@@ -1592,7 +1863,7 @@ noise";
     .expect("indexed critical range should be rehydrated");
 
     assert_eq!(range_count, 1);
-    assert!(appendix.contains("critical exact ranges:"));
+    assert!(appendix.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
     assert!(appendix.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 1, 4)));
     assert!(appendix.contains("error: hidden indexed failure"));
     assert!(appendix.contains("src/main.rs:22:5"));

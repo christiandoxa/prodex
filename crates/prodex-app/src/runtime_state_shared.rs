@@ -225,6 +225,17 @@ pub(crate) struct RuntimeSmartContextArtifactManifestEntry {
 pub(crate) struct RuntimeSmartContextArtifactStore {
     artifacts: BTreeMap<String, RuntimeSmartContextArtifact>,
     total_bytes: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    static_context_fingerprints: Vec<RuntimeSmartContextStaticFingerprintMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    static_context_prompt_cache_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextStaticFingerprintMetadata {
+    pub(crate) id: String,
+    pub(crate) content_hash: String,
+    pub(crate) byte_len: usize,
 }
 
 impl RuntimeSmartContextArtifactStore {
@@ -235,6 +246,7 @@ impl RuntimeSmartContextArtifactStore {
         let Ok(mut store) = serde_json::from_str::<Self>(&raw) else {
             return Self::default();
         };
+        store.validate_loaded_metadata();
         store.recompute_total_bytes();
         store.enforce_limits();
         store
@@ -265,6 +277,47 @@ impl RuntimeSmartContextArtifactStore {
 
     pub(crate) fn artifact_count(&self) -> usize {
         self.artifacts.len()
+    }
+
+    pub(crate) fn set_static_context_fingerprints(
+        &mut self,
+        prompt_cache_hash: Option<String>,
+        fingerprints: Vec<runtime_proxy_crate::SmartContextFingerprint>,
+    ) {
+        self.static_context_prompt_cache_hash = prompt_cache_hash;
+        self.static_context_fingerprints = fingerprints
+            .into_iter()
+            .filter(|fingerprint| {
+                fingerprint.kind == runtime_proxy_crate::SmartContextFingerprintKind::StaticContext
+                    && !fingerprint.id.trim().is_empty()
+                    && !fingerprint.content_hash.trim().is_empty()
+            })
+            .map(|fingerprint| RuntimeSmartContextStaticFingerprintMetadata {
+                id: fingerprint.id,
+                content_hash: fingerprint.content_hash,
+                byte_len: fingerprint.byte_len,
+            })
+            .collect();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn static_context_fingerprints(
+        &self,
+    ) -> Vec<runtime_proxy_crate::SmartContextFingerprint> {
+        self.static_context_fingerprints
+            .iter()
+            .map(|fingerprint| runtime_proxy_crate::SmartContextFingerprint {
+                id: fingerprint.id.clone(),
+                kind: runtime_proxy_crate::SmartContextFingerprintKind::StaticContext,
+                content_hash: fingerprint.content_hash.clone(),
+                byte_len: fingerprint.byte_len,
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn static_context_prompt_cache_hash(&self) -> Option<&str> {
+        self.static_context_prompt_cache_hash.as_deref()
     }
 
     pub(crate) fn artifact_manifest_entries(
@@ -403,6 +456,13 @@ impl RuntimeSmartContextArtifactStore {
                 })
                 .or_insert_with(|| incoming_artifact.clone());
         }
+        if !incoming.static_context_fingerprints.is_empty()
+            || incoming.static_context_prompt_cache_hash.is_some()
+        {
+            self.static_context_fingerprints = incoming.static_context_fingerprints.clone();
+            self.static_context_prompt_cache_hash =
+                incoming.static_context_prompt_cache_hash.clone();
+        }
         self.recompute_total_bytes();
         self.enforce_limits();
     }
@@ -424,6 +484,39 @@ impl RuntimeSmartContextArtifactStore {
             .values()
             .map(|artifact| artifact.byte_len)
             .sum();
+    }
+
+    fn validate_loaded_metadata(&mut self) {
+        self.artifacts.retain(|id, artifact| {
+            id == &artifact.content_hash
+                && Self::artifact_matches_text(
+                    artifact,
+                    &artifact.text,
+                    &runtime_proxy_crate::smart_context_hash_text(&artifact.text),
+                )
+        });
+
+        for artifact in self.artifacts.values_mut() {
+            if artifact.line_index.is_none() || artifact.chunk_index.is_none() {
+                let line_index = artifact
+                    .line_index
+                    .clone()
+                    .unwrap_or_else(|| runtime_smart_context_artifact_line_index(&artifact.text));
+                if artifact.line_index.is_none() {
+                    artifact.line_index = Some(line_index.clone());
+                }
+                if artifact.chunk_index.is_none() {
+                    artifact.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
+                        &artifact.text,
+                        &line_index,
+                    ));
+                }
+            }
+        }
+
+        self.static_context_fingerprints.retain(|fingerprint| {
+            !fingerprint.id.trim().is_empty() && !fingerprint.content_hash.trim().is_empty()
+        });
     }
 
     fn enforce_limits(&mut self) {
@@ -1127,6 +1220,31 @@ mod tests {
         assert_eq!(loaded.artifact_count(), 2);
         assert_eq!(loaded.get_text(&alpha.id).as_deref(), Some("alpha"));
         assert_eq!(loaded.get_text(&beta.id).as_deref(), Some("beta"));
+
+        remove_smart_context_artifact_temp_files(&path);
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_save_persists_static_fingerprints() {
+        let path = smart_context_artifact_temp_path("static-fingerprints");
+        remove_smart_context_artifact_temp_files(&path);
+
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        store.set_static_context_fingerprints(
+            Some("scpc:1234".to_string()),
+            vec![runtime_proxy_crate::SmartContextFingerprint {
+                id: "instructions".to_string(),
+                kind: runtime_proxy_crate::SmartContextFingerprintKind::StaticContext,
+                content_hash: "hash-a".to_string(),
+                byte_len: 42,
+            }],
+        );
+        store.save_to_path(&path).expect("store saved");
+
+        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
+        assert_eq!(loaded.static_context_prompt_cache_hash(), Some("scpc:1234"));
+        assert_eq!(loaded.static_context_fingerprints().len(), 1);
+        assert_eq!(loaded.static_context_fingerprints()[0].id, "instructions");
 
         remove_smart_context_artifact_temp_files(&path);
     }

@@ -109,12 +109,23 @@ fn command_metadata_infers_output_kind_hints() {
         ("git log --stat --oneline", CommandOutputKind::GitLog),
         ("pytest tests -q", CommandOutputKind::Diagnostics),
         ("python -m pytest tests", CommandOutputKind::Diagnostics),
+        ("ruff check .", CommandOutputKind::Diagnostics),
+        ("mypy src", CommandOutputKind::Diagnostics),
         ("npx tsc --noEmit", CommandOutputKind::Diagnostics),
         ("npm test -- --runInBand", CommandOutputKind::Diagnostics),
         (
             "npm --prefix web run typecheck",
             CommandOutputKind::Diagnostics,
         ),
+        (
+            "uv pip install -r requirements.txt",
+            CommandOutputKind::NoisySuccess,
+        ),
+        ("bazel test //...", CommandOutputKind::NoisySuccess),
+        ("npx nx affected -t build", CommandOutputKind::NoisySuccess),
+        ("turbo run build", CommandOutputKind::NoisySuccess),
+        ("docker compose up --wait", CommandOutputKind::NoisySuccess),
+        ("kubectl logs deploy/prodex", CommandOutputKind::LogStream),
         ("ls -la crates", CommandOutputKind::FileList),
         (
             "find crates -maxdepth 2 -type f",
@@ -147,11 +158,7 @@ fn command_metadata_hint_compacts_single_search_match_as_search() {
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Search);
-    assert!(
-        report
-            .output
-            .contains("search summary: 1 matches across 1 files")
-    );
+    assert!(report.output.contains("sum: search matches=1, files=1"));
     assert!(report.output.contains("src/lib.rs (1 matches):"));
     assert_no_critical_signal_loss(input, &report.output);
 }
@@ -171,7 +178,7 @@ fn command_metadata_hint_compacts_quiet_cargo_output_as_rust_diagnostics() {
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::RustDiagnostics);
-    assert!(report.output.contains("rust/cargo summary"));
+    assert!(report.output.contains("sum: rust"));
     assert!(report.output.contains("Finished `dev` profile"));
     assert_no_critical_signal_loss(input, &report.output);
 }
@@ -294,7 +301,7 @@ index 1111111..2222222 100644
     assert!(
         report
             .output
-            .contains("git diff summary: 1 files, +10, -1, 1 hunks")
+            .contains("sum: git diff files=1, +10, -1, hunks=1")
     );
     assert!(report.output.contains("src/lib.rs: +10, -1, 1 hunks"));
     assert!(report.output.contains("@@ -1,3 +1,12 @@"));
@@ -317,11 +324,7 @@ README.md:3:prodex context helper
     let report = compact_command_output_with_options(input, &options);
 
     assert_eq!(report.detected_kind, CommandOutputKind::Search);
-    assert!(
-        report
-            .output
-            .contains("search summary: 3 matches across 2 files")
-    );
+    assert!(report.output.contains("sum: search matches=3, files=2"));
     assert!(report.output.contains("README.md (1 matches):"));
     assert!(report.output.contains("src/lib.rs (2 matches):"));
     assert!(
@@ -403,7 +406,7 @@ fn file_list_output_summarizes_and_truncates_entries() {
     let report = compact_command_output_with_options(input, &options);
 
     assert_eq!(report.detected_kind, CommandOutputKind::FileList);
-    assert!(report.output.contains("file list summary: 8 entries"));
+    assert!(report.output.contains("sum: files entries=8"));
     assert!(report.output.contains("top roots: src=3"));
     assert!(report.output.contains("extensions: rs=4"));
     assert!(
@@ -526,7 +529,7 @@ Command failed with exit code 1
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
-    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("int:"));
     assert!(report.output.contains("targetWidget"));
     assert!(report.output.contains("src/target.ts"));
     assert_no_critical_signal_loss(input, &report.output);
@@ -598,7 +601,7 @@ Command failed with exit code 1
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
-    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("int:"));
     assert!(report.output.contains("targetWidget"));
     assert_no_critical_signal_loss(input, &report.output);
 }
@@ -626,7 +629,7 @@ README.md:3:prodex context helper
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Search);
-    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("int:"));
     assert!(report.output.contains("target_symbol"));
 }
 
@@ -656,13 +659,13 @@ docs/context.md:3:target_widget docs
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Search);
-    assert!(report.output.contains("relevant search matches:"));
+    assert!(report.output.contains("rel search:"));
     assert!(report.output.contains("crates/prodex-context/src/lib.rs"));
     assert!(report.output.contains("fn target_widget()"));
     assert!(
         report
             .output
-            .contains("search overflow: 2 other matches across 2 files")
+            .contains("overflow: 2 other matches across 2 files")
     );
     assert!(report.output.contains("more relevant matches in this file"));
 }
@@ -694,19 +697,15 @@ README.md
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::FileList);
-    assert!(report.output.contains("intent matches: 2 paths"));
-    assert!(report.output.contains("relevant paths:"));
+    assert!(report.output.contains("int: 2 paths"));
+    assert!(report.output.contains("rel paths:"));
     assert!(report.output.contains("crates/prodex-context/src/lib.rs"));
     assert!(
         report
             .output
             .contains("crates/prodex-context/tests/src/lib.rs")
     );
-    assert!(
-        report
-            .output
-            .contains("file-list overflow: 5 other entries")
-    );
+    assert!(report.output.contains("overflow: 5 other file entries"));
     assert!(report.output.contains("overflow roots:"));
 }
 
@@ -748,7 +747,7 @@ index 1111111..2222222 100644
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::GitDiff);
-    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("int:"));
     assert!(report.output.contains("+pub fn target_symbol() {}"));
     assert_no_critical_signal_loss(input, &report.output);
 }
@@ -788,7 +787,7 @@ tail
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Plain);
-    assert!(report.output.contains("intent matches:"));
+    assert!(report.output.contains("int:"));
     assert!(report.output.contains("interesting_symbol happened here"));
     assert_no_critical_signal_loss(input, &report.output);
 }
@@ -971,11 +970,7 @@ fn git_diff_stat_output_detects_git_diff_and_keeps_totals() {
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::GitDiff);
-    assert!(
-        report
-            .output
-            .contains("git diff summary: stat-only, 2 file entries")
-    );
+    assert!(report.output.contains("sum: git diff stat_only entries=2"));
     assert!(
         report
             .output
@@ -1332,7 +1327,7 @@ Date:   Mon May 4 09:00:00 2026 +0700
     assert!(
         report
             .output
-            .contains("git log --stat summary: 2 commits, 3 stat file entries")
+            .contains("sum: git log --stat commits=2, stat_files=3")
     );
     assert!(report.output.contains("commit: commit aaaaaaaaa"));
     assert!(
@@ -1375,7 +1370,7 @@ Ran all test suites.
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::NoisySuccess);
-    assert!(report.output.contains("success output summary"));
+    assert!(report.output.contains("sum: success"));
     assert!(report.output.contains("passed_suites=10"));
     assert!(report.output.contains("Test Suites: 10 passed, 10 total"));
     assert!(report.output.contains("Tests:       120 passed, 120 total"));
@@ -1420,12 +1415,80 @@ Running 12 tests using 4 workers
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::NoisySuccess);
-    assert!(report.output.contains("success output summary"));
+    assert!(report.output.contains("sum: success"));
     assert!(report.output.contains("go_test_ok=2"));
     assert!(report.output.contains("build_success="));
     assert!(report.output.contains("docker_summary="));
     assert!(report.output.contains("formatter_summary=1"));
     assert!(report.output.contains("12 passed (8.2s)"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn noisy_success_output_detects_modern_exit_zero_tool_noise() {
+    let input = "\
+All checks passed!
+Success: no issues found in 42 source files
+Resolved 42 packages in 10ms
+Prepared 3 packages in 20ms
+Installed 3 packages in 30ms
+Requirement already satisfied: anyio in .venv/lib/python3.12/site-packages
+Successfully installed httpx-0.28.1
+INFO: Analyzed target //app:bin (1 packages loaded, 1 target configured).
+Target //app:bin up-to-date:
+INFO: Build completed successfully, 1 total action
+NX Successfully ran target build for project web
+Tasks: 3 successful, 3 total
+PASS [   0.100s] prodex::smoke smoke_test
+Summary [   0.200s] 1 test run: 1 passed
+[+] Running 2/2
+Container prodex-db-1 Started
+Network prodex_default Created
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 80,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::NoisySuccess);
+    assert!(report.output.contains("sum: success"));
+    assert!(report.output.contains("formatter_summary=1"));
+    assert!(report.output.contains("typecheck_summary=1"));
+    assert!(report.output.contains("python_packages=5"));
+    assert!(report.output.contains("bazel_summary=2"));
+    assert!(report.output.contains("nx_summary=1"));
+    assert!(report.output.contains("turbo_summary=1"));
+    assert!(report.output.contains("nextest_summary=1"));
+    assert!(report.output.contains("docker_compose=3"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_refuses_modern_tool_failure_signals() {
+    let input = "\
+Found 2 errors.
+src/app.py:10:1: F401 unused import
+src/api.py:22:5: error: incompatible type
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("ruff check && mypy src".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!report.compacted);
+    assert!(report.failure_suspected);
+    assert_eq!(report.output, input);
     assert_no_critical_signal_loss(input, &report.output);
 }
 
@@ -1449,7 +1512,7 @@ Command failed with exit code 1
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::NoisySuccess);
-    assert!(!report.output.contains("success output summary"));
+    assert!(!report.output.contains("sum: success"));
     assert!(report.output.contains("FAIL tests/unit_2.test.ts"));
     assert!(report.output.contains("Command failed with exit code 1"));
     assert_no_critical_signal_loss(input, &report.output);
@@ -1487,7 +1550,7 @@ fn successful_command_output_summary_compacts_long_install_build_and_list_output
     assert!(!report.failure_suspected);
     assert_eq!(report.critical_signals.total(), 0);
     assert!(report.touched_files >= 35);
-    assert!(report.output.contains("successful command output"));
+    assert!(report.output.contains("success cmd"));
     assert!(
         report
             .output
@@ -1645,11 +1708,7 @@ fn rg_json_output_groups_matches_and_skips_metadata() {
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Search);
-    assert!(
-        report
-            .output
-            .contains("search summary: 2 matches across 2 files")
-    );
+    assert!(report.output.contains("sum: search matches=2, files=2"));
     assert!(report.output.contains("src/lib.rs (1 matches):"));
     assert!(report.output.contains("10: fn alpha() {}"));
     assert!(report.output.contains("README.md (1 matches):"));
@@ -1701,14 +1760,14 @@ src/main.rs
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::FileList);
-    assert!(report.output.contains("file list summary: 4 entries"));
+    assert!(report.output.contains("sum: files entries=4"));
     assert!(report.output.contains("Cargo.toml"));
     assert!(report.output.contains("README.md"));
     assert!(report.output.contains("src/main.rs"));
 }
 
 #[test]
-fn json_logish_plain_output_keeps_middle_error_line() {
+fn json_log_stream_output_summarizes_levels_and_keeps_critical_lines_exactly() {
     let mut input = String::new();
     for index in 0..25 {
         input.push_str(&format!(
@@ -1736,12 +1795,69 @@ fn json_logish_plain_output_keeps_middle_error_line() {
         },
     );
 
-    assert_eq!(report.detected_kind, CommandOutputKind::Plain);
-    assert!(report.output.contains("critical lines:"));
-    assert!(report.output.contains("\"level\":\"error\""));
+    assert_eq!(report.detected_kind, CommandOutputKind::LogStream);
+    assert!(report.output.contains("sum: logs"));
+    assert!(report.output.contains("levels: info=50, error=1"));
+    assert!(report.output.contains("preserved:"));
+    assert!(report.output.contains(
+        "{\"level\":\"error\",\"message\":\"database unavailable\",\"at\":\"src/db.rs:44:9\"}"
+    ));
     assert!(report.output.contains("database unavailable"));
     assert!(report.output.contains("src/db.rs:44:9"));
-    assert!(report.compacted_lines <= 12);
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn text_log_stream_preserves_warn_fatal_locations_and_stack_trace() {
+    let mut input = String::new();
+    for index in 0..12 {
+        input.push_str(&format!(
+            "2026-05-05T00:00:0{index}Z INFO worker heartbeat {index}\n"
+        ));
+    }
+    input.push_str("2026-05-05T00:00:13Z WARN config fallback enabled\n");
+    input.push_str("2026-05-05T00:00:14Z ERROR src/app.rs:77:5 request failed\n");
+    input.push_str("Traceback (most recent call last):\n");
+    input.push_str("  File \"src/app.py\", line 22, in handle\n");
+    input.push_str("RuntimeError: boom\n");
+    input.push_str("2026-05-05T00:00:15Z FATAL shutting down\n");
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 10,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::LogStream);
+    assert!(report.output.contains("levels: info=12"));
+    assert!(
+        report
+            .output
+            .contains("2026-05-05T00:00:13Z WARN config fallback enabled")
+    );
+    assert!(
+        report
+            .output
+            .contains("2026-05-05T00:00:14Z ERROR src/app.rs:77:5 request failed")
+    );
+    assert!(report.output.contains("Traceback (most recent call last):"));
+    assert!(
+        report
+            .output
+            .contains("  File \"src/app.py\", line 22, in handle")
+    );
+    assert!(report.output.contains("RuntimeError: boom"));
+    assert!(
+        report
+            .output
+            .contains("2026-05-05T00:00:15Z FATAL shutting down")
+    );
+    assert!(!report.output.contains("worker heartbeat 0"));
+    assert_no_critical_signal_loss(&input, &report.output);
 }
 
 #[test]
@@ -1838,6 +1954,30 @@ exit status: 101
     assert!(!check.has_loss());
     assert_eq!(check.lost.total(), 0);
     assert_eq!(check.before.total(), check.after.total());
+}
+
+#[test]
+fn generated_compaction_header_detection_accepts_old_and_short_labels() {
+    for line in [
+        "# prodex context saver: rust diagnostics (100 -> 10 lines)",
+        "pcs: rust-diag (100->10)",
+        "rust/cargo summary: errors=0",
+        "diagnostic summary: errors=0",
+        "success output summary: noisy_success_lines=12",
+        "command output summary: 100 lines, 4 critical lines preserved",
+        "sum: rust errors=0",
+        "sum: diag errors=0",
+        "sum: success noisy=12",
+        "baseline compaction:",
+        "base:",
+        "intent matches: 2 lines for runtime",
+        "int: 2 lines for runtime",
+    ] {
+        assert!(
+            is_generated_compaction_header_line(line),
+            "label should be generated: {line}"
+        );
+    }
 }
 
 #[test]

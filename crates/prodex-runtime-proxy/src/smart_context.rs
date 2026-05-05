@@ -4,6 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::RuntimeTokenUsage;
 
+const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
+
 pub fn smart_context_structural_minify_json_body(body: &[u8]) -> Cow<'_, [u8]> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return Cow::Borrowed(body);
@@ -131,7 +133,24 @@ pub fn smart_context_artifact_marker(
 }
 
 pub fn smart_context_artifact_reference_marker(artifact: &SmartContextArtifactRef) -> String {
-    smart_context_artifact_marker_line("repeat", artifact)
+    format!(
+        "psc repeat {} h={} b={} {}",
+        smart_context_short_artifact_ref(&artifact.id),
+        artifact.content_hash,
+        artifact.byte_len,
+        smart_context_legacy_artifact_ref(&artifact.id)
+    )
+}
+
+pub fn smart_context_short_artifact_ref(id: &str) -> String {
+    format!(
+        "{SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX}{}",
+        smart_context_short_artifact_label(id)
+    )
+}
+
+pub fn smart_context_short_artifact_line_ref(id: &str, start: usize, end: usize) -> String {
+    format!("{}#L{start}-L{end}", smart_context_short_artifact_ref(id))
 }
 
 pub fn smart_context_condense_tool_outputs(
@@ -1565,10 +1584,21 @@ fn smart_context_summary_prefix(text: &str, byte_limit: usize) -> String {
 }
 
 fn smart_context_artifact_marker_line(kind: &str, artifact: &SmartContextArtifactRef) -> String {
+    let reference = smart_context_short_artifact_ref(&artifact.id);
     format!(
-        "prodex-sc {kind} prodex-artifact:{} bytes={} hash={}; rehydrate: use prodex-artifact:{} or prodex-artifact:{}#Lstart-Lend",
-        artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, artifact.id
+        "prodex-sc {kind} {} b={} h={}; rehydrate {reference} or {reference}#Lstart-Lend",
+        smart_context_legacy_artifact_ref(&artifact.id),
+        artifact.byte_len,
+        artifact.content_hash
     )
+}
+
+fn smart_context_legacy_artifact_ref(id: &str) -> String {
+    format!("prodex-artifact:{id}")
+}
+
+fn smart_context_short_artifact_label(id: &str) -> &str {
+    id.strip_prefix("sc:").unwrap_or(id)
 }
 
 fn smart_context_capsule_order(

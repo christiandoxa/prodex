@@ -606,7 +606,7 @@ fn recall_content_dedupe_keeps_required_copy_and_replaces_optional_exact_duplica
         .replacement
         .as_deref()
         .expect("optional duplicate should be replaced");
-    assert!(replacement.contains("prodex mem duplicate: original=required-main"));
+    assert!(replacement.contains("mem dup: original=required-main"));
     assert!(replacement.contains("content_hash=sc:"));
     assert!(replacement.contains("original_bytes="));
     assert!(
@@ -645,6 +645,9 @@ fn recall_content_dedupe_replaces_optional_prodex_artifact_content_with_ref() {
         .as_deref()
         .expect("artifact-backed optional content should be replaced");
     assert!(replacement.starts_with("prodex-artifact:sc:abc123"));
+    assert!(replacement.contains("[mem art;"));
+    assert!(replacement.contains("content_hash=sc:"));
+    assert!(replacement.contains("original_bytes="));
     assert!(
         !replacement.contains("large artifact-backed memory"),
         "artifact replacement must stay reference-only"
@@ -1049,6 +1052,46 @@ fn super_slim_shadow_assistant_message_uses_short_summary() {
 }
 
 #[test]
+fn super_slim_shadow_referenced_artifact_uses_shorter_prefix_than_plain_summary() {
+    let tail = "TAIL_AFTER_SHORT_REF_CAP";
+    let line = format!(
+        "{}{tail}",
+        "x".repeat(RUNTIME_MEM_SUPER_SLIM_REFERENCED_SUMMARY_PREFIX_CHAR_LIMIT + 8)
+    );
+    assert!(line.chars().count() < RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT);
+
+    let plain_shadow = runtime_mem_super_slim_shadow_codex_event(&serde_json::json!({
+        "payload": {
+            "type": "function_call_output",
+            "call_id": "plain-call",
+            "output": line
+        }
+    }));
+    let artifact_shadow = runtime_mem_super_slim_shadow_codex_event(&serde_json::json!({
+        "payload": {
+            "type": "function_call_output",
+            "call_id": "artifact-call",
+            "output": line,
+            "metadata": {
+                "artifact_ref": "prodex-artifact:sc:short-prefix"
+            }
+        }
+    }));
+
+    let plain_summary = lookup_test_path(&plain_shadow, "payload.summary")
+        .and_then(Value::as_str)
+        .expect("plain summary should exist");
+    let artifact_summary = lookup_test_path(&artifact_shadow, "payload.summary")
+        .and_then(Value::as_str)
+        .expect("artifact summary should exist");
+
+    assert!(plain_summary.contains(tail));
+    assert!(!artifact_summary.contains(tail));
+    assert!(artifact_summary.contains("ref=prodex-artifact:sc:short-prefix"));
+    assert!(artifact_summary.contains("full output omitted"));
+}
+
+#[test]
 fn super_slim_shadow_tool_output_stores_summary_and_ref() {
     let output = "\nfirst useful output line\n".to_string() + &"artifact data ".repeat(500);
     let shadow = runtime_mem_super_slim_shadow_codex_event(&serde_json::json!({
@@ -1136,7 +1179,7 @@ fn super_slim_shadow_events_replaces_later_exact_duplicate_without_semantic_summ
 
     assert_eq!(shadows[0], single_shadow);
     assert!(first_summary.starts_with("assistant response summary: Important but repeated answer"));
-    assert!(duplicate_summary.starts_with("prodex mem duplicate: original=event[0]"));
+    assert!(duplicate_summary.starts_with("mem dup: original=event[0]"));
     assert!(duplicate_summary.contains("content_hash=sc:"));
     assert!(!duplicate_summary.contains("Important but repeated answer"));
     assert_eq!(
@@ -1174,6 +1217,7 @@ fn super_slim_shadow_events_use_artifact_ref_for_later_exact_duplicate() {
         .expect("artifact duplicate summary should exist");
 
     assert!(duplicate_summary.starts_with("prodex-artifact:sc:tool-output"));
+    assert!(duplicate_summary.contains("[mem art;"));
     assert!(duplicate_summary.contains("content_hash=sc:"));
     assert!(!duplicate_summary.contains("large artifact-backed output"));
     assert_eq!(
@@ -1183,6 +1227,47 @@ fn super_slim_shadow_events_use_artifact_ref_for_later_exact_duplicate() {
     assert_eq!(
         lookup_test_path(&shadows[1], "payload.metadata.summary").and_then(Value::as_str),
         Some(duplicate_summary)
+    );
+}
+
+#[test]
+fn super_slim_shadow_events_replaces_later_exact_duplicate_assistant_summary() {
+    let summary = "Repeated assistant summary from upstream; same exact text.";
+    let events = [
+        serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "id": "assistant-summary-1",
+                "message": "first full assistant message",
+                "summary": summary
+            }
+        }),
+        serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "id": "assistant-summary-2",
+                "message": "different full assistant message",
+                "summary": summary
+            }
+        }),
+    ];
+
+    let shadows = runtime_mem_super_slim_shadow_codex_events(events.iter());
+    let first_summary = lookup_test_path(&shadows[0], "payload.summary")
+        .and_then(Value::as_str)
+        .expect("first assistant summary should exist");
+    let duplicate_summary = lookup_test_path(&shadows[1], "payload.summary")
+        .and_then(Value::as_str)
+        .expect("duplicate assistant summary should exist");
+
+    assert_eq!(first_summary, summary);
+    assert!(duplicate_summary.starts_with("mem dup: original=assistant-summary-1"));
+    assert!(duplicate_summary.contains("content_hash=sc:"));
+    assert!(duplicate_summary.contains("original_bytes="));
+    assert!(!duplicate_summary.contains(summary));
+    assert_eq!(
+        lookup_test_path(&shadows[1], "payload.message").and_then(Value::as_str),
+        Some("assistant response shadowed by prodex super-slim mem; full content omitted")
     );
 }
 

@@ -101,7 +101,7 @@ fn condenser_uses_artifact_only_when_hash_matches() {
 }
 
 #[test]
-fn artifact_marker_is_short_and_preserves_rehydrate_metadata() {
+fn artifact_marker_uses_short_app_format_and_preserves_rehydrate_metadata() {
     let artifact = SmartContextArtifactRef {
         id: "sc:0123456789abcdef".to_string(),
         byte_len: 12_345,
@@ -110,18 +110,26 @@ fn artifact_marker_is_short_and_preserves_rehydrate_metadata() {
     let compacted = "first compacted line\nlast compacted line";
 
     let marker = smart_context_artifact_marker(&artifact, compacted);
-    let old_verbose = format!(
+    let old_reusable = format!(
+        "prodex-sc artifact prodex-artifact:{} bytes={} hash={}; rehydrate: use prodex-artifact:{} or prodex-artifact:{}#Lstart-Lend",
+        artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, artifact.id
+    );
+    let old_labeled = format!(
         "# prodex smart context artifact\nartifact_id: prodex-artifact:{}\noriginal_bytes: {}\ncontent_hash: {}\nrehydrate: automatic when exact content is referenced; use prodex-artifact:{}#Lstart-Lend for exact line range\n\n{}",
         artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, compacted
     );
 
-    assert!(marker.len() < old_verbose.len());
-    assert!(marker.starts_with("prodex-sc artifact prodex-artifact:sc:0123456789abcdef"));
-    assert!(marker.contains("bytes=12345"));
-    assert!(marker.contains("hash=sc:fedcba9876543210"));
-    assert!(marker.contains(
-        "rehydrate: use prodex-artifact:sc:0123456789abcdef or prodex-artifact:sc:0123456789abcdef#Lstart-Lend"
-    ));
+    let first_line = marker.lines().next().unwrap();
+    assert_eq!(
+        first_line,
+        "prodex-sc artifact prodex-artifact:sc:0123456789abcdef b=12345 h=sc:fedcba9876543210; rehydrate psc:0123456789abcdef or psc:0123456789abcdef#Lstart-Lend"
+    );
+    assert!(first_line.len() < old_reusable.len());
+    assert!(marker.len() < old_labeled.len());
+    assert_eq!(marker.matches("prodex-artifact:").count(), 1);
+    assert!(marker.contains("b=12345"));
+    assert!(marker.contains("h=sc:fedcba9876543210"));
+    assert!(marker.contains("psc:0123456789abcdef#Lstart-Lend"));
     assert!(marker.ends_with(compacted));
     assert!(!marker.contains("artifact_id:"));
     assert!(!marker.contains("original_bytes:"));
@@ -129,7 +137,7 @@ fn artifact_marker_is_short_and_preserves_rehydrate_metadata() {
 }
 
 #[test]
-fn artifact_reference_marker_has_same_exact_ref_fields() {
+fn artifact_reference_marker_uses_short_repeat_format_with_exact_ref_fields() {
     let artifact = SmartContextArtifactRef {
         id: "sc:0123456789abcdef".to_string(),
         byte_len: 456,
@@ -137,10 +145,38 @@ fn artifact_reference_marker_has_same_exact_ref_fields() {
     };
 
     let marker = smart_context_artifact_reference_marker(&artifact);
+    let old_reusable = format!(
+        "prodex-sc repeat prodex-artifact:{} bytes={} hash={}; rehydrate: use prodex-artifact:{} or prodex-artifact:{}#Lstart-Lend",
+        artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, artifact.id
+    );
 
     assert_eq!(
         marker,
-        "prodex-sc repeat prodex-artifact:sc:0123456789abcdef bytes=456 hash=sc:fedcba9876543210; rehydrate: use prodex-artifact:sc:0123456789abcdef or prodex-artifact:sc:0123456789abcdef#Lstart-Lend"
+        "psc repeat psc:0123456789abcdef h=sc:fedcba9876543210 b=456 prodex-artifact:sc:0123456789abcdef"
+    );
+    assert!(marker.len() < old_reusable.len());
+    assert_eq!(marker.matches("prodex-artifact:").count(), 1);
+    assert!(marker.contains("psc:0123456789abcdef"));
+    assert!(marker.contains("h=sc:fedcba9876543210"));
+    assert!(marker.contains("b=456"));
+    assert!(!marker.contains("artifact_id:"));
+    assert!(!marker.contains("original_bytes:"));
+    assert!(!marker.contains("content_hash:"));
+}
+
+#[test]
+fn artifact_short_ref_helpers_match_psc_line_refs() {
+    assert_eq!(
+        smart_context_short_artifact_ref("sc:0123456789abcdef"),
+        "psc:0123456789abcdef"
+    );
+    assert_eq!(
+        smart_context_short_artifact_ref("custom-id"),
+        "psc:custom-id"
+    );
+    assert_eq!(
+        smart_context_short_artifact_line_ref("sc:0123456789abcdef", 2, 4),
+        "psc:0123456789abcdef#L2-L4"
     );
 }
 
