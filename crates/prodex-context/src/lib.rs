@@ -2789,11 +2789,10 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("test_runner_summary")
     } else if lower.starts_with("done in ") {
         Some("done")
-    } else if lower.starts_with("build successful") || lower.contains(" build success") {
-        Some("build_success")
-    } else if lower.starts_with("build successful in ")
+    } else if lower.starts_with("build successful")
         || lower.starts_with("build success")
         || lower.starts_with("[info] build success")
+        || lower.contains(" build success")
     {
         Some("build_success")
     } else if lower.starts_with("[info] --- ") || lower.starts_with("> task ") {
@@ -2821,9 +2820,10 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         || lower.starts_with("[info] tests run:")
     {
         Some("maven_summary")
-    } else if lower.starts_with("#") && (lower.contains(" done ") || lower.ends_with(" done")) {
-        Some("docker_steps")
-    } else if lower.starts_with("=> ") || lower.starts_with("=>=> ") {
+    } else if lower.starts_with("=> ")
+        || lower.starts_with("=>=> ")
+        || lower.starts_with("#") && (lower.contains(" done ") || lower.ends_with(" done"))
+    {
         Some("docker_steps")
     } else if lower.starts_with("[+] running ")
         || (lower.starts_with("container ") && docker_compose_success_state(&lower))
@@ -2862,9 +2862,8 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("packages_up_to_date")
     } else if lower.starts_with("found 0 vulnerabilities") {
         Some("vulnerability_summary")
-    } else if lower.starts_with("all files pass") {
-        Some("formatter_summary")
-    } else if lower.contains("all matched files use prettier code style")
+    } else if lower.starts_with("all files pass")
+        || lower.contains("all matched files use prettier code style")
         || lower.contains("eslint found no problems")
         || lower.starts_with("all checks passed")
     {
@@ -3134,10 +3133,8 @@ fn count_after_word(lower: &str, after_word_index: usize) -> Option<usize> {
         rest
     } else if let Some(rest) = after.strip_prefix('=') {
         rest
-    } else if let Some(rest) = after.strip_prefix('(') {
-        rest
     } else {
-        return None;
+        after.strip_prefix('(')?
     };
     let digits = after
         .trim_start()

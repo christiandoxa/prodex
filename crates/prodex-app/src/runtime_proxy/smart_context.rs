@@ -151,6 +151,12 @@ struct RuntimeSmartContextArtifactAlias {
     alias: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RuntimeSmartContextArtifactIndexes<'a> {
+    line_index: Option<&'a RuntimeSmartContextArtifactLineIndex>,
+    chunk_index: Option<&'a RuntimeSmartContextArtifactChunkIndex>,
+}
+
 #[derive(Debug, Default)]
 struct RuntimeSmartContextProxyState {
     enabled: bool,
@@ -2452,8 +2458,10 @@ fn runtime_smart_context_condense_tool_outputs(
                 let compacted = runtime_smart_context_progressive_tool_output_summary(
                     &artifact,
                     &output,
-                    store.line_index(&artifact.id),
-                    store.chunk_index(&artifact.id),
+                    RuntimeSmartContextArtifactIndexes {
+                        line_index: store.line_index(&artifact.id),
+                        chunk_index: store.chunk_index(&artifact.id),
+                    },
                     tier,
                     inline_limit,
                     &compaction_metadata,
@@ -2480,8 +2488,7 @@ fn runtime_smart_context_condense_tool_outputs(
 fn runtime_smart_context_progressive_tool_output_summary(
     artifact: &runtime_proxy_crate::SmartContextArtifactRef,
     text: &str,
-    line_index: Option<&RuntimeSmartContextArtifactLineIndex>,
-    chunk_index: Option<&RuntimeSmartContextArtifactChunkIndex>,
+    indexes: RuntimeSmartContextArtifactIndexes<'_>,
     tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
     preview_byte_limit: usize,
     metadata: &RuntimeSmartContextToolOutputCompactionMetadata,
@@ -2507,7 +2514,7 @@ fn runtime_smart_context_progressive_tool_output_summary(
         &artifact.id,
         text,
         &summary,
-        chunk_index,
+        indexes.chunk_index,
     );
     let mut sections = Vec::new();
     if !summary.trim().is_empty() {
@@ -2519,7 +2526,7 @@ fn runtime_smart_context_progressive_tool_output_summary(
     if let Some(critical_ranges) = runtime_smart_context_progressive_critical_exact_ranges(
         &artifact.id,
         text,
-        line_index,
+        indexes.line_index,
         &summary,
     ) {
         sections.push(critical_ranges);
