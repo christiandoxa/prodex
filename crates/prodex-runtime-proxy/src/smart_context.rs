@@ -1398,8 +1398,9 @@ pub fn smart_context_stabilize_static_context_text(text: &str) -> String {
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     let lines = text
         .lines()
-        .map(|line| line.trim_end().to_string())
+        .map(str::trim_end)
         .filter(|line| !smart_context_static_context_noise_line(line))
+        .map(|line| smart_context_normalize_volatile_static_context(line).into_owned())
         .collect::<Vec<_>>();
 
     let Some(start) = lines.iter().position(|line| !line.trim().is_empty()) else {
@@ -1558,6 +1559,71 @@ pub struct SmartContextRewriteTelemetrySample {
     pub fallback: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmartContextTransformCategory {
+    StructuralMinifyJson,
+    StaticContextPromptCache,
+    CommandOutputCache,
+    ToolOutputArtifact,
+    CrossTurnDuplicateRef,
+    AutoRehydrate,
+    MemoryCapsuleSelection,
+    Other(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextTransformRewriteTelemetrySample {
+    pub category: SmartContextTransformCategory,
+    pub sample: SmartContextRewriteTelemetrySample,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextTransformRecentRewriteSafety {
+    pub category: SmartContextTransformCategory,
+    pub safety: SmartContextRecentRewriteSafety,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmartContextTransformRewriteSafetyReason {
+    NoTransformSamples,
+    InsufficientTransformSamples,
+    RecentSafetyFallback,
+    FallbackObserved,
+    UnsafeSample,
+    WeakSavings,
+    ModerateSavings,
+    StableSavings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextTransformRewriteSafetyScoreInput {
+    pub category: SmartContextTransformCategory,
+    pub recent_rewrite_safety: SmartContextRecentRewriteSafety,
+    pub telemetry_samples: Vec<SmartContextTransformRewriteTelemetrySample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextPerTransformRewriteSafetyInput {
+    pub recent_rewrite_safety: Vec<SmartContextTransformRecentRewriteSafety>,
+    pub telemetry_samples: Vec<SmartContextTransformRewriteTelemetrySample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextTransformRewriteSafetyScore {
+    pub category: SmartContextTransformCategory,
+    pub decision: SmartContextRewriteBudgetDecision,
+    pub safety_score: i32,
+    pub telemetry_samples: usize,
+    pub safety_samples: usize,
+    pub safe_samples: usize,
+    pub fallback_samples: usize,
+    pub unsafe_samples: usize,
+    pub weak_savings_samples: usize,
+    pub saved_tokens: u64,
+    pub average_body_ratio_percent: Option<usize>,
+    pub reasons: Vec<SmartContextTransformRewriteSafetyReason>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SmartContextRewriteTelemetryBudgetInput {
     pub recent_rewrite_safety: SmartContextRecentRewriteSafety,
@@ -1646,19 +1712,9 @@ pub fn smart_context_rewrite_telemetry_budget_decision(
         return smart_context_recent_rewrite_safety_budget_decision(&input.recent_rewrite_safety);
     }
 
-    let saved_tokens = recent.iter().fold(0u64, |total, sample| {
-        total.saturating_add(
-            sample
-                .estimated_tokens_before
-                .saturating_sub(sample.estimated_tokens_after),
-        )
-    });
-    let average_body_ratio_percent = recent.iter().fold(0usize, |total, sample| {
-        total.saturating_add(smart_context_rewrite_body_ratio_percent(
-            sample.body_bytes_before,
-            sample.body_bytes_after,
-        ))
-    }) / recent.len();
+    let saved_tokens = smart_context_rewrite_telemetry_saved_tokens(&recent);
+    let average_body_ratio_percent =
+        smart_context_rewrite_telemetry_average_body_ratio_percent(&recent);
     let required_saved_tokens = smart_context_recent_rewrite_min_saved_tokens(recent.len());
 
     if saved_tokens >= required_saved_tokens
@@ -1674,6 +1730,188 @@ pub fn smart_context_rewrite_telemetry_budget_decision(
     } else {
         SmartContextRewriteBudgetDecision::NoChange
     }
+}
+
+pub fn smart_context_transform_rewrite_budget_decision(
+    input: SmartContextTransformRewriteSafetyScoreInput,
+) -> SmartContextRewriteBudgetDecision {
+    smart_context_transform_rewrite_safety_score(input).decision
+}
+
+pub fn smart_context_transform_rewrite_safety_score(
+    input: SmartContextTransformRewriteSafetyScoreInput,
+) -> SmartContextTransformRewriteSafetyScore {
+    let SmartContextTransformRewriteSafetyScoreInput {
+        category,
+        recent_rewrite_safety,
+        telemetry_samples,
+    } = input;
+    let recent = telemetry_samples
+        .iter()
+        .filter(|sample| sample.category == category)
+        .map(|sample| sample.sample)
+        .rev()
+        .take(SMART_CONTEXT_REWRITE_TELEMETRY_RECENT_LIMIT)
+        .collect::<Vec<_>>();
+    let safety_samples = recent_rewrite_safety
+        .safe_rewrites
+        .saturating_add(recent_rewrite_safety.fallback_rewrites);
+
+    if recent.is_empty() {
+        let mut score =
+            smart_context_transform_rewrite_safety_score_empty(category, &recent_rewrite_safety);
+        score.safety_samples = safety_samples;
+        return score;
+    }
+
+    let safe_samples = recent
+        .iter()
+        .filter(|sample| smart_context_rewrite_telemetry_sample_safe_saved(sample))
+        .count();
+    let fallback_samples = recent.iter().filter(|sample| sample.fallback).count();
+    let unsafe_samples = recent.iter().filter(|sample| !sample.safe).count();
+    let weak_savings_samples = recent
+        .iter()
+        .filter(|sample| {
+            !sample.fallback
+                && sample.safe
+                && !smart_context_rewrite_telemetry_sample_safe_saved(sample)
+        })
+        .count();
+    let saved_tokens = smart_context_rewrite_telemetry_saved_tokens(&recent);
+    let average_body_ratio_percent_value =
+        smart_context_rewrite_telemetry_average_body_ratio_percent(&recent);
+    let average_body_ratio_percent = Some(average_body_ratio_percent_value);
+    let mut reasons = Vec::new();
+
+    if fallback_samples > 0 || unsafe_samples > 0 || weak_savings_samples > 0 {
+        if fallback_samples > 0 {
+            reasons.push(SmartContextTransformRewriteSafetyReason::FallbackObserved);
+        }
+        if unsafe_samples > 0 {
+            reasons.push(SmartContextTransformRewriteSafetyReason::UnsafeSample);
+        }
+        if weak_savings_samples > 0 {
+            reasons.push(SmartContextTransformRewriteSafetyReason::WeakSavings);
+        }
+        return SmartContextTransformRewriteSafetyScore {
+            category,
+            decision: SmartContextRewriteBudgetDecision::Tighten,
+            safety_score: -100,
+            telemetry_samples: recent.len(),
+            safety_samples,
+            safe_samples,
+            fallback_samples,
+            unsafe_samples,
+            weak_savings_samples,
+            saved_tokens,
+            average_body_ratio_percent,
+            reasons,
+        };
+    }
+
+    if recent.len() < SMART_CONTEXT_REWRITE_TELEMETRY_MIN_SAMPLE_COUNT {
+        let decision = smart_context_recent_rewrite_safety_budget_decision(&recent_rewrite_safety);
+        reasons.push(SmartContextTransformRewriteSafetyReason::InsufficientTransformSamples);
+        if safety_samples > 0 {
+            reasons.push(SmartContextTransformRewriteSafetyReason::RecentSafetyFallback);
+            reasons.extend(smart_context_transform_rewrite_safety_reasons_for_decision(
+                decision,
+            ));
+        }
+        return SmartContextTransformRewriteSafetyScore {
+            category,
+            decision,
+            safety_score: smart_context_transform_rewrite_safety_score_value(decision),
+            telemetry_samples: recent.len(),
+            safety_samples,
+            safe_samples,
+            fallback_samples,
+            unsafe_samples,
+            weak_savings_samples,
+            saved_tokens,
+            average_body_ratio_percent,
+            reasons,
+        };
+    }
+
+    let required_saved_tokens = smart_context_recent_rewrite_min_saved_tokens(recent.len());
+    let decision = if saved_tokens >= required_saved_tokens
+        && average_body_ratio_percent_value
+            <= SMART_CONTEXT_REWRITE_TELEMETRY_RELAX_MAX_AVERAGE_BODY_RATIO_PERCENT
+    {
+        SmartContextRewriteBudgetDecision::Relax
+    } else if saved_tokens < required_saved_tokens
+        || average_body_ratio_percent_value
+            >= SMART_CONTEXT_REWRITE_TELEMETRY_TIGHTEN_MIN_AVERAGE_BODY_RATIO_PERCENT
+    {
+        SmartContextRewriteBudgetDecision::Tighten
+    } else {
+        SmartContextRewriteBudgetDecision::NoChange
+    };
+    reasons.extend(smart_context_transform_rewrite_safety_reasons_for_decision(
+        decision,
+    ));
+
+    SmartContextTransformRewriteSafetyScore {
+        category,
+        decision,
+        safety_score: smart_context_transform_rewrite_safety_score_value(decision),
+        telemetry_samples: recent.len(),
+        safety_samples,
+        safe_samples,
+        fallback_samples,
+        unsafe_samples,
+        weak_savings_samples,
+        saved_tokens,
+        average_body_ratio_percent,
+        reasons,
+    }
+}
+
+pub fn smart_context_per_transform_rewrite_safety_scores(
+    input: SmartContextPerTransformRewriteSafetyInput,
+) -> Vec<SmartContextTransformRewriteSafetyScore> {
+    let mut categories = BTreeSet::new();
+    let mut recent_safety =
+        BTreeMap::<SmartContextTransformCategory, SmartContextRecentRewriteSafety>::new();
+
+    for item in input.recent_rewrite_safety {
+        categories.insert(item.category.clone());
+        recent_safety
+            .entry(item.category)
+            .and_modify(|existing| {
+                existing.safe_rewrites = existing
+                    .safe_rewrites
+                    .saturating_add(item.safety.safe_rewrites);
+                existing.fallback_rewrites = existing
+                    .fallback_rewrites
+                    .saturating_add(item.safety.fallback_rewrites);
+                existing.saved_tokens = existing
+                    .saved_tokens
+                    .saturating_add(item.safety.saved_tokens);
+            })
+            .or_insert(item.safety);
+    }
+    for sample in &input.telemetry_samples {
+        categories.insert(sample.category.clone());
+    }
+
+    categories
+        .into_iter()
+        .map(|category| {
+            smart_context_transform_rewrite_safety_score(
+                SmartContextTransformRewriteSafetyScoreInput {
+                    recent_rewrite_safety: recent_safety
+                        .get(&category)
+                        .copied()
+                        .unwrap_or_default(),
+                    telemetry_samples: input.telemetry_samples.clone(),
+                    category,
+                },
+            )
+        })
+        .collect()
 }
 
 pub fn smart_context_learned_rewrite_policy(
@@ -2110,6 +2348,59 @@ pub fn smart_context_normalize_volatile_command_output(text: &str) -> Cow<'_, st
     }
 }
 
+pub fn smart_context_normalize_volatile_static_context(text: &str) -> Cow<'_, str> {
+    let mut normalized = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut index = 0usize;
+
+    while index < text.len() {
+        let rest = &text[index..];
+        let previous = smart_context_previous_char(text, index);
+
+        if let Some(len) = smart_context_ansi_escape_len(rest) {
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some(len) = smart_context_temp_path_len(rest) {
+            normalized.push_str("<tmp-path>");
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some(len) = smart_context_timestamp_len(rest, previous) {
+            normalized.push_str("<timestamp>");
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some((len, replacement)) =
+            smart_context_labeled_random_id_replacement(rest, previous)
+        {
+            normalized.push_str(&replacement);
+            index += len;
+            changed = true;
+            continue;
+        }
+        if let Some(len) = smart_context_uuid_len(rest, previous) {
+            normalized.push_str("<id>");
+            index += len;
+            changed = true;
+            continue;
+        }
+
+        let ch = rest.chars().next().expect("index is within string");
+        normalized.push(ch);
+        index += ch.len_utf8();
+    }
+
+    if changed {
+        Cow::Owned(normalized)
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 fn smart_context_effective_input_source(
     current_input_tokens: u64,
     estimated_current_request_tokens: u64,
@@ -2275,6 +2566,90 @@ fn smart_context_rewrite_telemetry_sample_safe_saved(
     sample.safe
         && sample.estimated_tokens_after < sample.estimated_tokens_before
         && sample.body_bytes_after < sample.body_bytes_before
+}
+
+fn smart_context_rewrite_telemetry_saved_tokens(
+    samples: &[SmartContextRewriteTelemetrySample],
+) -> u64 {
+    samples.iter().fold(0u64, |total, sample| {
+        total.saturating_add(
+            sample
+                .estimated_tokens_before
+                .saturating_sub(sample.estimated_tokens_after),
+        )
+    })
+}
+
+fn smart_context_rewrite_telemetry_average_body_ratio_percent(
+    samples: &[SmartContextRewriteTelemetrySample],
+) -> usize {
+    if samples.is_empty() {
+        return 100;
+    }
+    samples.iter().fold(0usize, |total, sample| {
+        total.saturating_add(smart_context_rewrite_body_ratio_percent(
+            sample.body_bytes_before,
+            sample.body_bytes_after,
+        ))
+    }) / samples.len()
+}
+
+fn smart_context_transform_rewrite_safety_score_empty(
+    category: SmartContextTransformCategory,
+    safety: &SmartContextRecentRewriteSafety,
+) -> SmartContextTransformRewriteSafetyScore {
+    let safety_samples = safety
+        .safe_rewrites
+        .saturating_add(safety.fallback_rewrites);
+    let decision = smart_context_recent_rewrite_safety_budget_decision(safety);
+    let mut reasons = vec![SmartContextTransformRewriteSafetyReason::NoTransformSamples];
+    if safety_samples > 0 {
+        reasons.push(SmartContextTransformRewriteSafetyReason::RecentSafetyFallback);
+        reasons.extend(smart_context_transform_rewrite_safety_reasons_for_decision(
+            decision,
+        ));
+    }
+
+    SmartContextTransformRewriteSafetyScore {
+        category,
+        decision,
+        safety_score: smart_context_transform_rewrite_safety_score_value(decision),
+        telemetry_samples: 0,
+        safety_samples,
+        safe_samples: 0,
+        fallback_samples: 0,
+        unsafe_samples: 0,
+        weak_savings_samples: 0,
+        saved_tokens: 0,
+        average_body_ratio_percent: None,
+        reasons,
+    }
+}
+
+fn smart_context_transform_rewrite_safety_reasons_for_decision(
+    decision: SmartContextRewriteBudgetDecision,
+) -> Vec<SmartContextTransformRewriteSafetyReason> {
+    match decision {
+        SmartContextRewriteBudgetDecision::NoChange => {
+            vec![SmartContextTransformRewriteSafetyReason::ModerateSavings]
+        }
+        SmartContextRewriteBudgetDecision::Relax => {
+            vec![SmartContextTransformRewriteSafetyReason::StableSavings]
+        }
+        SmartContextRewriteBudgetDecision::Tighten => {
+            vec![SmartContextTransformRewriteSafetyReason::WeakSavings]
+        }
+    }
+}
+
+fn smart_context_transform_rewrite_safety_score_value(
+    decision: SmartContextRewriteBudgetDecision,
+) -> i32 {
+    match decision {
+        SmartContextRewriteBudgetDecision::NoChange => 0,
+        SmartContextRewriteBudgetDecision::Relax => 100,
+        SmartContextRewriteBudgetDecision::Tighten => -100,
+    }
 }
 
 fn smart_context_rewrite_body_ratio_percent(
@@ -3046,8 +3421,12 @@ fn smart_context_random_id_key_is_volatile(key: &str) -> bool {
     matches!(
         key,
         "request id"
+            | "x request id"
             | "trace id"
             | "run id"
+            | "session id"
+            | "conversation id"
+            | "turn id"
             | "span id"
             | "correlation id"
             | "invocation id"

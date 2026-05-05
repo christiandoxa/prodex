@@ -3008,6 +3008,7 @@ fn smart_context_regression_fallback_exact_on_quality_risk() {
         blob_outputs_condensed: 0,
         rehydrated_refs: 0,
         static_context_deltas: 0,
+        repo_state_facts: 0,
     };
     let before = br#"{"input":[{"content":"error: failed\nsrc/main.rs:10:5"}]}"#;
     let after = br#"{"input":[{"content":"summary"}]}"#;
@@ -3457,6 +3458,159 @@ fn smart_context_static_context_items_have_stable_id_order() {
 }
 
 #[test]
+fn smart_context_repo_state_micro_cache_collapses_repeated_tool_output_facts() {
+    let shared = smart_context_test_shared("repo-state-tool-repeat");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let output = "\
+Branch: feature/repo-cache
+Dirty files:
+- crates/prodex-app/src/runtime_proxy/smart_context.rs
+Recent changed files:
+- crates/prodex-app/tests/src/runtime_proxy/smart_context.rs
+Package manager: cargo
+Main test command: cargo test -q smart_context";
+    let first = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "repo_state",
+            "output": output
+        }]
+    }));
+    let second = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "repo_state",
+            "output": output
+        }]
+    }));
+
+    let _ =
+        prepare_runtime_smart_context_http_body(130, &first, &shared, RuntimeRouteKind::Responses);
+    let prepared =
+        prepare_runtime_smart_context_http_body(131, &second, &shared, RuntimeRouteKind::Responses);
+
+    let Cow::Owned(body) = prepared else {
+        panic!("expected repeated repo-state facts to rewrite");
+    };
+    let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    let rewritten = value["input"][0]["output"].as_str().unwrap();
+    assert!(rewritten.starts_with("psc repo-state repeat"));
+    assert!(rewritten.contains("branch=feature/repo-cache"));
+    assert!(rewritten.contains("dirty=1"));
+    assert!(rewritten.contains("recent=1"));
+    assert!(rewritten.contains("pm=cargo"));
+    assert!(rewritten.contains("cargo test -q smart_context"));
+    assert!(!rewritten.contains("crates/prodex-app/src/runtime_proxy/smart_context.rs"));
+    assert!(!rewritten.contains("crates/prodex-app/tests/src/runtime_proxy/smart_context.rs"));
+}
+
+#[test]
+fn smart_context_repo_state_micro_cache_preserves_changed_tool_output_facts() {
+    let shared = smart_context_test_shared("repo-state-tool-changed");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let first_output = "\
+Branch: feature/repo-cache
+Dirty files:
+- crates/prodex-app/src/runtime_proxy/smart_context.rs
+Recent changed files:
+- crates/prodex-app/tests/src/runtime_proxy/smart_context.rs
+Package manager: cargo
+Main test command: cargo test -q smart_context";
+    let changed_output = "\
+Branch: feature/repo-cache
+Dirty files:
+- crates/prodex-app/src/runtime_proxy/rotation.rs
+Recent changed files:
+- crates/prodex-app/tests/src/runtime_proxy/rotation.rs
+Package manager: cargo
+Main test command: cargo test -q smart_context";
+    let first = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "repo_state",
+            "output": first_output
+        }]
+    }));
+    let changed = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "repo_state",
+            "output": changed_output
+        }]
+    }));
+
+    let _ =
+        prepare_runtime_smart_context_http_body(132, &first, &shared, RuntimeRouteKind::Responses);
+    let prepared = prepare_runtime_smart_context_http_body(
+        133,
+        &changed,
+        &shared,
+        RuntimeRouteKind::Responses,
+    );
+
+    let value = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
+    let output = value["input"][0]["output"].as_str().unwrap();
+    assert_eq!(output, changed_output);
+    assert!(!output.contains("psc repo-state repeat"));
+    assert!(output.contains("crates/prodex-app/src/runtime_proxy/rotation.rs"));
+    assert!(output.contains("crates/prodex-app/tests/src/runtime_proxy/rotation.rs"));
+}
+
+#[test]
+fn smart_context_repo_state_micro_cache_collapses_repeated_static_facts() {
+    let shared = smart_context_test_shared("repo-state-static-repeat");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let exactness = runtime_proxy_crate::smart_context_exactness_guard(
+        runtime_proxy_crate::SmartContextExactnessInput::default(),
+    );
+    let instructions = "\
+Keep affinity exact.
+Branch: feature/repo-cache
+Dirty files:
+- crates/prodex-app/src/runtime_proxy/smart_context.rs
+Recent changed files:
+- crates/prodex-app/tests/src/runtime_proxy/smart_context.rs
+Package manager: cargo
+Main test command: cargo test -q smart_context";
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        let mut first = serde_json::json!({ "instructions": instructions });
+        let mut first_stats = RuntimeSmartContextTransformStats::default();
+        assert!(!runtime_smart_context_apply_repo_state_micro_cache(
+            &mut first,
+            state,
+            134,
+            &exactness,
+            true,
+            &mut first_stats,
+        ));
+        assert_eq!(first["instructions"].as_str(), Some(instructions));
+        assert_eq!(first_stats.repo_state_facts, 0);
+
+        let mut second = serde_json::json!({ "instructions": instructions });
+        let mut second_stats = RuntimeSmartContextTransformStats::default();
+        assert!(runtime_smart_context_apply_repo_state_micro_cache(
+            &mut second,
+            state,
+            135,
+            &exactness,
+            true,
+            &mut second_stats,
+        ));
+        let rewritten = second["instructions"].as_str().unwrap();
+        assert!(rewritten.contains("Keep affinity exact."));
+        assert!(rewritten.contains("psc repo-state repeat"));
+        assert!(rewritten.contains("branch=feature/repo-cache"));
+        assert!(!rewritten.contains("Dirty files:"));
+        assert!(!rewritten.contains("crates/prodex-app/src/runtime_proxy/smart_context.rs"));
+        assert_eq!(second_stats.repo_state_facts, 1);
+    })
+    .unwrap();
+}
+
+#[test]
 fn smart_context_reuses_existing_tool_output_artifact_with_short_ref() {
     let output = "repeat tool output ".repeat(200);
     let mut store = RuntimeSmartContextArtifactStore::default();
@@ -3850,6 +4004,7 @@ fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
         blob_outputs_condensed: 0,
         rehydrated_refs: 0,
         static_context_deltas: 0,
+        repo_state_facts: 0,
     };
 
     let (body, repaired_stats) = runtime_smart_context_try_surgical_rehydrate_critical_ranges(
@@ -4015,6 +4170,7 @@ fn smart_context_self_check_passes_through_growth_without_rehydrate() {
         blob_outputs_condensed: 0,
         rehydrated_refs: 0,
         static_context_deltas: 0,
+        repo_state_facts: 0,
     };
 
     assert_eq!(

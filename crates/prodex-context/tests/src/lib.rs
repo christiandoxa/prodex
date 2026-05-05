@@ -3232,6 +3232,170 @@ fn log_stream_compaction_keeps_stack_head_tail_and_drops_middle_noise() {
 }
 
 #[test]
+fn gh_run_watch_repeated_snapshots_compact_to_last_delta_and_failure() {
+    let mut input = String::new();
+    for cycle in 0..36 {
+        input.push_str("Refreshing run status every 3 seconds. Press Ctrl+C to quit.\n");
+        input.push_str("JOBS\n");
+        match cycle {
+            0..=9 => {
+                input.push_str("- build queued\n");
+                input.push_str("- test queued\n");
+            }
+            10..=20 => {
+                input.push_str("* build running\n");
+                input.push_str("- test queued\n");
+            }
+            21..=34 => {
+                input.push_str("build success\n");
+                input.push_str("* test running\n");
+            }
+            _ => {
+                input.push_str("build success\n");
+                input.push_str("X test failed\n");
+                input.push_str("Error: Process completed with exit code 1.\n");
+            }
+        }
+        input.push('\n');
+    }
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 14,
+            max_line_chars: 180,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.output.contains("pcs: watcher-delta"));
+    assert!(report.output.contains("last state changes"));
+    assert!(report.output.contains("X test failed"));
+    assert!(
+        report
+            .output
+            .contains("Error: Process completed with exit code 1.")
+    );
+    assert!(!report.output.contains("- build queued"));
+    assert!(report.compacted_lines <= 14);
+    assert_token_regression_budget(&input, &report, 70);
+}
+
+#[test]
+fn successful_command_output_one_lines_noisy_success_and_keeps_failures_exact() {
+    let mut input = String::new();
+    for index in 0..80 {
+        input.push_str(&format!(
+            "Progress: resolved {}, reused {}, downloaded 0, added 0\n",
+            index + 1,
+            index
+        ));
+    }
+    input.push_str("Done in 3.21s using pnpm v9.0.0\n");
+
+    let report = compact_successful_command_output_with_options(
+        &input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("pnpm install".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 10,
+            max_line_chars: 180,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert_eq!(report.compacted_lines, 1);
+    assert!(report.output.contains("pcs: ok lines=81"));
+    assert!(report.output.contains("noise:"));
+    assert!(report.output.contains("cmd: pnpm install"));
+    assert!(!report.output.contains("Progress: resolved 80"));
+    assert_no_critical_signal_loss(&input, &report.output);
+
+    let failure = "\
+PASS tests/unit.test.ts
+Error: Process completed with exit code 1.
+src/app.ts:12:7
+";
+    let failure_report = compact_successful_command_output_with_options(
+        failure,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("pnpm test".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!failure_report.compacted);
+    assert!(failure_report.failure_suspected);
+    assert_eq!(failure_report.output, failure);
+}
+
+#[test]
+fn github_actions_failure_log_slices_failed_step_exit_and_error_context() {
+    let mut input = String::new();
+    input.push_str("Current runner version: '2.329.0'\n");
+    input.push_str("job: test-linux\n");
+    input.push_str("##[group]Run actions/checkout@v4\n");
+    input.push_str("Syncing repository: acme/prodex\n");
+    input.push_str("##[endgroup]\n");
+    for index in 0..20 {
+        input.push_str(&format!("INFO cache restore line {index}\n"));
+    }
+    input.push_str("##[group]Run cargo test --workspace\n");
+    input.push_str("cargo test --workspace --locked\n");
+    for index in 0..30 {
+        input.push_str(&format!("   Compiling crate_{index} v0.1.0\n"));
+    }
+    input.push_str("error[E0425]: cannot find value `missing` in this scope\n");
+    input.push_str("  --> crates/app/src/lib.rs:88:13\n");
+    input.push_str("   |\n");
+    input.push_str("88 |     missing();\n");
+    input.push_str("   |     ^^^^^^^ not found in this scope\n");
+    input.push_str(
+        "process didn't exit successfully: `cargo test --workspace` (exit status: 101)\n",
+    );
+    input.push_str("##[error]Process completed with exit code 101.\n");
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 18,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.output.contains("pcs: ci-failure"));
+    assert!(report.output.contains("job=test-linux"));
+    assert!(report.output.contains("step=cargo test --workspace"));
+    assert!(report.output.contains("exit=101"));
+    assert!(
+        report
+            .output
+            .contains("error[E0425]: cannot find value `missing`")
+    );
+    assert!(report.output.contains("crates/app/src/lib.rs:88:13"));
+    assert!(
+        report
+            .output
+            .contains("process didn't exit successfully: `cargo test --workspace`")
+    );
+    assert!(
+        report
+            .output
+            .contains("##[error]Process completed with exit code 101.")
+    );
+    assert!(!report.output.contains("INFO cache restore line 0"));
+    assert!(!report.output.contains("Compiling crate_0"));
+    assert_token_regression_budget(&input, &report, 65);
+}
+
+#[test]
 fn token_regression_harness_guards_noisy_failure_compaction() {
     let mut input = String::from(
         "\

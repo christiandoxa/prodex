@@ -76,7 +76,8 @@ const RUNTIME_MEM_CONVERSATION_ELISION_MIN_CONTENT_BYTES: usize = 384;
 const RUNTIME_MEM_CONVERSATION_ELISION_SCAN_CHAR_LIMIT: usize = 8192;
 const RUNTIME_MEM_CONVERSATION_ELISION_MAX_FACTS: usize = 4;
 const RUNTIME_MEM_CONVERSATION_ELISION_FACT_CHAR_LIMIT: usize = 96;
-const RUNTIME_MEM_CONVERSATION_ELISION_SUMMARY_CHAR_LIMIT: usize = 360;
+const RUNTIME_MEM_CONVERSATION_LEDGER_OBJECTIVE_CHAR_LIMIT: usize = 112;
+const RUNTIME_MEM_CONVERSATION_LEDGER_SUMMARY_CHAR_LIMIT: usize = 420;
 const RUNTIME_MEM_RECALL_PROMPT_SCAN_CHAR_LIMIT: usize = 4096;
 const RUNTIME_MEM_RECALL_PROMPT_MAX_TERMS: usize = 32;
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -1354,6 +1355,7 @@ impl RuntimeMemConversationElisionState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeMemConversationElisionKind {
+    User,
     Assistant,
     Tool,
 }
@@ -1361,6 +1363,7 @@ enum RuntimeMemConversationElisionKind {
 impl RuntimeMemConversationElisionKind {
     fn as_str(self) -> &'static str {
         match self {
+            Self::User => "user",
             Self::Assistant => "assistant",
             Self::Tool => "tool",
         }
@@ -1494,6 +1497,12 @@ fn runtime_mem_elide_old_conversation_event(
         return;
     };
     let (kind, content_path, summary_paths, artifact_ref_paths) = match payload_type {
+        "user_message" => (
+            RuntimeMemConversationElisionKind::User,
+            "payload.message",
+            RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS,
+            RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS,
+        ),
         "agent_message" => (
             RuntimeMemConversationElisionKind::Assistant,
             "payload.message",
@@ -1516,12 +1525,6 @@ fn runtime_mem_elide_old_conversation_event(
     else {
         return;
     };
-    if kind == RuntimeMemConversationElisionKind::Assistant
-        && runtime_mem_conversation_has_final_decision_signal(content)
-    {
-        return;
-    }
-
     let artifact_ref =
         runtime_mem_first_prodex_artifact_ref_at_paths(event, artifact_ref_paths, content);
     let command = (kind == RuntimeMemConversationElisionKind::Tool)
@@ -1598,25 +1601,18 @@ fn runtime_mem_conversation_elision_summary(
     artifact_ref: Option<&str>,
 ) -> String {
     let mut parts = vec![format!(
-        "mem facts: kind={}; h={}; b={}; t~={}",
+        "mem ledger: kind={}; h={}; b={}; t~={}",
         kind.as_str(),
         runtime_mem_content_hash(content),
         content.len(),
         runtime_mem_approx_token_count(content)
     )];
 
-    let artifacts = runtime_mem_conversation_artifact_facts(content, artifact_ref);
-    runtime_mem_push_summary_facts(&mut parts, "artifacts", &artifacts);
-
-    let commands = runtime_mem_conversation_command_facts(content, command);
-    runtime_mem_push_summary_facts(&mut parts, "cmds", &commands);
+    let objectives = runtime_mem_conversation_objective_facts(kind, content);
+    runtime_mem_push_summary_facts(&mut parts, "objective", &objectives);
 
     let files = runtime_mem_conversation_file_facts(content);
     runtime_mem_push_summary_facts(&mut parts, "files", &files);
-
-    let failures =
-        runtime_mem_conversation_line_facts(content, runtime_mem_summary_has_critical_signal);
-    runtime_mem_push_summary_facts(&mut parts, "failures", &failures);
 
     let decisions = runtime_mem_conversation_line_facts(
         content,
@@ -1624,9 +1620,19 @@ fn runtime_mem_conversation_elision_summary(
     );
     runtime_mem_push_summary_facts(&mut parts, "decisions", &decisions);
 
+    let tests = runtime_mem_conversation_test_facts(content, command);
+    runtime_mem_push_summary_facts(&mut parts, "tests", &tests);
+
+    let failures =
+        runtime_mem_conversation_line_facts(content, runtime_mem_summary_has_critical_signal);
+    runtime_mem_push_summary_facts(&mut parts, "open_failures", &failures);
+
+    let artifacts = runtime_mem_conversation_artifact_facts(content, artifact_ref);
+    runtime_mem_push_summary_facts(&mut parts, "artifacts", &artifacts);
+
     runtime_mem_truncate_chars(
         &parts.join("; "),
-        RUNTIME_MEM_CONVERSATION_ELISION_SUMMARY_CHAR_LIMIT,
+        RUNTIME_MEM_CONVERSATION_LEDGER_SUMMARY_CHAR_LIMIT,
     )
 }
 
@@ -1635,6 +1641,65 @@ fn runtime_mem_push_summary_facts(parts: &mut Vec<String>, label: &str, facts: &
         return;
     }
     parts.push(format!("{label}=[{}]", facts.join(", ")));
+}
+
+fn runtime_mem_conversation_objective_facts(
+    kind: RuntimeMemConversationElisionKind,
+    content: &str,
+) -> Vec<String> {
+    let mut facts = Vec::new();
+    for line in runtime_mem_conversation_scan_text(content).lines() {
+        let Some(objective) = runtime_mem_conversation_objective_from_line(kind, line) else {
+            continue;
+        };
+        runtime_mem_push_limited_unique_fact(&mut facts, objective);
+        break;
+    }
+    facts
+}
+
+fn runtime_mem_conversation_objective_from_line(
+    kind: RuntimeMemConversationElisionKind,
+    line: &str,
+) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let lower = line.to_ascii_lowercase();
+    let explicit = [
+        "objective:",
+        "goal:",
+        "task:",
+        "request:",
+        "user asked:",
+        "implement ",
+        "fix ",
+        "add ",
+        "update ",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix));
+    if kind != RuntimeMemConversationElisionKind::User && !explicit {
+        return None;
+    }
+    let normalized = line
+        .strip_prefix("Objective:")
+        .or_else(|| line.strip_prefix("objective:"))
+        .or_else(|| line.strip_prefix("Goal:"))
+        .or_else(|| line.strip_prefix("goal:"))
+        .or_else(|| line.strip_prefix("Task:"))
+        .or_else(|| line.strip_prefix("task:"))
+        .or_else(|| line.strip_prefix("Request:"))
+        .or_else(|| line.strip_prefix("request:"))
+        .or_else(|| line.strip_prefix("User asked:"))
+        .or_else(|| line.strip_prefix("user asked:"))
+        .map(str::trim)
+        .unwrap_or(line);
+    Some(runtime_mem_truncate_chars(
+        normalized,
+        RUNTIME_MEM_CONVERSATION_LEDGER_OBJECTIVE_CHAR_LIMIT,
+    ))
 }
 
 fn runtime_mem_conversation_file_facts(content: &str) -> Vec<String> {
@@ -1658,21 +1723,46 @@ fn runtime_mem_conversation_file_facts(content: &str) -> Vec<String> {
     facts
 }
 
-fn runtime_mem_conversation_command_facts(content: &str, command: Option<&str>) -> Vec<String> {
+fn runtime_mem_conversation_test_facts(content: &str, command: Option<&str>) -> Vec<String> {
     let mut facts = Vec::new();
-    if let Some(command) = command.and_then(runtime_mem_conversation_normalize_command_fact) {
+    if let Some(command) = command
+        .and_then(runtime_mem_conversation_normalize_command_fact)
+        .filter(|command| runtime_mem_conversation_command_is_test(command))
+    {
         runtime_mem_push_limited_unique_fact(&mut facts, command);
     }
     for line in runtime_mem_conversation_scan_text(content).lines() {
         let Some(command) = runtime_mem_conversation_command_from_line(line) else {
             continue;
         };
+        if !runtime_mem_conversation_command_is_test(&command) {
+            continue;
+        }
         runtime_mem_push_limited_unique_fact(&mut facts, command);
         if facts.len() >= RUNTIME_MEM_CONVERSATION_ELISION_MAX_FACTS {
             break;
         }
     }
     facts
+}
+
+fn runtime_mem_conversation_command_is_test(command: &str) -> bool {
+    let command = command.trim();
+    command.starts_with("cargo test")
+        || command.starts_with("cargo nextest")
+        || command.starts_with("pytest")
+        || command.starts_with("python -m pytest")
+        || command.starts_with("python3 -m pytest")
+        || command.starts_with("npm test")
+        || command.starts_with("pnpm test")
+        || command.starts_with("yarn test")
+        || command.starts_with("go test")
+        || command.starts_with("mvn test")
+        || command.starts_with("gradle test")
+        || command.starts_with("./gradlew test")
+        || command.starts_with("just test")
+        || command.contains(" cargo test ")
+        || command.contains(" pytest ")
 }
 
 fn runtime_mem_conversation_artifact_facts(
@@ -1790,22 +1880,6 @@ fn runtime_mem_push_limited_unique_fact(facts: &mut Vec<String>, fact: String) {
         return;
     }
     facts.push(fact.to_string());
-}
-
-fn runtime_mem_conversation_has_final_decision_signal(text: &str) -> bool {
-    runtime_mem_conversation_scan_text(text)
-        .lines()
-        .any(runtime_mem_conversation_line_has_final_decision_signal)
-}
-
-fn runtime_mem_conversation_line_has_final_decision_signal(line: &str) -> bool {
-    let lower = line.trim().to_ascii_lowercase();
-    lower.starts_with("final:")
-        || lower.starts_with("final answer")
-        || lower.starts_with("decision:")
-        || lower.starts_with("decided:")
-        || lower.starts_with("conclusion:")
-        || lower.contains("final decision")
 }
 
 fn runtime_mem_conversation_line_has_decision_signal(line: &str) -> bool {
@@ -2074,6 +2148,11 @@ impl RuntimeMemSuperSlimV2InternState {
                     object.insert(field.to_string(), Value::String(resolved.clone()));
                 }
                 self.remember_resolved(field, &resolved);
+            } else if let Some(resolved) = self.resolve_inline_dictionary_refs(field, value) {
+                if let Some(object) = event.as_object_mut() {
+                    object.insert(field.to_string(), Value::String(resolved.clone()));
+                }
+                self.remember_resolved(field, &resolved);
             } else if runtime_mem_super_slim_v2_parse_dictionary_ref(value).is_none() {
                 self.remember_resolved(field, value);
             }
@@ -2172,6 +2251,53 @@ impl RuntimeMemSuperSlimV2InternState {
         }
     }
 
+    fn resolve_inline_dictionary_refs(&self, field: &str, value: &str) -> Option<String> {
+        let marker_prefix = format!("{{{RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX}{field}#");
+        let mut output = String::new();
+        let mut cursor = 0usize;
+        let mut changed = false;
+        while let Some(relative_start) = value[cursor..].find(&marker_prefix) {
+            let start = cursor + relative_start;
+            output.push_str(&value[cursor..start]);
+            let digits_start = start + marker_prefix.len();
+            let mut digits_end = digits_start;
+            for (offset, ch) in value[digits_start..].char_indices() {
+                if !ch.is_ascii_digit() {
+                    break;
+                }
+                digits_end = digits_start + offset + ch.len_utf8();
+            }
+            if digits_end == digits_start || !value[digits_end..].starts_with('}') {
+                output.push_str(&value[start..digits_end]);
+                cursor = digits_end;
+                continue;
+            }
+            let Some(index) = value[digits_start..digits_end].parse::<usize>().ok() else {
+                output.push_str(&value[start..digits_end]);
+                cursor = digits_end;
+                continue;
+            };
+            let Some(entry) = self
+                .dictionary_values
+                .get(field)
+                .and_then(|entries| entries.get(&index))
+                .filter(|entry| entry.mode == RuntimeMemSuperSlimV2DictionaryMode::Exact)
+            else {
+                output.push_str(&value[start..digits_end]);
+                cursor = digits_end;
+                continue;
+            };
+            output.push_str(&entry.value);
+            cursor = digits_end + 1;
+            changed = true;
+        }
+        if !changed {
+            return None;
+        }
+        output.push_str(&value[cursor..]);
+        Some(output)
+    }
+
     fn remember_resolved(&mut self, field: &str, value: &str) {
         self.remember_exact(field, value);
         self.remember_prefixes(field, value);
@@ -2241,6 +2367,7 @@ struct RuntimeMemSuperSlimV2DictionaryEntry {
 struct RuntimeMemSuperSlimV2DictionaryCandidate {
     field: String,
     mode: RuntimeMemSuperSlimV2DictionaryMode,
+    placement: RuntimeMemSuperSlimV2DictionaryPlacement,
     value: String,
     event_indexes: Vec<usize>,
 }
@@ -2256,6 +2383,12 @@ impl RuntimeMemSuperSlimV2DictionaryCandidate {
                 .map(|suffix| format!("{base_ref}+{suffix}")),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeMemSuperSlimV2DictionaryPlacement {
+    WholeField,
+    Inline,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2317,6 +2450,11 @@ fn runtime_mem_super_slim_v2_dictionary_candidates(
             events, field,
         ));
     }
+    for field in ["c", "r", "s"] {
+        candidates.extend(runtime_mem_super_slim_v2_inline_dictionary_candidates(
+            events, field,
+        ));
+    }
     candidates
 }
 
@@ -2335,6 +2473,7 @@ fn runtime_mem_super_slim_v2_exact_dictionary_candidates(
             |(value, event_indexes)| RuntimeMemSuperSlimV2DictionaryCandidate {
                 field: field.to_string(),
                 mode: RuntimeMemSuperSlimV2DictionaryMode::Exact,
+                placement: RuntimeMemSuperSlimV2DictionaryPlacement::WholeField,
                 value,
                 event_indexes,
             },
@@ -2372,6 +2511,7 @@ fn runtime_mem_super_slim_v2_prefix_dictionary_candidates(
             (event_indexes.len() > 1).then_some(RuntimeMemSuperSlimV2DictionaryCandidate {
                 field: field.to_string(),
                 mode: RuntimeMemSuperSlimV2DictionaryMode::Prefix,
+                placement: RuntimeMemSuperSlimV2DictionaryPlacement::WholeField,
                 value: prefix,
                 event_indexes,
             })
@@ -2379,7 +2519,68 @@ fn runtime_mem_super_slim_v2_prefix_dictionary_candidates(
         .collect()
 }
 
+fn runtime_mem_super_slim_v2_inline_dictionary_candidates(
+    events: &[Value],
+    field: &str,
+) -> Vec<RuntimeMemSuperSlimV2DictionaryCandidate> {
+    let values = runtime_mem_super_slim_v2_inline_field_strings(events, field);
+    let mut term_events = HashMap::<String, Vec<usize>>::new();
+    let mut term_occurrences = HashMap::<String, usize>::new();
+    for (event_index, value) in &values {
+        for term in runtime_mem_super_slim_v2_inline_dictionary_terms(value) {
+            let occurrences = value.matches(term.as_str()).count();
+            if occurrences == 0 {
+                continue;
+            }
+            let events = term_events.entry(term.clone()).or_default();
+            if !events.iter().any(|seen_index| seen_index == event_index) {
+                events.push(*event_index);
+            }
+            *term_occurrences.entry(term).or_default() += occurrences;
+        }
+    }
+    term_events
+        .into_iter()
+        .filter(|(term, event_indexes)| {
+            term_occurrences.get(term).copied().unwrap_or_default() > 1 && !event_indexes.is_empty()
+        })
+        .map(
+            |(value, event_indexes)| RuntimeMemSuperSlimV2DictionaryCandidate {
+                field: field.to_string(),
+                mode: RuntimeMemSuperSlimV2DictionaryMode::Exact,
+                placement: RuntimeMemSuperSlimV2DictionaryPlacement::Inline,
+                value,
+                event_indexes,
+            },
+        )
+        .collect()
+}
+
 fn runtime_mem_super_slim_v2_field_strings(events: &[Value], field: &str) -> Vec<(usize, String)> {
+    events
+        .iter()
+        .enumerate()
+        .filter_map(|(event_index, event)| {
+            let event_type = runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str)?;
+            if !runtime_mem_super_slim_v2_field_can_use_dictionary(event_type, field) {
+                return None;
+            }
+            let value = event.get(field)?.as_str()?;
+            if value.is_empty()
+                || value.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX)
+                || runtime_mem_super_slim_v2_parse_dictionary_ref(value).is_some()
+            {
+                return None;
+            }
+            Some((event_index, value.to_string()))
+        })
+        .collect()
+}
+
+fn runtime_mem_super_slim_v2_inline_field_strings(
+    events: &[Value],
+    field: &str,
+) -> Vec<(usize, String)> {
     events
         .iter()
         .enumerate()
@@ -2407,6 +2608,212 @@ fn runtime_mem_super_slim_v2_field_can_use_dictionary(event_type: &str, field: &
     }
 }
 
+fn runtime_mem_super_slim_v2_inline_dictionary_terms(value: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for token in runtime_mem_super_slim_v2_dictionary_tokens(value) {
+        for term in runtime_mem_super_slim_v2_token_dictionary_terms(&token) {
+            runtime_mem_push_dictionary_term(&mut terms, term);
+        }
+    }
+    for term in runtime_mem_super_slim_v2_package_terms(value) {
+        runtime_mem_push_dictionary_term(&mut terms, term);
+    }
+    terms
+}
+
+fn runtime_mem_super_slim_v2_dictionary_tokens(value: &str) -> Vec<String> {
+    value
+        .split(|ch: char| {
+            ch.is_whitespace()
+                || matches!(
+                    ch,
+                    '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';'
+                )
+        })
+        .filter_map(|token| {
+            let token = runtime_mem_super_slim_v2_trim_dictionary_token(token);
+            (!token.is_empty()).then(|| token.to_string())
+        })
+        .collect()
+}
+
+fn runtime_mem_super_slim_v2_trim_dictionary_token(token: &str) -> &str {
+    token
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';'
+            )
+        })
+        .trim_end_matches(['.', ',', ';', '!', '?'])
+}
+
+fn runtime_mem_super_slim_v2_token_dictionary_terms(token: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    if token.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX) {
+        return terms;
+    }
+    if let Some(term) = runtime_mem_super_slim_v2_temp_path_term(token) {
+        runtime_mem_push_dictionary_term(&mut terms, term);
+    }
+    for term in runtime_mem_super_slim_v2_url_terms(token) {
+        runtime_mem_push_dictionary_term(&mut terms, term);
+    }
+    if let Some(term) = runtime_mem_super_slim_v2_identity_term(token) {
+        runtime_mem_push_dictionary_term(&mut terms, term);
+    }
+    if let Some(term) = runtime_mem_super_slim_v2_stack_prefix_term(token) {
+        runtime_mem_push_dictionary_term(&mut terms, term);
+    }
+    terms
+}
+
+fn runtime_mem_super_slim_v2_temp_path_term(token: &str) -> Option<String> {
+    let token = token.trim_end_matches(':');
+    if ![
+        "/tmp/",
+        "/private/tmp/",
+        "/var/tmp/",
+        "/var/folders/",
+        "/run/user/",
+        "/dev/shm/",
+    ]
+    .iter()
+    .any(|prefix| token.starts_with(prefix))
+    {
+        return None;
+    }
+    runtime_mem_super_slim_v2_path_prefix_term(token).or_else(|| {
+        (token.len() >= RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS).then(|| token.to_string())
+    })
+}
+
+fn runtime_mem_super_slim_v2_path_prefix_term(token: &str) -> Option<String> {
+    let slash_index = token.rfind('/')?;
+    if slash_index == 0 {
+        return None;
+    }
+    let prefix = &token[..=slash_index];
+    (prefix.len() >= RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS).then(|| prefix.to_string())
+}
+
+fn runtime_mem_super_slim_v2_url_terms(token: &str) -> Vec<String> {
+    if !token.starts_with("https://") && !token.starts_with("http://") {
+        return Vec::new();
+    }
+    let mut terms = Vec::new();
+    let token = token.trim_end_matches('/');
+    if token.len() >= RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS {
+        runtime_mem_push_dictionary_term(&mut terms, token.to_string());
+    }
+    let scheme_end = token.find("://").map(|index| index + 3).unwrap_or_default();
+    if let Some(path_start) = token[scheme_end..].find('/') {
+        let origin_end = scheme_end + path_start;
+        let origin = &token[..origin_end];
+        if origin.len() >= RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS {
+            runtime_mem_push_dictionary_term(&mut terms, origin.to_string());
+        }
+        if let Some(prefix) = runtime_mem_super_slim_v2_path_prefix_term(token) {
+            runtime_mem_push_dictionary_term(&mut terms, prefix);
+        }
+    }
+    terms
+}
+
+fn runtime_mem_super_slim_v2_identity_term(token: &str) -> Option<String> {
+    let token = token
+        .trim_end_matches(':')
+        .trim_start_matches("profile=")
+        .trim_start_matches("account=")
+        .trim_start_matches("ref=")
+        .trim_start_matches("branch=");
+    if token.len() < RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS {
+        return None;
+    }
+    let lower = token.to_ascii_lowercase();
+    let profile_like = [
+        "profile-",
+        "profile_",
+        "prodex-profile-",
+        "codex-profile-",
+        "account-",
+        "account_",
+        "acct-",
+        "acct_",
+        "org-",
+        "org_",
+        "proj-",
+        "proj_",
+        "refs/heads/",
+        "refs/remotes/",
+        "refs/tags/",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix));
+    let branch_like = token.contains('/')
+        && [
+            "origin/",
+            "upstream/",
+            "feature/",
+            "bugfix/",
+            "hotfix/",
+            "release/",
+        ]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix));
+    let git_hash = token.len() >= 12 && token.chars().all(|ch| ch.is_ascii_hexdigit());
+    (profile_like || branch_like || git_hash).then(|| token.to_string())
+}
+
+fn runtime_mem_super_slim_v2_stack_prefix_term(token: &str) -> Option<String> {
+    if token.matches("::").count() < 2 {
+        return None;
+    }
+    let prefix_end = token.rfind("::")? + 2;
+    let prefix = &token[..prefix_end];
+    (prefix.len() >= RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS).then(|| prefix.to_string())
+}
+
+fn runtime_mem_super_slim_v2_package_terms(value: &str) -> Vec<String> {
+    let tokens = runtime_mem_super_slim_v2_dictionary_tokens(value);
+    let mut terms = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        let token = token
+            .trim_start_matches("crate=")
+            .trim_start_matches("package=")
+            .trim_start_matches("pkg=");
+        let previous = index.checked_sub(1).and_then(|index| tokens.get(index));
+        let package_context = previous.is_some_and(|previous| {
+            matches!(
+                previous.as_str(),
+                "-p" | "--package" | "--pkg" | "--crate" | "crate" | "package" | "pkg"
+            )
+        }) || value.contains(&format!("crate {token}"))
+            || value.contains(&format!("package {token}"));
+        let scoped_package = token.starts_with('@') && token.contains('/');
+        let crate_like = package_context
+            && token.len() >= RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS
+            && token
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':' | '/' | '@'));
+        if scoped_package || crate_like {
+            runtime_mem_push_dictionary_term(&mut terms, token.to_string());
+        }
+    }
+    terms
+}
+
+fn runtime_mem_push_dictionary_term(terms: &mut Vec<String>, term: String) {
+    let term = term.trim();
+    if term.len() < RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS
+        || term.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX)
+        || terms.iter().any(|existing| existing == term)
+    {
+        return;
+    }
+    terms.push(term.to_string());
+}
+
 fn runtime_mem_super_slim_v2_apply_dictionary_candidate(
     mut events: Vec<Value>,
     candidate: &RuntimeMemSuperSlimV2DictionaryCandidate,
@@ -2426,11 +2833,23 @@ fn runtime_mem_super_slim_v2_apply_dictionary_candidate(
         else {
             continue;
         };
-        let Some(compact_ref) = candidate.compact_ref(dictionary_index, &value) else {
-            continue;
+        let compacted = match candidate.placement {
+            RuntimeMemSuperSlimV2DictionaryPlacement::WholeField => {
+                candidate.compact_ref(dictionary_index, &value)
+            }
+            RuntimeMemSuperSlimV2DictionaryPlacement::Inline => {
+                let compact_ref = format!(
+                    "{{{}}}",
+                    runtime_mem_super_slim_v2_dictionary_ref(&candidate.field, dictionary_index)
+                );
+                let compacted = value.replace(candidate.value.as_str(), &compact_ref);
+                (compacted != value).then_some(compacted)
+            }
         };
-        if let Some(object) = events.get_mut(*event_index).and_then(Value::as_object_mut) {
-            object.insert(candidate.field.clone(), Value::String(compact_ref));
+        if let Some(compacted) = compacted
+            && let Some(object) = events.get_mut(*event_index).and_then(Value::as_object_mut)
+        {
+            object.insert(candidate.field.clone(), Value::String(compacted));
         }
     }
 

@@ -1449,6 +1449,63 @@ fn static_context_stabilizer_ignores_timestamp_noise() {
 }
 
 #[test]
+fn static_context_prompt_cache_normalizes_inline_volatile_noise() {
+    let first_text = "Trace request_id=123e4567-e89b-12d3-a456-426614174000 session_id=sess_alpha_123456789 path=/tmp/prodex-a/run-123 at 2026-05-04T01:02:03Z\nRule: Keep profile affinity\n";
+    let second_text = "Trace request_id=123e4567-e89b-12d3-a456-426614174999 session_id=sess_beta_999999999 path=/tmp/prodex-b/run-999 at 2026-05-05T09:08:07Z\nRule: Keep profile affinity\n";
+
+    let first_canonical = smart_context_stabilize_static_context_text(first_text);
+    let second_canonical = smart_context_stabilize_static_context_text(second_text);
+    let first =
+        smart_context_static_context_prompt_cache_fingerprint([SmartContextStaticContextItem {
+            id: "prodex-context".to_string(),
+            text: first_text.to_string(),
+        }]);
+    let second =
+        smart_context_static_context_prompt_cache_fingerprint([SmartContextStaticContextItem {
+            id: "prodex-context".to_string(),
+            text: second_text.to_string(),
+        }]);
+
+    assert_eq!(
+        first_canonical,
+        "Trace request_id=<id> session_id=<id> path=<tmp-path> at <timestamp>\nRule: Keep profile affinity"
+    );
+    assert_eq!(first_canonical, second_canonical);
+    assert_eq!(first.content_hash, second.content_hash);
+    assert_eq!(first.items[0].canonical_text, first_canonical);
+}
+
+#[test]
+fn static_context_prompt_cache_still_changes_on_substantive_text_with_volatile_noise() {
+    let before =
+        smart_context_static_context_prompt_cache_fingerprint([SmartContextStaticContextItem {
+            id: "prodex-context".to_string(),
+            text: "Trace request_id=123e4567-e89b-12d3-a456-426614174000 path=/tmp/prodex-a/run-123 at 2026-05-04T01:02:03Z\nRule: Keep profile affinity\n".to_string(),
+        }]);
+    let after =
+        smart_context_static_context_prompt_cache_fingerprint([SmartContextStaticContextItem {
+            id: "prodex-context".to_string(),
+            text: "Trace request_id=123e4567-e89b-12d3-a456-426614174999 path=/tmp/prodex-b/run-999 at 2026-05-05T09:08:07Z\nRule: Allow mid-stream rotation\n".to_string(),
+        }]);
+
+    assert_ne!(before.content_hash, after.content_hash);
+    assert_ne!(
+        before.items[0].canonical_text,
+        after.items[0].canonical_text
+    );
+    assert!(
+        before.items[0]
+            .canonical_text
+            .contains("Keep profile affinity")
+    );
+    assert!(
+        after.items[0]
+            .canonical_text
+            .contains("Allow mid-stream rotation")
+    );
+}
+
+#[test]
 fn static_context_prompt_cache_fingerprint_changes_on_substantive_text() {
     let before =
         smart_context_static_context_prompt_cache_fingerprint([SmartContextStaticContextItem {
@@ -1788,6 +1845,84 @@ fn rewrite_telemetry_budget_decision_keeps_neutral_for_moderate_safe_savings() {
 }
 
 #[test]
+fn per_transform_rewrite_safety_scores_categories_independently() {
+    let samples = vec![
+        smart_context_test_transform_rewrite_telemetry_sample(
+            SmartContextTransformCategory::CommandOutputCache,
+            smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000),
+        ),
+        smart_context_test_transform_rewrite_telemetry_sample(
+            SmartContextTransformCategory::CommandOutputCache,
+            smart_context_test_rewrite_telemetry_sample(8_000, 3_200, 2_000, 800),
+        ),
+        smart_context_test_transform_rewrite_telemetry_sample(
+            SmartContextTransformCategory::StaticContextPromptCache,
+            smart_context_test_rewrite_telemetry_sample(10_000, 9_000, 2_500, 2_450),
+        ),
+        smart_context_test_transform_rewrite_telemetry_sample(
+            SmartContextTransformCategory::StaticContextPromptCache,
+            smart_context_test_rewrite_telemetry_sample(8_000, 7_200, 2_000, 1_950),
+        ),
+        smart_context_test_transform_rewrite_telemetry_sample(
+            SmartContextTransformCategory::CrossTurnDuplicateRef,
+            SmartContextRewriteTelemetrySample {
+                fallback: true,
+                ..smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000)
+            },
+        ),
+    ];
+    let global =
+        smart_context_rewrite_telemetry_budget_decision(SmartContextRewriteTelemetryBudgetInput {
+            telemetry_samples: samples.iter().map(|sample| sample.sample).collect(),
+            ..SmartContextRewriteTelemetryBudgetInput::default()
+        });
+
+    let scores = smart_context_per_transform_rewrite_safety_scores(
+        SmartContextPerTransformRewriteSafetyInput {
+            recent_rewrite_safety: Vec::new(),
+            telemetry_samples: samples,
+        },
+    );
+    let command = smart_context_test_transform_score(
+        &scores,
+        SmartContextTransformCategory::CommandOutputCache,
+    );
+    let static_context = smart_context_test_transform_score(
+        &scores,
+        SmartContextTransformCategory::StaticContextPromptCache,
+    );
+    let cross_turn = smart_context_test_transform_score(
+        &scores,
+        SmartContextTransformCategory::CrossTurnDuplicateRef,
+    );
+
+    assert_eq!(global, SmartContextRewriteBudgetDecision::Tighten);
+    assert_eq!(command.decision, SmartContextRewriteBudgetDecision::Relax);
+    assert_eq!(command.safety_score, 100);
+    assert_eq!(
+        command.reasons,
+        vec![SmartContextTransformRewriteSafetyReason::StableSavings]
+    );
+    assert_eq!(
+        static_context.decision,
+        SmartContextRewriteBudgetDecision::Tighten
+    );
+    assert_eq!(
+        static_context.reasons,
+        vec![SmartContextTransformRewriteSafetyReason::WeakSavings]
+    );
+    assert_eq!(
+        cross_turn.decision,
+        SmartContextRewriteBudgetDecision::Tighten
+    );
+    assert_eq!(cross_turn.fallback_samples, 1);
+    assert_eq!(
+        cross_turn.reasons,
+        vec![SmartContextTransformRewriteSafetyReason::FallbackObserved]
+    );
+}
+
+#[test]
 fn rewrite_budget_application_respects_bounds() {
     let policy = SmartContextAdaptiveBudgetPolicy {
         tier: SmartContextTokenBudgetTier::Condensed,
@@ -2080,6 +2215,23 @@ fn smart_context_test_bucketed_rewrite_telemetry_sample(
         bucket_key: Some(bucket_key),
         sample,
     }
+}
+
+fn smart_context_test_transform_rewrite_telemetry_sample(
+    category: SmartContextTransformCategory,
+    sample: SmartContextRewriteTelemetrySample,
+) -> SmartContextTransformRewriteTelemetrySample {
+    SmartContextTransformRewriteTelemetrySample { category, sample }
+}
+
+fn smart_context_test_transform_score(
+    scores: &[SmartContextTransformRewriteSafetyScore],
+    category: SmartContextTransformCategory,
+) -> &SmartContextTransformRewriteSafetyScore {
+    scores
+        .iter()
+        .find(|score| score.category == category)
+        .unwrap_or_else(|| panic!("missing transform score: {category:?}"))
 }
 
 fn smart_context_test_rewrite_telemetry_sample(
