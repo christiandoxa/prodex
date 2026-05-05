@@ -29,14 +29,15 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
     );
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact"));
-    assert!(output.contains("prodex-artifact:sc:"));
-    assert!(output.contains(&format!("bytes={}", original_output.len())));
+    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
+    assert!(output.contains("b="));
+    assert!(output.contains("h="));
+    assert!(output.contains(&format!("b={}", original_output.len())));
     assert!(output.contains(&format!(
-        "hash={}",
+        "h={}",
         runtime_proxy_crate::smart_context_hash_text(&original_output)
     )));
-    assert!(output.contains("rehydrate: use prodex-artifact:"));
+    assert!(output.contains("rehydrate psc:"));
     assert!(output.contains("#Lstart-Lend"));
     assert!(!output.contains("artifact_id:"));
     assert_eq!(stats.artifacts_stored, 1);
@@ -83,10 +84,10 @@ fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     runtime_smart_context_append_artifact_manifest_if_useful(&mut value, &store, &stats);
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact"));
+    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
     assert!(output.contains("summary:"));
     assert!(output.contains("critical exact ranges:"));
-    assert!(output.contains("prodex-artifact:sc:"));
+    assert!(output.contains("psc:"));
     assert!(output.contains("#L"));
     assert!(output.contains("error[E0425]"));
     assert!(output.contains("runtime_proxy::progressive_output"));
@@ -94,8 +95,8 @@ fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     assert!(!output.contains("noise line 419"));
 
     let manifest = value["input"][1]["content"].as_str().unwrap();
-    assert!(manifest.contains("prodex smart context artifact manifest"));
-    assert!(manifest.contains("full content omitted"));
+    assert!(manifest.contains("psc manifest"));
+    assert!(manifest.contains("content omitted"));
     assert!(!manifest.contains(hidden_tail));
     assert_eq!(stats.artifacts_stored, 1);
     assert_eq!(stats.tool_outputs_condensed, 1);
@@ -183,7 +184,7 @@ fn smart_context_uses_command_metadata_hint_for_tool_output_compaction() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact"));
+    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
     assert!(output.contains("search summary: 1 matches across 1 files"));
     assert!(output.contains("src/lib.rs (1 matches):"));
     assert_eq!(stats.tool_outputs_condensed, 1);
@@ -233,7 +234,7 @@ fn smart_context_uses_success_summary_for_long_success_tool_output() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact"));
+    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
     assert!(output.contains("successful command output"));
     assert!(output.contains("command: npm install && npm run build && find src -type f"));
     assert!(output.contains("exit: (unknown)"));
@@ -289,7 +290,7 @@ fn smart_context_keeps_failure_output_on_critical_preserving_path() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact"));
+    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
     assert!(!output.contains("successful command output"));
     assert!(output.contains("critical exact ranges:"));
     assert!(output.contains("error: build script failed"));
@@ -425,12 +426,12 @@ fn smart_context_artifact_manifest_lists_refs_without_full_content() {
     let manifest =
         runtime_smart_context_artifact_manifest(&store).expect("artifact manifest should render");
 
-    assert!(manifest.contains("prodex smart context artifact manifest"));
-    assert!(manifest.contains(&format!("prodex-artifact:{}", artifact.id)));
-    assert!(manifest.contains(&format!("bytes={}", artifact_text.len())));
-    assert!(manifest.contains("critical_ranges="));
-    assert!(manifest.contains("semantic_ranges="));
-    assert!(manifest.contains("kind=cargo-test"));
+    assert!(manifest.contains("psc manifest"));
+    assert!(manifest.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
+    assert!(manifest.contains(&format!("b={}", artifact_text.len())));
+    assert!(manifest.contains("cr="));
+    assert!(manifest.contains("sr="));
+    assert!(manifest.contains("k=cargo-test"));
     assert!(!manifest.contains(secret_line));
     assert!(!manifest.contains("cannot find value"));
 }
@@ -468,7 +469,7 @@ fn smart_context_appends_artifact_manifest_only_when_rewrite_useful() {
     let input = value["input"].as_array().unwrap();
     assert_eq!(input.len(), 2);
     let manifest = input[1]["content"].as_str().unwrap();
-    assert!(manifest.contains("prodex-artifact:sc:"));
+    assert!(manifest.contains("psc:"));
     assert!(!manifest.contains("error: compacted output"));
 }
 
@@ -563,6 +564,76 @@ fn smart_context_rehydrates_artifact_line_ranges() {
 }
 
 #[test]
+fn smart_context_parser_accepts_short_and_legacy_artifact_refs() {
+    let refs = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(
+        "new psc:abc123#L2-L4 full psc:sc:def456 old prodex-artifact:sc:789abc?lines=L1-L1"
+            .to_string(),
+    ));
+
+    assert!(refs.iter().any(|reference| {
+        reference.id == "sc:abc123"
+            && reference.line_range == Some(RuntimeSmartContextLineRange { start: 2, end: 4 })
+    }));
+    assert!(
+        refs.iter()
+            .any(|reference| reference.id == "sc:def456" && reference.line_range.is_none())
+    );
+    assert!(refs.iter().any(|reference| {
+        reference.id == "sc:789abc"
+            && reference.line_range == Some(RuntimeSmartContextLineRange { start: 1, end: 1 })
+    }));
+}
+
+#[test]
+fn smart_context_rehydrates_short_artifact_refs_and_line_ranges() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store
+        .insert_text(1, "line one\nline two\nline three")
+        .unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!(
+                "need {}",
+                runtime_smart_context_artifact_line_ref(&artifact.id, 2, 3)
+            )
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value(&mut value, &store, &mut stats);
+
+    assert_eq!(value["input"][0]["content"], "need line two\nline three");
+    assert_eq!(stats.rehydrated_refs, 1);
+}
+
+#[test]
+fn smart_context_rehydrates_legacy_verbose_artifact_marker_summary() {
+    let artifact_text = "legacy exact artifact body\nwith second line";
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!(
+                "prodex-sc artifact prodex-artifact:{} bytes={} hash={}; rehydrate: use prodex-artifact:{} or prodex-artifact:{}#Lstart-Lend\nlegacy summary",
+                artifact.id,
+                artifact.byte_len,
+                artifact.content_hash,
+                artifact.id,
+                artifact.id
+            )
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value(&mut value, &store, &mut stats);
+
+    assert_eq!(value["input"][0]["content"], artifact_text);
+    assert_eq!(stats.rehydrated_refs, 1);
+}
+
+#[test]
 fn smart_context_selective_rehydrate_semantic_terms_append_exact_ranges_only() {
     let artifact_text = "\
 diff --git a/src/diff.rs b/src/diff.rs
@@ -607,9 +678,9 @@ unrelated full artifact tail";
     assert_eq!(count, stats.rehydrated_refs);
     assert!(count >= 3);
     assert!(content.contains("semantic exact ranges:"));
-    assert!(content.contains(&format!("prodex-artifact:{}#L8-L8", artifact.id)));
+    assert!(content.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 8, 8)));
     assert!(content.contains("error[E0425]: cannot find value `missing` in this scope"));
-    assert!(content.contains(&format!("prodex-artifact:{}#L9-L9", artifact.id)));
+    assert!(content.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 9, 9)));
     assert!(content.contains("src/lib.rs:42:13"));
     assert!(content.contains("runtime_proxy::semantic_rehydrate"));
     assert!(!content.contains("diff --git a/src/diff.rs b/src/diff.rs"));
@@ -656,7 +727,7 @@ unrelated tail";
     let content = value["input"][0]["content"].as_str().unwrap();
     assert_eq!(count, 1);
     assert_eq!(stats.rehydrated_refs, 1);
-    assert!(content.contains(&format!("prodex-artifact:{}#L4-L6", artifact.id)));
+    assert!(content.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 4, 6)));
     assert!(content.contains("@@ -10,2 +10,3 @@ fn changed()"));
     assert!(content.contains("-old diff line"));
     assert!(content.contains("+new diff line"));
@@ -727,7 +798,7 @@ fn smart_context_dedupes_repeated_input_text() {
         value["input"][1]["content"]
             .as_str()
             .unwrap()
-            .contains("prodex smart context duplicate")
+            .contains("psc dup")
     );
     assert_eq!(stats.duplicate_texts, 1);
 }
@@ -767,7 +838,7 @@ fn smart_context_dedupe_preserves_static_prompt_prefix() {
         value["input"][2]["content"]
             .as_str()
             .unwrap()
-            .contains(&format!("prodex-artifact:{}", artifact.id))
+            .contains(&runtime_smart_context_artifact_ref(&artifact.id))
     );
     assert_eq!(stats.duplicate_texts, 0);
     assert_eq!(stats.cross_turn_duplicate_texts, 1);
@@ -789,7 +860,7 @@ fn smart_context_budget_uses_runtime_token_usage_observation() {
 
     let budget = runtime_smart_context_budget(
         &shared,
-        32,
+        b"small current request body payload",
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -823,7 +894,7 @@ fn smart_context_budget_uses_configured_model_context_window() {
 
     let budget = runtime_smart_context_budget(
         &shared,
-        32,
+        b"small current request body payload",
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -856,7 +927,7 @@ fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
 
     let before = runtime_smart_context_budget(
         &shared,
-        32,
+        b"small current request body payload",
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -872,7 +943,7 @@ fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
     );
     let after = runtime_smart_context_budget(
         &shared,
-        32,
+        b"small current request body payload",
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -951,7 +1022,7 @@ fn smart_context_prepare_rewrites_when_savings_and_critical_signals_preserved() 
     };
     assert!(body.len() < before_len);
     let text = String::from_utf8(body).unwrap();
-    assert!(text.contains("prodex-artifact:sc:"));
+    assert!(text.contains("psc:"));
     assert!(text.contains("error: failed at src/main.rs:10:5"));
 }
 
@@ -1000,7 +1071,7 @@ fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
         value["input"][1]["output"]
             .as_str()
             .unwrap()
-            .contains("prodex-artifact:sc:")
+            .contains("psc:")
     );
 }
 
@@ -1054,7 +1125,7 @@ fn smart_context_cross_turn_duplicate_uses_artifact_plan_and_exact_guard() {
     );
 
     let content = value["input"][0]["content"].as_str().unwrap();
-    assert!(content.contains(&format!("prodex-artifact:{}", artifact.id)));
+    assert!(content.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
     assert_eq!(stats.cross_turn_duplicate_texts, 1);
 
     let mut exact_value = serde_json::json!({
@@ -1132,7 +1203,7 @@ fn smart_context_static_context_fingerprint_drives_exact_policy_on_real_change()
     let changed_observation = runtime_smart_context_observe_static_context(&shared, &changed);
     let budget = runtime_smart_context_budget(
         &shared,
-        32,
+        b"small current request body payload",
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -1404,7 +1475,7 @@ fn smart_context_reuses_existing_tool_output_artifact_with_short_ref() {
     );
 
     let rewritten = value["input"][0]["output"].as_str().unwrap();
-    assert_eq!(rewritten, format!("prodex-artifact:{}", artifact.id));
+    assert_eq!(rewritten, runtime_smart_context_artifact_ref(&artifact.id));
     assert!(!rewritten.contains("repeat tool output repeat tool output"));
     assert_eq!(stats.artifacts_stored, 0);
     assert_eq!(stats.repeat_tool_output_refs, 1);
@@ -1489,7 +1560,7 @@ fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
 
     let text = String::from_utf8(body).unwrap();
     assert!(text.contains("critical exact ranges"));
-    assert!(text.contains(&format!("prodex-artifact:{}#L1-L4", artifact.id)));
+    assert!(text.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 1, 4)));
     assert!(text.contains("error: hidden failure"));
     assert!(text.contains("src/main.rs:22:5"));
     assert!(repaired_stats.rehydrated_refs > stats.rehydrated_refs);
@@ -1522,7 +1593,7 @@ noise";
 
     assert_eq!(range_count, 1);
     assert!(appendix.contains("critical exact ranges:"));
-    assert!(appendix.contains(&format!("prodex-artifact:{}#L1-L4", artifact.id)));
+    assert!(appendix.contains(&runtime_smart_context_artifact_line_ref(&artifact.id, 1, 4)));
     assert!(appendix.contains("error: hidden indexed failure"));
     assert!(appendix.contains("src/main.rs:22:5"));
 }
@@ -1545,7 +1616,7 @@ noise";
     .expect("legacy artifact should still rehydrate by rescanning");
 
     assert_eq!(range_count, 1);
-    assert!(appendix.contains(&format!("prodex-artifact:{artifact_id}#L1-L4")));
+    assert!(appendix.contains(&runtime_smart_context_artifact_line_ref(&artifact_id, 1, 4)));
     assert!(appendix.contains("error: legacy failure"));
     assert!(appendix.contains("src/main.rs:22:5"));
 }

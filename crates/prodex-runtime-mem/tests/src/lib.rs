@@ -577,6 +577,81 @@ fn selection_sorts_same_priority_by_relevance_recency_cost_then_id() {
 }
 
 #[test]
+fn recall_content_dedupe_keeps_required_copy_and_replaces_optional_exact_duplicates() {
+    let content = "critical memory line\n".repeat(30);
+    let entries = runtime_mem_dedupe_recall_content([
+        RuntimeMemRecallDedupeItem {
+            id: "required-main".to_string(),
+            content: content.clone(),
+            required: true,
+            artifact_ref: None,
+        },
+        RuntimeMemRecallDedupeItem {
+            id: "optional-dup".to_string(),
+            content: content.clone(),
+            required: false,
+            artifact_ref: None,
+        },
+    ]);
+
+    assert_eq!(entries[0].replacement, None);
+    assert_eq!(entries[0].content, content);
+    assert_eq!(
+        entries[1].reason,
+        Some(RuntimeMemRecallDedupeReason::Duplicate {
+            original_id: "required-main".to_string()
+        })
+    );
+    let replacement = entries[1]
+        .replacement
+        .as_deref()
+        .expect("optional duplicate should be replaced");
+    assert!(replacement.contains("prodex mem duplicate: original=required-main"));
+    assert!(replacement.contains("content_hash=sc:"));
+    assert!(replacement.contains("original_bytes="));
+    assert!(
+        !replacement.contains("critical memory line"),
+        "duplicate replacement must not semantic-summarize content"
+    );
+}
+
+#[test]
+fn recall_content_dedupe_replaces_optional_prodex_artifact_content_with_ref() {
+    let content = "large artifact-backed memory\n".repeat(40);
+    let entries = runtime_mem_dedupe_recall_content([
+        RuntimeMemRecallDedupeItem {
+            id: "artifact-backed".to_string(),
+            content: content.clone(),
+            required: false,
+            artifact_ref: Some("prodex-artifact:sc:abc123".to_string()),
+        },
+        RuntimeMemRecallDedupeItem {
+            id: "required-artifact-backed".to_string(),
+            content,
+            required: true,
+            artifact_ref: Some("prodex-artifact:sc:def456".to_string()),
+        },
+    ]);
+
+    assert_eq!(
+        entries[0].reason,
+        Some(RuntimeMemRecallDedupeReason::ArtifactRef {
+            artifact_ref: "prodex-artifact:sc:abc123".to_string()
+        })
+    );
+    assert_eq!(entries[1].replacement, None);
+    let replacement = entries[0]
+        .replacement
+        .as_deref()
+        .expect("artifact-backed optional content should be replaced");
+    assert!(replacement.starts_with("prodex-artifact:sc:abc123"));
+    assert!(
+        !replacement.contains("large artifact-backed memory"),
+        "artifact replacement must stay reference-only"
+    );
+}
+
+#[test]
 fn extract_mode_keeps_slim_and_full_behavior_and_accepts_super_slim() {
     let (mem_mode, codex_args) =
         runtime_mem_extract_mode(&[OsString::from("mem"), OsString::from("exec")]);
@@ -1029,6 +1104,85 @@ fn super_slim_shadow_falls_back_to_local_summary_when_no_summary_or_ref_exists()
     assert_eq!(
         resolve_schema_tool_response(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
         Some(summary)
+    );
+}
+
+#[test]
+fn super_slim_shadow_events_replaces_later_exact_duplicate_without_semantic_summary() {
+    let message = "Important but repeated answer\n".to_string() + &"detail ".repeat(300);
+    let events = [
+        serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "message": message
+            }
+        }),
+        serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "message": message
+            }
+        }),
+    ];
+
+    let single_shadow = runtime_mem_super_slim_shadow_codex_event(&events[0]);
+    let shadows = runtime_mem_super_slim_shadow_codex_events(events.iter());
+    let first_summary = lookup_test_path(&shadows[0], "payload.summary")
+        .and_then(Value::as_str)
+        .expect("first summary should exist");
+    let duplicate_summary = lookup_test_path(&shadows[1], "payload.summary")
+        .and_then(Value::as_str)
+        .expect("duplicate summary should exist");
+
+    assert_eq!(shadows[0], single_shadow);
+    assert!(first_summary.starts_with("assistant response summary: Important but repeated answer"));
+    assert!(duplicate_summary.starts_with("prodex mem duplicate: original=event[0]"));
+    assert!(duplicate_summary.contains("content_hash=sc:"));
+    assert!(!duplicate_summary.contains("Important but repeated answer"));
+    assert_eq!(
+        lookup_test_path(&shadows[1], "payload.message").and_then(Value::as_str),
+        Some("assistant response shadowed by prodex super-slim mem; full content omitted")
+    );
+}
+
+#[test]
+fn super_slim_shadow_events_use_artifact_ref_for_later_exact_duplicate() {
+    let output = "large artifact-backed output\n".to_string() + &"payload ".repeat(300);
+    let events = [
+        serde_json::json!({
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-original",
+                "output": output,
+                "metadata": {
+                    "artifact_ref": "prodex-artifact:sc:tool-output"
+                }
+            }
+        }),
+        serde_json::json!({
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-dup",
+                "output": output
+            }
+        }),
+    ];
+
+    let shadows = runtime_mem_super_slim_shadow_codex_events(events.iter());
+    let duplicate_summary = lookup_test_path(&shadows[1], "payload.summary")
+        .and_then(Value::as_str)
+        .expect("artifact duplicate summary should exist");
+
+    assert!(duplicate_summary.starts_with("prodex-artifact:sc:tool-output"));
+    assert!(duplicate_summary.contains("content_hash=sc:"));
+    assert!(!duplicate_summary.contains("large artifact-backed output"));
+    assert_eq!(
+        lookup_test_path(&shadows[1], "payload.metadata.artifact_ref").and_then(Value::as_str),
+        Some("prodex-artifact:sc:tool-output")
+    );
+    assert_eq!(
+        lookup_test_path(&shadows[1], "payload.metadata.summary").and_then(Value::as_str),
+        Some(duplicate_summary)
     );
 }
 

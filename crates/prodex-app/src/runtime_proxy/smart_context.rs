@@ -13,6 +13,7 @@ const SMART_CONTEXT_TOOL_PREVIEW_MAX_LINE_CHARS: usize = 220;
 const SMART_CONTEXT_TOOL_PROGRESSIVE_SUMMARY_MAX_BYTES: usize = 8 * 1024;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES: usize = 12;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS: usize = 1_600;
+const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
 const RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS: [&str; 3] =
     ["instructions", "system", "developer"];
 
@@ -312,7 +313,7 @@ fn prepare_runtime_smart_context_body<'a>(
 ) -> Cow<'a, [u8]> {
     let budget = runtime_smart_context_budget(
         shared,
-        request.body.len(),
+        &request.body,
         runtime_proxy_crate::SmartContextExactnessGuard {
             decision: runtime_proxy_crate::SmartContextExactnessDecision::Allow,
             reasons: Vec::new(),
@@ -352,7 +353,7 @@ fn prepare_runtime_smart_context_body<'a>(
     let static_observation = runtime_smart_context_observe_static_context(shared, &value);
     let budget = runtime_smart_context_budget(
         shared,
-        request.body.len(),
+        &request.body,
         exactness.clone(),
         missing_rehydrate_refs.clone(),
         static_observation.changed,
@@ -651,7 +652,7 @@ struct RuntimeSmartContextBudget {
 
 fn runtime_smart_context_budget(
     shared: &RuntimeRotationProxyShared,
-    body_bytes: usize,
+    body: &[u8],
     exactness_guard: runtime_proxy_crate::SmartContextExactnessGuard,
     missing_rehydrate_refs: Vec<String>,
     static_context_changed: bool,
@@ -671,7 +672,10 @@ fn runtime_smart_context_budget(
             model_context_window_tokens: Some(model_context_window_tokens),
             reserved_output_tokens: SMART_CONTEXT_RESERVED_OUTPUT_TOKENS,
             current_input_tokens,
-            current_request_body_bytes: body_bytes,
+            current_request_body_bytes: body.len(),
+            current_request_estimated_tokens: Some(
+                runtime_proxy_crate::smart_context_estimate_tokens_from_body(body),
+            ),
             observed_usage: history,
         },
     );
@@ -1349,7 +1353,9 @@ fn runtime_smart_context_collect_artifact_refs_from_value(
     match value {
         serde_json::Value::String(text)
             if text.contains("prodex-artifact:")
-                || text.contains("prodex smart context artifact") =>
+                || text.contains(SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX)
+                || text.contains("prodex smart context artifact")
+                || text.contains("prodex-sc ") =>
         {
             for token in
                 text.split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ')' | ']' | '}'))
@@ -1376,9 +1382,38 @@ fn runtime_smart_context_collect_artifact_refs_from_value(
 fn runtime_smart_context_parse_artifact_reference(
     token: &str,
 ) -> Option<RuntimeSmartContextArtifactReference> {
-    let token =
-        token.trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ':' | ';' | '.' | '!' | '?'));
-    let raw = token.strip_prefix("prodex-artifact:").unwrap_or(token);
+    let token = token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ':'
+                | ';'
+                | '.'
+                | '!'
+                | '?'
+                | '('
+                | '['
+                | '{'
+                | '<'
+                | ')'
+                | ']'
+                | '}'
+                | '>'
+        )
+    });
+    let raw = if let Some(raw) = token.strip_prefix("prodex-artifact:") {
+        Cow::Borrowed(raw)
+    } else if let Some(raw) = token.strip_prefix(SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX) {
+        if raw.starts_with("sc:") {
+            Cow::Borrowed(raw)
+        } else {
+            Cow::Owned(format!("sc:{raw}"))
+        }
+    } else {
+        Cow::Borrowed(token)
+    };
+    let raw = raw.as_ref();
     if !raw.starts_with("sc:") {
         return None;
     }
@@ -1541,7 +1576,8 @@ fn runtime_smart_context_rehydrate_value_for_ids(
                         reference.line_range,
                     )
                 {
-                    let marker = format!("prodex-artifact:{}", reference.id);
+                    let legacy_marker = format!("prodex-artifact:{}", reference.id);
+                    let short_marker = runtime_smart_context_artifact_ref(&reference.id);
                     if reference.line_range.is_none()
                         && runtime_smart_context_text_is_artifact_marker_summary(
                             &next,
@@ -1554,8 +1590,11 @@ fn runtime_smart_context_rehydrate_value_for_ids(
                     } else if next.contains(&reference.marker) {
                         next = next.replace(&reference.marker, &rehydrated_text);
                         stats.rehydrated_refs += 1;
-                    } else if next.contains(&marker) {
-                        next = next.replace(&marker, &rehydrated_text);
+                    } else if next.contains(&legacy_marker) {
+                        next = next.replace(&legacy_marker, &rehydrated_text);
+                        stats.rehydrated_refs += 1;
+                    } else if next.contains(&short_marker) {
+                        next = next.replace(&short_marker, &rehydrated_text);
                         stats.rehydrated_refs += 1;
                     } else if next.trim() == reference.id {
                         next = rehydrated_text;
@@ -1586,8 +1625,15 @@ fn runtime_smart_context_text_is_artifact_marker_summary(text: &str, id: &str) -
     let Some(first_line) = text.trim_start().lines().next() else {
         return false;
     };
-    (first_line.starts_with("prodex-sc artifact ") || first_line.starts_with("prodex-sc repeat "))
-        && first_line.contains(&format!("prodex-artifact:{id}"))
+    let legacy = (first_line.starts_with("prodex-sc artifact ")
+        || first_line.starts_with("prodex-sc repeat "))
+        && first_line.contains(&format!("prodex-artifact:{id}"));
+    let short = (first_line.starts_with("psc art ")
+        || first_line.starts_with("psc repeat ")
+        || first_line.starts_with("prodex-sc artifact ")
+        || first_line.starts_with("prodex-sc repeat "))
+        && first_line.contains(&runtime_smart_context_artifact_ref(id));
+    legacy || short
 }
 
 fn runtime_smart_context_rehydrated_artifact_text(
@@ -1720,8 +1766,9 @@ fn runtime_smart_context_matching_semantic_range_appendix(
     let mut rendered = vec!["semantic exact ranges:".to_string()];
     for range in &ranges {
         rendered.push(format!(
-            "prodex-artifact:{artifact_id}#L{}-L{}\n{}",
-            range.start, range.end, range.text
+            "{}\n{}",
+            runtime_smart_context_artifact_line_ref(artifact_id, range.start, range.end),
+            range.text
         ));
     }
 
@@ -1745,6 +1792,11 @@ fn runtime_smart_context_matching_semantic_ranges<'a>(
     {
         if !runtime_smart_context_artifact_semantic_range_valid(range)
             || !runtime_smart_context_semantic_range_matches_terms(range, terms)
+            || current_text.contains(&runtime_smart_context_artifact_line_ref(
+                artifact_id,
+                range.start,
+                range.end,
+            ))
             || current_text.contains(&format!(
                 "prodex-artifact:{artifact_id}#L{}-L{}",
                 range.start, range.end
@@ -1989,8 +2041,8 @@ fn runtime_smart_context_missing_critical_range_appendix(
             continue;
         }
         rendered.push(format!(
-            "prodex-artifact:{artifact_id}#L{}-L{}\n{exact}",
-            range.start, range.end
+            "{}\n{exact}",
+            runtime_smart_context_artifact_line_ref(artifact_id, range.start, range.end)
         ));
         range_count = range_count.saturating_add(1);
     }
@@ -2074,8 +2126,9 @@ fn runtime_smart_context_missing_indexed_critical_range_appendix(
             continue;
         }
         rendered.push(format!(
-            "prodex-artifact:{artifact_id}#L{}-L{}\n{}",
-            range.start, range.end, range.text
+            "{}\n{}",
+            runtime_smart_context_artifact_line_ref(artifact_id, range.start, range.end),
+            range.text
         ));
     }
 
@@ -2273,8 +2326,9 @@ fn runtime_smart_context_progressive_critical_exact_ranges(
                 continue;
             }
             rendered.push(format!(
-                "prodex-artifact:{artifact_id}#L{}-L{}\n{}",
-                range.start, range.end, range.text
+                "{}\n{}",
+                runtime_smart_context_artifact_line_ref(artifact_id, range.start, range.end),
+                range.text
             ));
         }
     }
@@ -2651,13 +2705,38 @@ fn runtime_smart_context_artifact_summary(
     artifact: &runtime_proxy_crate::SmartContextArtifactRef,
     compacted: &str,
 ) -> String {
-    runtime_proxy_crate::smart_context_artifact_marker(artifact, compacted)
+    let marker = runtime_smart_context_artifact_marker_line("artifact", artifact);
+    if compacted.is_empty() {
+        return marker;
+    }
+    format!("{marker}\n{compacted}")
 }
 
 fn runtime_smart_context_artifact_reference_summary(
     artifact: &runtime_proxy_crate::SmartContextArtifactRef,
 ) -> String {
-    format!("prodex-artifact:{}", artifact.id)
+    runtime_smart_context_artifact_ref(&artifact.id)
+}
+
+fn runtime_smart_context_artifact_marker_line(
+    kind: &str,
+    artifact: &runtime_proxy_crate::SmartContextArtifactRef,
+) -> String {
+    let reference = runtime_smart_context_artifact_ref(&artifact.id);
+    let legacy_reference = format!("prodex-artifact:{}", artifact.id);
+    format!(
+        "prodex-sc {kind} {legacy_reference} b={} h={}; rehydrate {reference} or {reference}#Lstart-Lend",
+        artifact.byte_len, artifact.content_hash
+    )
+}
+
+fn runtime_smart_context_artifact_line_ref(id: &str, start: usize, end: usize) -> String {
+    format!("{}#L{start}-L{end}", runtime_smart_context_artifact_ref(id))
+}
+
+fn runtime_smart_context_artifact_ref(id: &str) -> String {
+    let short_id = id.strip_prefix("sc:").unwrap_or(id);
+    format!("{SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX}{short_id}")
 }
 
 fn runtime_smart_context_append_artifact_manifest_if_useful(
@@ -2691,9 +2770,7 @@ fn runtime_smart_context_artifact_manifest(
         return None;
     }
 
-    let mut lines = vec![
-        "prodex smart context artifact manifest (refs only; full content omitted):".to_string(),
-    ];
+    let mut lines = vec!["psc manifest refs-only; content omitted:".to_string()];
     for entry in entries {
         let semantic_count = entry
             .file_location_range_count
@@ -2701,9 +2778,9 @@ fn runtime_smart_context_artifact_manifest(
             .saturating_add(entry.test_failure_range_count)
             .saturating_add(entry.error_range_count);
         let kind = entry.command_kind.as_deref().unwrap_or("-");
+        let reference = runtime_smart_context_artifact_ref(&entry.id);
         let line = format!(
-            "- prodex-artifact:{} bytes={} hash={} critical_ranges={} semantic_ranges={} files={} diff_hunks={} tests={} errors={} kind={}",
-            entry.id,
+            "- {reference} b={} h={} cr={} sr={} f={} d={} t={} e={} k={}",
             entry.byte_len,
             entry.content_hash,
             entry.critical_range_count,
@@ -2721,7 +2798,7 @@ fn runtime_smart_context_artifact_manifest(
             .saturating_add(1)
             > SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS
         {
-            lines.push("[... artifact manifest truncated ...]".to_string());
+            lines.push("[... psc manifest truncated ...]".to_string());
             break;
         }
         lines.push(line);
@@ -2828,9 +2905,7 @@ fn runtime_smart_context_dedupe_value_text(
             }
             let hash = runtime_proxy_crate::smart_context_hash_text(text);
             if let Some(first_index) = seen.get(&hash) {
-                *text = format!(
-                    "[prodex smart context duplicate of input[{first_index}] content_hash={hash}]"
-                );
+                *text = format!("[psc dup input[{first_index}] h={hash}]");
                 stats.duplicate_texts += 1;
             } else {
                 seen.insert(hash.clone(), item_index);
@@ -2870,20 +2945,25 @@ fn runtime_smart_context_replace_cross_turn_duplicate_refs(
     let replacements = plan
         .actions
         .into_iter()
-        .filter_map(|action| match action {
-            runtime_proxy_crate::SmartContextCrossTurnDuplicateRefAction::ReplaceWithArtifactRef {
+        .filter_map(|action| {
+            let runtime_proxy_crate::SmartContextCrossTurnDuplicateRefAction::ReplaceWithArtifactRef {
                 id,
                 artifact,
                 content_hash,
                 byte_len,
-            } => Some((
+            } = action
+            else {
+                return None;
+            };
+            Some((
                 id,
                 format!(
-                    "[prodex smart context repeated artifact prodex-artifact:{} content_hash={} original_bytes={}]",
-                    artifact.id, content_hash, byte_len
+                    "[psc repeat {} h={} b={}]",
+                    runtime_smart_context_artifact_ref(&artifact.id),
+                    content_hash,
+                    byte_len
                 ),
-            )),
-            runtime_proxy_crate::SmartContextCrossTurnDuplicateRefAction::Keep { .. } => None,
+            ))
         })
         .collect::<BTreeMap<_, _>>();
     if replacements.is_empty() {
@@ -2940,7 +3020,9 @@ fn runtime_smart_context_collect_large_text_items_from_value(
         serde_json::Value::String(text)
             if text.len() >= SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES
                 && !text.contains("prodex-artifact:")
-                && !text.contains("prodex smart context artifact") =>
+                && !text.contains(SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX)
+                && !text.contains("prodex smart context artifact")
+                && !text.contains("prodex-sc ") =>
         {
             items.push(runtime_proxy_crate::SmartContextConversationItem {
                 id,

@@ -358,6 +358,7 @@ fn memory_capsule_budget_bridge_does_not_unbound_unsafe_exact_policy() {
             reserved_output_tokens: 8_000,
             current_input_tokens: 12_000,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
     let policy = smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {
@@ -493,6 +494,7 @@ fn observed_token_accounting_uses_real_usage_and_available_window() {
             reserved_output_tokens: 8_000,
             current_input_tokens: 40_000,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: vec![
                 RuntimeTokenUsage {
                     input_tokens: 20_000,
@@ -541,6 +543,7 @@ fn observed_token_accounting_uses_cached_only_history_as_input_fallback() {
             reserved_output_tokens: 4_000,
             current_input_tokens: 0,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: vec![RuntimeTokenUsage {
                 cached_input_tokens: 16_000,
                 ..RuntimeTokenUsage::default()
@@ -567,6 +570,7 @@ fn observed_token_accounting_uses_body_estimate_when_tokens_unknown() {
             reserved_output_tokens: 4_000,
             current_input_tokens: 0,
             current_request_body_bytes: 80_001,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
 
@@ -588,6 +592,31 @@ fn observed_token_accounting_uses_body_estimate_when_tokens_unknown() {
 }
 
 #[test]
+fn observed_token_accounting_accepts_content_aware_body_estimate() {
+    let body = "word ".repeat(100);
+    let estimate = smart_context_estimate_tokens_from_body(body.as_bytes());
+
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(32_000),
+            reserved_output_tokens: 4_000,
+            current_input_tokens: 0,
+            current_request_body_bytes: body.len(),
+            current_request_estimated_tokens: Some(estimate),
+            observed_usage: Vec::new(),
+        });
+
+    assert!(estimate > 0);
+    assert!(estimate < smart_context_estimate_tokens_from_body_bytes(body.len()));
+    assert_eq!(accounting.estimated_current_request_tokens, estimate);
+    assert_eq!(accounting.current_request_accounted_tokens, estimate);
+    assert_eq!(
+        accounting.effective_input_source,
+        SmartContextTokenAccountingSource::CurrentRequestBodyEstimate
+    );
+}
+
+#[test]
 fn observed_token_accounting_uses_larger_history_to_avoid_underbudget() {
     let accounting =
         smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
@@ -595,6 +624,7 @@ fn observed_token_accounting_uses_larger_history_to_avoid_underbudget() {
             reserved_output_tokens: 8_000,
             current_input_tokens: 10_000,
             current_request_body_bytes: 20_000,
+            current_request_estimated_tokens: None,
             observed_usage: vec![RuntimeTokenUsage {
                 input_tokens: 100_000,
                 output_tokens: 2_000,
@@ -840,6 +870,7 @@ fn adaptive_budget_policy_prefers_safe_exact_when_required() {
             reserved_output_tokens: 8_000,
             current_input_tokens: 125_000,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
     let guard = smart_context_exactness_guard(SmartContextExactnessInput {
@@ -871,6 +902,7 @@ fn adaptive_budget_policy_uses_condensed_and_minimal_modes_by_real_budget() {
             reserved_output_tokens: 8_000,
             current_input_tokens: 114_000,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
     let minimal =
@@ -879,6 +911,7 @@ fn adaptive_budget_policy_uses_condensed_and_minimal_modes_by_real_budget() {
             reserved_output_tokens: 8_000,
             current_input_tokens: 119_000,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
 
@@ -926,6 +959,7 @@ fn adaptive_budget_policy_caps_rehydrate_budget_to_available_tokens() {
             reserved_output_tokens: 0,
             current_input_tokens: 11_000,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
 
@@ -951,6 +985,7 @@ fn adaptive_budget_policy_falls_back_exact_when_accounting_unknown_or_unsafe() {
             reserved_output_tokens: 8_000,
             current_input_tokens: 12_000,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
     let unsafe_accounting =
@@ -959,6 +994,7 @@ fn adaptive_budget_policy_falls_back_exact_when_accounting_unknown_or_unsafe() {
             reserved_output_tokens: 8_000,
             current_input_tokens: 1,
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
 
@@ -1002,6 +1038,7 @@ fn adaptive_budget_policy_expands_preview_only_after_recent_safe_savings() {
         reserved_output_tokens: 4_096,
         current_input_tokens: 48_000,
         current_request_body_bytes: 0,
+        current_request_estimated_tokens: None,
         observed_usage: Vec::new(),
     });
     let exact = smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
@@ -1009,6 +1046,7 @@ fn adaptive_budget_policy_expands_preview_only_after_recent_safe_savings() {
         reserved_output_tokens: 4_096,
         current_input_tokens: 32_000,
         current_request_body_bytes: 0,
+        current_request_estimated_tokens: None,
         observed_usage: Vec::new(),
     });
     let safe = SmartContextRecentRewriteSafety {
@@ -1157,6 +1195,7 @@ fn smart_context_memory_capsule_policy_for_available_tokens(
             reserved_output_tokens: 8_000,
             current_input_tokens: 120_000u64.saturating_sub(available_tokens),
             current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
             observed_usage: Vec::new(),
         });
     let policy = smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {

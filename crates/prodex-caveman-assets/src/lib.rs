@@ -13,7 +13,7 @@ pub const PRODEX_CAVEMAN_PLUGIN_ID: &str = "caveman@prodex-caveman";
 pub const PRODEX_CAVEMAN_SOURCE_REPO: &str = "https://github.com/JuliusBrussee/caveman.git";
 pub const PRODEX_CAVEMAN_FULL_ASSETS_ENV: &str = "PRODEX_CAVEMAN_FULL_ASSETS";
 pub const PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME: &str = "caveman";
-const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "echo 'CAVEMAN MODE ACTIVE. Use $caveman full: terse, no filler, exact technical substance. Code/commits/security normal. Stop: normal mode.'";
+const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "echo 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.'";
 
 struct EmbeddedCavemanFile {
     relative_path: &'static str,

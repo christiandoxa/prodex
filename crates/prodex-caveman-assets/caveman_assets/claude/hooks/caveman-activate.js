@@ -36,7 +36,7 @@ const INDEPENDENT_MODES = new Set(['commit', 'review', 'compress']);
 
 if (INDEPENDENT_MODES.has(mode)) {
   process.stdout.write(
-    'CAVEMAN MODE ACTIVE - level: ' + mode + '. Behavior defined by /caveman-' + mode + ' skill.'
+    'CAVEMAN MODE ACTIVE: ' + mode + '. Rules: /caveman-' + mode + ' skill.'
   );
   process.exit(0);
 }
@@ -79,24 +79,16 @@ if (skillContent) {
     return acc;
   }, []);
 
-  output = 'CAVEMAN MODE ACTIVE - level: ' + modeLabel + '\n\n' + filtered.join('\n');
+  output = 'CAVEMAN MODE ACTIVE: ' + modeLabel + '\n\n' + filtered.join('\n').trim();
 } else {
   output =
-    'CAVEMAN MODE ACTIVE - level: ' + modeLabel + '\n\n' +
-    'Respond terse like smart caveman. All technical substance stay. Only fluff die.\n\n' +
-    '## Persistence\n\n' +
-    'ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off only: "stop caveman" / "normal mode".\n\n' +
-    'Current level: **' + modeLabel + '**. Switch: `/caveman lite|full|ultra`.\n\n' +
-    '## Rules\n\n' +
-    'Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. ' +
-    'Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Technical terms exact. Code blocks unchanged. Errors quoted exact.\n\n' +
-    'Pattern: `[thing] [action] [reason]. [next step].`\n\n' +
-    'Not: "Sure! I would be happy to help you with that. The issue you are experiencing is likely caused by..."\n' +
-    'Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"\n\n' +
-    '## Auto-Clarity\n\n' +
-    'Drop caveman for: security warnings, irreversible action confirmations, multi-step sequences where fragment order risks misread, user asks to clarify or repeats question. Resume caveman after clear part done.\n\n' +
-    '## Boundaries\n\n' +
-    'Code/commits/PRs: write normal. "stop caveman" or "normal mode": revert. Level persist until changed or session end.';
+    'CAVEMAN MODE ACTIVE: ' + modeLabel + '\n\n' +
+    'Terse, exact, no filler. Persist until stop caveman/normal mode. ' +
+    'Levels: lite/full/ultra/wenyan-lite/wenyan-full/wenyan-ultra. ' +
+    'Drop articles/filler/pleasantries/hedging; fragments OK. ' +
+    'Keep tech terms, code, commands, paths, errors exact. ' +
+    'Use normal clear language for security, irreversible actions, risky multi-step instructions, and clarification. ' +
+    'Code/commits/PRs/security: normal technical quality.';
 }
 
 try {
@@ -118,11 +110,8 @@ try {
     const statusLineSnippet =
       '"statusLine": { "type": "command", "command": ' + JSON.stringify(command) + ' }';
     output += '\n\n' +
-      'STATUSLINE SETUP NEEDED: The caveman plugin includes a statusline badge showing active mode ' +
-      '(e.g. [CAVEMAN], [CAVEMAN:ULTRA]). It is not configured yet. ' +
-      'To enable, add this to ' + settingsPath + ': ' +
-      statusLineSnippet + ' ' +
-      'Proactively offer to set this up for the user on first interaction.';
+      'STATUSLINE SETUP NEEDED: add to ' + settingsPath + ': ' +
+      statusLineSnippet + '. Offer setup on first reply.';
   }
 } catch (e) {
   // Silent fail - do not block session start.

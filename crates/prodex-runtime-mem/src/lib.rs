@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use dirs::home_dir;
 use serde_json::Value;
 use std::cmp::Ordering;
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::ffi::OsString;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -48,6 +48,7 @@ const RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS: &[&str] = &[
     "payload.artifact_id",
     "payload.artifactId",
 ];
+const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS: &[&str] = &["payload.summary"];
 const RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT: usize = 180;
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 128;
@@ -146,6 +147,41 @@ impl From<RuntimeMemCapsuleMetadata> for RuntimeMemRecallCapsuleMetadata {
     fn from(capsule: RuntimeMemCapsuleMetadata) -> Self {
         Self::new(capsule)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeMemRecallDedupeItem {
+    pub id: String,
+    pub content: String,
+    pub required: bool,
+    pub artifact_ref: Option<String>,
+}
+
+impl RuntimeMemRecallDedupeItem {
+    pub fn new(id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            content: content.into(),
+            required: false,
+            artifact_ref: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeMemRecallDedupeReason {
+    Duplicate { original_id: String },
+    ArtifactRef { artifact_ref: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeMemRecallDedupeEntry {
+    pub id: String,
+    pub content: String,
+    pub content_hash: String,
+    pub required: bool,
+    pub replacement: Option<String>,
+    pub reason: Option<RuntimeMemRecallDedupeReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -391,6 +427,95 @@ pub fn runtime_mem_select_capsules(
     }
 }
 
+pub fn runtime_mem_dedupe_recall_content(
+    items: impl IntoIterator<Item = RuntimeMemRecallDedupeItem>,
+) -> Vec<RuntimeMemRecallDedupeEntry> {
+    let items = items.into_iter().collect::<Vec<_>>();
+    let mut first_by_content = HashMap::<String, String>::new();
+    let mut first_required_by_content = HashMap::<String, String>::new();
+
+    for item in &items {
+        first_by_content
+            .entry(item.content.clone())
+            .or_insert_with(|| item.id.clone());
+        if item.required {
+            first_required_by_content
+                .entry(item.content.clone())
+                .or_insert_with(|| item.id.clone());
+        }
+    }
+
+    items
+        .into_iter()
+        .map(|item| {
+            let content_hash = runtime_mem_content_hash(&item.content);
+            if item.required {
+                return RuntimeMemRecallDedupeEntry {
+                    id: item.id,
+                    content: item.content,
+                    content_hash,
+                    required: true,
+                    replacement: None,
+                    reason: None,
+                };
+            }
+
+            let artifact_ref =
+                runtime_mem_prodex_artifact_ref(item.artifact_ref.as_deref(), &item.content);
+            if let Some(artifact_ref) = artifact_ref {
+                let original_bytes = item.content.len();
+                return RuntimeMemRecallDedupeEntry {
+                    id: item.id,
+                    content: item.content,
+                    replacement: Some(runtime_mem_artifact_recall_summary(
+                        &artifact_ref,
+                        &content_hash,
+                        original_bytes,
+                    )),
+                    reason: Some(RuntimeMemRecallDedupeReason::ArtifactRef { artifact_ref }),
+                    content_hash,
+                    required: false,
+                };
+            }
+
+            let original_id = first_required_by_content
+                .get(&item.content)
+                .or_else(|| first_by_content.get(&item.content))
+                .cloned();
+            if let Some(original_id) = original_id
+                && original_id != item.id
+            {
+                let original_bytes = item.content.len();
+                return RuntimeMemRecallDedupeEntry {
+                    id: item.id,
+                    content: item.content,
+                    replacement: Some(runtime_mem_duplicate_recall_summary(
+                        &original_id,
+                        &content_hash,
+                        original_bytes,
+                    )),
+                    reason: Some(RuntimeMemRecallDedupeReason::Duplicate { original_id }),
+                    content_hash,
+                    required: false,
+                };
+            }
+
+            RuntimeMemRecallDedupeEntry {
+                id: item.id,
+                content: item.content,
+                content_hash,
+                required: false,
+                replacement: None,
+                reason: None,
+            }
+        })
+        .collect()
+}
+
+pub fn runtime_mem_content_hash(text: &str) -> String {
+    format!("sc:{:016x}", runtime_mem_fnv1a64(text.as_bytes()))
+}
+
 pub fn runtime_mem_extract_mode(args: &[OsString]) -> (bool, Vec<OsString>) {
     let (mode, args) = runtime_mem_extract_mode_with_detail(args);
     (mode.is_some(), args)
@@ -478,9 +603,13 @@ pub fn runtime_mem_super_slim_shadow_codex_event(event: &Value) -> Value {
 pub fn runtime_mem_super_slim_shadow_codex_events<'a>(
     events: impl IntoIterator<Item = &'a Value>,
 ) -> Vec<Value> {
+    let mut dedupe_state = RuntimeMemEventDedupeState::default();
     events
         .into_iter()
-        .map(runtime_mem_super_slim_shadow_codex_event)
+        .enumerate()
+        .map(|(index, event)| {
+            runtime_mem_super_slim_shadow_codex_event_with_dedupe(event, index, &mut dedupe_state)
+        })
         .collect()
 }
 
@@ -962,6 +1091,140 @@ pub fn runtime_mem_codex_schema_for_mode(mode: RuntimeMemTranscriptMode) -> serd
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RuntimeMemEventContentSpec {
+    content_path: &'static str,
+    summary_paths: &'static [&'static str],
+    artifact_ref_paths: &'static [&'static str],
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeMemSeenEventContent {
+    original_id: String,
+    artifact_ref: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeMemEventDedupeState {
+    seen: HashMap<String, RuntimeMemSeenEventContent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeMemDedupeReplacement {
+    summary: String,
+    artifact_ref: Option<String>,
+}
+
+impl RuntimeMemEventDedupeState {
+    fn replacement_for_optional(
+        &mut self,
+        id: String,
+        content: &str,
+        artifact_ref: Option<String>,
+    ) -> Option<RuntimeMemDedupeReplacement> {
+        if let Some(seen) = self.seen.get_mut(content) {
+            if seen.artifact_ref.is_none() {
+                seen.artifact_ref = artifact_ref.clone();
+            }
+            let content_hash = runtime_mem_content_hash(content);
+            if let Some(artifact_ref) = artifact_ref.or_else(|| seen.artifact_ref.clone()) {
+                return Some(RuntimeMemDedupeReplacement {
+                    summary: runtime_mem_artifact_recall_summary(
+                        &artifact_ref,
+                        &content_hash,
+                        content.len(),
+                    ),
+                    artifact_ref: Some(artifact_ref),
+                });
+            }
+            return Some(RuntimeMemDedupeReplacement {
+                summary: runtime_mem_duplicate_recall_summary(
+                    &seen.original_id,
+                    &content_hash,
+                    content.len(),
+                ),
+                artifact_ref: None,
+            });
+        }
+
+        self.seen.insert(
+            content.to_string(),
+            RuntimeMemSeenEventContent {
+                original_id: id,
+                artifact_ref,
+            },
+        );
+        None
+    }
+}
+
+fn runtime_mem_super_slim_shadow_codex_event_with_dedupe(
+    event: &Value,
+    index: usize,
+    dedupe_state: &mut RuntimeMemEventDedupeState,
+) -> Value {
+    let spec = runtime_mem_event_content_spec(event);
+    let replacement = spec.and_then(|spec| {
+        let content = runtime_mem_lookup_json_path(event, spec.content_path)?.as_str()?;
+        let artifact_ref =
+            runtime_mem_first_prodex_artifact_ref_at_paths(event, spec.artifact_ref_paths, content);
+        dedupe_state
+            .replacement_for_optional(
+                runtime_mem_event_dedupe_id(event, index),
+                content,
+                artifact_ref,
+            )
+            .map(|replacement| (spec, replacement))
+    });
+    let mut shadow = runtime_mem_super_slim_shadow_codex_event(event);
+    if let Some((spec, replacement)) = replacement {
+        for path in spec.summary_paths {
+            runtime_mem_set_json_path(
+                &mut shadow,
+                path,
+                Value::String(replacement.summary.clone()),
+            );
+        }
+        if let Some(artifact_ref) = replacement.artifact_ref {
+            runtime_mem_set_json_path(
+                &mut shadow,
+                "payload.metadata.artifact_ref",
+                Value::String(artifact_ref),
+            );
+        }
+    }
+    shadow
+}
+
+fn runtime_mem_event_content_spec(event: &Value) -> Option<RuntimeMemEventContentSpec> {
+    let payload_type = runtime_mem_lookup_json_path(event, "payload.type")?.as_str()?;
+    match payload_type {
+        "user_message" => Some(RuntimeMemEventContentSpec {
+            content_path: "payload.message",
+            summary_paths: RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS,
+            artifact_ref_paths: RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS,
+        }),
+        "agent_message" => Some(RuntimeMemEventContentSpec {
+            content_path: "payload.message",
+            summary_paths: RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS,
+            artifact_ref_paths: RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
+        }),
+        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {
+            Some(RuntimeMemEventContentSpec {
+                content_path: "payload.output",
+                summary_paths: RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS,
+                artifact_ref_paths: RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn runtime_mem_event_dedupe_id(event: &Value, index: usize) -> String {
+    runtime_mem_first_text_at_paths(event, &["payload.call_id", "payload.id", "id"])
+        .unwrap_or_else(|| format!("event[{index}]"))
+}
+
 fn runtime_mem_lookup_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = value;
     for part in path.split('.') {
@@ -1132,6 +1395,67 @@ fn runtime_mem_first_text_at_paths(event: &Value, paths: &[&str]) -> Option<Stri
             .filter(|text| !text.is_empty())
             .map(str::to_string)
     })
+}
+
+fn runtime_mem_first_prodex_artifact_ref_at_paths(
+    event: &Value,
+    paths: &[&str],
+    content: &str,
+) -> Option<String> {
+    paths
+        .iter()
+        .find_map(|path| {
+            runtime_mem_lookup_json_path(event, path)
+                .and_then(Value::as_str)
+                .and_then(runtime_mem_normalize_prodex_artifact_ref)
+        })
+        .or_else(|| runtime_mem_prodex_artifact_ref(None, content))
+}
+
+fn runtime_mem_prodex_artifact_ref(artifact_ref: Option<&str>, content: &str) -> Option<String> {
+    artifact_ref
+        .and_then(runtime_mem_normalize_prodex_artifact_ref)
+        .or_else(|| runtime_mem_extract_artifact_marker_from_text(content))
+}
+
+fn runtime_mem_normalize_prodex_artifact_ref(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if text.starts_with("prodex-artifact:") || text.starts_with("prodex://artifact/") {
+        return Some(text.to_string());
+    }
+    runtime_mem_extract_artifact_marker_from_text(text)
+}
+
+fn runtime_mem_artifact_recall_summary(
+    artifact_ref: &str,
+    content_hash: &str,
+    original_bytes: usize,
+) -> String {
+    format!(
+        "{artifact_ref} [prodex mem artifact ref; content_hash={content_hash}; original_bytes={original_bytes}]"
+    )
+}
+
+fn runtime_mem_duplicate_recall_summary(
+    original_id: &str,
+    content_hash: &str,
+    original_bytes: usize,
+) -> String {
+    format!(
+        "prodex mem duplicate: original={original_id}; content_hash={content_hash}; original_bytes={original_bytes}"
+    )
+}
+
+fn runtime_mem_fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn runtime_mem_extract_artifact_marker(value: &Value) -> Option<String> {

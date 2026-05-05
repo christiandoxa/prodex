@@ -2259,7 +2259,7 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
         None,
     )
     .expect("runtime proxy should start with smart context enabled");
-    let tool_output = (0..2500)
+    let tool_output = (0..1900)
         .map(|index| format!("line {index}: repeated command output"))
         .collect::<Vec<_>>()
         .join("\n");
@@ -2271,7 +2271,8 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
         }]
     })
     .to_string();
-    let estimated_tokens = body.len().div_ceil(4);
+    let estimated_tokens =
+        runtime_proxy_crate::smart_context_estimate_tokens_from_body(body.as_bytes()) as usize;
     let available_tokens = 32_000usize
         .saturating_sub(estimated_tokens)
         .saturating_sub(4_096);

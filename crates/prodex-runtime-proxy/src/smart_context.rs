@@ -549,6 +549,7 @@ pub struct SmartContextObservedTokenAccountingInput {
     pub reserved_output_tokens: u64,
     pub current_input_tokens: u64,
     pub current_request_body_bytes: usize,
+    pub current_request_estimated_tokens: Option<u64>,
     pub observed_usage: Vec<RuntimeTokenUsage>,
 }
 
@@ -609,7 +610,9 @@ pub fn smart_context_observed_token_accounting(
     let observed_total_tokens = observed_input_tokens.saturating_add(observed_output_tokens);
     let observed_context_tokens = observed_total_tokens.saturating_add(observed_reasoning_tokens);
     let estimated_current_request_tokens =
-        smart_context_estimate_tokens_from_body_bytes(input.current_request_body_bytes);
+        input.current_request_estimated_tokens.unwrap_or_else(|| {
+            smart_context_estimate_tokens_from_body_bytes(input.current_request_body_bytes)
+        });
     let current_request_accounted_tokens = input
         .current_input_tokens
         .max(estimated_current_request_tokens);
@@ -660,6 +663,90 @@ pub fn smart_context_estimate_tokens_from_body_bytes(body_bytes: usize) -> u64 {
     let body_bytes = u64::try_from(body_bytes).unwrap_or(u64::MAX);
     body_bytes.saturating_add(SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN - 1)
         / SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN
+}
+
+pub fn smart_context_estimate_tokens_from_body(body: &[u8]) -> u64 {
+    let Ok(text) = std::str::from_utf8(body) else {
+        return smart_context_estimate_tokens_from_body_bytes(body.len());
+    };
+    smart_context_estimate_tokens_from_text(text)
+        .max(smart_context_estimate_tokens_from_body_bytes(body.len()).saturating_div(2))
+}
+
+fn smart_context_estimate_tokens_from_text(text: &str) -> u64 {
+    let mut tokens = 0u64;
+    let mut run = String::new();
+    let mut run_kind = SmartContextEstimatorRunKind::Other;
+    let mut structural = 0u64;
+    let mut separators = 0u64;
+
+    for ch in text.chars() {
+        let kind = smart_context_estimator_run_kind(ch);
+        if matches!(
+            kind,
+            SmartContextEstimatorRunKind::Word | SmartContextEstimatorRunKind::Number
+        ) {
+            if kind != run_kind {
+                tokens = tokens.saturating_add(smart_context_estimate_run_tokens(&run, run_kind));
+                run.clear();
+                run_kind = kind;
+            }
+            run.push(ch);
+            continue;
+        }
+
+        tokens = tokens.saturating_add(smart_context_estimate_run_tokens(&run, run_kind));
+        run.clear();
+        run_kind = SmartContextEstimatorRunKind::Other;
+
+        if ch.is_whitespace() {
+            if ch == '\n' {
+                separators = separators.saturating_add(1);
+            }
+        } else if matches!(
+            ch,
+            '{' | '}' | '[' | ']' | ':' | ',' | '"' | '\'' | '`' | '(' | ')' | '<' | '>'
+        ) {
+            structural = structural.saturating_add(1);
+        } else {
+            tokens = tokens.saturating_add(1);
+        }
+    }
+
+    tokens = tokens.saturating_add(smart_context_estimate_run_tokens(&run, run_kind));
+    tokens
+        .saturating_add(structural.saturating_add(3) / 4)
+        .saturating_add(separators.saturating_add(7) / 8)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SmartContextEstimatorRunKind {
+    Word,
+    Number,
+    Other,
+}
+
+fn smart_context_estimator_run_kind(ch: char) -> SmartContextEstimatorRunKind {
+    if ch.is_ascii_alphabetic() || ch == '_' || ch == '-' {
+        SmartContextEstimatorRunKind::Word
+    } else if ch.is_ascii_digit() {
+        SmartContextEstimatorRunKind::Number
+    } else {
+        SmartContextEstimatorRunKind::Other
+    }
+}
+
+fn smart_context_estimate_run_tokens(run: &str, kind: SmartContextEstimatorRunKind) -> u64 {
+    if run.is_empty() {
+        return 0;
+    }
+    let chars = u64::try_from(run.chars().count()).unwrap_or(u64::MAX);
+    match kind {
+        SmartContextEstimatorRunKind::Word => chars.saturating_add(3) / 4,
+        SmartContextEstimatorRunKind::Number => chars.saturating_add(2) / 3,
+        SmartContextEstimatorRunKind::Other => chars,
+    }
+    .max(1)
 }
 
 pub fn smart_context_observed_usage_context_tokens(usage: RuntimeTokenUsage) -> Option<u64> {

@@ -59,6 +59,39 @@ fn plain_command_output_strips_ansi_and_keeps_head_tail() {
 }
 
 #[test]
+fn plain_command_output_uses_path_alias_for_repeated_absolute_cwd_prefix() {
+    let cwd = test_cwd_prefix();
+    let input = format!(
+        "\
+loaded {cwd}/src/main.rs
+cached {cwd}/crates/prodex-context/src/lib.rs
+"
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Plain,
+            max_lines: 20,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Plain);
+    assert!(
+        report
+            .output
+            .contains(&format!("path aliases: $REPO={cwd}"))
+    );
+    assert!(report.output.contains("loaded $REPO/src/main.rs"));
+    assert!(
+        report
+            .output
+            .contains("cached $REPO/crates/prodex-context/src/lib.rs")
+    );
+}
+
+#[test]
 fn command_metadata_infers_output_kind_hints() {
     let cases = [
         (
@@ -216,9 +249,13 @@ fn git_status_output_shortens_repeated_absolute_cwd_prefix() {
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::GitStatus);
-    assert!(report.output.contains("modified (1): M src/lib.rs"));
-    assert!(report.output.contains("untracked (1): tests/new.rs"));
-    assert!(!report.output.contains(&cwd));
+    assert!(
+        report
+            .output
+            .contains(&format!("path aliases: $REPO={cwd}"))
+    );
+    assert!(report.output.contains("modified (1): M $REPO/src/lib.rs"));
+    assert!(report.output.contains("untracked (1): $REPO/tests/new.rs"));
 }
 
 #[test]
@@ -315,9 +352,13 @@ fn search_output_shortens_repeated_absolute_cwd_prefix() {
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Search);
-    assert!(report.output.contains("src/lib.rs (2 matches):"));
-    assert!(report.output.contains("README.md (1 matches):"));
-    assert!(!report.output.contains(&cwd));
+    assert!(
+        report
+            .output
+            .contains(&format!("path aliases: $REPO={cwd}"))
+    );
+    assert!(report.output.contains("$REPO/src/lib.rs (2 matches):"));
+    assert!(report.output.contains("$REPO/README.md (1 matches):"));
 }
 
 #[test]
@@ -587,6 +628,86 @@ README.md:3:prodex context helper
     assert_eq!(report.detected_kind, CommandOutputKind::Search);
     assert!(report.output.contains("intent matches:"));
     assert!(report.output.contains("target_symbol"));
+}
+
+#[test]
+fn intent_compaction_prioritizes_relevant_search_paths_and_summarizes_overflow() {
+    let input = "\
+src/alpha.rs:10:fn alpha() {}
+src/beta.rs:20:fn beta() {}
+crates/prodex-context/src/lib.rs:30:fn target_widget() {}
+crates/prodex-context/src/lib.rs:40:let target_widget_enabled = true;
+crates/prodex-context/tests/src/lib.rs:50:assert!(target_widget_enabled);
+docs/context.md:3:target_widget docs
+";
+
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::Search,
+                max_lines: 12,
+                max_search_matches_per_file: 1,
+                max_line_chars: 160,
+                ..CommandOutputCompactOptions::default()
+            },
+            vec!["target_widget".to_string()],
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Search);
+    assert!(report.output.contains("relevant search matches:"));
+    assert!(report.output.contains("crates/prodex-context/src/lib.rs"));
+    assert!(report.output.contains("fn target_widget()"));
+    assert!(
+        report
+            .output
+            .contains("search overflow: 2 other matches across 2 files")
+    );
+    assert!(report.output.contains("more relevant matches in this file"));
+}
+
+#[test]
+fn intent_compaction_prioritizes_relevant_file_list_paths_and_summarizes_overflow() {
+    let input = "\
+src/main.rs
+src/app.rs
+crates/prodex-context/src/lib.rs
+crates/prodex-context/tests/src/lib.rs
+crates/prodex-cli/src/lib.rs
+docs/context.md
+README.md
+";
+
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::FileList,
+                max_lines: 12,
+                max_path_entries: 2,
+                max_line_chars: 160,
+                ..CommandOutputCompactOptions::default()
+            },
+            vec!["prodex-context".to_string()],
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::FileList);
+    assert!(report.output.contains("intent matches: 2 paths"));
+    assert!(report.output.contains("relevant paths:"));
+    assert!(report.output.contains("crates/prodex-context/src/lib.rs"));
+    assert!(
+        report
+            .output
+            .contains("crates/prodex-context/tests/src/lib.rs")
+    );
+    assert!(
+        report
+            .output
+            .contains("file-list overflow: 5 other entries")
+    );
+    assert!(report.output.contains("overflow roots:"));
 }
 
 #[test]
@@ -1009,9 +1130,17 @@ Command failed with exit code 1
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
-    assert!(report.output.contains("crates/prodex-app/src/lib.rs:12:5"));
-    assert!(report.output.contains("tests/runtime_proxy.rs"));
-    assert!(!report.output.contains("/home/doxa/IdeaProjects/prodex/"));
+    assert!(
+        report
+            .output
+            .contains("path aliases: $REPO=/home/doxa/IdeaProjects/prodex")
+    );
+    assert!(
+        report
+            .output
+            .contains("$REPO/crates/prodex-app/src/lib.rs:12:5")
+    );
+    assert!(report.output.contains("$REPO/tests/runtime_proxy.rs"));
     assert_no_critical_signal_loss(input, &report.output);
 }
 
@@ -1039,10 +1168,14 @@ Command failed with exit code 1
     );
 
     assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
-    assert!(report.output.contains("src/index.ts(12,7)"));
-    assert!(report.output.contains("src/service.ts:44:13"));
-    assert!(report.output.contains("tests/service.test.ts:9:5"));
-    assert!(!report.output.contains(&cwd));
+    assert!(
+        report
+            .output
+            .contains(&format!("path aliases: $REPO={cwd}"))
+    );
+    assert!(report.output.contains("$REPO/src/index.ts(12,7)"));
+    assert!(report.output.contains("$REPO/src/service.ts:44:13"));
+    assert!(report.output.contains("$REPO/tests/service.test.ts:9:5"));
     assert_no_critical_signal_loss(&input, &report.output);
 }
 
@@ -1110,7 +1243,7 @@ process finished with exit code 1
     assert!(
         report
             .output
-            .contains("File \"tests/test_math.py\", line 12")
+            .contains("File \"$REPO/tests/test_math.py\", line 12")
     );
     assert!(
         report
@@ -1251,6 +1384,78 @@ Ran all test suites.
 }
 
 #[test]
+fn noisy_success_output_detects_common_exit_zero_tool_noise() {
+    let input = "\
+ok  \tgithub.com/acme/prodex/pkg/a\t0.123s
+ok  \tgithub.com/acme/prodex/pkg/b\t0.234s
+?   \tgithub.com/acme/prodex/pkg/c\t[no test files]
+============================= test session starts =============================
+collected 12 items
+............                                                             [100%]
+============================== 12 passed in 1.23s ==============================
+Test Files  4 passed (4)
+Tests       12 passed (12)
+Duration    1.42s
+[INFO] --- maven-surefire-plugin:test (default-test) @ app ---
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+> Task :test
+BUILD SUCCESSFUL in 2s
+4 actionable tasks: 4 executed
+#1 [internal] load build definition from Dockerfile
+#1 DONE 0.1s
+Successfully built abcdef123456
+All matched files use Prettier code style!
+Running 12 tests using 4 workers
+12 passed (8.2s)
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 40,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::NoisySuccess);
+    assert!(report.output.contains("success output summary"));
+    assert!(report.output.contains("go_test_ok=2"));
+    assert!(report.output.contains("build_success="));
+    assert!(report.output.contains("docker_summary="));
+    assert!(report.output.contains("formatter_summary=1"));
+    assert!(report.output.contains("12 passed (8.2s)"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn noisy_success_output_refuses_explicit_compaction_when_failure_signal_present() {
+    let input = "\
+PASS tests/unit_0.test.ts
+PASS tests/unit_1.test.ts
+FAIL tests/unit_2.test.ts
+Tests: 1 failed, 2 passed, 3 total
+Command failed with exit code 1
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::NoisySuccess,
+            max_lines: 20,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::NoisySuccess);
+    assert!(!report.output.contains("success output summary"));
+    assert!(report.output.contains("FAIL tests/unit_2.test.ts"));
+    assert!(report.output.contains("Command failed with exit code 1"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
 fn successful_command_output_summary_compacts_long_install_build_and_list_output() {
     let mut input = String::new();
     input.push_str("added 82 packages, and audited 83 packages in 2s\n");
@@ -1297,6 +1502,59 @@ fn successful_command_output_summary_compacts_long_install_build_and_list_output
     assert!(report.output.contains("[... "));
     assert!(!report.output.contains("src/generated/file_34.rs"));
     assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_compacts_common_tool_success_without_exit_code() {
+    let mut input = String::new();
+    for index in 0..24 {
+        input.push_str(&format!(
+            "ok  \tgithub.com/acme/prodex/pkg/{index}\t0.{index:03}s\n"
+        ));
+    }
+    input.push_str("24 passed (9.2s)\n");
+
+    let report = compact_successful_command_output_with_options(
+        &input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("go test ./...".to_string()),
+            exit_code: None,
+            min_lines_to_compact: 8,
+            max_touched_files: 8,
+            max_key_lines: 6,
+            max_line_chars: 160,
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert!(report.output.contains("command: go test ./..."));
+    assert!(report.output.contains("noise: go_test_ok=24"));
+    assert!(report.output.contains("24 passed (9.2s)"));
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_refuses_suspected_failure_even_with_exit_zero() {
+    let input = "\
+[INFO] BUILD FAILURE
+Tests run: 12, Failures: 1, Errors: 0, Skipped: 0
+1 failed, 11 passed in 1.23s
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("mvn test".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!report.compacted);
+    assert!(report.failure_suspected);
+    assert_eq!(report.output, input);
 }
 
 #[test]

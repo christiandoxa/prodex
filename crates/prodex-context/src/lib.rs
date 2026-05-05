@@ -28,6 +28,12 @@ struct ContextStaticDuplicateCandidate {
     estimated_tokens: usize,
 }
 
+#[derive(Debug, Clone)]
+struct CommandPathAlias {
+    alias: String,
+    prefix: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ContextAuditEntry {
     pub path: PathBuf,
@@ -1597,35 +1603,7 @@ fn compact_git_log_stat_output(input: &str, options: &CommandOutputCompactOption
 }
 
 fn compact_search_output(input: &str, options: &CommandOutputCompactOptions) -> String {
-    let lines = command_lines(input);
-    let mut files: BTreeMap<String, Vec<SearchMatch>> = BTreeMap::new();
-    let mut other = Vec::new();
-    let mut current_heading_path = None::<String>;
-
-    for line in lines {
-        if let Some(search_match) =
-            parse_rg_json_match_line(line).or_else(|| parse_search_match_line(line))
-        {
-            current_heading_path = Some(search_match.path.clone());
-            files
-                .entry(search_match.path.clone())
-                .or_default()
-                .push(search_match);
-        } else if let Some(search_match) =
-            parse_heading_search_match_line(line, current_heading_path.as_deref())
-        {
-            files
-                .entry(search_match.path.clone())
-                .or_default()
-                .push(search_match);
-        } else if let Some(path) = parse_search_heading_line(line) {
-            current_heading_path = Some(path);
-        } else if looks_like_rg_json_line(line) {
-            // Non-match rg JSON records are command metadata, not useful context.
-        } else if !line.trim().is_empty() {
-            other.push(line.to_string());
-        }
-    }
+    let (files, other) = collect_search_output_matches(input);
 
     let total_matches = files.values().map(Vec::len).sum::<usize>();
     if total_matches == 0 {
@@ -1679,13 +1657,7 @@ fn compact_search_output(input: &str, options: &CommandOutputCompactOptions) -> 
 }
 
 fn compact_file_list_output(input: &str, options: &CommandOutputCompactOptions) -> String {
-    let lines = command_lines(input);
-    let mut entries = Vec::new();
-    for line in lines {
-        if let Some(entry) = parse_file_list_entry_line(line) {
-            entries.push(entry);
-        }
-    }
+    let entries = collect_file_list_entries(input);
 
     if entries.is_empty() {
         return smart_truncate_command_output(input, options);
@@ -1726,6 +1698,47 @@ fn compact_file_list_output(input: &str, options: &CommandOutputCompactOptions) 
     }
 
     finalize_compacted_command_output(CommandOutputKind::FileList, input, output, options)
+}
+
+fn collect_search_output_matches(input: &str) -> (BTreeMap<String, Vec<SearchMatch>>, Vec<String>) {
+    let lines = command_lines(input);
+    let mut files: BTreeMap<String, Vec<SearchMatch>> = BTreeMap::new();
+    let mut other = Vec::new();
+    let mut current_heading_path = None::<String>;
+
+    for line in lines {
+        if let Some(search_match) =
+            parse_rg_json_match_line(line).or_else(|| parse_search_match_line(line))
+        {
+            current_heading_path = Some(search_match.path.clone());
+            files
+                .entry(search_match.path.clone())
+                .or_default()
+                .push(search_match);
+        } else if let Some(search_match) =
+            parse_heading_search_match_line(line, current_heading_path.as_deref())
+        {
+            files
+                .entry(search_match.path.clone())
+                .or_default()
+                .push(search_match);
+        } else if let Some(path) = parse_search_heading_line(line) {
+            current_heading_path = Some(path);
+        } else if looks_like_rg_json_line(line) {
+            // Non-match rg JSON records are command metadata, not useful context.
+        } else if !line.trim().is_empty() {
+            other.push(line.to_string());
+        }
+    }
+
+    (files, other)
+}
+
+fn collect_file_list_entries(input: &str) -> Vec<String> {
+    command_lines(input)
+        .into_iter()
+        .filter_map(parse_file_list_entry_line)
+        .collect()
 }
 
 fn compact_git_diff_stat_output(
@@ -2102,6 +2115,13 @@ fn compact_noisy_success_output(input: &str, options: &CommandOutputCompactOptio
     if lines.is_empty() {
         return String::new();
     }
+    if !count_critical_signals(input).is_empty()
+        || lines
+            .iter()
+            .any(|line| is_success_output_failure_signal_line(line))
+    {
+        return smart_truncate_command_output(input, options);
+    }
 
     let mut noise_counts = BTreeMap::<String, usize>::new();
     let mut key_lines = Vec::<String>::new();
@@ -2247,6 +2267,8 @@ pub fn compact_successful_command_output_with_options(
     push_success_output_touched_files(&mut output, &touched_files, options);
 
     let output = lines_to_text(output);
+    let output =
+        canonicalize_compacted_command_paths(&normalized, &output, CommandOutputKind::NoisySuccess);
     CommandSuccessOutputCompactReport {
         compacted: true,
         failure_suspected: false,
@@ -2268,6 +2290,7 @@ fn command_success_output_failure_suspected(
         || lines.iter().any(|line| {
             is_error_signal_line(line)
                 || is_test_failure_signal_line(line)
+                || is_success_output_failure_signal_line(line)
                 || is_diagnostic_failure_summary_line(line)
         })
 }
@@ -2286,14 +2309,16 @@ fn command_success_output_success_like(
 
 fn command_name_is_success_output_candidate(command: &str) -> bool {
     let tokens = command_metadata_tokens(command);
-    tokens.iter().any(|token| {
-        matches!(
-            command_metadata_token_command_name(token),
+    for index in 0..tokens.len() {
+        let command = command_metadata_token_command_name(&tokens[index]);
+        if matches!(
+            command,
             "cargo"
                 | "npm"
                 | "pnpm"
                 | "yarn"
                 | "bun"
+                | "corepack"
                 | "make"
                 | "cmake"
                 | "ninja"
@@ -2303,8 +2328,40 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
                 | "du"
                 | "tar"
                 | "unzip"
-        )
-    })
+                | "pip"
+                | "pip3"
+                | "uv"
+                | "pipenv"
+                | "poetry"
+                | "pytest"
+                | "py.test"
+                | "vitest"
+                | "jest"
+                | "eslint"
+                | "prettier"
+                | "playwright"
+                | "mvn"
+                | "mvnw"
+                | "gradle"
+                | "gradlew"
+        ) {
+            return true;
+        }
+        if command == "go"
+            && command_metadata_subcommand_after(&tokens, index)
+                .is_some_and(|subcommand| matches!(subcommand, "test" | "build" | "vet" | "list"))
+        {
+            return true;
+        }
+        if command == "docker"
+            && command_metadata_subcommand_after(&tokens, index).is_some_and(|subcommand| {
+                matches!(subcommand, "build" | "buildx" | "pull" | "compose")
+            })
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn collect_success_output_touched_files(lines: &[&str]) -> Vec<String> {
@@ -2511,10 +2568,11 @@ fn looks_like_noisy_success_output(lines: &[&str]) -> bool {
     if non_empty < 8 {
         return false;
     }
-    if lines
-        .iter()
-        .any(|line| is_error_signal_line(line) || is_test_failure_signal_line(line))
-    {
+    if lines.iter().any(|line| {
+        is_error_signal_line(line)
+            || is_test_failure_signal_line(line)
+            || is_success_output_failure_signal_line(line)
+    }) {
         return false;
     }
 
@@ -2583,27 +2641,83 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
     let lower = trimmed.to_ascii_lowercase();
     if trimmed.starts_with("PASS ") {
         Some("passed_suites")
+    } else if lower.starts_with("ok ") && lower.split_whitespace().count() >= 2 {
+        Some("go_test_ok")
+    } else if lower.starts_with("? ") && lower.contains("[no test files]") {
+        Some("go_test_no_files")
+    } else if lower.starts_with("=== run ") {
+        Some("go_test_run")
+    } else if lower.starts_with("--- pass: ") {
+        Some("go_test_pass")
     } else if lower.starts_with("test suites:") && lower.contains("passed") {
         Some("test_suites")
     } else if lower.starts_with("tests:") && lower.contains("passed") {
         Some("test_cases")
     } else if lower.starts_with("snapshots:") && lower.contains("passed") {
         Some("snapshots")
+    } else if lower.starts_with("test files") && lower.contains("passed") {
+        Some("test_files")
+    } else if lower.starts_with("duration") {
+        Some("test_duration")
     } else if lower.starts_with("time:") {
         Some("test_time")
     } else if lower.starts_with("ran all test suites") {
         Some("test_runner_summary")
     } else if lower.starts_with("done in ") {
         Some("done")
+    } else if lower.starts_with("build successful") || lower.contains(" build success") {
+        Some("build_success")
+    } else if lower.starts_with("build successful in ")
+        || lower.starts_with("build success")
+        || lower.starts_with("[info] build success")
+    {
+        Some("build_success")
+    } else if lower.starts_with("[info] --- ") || lower.starts_with("> task ") {
+        Some("build_steps")
+    } else if lower.contains("actionable tasks:") {
+        Some("gradle_tasks")
+    } else if lower.starts_with("[info] total time:")
+        || lower.starts_with("[info] finished at:")
+        || lower.starts_with("[info] tests run:")
+    {
+        Some("maven_summary")
+    } else if lower.starts_with("#") && (lower.contains(" done ") || lower.ends_with(" done")) {
+        Some("docker_steps")
+    } else if lower.starts_with("=> ") || lower.starts_with("=>=> ") {
+        Some("docker_steps")
+    } else if lower.starts_with("successfully built ")
+        || lower.starts_with("successfully tagged ")
+        || lower.contains("writing image sha256:")
+        || lower.contains("naming to ")
+    {
+        Some("docker_summary")
+    } else if lower.starts_with("running ") && lower.contains(" tests using ") {
+        Some("playwright_running")
+    } else if lower.contains(" passed (") && lower.chars().any(|ch| ch.is_ascii_digit()) {
+        Some("test_summary")
     } else if lower.starts_with("added ") && lower.contains(" package") {
         Some("packages_added")
     } else if lower.starts_with("audited ") && lower.contains(" package") {
         Some("packages_audited")
+    } else if lower.starts_with("packages: ") || lower.starts_with("progress: resolved") {
+        Some("package_progress")
+    } else if lower.starts_with("lockfile is up to date") || lower.starts_with("already up to date")
+    {
+        Some("packages_up_to_date")
+    } else if lower.starts_with("requirement already satisfied")
+        || lower.starts_with("successfully installed")
+        || lower.starts_with("installing collected packages")
+    {
+        Some("python_packages")
     } else if lower == "up to date" || lower.starts_with("up to date in ") {
         Some("packages_up_to_date")
     } else if lower.starts_with("found 0 vulnerabilities") {
         Some("vulnerability_summary")
     } else if lower.starts_with("all files pass") {
+        Some("formatter_summary")
+    } else if lower.contains("all matched files use prettier code style")
+        || lower.contains("eslint found no problems")
+    {
         Some("formatter_summary")
     } else if lower.starts_with("built in ") || lower.contains(" built in ") {
         Some("build_summary")
@@ -2611,6 +2725,7 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("compile_summary")
     } else if (lower.starts_with("tests/") && lower.contains(" passed"))
         || (lower.contains("::test_") && lower.ends_with(" passed"))
+        || is_pytest_success_summary_line(&lower)
     {
         Some("passed_tests")
     } else if is_pytest_progress_line(trimmed) {
@@ -2629,6 +2744,13 @@ fn is_pytest_progress_line(line: &str) -> bool {
         && trimmed.chars().any(|ch| ch == '.')
 }
 
+fn is_pytest_success_summary_line(lower: &str) -> bool {
+    lower.contains(" passed in ")
+        && !lower.contains(" failed")
+        && !lower.contains(" error")
+        && !lower.contains("errors")
+}
+
 fn is_diagnostic_key_line(line: &str) -> bool {
     is_diagnostic_success_summary_line(line)
         || is_diagnostic_failure_summary_line(line)
@@ -2640,9 +2762,11 @@ fn is_diagnostic_success_summary_line(line: &str) -> bool {
     lower.starts_with("test suites:")
         || lower.starts_with("tests:")
         || lower.starts_with("snapshots:")
+        || lower.starts_with("test files")
         || lower.starts_with("ran all test suites")
         || lower.starts_with("found 0 vulnerabilities")
         || lower.contains(" passed in ")
+        || is_common_success_summary_line(&lower)
 }
 
 fn is_diagnostic_failure_summary_line(line: &str) -> bool {
@@ -2659,17 +2783,110 @@ fn is_noisy_success_key_line(line: &str) -> bool {
     lower.starts_with("test suites:")
         || lower.starts_with("tests:")
         || lower.starts_with("snapshots:")
+        || lower.starts_with("test files")
         || lower.starts_with("ran all test suites")
         || lower.starts_with("done in ")
         || lower.starts_with("added ")
         || lower.starts_with("audited ")
+        || lower.starts_with("packages: ")
+        || lower.starts_with("build successful")
+        || lower.contains(" build success")
+        || lower.starts_with("[info] build success")
+        || lower.contains("actionable tasks:")
+        || lower.starts_with("[info] tests run:")
+        || lower.starts_with("successfully built ")
+        || lower.starts_with("successfully tagged ")
+        || lower.contains("writing image sha256:")
+        || lower.contains("naming to ")
+        || lower.contains("all matched files use prettier code style")
+        || lower.contains("eslint found no problems")
         || lower.starts_with("found 0 vulnerabilities")
         || lower == "up to date"
         || lower.starts_with("up to date in ")
+        || lower.starts_with("lockfile is up to date")
+        || lower.starts_with("already up to date")
+        || lower.starts_with("successfully installed")
         || lower.starts_with("all files pass")
         || lower.starts_with("built in ")
         || lower.contains(" passed in ")
+        || is_common_success_summary_line(&lower)
         || lower.starts_with("compiled successfully")
+}
+
+fn is_common_success_summary_line(lower: &str) -> bool {
+    lower.starts_with("build successful")
+        || lower.contains(" build success")
+        || lower.starts_with("[info] build success")
+        || lower.contains("actionable tasks:")
+        || lower.starts_with("[info] tests run:")
+        || lower.starts_with("successfully built ")
+        || lower.starts_with("successfully tagged ")
+        || lower.contains("all matched files use prettier code style")
+        || lower.contains("eslint found no problems")
+        || lower.starts_with("test files") && lower.contains("passed")
+        || lower.contains(" passed (")
+}
+
+fn is_success_output_failure_signal_line(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    lower.starts_with("build failure")
+        || lower.starts_with("build failed")
+        || lower.starts_with("--- fail:")
+        || lower.starts_with("failed tests:")
+        || lower.starts_with("there were failing")
+        || lower.starts_with("there were test failures")
+        || lower.contains(" test failures")
+        || lower.contains("tests failed")
+        || lower.contains("failed to compile")
+        || has_nonzero_summary_count(&lower, &["failed", "failures", "error", "errors"])
+}
+
+fn has_nonzero_summary_count(lower: &str, words: &[&str]) -> bool {
+    words.iter().any(|word| {
+        lower.match_indices(word).any(|(index, matched)| {
+            if let Some(count) = count_after_word(lower, index + matched.len()) {
+                return count > 0;
+            }
+            count_before_word(lower, index).is_some_and(|count| count > 0)
+        })
+    })
+}
+
+fn count_after_word(lower: &str, after_word_index: usize) -> Option<usize> {
+    let after = lower.get(after_word_index..)?.trim_start();
+    let after = if let Some(rest) = after.strip_prefix(':') {
+        rest
+    } else if let Some(rest) = after.strip_prefix('=') {
+        rest
+    } else if let Some(rest) = after.strip_prefix('(') {
+        rest
+    } else {
+        return None;
+    };
+    let digits = after
+        .trim_start()
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    (!digits.is_empty()).then(|| digits.parse::<usize>().ok())?
+}
+
+fn count_before_word(lower: &str, word_index: usize) -> Option<usize> {
+    let before = lower
+        .get(..word_index)?
+        .trim_end_matches(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ':' | ';' | '('));
+    let digits = before
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    (!digits.is_empty()).then(|| digits.parse::<usize>().ok())?
 }
 
 fn is_rust_success_summary_line(line: &str) -> bool {
@@ -3444,6 +3661,12 @@ fn compact_command_output_for_intent(
     if !command_output_kind_supports_intent_compaction(kind) {
         return base_output.to_string();
     }
+    if kind == CommandOutputKind::Search {
+        return compact_search_output_for_intent(original, base_output, options, intent_terms);
+    }
+    if kind == CommandOutputKind::FileList {
+        return compact_file_list_output_for_intent(original, base_output, options, intent_terms);
+    }
 
     let intent_matches = collect_intent_matching_lines(original, intent_terms, options);
     if intent_matches.is_empty() {
@@ -3511,6 +3734,250 @@ fn compact_command_output_for_intent(
     lines_to_text(output)
 }
 
+fn compact_search_output_for_intent(
+    original: &str,
+    base_output: &str,
+    options: &CommandOutputCompactOptions,
+    intent_terms: &[String],
+) -> String {
+    let (files, _) = collect_search_output_matches(original);
+    let total_matches = files.values().map(Vec::len).sum::<usize>();
+    if total_matches == 0 {
+        return base_output.to_string();
+    }
+
+    let mut relevant = Vec::<(usize, String, Vec<SearchMatch>)>::new();
+    let mut other_files = 0usize;
+    let mut other_matches = 0usize;
+    for (path, matches) in files {
+        let path_score = score_intent_text(&path, intent_terms).saturating_mul(4);
+        let mut scored = matches
+            .iter()
+            .cloned()
+            .map(|search_match| {
+                let score =
+                    path_score.saturating_add(score_intent_text(&search_match.text, intent_terms));
+                (score, search_match)
+            })
+            .collect::<Vec<_>>();
+        let file_score = scored.iter().map(|(score, _)| *score).max().unwrap_or(0);
+        if file_score == 0 {
+            other_files += 1;
+            other_matches += matches.len();
+            continue;
+        }
+        scored.sort_by_key(|(score, search_match)| {
+            (
+                Reverse(*score),
+                search_match.line_number.unwrap_or(usize::MAX),
+                search_match.text.clone(),
+            )
+        });
+        relevant.push((
+            file_score,
+            path,
+            scored
+                .into_iter()
+                .map(|(_, search_match)| search_match)
+                .collect(),
+        ));
+    }
+
+    if relevant.is_empty() {
+        return base_output.to_string();
+    }
+
+    relevant.sort_by_key(|(score, path, _)| (Reverse(*score), path.clone()));
+    let base_lines = command_lines(base_output);
+    let max_lines = options.max_lines.saturating_add(1).max(8);
+    let mut output = Vec::<String>::new();
+    push_intent_header(
+        &mut output,
+        &base_lines,
+        CommandOutputKind::Search,
+        original,
+    );
+    let relevant_matches = relevant
+        .iter()
+        .map(|(_, _, matches)| matches.len())
+        .sum::<usize>();
+    output.push(format!(
+        "intent matches: {} search matches across {} files for {}",
+        relevant_matches,
+        relevant.len(),
+        truncate_command_line(&intent_terms.join(", "), options.max_line_chars),
+    ));
+    output.push(format!(
+        "search overflow: {} other matches across {} files",
+        other_matches, other_files,
+    ));
+    output.push("relevant search matches:".to_string());
+
+    let mut budget = max_lines.saturating_sub(output.len()).max(1);
+    let reserve = usize::from(other_matches > 0).saturating_add(usize::from(base_lines.len() > 1));
+    budget = budget.saturating_sub(reserve).max(1);
+    let per_file = options.max_search_matches_per_file.max(1);
+    let mut hidden_relevant = 0usize;
+    for (_, path, matches) in &relevant {
+        if budget <= 1 {
+            hidden_relevant += matches.len();
+            continue;
+        }
+        output.push(format!("{path} ({} relevant matches):", matches.len()));
+        budget = budget.saturating_sub(1);
+        let shown = matches.len().min(per_file).min(budget);
+        for search_match in matches.iter().take(shown) {
+            let prefix = search_match
+                .line_number
+                .map(|line| format!("{line}: "))
+                .unwrap_or_default();
+            output.push(format!(
+                "  {}{}",
+                prefix,
+                truncate_command_line(&search_match.text, options.max_line_chars),
+            ));
+        }
+        budget = budget.saturating_sub(shown);
+        if matches.len() > shown {
+            output.push(format!(
+                "  [... {} more relevant matches in this file ...]",
+                matches.len() - shown
+            ));
+            budget = budget.saturating_sub(1);
+        }
+    }
+    if hidden_relevant > 0 {
+        output.push(format!(
+            "[... omitted {hidden_relevant} additional relevant search matches ...]"
+        ));
+    }
+    push_intent_baseline_tail(&mut output, &base_lines, max_lines, options);
+    lines_to_text(output)
+}
+
+fn compact_file_list_output_for_intent(
+    original: &str,
+    base_output: &str,
+    options: &CommandOutputCompactOptions,
+    intent_terms: &[String],
+) -> String {
+    let entries = collect_file_list_entries(original);
+    if entries.is_empty() {
+        return base_output.to_string();
+    }
+
+    let mut relevant = Vec::<(usize, String)>::new();
+    let mut overflow = Vec::<String>::new();
+    for entry in entries {
+        let score = score_intent_text(&entry, intent_terms);
+        if score == 0 {
+            overflow.push(entry);
+        } else {
+            relevant.push((score, entry));
+        }
+    }
+    if relevant.is_empty() {
+        return base_output.to_string();
+    }
+
+    relevant.sort_by_key(|(score, path)| (Reverse(*score), path.clone()));
+    let base_lines = command_lines(base_output);
+    let max_lines = options.max_lines.saturating_add(1).max(8);
+    let mut output = Vec::<String>::new();
+    push_intent_header(
+        &mut output,
+        &base_lines,
+        CommandOutputKind::FileList,
+        original,
+    );
+    output.push(format!(
+        "intent matches: {} paths for {}",
+        relevant.len(),
+        truncate_command_line(&intent_terms.join(", "), options.max_line_chars),
+    ));
+    if !overflow.is_empty() {
+        let roots = count_success_output_path_roots(&overflow);
+        let extensions = count_success_output_path_extensions(&overflow);
+        output.push(format!(
+            "file-list overflow: {} other entries",
+            overflow.len()
+        ));
+        output.push(format_count_map("overflow roots", &roots, 6));
+        output.push(format_count_map("overflow extensions", &extensions, 6));
+    }
+    output.push("relevant paths:".to_string());
+
+    let mut budget = max_lines.saturating_sub(output.len()).max(1);
+    let reserve = usize::from(base_lines.len() > 1);
+    budget = budget.saturating_sub(reserve).max(1);
+    let path_limit = options.max_path_entries.max(1).min(budget);
+    for (_, path) in relevant.iter().take(path_limit) {
+        output.push(format!(
+            "  {}",
+            truncate_command_line(path, options.max_line_chars)
+        ));
+    }
+    if relevant.len() > path_limit {
+        output.push(format!(
+            "  [... {} more relevant paths ...]",
+            relevant.len() - path_limit
+        ));
+    }
+    push_intent_baseline_tail(&mut output, &base_lines, max_lines, options);
+    lines_to_text(output)
+}
+
+fn push_intent_header(
+    output: &mut Vec<String>,
+    base_lines: &[&str],
+    kind: CommandOutputKind,
+    original: &str,
+) {
+    if let Some(header) = base_lines.first() {
+        output.push((*header).to_string());
+    } else {
+        output.push(format!(
+            "# prodex context saver: {} ({} -> intent lines)",
+            kind.label(),
+            count_text_lines(original),
+        ));
+    }
+}
+
+fn push_intent_baseline_tail(
+    output: &mut Vec<String>,
+    base_lines: &[&str],
+    max_lines: usize,
+    options: &CommandOutputCompactOptions,
+) {
+    let remaining = max_lines.saturating_sub(output.len());
+    if remaining < 3 || base_lines.len() <= 1 {
+        return;
+    }
+    output.push("baseline compaction:".to_string());
+    let baseline = base_lines
+        .iter()
+        .skip(1)
+        .map(|line| (*line).to_string())
+        .collect::<Vec<_>>();
+    push_head_tail_lines(
+        output,
+        &baseline,
+        max_lines.saturating_sub(output.len()).max(1),
+        options.max_line_chars,
+        "baseline lines",
+        "  ",
+    );
+}
+
+fn score_intent_text(value: &str, intent_terms: &[String]) -> usize {
+    let value = normalize_intent_match_text(value);
+    intent_terms
+        .iter()
+        .filter(|term| value.contains(term.as_str()))
+        .count()
+}
+
 fn command_output_kind_supports_intent_compaction(kind: CommandOutputKind) -> bool {
     matches!(
         kind,
@@ -3518,6 +3985,7 @@ fn command_output_kind_supports_intent_compaction(kind: CommandOutputKind) -> bo
             | CommandOutputKind::RustDiagnostics
             | CommandOutputKind::Diagnostics
             | CommandOutputKind::Search
+            | CommandOutputKind::FileList
             | CommandOutputKind::Plain
     )
 }
@@ -3857,18 +4325,24 @@ fn canonicalize_compacted_command_paths(
         return output.to_string();
     }
 
-    let prefixes = repeated_repo_relative_path_prefixes(original);
-    if prefixes.is_empty() {
+    let aliases = repeated_repo_path_aliases(original, output);
+    if aliases.is_empty() {
         return output.to_string();
     }
 
-    let mut rewritten = output.to_string();
-    for prefix in prefixes {
-        rewritten = replace_absolute_path_prefix(&rewritten, &prefix);
+    if let Some(rewritten) = rewrite_absolute_paths_with_aliases(output, &aliases)
+        && critical_signal_self_check(output, &rewritten).passed()
+    {
+        return rewritten;
     }
 
-    if rewritten != output && critical_signal_self_check(output, &rewritten).passed() {
-        rewritten
+    // Compatibility fallback: older compaction removed repeated repo prefixes entirely.
+    let mut relative = output.to_string();
+    for alias in aliases {
+        relative = replace_absolute_path_prefix(&relative, &alias.prefix);
+    }
+    if relative != output && critical_signal_self_check(output, &relative).passed() {
+        relative
     } else {
         output.to_string()
     }
@@ -3883,7 +4357,81 @@ fn command_output_kind_allows_repo_relative_paths(kind: CommandOutputKind) -> bo
             | CommandOutputKind::Diagnostics
             | CommandOutputKind::GitLog
             | CommandOutputKind::Search
+            | CommandOutputKind::FileList
+            | CommandOutputKind::NoisySuccess
+            | CommandOutputKind::Plain
     )
+}
+
+fn repeated_repo_path_aliases(original: &str, output: &str) -> Vec<CommandPathAlias> {
+    let mut prefixes = repeated_repo_relative_path_prefixes(original);
+    for prefix in repeated_repo_relative_path_prefixes(output) {
+        push_unique_line(&mut prefixes, &prefix);
+    }
+    prefixes.retain(|prefix| count_absolute_path_prefix_occurrences(output, prefix) >= 2);
+    prefixes.sort_by_key(|prefix| Reverse(prefix.len()));
+
+    let mut selected = Vec::<String>::new();
+    for prefix in prefixes {
+        if selected
+            .iter()
+            .any(|existing| path_prefix_contains(existing, &prefix))
+        {
+            continue;
+        }
+        selected.push(prefix);
+    }
+
+    selected
+        .into_iter()
+        .enumerate()
+        .map(|(index, prefix)| CommandPathAlias {
+            alias: if index == 0 {
+                "$REPO".to_string()
+            } else {
+                format!("$PATH{index}")
+            },
+            prefix,
+        })
+        .collect()
+}
+
+fn rewrite_absolute_paths_with_aliases(
+    output: &str,
+    aliases: &[CommandPathAlias],
+) -> Option<String> {
+    let mut rewritten = output.to_string();
+    for alias in aliases {
+        rewritten =
+            replace_absolute_path_prefix_with_alias(&rewritten, &alias.prefix, &alias.alias);
+    }
+    if rewritten == output {
+        return None;
+    }
+
+    let mapping = aliases
+        .iter()
+        .map(|alias| format!("{}={}", alias.alias, alias.prefix))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(insert_path_alias_mapping_line(
+        &rewritten,
+        &format!("path aliases: {mapping}"),
+    ))
+}
+
+fn insert_path_alias_mapping_line(output: &str, mapping_line: &str) -> String {
+    let mut lines = command_lines(output)
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let insert_at = usize::from(
+        lines
+            .first()
+            .is_some_and(|line| line.starts_with("# prodex context saver:")),
+    );
+    lines.insert(insert_at, mapping_line.to_string());
+    lines_to_text(lines)
 }
 
 fn repeated_repo_relative_path_prefixes(input: &str) -> Vec<String> {
@@ -3996,6 +4544,25 @@ fn replace_absolute_path_prefix(text: &str, prefix: &str) -> String {
     let mut cursor = 0usize;
     for start in occurrences {
         output.push_str(&text[cursor..start]);
+        cursor = start + marker_len;
+    }
+    output.push_str(&text[cursor..]);
+    output
+}
+
+fn replace_absolute_path_prefix_with_alias(text: &str, prefix: &str, alias: &str) -> String {
+    let occurrences = absolute_path_prefix_occurrences(text, prefix);
+    if occurrences.is_empty() {
+        return text.to_string();
+    }
+
+    let marker_len = prefix.len() + 1;
+    let mut output = String::with_capacity(text.len());
+    let mut cursor = 0usize;
+    for start in occurrences {
+        output.push_str(&text[cursor..start]);
+        output.push_str(alias);
+        output.push('/');
         cursor = start + marker_len;
     }
     output.push_str(&text[cursor..]);
