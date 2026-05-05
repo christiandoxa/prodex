@@ -545,6 +545,9 @@ pub fn smart_context_auto_rehydrate_plan(
 }
 
 pub const SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN: u64 = 4;
+const SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_NUMERATOR: u64 = 9;
+const SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR: u64 = 8;
+const SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS: u64 = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmartContextTokenAccountingSource {
@@ -615,11 +618,7 @@ pub fn smart_context_observed_token_accounting(
         observed_reasoning_tokens =
             observed_reasoning_tokens.saturating_add(usage.reasoning_tokens);
         last_input_tokens = usage.input_tokens;
-        last_accounted_input_tokens = if usage.input_tokens == 0 {
-            usage.cached_input_tokens
-        } else {
-            usage.input_tokens
-        };
+        last_accounted_input_tokens = smart_context_accounted_input_tokens(*usage).unwrap_or(0);
         last_observed_context_tokens =
             smart_context_observed_usage_context_tokens(*usage).unwrap_or(0);
     }
@@ -628,10 +627,15 @@ pub fn smart_context_observed_token_accounting(
         observed_input_tokens.saturating_sub(observed_cached_input_tokens);
     let observed_total_tokens = observed_input_tokens.saturating_add(observed_output_tokens);
     let observed_context_tokens = observed_total_tokens.saturating_add(observed_reasoning_tokens);
-    let estimated_current_request_tokens =
+    let baseline_estimated_current_request_tokens =
         input.current_request_estimated_tokens.unwrap_or_else(|| {
             smart_context_estimate_tokens_from_body_bytes(input.current_request_body_bytes)
         });
+    let estimated_current_request_tokens = smart_context_observed_calibrated_request_estimate(
+        input.current_request_body_bytes,
+        baseline_estimated_current_request_tokens,
+        &input.observed_usage,
+    );
     let current_request_accounted_tokens = input
         .current_input_tokens
         .max(estimated_current_request_tokens);
@@ -682,6 +686,43 @@ pub fn smart_context_estimate_tokens_from_body_bytes(body_bytes: usize) -> u64 {
     let body_bytes = u64::try_from(body_bytes).unwrap_or(u64::MAX);
     body_bytes.saturating_add(SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN - 1)
         / SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN
+}
+
+fn smart_context_observed_calibrated_request_estimate(
+    body_bytes: usize,
+    baseline_estimate: u64,
+    observed_usage: &[RuntimeTokenUsage],
+) -> u64 {
+    if baseline_estimate == 0 {
+        return 0;
+    }
+    let Some(last_accounted_input) = observed_usage
+        .iter()
+        .rev()
+        .find_map(|usage| smart_context_accounted_input_tokens(*usage))
+    else {
+        return baseline_estimate;
+    };
+    let raw_floor = smart_context_estimate_tokens_from_body_bytes(body_bytes)
+        .saturating_add(1)
+        .saturating_div(2)
+        .max(1);
+    let observed_with_margin = last_accounted_input
+        .saturating_mul(SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_NUMERATOR)
+        .saturating_add(SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR - 1)
+        / SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR;
+    let observed_with_margin =
+        observed_with_margin.saturating_add(SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS);
+    baseline_estimate.min(observed_with_margin.max(raw_floor))
+}
+
+fn smart_context_accounted_input_tokens(usage: RuntimeTokenUsage) -> Option<u64> {
+    let accounted = if usage.input_tokens == 0 {
+        usage.cached_input_tokens
+    } else {
+        usage.input_tokens
+    };
+    (accounted > 0).then_some(accounted)
 }
 
 pub fn smart_context_estimate_tokens_from_body(body: &[u8]) -> u64 {

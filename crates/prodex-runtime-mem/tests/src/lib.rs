@@ -607,8 +607,8 @@ fn recall_content_dedupe_keeps_required_copy_and_replaces_optional_exact_duplica
         .as_deref()
         .expect("optional duplicate should be replaced");
     assert!(replacement.contains("mem dup: original=required-main"));
-    assert!(replacement.contains("content_hash=sc:"));
-    assert!(replacement.contains("original_bytes="));
+    assert!(replacement.contains("h=sc:"));
+    assert!(replacement.contains("b="));
     assert!(
         !replacement.contains("critical memory line"),
         "duplicate replacement must not semantic-summarize content"
@@ -646,8 +646,8 @@ fn recall_content_dedupe_replaces_optional_prodex_artifact_content_with_ref() {
         .expect("artifact-backed optional content should be replaced");
     assert!(replacement.starts_with("prodex-artifact:sc:abc123"));
     assert!(replacement.contains("[mem art;"));
-    assert!(replacement.contains("content_hash=sc:"));
-    assert!(replacement.contains("original_bytes="));
+    assert!(replacement.contains("h=sc:"));
+    assert!(replacement.contains("b="));
     assert!(
         !replacement.contains("large artifact-backed memory"),
         "artifact replacement must stay reference-only"
@@ -756,10 +756,7 @@ fn super_slim_schema_prefers_prompt_summary_or_refs_and_omits_plain_prompt_body(
     .expect("super-slim prompt should resolve");
 
     assert_eq!(slim_prompt, large_prompt);
-    assert_eq!(
-        super_slim_prompt,
-        "user prompt recorded by prodex super-slim mem; content omitted"
-    );
+    assert_eq!(super_slim_prompt, "mem ss: prompt omitted");
 
     let summarized = resolve_schema_user_prompt(
         &super_slim_schema,
@@ -1005,14 +1002,11 @@ fn super_slim_shadow_user_prompt_stores_summary_counts_and_ref_not_full_prompt()
         .expect("shadow prompt body should exist");
 
     assert!(summary.starts_with("user prompt summary: Implement shadow transcript helpers"));
-    assert!(summary.contains("bytes="));
-    assert!(summary.contains("approx_tokens="));
+    assert!(summary.contains("b="));
+    assert!(summary.contains("tok~="));
     assert!(summary.contains("ref=prodex-artifact:prompt-123"));
-    assert!(summary.contains("full prompt omitted"));
-    assert_eq!(
-        shadow_message,
-        "user prompt shadowed by prodex super-slim mem; full content omitted"
-    );
+    assert!(summary.contains("prompt omitted"));
+    assert_eq!(shadow_message, "mem ss: omitted");
     assert_ne!(
         lookup_test_path(&event, "payload.message").and_then(Value::as_str),
         Some(shadow_message)
@@ -1038,11 +1032,11 @@ fn super_slim_shadow_assistant_message_uses_short_summary() {
         .expect("assistant summary should exist");
 
     assert!(summary.starts_with("assistant response summary: Completed helper implementation"));
-    assert!(summary.contains("bytes="));
-    assert!(summary.contains("approx_tokens="));
+    assert!(summary.contains("b="));
+    assert!(summary.contains("tok~="));
     assert_eq!(
         lookup_test_path(&shadow, "payload.message").and_then(Value::as_str),
-        Some("assistant response shadowed by prodex super-slim mem; full content omitted")
+        Some("mem ss: omitted")
     );
     assert_eq!(
         resolve_schema_assistant_message(&runtime_mem_super_slim_codex_schema(), &shadow)
@@ -1088,7 +1082,7 @@ fn super_slim_shadow_referenced_artifact_uses_shorter_prefix_than_plain_summary(
     assert!(plain_summary.contains(tail));
     assert!(!artifact_summary.contains(tail));
     assert!(artifact_summary.contains("ref=prodex-artifact:sc:short-prefix"));
-    assert!(artifact_summary.contains("full output omitted"));
+    assert!(artifact_summary.contains("output omitted"));
 }
 
 #[test]
@@ -1109,8 +1103,8 @@ fn super_slim_shadow_tool_output_stores_summary_and_ref() {
         .expect("tool output summary should exist");
 
     assert!(summary.starts_with("tool output summary: first useful output line"));
-    assert!(summary.contains("bytes="));
-    assert!(summary.contains("approx_tokens="));
+    assert!(summary.contains("b="));
+    assert!(summary.contains("tok~="));
     assert!(summary.contains("ref=prodex://artifact/tool-456"));
     assert_eq!(
         lookup_test_path(&shadow, "payload.metadata.artifact_ref").and_then(Value::as_str),
@@ -1118,7 +1112,7 @@ fn super_slim_shadow_tool_output_stores_summary_and_ref() {
     );
     assert_eq!(
         lookup_test_path(&shadow, "payload.output").and_then(Value::as_str),
-        Some("tool output shadowed by prodex super-slim mem; full content omitted")
+        Some("mem ss: omitted")
     );
     assert_eq!(
         resolve_schema_tool_response(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
@@ -1140,9 +1134,9 @@ fn super_slim_shadow_falls_back_to_local_summary_when_no_summary_or_ref_exists()
         .expect("fallback summary should exist");
 
     assert!(summary.starts_with("tool output summary: plain output only"));
-    assert!(summary.contains("bytes="));
-    assert!(summary.contains("approx_tokens="));
-    assert!(summary.contains("full output omitted"));
+    assert!(summary.contains("b="));
+    assert!(summary.contains("tok~="));
+    assert!(summary.contains("output omitted"));
     assert!(!summary.contains("ref="));
     assert_eq!(
         resolve_schema_tool_response(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
@@ -1180,11 +1174,11 @@ fn super_slim_shadow_events_replaces_later_exact_duplicate_without_semantic_summ
     assert_eq!(shadows[0], single_shadow);
     assert!(first_summary.starts_with("assistant response summary: Important but repeated answer"));
     assert!(duplicate_summary.starts_with("mem dup: original=event[0]"));
-    assert!(duplicate_summary.contains("content_hash=sc:"));
+    assert!(duplicate_summary.contains("h=sc:"));
     assert!(!duplicate_summary.contains("Important but repeated answer"));
     assert_eq!(
         lookup_test_path(&shadows[1], "payload.message").and_then(Value::as_str),
-        Some("assistant response shadowed by prodex super-slim mem; full content omitted")
+        Some("mem ss: omitted")
     );
 }
 
@@ -1218,7 +1212,7 @@ fn super_slim_shadow_events_use_artifact_ref_for_later_exact_duplicate() {
 
     assert!(duplicate_summary.starts_with("prodex-artifact:sc:tool-output"));
     assert!(duplicate_summary.contains("[mem art;"));
-    assert!(duplicate_summary.contains("content_hash=sc:"));
+    assert!(duplicate_summary.contains("h=sc:"));
     assert!(!duplicate_summary.contains("large artifact-backed output"));
     assert_eq!(
         lookup_test_path(&shadows[1], "payload.metadata.artifact_ref").and_then(Value::as_str),
@@ -1262,12 +1256,12 @@ fn super_slim_shadow_events_replaces_later_exact_duplicate_assistant_summary() {
 
     assert_eq!(first_summary, summary);
     assert!(duplicate_summary.starts_with("mem dup: original=assistant-summary-1"));
-    assert!(duplicate_summary.contains("content_hash=sc:"));
-    assert!(duplicate_summary.contains("original_bytes="));
+    assert!(duplicate_summary.contains("h=sc:"));
+    assert!(duplicate_summary.contains("b="));
     assert!(!duplicate_summary.contains(summary));
     assert_eq!(
         lookup_test_path(&shadows[1], "payload.message").and_then(Value::as_str),
-        Some("assistant response shadowed by prodex super-slim mem; full content omitted")
+        Some("mem ss: omitted")
     );
 }
 

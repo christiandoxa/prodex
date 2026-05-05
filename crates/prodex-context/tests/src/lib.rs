@@ -1469,6 +1469,75 @@ Network prodex_default Created
 }
 
 #[test]
+fn noisy_success_output_compacts_coverage_playwright_cypress_and_junit_success() {
+    let input = "\
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   92.31 |    88.00 |   90.00 |   92.31 |
+src/app.ts         |   93.10 |    87.50 |   90.00 |   93.10 | 44
+src/api.ts         |   91.20 |    88.50 |   90.00 |   91.20 | 18
+Running 12 tests using 4 workers
+12 passed (8.2s)
+✔ All specs passed!
+Spec                                              Tests  Passing  Failing  Pending  Skipped
+tests/app.cy.ts                                      4        4        0        0        0
+<testsuite name=\"unit\" tests=\"12\" failures=\"0\" errors=\"0\" skipped=\"0\"/>
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 40,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::NoisySuccess);
+    assert!(report.output.contains("sum: success"));
+    assert!(report.output.contains("coverage="));
+    assert!(report.output.contains("playwright="));
+    assert!(report.output.contains("cypress="));
+    assert!(report.output.contains("junit_xml=1"));
+    assert!(!report.output.contains("src/api.ts"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn diagnostics_preserve_junit_eslint_and_typescript_failures() {
+    let input = "\
+<testsuite name=\"unit\" tests=\"2\" failures=\"1\" errors=\"0\">
+  <testcase classname=\"app\" name=\"rejects bad input\">
+    <failure message=\"expected 400\">src/api.test.ts:18:7 assertion failed</failure>
+  </testcase>
+</testsuite>
+/repo/src/app.ts
+  12:5  error  Unexpected any.  @typescript-eslint/no-explicit-any
+src/index.ts(9,3): error TS2322: Type 'string' is not assignable to type 'number'.
+Command failed with exit code 1
+";
+
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 80,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("<failure message=\"expected 400\">"));
+    assert!(report.output.contains("src/api.test.ts:18:7"));
+    assert!(report.output.contains("@typescript-eslint/no-explicit-any"));
+    assert!(report.output.contains("src/index.ts(9,3): error TS2322"));
+    assert!(report.output.contains("exit code 1"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
 fn successful_command_output_summary_refuses_modern_tool_failure_signals() {
     let input = "\
 Found 2 errors.

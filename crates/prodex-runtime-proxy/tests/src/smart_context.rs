@@ -653,6 +653,30 @@ fn observed_token_accounting_accepts_content_aware_body_estimate() {
 }
 
 #[test]
+fn observed_token_accounting_calibrates_body_estimate_from_recent_usage_with_floor() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(64_000),
+            reserved_output_tokens: 4_000,
+            current_input_tokens: 0,
+            current_request_body_bytes: 80_000,
+            current_request_estimated_tokens: Some(20_000),
+            observed_usage: vec![RuntimeTokenUsage {
+                input_tokens: 8_000,
+                ..RuntimeTokenUsage::default()
+            }],
+        });
+
+    assert_eq!(accounting.estimated_current_request_tokens, 10_000);
+    assert_eq!(accounting.current_request_accounted_tokens, 10_000);
+    assert_eq!(
+        accounting.effective_input_source,
+        SmartContextTokenAccountingSource::CurrentRequestBodyEstimate
+    );
+    assert_eq!(accounting.available_context_tokens, Some(50_000));
+}
+
+#[test]
 fn observed_token_accounting_uses_larger_history_to_avoid_underbudget() {
     let accounting =
         smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {

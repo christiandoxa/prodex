@@ -2376,6 +2376,9 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
                 | "eslint"
                 | "prettier"
                 | "playwright"
+                | "cypress"
+                | "nyc"
+                | "c8"
                 | "mvn"
                 | "mvnw"
                 | "gradle"
@@ -2577,6 +2580,12 @@ fn looks_like_diagnostic_output(lines: &[&str]) -> bool {
         }
     }
 
+    if lines
+        .iter()
+        .any(|line| is_junit_xml_failure_line(line) || is_eslint_diagnostic_line(line))
+    {
+        return true;
+    }
     if strong_signals > 0 {
         return strong_signals + location_signals + stack_signals + exit_signals + noise_signals
             >= 2;
@@ -2742,7 +2751,15 @@ fn diagnostic_noise_label(line: &str) -> Option<&'static str> {
 fn noisy_success_label(line: &str) -> Option<&'static str> {
     let trimmed = line.trim();
     let lower = trimmed.to_ascii_lowercase();
-    if trimmed.starts_with("PASS ") {
+    if is_coverage_noise_line(trimmed, &lower) {
+        Some("coverage")
+    } else if is_junit_xml_success_line(trimmed, &lower) {
+        Some("junit_xml")
+    } else if is_playwright_success_line(trimmed, &lower) {
+        Some("playwright")
+    } else if is_cypress_success_line(trimmed, &lower) {
+        Some("cypress")
+    } else if trimmed.starts_with("PASS ") {
         Some("passed_suites")
     } else if lower.starts_with("ok ") && lower.split_whitespace().count() >= 2 {
         Some("go_test_ok")
@@ -2882,6 +2899,78 @@ fn docker_compose_success_state(lower: &str) -> bool {
         || lower.contains(" pulled")
 }
 
+fn is_coverage_noise_line(trimmed: &str, lower: &str) -> bool {
+    if lower.starts_with("coverage summary")
+        || lower.starts_with("all files")
+        || lower.starts_with("statements")
+        || lower.starts_with("branches")
+        || lower.starts_with("functions")
+        || lower.starts_with("lines")
+    {
+        return true;
+    }
+    trimmed.contains('|')
+        && (lower.contains("% stmts")
+            || lower.contains("% branch")
+            || lower.contains("% funcs")
+            || lower.contains("% lines")
+            || lower.contains("uncovered line"))
+}
+
+fn is_junit_xml_success_line(trimmed: &str, lower: &str) -> bool {
+    (trimmed.starts_with("<testsuite") || trimmed.starts_with("<testsuites"))
+        && lower.contains("tests=")
+        && (lower.contains("failures=\"0\"")
+            || lower.contains("failures='0'")
+            || lower.contains("failures=0"))
+        && (lower.contains("errors=\"0\"")
+            || lower.contains("errors='0'")
+            || lower.contains("errors=0"))
+}
+
+fn is_junit_xml_failure_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    trimmed.starts_with("<failure")
+        || trimmed.starts_with("<error")
+        || ((trimmed.starts_with("<testsuite") || trimmed.starts_with("<testsuites"))
+            && (xmlish_nonzero_attr(&lower, "failures") || xmlish_nonzero_attr(&lower, "errors")))
+}
+
+fn xmlish_nonzero_attr(lower: &str, name: &str) -> bool {
+    for needle in [
+        format!("{name}=\""),
+        format!("{name}='"),
+        format!("{name}="),
+    ] {
+        if let Some(after) = lower.split(&needle).nth(1) {
+            let digits = after
+                .chars()
+                .take_while(|ch| ch.is_ascii_digit())
+                .collect::<String>();
+            if matches!(digits.parse::<usize>(), Ok(count) if count > 0) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn is_playwright_success_line(trimmed: &str, lower: &str) -> bool {
+    (lower.starts_with("running ") && lower.contains(" tests using "))
+        || (lower.contains(" passed (") && lower.chars().any(|ch| ch.is_ascii_digit()))
+        || lower.starts_with("slow test file:")
+        || trimmed.starts_with('✓')
+}
+
+fn is_cypress_success_line(trimmed: &str, lower: &str) -> bool {
+    lower.contains("all specs passed")
+        || lower.starts_with("spec")
+        || lower.starts_with("tests")
+        || lower.starts_with("passing")
+        || trimmed.starts_with('✔')
+}
+
 fn is_pytest_progress_line(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.len() >= 8
@@ -2912,6 +3001,7 @@ fn is_diagnostic_success_summary_line(line: &str) -> bool {
         || lower.starts_with("test files")
         || lower.starts_with("ran all test suites")
         || lower.starts_with("found 0 vulnerabilities")
+        || is_junit_xml_success_line(line.trim_start(), &lower)
         || lower.contains(" passed in ")
         || is_common_success_summary_line(&lower)
 }
@@ -2923,6 +3013,7 @@ fn is_diagnostic_failure_summary_line(line: &str) -> bool {
         || lower.contains(" failed, ")
         || lower.starts_with("failed ")
         || lower.starts_with("error summary")
+        || is_junit_xml_failure_line(line)
 }
 
 fn is_noisy_success_key_line(line: &str) -> bool {
@@ -2973,6 +3064,10 @@ fn is_noisy_success_key_line(line: &str) -> bool {
         || lower.contains(" passed in ")
         || is_common_success_summary_line(&lower)
         || lower.starts_with("compiled successfully")
+        || is_coverage_noise_line(line.trim_start(), &lower)
+        || is_junit_xml_success_line(line.trim_start(), &lower)
+        || is_playwright_success_line(line.trim_start(), &lower)
+        || is_cypress_success_line(line.trim_start(), &lower)
 }
 
 fn is_common_success_summary_line(lower: &str) -> bool {
@@ -2995,6 +3090,7 @@ fn is_common_success_summary_line(lower: &str) -> bool {
         || lower.contains("eslint found no problems")
         || (lower.starts_with("test files") && lower.contains("passed"))
         || lower.contains(" passed (")
+        || lower.contains("all specs passed")
 }
 
 fn is_success_output_failure_signal_line(line: &str) -> bool {
@@ -3015,6 +3111,9 @@ fn is_success_output_failure_signal_line(line: &str) -> bool {
         || lower.contains(" test failures")
         || lower.contains("tests failed")
         || lower.contains("failed to compile")
+        || lower.contains("failed to load")
+        || lower.contains("failed with")
+        || is_junit_xml_failure_line(line)
         || has_nonzero_summary_count(&lower, &["failed", "failures", "error", "errors"])
 }
 
@@ -3212,6 +3311,8 @@ fn is_rust_failure_summary_line(line: &str) -> bool {
 
 fn is_diagnostic_block_start(line: &str) -> bool {
     is_typescript_diagnostic_line(line)
+        || is_eslint_diagnostic_line(line)
+        || is_junit_xml_failure_line(line)
         || is_exception_signal_line(line)
         || is_node_stack_error_line(line)
         || is_test_failure_signal_line(line)
@@ -3221,6 +3322,8 @@ fn is_diagnostic_block_start(line: &str) -> bool {
 
 fn is_diagnostic_detection_start(line: &str) -> bool {
     is_typescript_diagnostic_line(line)
+        || is_eslint_diagnostic_line(line)
+        || is_junit_xml_failure_line(line)
         || is_exception_signal_line(line)
         || is_node_stack_error_line(line)
         || is_test_failure_signal_line(line)
@@ -3241,6 +3344,17 @@ fn is_typescript_diagnostic_line(line: &str) -> bool {
         || lower.contains(" - warning ts")
         || lower.contains(": warning ts"))
         && count_file_location_signals(trimmed) > 0
+}
+
+fn is_eslint_diagnostic_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    count_file_location_signals(trimmed) > 0
+        && (lower.contains("  error  ")
+            || lower.contains("  warning  ")
+            || lower.contains(": error ")
+            || lower.contains(": warning ")
+            || lower.contains(" eslint "))
 }
 
 fn is_exception_signal_line(line: &str) -> bool {
@@ -4922,15 +5036,17 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
         if matches!(command, "ls" | "find" | "tree") {
             return Some(CommandOutputKind::FileList);
         }
-        if matches!(command, "pytest" | "py.test" | "tsc" | "ruff" | "mypy")
-            || command.ends_with("-tsc")
+        if matches!(
+            command,
+            "pytest" | "py.test" | "tsc" | "ruff" | "mypy" | "eslint" | "playwright" | "cypress"
+        ) || command.ends_with("-tsc")
             || command.ends_with("_tsc")
         {
             return Some(CommandOutputKind::Diagnostics);
         }
         if matches!(
             command,
-            "bazel" | "bazelisk" | "nx" | "turbo" | "pip" | "pip3" | "uv"
+            "bazel" | "bazelisk" | "nx" | "turbo" | "pip" | "pip3" | "uv" | "nyc" | "c8"
         ) {
             return Some(CommandOutputKind::NoisySuccess);
         }
@@ -5141,6 +5257,8 @@ fn is_error_signal_line(line: &str) -> bool {
         || lower.starts_with("thread '") && lower.contains("' panicked at")
         || is_rust_panic_line(line)
         || is_typescript_diagnostic_line(line)
+        || is_eslint_diagnostic_line(line)
+        || is_junit_xml_failure_line(line)
         || is_exception_signal_line(line)
         || is_log_level_signal_line(line)
     {

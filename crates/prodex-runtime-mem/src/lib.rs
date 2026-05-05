@@ -51,6 +51,10 @@ const RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS: &[&str] = &[
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS: &[&str] = &["payload.summary"];
 const RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT: usize = 180;
 const RUNTIME_MEM_SUPER_SLIM_REFERENCED_SUMMARY_PREFIX_CHAR_LIMIT: usize = 72;
+const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "mem ss: omitted";
+const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "mem ss: prompt omitted";
+const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "mem ss: assistant omitted";
+const RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED: &str = "mem ss: tool omitted";
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 128;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 512;
@@ -922,7 +926,7 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
                             "payload.artifact.id",
                             "payload.artifact_id",
                             "payload.artifactId",
-                            { "value": "user prompt recorded by prodex super-slim mem; content omitted" }
+                            { "value": RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED }
                         ]
                     }
                 }
@@ -936,7 +940,7 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
                         "coalesce": [
                             "payload.summary",
                             "payload.title",
-                            { "value": "assistant response recorded by prodex super-slim mem" }
+                            { "value": RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED }
                         ]
                     }
                 }
@@ -969,7 +973,7 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
                             "payload.artifact.id",
                             "payload.artifact_id",
                             "payload.artifactId",
-                            { "value": "tool result recorded by prodex super-slim mem; output omitted" }
+                            { "value": RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED }
                         ]
                     }
                 }
@@ -1325,9 +1329,7 @@ fn runtime_mem_shadow_user_message(event: &mut Value) {
         runtime_mem_set_json_path(
             event,
             "payload.message",
-            Value::String(
-                "user prompt shadowed by prodex super-slim mem; full content omitted".to_string(),
-            ),
+            Value::String(RUNTIME_MEM_SUPER_SLIM_OMITTED.to_string()),
         );
     }
 }
@@ -1347,10 +1349,7 @@ fn runtime_mem_shadow_assistant_message(event: &mut Value) {
         runtime_mem_set_json_path(
             event,
             "payload.message",
-            Value::String(
-                "assistant response shadowed by prodex super-slim mem; full content omitted"
-                    .to_string(),
-            ),
+            Value::String(RUNTIME_MEM_SUPER_SLIM_OMITTED.to_string()),
         );
     }
 }
@@ -1379,9 +1378,7 @@ fn runtime_mem_shadow_tool_output(event: &mut Value) {
         runtime_mem_set_json_path(
             event,
             "payload.output",
-            Value::String(
-                "tool output shadowed by prodex super-slim mem; full content omitted".to_string(),
-            ),
+            Value::String(RUNTIME_MEM_SUPER_SLIM_OMITTED.to_string()),
         );
     }
 }
@@ -1417,7 +1414,7 @@ fn runtime_mem_shadow_summary_from_text(
         .map(|value| format!("; ref={value}"))
         .unwrap_or_default();
     format!(
-        "{label} summary: {first_line} [bytes={}; approx_tokens={}; full {omitted_name} omitted{ref_part}]",
+        "{label} summary: {first_line} [b={}; tok~={}; {omitted_name} omitted{ref_part}]",
         text.len(),
         runtime_mem_approx_token_count(text),
     )
@@ -1497,9 +1494,7 @@ fn runtime_mem_artifact_recall_summary(
     content_hash: &str,
     original_bytes: usize,
 ) -> String {
-    format!(
-        "{artifact_ref} [mem art; content_hash={content_hash}; original_bytes={original_bytes}]"
-    )
+    format!("{artifact_ref} [mem art; h={content_hash}; b={original_bytes}]")
 }
 
 fn runtime_mem_duplicate_recall_summary(
@@ -1507,9 +1502,7 @@ fn runtime_mem_duplicate_recall_summary(
     content_hash: &str,
     original_bytes: usize,
 ) -> String {
-    format!(
-        "mem dup: original={original_id}; content_hash={content_hash}; original_bytes={original_bytes}"
-    )
+    format!("mem dup: original={original_id}; h={content_hash}; b={original_bytes}")
 }
 
 fn runtime_mem_fnv1a64(bytes: &[u8]) -> u64 {

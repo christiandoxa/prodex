@@ -568,6 +568,63 @@ fn smart_context_appends_artifact_manifest_only_when_rewrite_useful() {
 }
 
 #[test]
+fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
+    let shared = smart_context_test_shared("manifest-delta");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let useful_stats = RuntimeSmartContextTransformStats {
+        tool_outputs_condensed: 1,
+        ..RuntimeSmartContextTransformStats::default()
+    };
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        state
+            .artifacts
+            .insert_text(1, "first artifact\nerror: one")
+            .unwrap();
+        let mut first = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "first"}]
+        });
+        assert!(
+            runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut first,
+                state,
+                &useful_stats,
+            )
+        );
+        assert_eq!(first["input"].as_array().unwrap().len(), 2);
+
+        let mut unchanged = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "second"}]
+        });
+        assert!(
+            !runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut unchanged,
+                state,
+                &useful_stats,
+            )
+        );
+        assert_eq!(unchanged["input"].as_array().unwrap().len(), 1);
+
+        state
+            .artifacts
+            .insert_text(2, "second artifact\nerror: two")
+            .unwrap();
+        let mut changed = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "third"}]
+        });
+        assert!(
+            runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut changed,
+                state,
+                &useful_stats,
+            )
+        );
+        assert_eq!(changed["input"].as_array().unwrap().len(), 2);
+    })
+    .unwrap();
+}
+
+#[test]
 fn smart_context_rehydrates_known_artifact_refs() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let artifact = store.insert_text(1, "exact artifact text").unwrap();
@@ -676,6 +733,81 @@ fn smart_context_parser_accepts_short_and_legacy_artifact_refs() {
         reference.id == "sc:789abc"
             && reference.line_range == Some(RuntimeSmartContextLineRange { start: 1, end: 1 })
     }));
+}
+
+#[test]
+fn smart_context_alias_parser_rehydrates_alias_refs_when_legend_present() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store
+        .insert_text(1, "line one\nline two\nline three")
+        .unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!(
+                "psc aliases @0={}\nneed @0#L2-L3",
+                runtime_smart_context_artifact_ref(&artifact.id)
+            )
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value(&mut value, &store, &mut stats);
+
+    let expected = format!(
+        "psc aliases @0={}\nneed line two\nline three",
+        runtime_smart_context_artifact_ref(&artifact.id)
+    );
+    assert_eq!(
+        value["input"][0]["content"].as_str(),
+        Some(expected.as_str())
+    );
+    assert_eq!(stats.rehydrated_refs, 1);
+}
+
+#[test]
+fn smart_context_alias_parser_ignores_alias_refs_without_legend() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    store
+        .insert_text(1, "line one\nline two\nline three")
+        .unwrap();
+    let mut value = serde_json::json!({
+        "input": [{"type": "message", "content": "need @0#L2-L3"}]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value(&mut value, &store, &mut stats);
+
+    assert_eq!(value["input"][0]["content"].as_str(), Some("need @0#L2-L3"));
+    assert_eq!(stats.rehydrated_refs, 0);
+}
+
+#[test]
+fn smart_context_generated_summary_uses_aliases_only_when_shorter() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store
+        .insert_text(1, "line one\nline two\nline three\nline four")
+        .unwrap();
+    let refs = (1usize..=10)
+        .map(|line| runtime_smart_context_artifact_line_ref(&artifact.id, line.min(4), line.min(4)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let marker = runtime_smart_context_artifact_marker_line("artifact", &artifact);
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": format!("{marker}\n{SMART_CONTEXT_LABEL_CRITICAL_EXACT}\n{refs}")
+        }]
+    });
+    let before = value["input"][0]["output"].as_str().unwrap().len();
+
+    assert!(runtime_smart_context_apply_artifact_aliases_to_generated_texts(&mut value));
+
+    let output = value["input"][0]["output"].as_str().unwrap();
+    assert!(output.contains("psc aliases @0=psc:"));
+    assert!(output.contains("@0#L1-L1"));
+    assert!(output.len() < before);
 }
 
 #[test]
@@ -1392,7 +1524,7 @@ fn smart_context_delta_replaces_unchanged_fresh_static_context_with_marker() {
         prepare_runtime_smart_context_http_body(90, &first, &shared, RuntimeRouteKind::Responses);
     assert!(
         !String::from_utf8_lossy(first_prepared.as_ref())
-            .contains("prodex static context unchanged")
+            .contains(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
     );
 
     let second_prepared =
@@ -1402,7 +1534,8 @@ fn smart_context_delta_replaces_unchanged_fresh_static_context_with_marker() {
         panic!("expected static context delta body");
     };
     let text = String::from_utf8(body.clone()).unwrap();
-    assert!(text.contains("prodex static context unchanged scpc:"));
+    assert!(text.contains("psc static scpc:"));
+    assert!(!text.contains("prodex static context unchanged scpc:"));
     assert!(!text.contains(&instructions));
     assert!(!text.contains(&input_system));
     let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
@@ -1440,7 +1573,8 @@ fn smart_context_delta_preserves_exact_static_context() {
     let value = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
     assert_eq!(value["instructions"].as_str(), Some(instructions));
     assert!(
-        !String::from_utf8_lossy(prepared.as_ref()).contains("prodex static context unchanged")
+        !String::from_utf8_lossy(prepared.as_ref())
+            .contains(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
     );
 }
 
@@ -1468,7 +1602,8 @@ fn smart_context_delta_preserves_changed_static_context() {
         Some("Use repo rules.\nAllow account rotation.")
     );
     assert!(
-        !String::from_utf8_lossy(prepared.as_ref()).contains("prodex static context unchanged")
+        !String::from_utf8_lossy(prepared.as_ref())
+            .contains(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
     );
 }
 
@@ -1524,7 +1659,7 @@ fn smart_context_persists_static_fingerprints_but_does_not_delta_on_fresh_start(
     );
     let fresh_text = String::from_utf8_lossy(fresh_prepared.as_ref());
     assert!(fresh_text.contains("Persistent static context"));
-    assert!(!fresh_text.contains("prodex static context unchanged"));
+    assert!(!fresh_text.contains(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX));
 
     let fresh_second = smart_context_test_request(serde_json::json!({
         "instructions": instructions.as_str(),
@@ -1536,13 +1671,31 @@ fn smart_context_persists_static_fingerprints_but_does_not_delta_on_fresh_start(
         &fresh_shared,
         RuntimeRouteKind::Responses,
     );
-    assert!(
-        String::from_utf8_lossy(second_prepared.as_ref())
-            .contains("prodex static context unchanged scpc:")
-    );
+    assert!(String::from_utf8_lossy(second_prepared.as_ref()).contains("psc static scpc:"));
 
     let _ = std::fs::remove_file(&artifact_path);
     let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&artifact_path));
+}
+
+#[test]
+fn smart_context_static_delta_prompt_cache_key_accepts_short_and_legacy_markers() {
+    let shared = smart_context_test_shared("static-marker-compat");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let short = smart_context_test_request(serde_json::json!({
+        "instructions": "psc static scpc:short123"
+    }));
+    let legacy = smart_context_test_request(serde_json::json!({
+        "instructions": "prodex static context unchanged scpc:legacy123"
+    }));
+
+    assert_eq!(
+        runtime_smart_context_effective_prompt_cache_key(&short, &shared, true).as_deref(),
+        Some("scpc:short123")
+    );
+    assert_eq!(
+        runtime_smart_context_effective_prompt_cache_key(&legacy, &shared, true).as_deref(),
+        Some("scpc:legacy123")
+    );
 }
 
 #[test]
@@ -1760,6 +1913,52 @@ line 4 noisy
     assert!(repaired.contains("error: hidden failure"));
     assert!(repaired.contains("src/main.rs:22:5"));
     assert!(prodex_context::critical_signal_self_check(original, &repaired).passed());
+}
+
+#[test]
+fn smart_context_exact_appendices_dedupe_duplicate_range_bodies_when_shorter() {
+    let duplicate = "error: repeated failure\nsrc/lib.rs:10:5\n".repeat(12);
+    let ranges = vec![
+        RuntimeSmartContextExactAppendixRange {
+            reference: "psc:abc#L1-L24".to_string(),
+            body: duplicate.clone(),
+        },
+        RuntimeSmartContextExactAppendixRange {
+            reference: "psc:abc#L25-L48".to_string(),
+            body: duplicate.clone(),
+        },
+    ];
+    let naive = format!(
+        "{SMART_CONTEXT_LABEL_CRITICAL_EXACT}\npsc:abc#L1-L24\n{duplicate}\npsc:abc#L25-L48\n{duplicate}"
+    );
+
+    let (crit, count) =
+        runtime_smart_context_render_exact_appendix(SMART_CONTEXT_LABEL_CRITICAL_EXACT, ranges)
+            .unwrap();
+    let (sem, sem_count) = runtime_smart_context_render_exact_appendix(
+        SMART_CONTEXT_LABEL_SEMANTIC_EXACT,
+        vec![
+            RuntimeSmartContextExactAppendixRange {
+                reference: "psc:abc#L1-L24".to_string(),
+                body: duplicate.clone(),
+            },
+            RuntimeSmartContextExactAppendixRange {
+                reference: "psc:abc#L25-L48".to_string(),
+                body: duplicate.clone(),
+            },
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(count, 2);
+    assert_eq!(sem_count, 2);
+    assert!(crit.len() < naive.len());
+    assert_eq!(crit.match_indices(&duplicate).count(), 1);
+    assert!(crit.contains("[psc exact dup h="));
+    assert!(crit.contains(&format!("b={}", duplicate.len())));
+    assert!(crit.contains("refs=psc:abc#L1-L24"));
+    assert!(sem.contains(SMART_CONTEXT_LABEL_SEMANTIC_EXACT));
+    assert_eq!(sem.match_indices(&duplicate).count(), 1);
 }
 
 #[test]
