@@ -136,18 +136,18 @@ fn find_profile_by_identity_does_not_match_same_workspace_with_different_email()
             secret_store::auth_json_path(&first_home),
             format!(
                 r#"{{"tokens":{{"id_token":"{}","access_token":"test-token","account_id":"acct-one"}}}}"#,
-                chatgpt_id_token("customeradroit@gmail.com", Some("acct-one"))
+                chatgpt_id_token("customer@example.com", Some("acct-one"))
             ),
         )
         .unwrap();
     let mut state = AppState {
         active_profile: None,
         profiles: BTreeMap::from([(
-            "customeradroit_gmail.com".to_string(),
+            "customer_example.com".to_string(),
             ProfileEntry {
                 codex_home: first_home,
                 managed: true,
-                email: Some("customeradroit@gmail.com".to_string()),
+                email: Some("customer@example.com".to_string()),
                 provider: ProfileProvider::Openai,
             },
         )]),
@@ -159,7 +159,7 @@ fn find_profile_by_identity_does_not_match_same_workspace_with_different_email()
     let matched = find_profile_by_identity(
         &mut state,
         &ProfileIdentity {
-            email: Some("usahaqteam@gmail.com".to_string()),
+            email: Some("team@example.com".to_string()),
             account_id: Some("acct-one".to_string()),
         },
     )
@@ -177,18 +177,18 @@ fn find_profile_by_identity_rejects_email_derived_name_for_other_account_email()
         secret_store::auth_json_path(&first_home),
         format!(
             r#"{{"tokens":{{"id_token":"{}","access_token":"test-token","account_id":"acct-one"}}}}"#,
-            chatgpt_id_token("usahaqteam@gmail.com", Some("acct-one"))
+            chatgpt_id_token("team@example.com", Some("acct-one"))
         ),
     )
     .unwrap();
     let mut state = AppState {
         active_profile: None,
         profiles: BTreeMap::from([(
-            "customeradroit_gmail.com".to_string(),
+            "customer_example.com".to_string(),
             ProfileEntry {
                 codex_home: first_home,
                 managed: true,
-                email: Some("usahaqteam@gmail.com".to_string()),
+                email: Some("team@example.com".to_string()),
                 provider: ProfileProvider::Openai,
             },
         )]),
@@ -200,7 +200,7 @@ fn find_profile_by_identity_rejects_email_derived_name_for_other_account_email()
     let matched = find_profile_by_identity(
         &mut state,
         &ProfileIdentity {
-            email: Some("usahaqteam@gmail.com".to_string()),
+            email: Some("team@example.com".to_string()),
             account_id: Some("acct-one".to_string()),
         },
     )

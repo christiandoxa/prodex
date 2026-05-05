@@ -1139,7 +1139,7 @@ fn smart_context_generated_summary_uses_aliases_only_when_shorter() {
 
 #[test]
 fn smart_context_generated_summary_uses_path_aliases_only_when_shorter() {
-    let repo = "/home/doxa/IdeaProjects/prodex";
+    let repo = "/workspace/prodex";
     let mut value = serde_json::json!({
         "input": [{
             "type": "function_call_output",
@@ -1156,7 +1156,7 @@ fn smart_context_generated_summary_uses_path_aliases_only_when_shorter() {
     ));
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("psc p $R=/home/doxa/IdeaProjects/prodex"));
+    assert!(output.contains("psc p $R=/workspace/prodex"));
     assert!(output.contains("$R/crates/prodex-app/src/runtime_proxy/smart_context.rs"));
     assert!(output.len() < before);
 }

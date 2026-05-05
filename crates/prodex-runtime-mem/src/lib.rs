@@ -3181,8 +3181,7 @@ mod compact_v2_runtime_memory_tests {
     fn super_slim_v2_interns_command_and_repo_path_prefixes_when_smaller() {
         let command_prefix =
             "cargo test -q -p prodex-runtime-mem --lib compact_v2_runtime_memory_tests::";
-        let repo_prefix =
-            "/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-mem/src/runtime/schema/native/";
+        let repo_prefix = "/workspace/prodex/crates/prodex-runtime-mem/src/runtime/schema/native/";
         let mut events = Vec::new();
         for name in [
             "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",

@@ -222,8 +222,8 @@ fn detects_email_derived_profile_name_for_other_email() {
         "main@example.com"
     ));
     assert!(profile_name_looks_email_derived_for_other_email(
-        "customeradroit_gmail.com",
-        "usahaqteam@gmail.com"
+        "customer_example.com",
+        "team@example.com"
     ));
 }
 

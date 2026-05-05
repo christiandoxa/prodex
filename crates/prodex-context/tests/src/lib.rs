@@ -1144,8 +1144,8 @@ process didn't exit successfully: `target/debug/deps/prodex_context` (exit statu
 fn diagnostics_compaction_shortens_repeated_absolute_repo_prefixes() {
     let input = "\
 error: failed
-  --> /home/doxa/IdeaProjects/prodex/crates/prodex-app/src/lib.rs:12:5
-FAIL /home/doxa/IdeaProjects/prodex/tests/runtime_proxy.rs
+  --> /workspace/prodex/crates/prodex-app/src/lib.rs:12:5
+FAIL /workspace/prodex/tests/runtime_proxy.rs
 Command failed with exit code 1
 ";
 
@@ -1163,7 +1163,7 @@ Command failed with exit code 1
     assert!(
         report
             .output
-            .contains("path aliases: $REPO=/home/doxa/IdeaProjects/prodex")
+            .contains("path aliases: $REPO=/workspace/prodex")
     );
     assert!(
         report
@@ -2832,9 +2832,9 @@ README.md
 fn file_list_output_accepts_bare_paths_and_ls_listing_rows() {
     let input = "\
 total 16
--rw-r--r-- 1 doxa doxa 10 May 1 12:00 Cargo.toml
--rw-r--r-- 1 doxa doxa 20 May 1 12:00 README.md
-drwxr-xr-x 2 doxa doxa 4096 May 1 12:00 crates
+-rw-r--r-- 1 user group 10 May 1 12:00 Cargo.toml
+-rw-r--r-- 1 user group 20 May 1 12:00 README.md
+drwxr-xr-x 2 user group 4096 May 1 12:00 crates
 src/main.rs
 ";
 

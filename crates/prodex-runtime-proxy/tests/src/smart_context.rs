@@ -1906,7 +1906,7 @@ fn smart_context_golden_prodex_s_runtime_stall_trace() -> SmartContextGoldenProd
         "critical: no first_local_chunk emitted for req_s_7a1",
         "artifact psc:prodex-s-runtime-stall#L88-L104 should be rehydrated before editing selection",
         "artifact psc:prodex-s-runtime-stall#L88-L104 referenced again by failing terminal transcript",
-        "terminal transcript: /home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/src/selection.rs:392:21 still pending",
+        "terminal transcript: /workspace/prodex/crates/prodex-runtime-proxy/src/selection.rs:392:21 still pending",
         "test failure: runtime_proxy_stall_preserves_affinity panicked at crates/prodex-runtime-proxy/tests/src/smart_context.rs:2044:9",
     ]
     .join("\n");
@@ -1914,7 +1914,7 @@ fn smart_context_golden_prodex_s_runtime_stall_trace() -> SmartContextGoldenProd
         "{critical_block}\n{}",
         (0..360)
             .map(|index| format!(
-                "2026-05-05T03:{:02}:{:02}.{:03}Z DEBUG pid={} cwd=/home/doxa/IdeaProjects/prodex cmd='cargo test -q -p prodex-runtime-proxy runtime_proxy_ -- --test-threads=1' target/debug/deps/prodex_runtime_proxy-{} lane=responses route=responses poll={} path=crates/prodex-runtime-proxy/src/runtime_proxy.rs:{}",
+                "2026-05-05T03:{:02}:{:02}.{:03}Z DEBUG pid={} cwd=/workspace/prodex cmd='cargo test -q -p prodex-runtime-proxy runtime_proxy_ -- --test-threads=1' target/debug/deps/prodex_runtime_proxy-{} lane=responses route=responses poll={} path=crates/prodex-runtime-proxy/src/runtime_proxy.rs:{}",
                 15 + (index / 60),
                 index % 60,
                 (index * 17) % 1000,
@@ -1943,7 +1943,7 @@ fn smart_context_golden_prodex_s_runtime_stall_trace() -> SmartContextGoldenProd
             "profile_transport_backoff profile=s-east route=responses",
             "stream_read_error route=responses profile=s-east",
             "critical: no first_local_chunk emitted for req_s_7a1",
-            "/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/src/selection.rs:392:21",
+            "/workspace/prodex/crates/prodex-runtime-proxy/src/selection.rs:392:21",
             "runtime_proxy_stall_preserves_affinity",
         ],
         rehydrate_refs: vec!["psc:prodex-s-runtime-stall#L88-L104"],
@@ -1972,14 +1972,14 @@ fn smart_context_golden_prodex_super_quota_trace() -> SmartContextGoldenProdexTr
         "artifact psc:prodex-super-quota#L41-L63 contains sanitized upstream response",
         "artifact psc:prodex-super-quota#L41-L63 repeated in pytest-style failure footer",
         "thread 'runtime_proxy::compact_quota_real_trace' panicked at crates/prodex-runtime-proxy/tests/src/smart_context.rs:2121:13",
-        "left: Synthetic429 right: UpstreamPassThrough at /home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/src/quota.rs:277:18",
+        "left: Synthetic429 right: UpstreamPassThrough at /workspace/prodex/crates/prodex-runtime-proxy/src/quota.rs:277:18",
     ]
     .join("\n");
     let tool_output = format!(
         "{critical_block}\n{}",
         (0..640)
             .map(|index| format!(
-                "running test case {:04}: profile=super-west session_id=sess_super_492 previous_response_id=resp_super_abcd artifact=psc:prodex-super-quota-noise#L{}-L{} file=/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/tests/fixtures/sanitized/compact_quota_{:04}.json stdout='poll compact retry {}' stderr='warning: unused retry budget sample'",
+                "running test case {:04}: profile=super-west session_id=sess_super_492 previous_response_id=resp_super_abcd artifact=psc:prodex-super-quota-noise#L{}-L{} file=/workspace/prodex/crates/prodex-runtime-proxy/tests/fixtures/sanitized/compact_quota_{:04}.json stdout='poll compact retry {}' stderr='warning: unused retry budget sample'",
                 index,
                 200 + index,
                 201 + index,
@@ -2007,7 +2007,7 @@ fn smart_context_golden_prodex_super_quota_trace() -> SmartContextGoldenProdexTr
             r#""code":"insufficient_quota""#,
             "quota_classification=account_quota route=compact profile=super-west",
             "critical: generic_429_passthrough=false explicit_quota_code=true",
-            "/home/doxa/IdeaProjects/prodex/crates/prodex-runtime-proxy/src/quota.rs:277:18",
+            "/workspace/prodex/crates/prodex-runtime-proxy/src/quota.rs:277:18",
         ],
         rehydrate_refs: vec!["psc:prodex-super-quota#L41-L63"],
         max_after_token_ratio_percent: 12,
