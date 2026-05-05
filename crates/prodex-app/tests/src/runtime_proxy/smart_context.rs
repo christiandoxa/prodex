@@ -2066,6 +2066,17 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
             });
+        state
+            .rewrite_telemetry_history
+            .push(RuntimeSmartContextRewriteTelemetryRecord {
+                body_bytes_before: 100,
+                body_bytes_after: 100,
+                estimated_tokens_before: 25,
+                estimated_tokens_after: 25,
+                rewrite_kind: "pass_through".to_string(),
+                status: "noop".to_string(),
+                fallback_reason: None,
+            });
     })
     .unwrap();
 
@@ -2086,12 +2097,12 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
         budget.tier,
         runtime_proxy_crate::SmartContextTokenBudgetTier::Large
     );
-    assert_eq!(budget.policy.max_inline_tool_output_bytes, 40 * 1024);
+    assert_eq!(budget.policy.max_inline_tool_output_bytes, 64 * 1024);
     assert_eq!(budget.policy.max_rehydrate_tokens, 11_904);
 }
 
 #[test]
-fn smart_context_budget_tightens_only_for_safe_marginal_saving_telemetry() {
+fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
     let shared = smart_context_test_shared("budget-telemetry-tighten");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
     observe_runtime_smart_context_token_usage(
@@ -2159,7 +2170,7 @@ fn smart_context_budget_tightens_only_for_safe_marginal_saving_telemetry() {
             });
     })
     .unwrap();
-    let neutral = runtime_smart_context_budget(
+    let fallback_budget = runtime_smart_context_budget(
         &shared,
         b"small current request body payload",
         RuntimeRouteKind::Responses,
@@ -2171,8 +2182,11 @@ fn smart_context_budget_tightens_only_for_safe_marginal_saving_telemetry() {
         Vec::new(),
         false,
     );
-    assert_eq!(neutral.policy.max_inline_tool_output_bytes, 32 * 1024);
-    assert_eq!(neutral.policy.max_rehydrate_tokens, 11_904);
+    assert_eq!(
+        fallback_budget.policy.max_inline_tool_output_bytes,
+        (32 * 1024) * 9 / 10
+    );
+    assert_eq!(fallback_budget.policy.max_rehydrate_tokens, 10_713);
 }
 
 #[test]

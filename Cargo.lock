@@ -1541,6 +1541,7 @@ dependencies = [
  "anyhow",
  "prodex-terminal-ui",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

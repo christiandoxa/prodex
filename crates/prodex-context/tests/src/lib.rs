@@ -92,6 +92,84 @@ cached {cwd}/crates/prodex-context/src/lib.rs
 }
 
 #[test]
+fn compact_command_output_structured_json_array_summarizes_shape_and_errors() {
+    let mut input = String::from("[\n");
+    for index in 0..80 {
+        input.push_str(&format!(
+            "  {{\"id\":\"req-{index}\",\"path\":\"module/{index}\",\"result\":\"ok {index}\"}},\n"
+        ));
+    }
+    input.push_str(
+        "  {\"id\":\"req-error\",\"path\":\"src/lib.rs:42\",\"error\":{\"code\":\"E42\",\"message\":\"failed to parse src/lib.rs:42\"}}\n]",
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 40,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.output.contains("pcs: json"));
+    assert!(report.output.contains("shape: array items=81"));
+    assert!(report.output.contains("error samples:"));
+    assert!(report.output.contains("E42"));
+    assert!(report.estimated_tokens_after < report.estimated_tokens_before);
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn compact_command_output_ndjson_summarizes_records_and_errors() {
+    let mut input = String::new();
+    for index in 0..60 {
+        input.push_str(&format!(
+            "{{\"id\":\"evt-{index}\",\"path\":\"module-{index}\",\"event\":\"processed\"}}\n"
+        ));
+    }
+    input.push_str(
+        "{\"id\":\"evt-error\",\"path\":\"src/lib.rs:42\",\"error\":{\"code\":\"E_IO\",\"message\":\"failed src/lib.rs:42\"}}\n",
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 40,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.output.contains("pcs: ndjson"));
+    assert!(report.output.contains("records=61"));
+    assert!(report.output.contains("keys:"));
+    assert!(report.output.contains("E_IO"));
+    assert!(report.estimated_tokens_after < report.estimated_tokens_before);
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn compact_command_output_non_json_falls_back_to_existing_plain_compaction() {
+    let input = "plain line 1\nplain line 2\nplain line 3\n";
+    let report = compact_command_output_with_options(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Plain,
+            max_lines: 2,
+            head_lines: 1,
+            tail_lines: 1,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!report.output.contains("pcs: json"));
+    assert!(!report.output.contains("pcs: ndjson"));
+    assert!(report.output.contains("plain line 1"));
+    assert!(report.output.contains("plain line 3"));
+}
+
+#[test]
 fn command_metadata_infers_output_kind_hints() {
     let cases = [
         (

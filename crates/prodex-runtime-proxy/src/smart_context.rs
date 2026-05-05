@@ -1352,13 +1352,117 @@ pub struct SmartContextRecentRewriteSafety {
 }
 
 pub const SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS: u64 = 256;
+pub const SMART_CONTEXT_REWRITE_TELEMETRY_RECENT_LIMIT: usize = 4;
+pub const SMART_CONTEXT_REWRITE_TELEMETRY_MIN_SAMPLE_COUNT: usize = 2;
+pub const SMART_CONTEXT_REWRITE_TELEMETRY_RELAX_MAX_AVERAGE_BODY_RATIO_PERCENT: usize = 70;
+pub const SMART_CONTEXT_REWRITE_TELEMETRY_TIGHTEN_MIN_AVERAGE_BODY_RATIO_PERCENT: usize = 85;
+pub const SMART_CONTEXT_REWRITE_BUDGET_RELAX_NUMERATOR: u64 = 5;
+pub const SMART_CONTEXT_REWRITE_BUDGET_RELAX_DENOMINATOR: u64 = 4;
+pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_NUMERATOR: u64 = 9;
+pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_DENOMINATOR: u64 = 10;
+pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_INLINE_BYTES: usize = 256;
+pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_REHYDRATE_TOKENS: u64 = 1;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SmartContextRewriteBudgetDecision {
+    #[default]
+    NoChange,
+    Relax,
+    Tighten,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SmartContextRewriteTelemetrySample {
+    pub body_bytes_before: usize,
+    pub body_bytes_after: usize,
+    pub estimated_tokens_before: u64,
+    pub estimated_tokens_after: u64,
+    pub safe: bool,
+    pub fallback: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SmartContextRewriteTelemetryBudgetInput {
+    pub recent_rewrite_safety: SmartContextRecentRewriteSafety,
+    pub telemetry_samples: Vec<SmartContextRewriteTelemetrySample>,
+}
 
 pub fn smart_context_recent_rewrite_safety_allows_larger_preview(
     safety: &SmartContextRecentRewriteSafety,
 ) -> bool {
-    safety.safe_rewrites > 0
-        && safety.fallback_rewrites == 0
-        && safety.saved_tokens >= SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS
+    smart_context_recent_rewrite_safety_budget_decision(safety)
+        == SmartContextRewriteBudgetDecision::Relax
+}
+
+pub fn smart_context_recent_rewrite_safety_budget_decision(
+    safety: &SmartContextRecentRewriteSafety,
+) -> SmartContextRewriteBudgetDecision {
+    if safety.fallback_rewrites > 0 {
+        return SmartContextRewriteBudgetDecision::Tighten;
+    }
+    if safety.safe_rewrites == 0 {
+        return SmartContextRewriteBudgetDecision::NoChange;
+    }
+
+    if safety.saved_tokens >= smart_context_recent_rewrite_min_saved_tokens(safety.safe_rewrites) {
+        SmartContextRewriteBudgetDecision::Relax
+    } else {
+        SmartContextRewriteBudgetDecision::Tighten
+    }
+}
+
+pub fn smart_context_rewrite_telemetry_budget_decision(
+    input: SmartContextRewriteTelemetryBudgetInput,
+) -> SmartContextRewriteBudgetDecision {
+    let recent = input
+        .telemetry_samples
+        .iter()
+        .rev()
+        .take(SMART_CONTEXT_REWRITE_TELEMETRY_RECENT_LIMIT)
+        .copied()
+        .collect::<Vec<_>>();
+
+    if recent.is_empty() {
+        return smart_context_recent_rewrite_safety_budget_decision(&input.recent_rewrite_safety);
+    }
+    if recent
+        .iter()
+        .any(|sample| sample.fallback || !smart_context_rewrite_telemetry_sample_safe_saved(sample))
+    {
+        return SmartContextRewriteBudgetDecision::Tighten;
+    }
+    if recent.len() < SMART_CONTEXT_REWRITE_TELEMETRY_MIN_SAMPLE_COUNT {
+        return smart_context_recent_rewrite_safety_budget_decision(&input.recent_rewrite_safety);
+    }
+
+    let saved_tokens = recent.iter().fold(0u64, |total, sample| {
+        total.saturating_add(
+            sample
+                .estimated_tokens_before
+                .saturating_sub(sample.estimated_tokens_after),
+        )
+    });
+    let average_body_ratio_percent = recent.iter().fold(0usize, |total, sample| {
+        total.saturating_add(smart_context_rewrite_body_ratio_percent(
+            sample.body_bytes_before,
+            sample.body_bytes_after,
+        ))
+    }) / recent.len();
+    let required_saved_tokens = smart_context_recent_rewrite_min_saved_tokens(recent.len());
+
+    if saved_tokens >= required_saved_tokens
+        && average_body_ratio_percent
+            <= SMART_CONTEXT_REWRITE_TELEMETRY_RELAX_MAX_AVERAGE_BODY_RATIO_PERCENT
+    {
+        SmartContextRewriteBudgetDecision::Relax
+    } else if saved_tokens < required_saved_tokens
+        || average_body_ratio_percent
+            >= SMART_CONTEXT_REWRITE_TELEMETRY_TIGHTEN_MIN_AVERAGE_BODY_RATIO_PERCENT
+    {
+        SmartContextRewriteBudgetDecision::Tighten
+    } else {
+        SmartContextRewriteBudgetDecision::NoChange
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1385,6 +1489,7 @@ pub fn smart_context_adaptive_budget_policy(
 ) -> SmartContextAdaptiveBudgetPolicy {
     let tier = smart_context_token_budget_tier_from_accounting(&input.accounting);
     let mut reasons = Vec::new();
+    let available_context_tokens = input.accounting.available_context_tokens;
 
     if input.exactness_guard.decision == SmartContextExactnessDecision::RequireExact {
         reasons.push(SmartContextBudgetPolicyReason::ExactnessRequired);
@@ -1426,16 +1531,14 @@ pub fn smart_context_adaptive_budget_policy(
             mode: SmartContextBudgetMode::ExactPassThrough,
             max_inline_bytes: usize::MAX,
             max_inline_tool_output_bytes: usize::MAX,
-            max_rehydrate_tokens: input
-                .accounting
-                .available_context_tokens
-                .unwrap_or(u64::MAX),
+            max_rehydrate_tokens: available_context_tokens.unwrap_or(u64::MAX),
             reasons,
         };
     }
 
-    let larger_preview_safe =
-        smart_context_recent_rewrite_safety_allows_larger_preview(&input.recent_rewrite_safety);
+    let rewrite_budget_decision =
+        smart_context_recent_rewrite_safety_budget_decision(&input.recent_rewrite_safety);
+    let larger_preview_safe = rewrite_budget_decision == SmartContextRewriteBudgetDecision::Relax;
     let (mode, max_inline_tool_output_bytes, max_rehydrate_tokens, tier_reason) = match tier {
         SmartContextTokenBudgetTier::Exact => (
             SmartContextBudgetMode::ExactPassThrough,
@@ -1473,20 +1576,58 @@ pub fn smart_context_adaptive_budget_policy(
     if larger_preview_safe && matches!(tier, SmartContextTokenBudgetTier::Large) {
         reasons.push(SmartContextBudgetPolicyReason::RecentRewriteSavingsSafe);
     }
-    let max_rehydrate_tokens = input
-        .accounting
-        .available_context_tokens
+    let max_rehydrate_tokens = available_context_tokens
         .map(|available| max_rehydrate_tokens.min(available))
         .unwrap_or(max_rehydrate_tokens);
 
-    SmartContextAdaptiveBudgetPolicy {
+    let policy = SmartContextAdaptiveBudgetPolicy {
         tier,
         mode,
         max_inline_bytes: max_inline_tool_output_bytes,
         max_inline_tool_output_bytes,
         max_rehydrate_tokens,
         reasons,
+    };
+    smart_context_apply_rewrite_budget_decision(
+        policy,
+        rewrite_budget_decision,
+        available_context_tokens,
+    )
+}
+
+pub fn smart_context_apply_rewrite_budget_decision(
+    mut policy: SmartContextAdaptiveBudgetPolicy,
+    decision: SmartContextRewriteBudgetDecision,
+    available_context_tokens: Option<u64>,
+) -> SmartContextAdaptiveBudgetPolicy {
+    if policy.mode == SmartContextBudgetMode::ExactPassThrough {
+        return policy;
     }
+
+    match decision {
+        SmartContextRewriteBudgetDecision::NoChange => {}
+        SmartContextRewriteBudgetDecision::Relax => {
+            policy.max_inline_tool_output_bytes = smart_context_relaxed_inline_budget(
+                policy.tier,
+                policy.max_inline_tool_output_bytes,
+            );
+            policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
+            policy.max_rehydrate_tokens =
+                smart_context_relaxed_rehydrate_budget(policy.max_rehydrate_tokens);
+        }
+        SmartContextRewriteBudgetDecision::Tighten => {
+            policy.max_inline_tool_output_bytes =
+                smart_context_tightened_inline_budget(policy.max_inline_tool_output_bytes);
+            policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
+            policy.max_rehydrate_tokens =
+                smart_context_tightened_rehydrate_budget(policy.max_rehydrate_tokens);
+        }
+    }
+
+    if let Some(available) = available_context_tokens {
+        policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.min(available);
+    }
+    policy
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1657,6 +1798,115 @@ fn smart_context_memory_capsule_policy_allows_bounded_budget(
                     | SmartContextBudgetPolicyReason::UnsafeAccounting
             )
         })
+}
+
+fn smart_context_recent_rewrite_min_saved_tokens(rewrite_count: usize) -> u64 {
+    SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS
+        .saturating_mul(u64::try_from(rewrite_count).unwrap_or(u64::MAX))
+}
+
+fn smart_context_rewrite_telemetry_sample_safe_saved(
+    sample: &SmartContextRewriteTelemetrySample,
+) -> bool {
+    sample.safe
+        && sample.estimated_tokens_after < sample.estimated_tokens_before
+        && sample.body_bytes_after < sample.body_bytes_before
+}
+
+fn smart_context_rewrite_body_ratio_percent(
+    body_bytes_before: usize,
+    body_bytes_after: usize,
+) -> usize {
+    if body_bytes_before == 0 {
+        return 100;
+    }
+    body_bytes_after.saturating_mul(100) / body_bytes_before
+}
+
+fn smart_context_relaxed_inline_budget(tier: SmartContextTokenBudgetTier, value: usize) -> usize {
+    if value == 0 || value == usize::MAX {
+        return value;
+    }
+
+    if tier == SmartContextTokenBudgetTier::Large {
+        let cap = 64 * 1024;
+        if value >= cap {
+            return value;
+        }
+        return value.saturating_mul(2).min(cap).max(value);
+    }
+
+    smart_context_scale_usize_ceil(
+        value,
+        SMART_CONTEXT_REWRITE_BUDGET_RELAX_NUMERATOR,
+        SMART_CONTEXT_REWRITE_BUDGET_RELAX_DENOMINATOR,
+    )
+    .max(value)
+}
+
+fn smart_context_relaxed_rehydrate_budget(value: u64) -> u64 {
+    if value == 0 || value == u64::MAX {
+        return value;
+    }
+    smart_context_scale_u64_ceil(
+        value,
+        SMART_CONTEXT_REWRITE_BUDGET_RELAX_NUMERATOR,
+        SMART_CONTEXT_REWRITE_BUDGET_RELAX_DENOMINATOR,
+    )
+    .max(value)
+}
+
+fn smart_context_tightened_inline_budget(value: usize) -> usize {
+    if value <= SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_INLINE_BYTES {
+        return value;
+    }
+    smart_context_scale_usize_floor(
+        value,
+        SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_NUMERATOR,
+        SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_DENOMINATOR,
+    )
+    .max(SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_INLINE_BYTES)
+    .min(value)
+}
+
+fn smart_context_tightened_rehydrate_budget(value: u64) -> u64 {
+    if value <= SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_REHYDRATE_TOKENS {
+        return value;
+    }
+    smart_context_scale_u64_floor(
+        value,
+        SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_NUMERATOR,
+        SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_DENOMINATOR,
+    )
+    .max(SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_REHYDRATE_TOKENS)
+    .min(value)
+}
+
+fn smart_context_scale_usize_ceil(value: usize, numerator: u64, denominator: u64) -> usize {
+    let value = u64::try_from(value).unwrap_or(u64::MAX);
+    smart_context_u64_saturating_usize(smart_context_scale_u64_ceil(value, numerator, denominator))
+}
+
+fn smart_context_scale_usize_floor(value: usize, numerator: u64, denominator: u64) -> usize {
+    let value = u64::try_from(value).unwrap_or(u64::MAX);
+    smart_context_u64_saturating_usize(smart_context_scale_u64_floor(value, numerator, denominator))
+}
+
+fn smart_context_scale_u64_ceil(value: u64, numerator: u64, denominator: u64) -> u64 {
+    if denominator == 0 {
+        return value;
+    }
+    value
+        .saturating_mul(numerator)
+        .saturating_add(denominator - 1)
+        / denominator
+}
+
+fn smart_context_scale_u64_floor(value: u64, numerator: u64, denominator: u64) -> u64 {
+    if denominator == 0 {
+        return value;
+    }
+    value.saturating_mul(numerator) / denominator
 }
 
 fn smart_context_fingerprint_map(

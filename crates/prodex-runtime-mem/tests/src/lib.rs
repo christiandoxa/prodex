@@ -409,6 +409,7 @@ fn recall_diet_prioritizes_path_intent_matches_before_unrelated_optional() {
             recent_window_seconds: 60,
         },
         RuntimeMemRecallIntent {
+            prompt: None,
             paths: vec![PathBuf::from("crates/prodex-runtime-mem/src/lib.rs")],
             symbols: Vec::new(),
         },
@@ -459,6 +460,7 @@ fn recall_diet_prioritizes_symbol_intent_matches_before_unrelated_optional() {
             recent_window_seconds: 60,
         },
         RuntimeMemRecallIntent {
+            prompt: None,
             paths: Vec::new(),
             symbols: vec![
                 "RuntimeMemCapsuleMetadata".to_string(),
@@ -524,6 +526,7 @@ fn recall_diet_oversized_required_does_not_block_smaller_useful_capsules() {
             recent_window_seconds: 60,
         },
         RuntimeMemRecallIntent {
+            prompt: None,
             paths: vec![PathBuf::from("crates/prodex-runtime-mem/src/lib.rs")],
             symbols: vec!["prodex_runtime_mem::RuntimeMemRecallIntent".to_string()],
         },
@@ -546,6 +549,77 @@ fn recall_diet_oversized_required_does_not_block_smaller_useful_capsules() {
         vec!["path-match", "symbol-match"]
     );
     assert_eq!(selection.used_tokens, 45);
+}
+
+#[test]
+fn recall_diet_uses_prompt_intent_and_skips_unmatched_optional_fill() {
+    let selection = runtime_mem_select_capsules_for_recall_diet(
+        [
+            recall_capsule(capsule("required", 10, true, None, None, 0.0), &[], &[]),
+            recall_capsule(
+                capsule(
+                    "project-local",
+                    10,
+                    false,
+                    Some("/repo/prodex/README.md"),
+                    None,
+                    0.0,
+                ),
+                &[],
+                &[],
+            ),
+            recall_capsule(capsule("recent", 10, false, None, Some(995), 0.0), &[], &[]),
+            recall_capsule(
+                capsule("prompt-path-match", 20, false, None, Some(700), 0.1),
+                &["crates/prodex-runtime-mem/src/lib.rs"],
+                &[],
+            ),
+            recall_capsule(
+                capsule("prompt-symbol-match", 20, false, None, Some(700), 0.1),
+                &[],
+                &["prodex_runtime_mem::RuntimeMemRecallIntent"],
+            ),
+            recall_capsule(
+                capsule("optional-unmatched-high", 20, false, None, Some(700), 1.0),
+                &[],
+                &["OtherThing"],
+            ),
+        ],
+        RuntimeMemAutoCapsuleSelectionContext {
+            budget: RuntimeMemCapsuleBudget::Explicit(100),
+            project_root: Some(PathBuf::from("/repo/prodex")),
+            now_seconds: Some(1_000),
+            recent_window_seconds: 60,
+        },
+        RuntimeMemRecallIntent::from_prompt(
+            "Update crates/prodex-runtime-mem/src/lib.rs around RuntimeMemRecallIntent.",
+        ),
+    );
+
+    assert_eq!(
+        selection
+            .selected
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "required",
+            "prompt-path-match",
+            "prompt-symbol-match",
+            "project-local",
+            "recent"
+        ]
+    );
+    assert_eq!(
+        selection
+            .omitted
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["optional-unmatched-high"]
+    );
+    assert_eq!(selection.used_tokens, 70);
+    assert_eq!(selection.token_budget, 100);
 }
 
 #[test]

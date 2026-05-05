@@ -80,8 +80,12 @@ const RUNTIME_SMART_CONTEXT_MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_MAX_ARTIFACT_BYTES: usize = 1024 * 1024;
 const RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES: usize = 256;
 const RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES: usize = 16 * 1024;
+const RUNTIME_SMART_CONTEXT_SEMANTIC_SCHEMA_VERSION: u8 = 1;
 const RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES: usize = 256;
 const RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_FIELD_BYTES: usize = 512;
+const RUNTIME_SMART_CONTEXT_MAX_SYMBOL_PREFIX_LINES: usize = 6;
+const RUNTIME_SMART_CONTEXT_MAX_SYMBOL_RANGE_LINES: usize = 24;
+const RUNTIME_SMART_CONTEXT_MAX_SYMBOL_SIGNATURE_LINES: usize = 6;
 const RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS: usize = 256;
 const RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS: usize = 64;
 const RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES: usize = 8;
@@ -108,11 +112,18 @@ pub(crate) struct RuntimeSmartContextArtifact {
 pub(crate) struct RuntimeSmartContextArtifactLineIndex {
     #[serde(default)]
     pub(crate) complete: bool,
+    #[serde(default, skip_serializing_if = "runtime_smart_context_u8_is_zero")]
+    pub(crate) semantic_schema_version: u8,
     #[serde(
         default = "runtime_smart_context_semantic_index_complete_default",
         skip_serializing_if = "runtime_smart_context_bool_is_true"
     )]
     pub(crate) semantic_complete: bool,
+    #[serde(
+        default = "runtime_smart_context_semantic_index_complete_default",
+        skip_serializing_if = "runtime_smart_context_bool_is_true"
+    )]
+    pub(crate) symbol_complete: bool,
     #[serde(default)]
     pub(crate) critical_ranges: Vec<RuntimeSmartContextArtifactLineRange>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -123,6 +134,8 @@ pub(crate) struct RuntimeSmartContextArtifactLineIndex {
     pub(crate) test_failure_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) error_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) symbol_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) command_kind: Option<String>,
 }
@@ -372,15 +385,22 @@ impl RuntimeSmartContextArtifactStore {
                 return None;
             }
             existing.sequence = sequence;
-            if existing.line_index.is_none() || existing.chunk_index.is_none() {
-                let line_index = existing
-                    .line_index
-                    .clone()
-                    .unwrap_or_else(|| runtime_smart_context_artifact_line_index(text));
-                if existing.line_index.is_none() {
+            let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
+                existing.line_index.as_ref(),
+            );
+            if refresh_line_index || existing.chunk_index.is_none() {
+                let line_index = if refresh_line_index {
+                    runtime_smart_context_artifact_line_index(text)
+                } else {
+                    existing
+                        .line_index
+                        .clone()
+                        .expect("line index should exist when refresh is not needed")
+                };
+                if refresh_line_index {
                     existing.line_index = Some(line_index.clone());
                 }
-                if existing.chunk_index.is_none() {
+                if refresh_line_index || existing.chunk_index.is_none() {
                     existing.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
                         text,
                         &line_index,
@@ -497,15 +517,22 @@ impl RuntimeSmartContextArtifactStore {
         });
 
         for artifact in self.artifacts.values_mut() {
-            if artifact.line_index.is_none() || artifact.chunk_index.is_none() {
-                let line_index = artifact
-                    .line_index
-                    .clone()
-                    .unwrap_or_else(|| runtime_smart_context_artifact_line_index(&artifact.text));
-                if artifact.line_index.is_none() {
+            let refresh_line_index = runtime_smart_context_artifact_line_index_needs_refresh(
+                artifact.line_index.as_ref(),
+            );
+            if refresh_line_index || artifact.chunk_index.is_none() {
+                let line_index = if refresh_line_index {
+                    runtime_smart_context_artifact_line_index(&artifact.text)
+                } else {
+                    artifact
+                        .line_index
+                        .clone()
+                        .expect("line index should exist when refresh is not needed")
+                };
+                if refresh_line_index {
                     artifact.line_index = Some(line_index.clone());
                 }
-                if artifact.chunk_index.is_none() {
+                if refresh_line_index || artifact.chunk_index.is_none() {
                     artifact.chunk_index = Some(runtime_smart_context_artifact_chunk_index(
                         &artifact.text,
                         &line_index,
@@ -598,13 +625,27 @@ fn runtime_smart_context_artifact_line_index(text: &str) -> RuntimeSmartContextA
 
     RuntimeSmartContextArtifactLineIndex {
         complete: index_complete,
-        semantic_complete: semantic_index.complete,
+        semantic_schema_version: RUNTIME_SMART_CONTEXT_SEMANTIC_SCHEMA_VERSION,
+        semantic_complete: semantic_index.complete && semantic_index.symbol_complete,
+        symbol_complete: semantic_index.symbol_complete,
         critical_ranges: indexed_ranges,
         file_location_ranges: semantic_index.file_location_ranges,
         diff_hunk_ranges: semantic_index.diff_hunk_ranges,
         test_failure_ranges: semantic_index.test_failure_ranges,
         error_ranges: semantic_index.error_ranges,
+        symbol_ranges: semantic_index.symbol_ranges,
         command_kind: runtime_smart_context_infer_command_kind(&lines),
+    }
+}
+
+fn runtime_smart_context_artifact_line_index_needs_refresh(
+    line_index: Option<&RuntimeSmartContextArtifactLineIndex>,
+) -> bool {
+    match line_index {
+        Some(line_index) => {
+            line_index.semantic_schema_version < RUNTIME_SMART_CONTEXT_SEMANTIC_SCHEMA_VERSION
+        }
+        None => true,
     }
 }
 
@@ -614,7 +655,7 @@ fn runtime_smart_context_artifact_chunk_index(
 ) -> RuntimeSmartContextArtifactChunkIndex {
     let lines = text.lines().collect::<Vec<_>>();
     let mut chunks = Vec::new();
-    let mut complete = line_index.semantic_complete;
+    let mut complete = line_index.semantic_complete && line_index.symbol_complete;
 
     for range in &line_index.file_location_ranges {
         runtime_smart_context_push_chunk_fingerprint(&mut chunks, &mut complete, "file", range);
@@ -627,6 +668,9 @@ fn runtime_smart_context_artifact_chunk_index(
     }
     for range in &line_index.error_ranges {
         runtime_smart_context_push_chunk_fingerprint(&mut chunks, &mut complete, "error", range);
+    }
+    for range in &line_index.symbol_ranges {
+        runtime_smart_context_push_chunk_fingerprint(&mut chunks, &mut complete, "symbol", range);
     }
 
     if chunks.is_empty() {
@@ -755,7 +799,9 @@ struct RuntimeSmartContextArtifactSemanticLineIndexParts {
     diff_hunk_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
     test_failure_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
     error_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
+    symbol_ranges: Vec<RuntimeSmartContextArtifactSemanticLineRange>,
     complete: bool,
+    symbol_complete: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -787,11 +833,25 @@ struct RuntimeSmartContextSemanticRangeMetadata {
     symbol: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeSmartContextParsedSymbolLine {
+    label: &'static str,
+    symbol: String,
+    style: RuntimeSmartContextSymbolRangeStyle,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RuntimeSmartContextSymbolRangeStyle {
+    Brace,
+    Python,
+}
+
 fn runtime_smart_context_artifact_semantic_line_index(
     lines: &[&str],
 ) -> RuntimeSmartContextArtifactSemanticLineIndexParts {
     let mut parts = RuntimeSmartContextArtifactSemanticLineIndexParts {
         complete: true,
+        symbol_complete: true,
         ..Default::default()
     };
     let mut remaining = RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES;
@@ -880,6 +940,28 @@ fn runtime_smart_context_artifact_semantic_line_index(
         }
     }
 
+    for (index, _) in lines.iter().enumerate() {
+        let Some(symbol) = runtime_smart_context_parse_symbol_line(lines, index) else {
+            continue;
+        };
+        let (start, end) = runtime_smart_context_symbol_range_bounds(lines, index, symbol.style);
+        let metadata = RuntimeSmartContextSemanticRangeMetadata {
+            label: Some(symbol.label.to_string()),
+            line: Some(index + 1),
+            symbol: Some(symbol.symbol),
+            ..Default::default()
+        };
+        runtime_smart_context_push_semantic_range(
+            &mut parts.symbol_ranges,
+            &mut remaining,
+            &mut parts.symbol_complete,
+            lines,
+            start,
+            end,
+            metadata,
+        );
+    }
+
     parts
 }
 
@@ -938,6 +1020,255 @@ fn runtime_smart_context_line_excerpt(lines: &[&str], start: usize, end: usize) 
     let end = end.min(lines.len());
     let excerpt = lines[start - 1..end].join("\n");
     (excerpt.len() <= RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES).then_some(excerpt)
+}
+
+fn runtime_smart_context_parse_symbol_line(
+    lines: &[&str],
+    index: usize,
+) -> Option<RuntimeSmartContextParsedSymbolLine> {
+    let line = lines.get(index)?.trim_start();
+    if line.is_empty()
+        || line.starts_with("//")
+        || line.starts_with("/*")
+        || line.starts_with('*')
+        || line.starts_with("#[")
+        || line.starts_with('@')
+    {
+        return None;
+    }
+
+    let rust_test = runtime_smart_context_has_rust_test_attribute(lines, index);
+    if let Some(symbol) = runtime_smart_context_identifier_after_keyword(line, "fn") {
+        return Some(RuntimeSmartContextParsedSymbolLine {
+            label: if rust_test { "test_symbol" } else { "function" },
+            symbol,
+            style: RuntimeSmartContextSymbolRangeStyle::Brace,
+        });
+    }
+
+    if let Some(symbol) = runtime_smart_context_parse_python_symbol(line) {
+        return Some(RuntimeSmartContextParsedSymbolLine {
+            label: if symbol.starts_with("test_") {
+                "test_symbol"
+            } else {
+                "function"
+            },
+            symbol,
+            style: RuntimeSmartContextSymbolRangeStyle::Python,
+        });
+    }
+
+    if let Some(symbol) = runtime_smart_context_parse_js_test_symbol(line) {
+        return Some(RuntimeSmartContextParsedSymbolLine {
+            label: "test_symbol",
+            symbol,
+            style: RuntimeSmartContextSymbolRangeStyle::Brace,
+        });
+    }
+
+    if let Some(symbol) = runtime_smart_context_parse_js_function_symbol(line) {
+        return Some(RuntimeSmartContextParsedSymbolLine {
+            label: "function",
+            symbol,
+            style: RuntimeSmartContextSymbolRangeStyle::Brace,
+        });
+    }
+
+    for keyword in ["struct", "enum", "trait", "impl", "mod", "class"] {
+        if let Some(symbol) = runtime_smart_context_identifier_after_keyword(line, keyword) {
+            return Some(RuntimeSmartContextParsedSymbolLine {
+                label: "symbol",
+                symbol: if keyword == "impl" {
+                    format!("impl {symbol}")
+                } else {
+                    symbol
+                },
+                style: RuntimeSmartContextSymbolRangeStyle::Brace,
+            });
+        }
+    }
+
+    None
+}
+
+fn runtime_smart_context_symbol_range_bounds(
+    lines: &[&str],
+    declaration_index: usize,
+    style: RuntimeSmartContextSymbolRangeStyle,
+) -> (usize, usize) {
+    let start_index = runtime_smart_context_symbol_prefix_start(lines, declaration_index);
+    let end_index = match style {
+        RuntimeSmartContextSymbolRangeStyle::Python => {
+            runtime_smart_context_python_symbol_end(lines, declaration_index)
+        }
+        RuntimeSmartContextSymbolRangeStyle::Brace => {
+            runtime_smart_context_brace_symbol_end(lines, declaration_index)
+        }
+    };
+    (start_index + 1, end_index + 1)
+}
+
+fn runtime_smart_context_symbol_prefix_start(lines: &[&str], declaration_index: usize) -> usize {
+    let mut start = declaration_index;
+    let lower_bound =
+        declaration_index.saturating_sub(RUNTIME_SMART_CONTEXT_MAX_SYMBOL_PREFIX_LINES);
+    while start > lower_bound {
+        let previous = lines[start - 1].trim_start();
+        if previous.is_empty()
+            || previous.starts_with("#[")
+            || previous.starts_with('@')
+            || previous.starts_with("//")
+        {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    start
+}
+
+fn runtime_smart_context_brace_symbol_end(lines: &[&str], declaration_index: usize) -> usize {
+    let max_end = (declaration_index + RUNTIME_SMART_CONTEXT_MAX_SYMBOL_RANGE_LINES - 1)
+        .min(lines.len().saturating_sub(1));
+    let mut balance = 0isize;
+    let mut saw_open = false;
+    for (index, line) in lines
+        .iter()
+        .enumerate()
+        .take(max_end + 1)
+        .skip(declaration_index)
+    {
+        for ch in line.chars() {
+            if ch == '{' {
+                saw_open = true;
+                balance += 1;
+            } else if ch == '}' && saw_open {
+                balance -= 1;
+            }
+        }
+        if saw_open && balance <= 0 {
+            return index;
+        }
+        if !saw_open
+            && index > declaration_index
+            && index - declaration_index >= RUNTIME_SMART_CONTEXT_MAX_SYMBOL_SIGNATURE_LINES
+        {
+            return index;
+        }
+        if !saw_open && line.trim_end().ends_with(';') {
+            return index;
+        }
+    }
+    max_end
+}
+
+fn runtime_smart_context_python_symbol_end(lines: &[&str], declaration_index: usize) -> usize {
+    let base_indent = runtime_smart_context_leading_whitespace(lines[declaration_index]);
+    let max_end = (declaration_index + RUNTIME_SMART_CONTEXT_MAX_SYMBOL_RANGE_LINES - 1)
+        .min(lines.len().saturating_sub(1));
+    let mut end = declaration_index;
+    for (index, line) in lines
+        .iter()
+        .enumerate()
+        .take(max_end + 1)
+        .skip(declaration_index + 1)
+    {
+        let trimmed = line.trim();
+        if !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && runtime_smart_context_leading_whitespace(line) <= base_indent
+        {
+            break;
+        }
+        end = index;
+    }
+    end
+}
+
+fn runtime_smart_context_leading_whitespace(line: &str) -> usize {
+    line.chars().take_while(|ch| ch.is_whitespace()).count()
+}
+
+fn runtime_smart_context_has_rust_test_attribute(lines: &[&str], declaration_index: usize) -> bool {
+    let lower_bound =
+        declaration_index.saturating_sub(RUNTIME_SMART_CONTEXT_MAX_SYMBOL_PREFIX_LINES);
+    for line in lines[lower_bound..declaration_index].iter().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if runtime_smart_context_is_rust_test_attribute(trimmed) {
+            return true;
+        }
+        if !trimmed.starts_with("#[") {
+            break;
+        }
+    }
+    false
+}
+
+fn runtime_smart_context_is_rust_test_attribute(line: &str) -> bool {
+    line == "#[test]"
+        || line.starts_with("#[tokio::test")
+        || line.starts_with("#[async_std::test")
+        || line.starts_with("#[rstest")
+}
+
+fn runtime_smart_context_parse_python_symbol(line: &str) -> Option<String> {
+    let line = line
+        .strip_prefix("async def ")
+        .or_else(|| line.strip_prefix("def "))?;
+    runtime_smart_context_take_identifier(line)
+}
+
+fn runtime_smart_context_parse_js_function_symbol(line: &str) -> Option<String> {
+    if let Some(symbol) = runtime_smart_context_identifier_after_keyword(line, "function") {
+        return Some(symbol);
+    }
+    let Some((left, right)) = line.split_once('=') else {
+        return None;
+    };
+    if !right.contains("=>") && !right.trim_start().starts_with("function") {
+        return None;
+    }
+    let name = left
+        .split_whitespace()
+        .last()
+        .map(|name| name.trim_matches(|ch: char| ch == ':' || ch == '?'))?;
+    runtime_smart_context_take_identifier(name)
+}
+
+fn runtime_smart_context_parse_js_test_symbol(line: &str) -> Option<String> {
+    for prefix in ["test(", "it("] {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            let label = rest
+                .trim_start()
+                .strip_prefix('"')
+                .and_then(|rest| rest.split_once('"').map(|(label, _)| label))
+                .or_else(|| {
+                    rest.trim_start()
+                        .strip_prefix('\'')
+                        .and_then(|rest| rest.split_once('\'').map(|(label, _)| label))
+                })
+                .unwrap_or(prefix.trim_end_matches('('));
+            return runtime_smart_context_bounded_string(label);
+        }
+    }
+    None
+}
+
+fn runtime_smart_context_identifier_after_keyword(line: &str, keyword: &str) -> Option<String> {
+    let (_, rest) = line.split_once(&format!("{keyword} "))?;
+    runtime_smart_context_take_identifier(rest.trim_start_matches('*').trim_start())
+}
+
+fn runtime_smart_context_take_identifier(value: &str) -> Option<String> {
+    let identifier = value
+        .trim_start()
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(*ch, '_' | '$' | '#'))
+        .collect::<String>();
+    runtime_smart_context_bounded_string(identifier.trim_start_matches("r#"))
 }
 
 fn runtime_smart_context_parse_file_location(
@@ -1181,6 +1512,10 @@ fn runtime_smart_context_semantic_index_complete_default() -> bool {
 
 fn runtime_smart_context_bool_is_true(value: &bool) -> bool {
     *value
+}
+
+fn runtime_smart_context_u8_is_zero(value: &u8) -> bool {
+    *value == 0
 }
 
 fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {

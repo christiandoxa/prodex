@@ -1221,7 +1221,7 @@ fn prepare_runtime_smart_context_body<'a>(
         profile_name,
         exactness.clone(),
         missing_rehydrate_refs.clone(),
-        false,
+        static_observation.changed,
     );
     let tier = budget.tier;
     let intent_signals = runtime_smart_context_collect_intent_signals(&value);
@@ -1569,14 +1569,6 @@ struct RuntimeSmartContextBudget {
     token_usage_source: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum RuntimeSmartContextRewriteTelemetryTuning {
-    #[default]
-    Neutral,
-    Relax,
-    Tighten,
-}
-
 #[allow(clippy::too_many_arguments)]
 fn runtime_smart_context_budget(
     shared: &RuntimeRotationProxyShared,
@@ -1601,7 +1593,7 @@ fn runtime_smart_context_budget(
         calibration_samples,
         configured_context_window_tokens,
         recent_rewrite_safety,
-        rewrite_telemetry_tuning,
+        rewrite_telemetry_samples,
     ) = runtime_smart_context_budget_inputs(shared, &bucket_key);
     let history = if bucket_history.is_empty() {
         global_history
@@ -1642,9 +1634,15 @@ fn runtime_smart_context_budget(
             missing_rehydrate_refs,
         },
     );
-    runtime_smart_context_apply_rewrite_telemetry_tuning(
-        &mut policy,
-        rewrite_telemetry_tuning,
+    let telemetry_decision = runtime_proxy_crate::smart_context_rewrite_telemetry_budget_decision(
+        runtime_proxy_crate::SmartContextRewriteTelemetryBudgetInput {
+            recent_rewrite_safety: Default::default(),
+            telemetry_samples: rewrite_telemetry_samples,
+        },
+    );
+    policy = runtime_proxy_crate::smart_context_apply_rewrite_budget_decision(
+        policy,
+        telemetry_decision,
         available_context_tokens,
     );
     let available_tokens = policy
@@ -1778,7 +1776,7 @@ fn runtime_smart_context_budget_inputs(
     Vec<runtime_proxy_crate::SmartContextTokenCalibrationSample>,
     Option<u64>,
     runtime_proxy_crate::SmartContextRecentRewriteSafety,
-    RuntimeSmartContextRewriteTelemetryTuning,
+    Vec<runtime_proxy_crate::SmartContextRewriteTelemetrySample>,
 ) {
     let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
         return (
@@ -1787,7 +1785,7 @@ fn runtime_smart_context_budget_inputs(
             Vec::new(),
             None,
             Default::default(),
-            RuntimeSmartContextRewriteTelemetryTuning::Neutral,
+            Vec::new(),
         );
     };
     let Ok(states) = states.lock() else {
@@ -1797,7 +1795,7 @@ fn runtime_smart_context_budget_inputs(
             Vec::new(),
             None,
             Default::default(),
-            RuntimeSmartContextRewriteTelemetryTuning::Neutral,
+            Vec::new(),
         );
     };
     states
@@ -1825,7 +1823,7 @@ fn runtime_smart_context_budget_inputs(
                 calibration_samples,
                 state.model_context_window_tokens,
                 runtime_smart_context_recent_rewrite_safety(&state.rewrite_safety_history),
-                runtime_smart_context_rewrite_telemetry_tuning(&state.rewrite_telemetry_history),
+                runtime_smart_context_rewrite_telemetry_samples(&state.rewrite_telemetry_history),
             )
         })
         .unwrap_or_default()
@@ -1851,45 +1849,35 @@ fn runtime_smart_context_recent_rewrite_safety(
     safety
 }
 
-fn runtime_smart_context_rewrite_telemetry_tuning(
+fn runtime_smart_context_rewrite_telemetry_samples(
     history: &[RuntimeSmartContextRewriteTelemetryRecord],
-) -> RuntimeSmartContextRewriteTelemetryTuning {
-    let recent = history
+) -> Vec<runtime_proxy_crate::SmartContextRewriteTelemetrySample> {
+    history
         .iter()
-        .rev()
-        .take(SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT)
-        .collect::<Vec<_>>();
-    if recent.len() < 2 {
-        return RuntimeSmartContextRewriteTelemetryTuning::Neutral;
-    }
-    let mut saved_tokens = 0u64;
-    let mut ratio_sum = 0usize;
-    for record in &recent {
-        if !runtime_smart_context_rewrite_telemetry_record_safe_saved(record) {
-            return RuntimeSmartContextRewriteTelemetryTuning::Neutral;
-        }
-        saved_tokens = saved_tokens.saturating_add(
-            record
-                .estimated_tokens_before
-                .saturating_sub(record.estimated_tokens_after),
+        .filter_map(runtime_smart_context_rewrite_telemetry_sample)
+        .collect()
+}
+
+fn runtime_smart_context_rewrite_telemetry_sample(
+    record: &RuntimeSmartContextRewriteTelemetryRecord,
+) -> Option<runtime_proxy_crate::SmartContextRewriteTelemetrySample> {
+    let fallback = record.fallback_reason.is_some();
+    let potentially_rewritten = matches!(record.rewrite_kind.as_str(), "rewritten" | "minified")
+        || matches!(
+            record.status.as_str(),
+            "ok_saved" | "ok_surgical_rehydrate" | "ok_minified"
         );
-        ratio_sum = ratio_sum.saturating_add(runtime_smart_context_rewrite_ratio_percent(
-            record.body_bytes_before,
-            record.body_bytes_after,
-        ));
+    if !fallback && !potentially_rewritten {
+        return None;
     }
-    let average_ratio = ratio_sum / recent.len();
-    if saved_tokens
-        >= runtime_proxy_crate::SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS
-            .saturating_mul(recent.len() as u64)
-        && average_ratio <= 70
-    {
-        RuntimeSmartContextRewriteTelemetryTuning::Relax
-    } else if average_ratio >= 85 {
-        RuntimeSmartContextRewriteTelemetryTuning::Tighten
-    } else {
-        RuntimeSmartContextRewriteTelemetryTuning::Neutral
-    }
+    Some(runtime_proxy_crate::SmartContextRewriteTelemetrySample {
+        body_bytes_before: record.body_bytes_before,
+        body_bytes_after: record.body_bytes_after,
+        estimated_tokens_before: record.estimated_tokens_before,
+        estimated_tokens_after: record.estimated_tokens_after,
+        safe: runtime_smart_context_rewrite_telemetry_record_safe_saved(record),
+        fallback,
+    })
 }
 
 fn runtime_smart_context_rewrite_telemetry_record_safe_saved(
@@ -1902,36 +1890,6 @@ fn runtime_smart_context_rewrite_telemetry_record_safe_saved(
             "ok_saved" | "ok_surgical_rehydrate" | "ok_minified"
         )
         && record.estimated_tokens_after < record.estimated_tokens_before
-}
-
-fn runtime_smart_context_apply_rewrite_telemetry_tuning(
-    policy: &mut runtime_proxy_crate::SmartContextAdaptiveBudgetPolicy,
-    tuning: RuntimeSmartContextRewriteTelemetryTuning,
-    available_context_tokens: Option<u64>,
-) {
-    if policy.mode == runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough {
-        return;
-    }
-    match tuning {
-        RuntimeSmartContextRewriteTelemetryTuning::Neutral => {}
-        RuntimeSmartContextRewriteTelemetryTuning::Relax => {
-            policy.max_inline_tool_output_bytes =
-                policy.max_inline_tool_output_bytes.saturating_mul(5) / 4;
-            policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
-            policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.saturating_mul(5) / 4;
-            if let Some(available) = available_context_tokens {
-                policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.min(available);
-            }
-        }
-        RuntimeSmartContextRewriteTelemetryTuning::Tighten => {
-            policy.max_inline_tool_output_bytes =
-                policy.max_inline_tool_output_bytes.saturating_mul(9) / 10;
-            policy.max_inline_tool_output_bytes = policy.max_inline_tool_output_bytes.max(256);
-            policy.max_inline_bytes = policy.max_inline_tool_output_bytes;
-            policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.saturating_mul(9) / 10;
-            policy.max_rehydrate_tokens = policy.max_rehydrate_tokens.max(1);
-        }
-    }
 }
 
 fn runtime_smart_context_observe_static_context(

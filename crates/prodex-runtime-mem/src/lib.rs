@@ -71,6 +71,8 @@ const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
 const RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED: &str = "ss:omit=tool";
 const RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS: usize = 12;
+const RUNTIME_MEM_RECALL_PROMPT_SCAN_CHAR_LIMIT: usize = 4096;
+const RUNTIME_MEM_RECALL_PROMPT_MAX_TERMS: usize = 32;
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 128;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 512;
@@ -137,13 +139,27 @@ pub struct RuntimeMemCapsuleMetadata {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeMemRecallIntent {
+    pub prompt: Option<String>,
     pub paths: Vec<PathBuf>,
     pub symbols: Vec<String>,
 }
 
 impl RuntimeMemRecallIntent {
+    pub fn from_prompt(prompt: impl Into<String>) -> Self {
+        Self {
+            prompt: Some(prompt.into()),
+            paths: Vec::new(),
+            symbols: Vec::new(),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.paths.is_empty() && self.symbols.is_empty()
+        self.paths.is_empty()
+            && self.symbols.is_empty()
+            && self
+                .prompt
+                .as_deref()
+                .is_none_or(|prompt| prompt.trim().is_empty())
     }
 }
 
@@ -366,7 +382,8 @@ pub fn runtime_mem_select_capsules_with_recall_intent(
     context: RuntimeMemCapsuleSelectionContext,
     intent: RuntimeMemRecallIntent,
 ) -> RuntimeMemCapsuleSelection {
-    if intent.is_empty() {
+    let prepared_intent = RuntimeMemPreparedRecallIntent::from_intent(&intent);
+    if prepared_intent.is_empty() {
         return runtime_mem_select_capsules(
             capsules.into_iter().map(|candidate| candidate.capsule),
             context,
@@ -377,22 +394,33 @@ pub fn runtime_mem_select_capsules_with_recall_intent(
         .into_iter()
         .map(|capsule| {
             let priority = runtime_mem_classify_capsule(&capsule.capsule, &context);
-            let intent_score = runtime_mem_capsule_intent_score(&capsule, &context, &intent);
+            let intent_score =
+                runtime_mem_capsule_intent_score(&capsule, &context, &prepared_intent);
             (capsule, priority, intent_score)
         })
         .collect::<Vec<_>>();
     candidates.sort_by(runtime_mem_recall_diet_capsule_order);
+    let has_intent_matches = candidates
+        .iter()
+        .any(|(_, _, intent_score)| *intent_score > 0);
 
     let mut selected = Vec::new();
     let mut omitted = Vec::new();
     let mut used_tokens = 0usize;
 
-    for (candidate, priority, _) in candidates {
+    for (candidate, priority, intent_score) in candidates {
         let entry = RuntimeMemCapsuleSelectionEntry {
             id: candidate.capsule.id,
             priority,
             token_cost: candidate.capsule.token_cost,
         };
+        if has_intent_matches
+            && intent_score == 0
+            && matches!(priority, RuntimeMemCapsulePriority::Optional)
+        {
+            omitted.push(entry);
+            continue;
+        }
         if used_tokens.saturating_add(entry.token_cost) <= context.token_budget {
             used_tokens += entry.token_cost;
             selected.push(entry);
@@ -1656,8 +1684,9 @@ impl RuntimeMemSuperSlimV2InternState {
 
         let fields: &[&str] = match event_type {
             RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE => &["i", "n", "c"],
-            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => &["i", "r"],
-            RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => &["r"],
+            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => &["i", "s", "r"],
+            RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => &["s", "r"],
+            RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE => &["s"],
             _ => &[],
         };
         for field in fields {
@@ -1908,8 +1937,13 @@ fn runtime_mem_super_slim_v2_best_dictionary_candidate(
 fn runtime_mem_super_slim_v2_dictionary_candidates(
     events: &[Value],
 ) -> Vec<RuntimeMemSuperSlimV2DictionaryCandidate> {
-    let mut candidates = runtime_mem_super_slim_v2_exact_dictionary_candidates(events, "n");
-    for field in ["i", "c", "r"] {
+    let mut candidates = Vec::new();
+    for field in ["i", "n", "c", "r", "s"] {
+        candidates.extend(runtime_mem_super_slim_v2_exact_dictionary_candidates(
+            events, field,
+        ));
+    }
+    for field in ["i", "c", "r", "s"] {
         candidates.extend(runtime_mem_super_slim_v2_prefix_dictionary_candidates(
             events, field,
         ));
@@ -1997,8 +2031,9 @@ fn runtime_mem_super_slim_v2_field_strings(events: &[Value], field: &str) -> Vec
 fn runtime_mem_super_slim_v2_field_can_use_dictionary(event_type: &str, field: &str) -> bool {
     match event_type {
         RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE => matches!(field, "i" | "n" | "c"),
-        RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => matches!(field, "i" | "r"),
-        RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => field == "r",
+        RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => matches!(field, "i" | "r" | "s"),
+        RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => matches!(field, "r" | "s"),
+        RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE => field == "s",
         _ => false,
     }
 }
@@ -2747,10 +2782,41 @@ fn runtime_mem_relevance_order(left: f32, right: f32) -> Ordering {
     left.partial_cmp(&right).unwrap_or(Ordering::Equal)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct RuntimeMemPreparedRecallIntent {
+    paths: Vec<PathBuf>,
+    symbols: Vec<String>,
+}
+
+impl RuntimeMemPreparedRecallIntent {
+    fn from_intent(intent: &RuntimeMemRecallIntent) -> Self {
+        let mut prepared = Self::default();
+        for path in &intent.paths {
+            runtime_mem_push_unique_path(&mut prepared.paths, path.clone());
+        }
+        for symbol in &intent.symbols {
+            runtime_mem_push_unique_symbol(&mut prepared.symbols, symbol);
+        }
+        if let Some(prompt) = intent.prompt.as_deref() {
+            for path in runtime_mem_prompt_intent_paths(prompt) {
+                runtime_mem_push_unique_path(&mut prepared.paths, path);
+            }
+            for symbol in runtime_mem_prompt_intent_symbols(prompt) {
+                runtime_mem_push_unique_symbol(&mut prepared.symbols, &symbol);
+            }
+        }
+        prepared
+    }
+
+    fn is_empty(&self) -> bool {
+        self.paths.is_empty() && self.symbols.is_empty()
+    }
+}
+
 fn runtime_mem_capsule_intent_score(
     capsule: &RuntimeMemRecallCapsuleMetadata,
     context: &RuntimeMemCapsuleSelectionContext,
-    intent: &RuntimeMemRecallIntent,
+    intent: &RuntimeMemPreparedRecallIntent,
 ) -> usize {
     let path_score = intent
         .paths
@@ -2769,7 +2835,9 @@ fn runtime_mem_capsule_intent_score(
         })
         .count();
 
-    path_score.saturating_add(symbol_score)
+    path_score
+        .saturating_mul(4)
+        .saturating_add(symbol_score.saturating_mul(3))
 }
 
 fn runtime_mem_capsule_matches_intent_path(
@@ -2777,6 +2845,7 @@ fn runtime_mem_capsule_matches_intent_path(
     context: &RuntimeMemCapsuleSelectionContext,
     intent_path: &Path,
 ) -> bool {
+    let intent_file_name = runtime_mem_single_component_file_name(intent_path);
     let intent_path =
         runtime_mem_intent_path_for_matching(intent_path, context.project_root.as_deref());
     capsule
@@ -2784,8 +2853,14 @@ fn runtime_mem_capsule_matches_intent_path(
         .project_path
         .iter()
         .chain(capsule.paths.iter())
-        .map(|path| runtime_mem_intent_path_for_matching(path, context.project_root.as_deref()))
-        .any(|capsule_path| runtime_mem_paths_overlap(&capsule_path, &intent_path))
+        .any(|path| {
+            let capsule_path =
+                runtime_mem_intent_path_for_matching(path, context.project_root.as_deref());
+            runtime_mem_paths_overlap(&capsule_path, &intent_path)
+                || intent_file_name.is_some_and(|intent_file_name| {
+                    path.file_name().and_then(|name| name.to_str()) == Some(intent_file_name)
+                })
+        })
 }
 
 fn runtime_mem_intent_path_for_matching(path: &Path, project_root: Option<&Path>) -> PathBuf {
@@ -2801,6 +2876,17 @@ fn runtime_mem_paths_overlap(left: &Path, right: &Path) -> bool {
     left == right || left.starts_with(right) || right.starts_with(left)
 }
 
+fn runtime_mem_single_component_file_name(path: &Path) -> Option<&str> {
+    let mut components = path.components();
+    let Component::Normal(component) = components.next()? else {
+        return None;
+    };
+    if components.next().is_some() {
+        return None;
+    }
+    component.to_str()
+}
+
 fn runtime_mem_symbols_match(capsule_symbol: &str, intent_symbol: &str) -> bool {
     let capsule_symbol = runtime_mem_normalized_symbol(capsule_symbol);
     let intent_symbol = runtime_mem_normalized_symbol(intent_symbol);
@@ -2812,6 +2898,121 @@ fn runtime_mem_symbols_match(capsule_symbol: &str, intent_symbol: &str) -> bool 
         || capsule_symbol.ends_with(&format!(".{intent_symbol}"))
         || intent_symbol.ends_with(&format!("::{capsule_symbol}"))
         || intent_symbol.ends_with(&format!(".{capsule_symbol}"))
+}
+
+fn runtime_mem_prompt_intent_paths(prompt: &str) -> Vec<PathBuf> {
+    runtime_mem_recall_prompt_terms(prompt)
+        .into_iter()
+        .filter(|term| runtime_mem_prompt_term_is_path(term))
+        .take(RUNTIME_MEM_RECALL_PROMPT_MAX_TERMS)
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn runtime_mem_prompt_intent_symbols(prompt: &str) -> Vec<String> {
+    runtime_mem_recall_prompt_terms(prompt)
+        .into_iter()
+        .filter(|term| runtime_mem_prompt_term_is_symbol(term))
+        .take(RUNTIME_MEM_RECALL_PROMPT_MAX_TERMS)
+        .collect()
+}
+
+fn runtime_mem_recall_prompt_terms(prompt: &str) -> Vec<String> {
+    let prompt = prompt
+        .chars()
+        .take(RUNTIME_MEM_RECALL_PROMPT_SCAN_CHAR_LIMIT)
+        .collect::<String>();
+    let mut terms = Vec::new();
+    for raw in prompt.split(|ch: char| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';'
+            )
+    }) {
+        let Some(term) = runtime_mem_normalize_prompt_term(raw) else {
+            continue;
+        };
+        if !terms.iter().any(|existing| existing == &term) {
+            terms.push(term);
+        }
+    }
+    terms
+}
+
+fn runtime_mem_normalize_prompt_term(raw: &str) -> Option<String> {
+    let term = raw
+        .trim()
+        .trim_matches('`')
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_end_matches(|ch: char| matches!(ch, '.' | ':' | '!' | '?' | ','));
+    (!term.is_empty()).then(|| term.to_string())
+}
+
+fn runtime_mem_prompt_term_is_path(term: &str) -> bool {
+    term.contains('/')
+        || term.contains('\\')
+        || Path::new(term)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(runtime_mem_prompt_term_extension_is_path_like)
+}
+
+fn runtime_mem_prompt_term_extension_is_path_like(extension: &str) -> bool {
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "c" | "cc"
+            | "cpp"
+            | "css"
+            | "go"
+            | "h"
+            | "hpp"
+            | "html"
+            | "java"
+            | "js"
+            | "json"
+            | "jsx"
+            | "kt"
+            | "md"
+            | "py"
+            | "rs"
+            | "sh"
+            | "toml"
+            | "ts"
+            | "tsx"
+            | "yaml"
+            | "yml"
+    )
+}
+
+fn runtime_mem_prompt_term_is_symbol(term: &str) -> bool {
+    if term.len() < 3 || runtime_mem_prompt_term_is_path(term) {
+        return false;
+    }
+    let symbol = term.trim_end_matches("()");
+    symbol
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '.'))
+        && (symbol.contains("::")
+            || symbol
+                .chars()
+                .any(|ch| ch == '_' || ch.is_ascii_uppercase()))
+}
+
+fn runtime_mem_push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if paths.iter().any(|existing| existing == &path) {
+        return;
+    }
+    paths.push(path);
+}
+
+fn runtime_mem_push_unique_symbol(symbols: &mut Vec<String>, symbol: &str) {
+    let symbol = symbol.trim();
+    if symbol.is_empty() || symbols.iter().any(|existing| existing == symbol) {
+        return;
+    }
+    symbols.push(symbol.to_string());
 }
 
 fn runtime_mem_normalized_symbol(symbol: &str) -> String {
@@ -3309,6 +3510,92 @@ mod compact_v2_runtime_memory_tests {
     }
 
     #[test]
+    fn super_slim_v2_interns_exact_repeated_tool_ids_when_smaller() {
+        let call_id = "call_exact_prodex_runtime_mem_dictionary_repeated_identifier_0123456789";
+        let mut events = Vec::new();
+        for index in 0..6 {
+            events.push(serde_json::json!({
+                "payload": {
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": "tool",
+                    "arguments": format!("input {index}")
+                }
+            }));
+            events.push(serde_json::json!({
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": format!("output {index}")
+                }
+            }));
+        }
+
+        let base_shadows = v2_shadow_events_without_dictionary(events.iter());
+        let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+
+        assert!(
+            runtime_mem_jsonl_events_len(&shadows) < runtime_mem_jsonl_events_len(&base_shadows)
+        );
+        assert!(v2_dictionary_events(&shadows).iter().any(|event| {
+            event.get("k").and_then(Value::as_str) == Some("i")
+                && event.get("m").and_then(Value::as_str)
+                    == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT)
+                && event.get("v").and_then(Value::as_str) == Some(call_id)
+        }));
+        assert_v2_raw_events_schema_addressable(&shadows);
+        assert_v2_compact_fields_are_strings(&shadows);
+
+        let expanded = expanded_non_dictionary_events(shadows);
+        for event in v2_tool_events_with_ids(&expanded) {
+            assert_eq!(event.get("i").and_then(Value::as_str), Some(call_id));
+        }
+    }
+
+    #[test]
+    fn super_slim_v2_interns_exact_repeated_summaries_when_smaller() {
+        let summary = "user: exact repeated runtime memory summary retained through expansion";
+        let events = (0..8)
+            .map(|index| {
+                serde_json::json!({
+                    "payload": {
+                        "type": "user_message",
+                        "id": format!("user-{index}"),
+                        "message": format!("full user prompt {index} {}", "detail ".repeat(40)),
+                        "metadata": {
+                            "prompt_summary": summary
+                        }
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let base_shadows = v2_shadow_events_without_dictionary(events.iter());
+        let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+
+        assert!(
+            runtime_mem_jsonl_events_len(&shadows) < runtime_mem_jsonl_events_len(&base_shadows)
+        );
+        assert!(v2_dictionary_events(&shadows).iter().any(|event| {
+            event.get("k").and_then(Value::as_str) == Some("s")
+                && event.get("m").and_then(Value::as_str)
+                    == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT)
+                && event.get("v").and_then(Value::as_str) == Some(summary)
+        }));
+        assert_v2_raw_events_schema_addressable(&shadows);
+        assert_v2_compact_fields_are_strings(&shadows);
+
+        let expanded = expanded_non_dictionary_events(shadows);
+        let fields = v2_schema_fields("prodex-v2-user-message");
+        for event in v2_user_events(&expanded) {
+            assert_eq!(
+                resolve_v2_schema_string(&fields["prompt"], event).as_deref(),
+                Some(summary)
+            );
+        }
+    }
+
+    #[test]
     fn super_slim_v2_dictionary_skips_compaction_when_not_smaller() {
         let events = [
             serde_json::json!({
@@ -3385,6 +3672,19 @@ mod compact_v2_runtime_memory_tests {
 
     fn v2_tool_use_events(events: &[Value]) -> Vec<&Value> {
         v2_events_of_type(events, RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE)
+    }
+
+    fn v2_tool_events_with_ids(events: &[Value]) -> Vec<&Value> {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str),
+                    Some(RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE)
+                        | Some(RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE)
+                )
+            })
+            .collect()
     }
 
     fn v2_user_events(events: &[Value]) -> Vec<&Value> {
