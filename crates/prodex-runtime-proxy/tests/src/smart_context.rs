@@ -765,6 +765,185 @@ fn observed_token_accounting_calibrates_separately_by_bucket() {
 }
 
 #[test]
+fn observed_token_accounting_prefers_exact_bucket_before_calibration_fallbacks() {
+    let target = smart_context_test_calibration_bucket(
+        Some("responses"),
+        Some("gpt-5.4"),
+        Some("alpha"),
+        Some("http"),
+    );
+    let samples = vec![
+        smart_context_test_calibration_sample(
+            Some(smart_context_test_calibration_bucket(
+                Some("responses"),
+                Some("gpt-5.4"),
+                Some("beta"),
+                Some("websocket"),
+            )),
+            16_000,
+        ),
+        smart_context_test_calibration_sample(
+            Some(smart_context_test_calibration_bucket(
+                Some("responses"),
+                Some("other-model"),
+                Some("alpha"),
+                Some("http"),
+            )),
+            17_000,
+        ),
+        smart_context_test_calibration_sample(None, 18_000),
+        smart_context_test_calibration_sample(Some(target.clone()), 8_000),
+    ];
+
+    let estimate = smart_context_test_calibrated_bucket_estimate(target, samples);
+
+    assert_eq!(estimate, 10_064);
+}
+
+#[test]
+fn observed_token_accounting_falls_back_to_model_family_before_profile_route() {
+    let target = smart_context_test_calibration_bucket(
+        Some("responses"),
+        Some(" GPT_5.4-2026-05-01 "),
+        Some("alpha"),
+        Some("http"),
+    );
+    let samples = vec![
+        smart_context_test_calibration_sample(
+            Some(smart_context_test_calibration_bucket(
+                Some("responses"),
+                Some("other-model"),
+                Some("alpha"),
+                Some("websocket"),
+            )),
+            16_000,
+        ),
+        smart_context_test_calibration_sample(
+            Some(smart_context_test_calibration_bucket(
+                Some("compact"),
+                Some("gpt-5.4"),
+                Some("beta"),
+                Some("websocket"),
+            )),
+            12_000,
+        ),
+    ];
+
+    let estimate = smart_context_test_calibrated_bucket_estimate(target, samples);
+
+    assert_eq!(estimate, 13_564);
+}
+
+#[test]
+fn observed_token_accounting_falls_back_to_profile_route_before_route_transport() {
+    let target = smart_context_test_calibration_bucket(
+        Some("responses"),
+        Some("gpt-5.2"),
+        Some("alpha"),
+        Some("http"),
+    );
+    let samples = vec![
+        smart_context_test_calibration_sample(
+            Some(smart_context_test_calibration_bucket(
+                Some("responses"),
+                Some("other-model"),
+                Some("beta"),
+                Some("http"),
+            )),
+            17_000,
+        ),
+        smart_context_test_calibration_sample(
+            Some(smart_context_test_calibration_bucket(
+                Some("responses"),
+                Some("gpt-5.4"),
+                Some("alpha"),
+                Some("websocket"),
+            )),
+            12_000,
+        ),
+    ];
+
+    let estimate = smart_context_test_calibrated_bucket_estimate(target, samples);
+
+    assert_eq!(estimate, 13_564);
+}
+
+#[test]
+fn observed_token_accounting_falls_back_to_route_transport_and_global_compatible_samples() {
+    let target = smart_context_test_calibration_bucket(
+        Some("responses"),
+        Some("gpt-5.2"),
+        Some("alpha"),
+        Some("http"),
+    );
+    let route_transport_samples = vec![smart_context_test_calibration_sample(
+        Some(smart_context_test_calibration_bucket(
+            Some("responses"),
+            Some("other-model"),
+            Some("beta"),
+            Some("http"),
+        )),
+        12_000,
+    )];
+    let global_samples = vec![smart_context_test_calibration_sample(None, 14_000)];
+
+    let route_transport_estimate =
+        smart_context_test_calibrated_bucket_estimate(target.clone(), route_transport_samples);
+    let global_estimate = smart_context_test_calibrated_bucket_estimate(target, global_samples);
+
+    assert_eq!(route_transport_estimate, 13_564);
+    assert_eq!(global_estimate, 15_814);
+}
+
+fn smart_context_test_calibration_bucket(
+    route: Option<&str>,
+    model: Option<&str>,
+    profile: Option<&str>,
+    transport: Option<&str>,
+) -> SmartContextTokenCalibrationBucketKey {
+    SmartContextTokenCalibrationBucketKey {
+        route: route.map(str::to_string),
+        model: model.map(str::to_string),
+        profile: profile.map(str::to_string),
+        transport: transport.map(str::to_string),
+    }
+}
+
+fn smart_context_test_calibration_sample(
+    bucket_key: Option<SmartContextTokenCalibrationBucketKey>,
+    input_tokens: u64,
+) -> SmartContextTokenCalibrationSample {
+    SmartContextTokenCalibrationSample {
+        bucket_key,
+        usage: RuntimeTokenUsage {
+            input_tokens,
+            ..RuntimeTokenUsage::default()
+        },
+    }
+}
+
+fn smart_context_test_calibrated_bucket_estimate(
+    bucket_key: SmartContextTokenCalibrationBucketKey,
+    samples: Vec<SmartContextTokenCalibrationSample>,
+) -> u64 {
+    smart_context_observed_token_accounting_with_calibration(
+        SmartContextObservedTokenAccountingCalibrationInput {
+            accounting: SmartContextObservedTokenAccountingInput {
+                model_context_window_tokens: Some(64_000),
+                reserved_output_tokens: 4_000,
+                current_input_tokens: 0,
+                current_request_body_bytes: 80_000,
+                current_request_estimated_tokens: Some(20_000),
+                observed_usage: Vec::new(),
+            },
+            calibration_bucket_key: Some(bucket_key),
+            calibration_samples: samples,
+        },
+    )
+    .estimated_current_request_tokens
+}
+
+#[test]
 fn observed_token_accounting_uses_recent_high_water_mark_for_calibration_safety() {
     let accounting =
         smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {

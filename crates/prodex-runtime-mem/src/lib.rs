@@ -58,6 +58,8 @@ const RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE: &str = "pm2:tu";
 const RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE: &str = "pm2:tr";
 const RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_NAME: &str = "tool";
 const RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_INPUT: &str = "tool call";
+const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD: &str = "p";
+const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER: &str = "ss:ref=prev";
 const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "ss:omit";
 const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
@@ -598,9 +600,11 @@ pub fn runtime_mem_event_has_super_slim_prompt_reference(event: &Value) -> bool 
 fn runtime_mem_event_has_super_slim_v2_prompt_reference(event: &Value) -> bool {
     runtime_mem_lookup_json_path(event, "t").and_then(Value::as_str)
         == Some(RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE)
-        && ["s", "r"].iter().any(|path| {
-            runtime_mem_lookup_json_path(event, path).is_some_and(runtime_mem_value_is_text)
-        })
+        && ["s", "r", RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD]
+            .iter()
+            .any(|path| {
+                runtime_mem_lookup_json_path(event, path).is_some_and(runtime_mem_value_is_text)
+            })
 }
 
 pub fn runtime_mem_super_slim_shadow_codex_event(event: &Value) -> Value {
@@ -645,9 +649,11 @@ pub fn runtime_mem_super_slim_v2_shadow_codex_event(event: &Value) -> Value {
 pub fn runtime_mem_super_slim_v2_shadow_codex_events<'a>(
     events: impl IntoIterator<Item = &'a Value>,
 ) -> Vec<Value> {
+    let mut ref_dedupe_state = RuntimeMemSuperSlimV2ArtifactRefDedupeState::default();
     runtime_mem_super_slim_shadow_codex_events(events)
         .iter()
         .map(runtime_mem_super_slim_v2_shadow_from_v1_shadow)
+        .map(|event| ref_dedupe_state.dedupe_consecutive_event_ref(event))
         .collect()
 }
 
@@ -961,7 +967,7 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
             "action": "session_init",
             "fields": {
                 "prompt": {
-                    "coalesce": ["s", "r", { "value": RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED }]
+                    "coalesce": ["s", "r", RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD, { "value": RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED }]
                 }
             }
         }),
@@ -992,7 +998,7 @@ pub fn runtime_mem_super_slim_codex_schema() -> serde_json::Value {
             "fields": {
                 "toolId": "i",
                 "toolResponse": {
-                    "coalesce": ["s", "r", { "value": RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED }]
+                    "coalesce": ["s", "r", RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD, { "value": RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED }]
                 }
             }
         }),
@@ -1567,6 +1573,50 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
         }
         _ => event.clone(),
     }
+}
+
+#[derive(Debug, Default)]
+struct RuntimeMemSuperSlimV2ArtifactRefDedupeState {
+    previous_emitted_ref: Option<String>,
+}
+
+impl RuntimeMemSuperSlimV2ArtifactRefDedupeState {
+    fn dedupe_consecutive_event_ref(&mut self, mut event: Value) -> Value {
+        let Some(artifact_ref) = runtime_mem_super_slim_v2_emitted_artifact_ref(&event) else {
+            self.previous_emitted_ref = None;
+            return event;
+        };
+
+        if self.previous_emitted_ref.as_deref() == Some(artifact_ref.as_str()) {
+            if let Some(object) = event.as_object_mut() {
+                object.remove("r");
+                object.insert(
+                    RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD.to_string(),
+                    Value::String(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER.to_string()),
+                );
+            }
+        } else {
+            self.previous_emitted_ref = Some(artifact_ref);
+        }
+
+        event
+    }
+}
+
+fn runtime_mem_super_slim_v2_emitted_artifact_ref(event: &Value) -> Option<String> {
+    let event_type = runtime_mem_lookup_json_path(event, "t")?.as_str()?;
+    if !matches!(
+        event_type,
+        RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE
+            | RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE
+    ) {
+        return None;
+    }
+    runtime_mem_lookup_json_path(event, "r")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn runtime_mem_insert_super_slim_v2_tool_use_fields(
@@ -2367,6 +2417,140 @@ mod compact_v2_runtime_memory_tests {
             resolve_v2_schema_string(&fields["toolInput"], &shadow).as_deref(),
             Some("run diagnostics")
         );
+    }
+
+    #[test]
+    fn super_slim_v2_shadow_events_mark_consecutive_duplicate_artifact_refs() {
+        let artifact_ref = "psc:repeat-ref";
+        let events = [
+            serde_json::json!({
+                "payload": {
+                    "type": "user_message",
+                    "message": "first artifact-backed prompt",
+                    "metadata": {
+                        "artifact_ref": artifact_ref
+                    }
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "exec_command_output",
+                    "call_id": "call-repeat",
+                    "output": "same artifact-backed output",
+                    "metadata": {
+                        "artifact_ref": artifact_ref
+                    }
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "user_message",
+                    "message": "third consecutive artifact-backed prompt",
+                    "metadata": {
+                        "artifact_ref": artifact_ref
+                    }
+                }
+            }),
+        ];
+
+        let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+
+        assert_eq!(shadows[0]["r"].as_str(), Some(artifact_ref));
+        assert_eq!(
+            shadows[0].get(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD),
+            None
+        );
+        assert_eq!(shadows[1].get("r"), None);
+        assert_eq!(
+            shadows[1][RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD].as_str(),
+            Some(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER)
+        );
+        assert_eq!(shadows[2].get("r"), None);
+        assert_eq!(
+            shadows[2][RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD].as_str(),
+            Some(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER)
+        );
+
+        let fields = v2_schema_fields("prodex-v2-tool-result");
+        assert_eq!(
+            resolve_v2_schema_string(&fields["toolResponse"], &shadows[1]).as_deref(),
+            Some(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER)
+        );
+
+        let legacy_tool_response = serde_json::json!({
+            "coalesce": ["s", "r", { "value": RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED }]
+        });
+        assert_eq!(
+            resolve_v2_schema_string(&legacy_tool_response, &shadows[1]).as_deref(),
+            Some(RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED)
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_shadow_events_do_not_mark_non_consecutive_refs() {
+        let artifact_ref = "psc:not-consecutive";
+        let events = [
+            serde_json::json!({
+                "payload": {
+                    "type": "user_message",
+                    "message": "first artifact-backed prompt",
+                    "metadata": {
+                        "artifact_ref": artifact_ref
+                    }
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "agent_message",
+                    "message": "assistant event breaks adjacency",
+                    "summary": "assistant summary"
+                }
+            }),
+            serde_json::json!({
+                "payload": {
+                    "type": "exec_command_output",
+                    "call_id": "call-later",
+                    "output": "same ref after non-ref event",
+                    "metadata": {
+                        "artifact_ref": artifact_ref
+                    }
+                }
+            }),
+        ];
+
+        let shadows = runtime_mem_super_slim_v2_shadow_codex_events(events.iter());
+
+        assert_eq!(shadows[0]["r"].as_str(), Some(artifact_ref));
+        assert_eq!(shadows[2]["r"].as_str(), Some(artifact_ref));
+        assert_eq!(
+            shadows[2].get(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD),
+            None
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_schema_reads_previous_ref_marker_and_legacy_full_refs() {
+        let marker_event = serde_json::json!({
+            "t": RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE,
+            RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD: RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER
+        });
+        let legacy_event = serde_json::json!({
+            "t": RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE,
+            "r": "psc:legacy-full-ref"
+        });
+        let fields = v2_schema_fields("prodex-v2-user-message");
+
+        assert_eq!(
+            resolve_v2_schema_string(&fields["prompt"], &marker_event).as_deref(),
+            Some(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER)
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&fields["prompt"], &legacy_event).as_deref(),
+            Some("psc:legacy-full-ref")
+        );
+        assert!(runtime_mem_event_has_super_slim_prompt_reference(
+            &marker_event
+        ));
     }
 
     #[test]

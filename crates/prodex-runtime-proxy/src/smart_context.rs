@@ -783,13 +783,196 @@ fn smart_context_recent_accounted_input_calibration_for_bucket(
     calibration_bucket_key: Option<&SmartContextTokenCalibrationBucketKey>,
     calibration_samples: &[SmartContextTokenCalibrationSample],
 ) -> Option<u64> {
+    if let Some(calibration) = smart_context_recent_accounted_input_calibration_matching(
+        calibration_samples,
+        |sample_bucket_key| sample_bucket_key == calibration_bucket_key,
+    ) {
+        return Some(calibration);
+    }
+
+    let Some(calibration_bucket_key) = calibration_bucket_key else {
+        return None;
+    };
+
+    for tier in [
+        SmartContextTokenCalibrationFallbackTier::Model,
+        SmartContextTokenCalibrationFallbackTier::ProfileRoute,
+        SmartContextTokenCalibrationFallbackTier::RouteTransportGlobal,
+    ] {
+        if let Some(calibration) = smart_context_recent_accounted_input_calibration_matching(
+            calibration_samples,
+            |sample_bucket_key| {
+                smart_context_token_calibration_bucket_fallback_matches(
+                    calibration_bucket_key,
+                    sample_bucket_key,
+                    tier,
+                )
+            },
+        ) {
+            return Some(calibration);
+        }
+    }
+
+    None
+}
+
+fn smart_context_recent_accounted_input_calibration_matching(
+    calibration_samples: &[SmartContextTokenCalibrationSample],
+    mut bucket_matches: impl FnMut(Option<&SmartContextTokenCalibrationBucketKey>) -> bool,
+) -> Option<u64> {
     calibration_samples
         .iter()
         .rev()
-        .filter(|sample| sample.bucket_key.as_ref() == calibration_bucket_key)
+        .filter(|sample| bucket_matches(sample.bucket_key.as_ref()))
         .filter_map(|sample| smart_context_accounted_input_tokens(sample.usage))
         .take(SMART_CONTEXT_ADAPTIVE_ESTIMATE_RECENT_USAGE_LIMIT)
         .max()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SmartContextTokenCalibrationFallbackTier {
+    Model,
+    ProfileRoute,
+    RouteTransportGlobal,
+}
+
+fn smart_context_token_calibration_bucket_fallback_matches(
+    target: &SmartContextTokenCalibrationBucketKey,
+    sample: Option<&SmartContextTokenCalibrationBucketKey>,
+    tier: SmartContextTokenCalibrationFallbackTier,
+) -> bool {
+    match tier {
+        SmartContextTokenCalibrationFallbackTier::Model => sample.is_some_and(|sample| {
+            smart_context_token_calibration_model_matches(&target.model, &sample.model)
+        }),
+        SmartContextTokenCalibrationFallbackTier::ProfileRoute => sample.is_some_and(|sample| {
+            smart_context_token_calibration_field_matches(&target.profile, &sample.profile)
+                && smart_context_token_calibration_field_matches(&target.route, &sample.route)
+        }),
+        SmartContextTokenCalibrationFallbackTier::RouteTransportGlobal => sample
+            .map(|sample| {
+                (smart_context_token_calibration_field_matches(&target.route, &sample.route)
+                    && smart_context_token_calibration_field_matches(
+                        &target.transport,
+                        &sample.transport,
+                    ))
+                    || smart_context_token_calibration_sample_is_global_compatible(target, sample)
+            })
+            .unwrap_or(true),
+    }
+}
+
+fn smart_context_token_calibration_field_matches(
+    target: &Option<String>,
+    sample: &Option<String>,
+) -> bool {
+    target.as_deref().is_some_and(non_empty) && target == sample
+}
+
+fn smart_context_token_calibration_model_matches(
+    target: &Option<String>,
+    sample: &Option<String>,
+) -> bool {
+    let Some(target) = smart_context_token_calibration_normalized_model(target.as_deref()) else {
+        return false;
+    };
+    let Some(sample) = smart_context_token_calibration_normalized_model(sample.as_deref()) else {
+        return false;
+    };
+    target == sample
+        || smart_context_token_calibration_model_family(&target)
+            == smart_context_token_calibration_model_family(&sample)
+}
+
+fn smart_context_token_calibration_sample_is_global_compatible(
+    target: &SmartContextTokenCalibrationBucketKey,
+    sample: &SmartContextTokenCalibrationBucketKey,
+) -> bool {
+    smart_context_token_calibration_optional_field_compatible(&target.route, &sample.route)
+        && smart_context_token_calibration_optional_model_compatible(&target.model, &sample.model)
+        && smart_context_token_calibration_optional_field_compatible(
+            &target.profile,
+            &sample.profile,
+        )
+        && smart_context_token_calibration_optional_field_compatible(
+            &target.transport,
+            &sample.transport,
+        )
+}
+
+fn smart_context_token_calibration_optional_field_compatible(
+    target: &Option<String>,
+    sample: &Option<String>,
+) -> bool {
+    sample
+        .as_deref()
+        .is_none_or(|sample| target.as_deref() == Some(sample))
+}
+
+fn smart_context_token_calibration_optional_model_compatible(
+    target: &Option<String>,
+    sample: &Option<String>,
+) -> bool {
+    sample
+        .as_ref()
+        .is_none_or(|_| smart_context_token_calibration_model_matches(target, sample))
+}
+
+fn smart_context_token_calibration_normalized_model(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty() || value.chars().any(char::is_control) {
+        return None;
+    }
+    let mut normalized = String::with_capacity(value.len());
+    let mut previous_separator = false;
+    for ch in value.chars().flat_map(char::to_lowercase) {
+        let ch = match ch {
+            '_' | ' ' => '-',
+            ch => ch,
+        };
+        if ch == '-' {
+            if !previous_separator {
+                normalized.push(ch);
+                previous_separator = true;
+            }
+        } else {
+            normalized.push(ch);
+            previous_separator = false;
+        }
+    }
+    let normalized = normalized.trim_matches('-');
+    (!normalized.is_empty()).then(|| normalized.to_string())
+}
+
+fn smart_context_token_calibration_model_family(model: &str) -> &str {
+    let model = model
+        .strip_suffix("-latest")
+        .or_else(|| model.strip_suffix("-preview"))
+        .unwrap_or(model);
+
+    if let Some(family) = model
+        .strip_suffix("-mini")
+        .or_else(|| model.strip_suffix("-nano"))
+        .or_else(|| model.strip_suffix("-codex"))
+    {
+        return family;
+    }
+
+    if model.len() >= 11 {
+        let suffix_start = model.len() - 11;
+        let suffix = &model[suffix_start..];
+        if suffix.as_bytes()[0] == b'-'
+            && suffix.as_bytes()[1..5].iter().all(u8::is_ascii_digit)
+            && suffix.as_bytes()[5] == b'-'
+            && suffix.as_bytes()[6..8].iter().all(u8::is_ascii_digit)
+            && suffix.as_bytes()[8] == b'-'
+            && suffix.as_bytes()[9..11].iter().all(u8::is_ascii_digit)
+        {
+            return &model[..suffix_start];
+        }
+    }
+
+    model
 }
 
 fn smart_context_accounted_input_tokens(usage: RuntimeTokenUsage) -> Option<u64> {

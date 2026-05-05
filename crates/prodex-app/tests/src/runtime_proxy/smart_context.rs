@@ -668,6 +668,10 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
         tool_outputs_condensed: 1,
         ..RuntimeSmartContextTransformStats::default()
     };
+    let manifest_intent = RuntimeSmartContextIntentSignals {
+        intent_terms: vec!["manifest".to_string()],
+        ..RuntimeSmartContextIntentSignals::default()
+    };
 
     with_runtime_smart_context_proxy_state(&shared, |state| {
         state
@@ -682,7 +686,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut first,
                 state,
                 &useful_stats,
-                &RuntimeSmartContextIntentSignals::default(),
+                &manifest_intent,
             )
         );
         assert_eq!(first["input"].as_array().unwrap().len(), 2);
@@ -695,7 +699,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut unchanged,
                 state,
                 &useful_stats,
-                &RuntimeSmartContextIntentSignals::default(),
+                &manifest_intent,
             )
         );
         assert_eq!(unchanged["input"].as_array().unwrap().len(), 1);
@@ -712,10 +716,74 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut changed,
                 state,
                 &useful_stats,
-                &RuntimeSmartContextIntentSignals::default(),
+                &manifest_intent,
             )
         );
         assert_eq!(changed["input"].as_array().unwrap().len(), 2);
+    })
+    .unwrap();
+}
+
+#[test]
+fn smart_context_manifest_delta_requires_manifest_or_relevant_intent() {
+    let shared = smart_context_test_shared("manifest-delta-gated");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let useful_stats = RuntimeSmartContextTransformStats {
+        tool_outputs_condensed: 1,
+        ..RuntimeSmartContextTransformStats::default()
+    };
+
+    with_runtime_smart_context_proxy_state(&shared, |state| {
+        state
+            .artifacts
+            .insert_text(1, "first artifact\nerror: one")
+            .unwrap();
+        let mut unrequested = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "continue"}]
+        });
+        assert!(
+            !runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut unrequested,
+                state,
+                &useful_stats,
+                &RuntimeSmartContextIntentSignals::default(),
+            )
+        );
+        assert_eq!(unrequested["input"].as_array().unwrap().len(), 1);
+
+        let relevant_intent = RuntimeSmartContextIntentSignals {
+            command_kind_hints: BTreeSet::from(["test".to_string()]),
+            ..RuntimeSmartContextIntentSignals::default()
+        };
+        let mut relevant = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "continue"}]
+        });
+        assert!(
+            runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut relevant,
+                state,
+                &useful_stats,
+                &relevant_intent,
+            )
+        );
+        assert_eq!(relevant["input"].as_array().unwrap().len(), 2);
+
+        state
+            .artifacts
+            .insert_text(2, "second artifact\nerror: two")
+            .unwrap();
+        let mut cooled_down = serde_json::json!({
+            "input": [{"type": "message", "role": "user", "content": "continue"}]
+        });
+        assert!(
+            !runtime_smart_context_append_artifact_manifest_delta_if_useful(
+                &mut cooled_down,
+                state,
+                &useful_stats,
+                &relevant_intent,
+            )
+        );
+        assert_eq!(cooled_down["input"].as_array().unwrap().len(), 1);
     })
     .unwrap();
 }
@@ -1609,6 +1677,74 @@ fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
 }
 
 #[test]
+fn smart_context_budget_loads_persisted_recent_safe_rewrite() {
+    let first_shared = smart_context_test_shared("budget-persisted-recent-safe");
+    let artifact_path = first_shared
+        .log_path
+        .with_file_name("budget-persisted-recent-safe-artifacts.json");
+    let calibration_path = runtime_smart_context_token_calibration_path(&artifact_path);
+    let _ = std::fs::remove_file(&artifact_path);
+    let _ = std::fs::remove_file(&calibration_path);
+    register_runtime_smart_context_proxy_state(
+        &first_shared.log_path,
+        true,
+        Some(64_000),
+        Some(artifact_path.clone()),
+    );
+    observe_runtime_smart_context_token_usage(
+        &first_shared,
+        RuntimeTokenUsage {
+            input_tokens: 48_000,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+        },
+    );
+    observe_runtime_smart_context_rewrite_safety(
+        &first_shared,
+        RuntimeSmartContextRewriteSafetyObservation {
+            safe: true,
+            saved_tokens: runtime_proxy_crate::SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS,
+        },
+    );
+
+    let fresh_shared = smart_context_test_shared("budget-persisted-recent-safe-fresh");
+    register_runtime_smart_context_proxy_state(
+        &fresh_shared.log_path,
+        true,
+        Some(64_000),
+        Some(artifact_path.clone()),
+    );
+    let budget = runtime_smart_context_budget(
+        &fresh_shared,
+        b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        None,
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+
+    assert_eq!(
+        budget.tier,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Large
+    );
+    assert_eq!(budget.policy.max_inline_tool_output_bytes, 64 * 1024);
+    assert!(
+        budget.policy.reasons.contains(
+            &runtime_proxy_crate::SmartContextBudgetPolicyReason::RecentRewriteSavingsSafe
+        )
+    );
+
+    let _ = std::fs::remove_file(&artifact_path);
+    let _ = std::fs::remove_file(&calibration_path);
+    let _ = std::fs::remove_file(crate::runtime_store::json_lock_file_path(&artifact_path));
+}
+
+#[test]
 fn smart_context_tool_preview_lines_follow_budget_tier_and_limit() {
     assert_eq!(
         runtime_smart_context_tool_preview_max_lines(
@@ -1747,6 +1883,41 @@ fn smart_context_static_context_cross_field_dedupe_keeps_one_exact_copy() {
             .starts_with(SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX)
     );
     assert_eq!(value["input"][0]["content"].as_str(), Some("do work"));
+    assert_eq!(stats.static_context_deltas, 1);
+}
+
+#[test]
+fn smart_context_static_context_chunk_dedupe_replaces_repeated_chunk_only() {
+    let shared_chunk = (0..80)
+        .map(|index| format!("Shared policy sentence number {index} stays semantically identical."))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(shared_chunk.len() >= SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES);
+    let instructions = format!("Primary intro.\n\n{shared_chunk}\n\nPrimary tail.");
+    let system = format!("System intro.\n\n{shared_chunk}\n\nSystem tail.");
+    let mut value = serde_json::json!({
+        "instructions": instructions.as_str(),
+        "system": system.as_str(),
+        "input": [
+            {"role": "user", "content": "do work"}
+        ]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_apply_static_context_chunk_dedupe(
+        &mut value,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &mut stats,
+    );
+
+    assert_eq!(value["instructions"].as_str(), Some(instructions.as_str()));
+    let system_after = value["system"].as_str().unwrap();
+    assert!(system_after.contains("System intro."));
+    assert!(system_after.contains("System tail."));
+    assert!(system_after.contains(SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX));
+    assert!(!system_after.contains(&shared_chunk));
     assert_eq!(stats.static_context_deltas, 1);
 }
 

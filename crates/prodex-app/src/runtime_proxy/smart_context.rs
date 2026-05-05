@@ -13,12 +13,15 @@ const SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT: usize = 16;
 const SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION: u32 = 1;
 const SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS: u64 = 250;
 const SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT: usize = 4;
+const SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS: u64 = 6 * 60 * 60;
 const SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES: usize = 12;
+const SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES: usize = 512;
 const SMART_CONTEXT_TOOL_PREVIEW_ESTIMATED_LINE_BYTES: usize = 256;
 const SMART_CONTEXT_TOOL_PREVIEW_MAX_LINE_CHARS: usize = 220;
 const SMART_CONTEXT_TOOL_PROGRESSIVE_SUMMARY_MAX_BYTES: usize = 8 * 1024;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES: usize = 12;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS: usize = 1_600;
+const SMART_CONTEXT_ARTIFACT_MANIFEST_COOLDOWN_MS: u64 = 30_000;
 const SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES: usize = 2 * 1024;
 const SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES: usize = 12;
 const SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES: usize = 4;
@@ -32,6 +35,7 @@ const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
     "prodex static context unchanged ";
 const SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX: &str = "psc static dup ";
+const SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX: &str = "psc static chunk dup ";
 const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX: &str = "psc a ";
 const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX_LEGACY: &str = "psc aliases ";
 const SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX: &str = "psc p ";
@@ -87,6 +91,12 @@ struct RuntimeSmartContextStaticContextObservation {
 struct RuntimeSmartContextRewriteSafetyObservation {
     safe: bool,
     saved_tokens: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeSmartContextRewriteSafetyRecord {
+    observation: RuntimeSmartContextRewriteSafetyObservation,
+    observed_at_unix_secs: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -167,6 +177,12 @@ struct RuntimeSmartContextSeenExactAppendixBody {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeSmartContextStaticChunkSeen {
+    source_id: String,
+    body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeSmartContextArtifactAlias {
     id: String,
     alias: String,
@@ -187,10 +203,11 @@ struct RuntimeSmartContextProxyState {
     last_token_usage: Option<RuntimeTokenUsage>,
     token_usage_history: Vec<RuntimeTokenUsage>,
     token_calibration_history: Vec<RuntimeSmartContextTokenCalibrationObservation>,
-    rewrite_safety_history: Vec<RuntimeSmartContextRewriteSafetyObservation>,
+    rewrite_safety_history: Vec<RuntimeSmartContextRewriteSafetyRecord>,
     last_static_context_fingerprints: Vec<runtime_proxy_crate::SmartContextFingerprint>,
     last_static_context_prompt_cache_hash: Option<String>,
     last_artifact_manifest_ids: BTreeSet<String>,
+    last_artifact_manifest_emitted_at: Option<Instant>,
 }
 
 static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
@@ -205,6 +222,8 @@ struct RuntimeSmartContextPersistedTokenCalibration {
     token_usage_history: Vec<RuntimeSmartContextPersistedTokenUsage>,
     #[serde(default)]
     token_calibration_history: Vec<RuntimeSmartContextPersistedTokenCalibrationObservation>,
+    #[serde(default)]
+    rewrite_safety_history: Vec<RuntimeSmartContextPersistedRewriteSafetyObservation>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,6 +244,16 @@ struct RuntimeSmartContextPersistedTokenCalibrationObservation {
     bucket_key: RuntimeSmartContextPersistedTokenCalibrationBucketKey,
     #[serde(default)]
     usage: RuntimeSmartContextPersistedTokenUsage,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeSmartContextPersistedRewriteSafetyObservation {
+    #[serde(default)]
+    safe: bool,
+    #[serde(default)]
+    saved_tokens: u64,
+    #[serde(default)]
+    observed_at_unix_secs: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -328,6 +357,32 @@ impl From<&RuntimeSmartContextTokenCalibrationObservation>
     }
 }
 
+impl From<RuntimeSmartContextPersistedRewriteSafetyObservation>
+    for RuntimeSmartContextRewriteSafetyRecord
+{
+    fn from(value: RuntimeSmartContextPersistedRewriteSafetyObservation) -> Self {
+        Self {
+            observation: RuntimeSmartContextRewriteSafetyObservation {
+                safe: value.safe,
+                saved_tokens: value.saved_tokens,
+            },
+            observed_at_unix_secs: value.observed_at_unix_secs,
+        }
+    }
+}
+
+impl From<RuntimeSmartContextRewriteSafetyRecord>
+    for RuntimeSmartContextPersistedRewriteSafetyObservation
+{
+    fn from(value: RuntimeSmartContextRewriteSafetyRecord) -> Self {
+        Self {
+            safe: value.observation.safe,
+            saved_tokens: value.observation.saved_tokens,
+            observed_at_unix_secs: value.observed_at_unix_secs,
+        }
+    }
+}
+
 impl prodex_runtime_state::RuntimeScheduledSaveJob for RuntimeSmartContextTokenCalibrationSaveJob {
     fn ready_at(&self) -> Instant {
         self.ready_at
@@ -367,6 +422,7 @@ fn runtime_smart_context_load_token_calibration_for_artifact_path(
 fn runtime_smart_context_token_calibration_snapshot(
     state: &RuntimeSmartContextProxyState,
 ) -> RuntimeSmartContextPersistedTokenCalibration {
+    let now = runtime_smart_context_unix_secs_now();
     RuntimeSmartContextPersistedTokenCalibration {
         version: SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION,
         token_usage_history: state
@@ -380,7 +436,29 @@ fn runtime_smart_context_token_calibration_snapshot(
             .iter()
             .map(RuntimeSmartContextPersistedTokenCalibrationObservation::from)
             .collect(),
+        rewrite_safety_history: state
+            .rewrite_safety_history
+            .iter()
+            .copied()
+            .filter(|record| runtime_smart_context_rewrite_safety_record_fresh(*record, now))
+            .map(RuntimeSmartContextPersistedRewriteSafetyObservation::from)
+            .collect(),
     }
+}
+
+fn runtime_smart_context_unix_secs_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn runtime_smart_context_rewrite_safety_record_fresh(
+    record: RuntimeSmartContextRewriteSafetyRecord,
+    now: u64,
+) -> bool {
+    record.observed_at_unix_secs == 0
+        || now.saturating_sub(record.observed_at_unix_secs) <= SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS
 }
 
 fn schedule_runtime_smart_context_token_calibration_save(
@@ -623,6 +701,18 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
         .into_iter()
         .rev()
         .collect::<Vec<_>>();
+    let now = runtime_smart_context_unix_secs_now();
+    let rewrite_safety_history = calibration
+        .rewrite_safety_history
+        .into_iter()
+        .map(RuntimeSmartContextRewriteSafetyRecord::from)
+        .filter(|record| runtime_smart_context_rewrite_safety_record_fresh(*record, now))
+        .rev()
+        .take(SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
     states.insert(
         log_path.to_path_buf(),
         RuntimeSmartContextProxyState {
@@ -633,10 +723,11 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
             last_token_usage: token_usage_history.last().copied(),
             token_usage_history,
             token_calibration_history,
-            rewrite_safety_history: Vec::new(),
+            rewrite_safety_history,
             last_static_context_fingerprints: Vec::new(),
             last_static_context_prompt_cache_hash: None,
             last_artifact_manifest_ids: BTreeSet::new(),
+            last_artifact_manifest_emitted_at: None,
         },
     );
 }
@@ -762,10 +853,20 @@ fn observe_runtime_smart_context_rewrite_safety(
     let Ok(mut states) = states.lock() else {
         return;
     };
+    let mut save_job = None;
     if let Some(state) = states.get_mut(&shared.log_path)
         && state.enabled
     {
-        state.rewrite_safety_history.push(observation);
+        let now = runtime_smart_context_unix_secs_now();
+        state
+            .rewrite_safety_history
+            .retain(|record| runtime_smart_context_rewrite_safety_record_fresh(*record, now));
+        state
+            .rewrite_safety_history
+            .push(RuntimeSmartContextRewriteSafetyRecord {
+                observation,
+                observed_at_unix_secs: now,
+            });
         if state.rewrite_safety_history.len() > SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT {
             let overflow = state
                 .rewrite_safety_history
@@ -773,6 +874,21 @@ fn observe_runtime_smart_context_rewrite_safety(
                 .saturating_sub(SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT);
             state.rewrite_safety_history.drain(0..overflow);
         }
+        save_job = state.artifact_path.as_deref().map(|artifact_path| {
+            (
+                runtime_smart_context_token_calibration_path(artifact_path),
+                runtime_smart_context_token_calibration_snapshot(state),
+            )
+        });
+    }
+    drop(states);
+    if let Some((path, snapshot)) = save_job {
+        schedule_runtime_smart_context_token_calibration_save(
+            shared,
+            path,
+            snapshot,
+            "smart_context_rewrite_safety",
+        );
     }
 }
 
@@ -1034,6 +1150,11 @@ fn prepare_runtime_smart_context_body<'a>(
         return Cow::Borrowed(&request.body);
     };
     runtime_smart_context_apply_static_context_cross_field_dedupe(
+        &mut value,
+        &exactness,
+        &mut outcome.stats,
+    );
+    runtime_smart_context_apply_static_context_chunk_dedupe(
         &mut value,
         &exactness,
         &mut outcome.stats,
@@ -1451,10 +1572,15 @@ fn runtime_smart_context_budget_inputs(
 }
 
 fn runtime_smart_context_recent_rewrite_safety(
-    history: &[RuntimeSmartContextRewriteSafetyObservation],
+    history: &[RuntimeSmartContextRewriteSafetyRecord],
 ) -> runtime_proxy_crate::SmartContextRecentRewriteSafety {
     let mut safety = runtime_proxy_crate::SmartContextRecentRewriteSafety::default();
-    for observation in history {
+    let now = runtime_smart_context_unix_secs_now();
+    for record in history
+        .iter()
+        .filter(|record| runtime_smart_context_rewrite_safety_record_fresh(**record, now))
+    {
+        let observation = record.observation;
         if observation.safe {
             safety.safe_rewrites = safety.safe_rewrites.saturating_add(1);
             safety.saved_tokens = safety.saved_tokens.saturating_add(observation.saved_tokens);
@@ -1645,8 +1771,120 @@ fn runtime_smart_context_apply_static_context_cross_field_dedupe(
     );
 }
 
+fn runtime_smart_context_apply_static_context_chunk_dedupe(
+    value: &mut serde_json::Value,
+    exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    if exactness_guard.decision != runtime_proxy_crate::SmartContextExactnessDecision::Allow {
+        return;
+    }
+    let items = runtime_smart_context_static_context_items(value);
+    if items.len() < 2 {
+        return;
+    }
+    let mut seen_chunks =
+        BTreeMap::<(String, usize), Vec<RuntimeSmartContextStaticChunkSeen>>::new();
+    let mut replacements = BTreeMap::<String, String>::new();
+    for item in items {
+        let next_text = runtime_smart_context_static_context_chunk_deduped_text(
+            &item.id,
+            &item.text,
+            &seen_chunks,
+        );
+        let source_text = next_text.as_deref().unwrap_or(&item.text);
+        runtime_smart_context_record_static_context_chunks(&item.id, source_text, &mut seen_chunks);
+        if let Some(next_text) = next_text {
+            replacements.insert(item.id, next_text);
+        }
+    }
+    if replacements.is_empty() {
+        return;
+    }
+    stats.static_context_deltas = stats.static_context_deltas.saturating_add(
+        runtime_smart_context_replace_static_context_item_texts(value, &replacements),
+    );
+}
+
+fn runtime_smart_context_static_context_chunk_deduped_text(
+    item_id: &str,
+    text: &str,
+    seen_chunks: &BTreeMap<(String, usize), Vec<RuntimeSmartContextStaticChunkSeen>>,
+) -> Option<String> {
+    let mut candidate = text.to_string();
+    let mut changed = false;
+    for chunk in runtime_smart_context_static_context_dedupe_chunks(text) {
+        let content_hash = runtime_proxy_crate::smart_context_hash_text(chunk);
+        let Some(seen) = seen_chunks.get(&(content_hash.clone(), chunk.len())) else {
+            continue;
+        };
+        let Some(first_seen) = seen
+            .iter()
+            .find(|seen| seen.body == chunk && seen.source_id != item_id)
+        else {
+            continue;
+        };
+        let marker = runtime_smart_context_static_context_chunk_dup_marker(
+            &first_seen.source_id,
+            &content_hash,
+        );
+        if marker.len() >= chunk.len() || !candidate.contains(chunk) {
+            continue;
+        }
+        let next = candidate.replacen(chunk, &marker, 1);
+        if next.len() < candidate.len()
+            && prodex_context::critical_signal_self_check(text, &next).passed()
+        {
+            candidate = next;
+            changed = true;
+        }
+    }
+    changed.then_some(candidate)
+}
+
+fn runtime_smart_context_static_context_dedupe_chunks(text: &str) -> Vec<&str> {
+    text.split("\n\n")
+        .map(str::trim)
+        .filter(|chunk| chunk.len() >= SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES)
+        .filter(|chunk| {
+            !chunk.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
+                && !chunk.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY)
+                && !chunk.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX)
+                && !chunk.starts_with(SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX)
+        })
+        .collect()
+}
+
+fn runtime_smart_context_record_static_context_chunks(
+    item_id: &str,
+    text: &str,
+    seen_chunks: &mut BTreeMap<(String, usize), Vec<RuntimeSmartContextStaticChunkSeen>>,
+) {
+    for chunk in runtime_smart_context_static_context_dedupe_chunks(text) {
+        let content_hash = runtime_proxy_crate::smart_context_hash_text(chunk);
+        let entry = seen_chunks.entry((content_hash, chunk.len())).or_default();
+        if entry
+            .iter()
+            .any(|seen| seen.source_id == item_id && seen.body == chunk)
+        {
+            continue;
+        }
+        entry.push(RuntimeSmartContextStaticChunkSeen {
+            source_id: item_id.to_string(),
+            body: chunk.to_string(),
+        });
+    }
+}
+
 fn runtime_smart_context_static_context_dup_marker(source_id: &str, content_hash: &str) -> String {
     format!("{SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX}{source_id} {content_hash}")
+}
+
+fn runtime_smart_context_static_context_chunk_dup_marker(
+    source_id: &str,
+    content_hash: &str,
+) -> String {
+    format!("{SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX}{source_id} {content_hash}")
 }
 
 fn runtime_smart_context_static_context_delta_marker(prompt_cache_hash: &str) -> String {
@@ -1747,6 +1985,47 @@ fn runtime_smart_context_replace_static_context_duplicate_texts(
         let id = format!("input[{index}].{role}");
         if let Some(marker) = duplicate_ids.get(&id)
             && runtime_smart_context_replace_static_message_text_with_marker(item, marker)
+        {
+            replaced = replaced.saturating_add(1);
+        }
+    }
+    replaced
+}
+
+fn runtime_smart_context_replace_static_context_item_texts(
+    value: &mut serde_json::Value,
+    replacements: &BTreeMap<String, String>,
+) -> usize {
+    let Some(object) = value.as_object_mut() else {
+        return 0;
+    };
+    let mut replaced = 0usize;
+    for key in RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS {
+        if let Some(next_text) = replacements.get(key) {
+            object.insert(
+                key.to_string(),
+                serde_json::Value::String(next_text.to_string()),
+            );
+            replaced = replaced.saturating_add(1);
+        }
+    }
+
+    let Some(input) = object
+        .get_mut("input")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return replaced;
+    };
+    for (index, item) in input.iter_mut().enumerate() {
+        let role = item
+            .as_object()
+            .and_then(|object| object.get("role"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let id = format!("input[{index}].{role}");
+        if let Some(next_text) = replacements.get(&id)
+            && runtime_smart_context_replace_static_message_text_with_marker(item, next_text)
         {
             replaced = replaced.saturating_add(1);
         }
@@ -4746,6 +5025,9 @@ fn runtime_smart_context_append_artifact_manifest_delta_if_useful(
     if !runtime_smart_context_artifact_manifest_useful(stats) {
         return false;
     }
+    if !runtime_smart_context_artifact_manifest_delta_eligible(state, intent_signals) {
+        return false;
+    }
     let mut entries = state
         .artifacts
         .artifact_manifest_entries(SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES);
@@ -4767,7 +5049,29 @@ fn runtime_smart_context_append_artifact_manifest_delta_if_useful(
         return false;
     }
     state.last_artifact_manifest_ids = ids;
+    state.last_artifact_manifest_emitted_at = Some(Instant::now());
     true
+}
+
+fn runtime_smart_context_artifact_manifest_delta_eligible(
+    state: &RuntimeSmartContextProxyState,
+    intent_signals: &RuntimeSmartContextIntentSignals,
+) -> bool {
+    if runtime_smart_context_manifest_requested(intent_signals) {
+        return true;
+    }
+    if intent_signals.artifact_refs.is_empty()
+        && runtime_smart_context_selective_rehydrate_terms_empty(&intent_signals.semantic_terms)
+        && intent_signals.command_kind_hints.is_empty()
+    {
+        return false;
+    }
+    state
+        .last_artifact_manifest_emitted_at
+        .is_none_or(|emitted_at| {
+            emitted_at.elapsed()
+                >= Duration::from_millis(SMART_CONTEXT_ARTIFACT_MANIFEST_COOLDOWN_MS)
+        })
 }
 
 #[cfg(test)]

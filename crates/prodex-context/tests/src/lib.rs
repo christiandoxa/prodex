@@ -111,7 +111,14 @@ fn command_metadata_infers_output_kind_hints() {
         ("python -m pytest tests", CommandOutputKind::Diagnostics),
         ("ruff check .", CommandOutputKind::Diagnostics),
         ("mypy src", CommandOutputKind::Diagnostics),
+        ("biome check --write .", CommandOutputKind::Diagnostics),
+        ("oxlint --fix", CommandOutputKind::Diagnostics),
         ("npx tsc --noEmit", CommandOutputKind::Diagnostics),
+        (
+            "cargo clippy --fix --allow-dirty",
+            CommandOutputKind::RustDiagnostics,
+        ),
+        ("cargo fmt --all", CommandOutputKind::RustDiagnostics),
         ("npm test -- --runInBand", CommandOutputKind::Diagnostics),
         (
             "npm --prefix web run typecheck",
@@ -180,6 +187,34 @@ fn command_metadata_hint_compacts_quiet_cargo_output_as_rust_diagnostics() {
     assert_eq!(report.detected_kind, CommandOutputKind::RustDiagnostics);
     assert!(report.output.contains("sum: rust"));
     assert!(report.output.contains("Finished `dev` profile"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn command_metadata_hint_preserves_new_tool_warning_summaries() {
+    let input = "\
+Found 1 warning and 0 errors.
+Finished in 12ms on 42 files with 1 warning.
+";
+    let hint = infer_command_output_kind_from_metadata("oxlint .");
+    let report = compact_command_output_with_options_and_kind_hint(
+        input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 20,
+            ..CommandOutputCompactOptions::default()
+        },
+        hint,
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("Found 1 warning and 0 errors."));
+    assert!(
+        report
+            .output
+            .contains("Finished in 12ms on 42 files with 1 warning.")
+    );
+    assert!(!report.output.contains("noise:"));
     assert_no_critical_signal_loss(input, &report.output);
 }
 
@@ -1970,6 +2005,194 @@ fn successful_command_output_summary_compacts_common_tool_success_without_exit_c
     assert!(report.output.contains("noise: go_test_ok=24"));
     assert!(report.output.contains("24 passed (9.2s)"));
     assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_compacts_format_lint_quiet_and_verbose_test_success_noise() {
+    let cases = [
+        (
+            "cargo clippy --fix --allow-dirty",
+            "\
+    Checking prodex-context v0.1.0
+     Fixing src/lib.rs
+      Fixed crates/prodex-context/tests/src/lib.rs (1 fix)
+    Finished `dev` profile [unoptimized] target(s) in 1.23s
+",
+            ["checking=", "cargo_fix=", "finished="].as_slice(),
+            "Fixing src/lib.rs",
+        ),
+        (
+            "cargo fmt --all",
+            "\
+Formatting src/lib.rs
+Formatting crates/prodex-context/src/lib.rs
+Formatting crates/prodex-context/tests/src/lib.rs
+",
+            ["formatting=3"].as_slice(),
+            "Formatting src/lib.rs",
+        ),
+        (
+            "biome check --write .",
+            "\
+Checked 12 files in 10ms. No fixes applied.
+Formatted 2 files in 3ms. Fixed 1 file.
+No fixes applied.
+",
+            ["biome_summary=3"].as_slice(),
+            "Checked 12 files",
+        ),
+        (
+            "oxlint --fix",
+            "\
+Found 0 warnings and 0 errors.
+Finished in 12ms on 42 files with 0 warnings.
+",
+            ["typecheck_summary=1", "oxlint_summary=1"].as_slice(),
+            "Finished in 12ms",
+        ),
+        (
+            "pytest -q",
+            "\
+.......                                                                  [100%]
+7 passed, 2 skipped in 0.12s
+",
+            ["pytest_progress=1", "passed_tests=1"].as_slice(),
+            ".......",
+        ),
+        (
+            "go test -v ./...",
+            "\
+=== RUN   TestAlpha
+=== PAUSE TestAlpha
+=== CONT  TestAlpha
+--- PASS: TestAlpha (0.00s)
+=== RUN   TestBeta
+--- PASS: TestBeta (0.01s)
+PASS
+ok  \tgithub.com/acme/prodex/pkg/foo\t0.123s
+",
+            [
+                "go_test_run=2",
+                "go_test_pause=1",
+                "go_test_cont=1",
+                "go_test_pass=2",
+                "go_test_pass_summary=1",
+                "go_test_ok=1",
+            ]
+            .as_slice(),
+            "=== RUN   TestAlpha",
+        ),
+    ];
+
+    for (command, input, expected_labels, omitted_line) in cases {
+        let report = compact_successful_command_output_with_options(
+            input,
+            &CommandSuccessOutputCompactOptions {
+                command: Some(command.to_string()),
+                exit_code: Some(0),
+                min_lines_to_compact: 1,
+                max_touched_files: 8,
+                max_key_lines: 6,
+                max_line_chars: 160,
+            },
+        );
+
+        assert!(report.compacted, "{command}: {}", report.output);
+        assert!(!report.failure_suspected, "{command}");
+        assert_eq!(report.critical_signals.total(), 0, "{command}");
+        assert!(
+            report.output.contains("noise:"),
+            "{command}: {}",
+            report.output
+        );
+        assert!(
+            report.output.contains(command),
+            "{command}: {}",
+            report.output
+        );
+        for label in expected_labels {
+            assert!(
+                report.output.contains(label),
+                "{command}: missing {label}\n{}",
+                report.output
+            );
+        }
+        assert!(!report.output.contains(omitted_line), "{command}");
+        assert_no_critical_signal_loss(input, &report.output);
+    }
+}
+
+#[test]
+fn successful_command_output_summary_refuses_new_tool_warning_and_failure_signals() {
+    let cases = [
+        (
+            "cargo clippy --fix --allow-dirty",
+            "\
+    Checking prodex-context v0.1.0
+warning: variable does not need to be mutable
+    Finished `dev` profile [unoptimized] target(s) in 1.23s
+",
+            Some(0),
+        ),
+        (
+            "cargo fmt --all --check",
+            "\
+Diff in /repo/src/lib.rs at line 1:
+ fn main() {}
+",
+            Some(1),
+        ),
+        (
+            "biome check .",
+            "\
+Checked 3 files in 10ms. No fixes applied.
+Found 1 error.
+",
+            Some(0),
+        ),
+        (
+            "oxlint .",
+            "\
+Found 1 warning and 0 errors.
+Finished in 12ms on 42 files with 1 warning.
+",
+            Some(0),
+        ),
+        (
+            "pytest -q",
+            "\
+..F                                                                      [100%]
+1 failed, 2 passed in 0.12s
+",
+            Some(0),
+        ),
+        (
+            "go test -v ./...",
+            "\
+=== RUN   TestAlpha
+--- FAIL: TestAlpha (0.00s)
+FAIL
+",
+            Some(0),
+        ),
+    ];
+
+    for (command, input, exit_code) in cases {
+        let report = compact_successful_command_output_with_options(
+            input,
+            &CommandSuccessOutputCompactOptions {
+                command: Some(command.to_string()),
+                exit_code,
+                min_lines_to_compact: 1,
+                ..CommandSuccessOutputCompactOptions::default()
+            },
+        );
+
+        assert!(!report.compacted, "{command}");
+        assert!(report.failure_suspected, "{command}");
+        assert_eq!(report.output, input, "{command}");
+        assert_no_critical_signal_loss(input, &report.output);
+    }
 }
 
 #[test]

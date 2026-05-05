@@ -2042,6 +2042,16 @@ fn compact_diagnostic_output(input: &str, options: &CommandOutputCompactOptions)
         if is_critical_preserve_line(line) || count_file_location_signals(line) > 0 {
             summary.record_line(line);
             push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            index += 1;
+            continue;
+        }
+
+        if is_success_output_failure_signal_line(line)
+            || is_success_output_warning_signal_line(line)
+        {
+            push_unique_truncated_line(&mut key_lines, line, options.max_line_chars);
+            index += 1;
+            continue;
         }
         index += 1;
     }
@@ -2440,6 +2450,8 @@ fn command_name_is_success_output_candidate(command: &str) -> bool {
                 | "poetry"
                 | "ruff"
                 | "mypy"
+                | "biome"
+                | "oxlint"
                 | "pytest"
                 | "py.test"
                 | "tsc"
@@ -2491,7 +2503,15 @@ fn command_name_is_short_success_output_candidate(command: &str) -> bool {
         let command = command_metadata_token_command_name(&tokens[index]);
         if matches!(
             command,
-            "tsc" | "vitest" | "jest" | "vite" | "next" | "playwright" | "cypress"
+            "tsc"
+                | "vitest"
+                | "jest"
+                | "vite"
+                | "next"
+                | "playwright"
+                | "cypress"
+                | "biome"
+                | "oxlint"
         ) || command.ends_with("-tsc")
             || command.ends_with("_tsc")
         {
@@ -2499,7 +2519,7 @@ fn command_name_is_short_success_output_candidate(command: &str) -> bool {
         }
         if command == "cargo"
             && command_metadata_subcommand_after(&tokens, index)
-                .is_some_and(|subcommand| matches!(subcommand, "clippy" | "doc"))
+                .is_some_and(|subcommand| matches!(subcommand, "clippy" | "doc" | "fmt" | "fix"))
         {
             return true;
         }
@@ -2839,6 +2859,14 @@ fn diagnostic_block_line_limit(options: &CommandOutputCompactOptions) -> usize {
 
 fn rust_noise_label(line: &str) -> Option<&'static str> {
     let trimmed = line.trim_start();
+    if is_success_output_failure_signal_line(trimmed)
+        || is_success_output_warning_signal_line(trimmed)
+        || is_error_signal_line(trimmed)
+        || is_test_failure_signal_line(trimmed)
+    {
+        return None;
+    }
+
     if trimmed.starts_with("Compiling ") {
         Some("compiling")
     } else if trimmed.starts_with("Checking ") {
@@ -2847,6 +2875,10 @@ fn rust_noise_label(line: &str) -> Option<&'static str> {
         Some("fresh")
     } else if trimmed.starts_with("Documenting ") {
         Some("documenting")
+    } else if trimmed.starts_with("Formatting ") {
+        Some("formatting")
+    } else if trimmed.starts_with("Fixing ") || trimmed.starts_with("Fixed ") {
+        Some("cargo_fix")
     } else if trimmed.starts_with("Generated ") {
         Some("generated_docs")
     } else if trimmed.starts_with("Finished ") {
@@ -2889,6 +2921,13 @@ fn diagnostic_noise_label(line: &str) -> Option<&'static str> {
 fn noisy_success_label(line: &str) -> Option<&'static str> {
     let trimmed = line.trim();
     let lower = trimmed.to_ascii_lowercase();
+    if is_success_output_failure_signal_line(trimmed)
+        && !is_diagnostic_failure_summary_line(trimmed)
+        || is_success_output_warning_signal_line(trimmed)
+    {
+        return None;
+    }
+
     if is_coverage_noise_line(trimmed, &lower) {
         Some("coverage")
     } else if is_junit_xml_success_line(trimmed, &lower) {
@@ -2897,6 +2936,10 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("playwright")
     } else if is_cypress_success_line(trimmed, &lower) {
         Some("cypress")
+    } else if is_biome_success_summary_line(&lower) {
+        Some("biome_summary")
+    } else if is_oxlint_success_summary_line(&lower) {
+        Some("oxlint_summary")
     } else if let Some(label) = rust_noise_label(line) {
         Some(label)
     } else if is_typescript_success_line(trimmed, &lower) {
@@ -2913,8 +2956,16 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("go_test_no_files")
     } else if lower.starts_with("=== run ") {
         Some("go_test_run")
+    } else if lower.starts_with("=== pause ") {
+        Some("go_test_pause")
+    } else if lower.starts_with("=== cont ") {
+        Some("go_test_cont")
     } else if lower.starts_with("--- pass: ") {
         Some("go_test_pass")
+    } else if lower.starts_with("--- skip: ") {
+        Some("go_test_skip")
+    } else if trimmed == "PASS" {
+        Some("go_test_pass_summary")
     } else if lower.starts_with("test suites:") && lower.contains("passed") {
         Some("test_suites")
     } else if lower.starts_with("tests:") && lower.contains("passed") {
@@ -2993,6 +3044,12 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("packages_added")
     } else if lower.starts_with("audited ") && lower.contains(" package") {
         Some("packages_audited")
+    } else if lower.starts_with("updating crates.io index") {
+        Some("cargo_index")
+    } else if lower.starts_with("locking ") && lower.contains(" package") {
+        Some("cargo_lock")
+    } else if lower.starts_with("downloading crates") || lower.starts_with("downloaded ") {
+        Some("cargo_download")
     } else if lower.starts_with("packages: ") || lower.starts_with("progress: resolved") {
         Some("package_progress")
     } else if lower.starts_with("lockfile is up to date") || lower.starts_with("already up to date")
@@ -3018,6 +3075,7 @@ fn noisy_success_label(line: &str) -> Option<&'static str> {
         Some("formatter_summary")
     } else if lower.starts_with("success: no issues found")
         || lower.starts_with("found 0 errors")
+        || lower.starts_with("found 0 warnings")
         || lower.starts_with("found 0 issues")
     {
         Some("typecheck_summary")
@@ -3165,17 +3223,50 @@ fn is_cypress_success_line(trimmed: &str, lower: &str) -> bool {
         || trimmed.starts_with('✔')
 }
 
+fn is_biome_success_summary_line(lower: &str) -> bool {
+    (lower.starts_with("checked ")
+        || lower.starts_with("formatted ")
+        || lower.starts_with("linted "))
+        && lower.contains(" file")
+        && lower.contains(" in ")
+        && (lower.contains("no fixes applied")
+            || lower.contains("fixed ")
+            || lower.contains("no issues found"))
+        || lower == "no fixes applied."
+        || lower.starts_with("fixed ") && lower.contains(" file")
+}
+
+fn is_oxlint_success_summary_line(lower: &str) -> bool {
+    lower.starts_with("finished in ")
+        && lower.contains(" on ")
+        && lower.contains(" file")
+        && (lower.contains("0 warning")
+            || lower.contains("0 error")
+            || !lower.contains("warning") && !lower.contains("error"))
+}
+
 fn is_pytest_progress_line(line: &str) -> bool {
     let trimmed = line.trim();
-    trimmed.len() >= 8
-        && trimmed
+    let Some(progress) = trimmed.split_whitespace().next() else {
+        return false;
+    };
+    progress.len() >= 2
+        && progress
             .chars()
             .all(|ch| matches!(ch, '.' | 's' | 'S' | 'x' | 'X'))
-        && trimmed.chars().any(|ch| ch == '.')
+        && progress.chars().any(|ch| ch == '.')
+        && trimmed
+            .get(progress.len()..)
+            .map(str::trim)
+            .is_some_and(|rest| {
+                rest.is_empty()
+                    || rest.starts_with('[') && rest.ends_with(']') && rest.contains('%')
+            })
 }
 
 fn is_pytest_success_summary_line(lower: &str) -> bool {
-    lower.contains(" passed in ")
+    lower.contains(" passed")
+        && lower.contains(" in ")
         && !lower.contains(" failed")
         && !lower.contains(" error")
         && !lower.contains("errors")
@@ -3326,6 +3417,7 @@ fn is_success_output_warning_signal_line(line: &str) -> bool {
     lower.starts_with("warning")
         || lower.starts_with("warn ")
         || lower.starts_with("warn:")
+        || has_nonzero_summary_count(&lower, &["warning", "warnings"])
         || lower.contains(" warning ")
         || lower.contains(" warnings")
         || lower.contains("with warnings")
@@ -5277,7 +5369,16 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
         }
         if matches!(
             command,
-            "pytest" | "py.test" | "tsc" | "ruff" | "mypy" | "eslint" | "playwright" | "cypress"
+            "pytest"
+                | "py.test"
+                | "tsc"
+                | "ruff"
+                | "mypy"
+                | "biome"
+                | "oxlint"
+                | "eslint"
+                | "playwright"
+                | "cypress"
         ) || command.ends_with("-tsc")
             || command.ends_with("_tsc")
         {
@@ -5315,7 +5416,7 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
             && command_metadata_subcommand_after(tokens, index).is_some_and(|subcommand| {
                 matches!(
                     subcommand,
-                    "test" | "check" | "clippy" | "build" | "doc" | "nextest" | "fmt"
+                    "test" | "check" | "clippy" | "build" | "doc" | "nextest" | "fmt" | "fix"
                 )
             })
         {
