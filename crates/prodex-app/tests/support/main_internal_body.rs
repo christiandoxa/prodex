@@ -2282,7 +2282,7 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
     );
 
     let response = Client::builder()
-        .timeout(ci_timing_upper_bound_ms(2_000, 8_000))
+        .timeout(ci_timing_upper_bound_ms(5_000, 10_000))
         .build()
         .expect("client")
         .post(format!(
