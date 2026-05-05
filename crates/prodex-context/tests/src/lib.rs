@@ -1538,6 +1538,97 @@ Command failed with exit code 1
 }
 
 #[test]
+fn command_metadata_hints_install_update_and_docker_success_as_noisy_success() {
+    for command in [
+        "cargo update",
+        "npm install",
+        "pnpm install --frozen-lockfile",
+        "yarn install",
+        "bun install",
+        "docker build -t app .",
+        "docker buildx build .",
+        "uv sync",
+    ] {
+        assert_eq!(
+            command_output_kind_hint_for_command(command),
+            Some(CommandOutputKind::NoisySuccess),
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn successful_command_output_summary_compacts_install_build_and_ci_success_noise() {
+    let input = "\
+Updating crates.io index
+Locking 4 packages to latest compatible versions
+Downloading crates ...
+Downloaded serde v1.0.0
+added 120 packages, and audited 121 packages in 4s
+found 0 vulnerabilities
+Lockfile is up to date
+Packages: +42
+Progress: resolved 42, reused 40, downloaded 2, added 42
+#1 [internal] load build definition from Dockerfile
+#1 DONE 0.1s
+#2 [internal] load metadata for docker.io/library/debian:bookworm
+#2 DONE 0.2s
+writing image sha256:abc123
+naming to docker.io/library/app:latest
+Resolved 42 packages in 10ms
+Prepared 3 packages in 20ms
+Installed 3 packages in 30ms
+Test Suites: 8 passed, 8 total
+Tests:       64 passed, 64 total
+found 0 errors
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some(
+                "cargo update && npm install && pnpm install && docker build . && uv sync"
+                    .to_string(),
+            ),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert!(report.output.contains("pcs: success cmd"));
+    assert!(report.output.contains("docker_summary="));
+    assert!(report.output.contains("found 0 errors"));
+    assert!(!report.output.contains("Downloading crates ..."));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn successful_command_output_summary_keeps_nonzero_ci_failure_counts_exact() {
+    let input = "\
+Test Suites: 7 passed, 1 failed, 8 total
+Tests:       64 passed, 2 failed, 66 total
+found 2 errors
+";
+
+    let report = compact_successful_command_output_with_options(
+        input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("npm test".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 1,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(!report.compacted);
+    assert!(report.failure_suspected);
+    assert_eq!(report.output, input);
+}
+
+#[test]
 fn successful_command_output_summary_refuses_modern_tool_failure_signals() {
     let input = "\
 Found 2 errors.

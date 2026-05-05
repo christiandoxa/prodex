@@ -51,10 +51,11 @@ const RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS: &[&str] = &[
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS: &[&str] = &["payload.summary"];
 const RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT: usize = 180;
 const RUNTIME_MEM_SUPER_SLIM_REFERENCED_SUMMARY_PREFIX_CHAR_LIMIT: usize = 72;
-const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "mem ss: omitted";
-const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "mem ss: prompt omitted";
-const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "mem ss: assistant omitted";
-const RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED: &str = "mem ss: tool omitted";
+const RUNTIME_MEM_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
+const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "ss:omit";
+const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
+const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
+const RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED: &str = "ss:omit=tool";
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 128;
 pub const RUNTIME_MEM_DEFAULT_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 512;
@@ -1302,9 +1303,11 @@ fn runtime_mem_shadow_user_message(event: &mut Value) {
                     "prompt",
                 )
             });
-    let artifact_ref =
-        runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS)
-            .or_else(|| runtime_mem_extract_artifact_marker(event));
+    let artifact_ref = runtime_mem_first_artifact_ref_text_at_paths(
+        event,
+        RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS,
+    )
+    .or_else(|| runtime_mem_extract_artifact_marker(event));
 
     if let Some(summary) = summary {
         runtime_mem_set_json_path(
@@ -1360,7 +1363,7 @@ fn runtime_mem_shadow_tool_output(event: &mut Value) {
             runtime_mem_shadow_summary_for_path(event, "payload.output", "tool output", "output")
         });
     let artifact_ref =
-        runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS)
+        runtime_mem_first_artifact_ref_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS)
             .or_else(|| runtime_mem_extract_artifact_marker(event));
 
     if let Some(summary) = summary {
@@ -1405,6 +1408,7 @@ fn runtime_mem_shadow_summary_from_text(
     omitted_name: &str,
     artifact_ref: Option<&str>,
 ) -> String {
+    let label = runtime_mem_shadow_summary_label(label);
     let prefix_limit = runtime_mem_shadow_summary_prefix_char_limit(artifact_ref);
     let first_line = runtime_mem_first_useful_line(text)
         .map(|line| runtime_mem_truncate_chars(line, prefix_limit))
@@ -1414,10 +1418,19 @@ fn runtime_mem_shadow_summary_from_text(
         .map(|value| format!("; ref={value}"))
         .unwrap_or_default();
     format!(
-        "{label} summary: {first_line} [b={}; tok~={}; {omitted_name} omitted{ref_part}]",
+        "{label}: {first_line} [b={}; t~={}; omit={omitted_name}{ref_part}]",
         text.len(),
         runtime_mem_approx_token_count(text),
     )
+}
+
+fn runtime_mem_shadow_summary_label(label: &str) -> &str {
+    match label {
+        "user prompt" => "u",
+        "assistant response" => "a",
+        "tool output" => "tool",
+        _ => label,
+    }
 }
 
 fn runtime_mem_shadow_summary_prefix_char_limit(artifact_ref: Option<&str>) -> usize {
@@ -1457,6 +1470,18 @@ fn runtime_mem_first_text_at_paths(event: &Value, paths: &[&str]) -> Option<Stri
     })
 }
 
+fn runtime_mem_first_artifact_ref_text_at_paths(event: &Value, paths: &[&str]) -> Option<String> {
+    paths.iter().find_map(|path| {
+        runtime_mem_lookup_json_path(event, path)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(|text| {
+                runtime_mem_normalize_prodex_artifact_ref(text).unwrap_or_else(|| text.to_string())
+            })
+    })
+}
+
 fn runtime_mem_first_prodex_artifact_ref_at_paths(
     event: &Value,
     paths: &[&str],
@@ -1469,13 +1494,24 @@ fn runtime_mem_first_prodex_artifact_ref_at_paths(
                 .and_then(Value::as_str)
                 .and_then(runtime_mem_normalize_prodex_artifact_ref)
         })
+        .or_else(|| runtime_mem_extract_artifact_marker(event))
         .or_else(|| runtime_mem_prodex_artifact_ref(None, content))
 }
 
 fn runtime_mem_prodex_artifact_ref(artifact_ref: Option<&str>, content: &str) -> Option<String> {
-    artifact_ref
-        .and_then(runtime_mem_normalize_prodex_artifact_ref)
-        .or_else(|| runtime_mem_extract_artifact_marker_from_text(content))
+    if let Some(normalized) = artifact_ref.and_then(runtime_mem_normalize_prodex_artifact_ref) {
+        return Some(normalized);
+    }
+    if let Some(artifact_ref) = artifact_ref
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let combined = format!("{artifact_ref}\n{content}");
+        if let Some(normalized) = runtime_mem_normalize_prodex_artifact_ref(&combined) {
+            return Some(normalized);
+        }
+    }
+    runtime_mem_extract_artifact_marker_from_text(content)
 }
 
 fn runtime_mem_normalize_prodex_artifact_ref(text: &str) -> Option<String> {
@@ -1483,10 +1519,11 @@ fn runtime_mem_normalize_prodex_artifact_ref(text: &str) -> Option<String> {
     if text.is_empty() {
         return None;
     }
-    if text.starts_with("prodex-artifact:") || text.starts_with("prodex://artifact/") {
-        return Some(text.to_string());
+    if let Some(reference) = runtime_mem_parse_non_alias_artifact_ref(text) {
+        return Some(reference);
     }
-    runtime_mem_extract_artifact_marker_from_text(text)
+    let aliases = runtime_mem_artifact_aliases_from_text(text);
+    runtime_mem_extract_artifact_marker_from_text_with_aliases(text, &aliases)
 }
 
 fn runtime_mem_artifact_recall_summary(
@@ -1515,21 +1552,200 @@ fn runtime_mem_fnv1a64(bytes: &[u8]) -> u64 {
 }
 
 fn runtime_mem_extract_artifact_marker(value: &Value) -> Option<String> {
+    let aliases = runtime_mem_artifact_aliases(value);
+    runtime_mem_extract_artifact_marker_with_aliases(value, &aliases)
+}
+
+fn runtime_mem_extract_artifact_marker_with_aliases(
+    value: &Value,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
     match value {
-        Value::String(text) => runtime_mem_extract_artifact_marker_from_text(text),
-        Value::Array(values) => values.iter().find_map(runtime_mem_extract_artifact_marker),
+        Value::String(text) => {
+            runtime_mem_extract_artifact_marker_from_text_with_aliases(text, aliases)
+        }
+        Value::Array(values) => values
+            .iter()
+            .find_map(|value| runtime_mem_extract_artifact_marker_with_aliases(value, aliases)),
         Value::Object(object) => object
             .values()
-            .find_map(runtime_mem_extract_artifact_marker),
+            .find_map(|value| runtime_mem_extract_artifact_marker_with_aliases(value, aliases)),
         _ => None,
     }
 }
 
 fn runtime_mem_extract_artifact_marker_from_text(text: &str) -> Option<String> {
-    text.split_whitespace()
-        .map(|part| part.trim_matches(|c: char| c.is_ascii_punctuation() && c != ':' && c != '/'))
-        .find(|part| part.starts_with("prodex-artifact:") || part.starts_with("prodex://artifact/"))
-        .map(str::to_string)
+    let aliases = runtime_mem_artifact_aliases_from_text(text);
+    runtime_mem_extract_artifact_marker_from_text_with_aliases(text, &aliases)
+}
+
+fn runtime_mem_extract_artifact_marker_from_text_with_aliases(
+    text: &str,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    runtime_mem_artifact_ref_tokens(text)
+        .into_iter()
+        .find_map(|token| runtime_mem_parse_artifact_ref_token(token, aliases))
+}
+
+fn runtime_mem_artifact_aliases(value: &Value) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    runtime_mem_collect_artifact_aliases(value, &mut aliases);
+    aliases
+}
+
+fn runtime_mem_collect_artifact_aliases(value: &Value, aliases: &mut HashMap<String, String>) {
+    match value {
+        Value::String(text) => runtime_mem_collect_artifact_aliases_from_text(text, aliases),
+        Value::Array(values) => {
+            for value in values {
+                runtime_mem_collect_artifact_aliases(value, aliases);
+            }
+        }
+        Value::Object(object) => {
+            for value in object.values() {
+                runtime_mem_collect_artifact_aliases(value, aliases);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn runtime_mem_artifact_aliases_from_text(text: &str) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    runtime_mem_collect_artifact_aliases_from_text(text, &mut aliases);
+    aliases
+}
+
+fn runtime_mem_collect_artifact_aliases_from_text(
+    text: &str,
+    aliases: &mut HashMap<String, String>,
+) {
+    if !text.contains('@') || !text.contains('=') {
+        return;
+    }
+    for token in runtime_mem_artifact_ref_tokens(text) {
+        if let Some((alias, reference)) = runtime_mem_parse_artifact_alias(token) {
+            aliases.entry(alias).or_insert(reference);
+        }
+    }
+}
+
+fn runtime_mem_parse_artifact_alias(token: &str) -> Option<(String, String)> {
+    let token = runtime_mem_trim_artifact_ref_token(token);
+    let (alias, reference) = token.split_once('=')?;
+    if !runtime_mem_artifact_alias_valid(alias) {
+        return None;
+    }
+    let reference = runtime_mem_parse_non_alias_artifact_ref(reference)?;
+    Some((alias.to_string(), reference))
+}
+
+fn runtime_mem_parse_artifact_ref_token(
+    token: &str,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    let token = runtime_mem_trim_artifact_ref_token(token);
+    if let Some((_, reference)) = token.split_once('=')
+        && token.starts_with('@')
+    {
+        return runtime_mem_parse_non_alias_artifact_ref(reference);
+    }
+    runtime_mem_parse_alias_artifact_ref(token, aliases)
+        .or_else(|| runtime_mem_parse_non_alias_artifact_ref(token))
+}
+
+fn runtime_mem_parse_alias_artifact_ref(
+    token: &str,
+    aliases: &HashMap<String, String>,
+) -> Option<String> {
+    let (alias, suffix) = runtime_mem_split_artifact_alias_ref(token)?;
+    aliases
+        .get(alias)
+        .map(|reference| format!("{reference}{suffix}"))
+}
+
+fn runtime_mem_split_artifact_alias_ref(token: &str) -> Option<(&str, &str)> {
+    let rest = token.strip_prefix('@')?;
+    let digit_len = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .map(char::len_utf8)
+        .sum::<usize>();
+    if digit_len == 0 {
+        return None;
+    }
+    let alias_end = 1 + digit_len;
+    Some((&token[..alias_end], &token[alias_end..]))
+}
+
+fn runtime_mem_artifact_alias_valid(alias: &str) -> bool {
+    alias
+        .strip_prefix('@')
+        .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()))
+}
+
+fn runtime_mem_parse_non_alias_artifact_ref(token: &str) -> Option<String> {
+    let token = runtime_mem_trim_artifact_ref_token(token);
+    if token
+        .strip_prefix("prodex-artifact:")
+        .is_some_and(|value| !value.is_empty())
+        || token
+            .strip_prefix("prodex://artifact/")
+            .is_some_and(|value| !value.is_empty())
+    {
+        return Some(token.to_string());
+    }
+
+    if token
+        .strip_prefix(RUNTIME_MEM_SHORT_ARTIFACT_REF_PREFIX)
+        .is_some_and(runtime_mem_short_artifact_ref_tail_valid)
+    {
+        return Some(token.to_string());
+    }
+
+    None
+}
+
+fn runtime_mem_short_artifact_ref_tail_valid(tail: &str) -> bool {
+    let tail = tail.strip_prefix("sc:").unwrap_or(tail);
+    let artifact_id = tail
+        .split_once('#')
+        .map(|(artifact_id, _)| artifact_id)
+        .or_else(|| tail.split_once('?').map(|(artifact_id, _)| artifact_id))
+        .unwrap_or(tail);
+    !artifact_id.is_empty()
+        && artifact_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+}
+
+fn runtime_mem_artifact_ref_tokens(text: &str) -> Vec<&str> {
+    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ')' | ']' | '}'))
+        .collect()
+}
+
+fn runtime_mem_trim_artifact_ref_token(token: &str) -> &str {
+    token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ':'
+                | ';'
+                | '.'
+                | '!'
+                | '?'
+                | '('
+                | '['
+                | '{'
+                | '<'
+                | ')'
+                | ']'
+                | '}'
+                | '>'
+        )
+    })
 }
 
 fn runtime_mem_set_json_path(value: &mut Value, path: &str, new_value: Value) {
@@ -1559,18 +1775,21 @@ fn runtime_mem_value_is_text(value: &Value) -> bool {
 }
 
 fn runtime_mem_value_contains_artifact_marker(value: &Value) -> bool {
+    if runtime_mem_extract_artifact_marker(value).is_some() {
+        return true;
+    }
+    runtime_mem_value_contains_text(value, "prodex smart context artifact")
+}
+
+fn runtime_mem_value_contains_text(value: &Value, needle: &str) -> bool {
     match value {
-        Value::String(text) => {
-            text.contains("prodex-artifact:")
-                || text.contains("prodex://artifact/")
-                || text.contains("prodex smart context artifact")
-        }
+        Value::String(text) => text.contains(needle),
         Value::Array(values) => values
             .iter()
-            .any(runtime_mem_value_contains_artifact_marker),
+            .any(|value| runtime_mem_value_contains_text(value, needle)),
         Value::Object(object) => object
             .values()
-            .any(runtime_mem_value_contains_artifact_marker),
+            .any(|value| runtime_mem_value_contains_text(value, needle)),
         _ => false,
     }
 }

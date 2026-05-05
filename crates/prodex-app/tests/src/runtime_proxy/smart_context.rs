@@ -29,16 +29,13 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
     );
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
+    assert!(output.contains("psc art psc:"));
     assert!(output.contains("b="));
-    assert!(output.contains("h="));
     assert!(output.contains(&format!("b={}", original_output.len())));
-    assert!(output.contains(&format!(
-        "h={}",
-        runtime_proxy_crate::smart_context_hash_text(&original_output)
-    )));
-    assert!(output.contains("rehydrate psc:"));
-    assert!(output.contains("#Lstart-Lend"));
+    assert!(!output.contains("prodex-artifact:"));
+    assert!(!output.contains(" h="));
+    assert!(output.contains("ref psc:"));
+    assert!(output.contains("[#Lx-Ly]"));
     assert!(!output.contains("artifact_id:"));
     assert_eq!(stats.artifacts_stored, 1);
     assert_eq!(stats.tool_outputs_condensed, 1);
@@ -84,7 +81,7 @@ fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     runtime_smart_context_append_artifact_manifest_if_useful(&mut value, &store, &stats);
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
+    assert!(output.contains("psc art psc:"));
     assert!(output.contains(SMART_CONTEXT_LABEL_SUMMARY));
     assert!(output.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
     assert!(output.contains("psc:"));
@@ -94,10 +91,11 @@ fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     assert!(!output.contains(hidden_tail));
     assert!(!output.contains("noise line 419"));
 
-    let manifest = value["input"][1]["content"].as_str().unwrap();
-    assert!(manifest.contains("psc manifest"));
-    assert!(manifest.contains("content omitted"));
-    assert!(!manifest.contains(hidden_tail));
+    assert_eq!(
+        value["input"].as_array().unwrap().len(),
+        1,
+        "visible artifact refs should not need an extra manifest"
+    );
     assert_eq!(stats.artifacts_stored, 1);
     assert_eq!(stats.tool_outputs_condensed, 1);
 }
@@ -218,7 +216,7 @@ fn smart_context_uses_command_metadata_hint_for_tool_output_compaction() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
+    assert!(output.contains("psc art psc:"));
     assert!(output.contains("sum: search matches=1, files=1"));
     assert!(output.contains("src/lib.rs (1 matches):"));
     assert_eq!(stats.tool_outputs_condensed, 1);
@@ -328,7 +326,7 @@ fn smart_context_uses_success_summary_for_long_success_tool_output() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
+    assert!(output.contains("psc art psc:"));
     assert!(output.contains("pcs: success cmd"));
     assert!(output.contains("command: npm install && npm run build && find src -type f"));
     assert!(output.contains("exit: (unknown)"));
@@ -384,7 +382,7 @@ fn smart_context_keeps_failure_output_on_critical_preserving_path() {
     );
 
     let output = value["input"][1]["output"].as_str().unwrap();
-    assert!(output.contains("prodex-sc artifact prodex-artifact:sc:"));
+    assert!(output.contains("psc art psc:"));
     assert!(!output.contains("successful command output"));
     assert!(output.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
     assert!(output.contains("error: build script failed"));
@@ -523,6 +521,7 @@ fn smart_context_artifact_manifest_lists_refs_without_full_content() {
     assert!(manifest.contains("psc manifest"));
     assert!(manifest.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
     assert!(manifest.contains(&format!("b={}", artifact_text.len())));
+    assert!(!manifest.contains(" h="));
     assert!(manifest.contains("cr="));
     assert!(manifest.contains("sr="));
     assert!(manifest.contains("k=cargo-test"));
@@ -568,6 +567,32 @@ fn smart_context_appends_artifact_manifest_only_when_rewrite_useful() {
 }
 
 #[test]
+fn smart_context_manifest_skips_refs_already_visible_in_payload() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store
+        .insert_text(1, "error: compacted output\nsrc/lib.rs:1:1")
+        .unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": format!("visible {}", runtime_smart_context_artifact_ref(&artifact.id))
+        }]
+    });
+    let useful_stats = RuntimeSmartContextTransformStats {
+        tool_outputs_condensed: 1,
+        ..RuntimeSmartContextTransformStats::default()
+    };
+
+    assert!(!runtime_smart_context_append_artifact_manifest_if_useful(
+        &mut value,
+        &store,
+        &useful_stats,
+    ));
+    assert_eq!(value["input"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
     let shared = smart_context_test_shared("manifest-delta");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
@@ -589,6 +614,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut first,
                 state,
                 &useful_stats,
+                &RuntimeSmartContextIntentSignals::default(),
             )
         );
         assert_eq!(first["input"].as_array().unwrap().len(), 2);
@@ -601,6 +627,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut unchanged,
                 state,
                 &useful_stats,
+                &RuntimeSmartContextIntentSignals::default(),
             )
         );
         assert_eq!(unchanged["input"].as_array().unwrap().len(), 1);
@@ -617,6 +644,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
                 &mut changed,
                 state,
                 &useful_stats,
+                &RuntimeSmartContextIntentSignals::default(),
             )
         );
         assert_eq!(changed["input"].as_array().unwrap().len(), 2);
@@ -1466,30 +1494,14 @@ fn smart_context_static_context_fingerprint_drives_exact_policy_on_real_change()
     let volatile_observation =
         runtime_smart_context_observe_static_context(&shared, &volatile_only);
     let changed_observation = runtime_smart_context_observe_static_context(&shared, &changed);
-    let budget = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        runtime_proxy_crate::smart_context_exactness_guard(
-            runtime_proxy_crate::SmartContextExactnessInput::default(),
-        ),
-        Vec::new(),
-        changed_observation.changed,
-    );
-
     assert!(!first_observation.changed);
     assert_eq!(first_observation.item_count, 1);
     assert!(!volatile_observation.changed);
     assert_eq!(volatile_observation.delta_count, 1);
     assert!(changed_observation.changed);
     assert_eq!(
-        budget.policy.mode,
-        runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough
-    );
-    assert!(
-        budget
-            .policy
-            .reasons
-            .contains(&runtime_proxy_crate::SmartContextBudgetPolicyReason::StaticContextChanged)
+        changed_observation.changed_item_ids,
+        BTreeSet::from(["instructions".to_string()])
     );
 }
 
@@ -1582,13 +1594,20 @@ fn smart_context_delta_preserves_exact_static_context() {
 fn smart_context_delta_preserves_changed_static_context() {
     let shared = smart_context_test_shared("static-context-delta-changed");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let stable_system = format!("Stable system prefix\n{}", "stable ".repeat(80));
     let first = smart_context_test_request(serde_json::json!({
         "instructions": "Use repo rules.\nKeep account affinity.",
-        "input": [{"role": "user", "content": "first fresh request"}]
+        "input": [
+            {"role": "system", "content": stable_system.as_str()},
+            {"role": "user", "content": "first fresh request"}
+        ]
     }));
     let changed = smart_context_test_request(serde_json::json!({
         "instructions": "Use repo rules.\nAllow account rotation.",
-        "input": [{"role": "user", "content": "changed fresh request"}]
+        "input": [
+            {"role": "system", "content": stable_system.as_str()},
+            {"role": "user", "content": "changed fresh request"}
+        ]
     }));
 
     let _ =
@@ -1601,10 +1620,9 @@ fn smart_context_delta_preserves_changed_static_context() {
         value["instructions"].as_str(),
         Some("Use repo rules.\nAllow account rotation.")
     );
-    assert!(
-        !String::from_utf8_lossy(prepared.as_ref())
-            .contains(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
-    );
+    let text = String::from_utf8_lossy(prepared.as_ref());
+    assert!(text.contains("psc static scpc:"));
+    assert!(!text.contains(stable_system.as_str()));
 }
 
 #[test]

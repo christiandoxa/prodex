@@ -5069,6 +5069,12 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
         {
             return Some(CommandOutputKind::RustDiagnostics);
         }
+        if command == "cargo"
+            && command_metadata_subcommand_after(tokens, index)
+                .is_some_and(|subcommand| matches!(subcommand, "update" | "install" | "fetch"))
+        {
+            return Some(CommandOutputKind::NoisySuccess);
+        }
         if command == "git"
             && let Some(subcommand) = command_metadata_subcommand_after(tokens, index)
         {
@@ -5086,10 +5092,21 @@ fn infer_command_output_kind_from_metadata_tokens(tokens: &[String]) -> Option<C
         {
             return Some(CommandOutputKind::NoisySuccess);
         }
+        if command == "docker"
+            && command_metadata_subcommand_after(tokens, index)
+                .is_some_and(|subcommand| matches!(subcommand, "build" | "buildx" | "pull"))
+        {
+            return Some(CommandOutputKind::NoisySuccess);
+        }
         if matches!(command, "npm" | "pnpm" | "yarn" | "bun")
             && command_metadata_package_script_after(tokens, index).is_some()
         {
             return Some(CommandOutputKind::Diagnostics);
+        }
+        if matches!(command, "npm" | "pnpm" | "yarn" | "bun")
+            && command_metadata_package_install_after(tokens, index).is_some()
+        {
+            return Some(CommandOutputKind::NoisySuccess);
         }
         if matches!(command, "docker-compose") {
             return Some(CommandOutputKind::NoisySuccess);
@@ -5148,6 +5165,35 @@ fn command_metadata_package_script_after(tokens: &[String], command_index: usize
             "test" | "t" | "typecheck" | "type-check" | "tsc" | "check"
         ) || (saw_run && (token.contains("test") || token.contains("typecheck")))
         {
+            return Some(token);
+        }
+        return None;
+    }
+    None
+}
+
+fn command_metadata_package_install_after(tokens: &[String], command_index: usize) -> Option<&str> {
+    let mut skip_next = false;
+    for token in tokens
+        .iter()
+        .skip(command_index + 1)
+        .map(|token| command_metadata_token_command_name(token))
+    {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if command_metadata_token_option_takes_value(token) {
+            skip_next = true;
+            continue;
+        }
+        if command_metadata_token_is_option_or_shell_glue(token) {
+            continue;
+        }
+        if matches!(
+            token,
+            "install" | "i" | "ci" | "add" | "update" | "upgrade" | "sync"
+        ) {
             return Some(token);
         }
         return None;

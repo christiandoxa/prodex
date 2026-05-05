@@ -122,14 +122,14 @@ fn artifact_marker_uses_short_app_format_and_preserves_rehydrate_metadata() {
     let first_line = marker.lines().next().unwrap();
     assert_eq!(
         first_line,
-        "prodex-sc artifact prodex-artifact:sc:0123456789abcdef b=12345 h=sc:fedcba9876543210; rehydrate psc:0123456789abcdef or psc:0123456789abcdef#Lstart-Lend"
+        "psc art psc:0123456789abcdef b=12345; ref psc:0123456789abcdef[#Lx-Ly]"
     );
     assert!(first_line.len() < old_reusable.len());
     assert!(marker.len() < old_labeled.len());
-    assert_eq!(marker.matches("prodex-artifact:").count(), 1);
+    assert_eq!(marker.matches("prodex-artifact:").count(), 0);
     assert!(marker.contains("b=12345"));
-    assert!(marker.contains("h=sc:fedcba9876543210"));
-    assert!(marker.contains("psc:0123456789abcdef#Lstart-Lend"));
+    assert!(!marker.contains("h=sc:fedcba9876543210"));
+    assert!(marker.contains("psc:0123456789abcdef[#Lx-Ly]"));
     assert!(marker.ends_with(compacted));
     assert!(!marker.contains("artifact_id:"));
     assert!(!marker.contains("original_bytes:"));
@@ -150,14 +150,11 @@ fn artifact_reference_marker_uses_short_repeat_format_with_exact_ref_fields() {
         artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, artifact.id
     );
 
-    assert_eq!(
-        marker,
-        "psc repeat psc:0123456789abcdef h=sc:fedcba9876543210 b=456 prodex-artifact:sc:0123456789abcdef"
-    );
+    assert_eq!(marker, "psc repeat psc:0123456789abcdef b=456");
     assert!(marker.len() < old_reusable.len());
-    assert_eq!(marker.matches("prodex-artifact:").count(), 1);
+    assert_eq!(marker.matches("prodex-artifact:").count(), 0);
     assert!(marker.contains("psc:0123456789abcdef"));
-    assert!(marker.contains("h=sc:fedcba9876543210"));
+    assert!(!marker.contains("h=sc:fedcba9876543210"));
     assert!(marker.contains("b=456"));
     assert!(!marker.contains("artifact_id:"));
     assert!(!marker.contains("original_bytes:"));
@@ -674,6 +671,34 @@ fn observed_token_accounting_calibrates_body_estimate_from_recent_usage_with_flo
         SmartContextTokenAccountingSource::CurrentRequestBodyEstimate
     );
     assert_eq!(accounting.available_context_tokens, Some(50_000));
+}
+
+#[test]
+fn observed_token_accounting_uses_recent_high_water_mark_for_calibration_safety() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(64_000),
+            reserved_output_tokens: 4_000,
+            current_input_tokens: 0,
+            current_request_body_bytes: 80_000,
+            current_request_estimated_tokens: Some(20_000),
+            observed_usage: vec![
+                RuntimeTokenUsage {
+                    input_tokens: 18_000,
+                    ..RuntimeTokenUsage::default()
+                },
+                RuntimeTokenUsage {
+                    input_tokens: 8_000,
+                    ..RuntimeTokenUsage::default()
+                },
+            ],
+        });
+
+    assert_eq!(
+        accounting.estimated_current_request_tokens, 20_000,
+        "recent high-water usage should prevent unsafe over-shrink"
+    );
+    assert_eq!(accounting.available_context_tokens, Some(40_000));
 }
 
 #[test]

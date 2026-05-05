@@ -2301,8 +2301,8 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
     );
     let responses_bodies = backend.responses_bodies();
     assert_eq!(responses_bodies.len(), 1);
-    assert!(responses_bodies[0].contains("prodex-sc artifact"));
-    assert!(responses_bodies[0].contains("prodex-artifact:sc:"));
+    assert!(responses_bodies[0].contains("psc art psc:"));
+    assert!(!responses_bodies[0].contains("prodex-artifact:sc:"));
     assert!(
         !responses_bodies[0].contains("line 1200: repeated command output"),
         "middle tool-output noise should be artifact-backed, not forwarded inline"

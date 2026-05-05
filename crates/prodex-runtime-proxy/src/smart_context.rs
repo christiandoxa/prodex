@@ -134,11 +134,9 @@ pub fn smart_context_artifact_marker(
 
 pub fn smart_context_artifact_reference_marker(artifact: &SmartContextArtifactRef) -> String {
     format!(
-        "psc repeat {} h={} b={} {}",
+        "psc repeat {} b={}",
         smart_context_short_artifact_ref(&artifact.id),
-        artifact.content_hash,
         artifact.byte_len,
-        smart_context_legacy_artifact_ref(&artifact.id)
     )
 }
 
@@ -548,6 +546,7 @@ pub const SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN: u64 = 4;
 const SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_NUMERATOR: u64 = 9;
 const SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR: u64 = 8;
 const SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS: u64 = 64;
+const SMART_CONTEXT_ADAPTIVE_ESTIMATE_RECENT_USAGE_LIMIT: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmartContextTokenAccountingSource {
@@ -696,10 +695,8 @@ fn smart_context_observed_calibrated_request_estimate(
     if baseline_estimate == 0 {
         return 0;
     }
-    let Some(last_accounted_input) = observed_usage
-        .iter()
-        .rev()
-        .find_map(|usage| smart_context_accounted_input_tokens(*usage))
+    let Some(recent_accounted_input) =
+        smart_context_recent_accounted_input_calibration(observed_usage)
     else {
         return baseline_estimate;
     };
@@ -707,13 +704,24 @@ fn smart_context_observed_calibrated_request_estimate(
         .saturating_add(1)
         .saturating_div(2)
         .max(1);
-    let observed_with_margin = last_accounted_input
+    let observed_with_margin = recent_accounted_input
         .saturating_mul(SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_NUMERATOR)
         .saturating_add(SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR - 1)
         / SMART_CONTEXT_ADAPTIVE_ESTIMATE_SAFETY_DENOMINATOR;
     let observed_with_margin =
         observed_with_margin.saturating_add(SMART_CONTEXT_ADAPTIVE_ESTIMATE_MIN_MARGIN_TOKENS);
     baseline_estimate.min(observed_with_margin.max(raw_floor))
+}
+
+fn smart_context_recent_accounted_input_calibration(
+    observed_usage: &[RuntimeTokenUsage],
+) -> Option<u64> {
+    observed_usage
+        .iter()
+        .rev()
+        .filter_map(|usage| smart_context_accounted_input_tokens(*usage))
+        .take(SMART_CONTEXT_ADAPTIVE_ESTIMATE_RECENT_USAGE_LIMIT)
+        .max()
 }
 
 fn smart_context_accounted_input_tokens(usage: RuntimeTokenUsage) -> Option<u64> {
@@ -1626,14 +1634,17 @@ fn smart_context_summary_prefix(text: &str, byte_limit: usize) -> String {
 
 fn smart_context_artifact_marker_line(kind: &str, artifact: &SmartContextArtifactRef) -> String {
     let reference = smart_context_short_artifact_ref(&artifact.id);
+    let kind = match kind {
+        "artifact" => "art",
+        other => other,
+    };
     format!(
-        "prodex-sc {kind} {} b={} h={}; rehydrate {reference} or {reference}#Lstart-Lend",
-        smart_context_legacy_artifact_ref(&artifact.id),
-        artifact.byte_len,
-        artifact.content_hash
+        "psc {kind} {reference} b={}; ref {reference}[#Lx-Ly]",
+        artifact.byte_len
     )
 }
 
+#[allow(dead_code)]
 fn smart_context_legacy_artifact_ref(id: &str) -> String {
     format!("prodex-artifact:{id}")
 }

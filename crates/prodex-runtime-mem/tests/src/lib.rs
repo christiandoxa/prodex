@@ -655,6 +655,41 @@ fn recall_content_dedupe_replaces_optional_prodex_artifact_content_with_ref() {
 }
 
 #[test]
+fn prodex_artifact_ref_helpers_accept_short_and_alias_refs() {
+    assert_eq!(
+        runtime_mem_normalize_prodex_artifact_ref("psc:0123456789abcdef"),
+        Some("psc:0123456789abcdef".to_string())
+    );
+    assert_eq!(
+        runtime_mem_normalize_prodex_artifact_ref("prodex-artifact:sc:legacy"),
+        Some("prodex-artifact:sc:legacy".to_string())
+    );
+    assert_eq!(
+        runtime_mem_normalize_prodex_artifact_ref(
+            "need @0 first\npsc aliases @0=psc:fedcba9876543210"
+        ),
+        Some("psc:fedcba9876543210".to_string())
+    );
+
+    let aliases_across_values =
+        serde_json::json!(["need @0", "psc aliases @0=psc:0123456789abcdef"]);
+    assert_eq!(
+        runtime_mem_extract_artifact_marker(&aliases_across_values),
+        Some("psc:0123456789abcdef".to_string())
+    );
+    assert!(runtime_mem_value_contains_artifact_marker(
+        &serde_json::json!({
+            "payload": {
+                "message": "refer to psc:0123456789abcdef"
+            }
+        })
+    ));
+    assert!(runtime_mem_value_contains_artifact_marker(
+        &aliases_across_values
+    ));
+}
+
+#[test]
 fn extract_mode_keeps_slim_and_full_behavior_and_accepts_super_slim() {
     let (mem_mode, codex_args) =
         runtime_mem_extract_mode(&[OsString::from("mem"), OsString::from("exec")]);
@@ -756,7 +791,7 @@ fn super_slim_schema_prefers_prompt_summary_or_refs_and_omits_plain_prompt_body(
     .expect("super-slim prompt should resolve");
 
     assert_eq!(slim_prompt, large_prompt);
-    assert_eq!(super_slim_prompt, "mem ss: prompt omitted");
+    assert_eq!(super_slim_prompt, "ss:omit=prompt");
 
     let summarized = resolve_schema_user_prompt(
         &super_slim_schema,
@@ -1001,12 +1036,14 @@ fn super_slim_shadow_user_prompt_stores_summary_counts_and_ref_not_full_prompt()
         .and_then(Value::as_str)
         .expect("shadow prompt body should exist");
 
-    assert!(summary.starts_with("user prompt summary: Implement shadow transcript helpers"));
+    assert!(summary.starts_with("u: Implement shadow transcript helpers"));
     assert!(summary.contains("b="));
-    assert!(summary.contains("tok~="));
+    assert!(summary.contains("t~="));
     assert!(summary.contains("ref=prodex-artifact:prompt-123"));
-    assert!(summary.contains("prompt omitted"));
-    assert_eq!(shadow_message, "mem ss: omitted");
+    assert!(summary.contains("omit=prompt"));
+    assert!(!summary.contains("tok~="));
+    assert!(!summary.contains("prompt omitted"));
+    assert_eq!(shadow_message, "ss:omit");
     assert_ne!(
         lookup_test_path(&event, "payload.message").and_then(Value::as_str),
         Some(shadow_message)
@@ -1031,12 +1068,13 @@ fn super_slim_shadow_assistant_message_uses_short_summary() {
         .and_then(Value::as_str)
         .expect("assistant summary should exist");
 
-    assert!(summary.starts_with("assistant response summary: Completed helper implementation"));
+    assert!(summary.starts_with("a: Completed helper implementation"));
     assert!(summary.contains("b="));
-    assert!(summary.contains("tok~="));
+    assert!(summary.contains("t~="));
+    assert!(summary.contains("omit=message"));
     assert_eq!(
         lookup_test_path(&shadow, "payload.message").and_then(Value::as_str),
-        Some("mem ss: omitted")
+        Some("ss:omit")
     );
     assert_eq!(
         resolve_schema_assistant_message(&runtime_mem_super_slim_codex_schema(), &shadow)
@@ -1082,7 +1120,7 @@ fn super_slim_shadow_referenced_artifact_uses_shorter_prefix_than_plain_summary(
     assert!(plain_summary.contains(tail));
     assert!(!artifact_summary.contains(tail));
     assert!(artifact_summary.contains("ref=prodex-artifact:sc:short-prefix"));
-    assert!(artifact_summary.contains("output omitted"));
+    assert!(artifact_summary.contains("omit=output"));
 }
 
 #[test]
@@ -1102,9 +1140,10 @@ fn super_slim_shadow_tool_output_stores_summary_and_ref() {
         .and_then(Value::as_str)
         .expect("tool output summary should exist");
 
-    assert!(summary.starts_with("tool output summary: first useful output line"));
+    assert!(summary.starts_with("tool: first useful output line"));
     assert!(summary.contains("b="));
-    assert!(summary.contains("tok~="));
+    assert!(summary.contains("t~="));
+    assert!(summary.contains("omit=output"));
     assert!(summary.contains("ref=prodex://artifact/tool-456"));
     assert_eq!(
         lookup_test_path(&shadow, "payload.metadata.artifact_ref").and_then(Value::as_str),
@@ -1112,7 +1151,7 @@ fn super_slim_shadow_tool_output_stores_summary_and_ref() {
     );
     assert_eq!(
         lookup_test_path(&shadow, "payload.output").and_then(Value::as_str),
-        Some("mem ss: omitted")
+        Some("ss:omit")
     );
     assert_eq!(
         resolve_schema_tool_response(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
@@ -1133,10 +1172,10 @@ fn super_slim_shadow_falls_back_to_local_summary_when_no_summary_or_ref_exists()
         .and_then(Value::as_str)
         .expect("fallback summary should exist");
 
-    assert!(summary.starts_with("tool output summary: plain output only"));
+    assert!(summary.starts_with("tool: plain output only"));
     assert!(summary.contains("b="));
-    assert!(summary.contains("tok~="));
-    assert!(summary.contains("output omitted"));
+    assert!(summary.contains("t~="));
+    assert!(summary.contains("omit=output"));
     assert!(!summary.contains("ref="));
     assert_eq!(
         resolve_schema_tool_response(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
@@ -1172,13 +1211,13 @@ fn super_slim_shadow_events_replaces_later_exact_duplicate_without_semantic_summ
         .expect("duplicate summary should exist");
 
     assert_eq!(shadows[0], single_shadow);
-    assert!(first_summary.starts_with("assistant response summary: Important but repeated answer"));
+    assert!(first_summary.starts_with("a: Important but repeated answer"));
     assert!(duplicate_summary.starts_with("mem dup: original=event[0]"));
     assert!(duplicate_summary.contains("h=sc:"));
     assert!(!duplicate_summary.contains("Important but repeated answer"));
     assert_eq!(
         lookup_test_path(&shadows[1], "payload.message").and_then(Value::as_str),
-        Some("mem ss: omitted")
+        Some("ss:omit")
     );
 }
 
@@ -1261,7 +1300,7 @@ fn super_slim_shadow_events_replaces_later_exact_duplicate_assistant_summary() {
     assert!(!duplicate_summary.contains(summary));
     assert_eq!(
         lookup_test_path(&shadows[1], "payload.message").and_then(Value::as_str),
-        Some("mem ss: omitted")
+        Some("ss:omit")
     );
 }
 
