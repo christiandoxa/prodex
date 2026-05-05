@@ -1780,6 +1780,40 @@ fn successful_command_output_summary_omits_touched_files_for_pure_success_noise(
 }
 
 #[test]
+fn successful_command_output_summary_uses_short_form_for_pure_noise() {
+    let mut input = String::new();
+    for index in 0..40 {
+        input.push_str(&format!(
+            "Progress: resolved {}, reused {}, downloaded 0, added 0\n",
+            index + 1,
+            index
+        ));
+    }
+
+    let report = compact_successful_command_output_with_options(
+        &input,
+        &CommandSuccessOutputCompactOptions {
+            command: Some("pnpm install".to_string()),
+            exit_code: Some(0),
+            min_lines_to_compact: 10,
+            max_line_chars: 160,
+            ..CommandSuccessOutputCompactOptions::default()
+        },
+    );
+
+    assert!(report.compacted);
+    assert!(!report.failure_suspected);
+    assert_eq!(report.critical_signals.total(), 0);
+    assert!(report.compacted_lines <= 3);
+    assert!(report.output.contains("pcs: ok lines=40"));
+    assert!(report.output.contains("noise:"));
+    assert!(report.output.contains("cmd: pnpm install"));
+    assert!(!report.output.contains("counts:"));
+    assert!(!report.output.contains("Progress: resolved 40"));
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
 fn successful_command_output_summary_compacts_common_tool_success_without_exit_code() {
     let mut input = String::new();
     for index in 0..24 {

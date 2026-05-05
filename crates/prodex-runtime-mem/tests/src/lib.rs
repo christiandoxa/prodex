@@ -1075,6 +1075,8 @@ fn super_slim_v2_shadow_events_are_short_and_schema_addressable() {
     assert_eq!(shadows[3]["t"].as_str(), Some("pm2:tr"));
     assert_eq!(shadows[0]["r"].as_str(), Some("p:0123456789abcdef"));
     assert_eq!(shadows[3]["r"].as_str(), Some("psc:fedcba9876543210"));
+    assert_eq!(shadows[0].get("s"), None);
+    assert_eq!(shadows[3].get("s"), None);
     assert!(runtime_mem_event_has_super_slim_prompt_reference(
         &shadows[0]
     ));
@@ -1084,6 +1086,30 @@ fn super_slim_v2_shadow_events_are_short_and_schema_addressable() {
     let schema_text = runtime_mem_super_slim_codex_schema().to_string();
     assert!(schema_text.contains("prodex-v2-user-message"));
     assert!(schema_text.contains("prodex-v2-tool-result"));
+}
+
+#[test]
+fn super_slim_v2_keeps_artifact_backed_summary_when_critical() {
+    let event = serde_json::json!({
+        "payload": {
+            "type": "exec_command_output",
+            "call_id": "call-err",
+            "summary": "tool: error[E0425]: cannot find value",
+            "metadata": {
+                "artifact_ref": "psc:fedcba9876543210"
+            },
+            "output": "full output omitted"
+        }
+    });
+
+    let shadow = runtime_mem_super_slim_v2_shadow_codex_event(&event);
+
+    assert_eq!(shadow["t"].as_str(), Some("pm2:tr"));
+    assert_eq!(shadow["r"].as_str(), Some("psc:fedcba9876543210"));
+    assert_eq!(
+        shadow["s"].as_str(),
+        Some("tool: error[E0425]: cannot find value")
+    );
 }
 
 #[test]

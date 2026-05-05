@@ -6,6 +6,7 @@ const SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES: usize = 1024;
 const SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS: u64 = 32_000;
 const SMART_CONTEXT_RESERVED_OUTPUT_TOKENS: u64 = 4_096;
 const SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT: usize = 8;
+const SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT: usize = 16;
 const SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT: usize = 4;
 const SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES: usize = 12;
 const SMART_CONTEXT_TOOL_PREVIEW_ESTIMATED_LINE_BYTES: usize = 256;
@@ -14,7 +15,6 @@ const SMART_CONTEXT_TOOL_PROGRESSIVE_SUMMARY_MAX_BYTES: usize = 8 * 1024;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES: usize = 12;
 const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS: usize = 1_600;
 const SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES: usize = 2 * 1024;
-const SMART_CONTEXT_TOOL_ARGS_PREVIEW_MAX_CHARS: usize = 480;
 const SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES: usize = 12;
 const SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES: usize = 4;
 const SMART_CONTEXT_LABEL_SUMMARY: &str = "sum:";
@@ -26,8 +26,11 @@ const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
     "prodex static context unchanged ";
-const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX: &str = "psc aliases ";
-const SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX: &str = "psc path aliases ";
+const SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX: &str = "psc static dup ";
+const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX: &str = "psc a ";
+const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX_LEGACY: &str = "psc aliases ";
+const SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX: &str = "psc p ";
+const SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX_LEGACY: &str = "psc path aliases ";
 const RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS: [&str; 3] =
     ["instructions", "system", "developer"];
 
@@ -79,6 +82,12 @@ struct RuntimeSmartContextStaticContextObservation {
 struct RuntimeSmartContextRewriteSafetyObservation {
     safe: bool,
     saved_tokens: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RuntimeSmartContextTokenCalibrationObservation {
+    bucket_key: runtime_proxy_crate::SmartContextTokenCalibrationBucketKey,
+    usage: RuntimeTokenUsage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -172,6 +181,7 @@ struct RuntimeSmartContextProxyState {
     artifact_path: Option<PathBuf>,
     last_token_usage: Option<RuntimeTokenUsage>,
     token_usage_history: Vec<RuntimeTokenUsage>,
+    token_calibration_history: Vec<RuntimeSmartContextTokenCalibrationObservation>,
     rewrite_safety_history: Vec<RuntimeSmartContextRewriteSafetyObservation>,
     last_static_context_fingerprints: Vec<runtime_proxy_crate::SmartContextFingerprint>,
     last_static_context_prompt_cache_hash: Option<String>,
@@ -206,6 +216,7 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
             artifact_path,
             last_token_usage: None,
             token_usage_history: Vec::new(),
+            token_calibration_history: Vec::new(),
             rewrite_safety_history: Vec::new(),
             last_static_context_fingerprints: Vec::new(),
             last_static_context_prompt_cache_hash: None,
@@ -214,9 +225,18 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
     );
 }
 
+#[cfg(test)]
 pub(crate) fn observe_runtime_smart_context_token_usage(
     shared: &RuntimeRotationProxyShared,
     usage: RuntimeTokenUsage,
+) {
+    observe_runtime_smart_context_token_usage_for_bucket(shared, usage, None);
+}
+
+pub(crate) fn observe_runtime_smart_context_token_usage_for_bucket(
+    shared: &RuntimeRotationProxyShared,
+    usage: RuntimeTokenUsage,
+    bucket_key: Option<runtime_proxy_crate::SmartContextTokenCalibrationBucketKey>,
 ) {
     let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
         return;
@@ -235,6 +255,19 @@ pub(crate) fn observe_runtime_smart_context_token_usage(
                 .len()
                 .saturating_sub(SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT);
             state.token_usage_history.drain(0..overflow);
+        }
+        if let Some(bucket_key) = bucket_key.clone() {
+            state
+                .token_calibration_history
+                .push(RuntimeSmartContextTokenCalibrationObservation { bucket_key, usage });
+            if state.token_calibration_history.len() > SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT
+            {
+                let overflow = state
+                    .token_calibration_history
+                    .len()
+                    .saturating_sub(SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT);
+                state.token_calibration_history.drain(0..overflow);
+            }
         }
     }
 }
@@ -317,6 +350,18 @@ pub(crate) fn prepare_runtime_smart_context_http_body<'a>(
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
 ) -> Cow<'a, [u8]> {
+    prepare_runtime_smart_context_http_body_for_profile(
+        request_id, request, shared, route_kind, None,
+    )
+}
+
+pub(crate) fn prepare_runtime_smart_context_http_body_for_profile<'a>(
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    profile_name: Option<&str>,
+) -> Cow<'a, [u8]> {
     if !runtime_smart_context_enabled(shared) {
         return Cow::Borrowed(&request.body);
     }
@@ -327,6 +372,7 @@ pub(crate) fn prepare_runtime_smart_context_http_body<'a>(
         shared,
         route_kind,
         RuntimeSmartContextTransport::Http,
+        profile_name,
     )
 }
 
@@ -335,6 +381,7 @@ pub(super) fn prepare_runtime_smart_context_websocket_text<'a>(
     request_text: &'a str,
     handshake_request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
 ) -> Cow<'a, str> {
     if !runtime_smart_context_enabled(shared) {
         return Cow::Borrowed(request_text);
@@ -352,6 +399,7 @@ pub(super) fn prepare_runtime_smart_context_websocket_text<'a>(
         shared,
         RuntimeRouteKind::Websocket,
         RuntimeSmartContextTransport::Websocket,
+        Some(profile_name),
     ) {
         Cow::Borrowed(_) => Cow::Borrowed(request_text),
         Cow::Owned(body) => String::from_utf8(body)
@@ -366,10 +414,14 @@ fn prepare_runtime_smart_context_body<'a>(
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
     transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
 ) -> Cow<'a, [u8]> {
     let budget = runtime_smart_context_budget(
         shared,
         &request.body,
+        route_kind,
+        transport,
+        profile_name,
         runtime_proxy_crate::SmartContextExactnessGuard {
             decision: runtime_proxy_crate::SmartContextExactnessDecision::Allow,
             reasons: Vec::new(),
@@ -410,6 +462,9 @@ fn prepare_runtime_smart_context_body<'a>(
     let budget = runtime_smart_context_budget(
         shared,
         &request.body,
+        route_kind,
+        transport,
+        profile_name,
         exactness.clone(),
         missing_rehydrate_refs.clone(),
         false,
@@ -491,6 +546,7 @@ fn prepare_runtime_smart_context_body<'a>(
                     &mut value,
                     store,
                     request_id,
+                    tier,
                     budget.policy.max_inline_tool_output_bytes,
                     &mut outcome.stats,
                 );
@@ -545,6 +601,11 @@ fn prepare_runtime_smart_context_body<'a>(
         );
         return Cow::Borrowed(&request.body);
     };
+    runtime_smart_context_apply_static_context_cross_field_dedupe(
+        &mut value,
+        &exactness,
+        &mut outcome.stats,
+    );
     runtime_smart_context_apply_static_context_delta(
         &mut value,
         &static_observation,
@@ -730,12 +791,27 @@ struct RuntimeSmartContextBudget {
 fn runtime_smart_context_budget(
     shared: &RuntimeRotationProxyShared,
     body: &[u8],
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
     exactness_guard: runtime_proxy_crate::SmartContextExactnessGuard,
     missing_rehydrate_refs: Vec<String>,
     static_context_changed: bool,
 ) -> RuntimeSmartContextBudget {
-    let (history, configured_context_window_tokens, recent_rewrite_safety) =
-        runtime_smart_context_budget_inputs(shared);
+    let bucket_key =
+        runtime_smart_context_token_calibration_bucket_key(route_kind, transport, profile_name);
+    let (
+        global_history,
+        bucket_history,
+        calibration_samples,
+        configured_context_window_tokens,
+        recent_rewrite_safety,
+    ) = runtime_smart_context_budget_inputs(shared, &bucket_key);
+    let history = if bucket_history.is_empty() {
+        global_history
+    } else {
+        bucket_history
+    };
     let model_context_window_tokens =
         configured_context_window_tokens.unwrap_or(SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS);
     let observed_context_tokens_u64 = history
@@ -744,16 +820,20 @@ fn runtime_smart_context_budget(
     let observed_context_tokens =
         observed_context_tokens_u64.and_then(|tokens| usize::try_from(tokens).ok());
     let current_input_tokens = observed_context_tokens_u64.unwrap_or(0);
-    let accounting = runtime_proxy_crate::smart_context_observed_token_accounting(
-        runtime_proxy_crate::SmartContextObservedTokenAccountingInput {
-            model_context_window_tokens: Some(model_context_window_tokens),
-            reserved_output_tokens: SMART_CONTEXT_RESERVED_OUTPUT_TOKENS,
-            current_input_tokens,
-            current_request_body_bytes: body.len(),
-            current_request_estimated_tokens: Some(
-                runtime_proxy_crate::smart_context_estimate_tokens_from_body(body),
-            ),
-            observed_usage: history,
+    let accounting = runtime_proxy_crate::smart_context_observed_token_accounting_with_calibration(
+        runtime_proxy_crate::SmartContextObservedTokenAccountingCalibrationInput {
+            accounting: runtime_proxy_crate::SmartContextObservedTokenAccountingInput {
+                model_context_window_tokens: Some(model_context_window_tokens),
+                reserved_output_tokens: SMART_CONTEXT_RESERVED_OUTPUT_TOKENS,
+                current_input_tokens,
+                current_request_body_bytes: body.len(),
+                current_request_estimated_tokens: Some(
+                    runtime_proxy_crate::smart_context_estimate_tokens_from_body(body),
+                ),
+                observed_usage: history,
+            },
+            calibration_bucket_key: Some(bucket_key),
+            calibration_samples,
         },
     );
     let policy = runtime_proxy_crate::smart_context_adaptive_budget_policy(
@@ -801,24 +881,61 @@ fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
         .is_some_and(|state| state.enabled)
 }
 
+fn runtime_smart_context_token_calibration_bucket_key(
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
+) -> runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
+    runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
+        route: Some(runtime_route_kind_label(route_kind).to_string()),
+        model: None,
+        profile: profile_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        transport: Some(transport.label().to_string()),
+    }
+}
+
 fn runtime_smart_context_budget_inputs(
     shared: &RuntimeRotationProxyShared,
+    bucket_key: &runtime_proxy_crate::SmartContextTokenCalibrationBucketKey,
 ) -> (
     Vec<RuntimeTokenUsage>,
+    Vec<RuntimeTokenUsage>,
+    Vec<runtime_proxy_crate::SmartContextTokenCalibrationSample>,
     Option<u64>,
     runtime_proxy_crate::SmartContextRecentRewriteSafety,
 ) {
     let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
-        return (Vec::new(), None, Default::default());
+        return (Vec::new(), Vec::new(), Vec::new(), None, Default::default());
     };
     let Ok(states) = states.lock() else {
-        return (Vec::new(), None, Default::default());
+        return (Vec::new(), Vec::new(), Vec::new(), None, Default::default());
     };
     states
         .get(&shared.log_path)
         .map(|state| {
+            let calibration_samples = state
+                .token_calibration_history
+                .iter()
+                .map(
+                    |sample| runtime_proxy_crate::SmartContextTokenCalibrationSample {
+                        bucket_key: Some(sample.bucket_key.clone()),
+                        usage: sample.usage,
+                    },
+                )
+                .collect::<Vec<_>>();
+            let bucket_history = state
+                .token_calibration_history
+                .iter()
+                .filter(|sample| &sample.bucket_key == bucket_key)
+                .map(|sample| sample.usage)
+                .collect::<Vec<_>>();
             (
                 state.token_usage_history.clone(),
+                bucket_history,
+                calibration_samples,
                 state.model_context_window_tokens,
                 runtime_smart_context_recent_rewrite_safety(&state.rewrite_safety_history),
             )
@@ -985,6 +1102,46 @@ fn runtime_smart_context_apply_static_context_delta(
     );
 }
 
+fn runtime_smart_context_apply_static_context_cross_field_dedupe(
+    value: &mut serde_json::Value,
+    exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
+    stats: &mut RuntimeSmartContextTransformStats,
+) {
+    if exactness_guard.decision != runtime_proxy_crate::SmartContextExactnessDecision::Allow {
+        return;
+    }
+    let items = runtime_smart_context_static_context_items(value);
+    if items.len() < 2 {
+        return;
+    }
+    let mut first_by_hash = BTreeMap::<String, String>::new();
+    let mut duplicate_ids = BTreeMap::<String, String>::new();
+    for item in items {
+        if item.text.len() < SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES {
+            continue;
+        }
+        let content_hash = runtime_proxy_crate::smart_context_hash_text(&item.text);
+        if let Some(first_id) = first_by_hash.get(&content_hash) {
+            duplicate_ids.insert(
+                item.id.clone(),
+                runtime_smart_context_static_context_dup_marker(first_id, &content_hash),
+            );
+        } else {
+            first_by_hash.insert(content_hash, item.id);
+        }
+    }
+    if duplicate_ids.is_empty() {
+        return;
+    }
+    stats.static_context_deltas = stats.static_context_deltas.saturating_add(
+        runtime_smart_context_replace_static_context_duplicate_texts(value, &duplicate_ids),
+    );
+}
+
+fn runtime_smart_context_static_context_dup_marker(source_id: &str, content_hash: &str) -> String {
+    format!("{SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX}{source_id} {content_hash}")
+}
+
 fn runtime_smart_context_static_context_delta_marker(prompt_cache_hash: &str) -> String {
     format!("{SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX}{prompt_cache_hash}")
 }
@@ -1051,6 +1208,65 @@ fn runtime_smart_context_replace_static_context_texts(
     replaced
 }
 
+fn runtime_smart_context_replace_static_context_duplicate_texts(
+    value: &mut serde_json::Value,
+    duplicate_ids: &BTreeMap<String, String>,
+) -> usize {
+    let Some(object) = value.as_object_mut() else {
+        return 0;
+    };
+    let mut replaced = 0usize;
+    for key in RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS {
+        if let Some(marker) = duplicate_ids.get(key)
+            && runtime_smart_context_replace_top_level_static_field(object, key, marker)
+        {
+            replaced = replaced.saturating_add(1);
+        }
+    }
+
+    let Some(input) = object
+        .get_mut("input")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return replaced;
+    };
+    for (index, item) in input.iter_mut().enumerate() {
+        let role = item
+            .as_object()
+            .and_then(|object| object.get("role"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let id = format!("input[{index}].{role}");
+        if let Some(marker) = duplicate_ids.get(&id)
+            && runtime_smart_context_replace_static_message_text_with_marker(item, marker)
+        {
+            replaced = replaced.saturating_add(1);
+        }
+    }
+    replaced
+}
+
+fn runtime_smart_context_replace_top_level_static_field(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    marker: &str,
+) -> bool {
+    if object
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+    {
+        object.insert(
+            key.to_string(),
+            serde_json::Value::String(marker.to_string()),
+        );
+        true
+    } else {
+        false
+    }
+}
+
 fn runtime_smart_context_replace_static_message_text(
     index: usize,
     value: &mut serde_json::Value,
@@ -1074,24 +1290,36 @@ fn runtime_smart_context_replace_static_message_text(
     if let Some(text) = object.get("content").and_then(serde_json::Value::as_str)
         && !text.trim().is_empty()
     {
-        object.insert(
-            "content".to_string(),
-            serde_json::Value::String(marker.to_string()),
-        );
-        return true;
+        return runtime_smart_context_replace_static_message_text_with_marker(value, marker);
     }
     if let Some(text) = object.get("input_text").and_then(serde_json::Value::as_str)
         && !text.trim().is_empty()
     {
+        return runtime_smart_context_replace_static_message_text_with_marker(value, marker);
+    }
+    if object.get("content").is_some() {
+        return runtime_smart_context_replace_static_message_text_with_marker(value, marker);
+    }
+    false
+}
+
+fn runtime_smart_context_replace_static_message_text_with_marker(
+    value: &mut serde_json::Value,
+    marker: &str,
+) -> bool {
+    let Some(object) = value.as_object_mut() else {
+        return false;
+    };
+    if object.get("content").is_some() {
         object.insert(
-            "input_text".to_string(),
+            "content".to_string(),
             serde_json::Value::String(marker.to_string()),
         );
         return true;
     }
-    if object.get("content").is_some() {
+    if object.get("input_text").is_some() {
         object.insert(
-            "content".to_string(),
+            "input_text".to_string(),
             serde_json::Value::String(marker.to_string()),
         );
         return true;
@@ -2571,6 +2799,7 @@ fn runtime_smart_context_condense_historical_tool_call_arguments(
     value: &mut serde_json::Value,
     store: &mut RuntimeSmartContextArtifactStore,
     request_id: u64,
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
     inline_limit: usize,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
@@ -2638,7 +2867,7 @@ fn runtime_smart_context_condense_historical_tool_call_arguments(
                 continue;
             };
             let replacement =
-                runtime_smart_context_tool_argument_summary(&artifact, &arguments_text);
+                runtime_smart_context_tool_argument_summary(&artifact, &arguments_text, tier);
             if replacement.len().saturating_mul(100) >= arguments_text.len().saturating_mul(75) {
                 continue;
             }
@@ -2665,17 +2894,29 @@ fn runtime_smart_context_tool_argument_text(value: &serde_json::Value) -> Option
 fn runtime_smart_context_tool_argument_summary(
     artifact: &runtime_proxy_crate::SmartContextArtifactRef,
     text: &str,
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
 ) -> String {
     let reference = runtime_smart_context_artifact_ref(&artifact.id);
     let preview = text
         .chars()
-        .take(SMART_CONTEXT_TOOL_ARGS_PREVIEW_MAX_CHARS)
+        .take(runtime_smart_context_tool_args_preview_max_chars(tier))
         .collect::<String>();
     format!(
-        "psc tool args {reference} b={}; preview: {}",
+        "psc args {reference} b={}; p: {}",
         artifact.byte_len,
         preview.trim()
     )
+}
+
+fn runtime_smart_context_tool_args_preview_max_chars(
+    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
+) -> usize {
+    match tier {
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal => 160,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed => 240,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Large => 360,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Exact => 480,
+    }
 }
 
 fn runtime_smart_context_progressive_tool_output_summary(
@@ -3665,19 +3906,27 @@ fn runtime_smart_context_replace_generated_artifact_refs_with_aliases(
         serde_json::Value::String(text)
             if runtime_smart_context_text_is_generated_summary_or_manifest(text) =>
         {
-            let mut next = text.clone();
+            let mut next_lines = Vec::new();
             let mut replacements = 0usize;
-            for alias in aliases {
-                let reference = runtime_smart_context_artifact_ref(&alias.id);
-                let count = next.matches(&reference).count();
-                if count == 0 {
+            for line in text.lines() {
+                if runtime_smart_context_generated_control_line(line) {
+                    next_lines.push(line.to_string());
                     continue;
                 }
-                next = next.replace(&reference, &alias.alias);
-                replacements = replacements.saturating_add(count);
+                let mut next_line = line.to_string();
+                for alias in aliases {
+                    let reference = runtime_smart_context_artifact_ref(&alias.id);
+                    let count = next_line.matches(&reference).count();
+                    if count == 0 {
+                        continue;
+                    }
+                    next_line = next_line.replace(&reference, &alias.alias);
+                    replacements = replacements.saturating_add(count);
+                }
+                next_lines.push(next_line);
             }
             if replacements > 0 {
-                *text = next;
+                *text = next_lines.join("\n");
             }
             replacements
         }
@@ -3695,6 +3944,18 @@ fn runtime_smart_context_replace_generated_artifact_refs_with_aliases(
             .sum(),
         _ => 0,
     }
+}
+
+fn runtime_smart_context_generated_control_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with(SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX)
+        || trimmed.starts_with(SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX_LEGACY)
+        || trimmed.starts_with(SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX)
+        || trimmed.starts_with(SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX_LEGACY)
+        || trimmed.starts_with("psc art ")
+        || trimmed.starts_with("psc repeat ")
+        || trimmed.starts_with("prodex-sc artifact ")
+        || trimmed.starts_with("prodex-sc repeat ")
 }
 
 fn runtime_smart_context_insert_artifact_alias_legend(
@@ -3744,6 +4005,18 @@ fn runtime_smart_context_insert_artifact_alias_legend_in_value(
 }
 
 fn runtime_smart_context_insert_artifact_alias_legend_in_text(text: &str, legend: &str) -> String {
+    let duplicate_legend = if legend.starts_with(SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX) {
+        text.contains(SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX)
+            || text.contains(SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX_LEGACY)
+    } else if legend.starts_with(SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX) {
+        text.contains(SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX)
+            || text.contains(SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX_LEGACY)
+    } else {
+        text.contains(legend)
+    };
+    if duplicate_legend {
+        return text.to_string();
+    }
     if let Some((first, rest)) = text.split_once('\n') {
         format!("{first}\n{legend}\n{rest}")
     } else {
@@ -3879,6 +4152,7 @@ fn runtime_smart_context_text_is_generated_summary_or_manifest(text: &str) -> bo
         || trimmed.starts_with("prodex-sc repeat ")
         || trimmed.starts_with("psc art ")
         || trimmed.starts_with("psc repeat ")
+        || trimmed.starts_with("psc m ")
         || trimmed.starts_with("psc manifest ")
 }
 
@@ -3902,7 +4176,10 @@ fn runtime_smart_context_append_artifact_manifest_delta_if_useful(
     if ids.is_empty() || ids == state.last_artifact_manifest_ids {
         return false;
     }
-    let Some(manifest) = runtime_smart_context_artifact_manifest_from_entries(entries) else {
+    let detailed_manifest = runtime_smart_context_manifest_requested(intent_signals);
+    let Some(manifest) =
+        runtime_smart_context_artifact_manifest_from_entries(entries, detailed_manifest)
+    else {
         return false;
     };
     if !runtime_smart_context_append_input_manifest(value, manifest) {
@@ -3943,7 +4220,7 @@ fn runtime_smart_context_artifact_manifest(
     store: &RuntimeSmartContextArtifactStore,
 ) -> Option<String> {
     let entries = store.artifact_manifest_entries(SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES);
-    runtime_smart_context_artifact_manifest_from_entries(entries)
+    runtime_smart_context_artifact_manifest_from_entries(entries, true)
 }
 
 #[cfg(test)]
@@ -3954,7 +4231,10 @@ fn runtime_smart_context_artifact_manifest_for_value(
 ) -> Option<String> {
     let mut entries = store.artifact_manifest_entries(SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES);
     runtime_smart_context_filter_manifest_entries(value, intent_signals, &mut entries);
-    runtime_smart_context_artifact_manifest_from_entries(entries)
+    runtime_smart_context_artifact_manifest_from_entries(
+        entries,
+        runtime_smart_context_manifest_requested(intent_signals),
+    )
 }
 
 fn runtime_smart_context_filter_manifest_entries(
@@ -4017,12 +4297,13 @@ fn runtime_smart_context_manifest_entry_matches_intent(
 
 fn runtime_smart_context_artifact_manifest_from_entries(
     entries: Vec<RuntimeSmartContextArtifactManifestEntry>,
+    detailed: bool,
 ) -> Option<String> {
     if entries.is_empty() {
         return None;
     }
 
-    let mut lines = vec!["psc manifest refs-only; content omitted:".to_string()];
+    let mut lines = vec!["psc m refs-only".to_string()];
     let mut rendered_len = lines[0].len();
     for entry in entries {
         let semantic_count = entry
@@ -4032,25 +4313,25 @@ fn runtime_smart_context_artifact_manifest_from_entries(
             .saturating_add(entry.error_range_count);
         let reference = runtime_smart_context_artifact_ref(&entry.id);
         let mut parts = vec![format!("- {reference}"), format!("b={}", entry.byte_len)];
-        if entry.critical_range_count > 0 {
+        if detailed && entry.critical_range_count > 0 {
             parts.push(format!("cr={}", entry.critical_range_count));
         }
-        if semantic_count > 0 {
+        if detailed && semantic_count > 0 {
             parts.push(format!("sr={semantic_count}"));
         }
-        if entry.file_location_range_count > 0 {
+        if detailed && entry.file_location_range_count > 0 {
             parts.push(format!("f={}", entry.file_location_range_count));
         }
-        if entry.diff_hunk_range_count > 0 {
+        if detailed && entry.diff_hunk_range_count > 0 {
             parts.push(format!("d={}", entry.diff_hunk_range_count));
         }
-        if entry.test_failure_range_count > 0 {
+        if detailed && entry.test_failure_range_count > 0 {
             parts.push(format!("t={}", entry.test_failure_range_count));
         }
-        if entry.error_range_count > 0 {
+        if detailed && entry.error_range_count > 0 {
             parts.push(format!("e={}", entry.error_range_count));
         }
-        if let Some(kind) = entry.command_kind.as_deref() {
+        if detailed && let Some(kind) = entry.command_kind.as_deref() {
             parts.push(format!("k={kind}"));
         }
         let line = parts.join(" ");

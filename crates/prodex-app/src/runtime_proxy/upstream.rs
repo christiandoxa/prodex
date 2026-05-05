@@ -89,8 +89,13 @@ fn send_runtime_proxy_upstream_request_with_events(
         upstream_request = upstream_request.header("x-codex-turn-state", turn_state);
     }
 
-    let upstream_body =
-        prepare_runtime_smart_context_http_body(request_id, request, shared, events.route_kind);
+    let upstream_body = prepare_runtime_smart_context_http_body_for_profile(
+        request_id,
+        request,
+        shared,
+        events.route_kind,
+        Some(profile_name),
+    );
 
     upstream_request = upstream_request
         .header("Authorization", format!("Bearer {}", auth.access_token))

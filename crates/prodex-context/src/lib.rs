@@ -2296,6 +2296,44 @@ pub fn compact_successful_command_output_with_options(
         }
     }
 
+    if command_success_output_can_use_short_success_summary(
+        critical_signals,
+        include_path_summary,
+        touched_files.len(),
+        &key_lines,
+    ) {
+        let mut short = Vec::<String>::new();
+        short.push(format!(
+            "pcs: ok lines={} noisy={} touched={}",
+            original_lines,
+            noisy_success_lines,
+            touched_files.len()
+        ));
+        if !noise_counts.is_empty() {
+            short.push(format_count_map("noise", &noise_counts, 6));
+        }
+        if let Some(command) = options
+            .command
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            short.push(format!(
+                "cmd: {}",
+                truncate_command_line(command, options.max_line_chars)
+            ));
+        }
+        let output = lines_to_text(short);
+        return CommandSuccessOutputCompactReport {
+            compacted: true,
+            failure_suspected: false,
+            original_lines,
+            compacted_lines: count_text_lines(&output),
+            touched_files: touched_files.len(),
+            critical_signals,
+            output,
+        };
+    }
+
     push_labeled_lines(
         &mut output,
         "key lines",
@@ -2318,6 +2356,20 @@ pub fn compact_successful_command_output_with_options(
         critical_signals,
         output,
     }
+}
+
+fn command_success_output_can_use_short_success_summary(
+    critical_signals: CriticalSignalCounts,
+    include_path_summary: bool,
+    touched_files: usize,
+    key_lines: &[String],
+) -> bool {
+    critical_signals.total() == 0
+        && !include_path_summary
+        && touched_files == 0
+        && key_lines
+            .iter()
+            .all(|line| noisy_success_label(line).is_some())
 }
 
 fn command_success_output_failure_suspected(

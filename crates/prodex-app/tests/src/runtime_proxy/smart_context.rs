@@ -128,14 +128,15 @@ fn smart_context_condenses_completed_tool_call_arguments() {
         &mut value,
         &mut store,
         9,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
         8 * 1024,
         &mut stats,
     );
 
     let replacement = value["input"][0]["arguments"].as_str().unwrap();
-    assert!(replacement.starts_with("psc tool args psc:"));
+    assert!(replacement.starts_with("psc args psc:"));
     assert!(replacement.contains("b="));
-    assert!(replacement.contains("preview:"));
+    assert!(replacement.contains("p:"));
     assert!(replacement.len().saturating_mul(4) < argument_text.len());
     assert!(store.artifact_ref_for_exact_text(&argument_text).is_some());
     assert_eq!(stats.artifacts_stored, 1);
@@ -560,7 +561,7 @@ fn smart_context_artifact_manifest_lists_refs_without_full_content() {
     let manifest =
         runtime_smart_context_artifact_manifest(&store).expect("artifact manifest should render");
 
-    assert!(manifest.contains("psc manifest"));
+    assert!(manifest.contains("psc m"));
     assert!(manifest.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
     assert!(manifest.contains(&format!("b={}", artifact_text.len())));
     assert!(!manifest.contains(" h="));
@@ -632,6 +633,31 @@ fn smart_context_manifest_skips_refs_already_visible_in_payload() {
         &useful_stats,
     ));
     assert_eq!(value["input"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn smart_context_manifest_default_omits_detail_fields_until_requested() {
+    let artifact_text = "error[E0425]: cannot find value\nsrc/lib.rs:7:3";
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    store.insert_text(1, artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{"type": "message", "role": "user", "content": "existing prompt"}]
+    });
+    let stats = RuntimeSmartContextTransformStats {
+        tool_outputs_condensed: 1,
+        ..RuntimeSmartContextTransformStats::default()
+    };
+
+    assert!(runtime_smart_context_append_artifact_manifest_if_useful(
+        &mut value, &store, &stats,
+    ));
+
+    let manifest = value["input"][1]["content"].as_str().unwrap();
+    assert!(manifest.starts_with("psc m refs-only"));
+    assert!(manifest.contains("b="));
+    assert!(!manifest.contains("cr="));
+    assert!(!manifest.contains("sr="));
+    assert!(!manifest.contains("k="));
 }
 
 #[test]
@@ -875,7 +901,7 @@ fn smart_context_generated_summary_uses_aliases_only_when_shorter() {
     assert!(runtime_smart_context_apply_artifact_aliases_to_generated_texts(&mut value));
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("psc aliases @0=psc:"));
+    assert!(output.contains("psc a @0=psc:"));
     assert!(output.contains("@0#L1-L1"));
     assert!(output.len() < before);
 }
@@ -899,9 +925,35 @@ fn smart_context_generated_summary_uses_path_aliases_only_when_shorter() {
     ));
 
     let output = value["input"][0]["output"].as_str().unwrap();
-    assert!(output.contains("psc path aliases $R=/home/doxa/IdeaProjects/prodex"));
+    assert!(output.contains("psc p $R=/home/doxa/IdeaProjects/prodex"));
     assert!(output.contains("$R/crates/prodex-app/src/runtime_proxy/smart_context.rs"));
     assert!(output.len() < before);
+}
+
+#[test]
+fn smart_context_generated_summary_dedupes_existing_alias_legend() {
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store
+        .insert_text(1, "line one\nline two\nline three\nline four")
+        .unwrap();
+    let ref_line = runtime_smart_context_artifact_line_ref(&artifact.id, 1, 1);
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": format!(
+                "psc art {}\npsc a @0={}\n{ref_line}\n{ref_line}\n{ref_line}",
+                runtime_smart_context_artifact_ref(&artifact.id),
+                runtime_smart_context_artifact_ref(&artifact.id),
+            )
+        }]
+    });
+
+    assert!(runtime_smart_context_apply_artifact_aliases_to_generated_texts(&mut value));
+
+    let output = value["input"][0]["output"].as_str().unwrap();
+    assert_eq!(output.matches("psc a ").count(), 1);
+    assert!(output.contains("@0#L1-L1"));
 }
 
 #[test]
@@ -1302,6 +1354,9 @@ fn smart_context_budget_uses_runtime_token_usage_observation() {
     let budget = runtime_smart_context_budget(
         &shared,
         b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        None,
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -1336,6 +1391,9 @@ fn smart_context_budget_uses_configured_model_context_window() {
     let budget = runtime_smart_context_budget(
         &shared,
         b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        None,
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -1350,6 +1408,72 @@ fn smart_context_budget_uses_configured_model_context_window() {
     assert_eq!(budget.model_context_window_tokens, 64_000);
     assert_eq!(budget.model_context_window_source, "launch_config");
     assert_eq!(budget.observed_context_tokens, Some(32_000));
+}
+
+#[test]
+fn smart_context_budget_uses_matching_token_calibration_bucket() {
+    let shared = smart_context_test_shared("budget-bucket");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+    observe_runtime_smart_context_token_usage_for_bucket(
+        &shared,
+        RuntimeTokenUsage {
+            input_tokens: 48_000,
+            ..RuntimeTokenUsage::default()
+        },
+        Some(runtime_smart_context_token_calibration_bucket_key(
+            RuntimeRouteKind::Responses,
+            RuntimeSmartContextTransport::Http,
+            Some("alpha"),
+        )),
+    );
+    observe_runtime_smart_context_token_usage_for_bucket(
+        &shared,
+        RuntimeTokenUsage {
+            input_tokens: 56_000,
+            ..RuntimeTokenUsage::default()
+        },
+        Some(runtime_smart_context_token_calibration_bucket_key(
+            RuntimeRouteKind::Websocket,
+            RuntimeSmartContextTransport::Websocket,
+            Some("beta"),
+        )),
+    );
+
+    let alpha = runtime_smart_context_budget(
+        &shared,
+        b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        Some("alpha"),
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+    let beta = runtime_smart_context_budget(
+        &shared,
+        b"small current request body payload",
+        RuntimeRouteKind::Websocket,
+        RuntimeSmartContextTransport::Websocket,
+        Some("beta"),
+        runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        Vec::new(),
+        false,
+    );
+
+    assert_eq!(
+        alpha.tier,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Large
+    );
+    assert_eq!(alpha.observed_context_tokens, Some(48_000));
+    assert_eq!(
+        beta.tier,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed
+    );
+    assert_eq!(beta.observed_context_tokens, Some(56_000));
 }
 
 #[test]
@@ -1369,6 +1493,9 @@ fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
     let before = runtime_smart_context_budget(
         &shared,
         b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        None,
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -1385,6 +1512,9 @@ fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
     let after = runtime_smart_context_budget(
         &shared,
         b"small current request body payload",
+        RuntimeRouteKind::Responses,
+        RuntimeSmartContextTransport::Http,
+        None,
         runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
@@ -1514,6 +1644,37 @@ fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
             .unwrap()
             .contains("psc:")
     );
+}
+
+#[test]
+fn smart_context_static_context_cross_field_dedupe_keeps_one_exact_copy() {
+    let repeated = "Use repo rules exactly.\n".repeat(80);
+    let mut value = serde_json::json!({
+        "instructions": repeated.as_str(),
+        "system": repeated.as_str(),
+        "input": [
+            {"role": "user", "content": "do work"}
+        ]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_apply_static_context_cross_field_dedupe(
+        &mut value,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &mut stats,
+    );
+
+    assert_eq!(value["instructions"].as_str(), Some(repeated.as_str()));
+    assert!(
+        value["system"]
+            .as_str()
+            .unwrap()
+            .starts_with(SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX)
+    );
+    assert_eq!(value["input"][0]["content"].as_str(), Some("do work"));
+    assert_eq!(stats.static_context_deltas, 1);
 }
 
 #[test]

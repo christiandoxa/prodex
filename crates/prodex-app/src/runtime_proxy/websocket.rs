@@ -1056,6 +1056,7 @@ pub(super) fn attempt_runtime_websocket_request(
         request_text,
         handshake_request,
         shared,
+        profile_name,
     );
     if let Err(err) =
         upstream_socket.send(WsMessage::Text(upstream_request_text.into_owned().into()))

@@ -1495,16 +1495,21 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
         "user_message" => {
             let mut shadow =
                 runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE);
-            if let Some(summary) =
-                runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS)
-            {
-                shadow.insert("s".to_string(), Value::String(summary));
-            }
-            if let Some(artifact_ref) = runtime_mem_first_artifact_ref_text_at_paths(
+            let summary =
+                runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS);
+            let artifact_ref = runtime_mem_first_artifact_ref_text_at_paths(
                 event,
                 RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS,
-            ) {
-                shadow.insert("r".to_string(), Value::String(artifact_ref));
+            );
+            if let Some(artifact_ref) = artifact_ref.as_ref() {
+                shadow.insert("r".to_string(), Value::String(artifact_ref.clone()));
+            }
+            if runtime_mem_super_slim_v2_should_keep_summary(
+                summary.as_deref(),
+                artifact_ref.as_deref(),
+            ) && let Some(summary) = summary
+            {
+                shadow.insert("s".to_string(), Value::String(summary));
             }
             Value::Object(shadow)
         }
@@ -1544,21 +1549,54 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
             if let Some(tool_id) = runtime_mem_first_text_at_paths(event, &["payload.call_id"]) {
                 shadow.insert("i".to_string(), Value::String(tool_id));
             }
-            if let Some(summary) =
-                runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS)
-            {
-                shadow.insert("s".to_string(), Value::String(summary));
-            }
-            if let Some(artifact_ref) = runtime_mem_first_artifact_ref_text_at_paths(
+            let summary =
+                runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS);
+            let artifact_ref = runtime_mem_first_artifact_ref_text_at_paths(
                 event,
                 RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
-            ) {
-                shadow.insert("r".to_string(), Value::String(artifact_ref));
+            );
+            if let Some(artifact_ref) = artifact_ref.as_ref() {
+                shadow.insert("r".to_string(), Value::String(artifact_ref.clone()));
+            }
+            if runtime_mem_super_slim_v2_should_keep_summary(
+                summary.as_deref(),
+                artifact_ref.as_deref(),
+            ) && let Some(summary) = summary
+            {
+                shadow.insert("s".to_string(), Value::String(summary));
             }
             Value::Object(shadow)
         }
         _ => event.clone(),
     }
+}
+
+fn runtime_mem_super_slim_v2_should_keep_summary(
+    summary: Option<&str>,
+    artifact_ref: Option<&str>,
+) -> bool {
+    let Some(summary) = summary else {
+        return false;
+    };
+    artifact_ref.is_none() || runtime_mem_summary_has_critical_signal(summary)
+}
+
+fn runtime_mem_summary_has_critical_signal(summary: &str) -> bool {
+    let lower = summary.to_ascii_lowercase();
+    [
+        "error",
+        "failed",
+        "failure",
+        "panic",
+        "exception",
+        "traceback",
+        "fatal",
+        "cannot",
+        "denied",
+        "timed out",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn runtime_mem_short_shadow_event(event_type: &str) -> serde_json::Map<String, Value> {
