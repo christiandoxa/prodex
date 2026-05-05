@@ -121,6 +121,165 @@ pub enum SmartContextCondensedToolOutput {
     },
 }
 
+pub const SMART_CONTEXT_COMMAND_OUTPUT_CACHE_MIN_BYTES: usize = 4 * 1024;
+pub const SMART_CONTEXT_COMMAND_OUTPUT_CRITICAL_SAMPLE_LIMIT: usize = 3;
+const SMART_CONTEXT_COMMAND_OUTPUT_CRITICAL_SAMPLE_BYTES: usize = 160;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextCommandOutputCacheRecord {
+    pub id: String,
+    pub content_hash: String,
+    pub byte_len: usize,
+    pub estimated_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextCommandOutputCacheInput {
+    pub id: String,
+    pub text: String,
+    pub previous_records: Vec<SmartContextCommandOutputCacheRecord>,
+    pub min_replacement_bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmartContextCommandOutputCacheKeepReason {
+    BelowMinByteThreshold,
+    NoMatchingPreviousOutput,
+    ChangedSincePreviousOutput,
+    SummaryWouldNotSaveTokens,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SmartContextCommandOutputCacheAction {
+    KeepExact {
+        reason: SmartContextCommandOutputCacheKeepReason,
+        summary: Option<String>,
+    },
+    ReplaceWithUnchangedSummary {
+        ref_id: String,
+        saved_tokens: u64,
+        critical_signal_count: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextCommandOutputCacheRewrite {
+    pub record: SmartContextCommandOutputCacheRecord,
+    pub output: String,
+    pub action: SmartContextCommandOutputCacheAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextCommandOutputCriticalSignals {
+    pub count: usize,
+    pub samples: Vec<String>,
+}
+
+pub fn smart_context_command_output_cache_record(
+    id: impl Into<String>,
+    text: &str,
+) -> SmartContextCommandOutputCacheRecord {
+    SmartContextCommandOutputCacheRecord {
+        id: id.into(),
+        content_hash: smart_context_hash_text(text),
+        byte_len: text.len(),
+        estimated_tokens: smart_context_estimate_tokens_from_body(text.as_bytes()),
+    }
+}
+
+pub fn smart_context_command_output_cache_rewrite(
+    input: SmartContextCommandOutputCacheInput,
+) -> SmartContextCommandOutputCacheRewrite {
+    let record = smart_context_command_output_cache_record(input.id, &input.text);
+    let min_replacement_bytes = if input.min_replacement_bytes == 0 {
+        SMART_CONTEXT_COMMAND_OUTPUT_CACHE_MIN_BYTES
+    } else {
+        input.min_replacement_bytes
+    };
+
+    if record.byte_len < min_replacement_bytes {
+        return smart_context_command_output_keep_exact(
+            record,
+            input.text,
+            SmartContextCommandOutputCacheKeepReason::BelowMinByteThreshold,
+            None,
+        );
+    }
+
+    let mut previous_records = input
+        .previous_records
+        .into_iter()
+        .filter(smart_context_command_output_cache_record_valid)
+        .collect::<Vec<_>>();
+    previous_records.sort_by(|left, right| {
+        (left.id != record.id)
+            .cmp(&(right.id != record.id))
+            .then_with(|| left.id.cmp(&right.id))
+            .then_with(|| left.content_hash.cmp(&right.content_hash))
+            .then_with(|| left.byte_len.cmp(&right.byte_len))
+    });
+
+    if let Some(previous) = previous_records.iter().find(|previous| {
+        previous.content_hash == record.content_hash && previous.byte_len == record.byte_len
+    }) {
+        let summary =
+            smart_context_command_output_unchanged_summary(&record, previous, &input.text);
+        let summary_estimated_tokens = smart_context_estimate_tokens_from_body(summary.as_bytes());
+        if summary.len() >= record.byte_len || summary_estimated_tokens >= record.estimated_tokens {
+            return smart_context_command_output_keep_exact(
+                record,
+                input.text,
+                SmartContextCommandOutputCacheKeepReason::SummaryWouldNotSaveTokens,
+                None,
+            );
+        }
+
+        return SmartContextCommandOutputCacheRewrite {
+            output: summary,
+            action: SmartContextCommandOutputCacheAction::ReplaceWithUnchangedSummary {
+                ref_id: previous.id.clone(),
+                saved_tokens: record
+                    .estimated_tokens
+                    .saturating_sub(summary_estimated_tokens),
+                critical_signal_count: smart_context_command_output_critical_signals(&input.text)
+                    .count,
+            },
+            record,
+        };
+    }
+
+    let changed_summary = previous_records
+        .iter()
+        .find(|previous| previous.id == record.id)
+        .map(|previous| smart_context_command_output_changed_summary(&record, previous));
+    let reason = if changed_summary.is_some() {
+        SmartContextCommandOutputCacheKeepReason::ChangedSincePreviousOutput
+    } else {
+        SmartContextCommandOutputCacheKeepReason::NoMatchingPreviousOutput
+    };
+
+    smart_context_command_output_keep_exact(record, input.text, reason, changed_summary)
+}
+
+pub fn smart_context_command_output_critical_signals(
+    text: &str,
+) -> SmartContextCommandOutputCriticalSignals {
+    let mut count = 0usize;
+    let mut samples = Vec::new();
+
+    for line in text.lines() {
+        if !smart_context_command_output_line_has_critical_signal(line) {
+            continue;
+        }
+        count += 1;
+        if samples.len() < SMART_CONTEXT_COMMAND_OUTPUT_CRITICAL_SAMPLE_LIMIT {
+            samples.push(smart_context_command_output_signal_sample(line));
+        }
+    }
+
+    SmartContextCommandOutputCriticalSignals { count, samples }
+}
+
 pub fn smart_context_artifact_marker(
     artifact: &SmartContextArtifactRef,
     compacted: &str,
@@ -1940,6 +2099,143 @@ fn smart_context_available_artifacts_by_hash_and_len(
     }
 
     available
+}
+
+fn smart_context_command_output_keep_exact(
+    record: SmartContextCommandOutputCacheRecord,
+    output: String,
+    reason: SmartContextCommandOutputCacheKeepReason,
+    summary: Option<String>,
+) -> SmartContextCommandOutputCacheRewrite {
+    SmartContextCommandOutputCacheRewrite {
+        record,
+        output,
+        action: SmartContextCommandOutputCacheAction::KeepExact { reason, summary },
+    }
+}
+
+fn smart_context_command_output_cache_record_valid(
+    record: &SmartContextCommandOutputCacheRecord,
+) -> bool {
+    non_empty(&record.content_hash) && record.byte_len > 0
+}
+
+fn smart_context_command_output_unchanged_summary(
+    current: &SmartContextCommandOutputCacheRecord,
+    previous: &SmartContextCommandOutputCacheRecord,
+    text: &str,
+) -> String {
+    let mut summary = format!(
+        "psc cmdout unchanged id={} ref={} h={} b={} tok={}; exact repeat omitted",
+        smart_context_command_output_label(&current.id),
+        smart_context_command_output_label(&previous.id),
+        current.content_hash,
+        current.byte_len,
+        current.estimated_tokens,
+    );
+
+    let critical_signals = smart_context_command_output_critical_signals(text);
+    if critical_signals.count > 0 {
+        summary.push('\n');
+        summary.push_str(&format!(
+            "psc cmdout critical n={}; exact signals available via h={}",
+            critical_signals.count, current.content_hash
+        ));
+        for sample in critical_signals.samples {
+            summary.push('\n');
+            summary.push_str("sig: ");
+            summary.push_str(&sample);
+        }
+    }
+
+    summary
+}
+
+fn smart_context_command_output_changed_summary(
+    current: &SmartContextCommandOutputCacheRecord,
+    previous: &SmartContextCommandOutputCacheRecord,
+) -> String {
+    let byte_delta = smart_context_signed_delta(current.byte_len, previous.byte_len);
+    let token_delta =
+        smart_context_signed_delta_u64(current.estimated_tokens, previous.estimated_tokens);
+    format!(
+        "psc cmdout changed id={} ref={} old_h={} new_h={} old_b={} new_b={} old_tok={} new_tok={} db={} dtok={}; exact output kept",
+        smart_context_command_output_label(&current.id),
+        smart_context_command_output_label(&previous.id),
+        previous.content_hash,
+        current.content_hash,
+        previous.byte_len,
+        current.byte_len,
+        previous.estimated_tokens,
+        current.estimated_tokens,
+        byte_delta,
+        token_delta,
+    )
+}
+
+fn smart_context_command_output_label(value: &str) -> String {
+    let mut label = String::new();
+    for value in value.trim().chars() {
+        if label.len() >= 96 {
+            break;
+        }
+        let replacement = if value.is_ascii_alphanumeric()
+            || matches!(value, ':' | '_' | '-' | '.' | '/' | '#' | '@')
+        {
+            value
+        } else {
+            '_'
+        };
+        label.push(replacement);
+    }
+
+    if label.is_empty() {
+        "unknown".to_string()
+    } else {
+        label
+    }
+}
+
+fn smart_context_command_output_line_has_critical_signal(line: &str) -> bool {
+    let line = line.to_ascii_lowercase();
+    [
+        "error",
+        "failed",
+        "failure",
+        "panic",
+        "exception",
+        "traceback",
+        "fatal",
+        "denied",
+        "not found",
+        "segmentation fault",
+        "abort",
+        "timeout",
+    ]
+    .iter()
+    .any(|signal| line.contains(signal))
+}
+
+fn smart_context_command_output_signal_sample(line: &str) -> String {
+    let line = line.trim();
+    let mut sample =
+        smart_context_summary_prefix(line, SMART_CONTEXT_COMMAND_OUTPUT_CRITICAL_SAMPLE_BYTES);
+    if sample.len() < line.len() {
+        sample.push_str("...");
+    }
+    sample
+}
+
+fn smart_context_signed_delta(current: usize, previous: usize) -> i128 {
+    let current = i128::try_from(current).unwrap_or(i128::MAX);
+    let previous = i128::try_from(previous).unwrap_or(i128::MAX);
+    current.saturating_sub(previous)
+}
+
+fn smart_context_signed_delta_u64(current: u64, previous: u64) -> i128 {
+    let current = i128::from(current);
+    let previous = i128::from(previous);
+    current.saturating_sub(previous)
 }
 
 fn smart_context_stabilize_static_context_id(id: &str) -> String {

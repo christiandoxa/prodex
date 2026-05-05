@@ -3,7 +3,7 @@ use crate::{
     RuntimeQuotaWindowStatus, UsageAuth,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
@@ -90,6 +90,7 @@ const RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS: usize = 256;
 const RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS: usize = 64;
 const RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES: usize = 8;
 const RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES: usize = 32;
+const RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES: usize = 256;
 
 static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
     Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
@@ -234,6 +235,36 @@ pub(crate) struct RuntimeSmartContextArtifactManifestEntry {
     pub(crate) command_kind: Option<String>,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactRepoMap {
+    pub(crate) complete: bool,
+    pub(crate) entries: Vec<RuntimeSmartContextArtifactRepoMapEntry>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeSmartContextArtifactRepoMapEntry {
+    pub(crate) kind: RuntimeSmartContextArtifactRepoMapEntryKind,
+    pub(crate) path: Option<String>,
+    pub(crate) module: Option<String>,
+    pub(crate) symbol: Option<String>,
+    pub(crate) line: Option<usize>,
+    pub(crate) artifact_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) range_start: usize,
+    pub(crate) range_end: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum RuntimeSmartContextArtifactRepoMapEntryKind {
+    Path,
+    Module,
+    Symbol,
+    Test,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct RuntimeSmartContextArtifactStore {
     artifacts: BTreeMap<String, RuntimeSmartContextArtifact>,
@@ -368,6 +399,96 @@ impl RuntimeSmartContextArtifactStore {
                 }
             })
             .collect()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn repo_map_projection(&self, limit: usize) -> RuntimeSmartContextArtifactRepoMap {
+        let limit = limit.min(RUNTIME_SMART_CONTEXT_MAX_REPO_MAP_ENTRIES);
+        if limit == 0 {
+            return RuntimeSmartContextArtifactRepoMap {
+                complete: self.artifacts.is_empty(),
+                entries: Vec::new(),
+            };
+        }
+
+        let mut entries = BTreeMap::<
+            (
+                RuntimeSmartContextArtifactRepoMapEntryKind,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ),
+            RuntimeSmartContextArtifactRepoMapEntry,
+        >::new();
+        let mut complete = true;
+        let mut artifacts = self.artifacts.values().collect::<Vec<_>>();
+        artifacts.sort_by(|left, right| {
+            right
+                .sequence
+                .cmp(&left.sequence)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        for artifact in artifacts {
+            let Some(line_index) = artifact.line_index.as_ref() else {
+                complete = false;
+                continue;
+            };
+            complete &= line_index.semantic_complete && line_index.symbol_complete;
+
+            let paths = runtime_smart_context_repo_map_paths(line_index);
+            let primary_path = (paths.len() == 1).then(|| paths[0].clone());
+            for path in paths {
+                runtime_smart_context_insert_repo_map_entry(
+                    &mut entries,
+                    RuntimeSmartContextArtifactRepoMapEntry {
+                        kind: RuntimeSmartContextArtifactRepoMapEntryKind::Path,
+                        module: runtime_smart_context_repo_map_module_from_path(&path),
+                        symbol: None,
+                        line: runtime_smart_context_repo_map_first_path_line(line_index, &path),
+                        path: Some(path),
+                        artifact_id: artifact.id.clone(),
+                        sequence: artifact.sequence,
+                        range_start: 0,
+                        range_end: 0,
+                    },
+                );
+            }
+
+            for range in &line_index.symbol_ranges {
+                let Some(symbol) = range.symbol.clone() else {
+                    continue;
+                };
+                let kind = runtime_smart_context_repo_map_symbol_kind(range);
+                let path = primary_path.clone();
+                runtime_smart_context_insert_repo_map_entry(
+                    &mut entries,
+                    RuntimeSmartContextArtifactRepoMapEntry {
+                        kind,
+                        module: runtime_smart_context_repo_map_symbol_module(
+                            kind,
+                            path.as_deref(),
+                            &symbol,
+                        ),
+                        symbol: Some(symbol),
+                        line: range.line,
+                        path,
+                        artifact_id: artifact.id.clone(),
+                        sequence: artifact.sequence,
+                        range_start: range.start,
+                        range_end: range.end,
+                    },
+                );
+            }
+        }
+
+        let mut entries = entries.into_values().collect::<Vec<_>>();
+        if entries.len() > limit {
+            entries.truncate(limit);
+            complete = false;
+        }
+
+        RuntimeSmartContextArtifactRepoMap { complete, entries }
     }
 
     pub(crate) fn insert_text(
@@ -791,6 +912,139 @@ fn runtime_smart_context_duplicate_chunk_fingerprints(
         });
     }
     (duplicates, complete)
+}
+
+fn runtime_smart_context_repo_map_paths(
+    line_index: &RuntimeSmartContextArtifactLineIndex,
+) -> Vec<String> {
+    let mut paths = BTreeSet::new();
+    for range in line_index
+        .file_location_ranges
+        .iter()
+        .chain(line_index.diff_hunk_ranges.iter())
+    {
+        if let Some(path) = range.path.as_ref().filter(|path| !path.trim().is_empty()) {
+            paths.insert(path.clone());
+        }
+    }
+    paths.into_iter().collect()
+}
+
+fn runtime_smart_context_repo_map_first_path_line(
+    line_index: &RuntimeSmartContextArtifactLineIndex,
+    path: &str,
+) -> Option<usize> {
+    line_index
+        .file_location_ranges
+        .iter()
+        .chain(line_index.diff_hunk_ranges.iter())
+        .find(|range| range.path.as_deref() == Some(path))
+        .and_then(|range| range.line.or(range.new_start).or(range.old_start))
+}
+
+fn runtime_smart_context_repo_map_symbol_kind(
+    range: &RuntimeSmartContextArtifactSemanticLineRange,
+) -> RuntimeSmartContextArtifactRepoMapEntryKind {
+    match range.label.as_deref() {
+        Some("test_symbol") => RuntimeSmartContextArtifactRepoMapEntryKind::Test,
+        Some("symbol") if runtime_smart_context_repo_map_symbol_is_module_like(&range.text) => {
+            RuntimeSmartContextArtifactRepoMapEntryKind::Module
+        }
+        _ => RuntimeSmartContextArtifactRepoMapEntryKind::Symbol,
+    }
+}
+
+fn runtime_smart_context_repo_map_symbol_module(
+    kind: RuntimeSmartContextArtifactRepoMapEntryKind,
+    path: Option<&str>,
+    symbol: &str,
+) -> Option<String> {
+    if kind == RuntimeSmartContextArtifactRepoMapEntryKind::Module {
+        return runtime_smart_context_bounded_string(symbol);
+    }
+    path.and_then(runtime_smart_context_repo_map_module_from_path)
+}
+
+fn runtime_smart_context_repo_map_symbol_is_module_like(text: &str) -> bool {
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty()
+            || trimmed.starts_with("#[")
+            || trimmed.starts_with('@')
+            || trimmed.starts_with("//")
+            || trimmed.starts_with('#')
+        {
+            continue;
+        }
+        return runtime_smart_context_repo_map_declaration_keyword(trimmed)
+            .is_some_and(|keyword| matches!(keyword, "mod" | "class"));
+    }
+    false
+}
+
+fn runtime_smart_context_repo_map_declaration_keyword(line: &str) -> Option<&str> {
+    let line = line
+        .strip_prefix("pub(crate) ")
+        .or_else(|| line.strip_prefix("pub(super) "))
+        .or_else(|| line.strip_prefix("pub "))
+        .unwrap_or(line);
+    let line = line
+        .strip_prefix("export default ")
+        .or_else(|| line.strip_prefix("export "))
+        .or_else(|| line.strip_prefix("async "))
+        .unwrap_or(line);
+    line.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .find(|part| !part.is_empty())
+}
+
+fn runtime_smart_context_repo_map_module_from_path(path: &str) -> Option<String> {
+    let path = path
+        .trim_start_matches("a/")
+        .trim_start_matches("b/")
+        .trim_start_matches("./")
+        .trim_matches('"');
+    let without_extension = path.rsplit_once('.').map(|(base, _)| base).unwrap_or(path);
+    let mut parts = without_extension
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>();
+    if parts.first() == Some(&"src") && parts.len() > 1 {
+        parts.remove(0);
+    }
+    if matches!(parts.last(), Some(&"mod" | &"lib" | &"main" | &"index")) && parts.len() > 1 {
+        parts.pop();
+    }
+    runtime_smart_context_bounded_string(&parts.join("::"))
+}
+
+fn runtime_smart_context_insert_repo_map_entry(
+    entries: &mut BTreeMap<
+        (
+            RuntimeSmartContextArtifactRepoMapEntryKind,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ),
+        RuntimeSmartContextArtifactRepoMapEntry,
+    >,
+    entry: RuntimeSmartContextArtifactRepoMapEntry,
+) {
+    let key = (
+        entry.kind,
+        entry.path.clone(),
+        entry.module.clone(),
+        entry.symbol.clone(),
+    );
+    entries
+        .entry(key)
+        .and_modify(|current| {
+            if entry.sequence > current.sequence
+                || entry.sequence == current.sequence && entry.artifact_id < current.artifact_id
+            {
+                *current = entry.clone();
+            }
+        })
+        .or_insert(entry);
 }
 
 #[derive(Default)]
@@ -1744,6 +1998,119 @@ test result: FAILED. 0 passed; 1 failed";
             RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES
         );
         assert!(!index.semantic_complete);
+    }
+
+    #[test]
+    fn runtime_smart_context_repo_map_projection_collects_multilanguage_symbols() {
+        let rust = "\
+src/lib.rs:1:1
+pub mod engine {
+}
+#[test]
+fn parses_repo_map() {
+}
+fn helper() {
+}";
+        let typescript = "\
+src/ui/App.tsx:4:1
+export class Widget {
+}
+test(\"renders widget\", () => {
+});
+const useWidget = () => {
+};";
+        let python = "\
+tests/test_cli.py:1:1
+class CliHarness:
+    pass
+def test_launch_super():
+    pass
+async def load_profile():
+    pass";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        store.insert_text(1, rust).expect("rust artifact inserted");
+        store
+            .insert_text(2, typescript)
+            .expect("typescript artifact inserted");
+        store
+            .insert_text(3, python)
+            .expect("python artifact inserted");
+
+        let repo_map = store.repo_map_projection(64);
+
+        assert!(repo_map.complete);
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path
+                && entry.path.as_deref() == Some("src/lib.rs")
+                && entry.module.as_deref() == Some("lib")
+        }));
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Module
+                && entry.path.as_deref() == Some("src/lib.rs")
+                && entry.symbol.as_deref() == Some("engine")
+        }));
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Test
+                && entry.symbol.as_deref() == Some("parses_repo_map")
+        }));
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Symbol
+                && entry.symbol.as_deref() == Some("helper")
+                && entry.module.as_deref() == Some("lib")
+        }));
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Module
+                && entry.path.as_deref() == Some("src/ui/App.tsx")
+                && entry.symbol.as_deref() == Some("Widget")
+        }));
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Test
+                && entry.path.as_deref() == Some("src/ui/App.tsx")
+                && entry.symbol.as_deref() == Some("renders widget")
+        }));
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Module
+                && entry.path.as_deref() == Some("tests/test_cli.py")
+                && entry.symbol.as_deref() == Some("CliHarness")
+        }));
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Test
+                && entry.path.as_deref() == Some("tests/test_cli.py")
+                && entry.symbol.as_deref() == Some("test_launch_super")
+        }));
+        assert!(repo_map.entries.iter().any(|entry| {
+            entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Symbol
+                && entry.path.as_deref() == Some("tests/test_cli.py")
+                && entry.symbol.as_deref() == Some("load_profile")
+        }));
+    }
+
+    #[test]
+    fn runtime_smart_context_repo_map_projection_is_bounded_and_deterministic() {
+        let text = (0..80)
+            .flat_map(|index| {
+                [
+                    format!("src/file{index}.rs:1:1"),
+                    format!("fn symbol_{index}() {{}}"),
+                ]
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        store.insert_text(1, &text).expect("artifact inserted");
+
+        let first = store.repo_map_projection(16);
+        let second = store.repo_map_projection(16);
+
+        assert_eq!(first, second);
+        assert_eq!(first.entries.len(), 16);
+        assert!(!first.complete);
+        assert!(
+            first
+                .entries
+                .iter()
+                .all(|entry| entry.kind == RuntimeSmartContextArtifactRepoMapEntryKind::Path)
+        );
     }
 
     #[test]

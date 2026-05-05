@@ -71,6 +71,12 @@ const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
 const RUNTIME_MEM_SUPER_SLIM_TOOL_OMITTED: &str = "ss:omit=tool";
 const RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS: usize = 12;
+const RUNTIME_MEM_CONVERSATION_ELISION_RECENT_EVENT_WINDOW: usize = 8;
+const RUNTIME_MEM_CONVERSATION_ELISION_MIN_CONTENT_BYTES: usize = 384;
+const RUNTIME_MEM_CONVERSATION_ELISION_SCAN_CHAR_LIMIT: usize = 8192;
+const RUNTIME_MEM_CONVERSATION_ELISION_MAX_FACTS: usize = 4;
+const RUNTIME_MEM_CONVERSATION_ELISION_FACT_CHAR_LIMIT: usize = 96;
+const RUNTIME_MEM_CONVERSATION_ELISION_SUMMARY_CHAR_LIMIT: usize = 360;
 const RUNTIME_MEM_RECALL_PROMPT_SCAN_CHAR_LIMIT: usize = 4096;
 const RUNTIME_MEM_RECALL_PROMPT_MAX_TERMS: usize = 32;
 pub const RUNTIME_MEM_DEFAULT_RECENT_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
@@ -667,11 +673,20 @@ pub fn runtime_mem_super_slim_shadow_codex_events<'a>(
     events: impl IntoIterator<Item = &'a Value>,
 ) -> Vec<Value> {
     let mut dedupe_state = RuntimeMemEventDedupeState::default();
+    let events = events.into_iter().collect::<Vec<_>>();
+    let mut elision_state = RuntimeMemConversationElisionState::new(events.len());
     events
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(index, event)| {
-            runtime_mem_super_slim_shadow_codex_event_with_dedupe(event, index, &mut dedupe_state)
+            elision_state.remember_event(event);
+            let mut shadow = runtime_mem_super_slim_shadow_codex_event_with_dedupe(
+                event,
+                index,
+                &mut dedupe_state,
+            );
+            runtime_mem_elide_old_conversation_event(event, &mut shadow, index, &elision_state);
+            shadow
         })
         .collect()
 }
@@ -1287,6 +1302,70 @@ struct RuntimeMemDedupeReplacement {
     artifact_ref: Option<String>,
 }
 
+#[derive(Debug, Default)]
+struct RuntimeMemConversationElisionState {
+    total_events: usize,
+    tool_commands: HashMap<String, String>,
+}
+
+impl RuntimeMemConversationElisionState {
+    fn new(total_events: usize) -> Self {
+        Self {
+            total_events,
+            tool_commands: HashMap::new(),
+        }
+    }
+
+    fn remember_event(&mut self, event: &Value) {
+        let Some(payload_type) =
+            runtime_mem_lookup_json_path(event, "payload.type").and_then(Value::as_str)
+        else {
+            return;
+        };
+        if !matches!(
+            payload_type,
+            "function_call" | "custom_tool_call" | "web_search_call" | "exec_command"
+        ) {
+            return;
+        }
+        let Some(tool_id) = runtime_mem_first_text_at_paths(event, &["payload.call_id"]) else {
+            return;
+        };
+        let Some(command) = runtime_mem_first_text_at_paths(
+            event,
+            &["payload.command", "payload.action", "payload.name"],
+        ) else {
+            return;
+        };
+        self.tool_commands.entry(tool_id).or_insert(command);
+    }
+
+    fn command_for_event(&self, event: &Value) -> Option<&str> {
+        let tool_id = runtime_mem_first_text_at_paths(event, &["payload.call_id"])?;
+        self.tool_commands.get(&tool_id).map(String::as_str)
+    }
+
+    fn event_is_old(&self, index: usize) -> bool {
+        index.saturating_add(RUNTIME_MEM_CONVERSATION_ELISION_RECENT_EVENT_WINDOW)
+            < self.total_events
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeMemConversationElisionKind {
+    Assistant,
+    Tool,
+}
+
+impl RuntimeMemConversationElisionKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Assistant => "assistant",
+            Self::Tool => "tool",
+        }
+    }
+}
+
 impl RuntimeMemEventDedupeState {
     fn replacement_for_optional_content(
         &mut self,
@@ -1399,6 +1478,68 @@ fn runtime_mem_super_slim_shadow_codex_event_with_dedupe(
     shadow
 }
 
+fn runtime_mem_elide_old_conversation_event(
+    event: &Value,
+    shadow: &mut Value,
+    index: usize,
+    elision_state: &RuntimeMemConversationElisionState,
+) {
+    if !elision_state.event_is_old(index) {
+        return;
+    }
+    let Some(payload_type) =
+        runtime_mem_lookup_json_path(event, "payload.type").and_then(Value::as_str)
+    else {
+        return;
+    };
+    let (kind, content_path, summary_paths, artifact_ref_paths) = match payload_type {
+        "agent_message" => (
+            RuntimeMemConversationElisionKind::Assistant,
+            "payload.message",
+            RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS,
+            RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
+        ),
+        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => (
+            RuntimeMemConversationElisionKind::Tool,
+            "payload.output",
+            RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS,
+            RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
+        ),
+        _ => return,
+    };
+
+    let Some(content) = runtime_mem_lookup_json_path(event, content_path)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|content| content.len() >= RUNTIME_MEM_CONVERSATION_ELISION_MIN_CONTENT_BYTES)
+    else {
+        return;
+    };
+    if kind == RuntimeMemConversationElisionKind::Assistant
+        && runtime_mem_conversation_has_final_decision_signal(content)
+    {
+        return;
+    }
+
+    let artifact_ref =
+        runtime_mem_first_prodex_artifact_ref_at_paths(event, artifact_ref_paths, content);
+    let command = (kind == RuntimeMemConversationElisionKind::Tool)
+        .then(|| elision_state.command_for_event(event))
+        .flatten();
+    let summary =
+        runtime_mem_conversation_elision_summary(kind, content, command, artifact_ref.as_deref());
+    for path in summary_paths {
+        runtime_mem_set_json_path(shadow, path, Value::String(summary.clone()));
+    }
+    if let Some(artifact_ref) = artifact_ref {
+        runtime_mem_set_json_path(
+            shadow,
+            "payload.metadata.artifact_ref",
+            Value::String(artifact_ref),
+        );
+    }
+}
+
 fn runtime_mem_assistant_summary_duplicate_replacement(
     event: &Value,
     index: usize,
@@ -1447,6 +1588,233 @@ fn runtime_mem_event_content_spec(event: &Value) -> Option<RuntimeMemEventConten
 fn runtime_mem_event_dedupe_id(event: &Value, index: usize) -> String {
     runtime_mem_first_text_at_paths(event, &["payload.call_id", "payload.id", "id"])
         .unwrap_or_else(|| format!("event[{index}]"))
+}
+
+fn runtime_mem_conversation_elision_summary(
+    kind: RuntimeMemConversationElisionKind,
+    content: &str,
+    command: Option<&str>,
+    artifact_ref: Option<&str>,
+) -> String {
+    let mut parts = vec![format!(
+        "mem facts: kind={}; h={}; b={}; t~={}",
+        kind.as_str(),
+        runtime_mem_content_hash(content),
+        content.len(),
+        runtime_mem_approx_token_count(content)
+    )];
+
+    let artifacts = runtime_mem_conversation_artifact_facts(content, artifact_ref);
+    runtime_mem_push_summary_facts(&mut parts, "artifacts", &artifacts);
+
+    let commands = runtime_mem_conversation_command_facts(content, command);
+    runtime_mem_push_summary_facts(&mut parts, "cmds", &commands);
+
+    let files = runtime_mem_conversation_file_facts(content);
+    runtime_mem_push_summary_facts(&mut parts, "files", &files);
+
+    let failures =
+        runtime_mem_conversation_line_facts(content, runtime_mem_summary_has_critical_signal);
+    runtime_mem_push_summary_facts(&mut parts, "failures", &failures);
+
+    let decisions = runtime_mem_conversation_line_facts(
+        content,
+        runtime_mem_conversation_line_has_decision_signal,
+    );
+    runtime_mem_push_summary_facts(&mut parts, "decisions", &decisions);
+
+    runtime_mem_truncate_chars(
+        &parts.join("; "),
+        RUNTIME_MEM_CONVERSATION_ELISION_SUMMARY_CHAR_LIMIT,
+    )
+}
+
+fn runtime_mem_push_summary_facts(parts: &mut Vec<String>, label: &str, facts: &[String]) {
+    if facts.is_empty() {
+        return;
+    }
+    parts.push(format!("{label}=[{}]", facts.join(", ")));
+}
+
+fn runtime_mem_conversation_file_facts(content: &str) -> Vec<String> {
+    let scan = runtime_mem_conversation_scan_text(content);
+    let mut facts = Vec::new();
+    for raw in scan.split(|ch: char| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';'
+            )
+    }) {
+        let Some(path) = runtime_mem_conversation_normalize_path_fact(raw) else {
+            continue;
+        };
+        runtime_mem_push_limited_unique_fact(&mut facts, path);
+        if facts.len() >= RUNTIME_MEM_CONVERSATION_ELISION_MAX_FACTS {
+            break;
+        }
+    }
+    facts
+}
+
+fn runtime_mem_conversation_command_facts(content: &str, command: Option<&str>) -> Vec<String> {
+    let mut facts = Vec::new();
+    if let Some(command) = command.and_then(runtime_mem_conversation_normalize_command_fact) {
+        runtime_mem_push_limited_unique_fact(&mut facts, command);
+    }
+    for line in runtime_mem_conversation_scan_text(content).lines() {
+        let Some(command) = runtime_mem_conversation_command_from_line(line) else {
+            continue;
+        };
+        runtime_mem_push_limited_unique_fact(&mut facts, command);
+        if facts.len() >= RUNTIME_MEM_CONVERSATION_ELISION_MAX_FACTS {
+            break;
+        }
+    }
+    facts
+}
+
+fn runtime_mem_conversation_artifact_facts(
+    content: &str,
+    artifact_ref: Option<&str>,
+) -> Vec<String> {
+    let mut facts = Vec::new();
+    if let Some(artifact_ref) = artifact_ref
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        runtime_mem_push_limited_unique_fact(&mut facts, artifact_ref.to_string());
+    }
+    let aliases = runtime_mem_artifact_aliases_from_text(content);
+    for token in runtime_mem_artifact_ref_tokens(&runtime_mem_conversation_scan_text(content)) {
+        let Some(artifact_ref) = runtime_mem_parse_artifact_ref_token(token, &aliases) else {
+            continue;
+        };
+        runtime_mem_push_limited_unique_fact(&mut facts, artifact_ref);
+        if facts.len() >= RUNTIME_MEM_CONVERSATION_ELISION_MAX_FACTS {
+            break;
+        }
+    }
+    facts
+}
+
+fn runtime_mem_conversation_line_facts(
+    content: &str,
+    predicate: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut facts = Vec::new();
+    for line in runtime_mem_conversation_scan_text(content).lines() {
+        let line = line.trim();
+        if line.is_empty() || !predicate(line) {
+            continue;
+        }
+        runtime_mem_push_limited_unique_fact(
+            &mut facts,
+            runtime_mem_truncate_chars(line, RUNTIME_MEM_CONVERSATION_ELISION_FACT_CHAR_LIMIT),
+        );
+        if facts.len() >= RUNTIME_MEM_CONVERSATION_ELISION_MAX_FACTS {
+            break;
+        }
+    }
+    facts
+}
+
+fn runtime_mem_conversation_scan_text(content: &str) -> String {
+    content
+        .chars()
+        .take(RUNTIME_MEM_CONVERSATION_ELISION_SCAN_CHAR_LIMIT)
+        .collect()
+}
+
+fn runtime_mem_conversation_normalize_path_fact(raw: &str) -> Option<String> {
+    let mut term = raw
+        .trim()
+        .trim_matches('`')
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_matches(|ch: char| matches!(ch, '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'))
+        .trim_end_matches(|ch: char| matches!(ch, '.' | ',' | ';' | '!' | '?'));
+    while let Some((head, tail)) = term.rsplit_once(':') {
+        if tail.is_empty() || !tail.chars().all(|ch| ch.is_ascii_digit()) {
+            break;
+        }
+        term = head;
+    }
+    let term = term.trim_start_matches("./");
+    if term.len() < 3 || !runtime_mem_prompt_term_is_path(term) {
+        return None;
+    }
+    Some(runtime_mem_truncate_chars(
+        term,
+        RUNTIME_MEM_CONVERSATION_ELISION_FACT_CHAR_LIMIT,
+    ))
+}
+
+fn runtime_mem_conversation_command_from_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    let command = line
+        .strip_prefix('$')
+        .or_else(|| line.strip_prefix('>'))
+        .map(str::trim)
+        .unwrap_or(line);
+    if !runtime_mem_conversation_looks_like_command(command) {
+        return None;
+    }
+    runtime_mem_conversation_normalize_command_fact(command)
+}
+
+fn runtime_mem_conversation_normalize_command_fact(command: &str) -> Option<String> {
+    let command = command.trim();
+    if command.is_empty() {
+        return None;
+    }
+    Some(runtime_mem_truncate_chars(
+        command,
+        RUNTIME_MEM_CONVERSATION_ELISION_FACT_CHAR_LIMIT,
+    ))
+}
+
+fn runtime_mem_conversation_looks_like_command(command: &str) -> bool {
+    [
+        "./", "cargo ", "cargo-", "git ", "rg ", "grep ", "npm ", "pnpm ", "yarn ", "pytest",
+        "python ", "python3 ", "node ", "prodex ", "codex ", "make ", "just ",
+    ]
+    .iter()
+    .any(|prefix| command.starts_with(prefix))
+}
+
+fn runtime_mem_push_limited_unique_fact(facts: &mut Vec<String>, fact: String) {
+    let fact = fact.trim();
+    if fact.is_empty() || facts.iter().any(|existing| existing == fact) {
+        return;
+    }
+    facts.push(fact.to_string());
+}
+
+fn runtime_mem_conversation_has_final_decision_signal(text: &str) -> bool {
+    runtime_mem_conversation_scan_text(text)
+        .lines()
+        .any(runtime_mem_conversation_line_has_final_decision_signal)
+}
+
+fn runtime_mem_conversation_line_has_final_decision_signal(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    lower.starts_with("final:")
+        || lower.starts_with("final answer")
+        || lower.starts_with("decision:")
+        || lower.starts_with("decided:")
+        || lower.starts_with("conclusion:")
+        || lower.contains("final decision")
+}
+
+fn runtime_mem_conversation_line_has_decision_signal(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    lower.contains("decision")
+        || lower.contains("decided")
+        || lower.contains("conclusion")
+        || lower.contains("implemented")
+        || lower.contains("changed")
+        || lower.contains("fixed")
 }
 
 fn runtime_mem_lookup_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {

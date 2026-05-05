@@ -837,6 +837,134 @@ fn lineage_key_helpers_round_trip_and_filter_internal_keys() {
 }
 
 #[test]
+fn smart_context_stale_pruning_reuses_exact_large_payload() {
+    let decision = runtime_smart_context_stale_context_pruning_decision(
+        RuntimeSmartContextStaleContextPruningInput {
+            previous: Some(RuntimeSmartContextStaleContextSnapshot {
+                hash: Some("fnv1a64:aaaaaaaaaaaaaaaa"),
+                byte_len: 8_192,
+                token_len: 2_048,
+            }),
+            current: RuntimeSmartContextStaleContextSnapshot {
+                hash: Some("fnv1a64:aaaaaaaaaaaaaaaa"),
+                byte_len: 8_192,
+                token_len: 2_048,
+            },
+            changed: true,
+        },
+    );
+
+    assert_eq!(
+        decision.kind,
+        RuntimeSmartContextStaleContextPruningKind::ExactReuse
+    );
+    assert!(decision.kind.can_prune_payload());
+    assert_eq!(decision.reusable_byte_len, 8_192);
+    assert_eq!(decision.reusable_token_len, 2_048);
+    assert_eq!(
+        decision.summary,
+        "static-context: reuse hash=fnv1a64:aaaaaaaaaaaaaaaa bytes=8192 tokens=2048 saved_bytes=8192 saved_tokens=2048"
+    );
+}
+
+#[test]
+fn smart_context_stale_pruning_reports_changed_large_payload_delta() {
+    let decision = runtime_smart_context_stale_context_pruning_decision(
+        RuntimeSmartContextStaleContextPruningInput {
+            previous: Some(RuntimeSmartContextStaleContextSnapshot {
+                hash: Some("fnv1a64:aaaaaaaaaaaaaaaa"),
+                byte_len: 8_192,
+                token_len: 2_048,
+            }),
+            current: RuntimeSmartContextStaleContextSnapshot {
+                hash: Some("fnv1a64:bbbbbbbbbbbbbbbb"),
+                byte_len: 9_000,
+                token_len: 1_900,
+            },
+            changed: false,
+        },
+    );
+
+    assert_eq!(
+        decision.kind,
+        RuntimeSmartContextStaleContextPruningKind::Changed
+    );
+    assert!(decision.kind.can_prune_payload());
+    assert_eq!(decision.reusable_byte_len, 0);
+    assert_eq!(
+        decision.previous_hash.as_deref(),
+        Some("fnv1a64:aaaaaaaaaaaaaaaa")
+    );
+    assert_eq!(
+        decision.current_hash.as_deref(),
+        Some("fnv1a64:bbbbbbbbbbbbbbbb")
+    );
+    assert_eq!(
+        decision.summary,
+        "static-context: changed previous_hash=fnv1a64:aaaaaaaaaaaaaaaa current_hash=fnv1a64:bbbbbbbbbbbbbbbb previous_bytes=8192 current_bytes=9000 previous_tokens=2048 current_tokens=1900 byte_delta=+808 token_delta=-148"
+    );
+}
+
+#[test]
+fn smart_context_stale_pruning_no_previous_is_noop() {
+    let decision = runtime_smart_context_stale_context_pruning_decision(
+        RuntimeSmartContextStaleContextPruningInput {
+            previous: None,
+            current: RuntimeSmartContextStaleContextSnapshot {
+                hash: Some(" fnv1a64:cccccccccccccccc "),
+                byte_len: 4_096,
+                token_len: 1_024,
+            },
+            changed: true,
+        },
+    );
+
+    assert_eq!(
+        decision.kind,
+        RuntimeSmartContextStaleContextPruningKind::NoPrevious
+    );
+    assert!(!decision.kind.can_prune_payload());
+    assert_eq!(
+        decision.current_hash.as_deref(),
+        Some("fnv1a64:cccccccccccccccc")
+    );
+    assert_eq!(
+        decision.summary,
+        "static-context: no-op reason=no_previous current_hash=fnv1a64:cccccccccccccccc current_bytes=4096 current_tokens=1024"
+    );
+}
+
+#[test]
+fn smart_context_stale_pruning_too_small_is_noop_before_reuse() {
+    let decision = runtime_smart_context_stale_context_pruning_decision(
+        RuntimeSmartContextStaleContextPruningInput {
+            previous: Some(RuntimeSmartContextStaleContextSnapshot {
+                hash: Some("fnv1a64:dddddddddddddddd"),
+                byte_len: 128,
+                token_len: 32,
+            }),
+            current: RuntimeSmartContextStaleContextSnapshot {
+                hash: Some("fnv1a64:dddddddddddddddd"),
+                byte_len: 128,
+                token_len: 32,
+            },
+            changed: false,
+        },
+    );
+
+    assert_eq!(
+        decision.kind,
+        RuntimeSmartContextStaleContextPruningKind::TooSmall
+    );
+    assert!(!decision.kind.can_prune_payload());
+    assert_eq!(decision.reusable_byte_len, 0);
+    assert_eq!(
+        decision.summary,
+        "static-context: no-op reason=too_small current_hash=fnv1a64:dddddddddddddddd current_bytes=128 current_tokens=32"
+    );
+}
+
+#[test]
 fn smart_context_artifact_helpers_hash_touch_and_extract_line_ranges() {
     let mut store = RuntimeSmartContextArtifactStore::default();
     let content = "one\ntwo\nthree\n";

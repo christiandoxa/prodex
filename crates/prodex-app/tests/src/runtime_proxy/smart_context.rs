@@ -1028,6 +1028,123 @@ fn smart_context_rehydrates_compact_multi_line_ranges() {
 }
 
 #[test]
+fn smart_context_budget_limited_rehydrate_prefers_symbol_critical_and_import_ranges() {
+    let unrelated = (0..80)
+        .map(|index| format!("fn unrelated_{index}() -> usize {{ {index} }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let artifact_text = format!(
+        "\
+use crate::runtime::Thing;
+use std::sync::Arc;
+
+{unrelated}
+
+fn target_symbol() -> usize {{
+    let _thing = Thing::default();
+    Arc::strong_count(&Arc::new(1))
+}}
+
+error[E0425]: cannot find value `missing` in this scope
+src/lib.rs:77:9
+diagnostic context line
+FULL_ARTIFACT_TAIL_SHOULD_NOT_REHYDRATE"
+    );
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, &artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("inspect {}", runtime_smart_context_artifact_ref(&artifact.id))
+        }]
+    });
+    let plan = runtime_smart_context_auto_rehydrate_plan(
+        &value,
+        &store,
+        96,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Condensed,
+    );
+    assert!(plan.actions.iter().any(|action| matches!(
+        action,
+        runtime_proxy_crate::SmartContextRehydrateAction::Defer {
+            id,
+            reason: runtime_proxy_crate::SmartContextRehydrateDeferReason::TokenBudgetExceeded
+        } if id == &artifact.id
+    )));
+
+    let mut stats = RuntimeSmartContextTransformStats::default();
+    runtime_smart_context_rehydrate_value_with_plan(&mut value, &store, &plan, &mut stats);
+    let count = runtime_smart_context_selective_rehydrate_budget_aware_ranges(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &RuntimeSmartContextSelectiveRehydrateTerms {
+            error_codes: BTreeSet::from(["E0425".to_string()]),
+            test_symbols: BTreeSet::from(["crate::module::target_symbol".to_string()]),
+            ..RuntimeSmartContextSelectiveRehydrateTerms::default()
+        },
+        &plan,
+        180,
+        &mut stats,
+    );
+
+    let content = value["input"][0]["content"].as_str().unwrap();
+    assert!(count >= 3);
+    assert_eq!(stats.rehydrated_refs, count);
+    assert!(content.contains(SMART_CONTEXT_LABEL_SEMANTIC_EXACT));
+    assert!(content.contains(SMART_CONTEXT_LABEL_REHYDRATE_PLAN_EXACT));
+    assert!(content.contains("use crate::runtime::Thing;"));
+    assert!(content.contains("fn target_symbol() -> usize"));
+    assert!(content.contains("error[E0425]: cannot find value `missing` in this scope"));
+    assert!(content.contains("src/lib.rs:77:9"));
+    assert!(!content.contains("FULL_ARTIFACT_TAIL_SHOULD_NOT_REHYDRATE"));
+}
+
+#[test]
+fn smart_context_budget_available_rehydrates_full_artifact_without_read_plan() {
+    let artifact_text = "fn target_symbol() -> usize { 1 }\nFULL_ARTIFACT_TAIL_REHYDRATED";
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("inspect {}", runtime_smart_context_artifact_ref(&artifact.id))
+        }]
+    });
+    let plan = runtime_smart_context_auto_rehydrate_plan(
+        &value,
+        &store,
+        usize::MAX,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Exact,
+    );
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value_with_plan(&mut value, &store, &plan, &mut stats);
+    let count = runtime_smart_context_selective_rehydrate_budget_aware_ranges(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &RuntimeSmartContextSelectiveRehydrateTerms {
+            test_symbols: BTreeSet::from(["target_symbol".to_string()]),
+            ..RuntimeSmartContextSelectiveRehydrateTerms::default()
+        },
+        &plan,
+        usize::MAX,
+        &mut stats,
+    );
+
+    let content = value["input"][0]["content"].as_str().unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(stats.rehydrated_refs, 1);
+    assert!(content.contains("FULL_ARTIFACT_TAIL_REHYDRATED"));
+    assert!(!content.contains(SMART_CONTEXT_LABEL_REHYDRATE_PLAN_EXACT));
+}
+
+#[test]
 fn smart_context_parser_accepts_short_and_legacy_artifact_refs() {
     let refs = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(
         "new psc:abc123#L2-L4 full psc:sc:def456 old prodex-artifact:sc:789abc?lines=L1-L1"
@@ -3062,6 +3179,46 @@ fn smart_context_reuses_existing_tool_output_artifact_with_short_ref() {
     let rewritten = value["input"][0]["output"].as_str().unwrap();
     assert_eq!(rewritten, runtime_smart_context_artifact_ref(&artifact.id));
     assert!(!rewritten.contains("repeat tool output repeat tool output"));
+    assert_eq!(stats.artifacts_stored, 0);
+    assert_eq!(stats.repeat_tool_output_refs, 1);
+    assert_eq!(stats.tool_outputs_condensed, 1);
+
+    let mut rehydrate_stats = RuntimeSmartContextTransformStats::default();
+    runtime_smart_context_rehydrate_value(&mut value, &store, &mut rehydrate_stats);
+    assert_eq!(value["input"][0]["output"].as_str(), Some(output.as_str()));
+    assert_eq!(rehydrate_stats.rehydrated_refs, 1);
+}
+
+#[test]
+fn smart_context_reuses_existing_critical_tool_output_with_cache_summary() {
+    let output = "error: repeated failure\nsrc/lib.rs:10:5\n".repeat(160);
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, &output).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_repeat",
+            "output": output
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        2,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+
+    let rewritten = value["input"][0]["output"].as_str().unwrap();
+    assert!(rewritten.starts_with("psc cmdout unchanged"));
+    assert!(rewritten.contains("id=call_repeat"));
+    assert!(rewritten.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
+    assert!(rewritten.contains("sig: error: repeated failure"));
+    assert!(!rewritten.contains("error: repeated failure\nsrc/lib.rs:10:5\nerror:"));
     assert_eq!(stats.artifacts_stored, 0);
     assert_eq!(stats.repeat_tool_output_refs, 1);
     assert_eq!(stats.tool_outputs_condensed, 1);

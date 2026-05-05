@@ -328,6 +328,123 @@ fn cross_turn_duplicate_ref_plan_keeps_when_exactness_required() {
 }
 
 #[test]
+fn command_output_cache_replaces_exact_repeated_large_output_with_stable_summary() {
+    let output = "running test suite: ok\n".repeat(400);
+    let previous = smart_context_command_output_cache_record("cmd-a", &output);
+
+    let rewrite = smart_context_command_output_cache_rewrite(SmartContextCommandOutputCacheInput {
+        id: "cmd-b".to_string(),
+        text: output.clone(),
+        previous_records: vec![previous.clone()],
+        min_replacement_bytes: 1024,
+    });
+
+    assert!(matches!(
+        rewrite.action,
+        SmartContextCommandOutputCacheAction::ReplaceWithUnchangedSummary {
+            ref_id,
+            saved_tokens,
+            critical_signal_count: 0,
+        } if ref_id == "cmd-a" && saved_tokens > 0
+    ));
+    assert_ne!(rewrite.output, output);
+    assert!(rewrite.output.len() < output.len());
+    assert!(rewrite.output.contains("psc cmdout unchanged"));
+    assert!(rewrite.output.contains("id=cmd-b"));
+    assert!(rewrite.output.contains("ref=cmd-a"));
+    assert!(rewrite.output.contains(&previous.content_hash));
+    assert!(rewrite.output.contains(&format!("b={}", previous.byte_len)));
+    assert!(
+        rewrite
+            .output
+            .contains(&format!("tok={}", previous.estimated_tokens))
+    );
+}
+
+#[test]
+fn command_output_cache_keeps_changed_output_exact_with_delta_summary() {
+    let previous_text = "compile warning: old\n".repeat(300);
+    let changed_text = format!(
+        "{}compile warning: new\n",
+        "compile warning: old\n".repeat(299)
+    );
+    let previous = smart_context_command_output_cache_record("cargo-test", &previous_text);
+
+    let rewrite = smart_context_command_output_cache_rewrite(SmartContextCommandOutputCacheInput {
+        id: "cargo-test".to_string(),
+        text: changed_text.clone(),
+        previous_records: vec![previous.clone()],
+        min_replacement_bytes: 1024,
+    });
+
+    assert_eq!(rewrite.output, changed_text);
+    match rewrite.action {
+        SmartContextCommandOutputCacheAction::KeepExact {
+            reason: SmartContextCommandOutputCacheKeepReason::ChangedSincePreviousOutput,
+            summary: Some(summary),
+        } => {
+            assert!(summary.contains("psc cmdout changed"));
+            assert!(summary.contains("exact output kept"));
+            assert!(summary.contains(&previous.content_hash));
+            assert!(summary.contains(&rewrite.record.content_hash));
+        }
+        other => panic!("unexpected action: {other:?}"),
+    }
+}
+
+#[test]
+fn command_output_cache_keeps_small_repeated_output_exact() {
+    let output = "error: small but exact\n".to_string();
+    let previous = smart_context_command_output_cache_record("cmd-a", &output);
+
+    let rewrite = smart_context_command_output_cache_rewrite(SmartContextCommandOutputCacheInput {
+        id: "cmd-b".to_string(),
+        text: output.clone(),
+        previous_records: vec![previous],
+        min_replacement_bytes: 1024,
+    });
+
+    assert_eq!(rewrite.output, output);
+    assert_eq!(
+        rewrite.action,
+        SmartContextCommandOutputCacheAction::KeepExact {
+            reason: SmartContextCommandOutputCacheKeepReason::BelowMinByteThreshold,
+            summary: None,
+        }
+    );
+}
+
+#[test]
+fn command_output_cache_unchanged_summary_preserves_critical_signal_samples() {
+    let output = format!(
+        "{}error: build failed in crates/prodex-runtime-proxy/src/smart_context.rs\nthread 'main' panicked at assertion\n",
+        "ok\n".repeat(1500)
+    );
+    let previous = smart_context_command_output_cache_record("cargo-test", &output);
+
+    let rewrite = smart_context_command_output_cache_rewrite(SmartContextCommandOutputCacheInput {
+        id: "cargo-test-repeat".to_string(),
+        text: output.clone(),
+        previous_records: vec![previous.clone()],
+        min_replacement_bytes: 1024,
+    });
+
+    assert!(matches!(
+        rewrite.action,
+        SmartContextCommandOutputCacheAction::ReplaceWithUnchangedSummary {
+            ref_id,
+            critical_signal_count: 2,
+            ..
+        } if ref_id == "cargo-test"
+    ));
+    assert!(rewrite.output.len() < output.len());
+    assert!(rewrite.output.contains("psc cmdout critical n=2"));
+    assert!(rewrite.output.contains("error: build failed"));
+    assert!(rewrite.output.contains("panicked at assertion"));
+    assert!(rewrite.output.contains(&previous.content_hash));
+}
+
+#[test]
 fn memory_capsule_selection_prioritizes_required_then_relevance() {
     let selected = smart_context_select_memory_capsules(
         [

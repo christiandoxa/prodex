@@ -1352,7 +1352,7 @@ pub fn compact_command_output_with_intent_options(
     input: &str,
     options: &CommandOutputIntentCompactOptions,
 ) -> CommandOutputCompactReport {
-    let intent_terms = normalize_intent_terms(&options.intent_terms);
+    let intent_terms = normalize_intent_terms_with_prompt_expansion(&options.intent_terms);
     if intent_terms.is_empty() {
         return compact_command_output_with_options_and_kind_hint(
             input,
@@ -1379,6 +1379,25 @@ pub fn compact_command_output_with_intent_options(
         estimate_context_tokens(output.chars().count(), output.split_whitespace().count());
     report.output = output;
     report
+}
+
+fn normalize_intent_terms_with_prompt_expansion(terms: &[String]) -> Vec<String> {
+    let mut expanded = Vec::<String>::new();
+    for term in terms {
+        if !term.trim().is_empty() && !term.chars().any(char::is_whitespace) {
+            expanded.push(term.clone());
+        }
+        for extracted in extract_intent_terms_from_prompt(term) {
+            expanded.push(extracted);
+        }
+        if expanded.len() >= MAX_EXTRACTED_INTENT_TERMS.saturating_mul(2) {
+            break;
+        }
+    }
+    normalize_intent_terms(&expanded)
+        .into_iter()
+        .take(MAX_EXTRACTED_INTENT_TERMS)
+        .collect()
 }
 
 pub fn extract_intent_terms_from_prompt(prompt: &str) -> Vec<String> {
@@ -1462,16 +1481,25 @@ fn compact_git_status_output(input: &str, options: &CommandOutputCompactOptions)
 }
 
 fn compact_git_diff_output(input: &str, options: &CommandOutputCompactOptions) -> String {
+    compact_git_diff_output_with_intent(input, options, &[])
+}
+
+fn compact_git_diff_output_with_intent(
+    input: &str,
+    options: &CommandOutputCompactOptions,
+    intent_terms: &[String],
+) -> String {
     let lines = command_lines(input);
     let sections = split_git_diff_sections(&lines);
     if sections.is_empty() {
         if let Some(output) = compact_git_diff_stat_output(&lines, options) {
-            return finalize_compacted_command_output(
+            let output = finalize_compacted_command_output(
                 CommandOutputKind::GitDiff,
                 input,
                 output,
                 options,
             );
+            return ensure_no_critical_signal_loss_for_intent(input, &output, options);
         }
         return smart_truncate_command_output(input, options);
     }
@@ -1487,15 +1515,30 @@ fn compact_git_diff_output(input: &str, options: &CommandOutputCompactOptions) -
         .sum::<usize>();
     let total_hunks = summaries.iter().map(|summary| summary.hunks).sum::<usize>();
 
-    let summary_line_count = summaries.len().saturating_add(4);
+    let intent_focused = !intent_terms.is_empty();
+    let structural_line_count = sections
+        .iter()
+        .map(|section| {
+            section
+                .iter()
+                .filter(|line| is_git_diff_excerpt_structural_line(line, intent_focused))
+                .count()
+        })
+        .sum::<usize>();
+    let fixed_body_lines = 1usize
+        .saturating_add(usize::from(intent_focused))
+        .saturating_add(summaries.len())
+        .saturating_add(2)
+        .saturating_add(structural_line_count)
+        .saturating_add(sections.len());
     let detail_budget = options
         .max_lines
-        .saturating_sub(summary_line_count)
-        .saturating_sub(4);
+        .saturating_sub(1)
+        .saturating_sub(fixed_body_lines);
     let per_file_budget = detail_budget
         .checked_div(sections.len().max(1))
         .unwrap_or(0)
-        .max(6);
+        .max(usize::from(detail_budget > 0));
 
     let mut output = Vec::new();
     output.push(format!(
@@ -1505,25 +1548,47 @@ fn compact_git_diff_output(input: &str, options: &CommandOutputCompactOptions) -
         total_removed,
         total_hunks,
     ));
+    if !intent_terms.is_empty() {
+        output.push(format!(
+            "int: git diff focus for {}",
+            truncate_command_line(&intent_terms.join(", "), options.max_line_chars)
+        ));
+    }
     for summary in &summaries {
         let binary = if summary.binary { ", binary" } else { "" };
-        output.push(format!(
+        let mut line = format!(
             "{}: +{}, -{}, {} hunks{}",
             summary.path, summary.added, summary.removed, summary.hunks, binary,
-        ));
+        );
+        if !summary.semantic_contexts.is_empty() {
+            line.push_str(&format!(
+                ", ctx={}",
+                truncate_command_line(&summary.semantic_contexts.join(" | "), 140)
+            ));
+        }
+        output.push(line);
     }
     output.push(String::new());
     output.push("diff excerpts:".to_string());
 
     for (section, summary) in sections.iter().zip(summaries.iter()) {
-        let mut kept_detail = 0usize;
+        let section_score = score_git_diff_section_for_intent(section, summary, intent_terms);
+        if !intent_terms.is_empty() && section_score == 0 {
+            output.push(format!(
+                "{}: [... omitted unchanged-to-intent diff detail ...]",
+                summary.path
+            ));
+            continue;
+        }
+        let section_budget = per_file_budget;
+        let selected_detail =
+            select_git_diff_detail_line_indexes(section, section_budget, intent_terms);
         let mut omitted_detail = 0usize;
-        for line in section {
-            if is_git_diff_structural_line(line) {
+        for (line_index, line) in section.iter().enumerate() {
+            if is_git_diff_excerpt_structural_line(line, intent_focused) {
                 output.push(truncate_command_line(line, options.max_line_chars));
-            } else if kept_detail < per_file_budget {
+            } else if selected_detail.contains_key(&line_index) {
                 output.push(truncate_command_line(line, options.max_line_chars));
-                kept_detail += 1;
             } else {
                 omitted_detail += 1;
             }
@@ -1536,7 +1601,81 @@ fn compact_git_diff_output(input: &str, options: &CommandOutputCompactOptions) -
         }
     }
 
-    finalize_compacted_command_output(CommandOutputKind::GitDiff, input, output, options)
+    let output =
+        finalize_compacted_command_output(CommandOutputKind::GitDiff, input, output, options);
+    ensure_no_critical_signal_loss_for_intent(input, &output, options)
+}
+
+fn score_git_diff_section_for_intent(
+    section: &[&str],
+    summary: &GitDiffSummary,
+    intent_terms: &[String],
+) -> usize {
+    if intent_terms.is_empty() {
+        return 0;
+    }
+    let mut score = score_intent_text(&summary.path, intent_terms).saturating_mul(6);
+    for context in &summary.semantic_contexts {
+        score = score.saturating_add(score_intent_text(context, intent_terms).saturating_mul(4));
+    }
+    for line in section {
+        score = score.saturating_add(score_intent_text(line, intent_terms));
+    }
+    score
+}
+
+fn select_git_diff_detail_line_indexes(
+    section: &[&str],
+    budget: usize,
+    intent_terms: &[String],
+) -> BTreeMap<usize, ()> {
+    if budget == 0 {
+        return BTreeMap::new();
+    }
+
+    let mut intent_hits = Vec::<usize>::new();
+    for (index, line) in section.iter().enumerate() {
+        if !is_git_diff_structural_line(line) && intent_line_matches(line, intent_terms) {
+            intent_hits.push(index);
+        }
+    }
+
+    let mut candidates = Vec::<(u8, usize)>::new();
+    for (index, line) in section.iter().enumerate() {
+        if is_git_diff_structural_line(line) {
+            continue;
+        }
+        if intent_hits
+            .iter()
+            .any(|hit| hit.abs_diff(index) <= git_diff_intent_context_radius())
+        {
+            candidates.push((0, index));
+        } else if git_diff_semantic_context_line(line).is_some() {
+            candidates.push((1, index));
+        } else if is_git_diff_changed_detail_line(line) {
+            candidates.push((2, index));
+        }
+    }
+
+    candidates.sort_by_key(|(priority, index)| (*priority, *index));
+    let mut selected = BTreeMap::<usize, ()>::new();
+    for (_, index) in candidates.into_iter().take(budget) {
+        selected.insert(index, ());
+    }
+    selected
+}
+
+fn git_diff_intent_context_radius() -> usize {
+    2
+}
+
+fn is_git_diff_changed_detail_line(line: &str) -> bool {
+    (line.starts_with('+') && !line.starts_with("+++")
+        || line.starts_with('-') && !line.starts_with("---"))
+        && !line
+            .trim_start_matches(|ch| matches!(ch, '+' | '-'))
+            .trim()
+            .is_empty()
 }
 
 fn compact_git_log_stat_output(input: &str, options: &CommandOutputCompactOptions) -> String {
@@ -1958,6 +2097,12 @@ fn compact_rust_diagnostic_output(input: &str, options: &CommandOutputCompactOpt
     ));
     push_labeled_lines(
         &mut output,
+        "root causes",
+        &summary.root_causes,
+        options.max_lines.max(24).saturating_div(6).max(3),
+    );
+    push_labeled_lines(
+        &mut output,
         "diagnostics",
         &summary.diagnostic_headers,
         options.max_lines.max(24).saturating_div(4).max(4),
@@ -2082,6 +2227,12 @@ fn compact_diagnostic_output(input: &str, options: &CommandOutputCompactOptions)
         summary.exit_statuses.len(),
         noise_counts.values().sum::<usize>(),
     ));
+    push_labeled_lines(
+        &mut output,
+        "root causes",
+        &summary.root_causes,
+        options.max_lines.max(24).saturating_div(6).max(3),
+    );
     push_labeled_lines(
         &mut output,
         "diagnostics",
@@ -4522,6 +4673,7 @@ fn push_unique_truncated_line(lines: &mut Vec<String>, line: &str, max_chars: us
 struct IntentMatchLine {
     line_number: usize,
     text: String,
+    score: usize,
 }
 
 fn normalize_intent_terms(terms: &[String]) -> Vec<String> {
@@ -4858,6 +5010,9 @@ fn compact_command_output_for_intent(
     if kind == CommandOutputKind::FileList {
         return compact_file_list_output_for_intent(original, base_output, options, intent_terms);
     }
+    if kind == CommandOutputKind::GitDiff {
+        return compact_git_diff_output_with_intent(original, options, intent_terms);
+    }
 
     let intent_matches = collect_intent_matching_lines(original, intent_terms, options);
     if intent_matches.is_empty() {
@@ -5160,10 +5315,30 @@ fn push_intent_baseline_tail(
 
 fn score_intent_text(value: &str, intent_terms: &[String]) -> usize {
     let value = normalize_intent_match_text(value);
-    intent_terms
-        .iter()
-        .filter(|term| value.contains(term.as_str()))
-        .count()
+    intent_terms.iter().fold(0usize, |score, term| {
+        if term.is_empty() {
+            return score;
+        }
+        let mut term_score = 0usize;
+        if value.contains(term.as_str()) {
+            term_score = term_score
+                .saturating_add(4)
+                .saturating_add(term.len().min(48).saturating_div(8));
+        }
+        if let Some(basename) = intent_term_basename(term)
+            && basename != term.as_str()
+            && value.contains(basename)
+        {
+            term_score = term_score.saturating_add(2);
+        }
+        score.saturating_add(term_score)
+    })
+}
+
+fn intent_term_basename(term: &str) -> Option<&str> {
+    term.rsplit('/').next().filter(|basename| {
+        !basename.is_empty() && basename.len() >= 3 && basename.len() < term.len()
+    })
 }
 
 fn command_output_kind_supports_intent_compaction(kind: CommandOutputKind) -> bool {
@@ -5183,29 +5358,56 @@ fn collect_intent_matching_lines(
     intent_terms: &[String],
     options: &CommandOutputCompactOptions,
 ) -> Vec<IntentMatchLine> {
-    command_lines(input)
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, line)| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || !intent_line_matches(trimmed, intent_terms) {
-                return None;
+    let lines = command_lines(input);
+    let mut selected = BTreeMap::<usize, usize>::new();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let score = score_intent_text(trimmed, intent_terms);
+        if score == 0 {
+            continue;
+        }
+        selected
+            .entry(index)
+            .and_modify(|existing| *existing = (*existing).max(score))
+            .or_insert(score);
+        for nearby in intent_context_line_range(index, lines.len()) {
+            if nearby == index || lines[nearby].trim().is_empty() {
+                continue;
             }
-            Some(IntentMatchLine {
-                line_number: index + 1,
-                text: truncate_command_line(trimmed, options.max_line_chars),
-            })
+            selected
+                .entry(nearby)
+                .and_modify(|existing| *existing = (*existing).max(score.saturating_sub(1)))
+                .or_insert(score.saturating_sub(1).max(1));
+        }
+    }
+
+    let mut matches = selected
+        .into_iter()
+        .map(|(index, score)| IntentMatchLine {
+            line_number: index + 1,
+            text: truncate_command_line(lines[index].trim(), options.max_line_chars),
+            score,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    matches.sort_by_key(|line| (Reverse(line.score), line.line_number));
+    matches
 }
 
 fn intent_line_matches(line: &str, intent_terms: &[String]) -> bool {
-    let line = normalize_intent_match_text(line);
-    intent_terms.iter().any(|term| line.contains(term))
+    score_intent_text(line, intent_terms) > 0
 }
 
 fn normalize_intent_match_text(value: &str) -> String {
     value.replace('\\', "/").trim().to_ascii_lowercase()
+}
+
+fn intent_context_line_range(index: usize, total: usize) -> std::ops::RangeInclusive<usize> {
+    let start = index.saturating_sub(1);
+    let end = (index + 1).min(total.saturating_sub(1));
+    start..=end
 }
 
 fn ensure_no_critical_signal_loss_for_intent(
@@ -7313,6 +7515,7 @@ struct GitDiffSummary {
     removed: usize,
     hunks: usize,
     binary: bool,
+    semantic_contexts: Vec<String>,
 }
 
 #[derive(Default)]
@@ -7320,6 +7523,7 @@ struct RustDiagnosticSummary {
     errors: usize,
     warnings: usize,
     panics: usize,
+    root_causes: Vec<String>,
     diagnostic_headers: Vec<String>,
     locations: Vec<String>,
     failed_tests: Vec<String>,
@@ -7331,6 +7535,7 @@ impl RustDiagnosticSummary {
         self.errors == 0
             && self.warnings == 0
             && self.panics == 0
+            && self.root_causes.is_empty()
             && self.diagnostic_headers.is_empty()
             && self.locations.is_empty()
             && self.failed_tests.is_empty()
@@ -7343,10 +7548,14 @@ impl RustDiagnosticSummary {
             RustDiagnosticSeverity::Warning => self.warnings += 1,
         }
         push_unique_line(&mut self.diagnostic_headers, line.trim());
+        if matches!(severity, RustDiagnosticSeverity::Error) {
+            push_unique_truncated_line(&mut self.root_causes, line, 240);
+        }
     }
 
     fn record_failed_test(&mut self, test_name: &str) {
         push_unique_line(&mut self.failed_tests, test_name.trim());
+        push_unique_line(&mut self.root_causes, test_name.trim());
     }
 
     fn record_location(&mut self, line: &str) {
@@ -7355,6 +7564,7 @@ impl RustDiagnosticSummary {
 
     fn record_exit_status(&mut self, line: &str) {
         push_unique_line(&mut self.exit_statuses, line.trim());
+        push_unique_truncated_line(&mut self.root_causes, line, 240);
     }
 
     fn record_block_signals(&mut self, block: &RustCriticalBlock) {
@@ -7364,6 +7574,7 @@ impl RustDiagnosticSummary {
             }
             if is_rust_panic_line(line) {
                 self.panics += 1;
+                push_unique_truncated_line(&mut self.root_causes, line, 240);
             }
             if is_rust_exit_status_line(line) {
                 self.record_exit_status(line);
@@ -7390,6 +7601,7 @@ struct RustCriticalBlock {
 struct CommandDiagnosticSummary {
     errors: usize,
     stack_markers: usize,
+    root_causes: Vec<String>,
     diagnostic_headers: Vec<String>,
     locations: Vec<String>,
     failed_tests: Vec<String>,
@@ -7400,6 +7612,7 @@ impl CommandDiagnosticSummary {
     fn is_empty(&self) -> bool {
         self.errors == 0
             && self.stack_markers == 0
+            && self.root_causes.is_empty()
             && self.diagnostic_headers.is_empty()
             && self.locations.is_empty()
             && self.failed_tests.is_empty()
@@ -7410,15 +7623,18 @@ impl CommandDiagnosticSummary {
         if is_error_signal_line(line) || is_typescript_diagnostic_line(line) {
             self.errors += 1;
             push_unique_truncated_line(&mut self.diagnostic_headers, line, 240);
+            push_unique_truncated_line(&mut self.root_causes, line, 240);
         }
         if let Some(test_name) = generic_failed_test_name(line) {
             push_unique_line(&mut self.failed_tests, test_name);
+            push_unique_line(&mut self.root_causes, test_name);
         }
         if count_file_location_signals(line) > 0 {
             push_unique_truncated_line(&mut self.locations, line, 240);
         }
         if is_rust_exit_status_line(line) {
             push_unique_truncated_line(&mut self.exit_statuses, line, 240);
+            push_unique_truncated_line(&mut self.root_causes, line, 240);
         }
         if is_stack_signal_line(line) {
             self.stack_markers += 1;
@@ -7476,14 +7692,24 @@ fn summarize_git_diff_section(section: &[&str]) -> GitDiffSummary {
         removed: 0,
         hunks: 0,
         binary: false,
+        semantic_contexts: Vec::new(),
     };
     for line in section {
         if line.starts_with("@@ ") {
             summary.hunks += 1;
+            if let Some(context) = git_diff_semantic_context_line(line) {
+                push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
+            }
         } else if line.starts_with('+') && !line.starts_with("+++") {
             summary.added += 1;
+            if let Some(context) = git_diff_semantic_context_line(line) {
+                push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
+            }
         } else if line.starts_with('-') && !line.starts_with("---") {
             summary.removed += 1;
+            if let Some(context) = git_diff_semantic_context_line(line) {
+                push_unique_truncated_line(&mut summary.semantic_contexts, &context, 120);
+            }
         } else if line.starts_with("Binary files ") || line.starts_with("GIT binary patch") {
             summary.binary = true;
         }
@@ -7521,6 +7747,79 @@ fn is_git_diff_structural_line(line: &str) -> bool {
         || line.starts_with("dissimilarity index ")
         || line.starts_with("Binary files ")
         || line.starts_with("GIT binary patch")
+}
+
+fn is_git_diff_excerpt_structural_line(line: &str, intent_focused: bool) -> bool {
+    if line.starts_with("@@ ")
+        || line.starts_with("Binary files ")
+        || line.starts_with("GIT binary patch")
+    {
+        return true;
+    }
+    if intent_focused {
+        return false;
+    }
+    line.starts_with("diff --git ")
+        || line.starts_with("--- ")
+        || line.starts_with("+++ ")
+        || line.starts_with("new file mode ")
+        || line.starts_with("deleted file mode ")
+        || line.starts_with("old mode ")
+        || line.starts_with("new mode ")
+        || line.starts_with("rename from ")
+        || line.starts_with("rename to ")
+}
+
+fn git_diff_semantic_context_line(line: &str) -> Option<String> {
+    if line.starts_with("@@ ")
+        && let Some((_, context)) = line.rsplit_once("@@")
+    {
+        let context = context.trim();
+        if !context.is_empty() {
+            return Some(context.to_string());
+        }
+    }
+
+    let trimmed = line
+        .trim_start_matches(|ch| matches!(ch, '+' | '-' | ' '))
+        .trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("//")
+        || trimmed.starts_with('#') && !trimmed.starts_with("#[")
+        || trimmed.starts_with('*')
+    {
+        return None;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    let semantic_start = [
+        "pub fn ",
+        "async fn ",
+        "fn ",
+        "def ",
+        "class ",
+        "impl ",
+        "pub struct ",
+        "struct ",
+        "pub enum ",
+        "enum ",
+        "interface ",
+        "type ",
+        "function ",
+        "describe(",
+        "it(",
+        "test(",
+        "#[test]",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix));
+    let semantic_contains = lower.contains(" test_")
+        || lower.contains("::test_")
+        || lower.contains(" should ")
+        || lower.contains("=>")
+            && (lower.contains("test") || lower.contains("describe") || lower.contains("it("));
+
+    (semantic_start || semantic_contains).then(|| trimmed.to_string())
 }
 
 fn looks_like_git_diff_output(lines: &[&str]) -> bool {

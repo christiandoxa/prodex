@@ -1187,6 +1187,156 @@ fn super_slim_v2_keeps_artifact_backed_summary_when_critical() {
 }
 
 #[test]
+fn super_slim_v2_elides_old_tool_output_into_fact_index_summary() {
+    let old_output = [
+        "$ cargo test -q -p prodex-runtime-mem",
+        "error[E0425]: cannot find value `missing` in this scope",
+        " --> crates/prodex-runtime-mem/src/lib.rs:42:9",
+        "stored artifact p:old-tool-output",
+        &"repeated compiler context ".repeat(80),
+    ]
+    .join("\n");
+    let recent_output =
+        "error[E0308]: mismatched types\n --> crates/prodex-runtime-mem/src/lib.rs:99:5\n"
+            .to_string()
+            + &"recent failure detail ".repeat(60);
+    let mut events = vec![
+        serde_json::json!({
+            "payload": {
+                "type": "exec_command",
+                "call_id": "call-old",
+                "command": "cargo test -q -p prodex-runtime-mem"
+            }
+        }),
+        serde_json::json!({
+            "payload": {
+                "type": "exec_command_output",
+                "call_id": "call-old",
+                "output": old_output
+            }
+        }),
+    ];
+    for index in 0..8 {
+        events.push(serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "message": format!("progress marker {index}")
+            }
+        }));
+    }
+    events.push(serde_json::json!({
+        "payload": {
+            "type": "exec_command",
+            "call_id": "call-recent",
+            "command": "cargo check -q"
+        }
+    }));
+    events.push(serde_json::json!({
+        "payload": {
+            "type": "exec_command_output",
+            "call_id": "call-recent",
+            "output": recent_output
+        }
+    }));
+
+    let shadows = runtime_mem_super_slim_v2_expand_interned_events(
+        runtime_mem_super_slim_v2_shadow_codex_events(events.iter()),
+    );
+    let old_result = shadows
+        .iter()
+        .find(|event| {
+            event.get("t").and_then(Value::as_str) == Some("pm2:tr")
+                && event.get("i").and_then(Value::as_str) == Some("call-old")
+        })
+        .expect("old tool result should exist");
+    let old_summary = old_result
+        .get("s")
+        .and_then(Value::as_str)
+        .expect("old tool result should keep fact summary");
+
+    assert!(old_summary.starts_with("mem facts: kind=tool"));
+    assert!(old_summary.contains("cargo test -q -p prodex-runtime-mem"));
+    assert!(old_summary.contains("crates/prodex-runtime-mem/src/lib.rs"));
+    assert!(old_summary.contains("error[E0425]"));
+    assert!(old_summary.contains("p:old-tool-output"));
+    assert!(!old_summary.contains("repeated compiler context repeated compiler context"));
+    assert_eq!(
+        old_result.get("r").and_then(Value::as_str),
+        Some("p:old-tool-output")
+    );
+
+    let recent_result = shadows
+        .iter()
+        .find(|event| {
+            event.get("t").and_then(Value::as_str) == Some("pm2:tr")
+                && event.get("i").and_then(Value::as_str) == Some("call-recent")
+        })
+        .expect("recent tool result should exist");
+    let recent_summary = recent_result
+        .get("s")
+        .and_then(Value::as_str)
+        .expect("recent failure summary should stay explicit");
+    assert!(recent_summary.starts_with("tool: error[E0308]"));
+    assert!(!recent_summary.starts_with("mem facts:"));
+}
+
+#[test]
+fn super_slim_v2_elides_old_assistant_output_but_preserves_final_decision() {
+    let old_assistant = "Implemented cache probe in crates/prodex-runtime-mem/src/lib.rs\n"
+        .to_string()
+        + "$ cargo test -q -p prodex-runtime-mem\n"
+        + "Changed summary writer for repeated outputs\n"
+        + &"verbose implementation notes ".repeat(80);
+    let final_decision = "Final decision: keep prodex s launch behavior unchanged.\n".to_string()
+        + &"decision rationale detail ".repeat(80);
+    let mut events = vec![
+        serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "message": old_assistant
+            }
+        }),
+        serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "message": final_decision
+            }
+        }),
+    ];
+    for index in 0..9 {
+        events.push(serde_json::json!({
+            "payload": {
+                "type": "agent_message",
+                "message": format!("recent progress marker {index}")
+            }
+        }));
+    }
+
+    let shadows = runtime_mem_super_slim_v2_expand_interned_events(
+        runtime_mem_super_slim_v2_shadow_codex_events(events.iter()),
+    );
+    let old_summary = shadows[0]
+        .get("s")
+        .and_then(Value::as_str)
+        .expect("old assistant should have summary");
+    let final_summary = shadows[1]
+        .get("s")
+        .and_then(Value::as_str)
+        .expect("final decision should have summary");
+
+    assert!(old_summary.starts_with("mem facts: kind=assistant"));
+    assert!(old_summary.contains("crates/prodex-runtime-mem/src/lib.rs"));
+    assert!(old_summary.contains("cargo test -q -p prodex-runtime-mem"));
+    assert!(old_summary.contains("Changed summary writer"));
+    assert!(!old_summary.contains("verbose implementation notes verbose implementation notes"));
+
+    assert!(
+        final_summary.starts_with("a: Final decision: keep prodex s launch behavior unchanged.")
+    );
+    assert!(!final_summary.starts_with("mem facts:"));
+}
+
+#[test]
 fn super_slim_shadow_user_prompt_stores_summary_counts_and_ref_not_full_prompt() {
     let prompt = "\n\nImplement shadow transcript helpers\n".to_string() + &"detail ".repeat(400);
     let event = serde_json::json!({

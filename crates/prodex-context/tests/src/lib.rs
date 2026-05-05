@@ -649,6 +649,36 @@ Command failed with exit code 1
 }
 
 #[test]
+fn full_prompt_intent_terms_are_extracted_before_compaction() {
+    let prompt = "Fix targetWidget in src/target.ts after TS2322; ignore src/noise.ts.";
+    let input = "\
+src/noise.ts(10,7): error TS2322: Type 'string' is not assignable to type 'number'.
+10 const noise: number = value;
+src/target.ts(40,7): error TS2322: Type 'string' is not assignable to type 'number'.
+40 const targetWidget: number = value;
+Command failed with exit code 1
+";
+
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::Diagnostics,
+                max_lines: 9,
+                max_line_chars: 180,
+                ..CommandOutputCompactOptions::default()
+            },
+            vec![prompt.to_string()],
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("targetWidget"));
+    assert!(report.output.contains("src/target.ts"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
 fn intent_compaction_empty_terms_matches_existing_options_api() {
     let input = "\
 line0
@@ -862,6 +892,76 @@ index 1111111..2222222 100644
     assert_eq!(report.detected_kind, CommandOutputKind::GitDiff);
     assert!(report.output.contains("int:"));
     assert!(report.output.contains("+pub fn target_symbol() {}"));
+    assert_no_critical_signal_loss(input, &report.output);
+}
+
+#[test]
+fn git_diff_compaction_keeps_semantic_hunk_context_and_reduces_noise() {
+    let mut input = String::from(
+        "\
+diff --git a/src/app.rs b/src/app.rs
+index 1111111..2222222 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -1,4 +1,28 @@ fn target_handler()
+ pub fn target_handler() {
+",
+    );
+    for index in 0..24 {
+        input.push_str(&format!("+    let noise_{index} = {index};\n"));
+    }
+    input.push_str(" }\n");
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::GitDiff,
+            max_lines: 18,
+            max_line_chars: 180,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::GitDiff);
+    assert!(report.output.contains("ctx=fn target_handler"));
+    assert!(report.output.contains("pub fn target_handler()"));
+    assert!(report.output.contains("omitted"));
+    assert!(!report.output.contains("noise_23"));
+    assert_no_critical_signal_loss(&input, &report.output);
+}
+
+#[test]
+fn intent_git_diff_compaction_keeps_adjacent_context() {
+    let input = "\
+diff --git a/src/app.rs b/src/app.rs
+index 1111111..2222222 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -1,8 +1,10 @@ fn unrelated()
++let before_target = prepare();
++let targetWidget = build_target();
++let after_target = verify();
++let unrelated_noise = 1;
+";
+
+    let report = compact_command_output_with_intent_options(
+        input,
+        &CommandOutputIntentCompactOptions::new(
+            CommandOutputCompactOptions {
+                kind: CommandOutputKind::GitDiff,
+                max_lines: 12,
+                max_line_chars: 180,
+                ..CommandOutputCompactOptions::default()
+            },
+            vec!["targetWidget".to_string()],
+        ),
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::GitDiff);
+    assert!(report.output.contains("int: git diff focus"));
+    assert!(report.output.contains("before_target"));
+    assert!(report.output.contains("targetWidget"));
+    assert!(report.output.contains("after_target"));
     assert_no_critical_signal_loss(input, &report.output);
 }
 
@@ -1166,6 +1266,47 @@ Command failed with exit code 1
     assert!(!report.output.contains("PASS tests/alpha.test.ts"));
     assert!(!report.output.contains("warning TS6133"));
     assert!(report.compacted_lines <= 10);
+}
+
+#[test]
+fn diagnostics_compaction_promotes_root_cause_and_collapses_pass_noise() {
+    let mut input = String::from(
+        "\
+> app@1.0.0 test /repo
+",
+    );
+    for index in 0..40 {
+        input.push_str(&format!("PASS tests/noise_{index}.test.ts\n"));
+    }
+    input.push_str(
+        "\
+FAIL tests/target.test.ts
+AssertionError: expected 400 but got 200
+    at submitOrder (/repo/src/order.ts:88:13)
+Test Suites: 1 failed, 40 passed, 41 total
+Tests:       1 failed, 120 passed, 121 total
+Command failed with exit code 1
+",
+    );
+
+    let report = compact_command_output_with_options(
+        &input,
+        &CommandOutputCompactOptions {
+            kind: CommandOutputKind::Auto,
+            max_lines: 44,
+            max_line_chars: 220,
+            ..CommandOutputCompactOptions::default()
+        },
+    );
+
+    assert_eq!(report.detected_kind, CommandOutputKind::Diagnostics);
+    assert!(report.output.contains("root causes"));
+    assert!(report.output.contains("AssertionError: expected 400"));
+    assert!(report.output.contains("tests/target.test.ts"));
+    assert!(report.output.contains("src/order.ts:88:13"));
+    assert!(report.output.contains("passed_suites=40"));
+    assert!(!report.output.contains("PASS tests/noise_39.test.ts"));
+    assert_no_critical_signal_loss(&input, &report.output);
 }
 
 #[test]

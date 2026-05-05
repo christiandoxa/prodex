@@ -28,10 +28,14 @@ const SMART_CONTEXT_ARTIFACT_MANIFEST_COOLDOWN_MS: u64 = 30_000;
 const SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES: usize = 2 * 1024;
 const SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES: usize = 12;
 const SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES: usize = 4;
+const SMART_CONTEXT_BUDGET_AWARE_REHYDRATE_MAX_RANGES: usize = 8;
+const SMART_CONTEXT_BUDGET_AWARE_IMPORT_MAX_RANGES: usize = 3;
+const SMART_CONTEXT_BUDGET_AWARE_IMPORT_SCAN_MAX_LINES: usize = 160;
 const SMART_CONTEXT_LABEL_SUMMARY: &str = "sum:";
 const SMART_CONTEXT_LABEL_CRITICAL_EXACT: &str = "crit exact:";
 const SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY: &str = "critical exact ranges:";
 const SMART_CONTEXT_LABEL_SEMANTIC_EXACT: &str = "sem exact:";
+const SMART_CONTEXT_LABEL_REHYDRATE_PLAN_EXACT: &str = "plan exact:";
 const SMART_CONTEXT_LABEL_DUPLICATE_CHUNKS: &str = "dup exact chunks:";
 const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
@@ -173,6 +177,12 @@ struct RuntimeSmartContextDuplicateChunkSummaryPlan {
 struct RuntimeSmartContextExactAppendixRange {
     reference: String,
     body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeSmartContextScoredExactAppendixRange {
+    range: RuntimeSmartContextExactAppendixRange,
+    score: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1279,11 +1289,15 @@ fn prepare_runtime_smart_context_body<'a>(
                 &rehydrate_plan,
                 &mut outcome.stats,
             );
-            runtime_smart_context_selective_rehydrate_semantic_ranges(
+            runtime_smart_context_selective_rehydrate_budget_aware_ranges(
                 &mut value,
                 store,
                 &exactness,
                 &intent_signals.semantic_terms,
+                &rehydrate_plan,
+                budget
+                    .available_tokens
+                    .saturating_sub(rehydrate_plan.used_tokens),
                 &mut outcome.stats,
             );
             if budget.policy.mode != runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough {
@@ -3665,6 +3679,7 @@ fn runtime_smart_context_text_is_artifact_marker_summary(text: &str, id: &str) -
         && first_line.contains(&format!("prodex-artifact:{id}"));
     let short = (first_line.starts_with("psc art ")
         || first_line.starts_with("psc repeat ")
+        || first_line.starts_with("psc cmdout ")
         || first_line.starts_with("prodex-sc artifact ")
         || first_line.starts_with("prodex-sc repeat "))
         && first_line.contains(&runtime_smart_context_artifact_ref(id));
@@ -3703,6 +3718,7 @@ fn runtime_smart_context_rehydrated_artifact_reference_text(
     Some(parts.join("\n"))
 }
 
+#[cfg(test)]
 fn runtime_smart_context_selective_rehydrate_semantic_ranges(
     value: &mut serde_json::Value,
     store: &RuntimeSmartContextArtifactStore,
@@ -3710,18 +3726,87 @@ fn runtime_smart_context_selective_rehydrate_semantic_ranges(
     terms: &RuntimeSmartContextSelectiveRehydrateTerms,
     stats: &mut RuntimeSmartContextTransformStats,
 ) -> usize {
+    runtime_smart_context_selective_rehydrate_semantic_ranges_with_budget(
+        value,
+        store,
+        exactness_guard,
+        terms,
+        usize::MAX,
+        stats,
+    )
+}
+
+fn runtime_smart_context_selective_rehydrate_budget_aware_ranges(
+    value: &mut serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
+    exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    plan: &runtime_proxy_crate::SmartContextRehydratePlan,
+    token_budget: usize,
+    stats: &mut RuntimeSmartContextTransformStats,
+) -> usize {
+    if exactness_guard.decision != runtime_proxy_crate::SmartContextExactnessDecision::Allow {
+        return 0;
+    }
+
+    let mut remaining_tokens = token_budget;
+    let mut count = if runtime_smart_context_selective_rehydrate_terms_empty(terms) {
+        0
+    } else {
+        runtime_smart_context_selective_rehydrate_semantic_ranges_inner(
+            value,
+            store,
+            terms,
+            &mut remaining_tokens,
+            stats,
+        )
+    };
+
+    let deferred_ids = runtime_smart_context_token_budget_deferred_rehydrate_ids(plan);
+    if !deferred_ids.is_empty() && remaining_tokens > 0 {
+        count = count.saturating_add(
+            runtime_smart_context_selective_rehydrate_deferred_read_plan(
+                value,
+                store,
+                terms,
+                &deferred_ids,
+                &mut remaining_tokens,
+                stats,
+            ),
+        );
+    }
+    count
+}
+
+#[cfg(test)]
+fn runtime_smart_context_selective_rehydrate_semantic_ranges_with_budget(
+    value: &mut serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
+    exactness_guard: &runtime_proxy_crate::SmartContextExactnessGuard,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    token_budget: usize,
+    stats: &mut RuntimeSmartContextTransformStats,
+) -> usize {
     if exactness_guard.decision != runtime_proxy_crate::SmartContextExactnessDecision::Allow
         || runtime_smart_context_selective_rehydrate_terms_empty(terms)
     {
         return 0;
     }
-    runtime_smart_context_selective_rehydrate_semantic_ranges_inner(value, store, terms, stats)
+    let mut remaining_tokens = token_budget;
+    runtime_smart_context_selective_rehydrate_semantic_ranges_inner(
+        value,
+        store,
+        terms,
+        &mut remaining_tokens,
+        stats,
+    )
 }
 
 fn runtime_smart_context_selective_rehydrate_semantic_ranges_inner(
     value: &mut serde_json::Value,
     store: &RuntimeSmartContextArtifactStore,
     terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    remaining_tokens: &mut usize,
     stats: &mut RuntimeSmartContextTransformStats,
 ) -> usize {
     if runtime_smart_context_value_is_static_context_item(value) {
@@ -3730,14 +3815,22 @@ fn runtime_smart_context_selective_rehydrate_semantic_ranges_inner(
     match value {
         serde_json::Value::String(text) => {
             runtime_smart_context_selective_rehydrate_semantic_ranges_in_text(
-                text, store, terms, stats,
+                text,
+                store,
+                terms,
+                remaining_tokens,
+                stats,
             )
         }
         serde_json::Value::Array(items) => items
             .iter_mut()
             .map(|item| {
                 runtime_smart_context_selective_rehydrate_semantic_ranges_inner(
-                    item, store, terms, stats,
+                    item,
+                    store,
+                    terms,
+                    remaining_tokens,
+                    stats,
                 )
             })
             .sum(),
@@ -3749,7 +3842,11 @@ fn runtime_smart_context_selective_rehydrate_semantic_ranges_inner(
                 }
                 count = count.saturating_add(
                     runtime_smart_context_selective_rehydrate_semantic_ranges_inner(
-                        item, store, terms, stats,
+                        item,
+                        store,
+                        terms,
+                        remaining_tokens,
+                        stats,
                     ),
                 );
             }
@@ -3763,8 +3860,12 @@ fn runtime_smart_context_selective_rehydrate_semantic_ranges_in_text(
     text: &mut String,
     store: &RuntimeSmartContextArtifactStore,
     terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    remaining_tokens: &mut usize,
     stats: &mut RuntimeSmartContextTransformStats,
 ) -> usize {
+    if *remaining_tokens == 0 {
+        return 0;
+    }
     let ids = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(text.clone()))
         .into_iter()
         .map(|reference| reference.id)
@@ -3779,8 +3880,14 @@ fn runtime_smart_context_selective_rehydrate_semantic_ranges_in_text(
         let Some(line_index) = store.line_index(&id) else {
             continue;
         };
-        let Some((appendix, range_count)) =
-            runtime_smart_context_matching_semantic_range_appendix(&id, line_index, &next, terms)
+        let Some((appendix, range_count, token_cost)) =
+            runtime_smart_context_matching_semantic_range_appendix_with_budget(
+                &id,
+                line_index,
+                &next,
+                terms,
+                *remaining_tokens,
+            )
         else {
             continue;
         };
@@ -3790,6 +3897,10 @@ fn runtime_smart_context_selective_rehydrate_semantic_ranges_in_text(
         next.push('\n');
         next.push_str(&appendix);
         rehydrated_ranges = rehydrated_ranges.saturating_add(range_count);
+        runtime_smart_context_consume_rehydrate_budget(remaining_tokens, token_cost);
+        if *remaining_tokens == 0 {
+            break;
+        }
     }
 
     if rehydrated_ranges > 0 {
@@ -3799,12 +3910,360 @@ fn runtime_smart_context_selective_rehydrate_semantic_ranges_in_text(
     rehydrated_ranges
 }
 
-fn runtime_smart_context_matching_semantic_range_appendix(
+fn runtime_smart_context_token_budget_deferred_rehydrate_ids(
+    plan: &runtime_proxy_crate::SmartContextRehydratePlan,
+) -> BTreeSet<String> {
+    plan.actions
+        .iter()
+        .filter_map(|action| match action {
+            runtime_proxy_crate::SmartContextRehydrateAction::Defer { id, reason }
+                if matches!(
+                    reason,
+                    runtime_proxy_crate::SmartContextRehydrateDeferReason::TokenBudgetExceeded
+                        | runtime_proxy_crate::SmartContextRehydrateDeferReason::MinimalBudgetTier
+                ) =>
+            {
+                Some(id.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn runtime_smart_context_selective_rehydrate_deferred_read_plan(
+    value: &mut serde_json::Value,
+    store: &RuntimeSmartContextArtifactStore,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    deferred_ids: &BTreeSet<String>,
+    remaining_tokens: &mut usize,
+    stats: &mut RuntimeSmartContextTransformStats,
+) -> usize {
+    if *remaining_tokens == 0 || deferred_ids.is_empty() {
+        return 0;
+    }
+    if runtime_smart_context_value_is_static_context_item(value) {
+        return 0;
+    }
+    match value {
+        serde_json::Value::String(text) => {
+            runtime_smart_context_selective_rehydrate_deferred_read_plan_in_text(
+                text,
+                store,
+                terms,
+                deferred_ids,
+                remaining_tokens,
+                stats,
+            )
+        }
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .map(|item| {
+                runtime_smart_context_selective_rehydrate_deferred_read_plan(
+                    item,
+                    store,
+                    terms,
+                    deferred_ids,
+                    remaining_tokens,
+                    stats,
+                )
+            })
+            .sum(),
+        serde_json::Value::Object(object) => {
+            let mut count = 0usize;
+            for (key, item) in object {
+                if runtime_smart_context_static_prompt_field_key(key) {
+                    continue;
+                }
+                count = count.saturating_add(
+                    runtime_smart_context_selective_rehydrate_deferred_read_plan(
+                        item,
+                        store,
+                        terms,
+                        deferred_ids,
+                        remaining_tokens,
+                        stats,
+                    ),
+                );
+            }
+            count
+        }
+        _ => 0,
+    }
+}
+
+fn runtime_smart_context_selective_rehydrate_deferred_read_plan_in_text(
+    text: &mut String,
+    store: &RuntimeSmartContextArtifactStore,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    deferred_ids: &BTreeSet<String>,
+    remaining_tokens: &mut usize,
+    stats: &mut RuntimeSmartContextTransformStats,
+) -> usize {
+    if *remaining_tokens == 0 {
+        return 0;
+    }
+    let ids = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(text.clone()))
+        .into_iter()
+        .filter(|reference| reference.line_ranges.is_empty() && reference.line_range.is_none())
+        .map(|reference| reference.id)
+        .filter(|id| deferred_ids.contains(id))
+        .collect::<BTreeSet<_>>();
+    if ids.is_empty() {
+        return 0;
+    }
+
+    let mut next = text.clone();
+    let mut rehydrated_ranges = 0usize;
+    for id in ids {
+        let Some((appendix, range_count, token_cost)) =
+            runtime_smart_context_deferred_read_plan_appendix(
+                &id,
+                store,
+                terms,
+                &next,
+                *remaining_tokens,
+            )
+        else {
+            continue;
+        };
+        if !next.ends_with('\n') {
+            next.push('\n');
+        }
+        next.push('\n');
+        next.push_str(&appendix);
+        rehydrated_ranges = rehydrated_ranges.saturating_add(range_count);
+        runtime_smart_context_consume_rehydrate_budget(remaining_tokens, token_cost);
+        if *remaining_tokens == 0 {
+            break;
+        }
+    }
+
+    if rehydrated_ranges > 0 {
+        *text = next;
+        stats.rehydrated_refs = stats.rehydrated_refs.saturating_add(rehydrated_ranges);
+    }
+    rehydrated_ranges
+}
+
+fn runtime_smart_context_deferred_read_plan_appendix(
+    artifact_id: &str,
+    store: &RuntimeSmartContextArtifactStore,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    current_text: &str,
+    token_budget: usize,
+) -> Option<(String, usize, usize)> {
+    let line_index = store.line_index(artifact_id)?;
+    let artifact_text = store.get_text(artifact_id);
+    let mut ranges = Vec::<RuntimeSmartContextScoredExactAppendixRange>::new();
+
+    for range in line_index
+        .symbol_ranges
+        .iter()
+        .chain(line_index.test_failure_ranges.iter())
+        .chain(line_index.error_ranges.iter())
+        .chain(line_index.file_location_ranges.iter())
+        .chain(line_index.diff_hunk_ranges.iter())
+    {
+        if !runtime_smart_context_artifact_semantic_range_valid(range)
+            || !runtime_smart_context_semantic_range_matches_terms(range, terms)
+        {
+            continue;
+        }
+        runtime_smart_context_push_scored_exact_range(
+            &mut ranges,
+            current_text,
+            RuntimeSmartContextExactAppendixRange {
+                reference: runtime_smart_context_artifact_line_ref(
+                    artifact_id,
+                    range.start,
+                    range.end,
+                ),
+                body: range.text.clone(),
+            },
+            runtime_smart_context_semantic_range_score(range, terms).saturating_add(200),
+        );
+    }
+
+    for range in &line_index.critical_ranges {
+        if !runtime_smart_context_artifact_line_index_range_valid(range) {
+            continue;
+        }
+        runtime_smart_context_push_scored_exact_range(
+            &mut ranges,
+            current_text,
+            RuntimeSmartContextExactAppendixRange {
+                reference: runtime_smart_context_artifact_line_ref(
+                    artifact_id,
+                    range.start,
+                    range.end,
+                ),
+                body: range.text.clone(),
+            },
+            runtime_smart_context_critical_exact_appendix_score(
+                &RuntimeSmartContextExactAppendixRange {
+                    reference: String::new(),
+                    body: range.text.clone(),
+                },
+            )
+            .saturating_add(100),
+        );
+    }
+
+    if let Some(artifact_text) = artifact_text.as_deref() {
+        ranges.extend(runtime_smart_context_import_read_plan_ranges(
+            artifact_id,
+            artifact_text,
+            current_text,
+            terms,
+        ));
+    }
+
+    if ranges.is_empty() {
+        return None;
+    }
+    let exact_ranges = ranges
+        .iter()
+        .map(|range| range.range.clone())
+        .collect::<Vec<_>>();
+    runtime_smart_context_render_budgeted_scored_exact_appendix(
+        SMART_CONTEXT_LABEL_REHYDRATE_PLAN_EXACT,
+        exact_ranges,
+        SMART_CONTEXT_BUDGET_AWARE_REHYDRATE_MAX_RANGES,
+        token_budget,
+        |range| {
+            ranges
+                .iter()
+                .find(|candidate| candidate.range.eq(range))
+                .map_or(0, |candidate| candidate.score)
+        },
+    )
+}
+
+fn runtime_smart_context_push_scored_exact_range(
+    ranges: &mut Vec<RuntimeSmartContextScoredExactAppendixRange>,
+    current_text: &str,
+    range: RuntimeSmartContextExactAppendixRange,
+    score: usize,
+) {
+    if range.body.trim().is_empty()
+        || current_text.contains(&range.reference)
+        || current_text.contains(&range.body)
+        || ranges.iter().any(|candidate| candidate.range == range)
+    {
+        return;
+    }
+    ranges.push(RuntimeSmartContextScoredExactAppendixRange { range, score });
+}
+
+fn runtime_smart_context_import_read_plan_ranges(
+    artifact_id: &str,
+    artifact_text: &str,
+    current_text: &str,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> Vec<RuntimeSmartContextScoredExactAppendixRange> {
+    let lines = artifact_text.lines().collect::<Vec<_>>();
+    let mut ranges = Vec::new();
+    let mut start: Option<usize> = None;
+    let mut end = 0usize;
+    for (index, line) in lines
+        .iter()
+        .enumerate()
+        .take(SMART_CONTEXT_BUDGET_AWARE_IMPORT_SCAN_MAX_LINES)
+    {
+        let line_number = index + 1;
+        if runtime_smart_context_line_is_import(line) {
+            start.get_or_insert(line_number);
+            end = line_number;
+            continue;
+        }
+        if let Some(range_start) = start.take() {
+            runtime_smart_context_push_import_read_plan_range(
+                artifact_id,
+                &lines,
+                range_start,
+                end,
+                current_text,
+                terms,
+                &mut ranges,
+            );
+            if ranges.len() >= SMART_CONTEXT_BUDGET_AWARE_IMPORT_MAX_RANGES {
+                return ranges;
+            }
+        }
+        if !line.trim().is_empty()
+            && !line.trim_start().starts_with("//")
+            && !line.trim_start().starts_with('#')
+        {
+            continue;
+        }
+    }
+    if let Some(range_start) = start {
+        runtime_smart_context_push_import_read_plan_range(
+            artifact_id,
+            &lines,
+            range_start,
+            end,
+            current_text,
+            terms,
+            &mut ranges,
+        );
+    }
+    ranges
+}
+
+fn runtime_smart_context_push_import_read_plan_range(
+    artifact_id: &str,
+    lines: &[&str],
+    start: usize,
+    end: usize,
+    current_text: &str,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+    ranges: &mut Vec<RuntimeSmartContextScoredExactAppendixRange>,
+) {
+    if ranges.len() >= SMART_CONTEXT_BUDGET_AWARE_IMPORT_MAX_RANGES {
+        return;
+    }
+    let Some(body) = runtime_smart_context_line_excerpt(lines, start, end) else {
+        return;
+    };
+    let mut score = 40usize;
+    for term in terms
+        .file_paths
+        .iter()
+        .chain(terms.test_symbols.iter())
+        .chain(terms.error_codes.iter())
+    {
+        if body.contains(term) {
+            score = score.saturating_add(40);
+        }
+    }
+    runtime_smart_context_push_scored_exact_range(
+        ranges,
+        current_text,
+        RuntimeSmartContextExactAppendixRange {
+            reference: runtime_smart_context_artifact_line_ref(artifact_id, start, end),
+            body,
+        },
+        score,
+    );
+}
+
+fn runtime_smart_context_line_is_import(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("use ")
+        || trimmed.starts_with("pub use ")
+        || trimmed.starts_with("extern crate ")
+        || trimmed.starts_with("import ")
+        || trimmed.starts_with("from ") && trimmed.contains(" import ")
+}
+
+fn runtime_smart_context_matching_semantic_range_appendix_with_budget(
     artifact_id: &str,
     line_index: &RuntimeSmartContextArtifactLineIndex,
     current_text: &str,
     terms: &RuntimeSmartContextSelectiveRehydrateTerms,
-) -> Option<(String, usize)> {
+    token_budget: usize,
+) -> Option<(String, usize, usize)> {
     let ranges = runtime_smart_context_matching_semantic_ranges(
         artifact_id,
         line_index,
@@ -3815,7 +4274,7 @@ fn runtime_smart_context_matching_semantic_range_appendix(
         return None;
     }
 
-    runtime_smart_context_render_scored_exact_appendix(
+    runtime_smart_context_render_budgeted_scored_exact_appendix(
         SMART_CONTEXT_LABEL_SEMANTIC_EXACT,
         ranges
             .iter()
@@ -3829,6 +4288,7 @@ fn runtime_smart_context_matching_semantic_range_appendix(
             })
             .collect(),
         runtime_smart_context_semantic_rehydrate_range_cap(terms),
+        token_budget,
         |range| runtime_smart_context_semantic_exact_appendix_score(range, terms),
     )
 }
@@ -3847,6 +4307,7 @@ fn runtime_smart_context_matching_semantic_ranges<'a>(
         .chain(line_index.diff_hunk_ranges.iter())
         .chain(line_index.test_failure_ranges.iter())
         .chain(line_index.error_ranges.iter())
+        .chain(line_index.symbol_ranges.iter())
     {
         if !runtime_smart_context_artifact_semantic_range_valid(range)
             || !runtime_smart_context_semantic_range_matches_terms(range, terms)
@@ -3914,7 +4375,7 @@ fn runtime_smart_context_semantic_range_score(
     if range
         .symbol
         .as_deref()
-        .is_some_and(|symbol| terms.test_symbols.contains(symbol))
+        .is_some_and(|symbol| runtime_smart_context_symbol_matches_terms(symbol, terms))
     {
         score = score.saturating_add(110);
     }
@@ -3933,6 +4394,33 @@ fn runtime_smart_context_semantic_range_score(
         score = score.saturating_add(80);
     }
     score.saturating_add(10_000usize.saturating_sub(range.byte_len.min(10_000)) / 100)
+}
+
+fn runtime_smart_context_symbol_matches_terms(
+    symbol: &str,
+    terms: &RuntimeSmartContextSelectiveRehydrateTerms,
+) -> bool {
+    terms
+        .test_symbols
+        .iter()
+        .any(|term| runtime_smart_context_symbol_matches_term(symbol, term))
+}
+
+fn runtime_smart_context_symbol_matches_term(symbol: &str, term: &str) -> bool {
+    let term = term.trim_end_matches("()");
+    symbol == term
+        || term
+            .rsplit("::")
+            .next()
+            .is_some_and(|suffix| suffix == symbol)
+        || term
+            .rsplit('#')
+            .next()
+            .is_some_and(|suffix| suffix == symbol)
+        || term
+            .rsplit('.')
+            .next()
+            .is_some_and(|suffix| suffix == symbol)
 }
 
 fn runtime_smart_context_semantic_rehydrate_range_cap(
@@ -3981,7 +4469,7 @@ fn runtime_smart_context_semantic_range_matches_terms(
         || range
             .symbol
             .as_deref()
-            .is_some_and(|symbol| terms.test_symbols.contains(symbol))
+            .is_some_and(|symbol| runtime_smart_context_symbol_matches_terms(symbol, terms))
         || terms
             .diff_hunks
             .iter()
@@ -4347,7 +4835,11 @@ fn runtime_smart_context_condense_tool_outputs(
             };
             let replacement = if existing_artifact.is_some() {
                 stats.repeat_tool_output_refs += 1;
-                runtime_smart_context_artifact_reference_summary(&artifact)
+                runtime_smart_context_repeat_tool_output_reference_summary(
+                    &artifact,
+                    &output,
+                    runtime_smart_context_tool_call_id(object),
+                )
             } else {
                 let compacted = runtime_smart_context_progressive_tool_output_summary(
                     &artifact,
@@ -4792,6 +5284,97 @@ fn runtime_smart_context_render_scored_exact_appendix(
         ));
     }
     Some((appendix, selected_count))
+}
+
+fn runtime_smart_context_render_budgeted_scored_exact_appendix(
+    label: &str,
+    ranges: Vec<RuntimeSmartContextExactAppendixRange>,
+    max_exact_ranges: usize,
+    token_budget: usize,
+    score: impl Fn(&RuntimeSmartContextExactAppendixRange) -> usize,
+) -> Option<(String, usize, usize)> {
+    if token_budget == usize::MAX {
+        let (appendix, range_count) = runtime_smart_context_render_scored_exact_appendix(
+            label,
+            ranges,
+            max_exact_ranges,
+            score,
+        )?;
+        let token_cost = runtime_smart_context_estimated_tokens_usize(appendix.len());
+        return Some((appendix, range_count, token_cost));
+    }
+    if token_budget == 0 {
+        return None;
+    }
+
+    let ranges = ranges
+        .into_iter()
+        .filter(|range| !range.body.trim().is_empty())
+        .collect::<Vec<_>>();
+    if ranges.is_empty() {
+        return None;
+    }
+
+    let max_exact_ranges = max_exact_ranges.max(1);
+    let mut ranked = ranges
+        .iter()
+        .enumerate()
+        .map(|(index, range)| (index, score(range)))
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(index, score)| (std::cmp::Reverse(*score), *index));
+
+    let mut selected_indexes = Vec::new();
+    let mut estimated_tokens = runtime_smart_context_estimated_tokens_usize(label.len());
+    for (index, _) in ranked {
+        if selected_indexes.len() >= max_exact_ranges {
+            break;
+        }
+        let next_cost = runtime_smart_context_exact_appendix_range_token_cost(&ranges[index]);
+        if estimated_tokens.saturating_add(next_cost) > token_budget {
+            continue;
+        }
+        selected_indexes.push(index);
+        estimated_tokens = estimated_tokens.saturating_add(next_cost);
+    }
+    if selected_indexes.is_empty() {
+        return None;
+    }
+    selected_indexes.sort_unstable();
+    let selected = selected_indexes
+        .into_iter()
+        .map(|index| ranges[index].clone())
+        .collect::<Vec<_>>();
+    let selected_count = selected.len();
+    let (appendix, _) = runtime_smart_context_render_exact_appendix(label, selected)?;
+    let actual_tokens = runtime_smart_context_estimated_tokens_usize(appendix.len());
+    (actual_tokens <= token_budget).then_some((appendix, selected_count, actual_tokens))
+}
+
+fn runtime_smart_context_exact_appendix_range_token_cost(
+    range: &RuntimeSmartContextExactAppendixRange,
+) -> usize {
+    runtime_smart_context_estimated_tokens_usize(
+        range
+            .reference
+            .len()
+            .saturating_add(range.body.len())
+            .saturating_add(2),
+    )
+}
+
+fn runtime_smart_context_estimated_tokens_usize(byte_len: usize) -> usize {
+    runtime_proxy_crate::smart_context_estimate_tokens_from_body_bytes(byte_len)
+        .try_into()
+        .unwrap_or(usize::MAX)
+}
+
+fn runtime_smart_context_consume_rehydrate_budget(
+    remaining_tokens: &mut usize,
+    used_tokens: usize,
+) {
+    if *remaining_tokens != usize::MAX {
+        *remaining_tokens = remaining_tokens.saturating_sub(used_tokens);
+    }
 }
 
 fn runtime_smart_context_merge_exact_appendix_ranges(
@@ -5538,6 +6121,40 @@ fn runtime_smart_context_artifact_reference_summary(
     runtime_smart_context_artifact_ref(&artifact.id)
 }
 
+fn runtime_smart_context_repeat_tool_output_reference_summary(
+    artifact: &runtime_proxy_crate::SmartContextArtifactRef,
+    text: &str,
+    call_id: Option<&str>,
+) -> String {
+    let reference = runtime_smart_context_artifact_reference_summary(artifact);
+    if runtime_proxy_crate::smart_context_command_output_critical_signals(text).count == 0 {
+        return reference;
+    }
+
+    let previous_record =
+        runtime_proxy_crate::smart_context_command_output_cache_record(reference.clone(), text);
+    let rewrite = runtime_proxy_crate::smart_context_command_output_cache_rewrite(
+        runtime_proxy_crate::SmartContextCommandOutputCacheInput {
+            id: call_id.unwrap_or(&artifact.id).to_string(),
+            text: text.to_string(),
+            previous_records: vec![previous_record],
+            min_replacement_bytes:
+                runtime_proxy_crate::SMART_CONTEXT_COMMAND_OUTPUT_CACHE_MIN_BYTES,
+        },
+    );
+    match rewrite.action {
+        runtime_proxy_crate::SmartContextCommandOutputCacheAction::ReplaceWithUnchangedSummary {
+            ..
+        } => {
+            let mut output = rewrite.output;
+            output.push_str("\nref ");
+            output.push_str(&reference);
+            output
+        }
+        runtime_proxy_crate::SmartContextCommandOutputCacheAction::KeepExact { .. } => reference,
+    }
+}
+
 fn runtime_smart_context_artifact_marker_line(
     kind: &str,
     artifact: &runtime_proxy_crate::SmartContextArtifactRef,
@@ -6083,6 +6700,7 @@ fn runtime_smart_context_text_is_generated_summary_or_manifest(text: &str) -> bo
         || trimmed.starts_with("prodex-sc repeat ")
         || trimmed.starts_with("psc art ")
         || trimmed.starts_with("psc repeat ")
+        || trimmed.starts_with("psc cmdout ")
         || trimmed.starts_with("psc m ")
         || trimmed.starts_with("psc manifest ")
 }
