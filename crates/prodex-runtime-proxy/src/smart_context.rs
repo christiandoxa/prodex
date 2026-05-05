@@ -790,9 +790,7 @@ fn smart_context_recent_accounted_input_calibration_for_bucket(
         return Some(calibration);
     }
 
-    let Some(calibration_bucket_key) = calibration_bucket_key else {
-        return None;
-    };
+    let calibration_bucket_key = calibration_bucket_key?;
 
     for tier in [
         SmartContextTokenCalibrationFallbackTier::Model,

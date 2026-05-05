@@ -69,6 +69,7 @@ fn runtime_prompt_cache_key_hash_label(prompt_cache_key: Option<&str>) -> String
         .unwrap_or_else(|| "none".to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn log_runtime_token_usage(
     shared: &RuntimeRotationProxyShared,
     request_id: u64,

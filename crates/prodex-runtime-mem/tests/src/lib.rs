@@ -1031,7 +1031,7 @@ fn safe_auto_schema_policy_and_schema_helper_are_ready_for_app_integration() {
 fn super_slim_v2_shadow_events_are_short_and_schema_addressable() {
     let user_prompt = "Implement concise memory bridge\n".to_string() + &"detail ".repeat(120);
     let tool_output = "cargo test passed\n".to_string() + &"ok ".repeat(120);
-    let events = vec![
+    let events = [
         serde_json::json!({
             "payload": {
                 "type": "user_message",

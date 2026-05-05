@@ -791,7 +791,7 @@ fn runtime_smart_context_merge_persisted_token_calibration(
         .extend(incoming.rewrite_safety_history);
     existing.rewrite_safety_history.retain(|record| {
         runtime_smart_context_rewrite_safety_record_fresh(
-            RuntimeSmartContextRewriteSafetyRecord::from(record.clone()),
+            RuntimeSmartContextRewriteSafetyRecord::from(*record),
             now,
         )
     });
@@ -1577,6 +1577,7 @@ enum RuntimeSmartContextRewriteTelemetryTuning {
     Tighten,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_smart_context_budget(
     shared: &RuntimeRotationProxyShared,
     body: &[u8],
@@ -4478,9 +4479,7 @@ fn runtime_smart_context_condense_historical_tool_call_arguments(
                 continue;
             };
             if arguments_text.len()
-                <= inline_limit
-                    .min(SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES)
-                    .max(256)
+                <= inline_limit.clamp(256, SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES)
             {
                 continue;
             }
