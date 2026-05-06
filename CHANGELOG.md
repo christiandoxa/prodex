@@ -11,6 +11,10 @@ Changes after `0.82.0`.
 - Close residual release guard gaps (`51ba501`)
 - Close runtime and release guard gaps (`8f9f61c`)
 
+### CI
+
+- Harden release guard calibration (`db3e2d6`)
+
 ### Misc
 
 - Ignore changelog-only entries (`9b2746e`)
