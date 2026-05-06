@@ -4,15 +4,11 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.82.0 - Unreleased
 
-Changes after `0.79.0`.
+Changes after `0.81.0`.
 
 ### Runtime
 
 - Harden smart context rewrite fallback (`80f4a87`)
-- Stabilize websocket streaming (`a92f29a`)
-- Avoid broker readiness timeout (`8bc2a85`)
-- Reduce compact pressure for affinity continuations (`dee2401`)
-- Reduce default smart context token overhead (`4a64cc5`)
 
 ### Docs
 
@@ -21,6 +17,20 @@ Changes after `0.79.0`.
 ### CI
 
 - Fetch full history for release sync (`3a2c6d8`)
+
+## 0.81.0 - 2026-05-06
+
+### Runtime
+
+- Stabilize websocket streaming (`a92f29a`)
+
+## 0.80.0 - 2026-05-06
+
+### Runtime
+
+- Avoid broker readiness timeout (`8bc2a85`)
+- Reduce compact pressure for affinity continuations (`dee2401`)
+- Reduce default smart context token overhead (`4a64cc5`)
 
 ## 0.79.0 - 2026-05-05
 
@@ -177,40 +187,3 @@ Changes after `0.79.0`.
 - Extract src helpers into workspace crates (`7474281`)
 - Extract context helpers into crate (`7404c0a`)
 - Split modules into workspace crates (`18459e9`)
-
-## 0.69.0 - 2026-05-01
-
-### CLI
-
-- Satisfy quota clippy gate (`fb4265e`)
-
-### CI
-
-- Serialize auto-rotate integration tests (`6a00aee`)
-
-### Misc
-
-- Split internal workspace crates (`7881ca4`)
-
-## 0.68.0 - 2026-04-30
-
-### Runtime
-
-- Promote fresh websocket rotations (`00dcc41`)
-- Make auto-rotate opt-in (`616c8d0`)
-- Split runtime support crates (`11bddfb`)
-
-### CLI
-
-- Add session inspection and quota auth filtering (`24472a0`)
-
-### CI
-
-- Relax sse bench smoke threshold (`203afbd`)
-- Update split crate lint checks (`49536ce`)
-
-### Misc
-
-- Satisfy clippy for terminal ui crate (`5d36706`)
-- Split additional support crates (`0c38b27`)
-- Split leaf modules into workspace crates (`2f20685`)
