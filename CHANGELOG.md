@@ -14,6 +14,10 @@ Changes after `0.79.0`.
 - Reduce compact pressure for affinity continuations (`dee2401`)
 - Reduce default smart context token overhead (`4a64cc5`)
 
+### CI
+
+- Fetch full history for release sync (`3a2c6d8`)
+
 ## 0.79.0 - 2026-05-05
 
 ### CLI
