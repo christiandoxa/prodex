@@ -67,6 +67,39 @@ jobs:
             ghcr.io/gitleaks/gitleaks:v8.30.1 \
             detect --source /repo --no-git --redact --no-banner --config /repo/.gitleaks.toml
 
+  process-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Enforce churn hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run ci:churn-hygiene:check -- --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}"
+            exit 0
+          fi
+
+          before="${{ github.event.before }}"
+          after="${{ github.sha }}"
+          if [ -n "${before}" ] && [ "${before}" != "0000000000000000000000000000000000000000" ]; then
+            npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"
+          else
+            npm run ci:churn-hygiene:check
+          fi
+
   supply-chain:
     runs-on: ubuntu-latest
     timeout-minutes: 30

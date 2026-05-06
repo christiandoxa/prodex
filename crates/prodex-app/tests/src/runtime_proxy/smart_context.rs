@@ -4348,6 +4348,55 @@ fn smart_context_prepare_passes_invalid_json_unchanged() {
 }
 
 #[test]
+fn smart_context_prepare_passes_too_deep_json_unchanged_without_panic_fallback() {
+    let shared = smart_context_test_shared("prepare-too-deep-json");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    let mut nested = serde_json::Value::String("leaf".to_string());
+    for _ in 0..RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH {
+        nested = serde_json::json!({ "nested": nested });
+    }
+    let body = serde_json::json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": "keep exact"
+        }],
+        "metadata": nested
+    })
+    .to_string();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: body.into_bytes(),
+    };
+
+    let prepared =
+        prepare_runtime_smart_context_http_body(79, &request, &shared, RuntimeRouteKind::Responses);
+
+    assert!(matches!(&prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("decision=unsupported_json_shape"));
+    assert!(log.contains("reasons=json_depth_limit"));
+    assert!(!log.contains("smart_context_panic"));
+}
+
+#[test]
+fn smart_context_json_shape_guard_rejects_excessive_node_count_iteratively() {
+    let value = serde_json::Value::Array(vec![
+        serde_json::Value::Null;
+        RUNTIME_SMART_CONTEXT_MAX_JSON_NODES + 1
+    ]);
+
+    assert_eq!(
+        runtime_smart_context_unsupported_json_shape_reason(&value),
+        Some("json_node_limit")
+    );
+}
+
+#[test]
 fn smart_context_self_check_passes_through_growth_without_rehydrate() {
     let stats = RuntimeSmartContextTransformStats {
         artifacts_stored: 1,

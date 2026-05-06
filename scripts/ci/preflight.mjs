@@ -7,6 +7,7 @@ import {
 
 function parseArgs(argv) {
   const args = {
+    churnCheck: process.env.CI === "true",
     dryRun: false,
     jobs: defaultJobCount(),
     fastTests: true,
@@ -17,6 +18,14 @@ function parseArgs(argv) {
     const value = argv[index];
     if (value === "--dry-run") {
       args.dryRun = true;
+      continue;
+    }
+    if (value === "--churn-check") {
+      args.churnCheck = true;
+      continue;
+    }
+    if (value === "--no-churn-check") {
+      args.churnCheck = false;
       continue;
     }
     if (value === "--jobs" || value === "-j") {
@@ -48,7 +57,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--dry-run]",
+      "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--churn-check] [--no-churn-check] [--dry-run]",
       "",
       "Runs the practical local preflight gate before pushing or release prep.",
       "",
@@ -58,11 +67,15 @@ function printHelp() {
       "  - cargo clippy --locked --all-targets --all-features -- -D warnings",
       "  - npm run test:fast -- --tests-only --no-prebuild",
       "",
+      "Churn hygiene reports locally by default and fails in CI by default.",
+      "",
       "Options:",
-      "  --jobs <n>  set test:fast child process parallelism",
-      "  --serial    also run npm run test:serial -- --suite all",
-      "  --no-tests  skip test:fast; useful when only checking metadata/clippy",
-      "  --dry-run   print the command plan without running it",
+      "  --jobs <n>        set test:fast child process parallelism",
+      "  --serial          also run npm run test:serial -- --suite all",
+      "  --no-tests        skip test:fast; useful when only checking metadata/clippy",
+      "  --churn-check     fail when churn hygiene thresholds are exceeded",
+      "  --no-churn-check  force churn hygiene report-only mode, including in CI",
+      "  --dry-run         print the command plan without running it",
     ].join("\n") + "\n",
   );
 }
@@ -80,9 +93,9 @@ function preflightSteps(args) {
       args: ["scripts/ci/runtime-hotpath-guard.mjs"],
     },
     {
-      label: "churn-hygiene-report",
+      label: args.churnCheck ? "churn-hygiene-check" : "churn-hygiene-report",
       command: "node",
-      args: ["scripts/ci/churn-hygiene.mjs"],
+      args: ["scripts/ci/churn-hygiene.mjs", ...(args.churnCheck ? ["--check"] : [])],
     },
     {
       label: "release-preflight",

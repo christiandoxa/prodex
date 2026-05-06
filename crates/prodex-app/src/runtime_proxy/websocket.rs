@@ -889,6 +889,22 @@ pub(super) struct RuntimeWebsocketAttemptRequest<'a> {
     pub(in crate::runtime_proxy) promote_committed_profile: bool,
 }
 
+fn runtime_websocket_precommit_hold_promotion_allowed(
+    reuse_existing_session: bool,
+    request_previous_response_id: Option<&str>,
+    request_session_id: Option<&str>,
+    request_turn_state: Option<&str>,
+    turn_state_override: Option<&str>,
+    promote_committed_profile: bool,
+) -> bool {
+    !reuse_existing_session
+        && request_previous_response_id.is_none()
+        && request_session_id.is_none()
+        && request_turn_state.is_none()
+        && turn_state_override.is_none()
+        && promote_committed_profile
+}
+
 pub(super) fn attempt_runtime_websocket_request(
     attempt: RuntimeWebsocketAttemptRequest<'_>,
 ) -> Result<RuntimeWebsocketAttempt> {
@@ -972,6 +988,14 @@ pub(super) fn attempt_runtime_websocket_request(
     }
 
     let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
+    let precommit_hold_promotion_allowed = runtime_websocket_precommit_hold_promotion_allowed(
+        reuse_existing_session,
+        request_previous_response_id,
+        request_session_id,
+        request_turn_state,
+        turn_state_override,
+        promote_committed_profile,
+    );
     let reuse_started_at = reuse_existing_session.then(Instant::now);
     let precommit_started_at = Instant::now();
     let (mut upstream_socket, mut upstream_turn_state, mut inflight_guard) =
@@ -1191,7 +1215,7 @@ pub(super) fn attempt_runtime_websocket_request(
                     });
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
-                    if elapsed_ms >= u128::from(timeout_ms) {
+                    if elapsed_ms >= u128::from(timeout_ms) && precommit_hold_promotion_allowed {
                         runtime_proxy_log(
                             shared,
                             runtime_proxy_structured_log_message(
@@ -1573,7 +1597,11 @@ pub(super) fn attempt_runtime_websocket_request(
                 return Err(transport_error);
             }
             Err(err) => {
-                if !committed && precommit_hold_count > 0 && runtime_websocket_timeout_error(&err) {
+                if !committed
+                    && precommit_hold_count > 0
+                    && runtime_websocket_timeout_error(&err)
+                    && precommit_hold_promotion_allowed
+                {
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
                     runtime_proxy_log(

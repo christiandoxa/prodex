@@ -28,6 +28,7 @@
     "ci:release-metadata-guard": "node scripts/ci/release-metadata-only-guard.mjs",
     "ci:runtime-hotpath-guard": "node scripts/ci/runtime-hotpath-guard.mjs",
     "ci:churn-hygiene": "node scripts/ci/churn-hygiene.mjs",
+    "ci:churn-hygiene:check": "node scripts/ci/churn-hygiene.mjs --check",
     "ci:runtime-manifest": "node scripts/ci/runtime-test-manifest-guard.mjs",
     "ci:runtime-stress": "node scripts/ci/runtime-stress.mjs",
     "ci:npm-smoke": "node scripts/ci/npm-package-smoke.mjs",

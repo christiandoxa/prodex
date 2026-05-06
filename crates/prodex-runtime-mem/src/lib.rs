@@ -2430,18 +2430,11 @@ fn runtime_mem_super_slim_v2_compact_dictionary_events(mut events: Vec<Value>) -
 fn runtime_mem_super_slim_v2_best_dictionary_candidate(
     events: &[Value],
 ) -> Option<RuntimeMemSuperSlimV2DictionaryCandidate> {
-    let base_len = runtime_mem_jsonl_events_len(events);
     runtime_mem_super_slim_v2_dictionary_candidates(events)
         .into_iter()
         .filter_map(|candidate| {
-            let compacted =
-                runtime_mem_super_slim_v2_apply_dictionary_candidate(events.to_vec(), &candidate);
-            let compacted_len = runtime_mem_jsonl_events_len(&compacted);
-            if compacted_len < base_len {
-                Some((candidate, base_len - compacted_len))
-            } else {
-                None
-            }
+            runtime_mem_super_slim_v2_candidate_savings(events, &candidate)
+                .map(|savings| (candidate, savings))
         })
         .max_by_key(|(candidate, savings)| {
             (
@@ -2451,6 +2444,66 @@ fn runtime_mem_super_slim_v2_best_dictionary_candidate(
             )
         })
         .map(|(candidate, _)| candidate)
+}
+
+fn runtime_mem_super_slim_v2_candidate_savings(
+    events: &[Value],
+    candidate: &RuntimeMemSuperSlimV2DictionaryCandidate,
+) -> Option<usize> {
+    let dictionary_index =
+        runtime_mem_super_slim_v2_next_dictionary_index(events, &candidate.field);
+    let dictionary_event_len =
+        runtime_mem_json_value_len(&runtime_mem_super_slim_v2_dictionary_event(
+            &candidate.field,
+            dictionary_index,
+            candidate.mode,
+            &candidate.value,
+        ))
+        .saturating_add(1);
+    if dictionary_event_len == usize::MAX {
+        return None;
+    }
+
+    let mut field_savings = 0usize;
+    for event_index in &candidate.event_indexes {
+        let Some(event) = events.get(*event_index) else {
+            continue;
+        };
+        let Some(value) = event.get(&candidate.field).and_then(Value::as_str) else {
+            continue;
+        };
+        let compacted = match candidate.placement {
+            RuntimeMemSuperSlimV2DictionaryPlacement::WholeField => {
+                candidate.compact_ref(dictionary_index, value)
+            }
+            RuntimeMemSuperSlimV2DictionaryPlacement::Inline => {
+                let compact_ref = format!(
+                    "{{{}}}",
+                    runtime_mem_super_slim_v2_dictionary_ref(&candidate.field, dictionary_index)
+                );
+                let compacted = value.replace(candidate.value.as_str(), &compact_ref);
+                (compacted != value).then_some(compacted)
+            }
+        };
+        let Some(compacted) = compacted else {
+            continue;
+        };
+
+        let original_len = runtime_mem_json_value_len(event).saturating_add(1);
+        let mut compacted_event = event.clone();
+        let Some(object) = compacted_event.as_object_mut() else {
+            continue;
+        };
+        object.insert(candidate.field.clone(), Value::String(compacted));
+        let compacted_len = runtime_mem_json_value_len(&compacted_event).saturating_add(1);
+        if compacted_len < original_len {
+            field_savings = field_savings.saturating_add(original_len - compacted_len);
+        }
+    }
+
+    field_savings
+        .checked_sub(dictionary_event_len)
+        .filter(|savings| *savings > 0)
 }
 
 fn runtime_mem_super_slim_v2_dictionary_candidates(
@@ -4604,6 +4657,42 @@ mod compact_v2_runtime_memory_tests {
         assert_eq!(shadows, base_shadows);
         assert!(v2_dictionary_events(&shadows).is_empty());
         assert_v2_raw_events_schema_addressable(&shadows);
+    }
+
+    #[test]
+    fn super_slim_v2_dictionary_candidate_savings_matches_applied_jsonl_delta() {
+        let summary = "user: repeated summary for candidate savings";
+        let events = (0..6)
+            .map(|index| {
+                serde_json::json!({
+                    "payload": {
+                        "type": "user_message",
+                        "message": format!("full user prompt {index} {}", "detail ".repeat(16)),
+                        "metadata": {
+                            "prompt_summary": summary
+                        }
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let base_shadows = v2_shadow_events_without_dictionary(events.iter());
+        let candidate = runtime_mem_super_slim_v2_dictionary_candidates(&base_shadows)
+            .into_iter()
+            .find(|candidate| {
+                candidate.field == "s"
+                    && candidate.mode == RuntimeMemSuperSlimV2DictionaryMode::Exact
+                    && candidate.value == summary
+            })
+            .expect("expected repeated summary dictionary candidate");
+
+        let estimated = runtime_mem_super_slim_v2_candidate_savings(&base_shadows, &candidate)
+            .expect("candidate should shrink JSONL");
+        let compacted =
+            runtime_mem_super_slim_v2_apply_dictionary_candidate(base_shadows.clone(), &candidate);
+        let actual =
+            runtime_mem_jsonl_events_len(&base_shadows) - runtime_mem_jsonl_events_len(&compacted);
+
+        assert_eq!(estimated, actual);
     }
 
     #[test]

@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+const RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH: usize = 64;
+const RUNTIME_SMART_CONTEXT_MAX_JSON_NODES: usize = 50_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeSmartContextTransport {
     Http,
@@ -1271,6 +1274,23 @@ fn prepare_runtime_smart_context_body<'a>(
         );
         return Cow::Borrowed(&request.body);
     };
+    if let Some(reason) = runtime_smart_context_unsupported_json_shape_reason(&value) {
+        runtime_smart_context_log(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            runtime_smart_context_tier_label(budget.tier),
+            "unsupported_json_shape",
+            reason,
+            request.body.len(),
+            request.body.len(),
+            RuntimeSmartContextTransformStats::default(),
+            &budget,
+            "pass_through",
+        );
+        return Cow::Borrowed(&request.body);
+    }
 
     let missing_rehydrate_refs = runtime_smart_context_missing_artifact_refs(&value, shared);
     let exactness = runtime_proxy_crate::smart_context_exactness_guard(
@@ -1677,6 +1697,32 @@ fn prepare_runtime_smart_context_body<'a>(
         self_check,
     );
     Cow::Owned(body)
+}
+
+fn runtime_smart_context_unsupported_json_shape_reason(
+    value: &serde_json::Value,
+) -> Option<&'static str> {
+    let mut stack = vec![(value, 1usize)];
+    let mut nodes = 0usize;
+    while let Some((value, depth)) = stack.pop() {
+        if depth > RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH {
+            return Some("json_depth_limit");
+        }
+        nodes = nodes.saturating_add(1);
+        if nodes > RUNTIME_SMART_CONTEXT_MAX_JSON_NODES {
+            return Some("json_node_limit");
+        }
+        match value {
+            serde_json::Value::Array(items) => {
+                stack.extend(items.iter().map(|item| (item, depth.saturating_add(1))));
+            }
+            serde_json::Value::Object(object) => {
+                stack.extend(object.values().map(|item| (item, depth.saturating_add(1))));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn runtime_smart_context_affinity_pressure_rewrite_allowed(
