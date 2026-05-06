@@ -10,6 +10,10 @@ Changes after `0.84.0`.
 
 - Close smart context release gaps (`c978eb7`)
 
+### CI
+
+- Stabilize historical churn audits (`a3bd0b9`)
+
 ## 0.84.0 - 2026-05-06
 
 ### Runtime
