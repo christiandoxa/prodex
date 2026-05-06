@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Shared Codex home file operations for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_shared_codex_fs"
@@ -13,5 +12,5 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.102"
-prodex_core = { package = "prodex-core", path = "../prodex-core" }
+prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.83.0" }
 serde_json = "1.0.149"

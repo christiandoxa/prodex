@@ -5,14 +5,13 @@ edition.workspace = true
 description = "Shared internal data types for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_shared_types"
 path = "src/lib.rs"
 
 [dependencies]
-prodex_quota = { package = "prodex-quota", path = "../prodex-quota" }
-prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy" }
-prodex_state = { package = "prodex-state", path = "../prodex-state" }
+prodex_quota = { package = "prodex-quota", path = "../prodex-quota", version = "0.83.0" }
+prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy", version = "0.83.0" }
+prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.83.0" }
 serde = { version = "1.0.228", features = ["derive"] }

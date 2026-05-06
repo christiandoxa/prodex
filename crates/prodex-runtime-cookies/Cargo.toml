@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Runtime proxy cookie relay helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_runtime_cookies"

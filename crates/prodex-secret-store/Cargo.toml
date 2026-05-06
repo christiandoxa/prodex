@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Secret storage primitives for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "secret_store"

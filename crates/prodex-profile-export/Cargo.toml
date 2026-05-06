@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Profile export envelope crypto helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_profile_export"

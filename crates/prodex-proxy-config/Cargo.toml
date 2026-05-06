@@ -2,6 +2,7 @@
 name = "prodex-proxy-config"
 version.workspace = true
 edition.workspace = true
+description = "Upstream proxy and client configuration helpers for prodex"
 license.workspace = true
 repository.workspace = true
 

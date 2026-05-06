@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Audit log helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_audit_log"

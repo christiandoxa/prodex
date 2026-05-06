@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Codex config parsing helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "codex_config"

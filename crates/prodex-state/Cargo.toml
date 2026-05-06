@@ -5,7 +5,6 @@ edition.workspace = true
 description = "State models and merge helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_state"

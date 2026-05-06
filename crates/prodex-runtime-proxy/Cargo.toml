@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Runtime proxy boundary primitives for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "runtime_proxy"
@@ -13,5 +12,5 @@ path = "src/lib.rs"
 
 [dependencies]
 base64 = "0.22.1"
-prodex-runtime-tuning = { path = "../prodex-runtime-tuning" }
+prodex-runtime-tuning = { path = "../prodex-runtime-tuning", version = "0.83.0" }
 serde_json = "1.0.149"

@@ -5,7 +5,6 @@ edition.workspace = true
 description = "CLI argument model and parsing helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_cli"

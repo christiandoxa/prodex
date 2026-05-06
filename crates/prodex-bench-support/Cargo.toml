@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Benchmark check harness helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_bench_support"

@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Runtime quota adapter helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_runtime_quota"
@@ -13,7 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono = { version = "0.4.44", features = ["clock"] }
-prodex_quota = { package = "prodex-quota", path = "../prodex-quota" }
-prodex_runtime_state = { package = "prodex-runtime-state", path = "../prodex-runtime-state" }
-prodex_shared_types = { package = "prodex-shared-types", path = "../prodex-shared-types" }
-runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy" }
+prodex_quota = { package = "prodex-quota", path = "../prodex-quota", version = "0.83.0" }
+prodex_runtime_state = { package = "prodex-runtime-state", path = "../prodex-runtime-state", version = "0.83.0" }
+prodex_shared_types = { package = "prodex-shared-types", path = "../prodex-shared-types", version = "0.83.0" }
+runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy", version = "0.83.0" }

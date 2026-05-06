@@ -5,7 +5,6 @@ edition.workspace = true
 description = "Context audit and compression helpers for prodex"
 license.workspace = true
 repository.workspace = true
-publish = false
 
 [lib]
 name = "prodex_context"
@@ -15,4 +14,4 @@ path = "src/lib.rs"
 anyhow = "1.0.102"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-terminal_ui = { package = "prodex-terminal-ui", path = "../prodex-terminal-ui" }
+terminal_ui = { package = "prodex-terminal-ui", path = "../prodex-terminal-ui", version = "0.83.0" }
