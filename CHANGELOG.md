@@ -8,6 +8,7 @@ Changes after `0.82.0`.
 
 ### Runtime
 
+- Close residual release gaps (`227d927`)
 - Close residual release guard gaps (`51ba501`)
 - Close runtime and release guard gaps (`8f9f61c`)
 
