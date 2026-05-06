@@ -192,6 +192,85 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
 }
 
 #[test]
+fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let profile_home = temp_dir.path.join("homes/main");
+    write_auth_json(&profile_home.join("auth.json"), "main-account");
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    state
+        .save(&paths)
+        .expect("runtime broker test state should save");
+    let _owner_lock = try_acquire_runtime_owner_lock(&paths)
+        .expect("owner lock should open")
+        .expect("owner lock should be held by the existing broker");
+
+    let broker_key = "follower-ready-broker".to_string();
+    let admin_token = "follower-ready-admin".to_string();
+    let args = RuntimeBrokerArgs {
+        current_profile: "main".to_string(),
+        upstream_base_url: "http://127.0.0.1:9/backend-api".to_string(),
+        include_code_review: false,
+        upstream_no_proxy: true,
+        smart_context_enabled: true,
+        model_context_window_tokens: None,
+        broker_key: broker_key.clone(),
+        instance_token: "follower-ready-instance".to_string(),
+        admin_token,
+        listen_addr: None,
+    };
+
+    let proxy = start_runtime_rotation_proxy_with_options(
+        &paths,
+        &state,
+        &args.current_profile,
+        args.upstream_base_url.clone(),
+        args.include_code_review,
+        args.upstream_no_proxy,
+        args.smart_context_enabled,
+        args.model_context_window_tokens,
+        args.listen_addr.as_deref(),
+    )
+    .expect("follower runtime broker proxy should start");
+    assert!(
+        proxy.owner_lock.is_none(),
+        "held owner lock should force follower persistence mode"
+    );
+    runtime_broker_publish_start(&paths, &args, &proxy)
+        .expect("follower runtime broker should publish registry");
+    let registry = load_runtime_broker_registry(&paths, &broker_key)
+        .expect("runtime broker registry should load")
+        .expect("follower runtime broker registry should be present");
+    let client = runtime_broker_client().expect("runtime broker client should build");
+    let health = probe_runtime_broker_health(&client, &registry)
+        .expect("follower runtime broker health probe should succeed")
+        .expect("follower runtime broker should respond");
+
+    assert_eq!(health.persistence_role, "follower");
+    assert_eq!(health.instance_token, "follower-ready-instance");
+}
+
+#[test]
 fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_broker() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "500");
     let temp_dir = TestDir::isolated();

@@ -3,7 +3,7 @@ use super::*;
 pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let proxy = start_runtime_rotation_proxy_with_options(
+    let mut proxy = start_runtime_rotation_proxy_with_options(
         &paths,
         &state,
         &args.current_profile,
@@ -15,18 +15,75 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         args.listen_addr.as_deref(),
     )?;
     if proxy.owner_lock.is_none() {
-        return Ok(());
+        runtime_proxy_log_to_path(
+            &proxy.log_path,
+            "runtime_broker_persistence_follower reason=owner_lock_busy",
+        );
     }
 
-    let current_identity = runtime_current_prodex_binary_identity();
+    let metadata = runtime_broker_publish_start(&paths, &args, &proxy)?;
+
+    let startup_grace_until = metadata
+        .started_at
+        .saturating_add(runtime_broker_startup_grace_seconds());
+    let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
+    let lease_scan_interval = Duration::from_millis(
+        RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS.max(RUNTIME_BROKER_POLL_INTERVAL_MS),
+    );
+    let mut idle_started_at = None::<i64>;
+    let mut cached_live_leases = 0usize;
+    let mut last_lease_scan_at = Instant::now() - lease_scan_interval;
+    let mut last_owner_promotion_attempt_at = Instant::now() - lease_scan_interval;
+    loop {
+        let active_requests = proxy.active_request_count.load(Ordering::SeqCst);
+        if proxy.owner_lock.is_none()
+            && last_owner_promotion_attempt_at.elapsed() >= lease_scan_interval
+        {
+            runtime_broker_try_promote_persistence_owner(&paths, &mut proxy);
+            last_owner_promotion_attempt_at = Instant::now();
+        }
+        if active_requests == 0 && last_lease_scan_at.elapsed() >= lease_scan_interval {
+            cached_live_leases = cleanup_runtime_broker_stale_leases(&paths, &args.broker_key);
+            last_lease_scan_at = Instant::now();
+        }
+        if cached_live_leases > 0 || active_requests > 0 {
+            idle_started_at = None;
+        } else {
+            let now = Local::now().timestamp();
+            if now < startup_grace_until {
+                idle_started_at = None;
+                thread::sleep(poll_interval);
+                continue;
+            }
+            let idle_since = idle_started_at.get_or_insert(now);
+            if now.saturating_sub(*idle_since) >= RUNTIME_BROKER_IDLE_GRACE_SECONDS {
+                runtime_proxy_log_to_path(
+                    &proxy.log_path,
+                    &format!(
+                        "runtime_broker_idle_shutdown broker_key={} idle_seconds={}",
+                        args.broker_key,
+                        now.saturating_sub(*idle_since)
+                    ),
+                );
+                break;
+            }
+        }
+        thread::sleep(poll_interval);
+    }
+
+    drop(proxy);
+    remove_runtime_broker_registry_if_token_matches(&paths, &args.broker_key, &args.instance_token);
+    Ok(())
+}
+
+pub(crate) fn runtime_broker_publish_start(
+    paths: &AppPaths,
+    args: &RuntimeBrokerArgs,
+    proxy: &RuntimeRotationProxy,
+) -> Result<RuntimeBrokerMetadata> {
+    let current_identity = runtime_current_prodex_version_identity();
     let metadata = RuntimeBrokerMetadata {
-        broker_key: runtime_broker_key_with_smart_context(
-            &args.upstream_base_url,
-            args.include_code_review,
-            args.upstream_no_proxy,
-            args.smart_context_enabled,
-            args.model_context_window_tokens,
-        ),
+        broker_key: args.broker_key.clone(),
         listen_addr: proxy.listen_addr.to_string(),
         started_at: Local::now().timestamp(),
         current_profile: args.current_profile.clone(),
@@ -61,7 +118,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         executable_sha256: current_identity.executable_sha256.clone(),
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
-    save_runtime_broker_registry(&paths, &args.broker_key, &registry)?;
+    save_runtime_broker_registry(paths, &args.broker_key, &registry)?;
     runtime_proxy_log_to_path(
         &proxy.log_path,
         &format!(
@@ -94,49 +151,29 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
             "executable_sha256": metadata.executable_sha256,
         }),
     );
+    Ok(metadata)
+}
 
-    let startup_grace_until = metadata
-        .started_at
-        .saturating_add(runtime_broker_startup_grace_seconds());
-    let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
-    let lease_scan_interval = Duration::from_millis(
-        RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS.max(RUNTIME_BROKER_POLL_INTERVAL_MS),
-    );
-    let mut idle_started_at = None::<i64>;
-    let mut cached_live_leases = 0usize;
-    let mut last_lease_scan_at = Instant::now() - lease_scan_interval;
-    loop {
-        let active_requests = proxy.active_request_count.load(Ordering::SeqCst);
-        if active_requests == 0 && last_lease_scan_at.elapsed() >= lease_scan_interval {
-            cached_live_leases = cleanup_runtime_broker_stale_leases(&paths, &args.broker_key);
-            last_lease_scan_at = Instant::now();
-        }
-        if cached_live_leases > 0 || active_requests > 0 {
-            idle_started_at = None;
-        } else {
-            let now = Local::now().timestamp();
-            if now < startup_grace_until {
-                idle_started_at = None;
-                thread::sleep(poll_interval);
-                continue;
-            }
-            let idle_since = idle_started_at.get_or_insert(now);
-            if now.saturating_sub(*idle_since) >= RUNTIME_BROKER_IDLE_GRACE_SECONDS {
-                runtime_proxy_log_to_path(
-                    &proxy.log_path,
-                    &format!(
-                        "runtime_broker_idle_shutdown broker_key={} idle_seconds={}",
-                        args.broker_key,
-                        now.saturating_sub(*idle_since)
-                    ),
-                );
-                break;
-            }
-        }
-        thread::sleep(poll_interval);
+fn runtime_broker_try_promote_persistence_owner(
+    paths: &AppPaths,
+    proxy: &mut RuntimeRotationProxy,
+) {
+    if proxy.owner_lock.is_some() {
+        return;
     }
-
-    drop(proxy);
-    remove_runtime_broker_registry_if_token_matches(&paths, &args.broker_key, &args.instance_token);
-    Ok(())
+    match try_acquire_runtime_owner_lock(paths) {
+        Ok(Some(owner_lock)) => {
+            proxy.owner_lock = Some(owner_lock);
+            register_runtime_proxy_persistence_mode(&proxy.log_path, true);
+            runtime_proxy_log_to_path(
+                &proxy.log_path,
+                "runtime_broker_persistence_promoted role=owner",
+            );
+        }
+        Ok(None) => {}
+        Err(err) => runtime_proxy_log_to_path(
+            &proxy.log_path,
+            &format!("runtime_broker_persistence_promotion_error error={err:#}"),
+        ),
+    }
 }

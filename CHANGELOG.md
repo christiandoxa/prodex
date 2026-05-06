@@ -2,9 +2,71 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.75.0 - Unreleased
+## 0.80.0 - Unreleased
 
-Changes after `0.74.0`.
+Changes after `0.79.0`.
+
+### Runtime
+
+- Reduce compact pressure for affinity continuations (`dee2401`)
+- Reduce default smart context token overhead (`4a64cc5`)
+
+## 0.79.0 - 2026-05-05
+
+### CLI
+
+- Improve embedded token efficiency (`37bf326`)
+
+### Misc
+
+- Improve super token efficiency (`7072bc3`)
+- Satisfy ci clippy gate (`a895b53`)
+- Optimize smart context token usage (`0cc7747`)
+- Improve smart context token efficiency (`93b4f97`)
+
+## 0.78.0 - 2026-05-05
+
+### CLI
+
+- Improve embedded token efficiency (`8fbb819`)
+- Trim embedded token overhead (`449d145`)
+- Reduce smart context token overhead (`a65ef71`)
+- Improve token-efficient context calibration (`fe27e49`)
+- Tighten smart context token budgets (`c13709c`)
+- Reduce smart context token overhead (`0e68795`)
+- Reduce embedded context token overhead (`a6cd544`)
+
+### Tests
+
+- Relax smart context rewrite timeout (`b0df72d`)
+
+### CI
+
+- Satisfy clippy warning gate (`5bcad24`)
+
+### Misc
+
+- Sanitize personal fixture data (`0c3e8b5`)
+
+## 0.77.0 - 2026-05-05
+
+### CLI
+
+- Trim smart context token overhead (`9ad2f58`)
+- Improve token-efficient context compaction (`d17c97f`)
+- Reduce context token overhead (`f4b8c71`)
+
+### CI
+
+- Satisfy clippy warning gate (`05544d4`)
+
+## 0.76.0 - 2026-05-04
+
+### CLI
+
+- Improve prodex super token efficiency (`e7eb552`)
+
+## 0.75.0 - 2026-05-04
 
 ### CLI
 
@@ -141,43 +203,3 @@ Changes after `0.74.0`.
 - Satisfy clippy for terminal ui crate (`5d36706`)
 - Split additional support crates (`0c38b27`)
 - Split leaf modules into workspace crates (`2f20685`)
-
-## 0.67.0 - 2026-04-29
-
-### Runtime
-
-- Improve token efficiency and websocket proxying (`bc1d7b1`)
-
-### Docs
-
-- Add support section to README with donation link (`ba124dd`)
-
-### CI
-
-- Refresh upstream watchdog baseline (`a5ff040`)
-- Satisfy clippy warning gate (`bad9f5e`)
-
-## 0.66.0 - 2026-04-29
-
-### Runtime
-
-- Support proxied Codex launches (`990eb56`)
-
-## 0.65.0 - 2026-04-29
-
-### CLI
-
-- Support OpenAI workspace identities (`764bf2b`)
-
-## 0.64.0 - 2026-04-29
-
-### Runtime
-
-- Add prompt cache affinity (`8110553`)
-- Harden runtime proxy validation (`a088875`)
-
-## 0.63.0 - 2026-04-28
-
-### Runtime
-
-- Support proxies and native Codex history (`63ef05a`)
