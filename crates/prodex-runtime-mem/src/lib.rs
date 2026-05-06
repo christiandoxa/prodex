@@ -59,13 +59,18 @@ const RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE: &str = "pm2:tr";
 const RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_NAME: &str = "tool";
 const RUNTIME_MEM_SUPER_SLIM_V2_DEFAULT_TOOL_INPUT: &str = "tool call";
 const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD: &str = "p";
-const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER: &str = "ss:ref=prev";
+const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER: &str = "ss:prev";
+#[cfg(test)]
+const RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER_LEGACY: &str = "ss:ref=prev";
 const RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD: &str = "@";
 const RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD: &str = "@p";
 const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE: &str = "pm2:d";
-const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX: &str = "ss:dict:";
-const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT: &str = "exact";
-const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX: &str = "prefix";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX: &str = "ss:d:";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX_LEGACY: &str = "ss:dict:";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT: &str = "e";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX: &str = "p";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT_LEGACY: &str = "exact";
+const RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX_LEGACY: &str = "prefix";
 const RUNTIME_MEM_SUPER_SLIM_OMITTED: &str = "ss:omit";
 const RUNTIME_MEM_SUPER_SLIM_PROMPT_OMITTED: &str = "ss:omit=prompt";
 const RUNTIME_MEM_SUPER_SLIM_ASSISTANT_OMITTED: &str = "ss:omit=assistant";
@@ -2252,14 +2257,24 @@ impl RuntimeMemSuperSlimV2InternState {
     }
 
     fn resolve_inline_dictionary_refs(&self, field: &str, value: &str) -> Option<String> {
-        let marker_prefix = format!("{{{RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX}{field}#");
+        let marker_prefixes = [
+            format!("{{{RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX}{field}#"),
+            format!("{{{RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX_LEGACY}{field}#"),
+        ];
         let mut output = String::new();
         let mut cursor = 0usize;
         let mut changed = false;
-        while let Some(relative_start) = value[cursor..].find(&marker_prefix) {
-            let start = cursor + relative_start;
+        while let Some((start, marker_len)) = marker_prefixes
+            .iter()
+            .filter_map(|marker_prefix| {
+                value[cursor..]
+                    .find(marker_prefix)
+                    .map(|relative_start| (cursor + relative_start, marker_prefix.len()))
+            })
+            .min_by_key(|(start, _)| *start)
+        {
             output.push_str(&value[cursor..start]);
-            let digits_start = start + marker_prefix.len();
+            let digits_start = start + marker_len;
             let mut digits_end = digits_start;
             for (offset, ch) in value[digits_start..].char_indices() {
                 if !ch.is_ascii_digit() {
@@ -2350,8 +2365,10 @@ impl RuntimeMemSuperSlimV2DictionaryMode {
 
     fn from_str(value: &str) -> Option<Self> {
         match value {
-            RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT => Some(Self::Exact),
-            RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX => Some(Self::Prefix),
+            RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT
+            | RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT_LEGACY => Some(Self::Exact),
+            RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX
+            | RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX_LEGACY => Some(Self::Prefix),
             _ => None,
         }
     }
@@ -2567,7 +2584,7 @@ fn runtime_mem_super_slim_v2_field_strings(events: &[Value], field: &str) -> Vec
             }
             let value = event.get(field)?.as_str()?;
             if value.is_empty()
-                || value.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX)
+                || runtime_mem_super_slim_v2_contains_dictionary_ref_marker(value)
                 || runtime_mem_super_slim_v2_parse_dictionary_ref(value).is_some()
             {
                 return None;
@@ -2650,7 +2667,7 @@ fn runtime_mem_super_slim_v2_trim_dictionary_token(token: &str) -> &str {
 
 fn runtime_mem_super_slim_v2_token_dictionary_terms(token: &str) -> Vec<String> {
     let mut terms = Vec::new();
-    if token.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX) {
+    if runtime_mem_super_slim_v2_contains_dictionary_ref_marker(token) {
         return terms;
     }
     if let Some(term) = runtime_mem_super_slim_v2_temp_path_term(token) {
@@ -2806,7 +2823,7 @@ fn runtime_mem_super_slim_v2_package_terms(value: &str) -> Vec<String> {
 fn runtime_mem_push_dictionary_term(terms: &mut Vec<String>, term: String) {
     let term = term.trim();
     if term.len() < RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS
-        || term.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX)
+        || runtime_mem_super_slim_v2_contains_dictionary_ref_marker(term)
         || terms.iter().any(|existing| existing == term)
     {
         return;
@@ -2909,7 +2926,9 @@ fn runtime_mem_super_slim_v2_dictionary_ref(field: &str, dictionary_index: usize
 fn runtime_mem_super_slim_v2_parse_dictionary_ref(
     value: &str,
 ) -> Option<RuntimeMemSuperSlimV2DictionaryRef<'_>> {
-    let rest = value.strip_prefix(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX)?;
+    let rest = value
+        .strip_prefix(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX)
+        .or_else(|| value.strip_prefix(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX_LEGACY))?;
     let (field, index_and_suffix) = rest.split_once('#')?;
     if field.is_empty() || !field.chars().all(|ch| ch.is_ascii_alphanumeric()) {
         return None;
@@ -2925,6 +2944,11 @@ fn runtime_mem_super_slim_v2_parse_dictionary_ref(
         index,
         suffix,
     })
+}
+
+fn runtime_mem_super_slim_v2_contains_dictionary_ref_marker(value: &str) -> bool {
+    value.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX)
+        || value.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX_LEGACY)
 }
 
 fn runtime_mem_super_slim_v2_dictionary_index(value: &Value) -> Option<usize> {
@@ -3089,10 +3113,10 @@ fn runtime_mem_shadow_summary_from_text(
         .unwrap_or_else(|| "(empty)".to_string());
     let ref_part = artifact_ref
         .filter(|value| !value.trim().is_empty())
-        .map(|value| format!("; ref={value}"))
+        .map(|value| format!(" ref={value}"))
         .unwrap_or_default();
     format!(
-        "{label}: {first_line} [b={}; t~={}; omit={omitted_name}{ref_part}]",
+        "{label}: {first_line} [b={} t~={} omit={omitted_name}{ref_part}]",
         text.len(),
         runtime_mem_approx_token_count(text),
     )
@@ -4235,6 +4259,10 @@ mod compact_v2_runtime_memory_tests {
             "t": RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE,
             RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD: RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER
         });
+        let legacy_marker_event = serde_json::json!({
+            "t": RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE,
+            RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD: RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER_LEGACY
+        });
         let legacy_event = serde_json::json!({
             "t": RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE,
             "r": "psc:legacy-full-ref"
@@ -4246,11 +4274,18 @@ mod compact_v2_runtime_memory_tests {
             Some(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER)
         );
         assert_eq!(
+            resolve_v2_schema_string(&fields["prompt"], &legacy_marker_event).as_deref(),
+            Some(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER_LEGACY)
+        );
+        assert_eq!(
             resolve_v2_schema_string(&fields["prompt"], &legacy_event).as_deref(),
             Some("psc:legacy-full-ref")
         );
         assert!(runtime_mem_event_has_super_slim_prompt_reference(
             &marker_event
+        ));
+        assert!(runtime_mem_event_has_super_slim_prompt_reference(
+            &legacy_marker_event
         ));
     }
 
@@ -4310,7 +4345,7 @@ mod compact_v2_runtime_memory_tests {
             event
                 .get("n")
                 .and_then(Value::as_str)
-                .is_some_and(|value| value.starts_with("ss:dict:n#"))
+                .is_some_and(|value| value.starts_with("ss:d:n#"))
         }));
         assert_v2_raw_events_schema_addressable(&shadows);
         assert_v2_compact_fields_are_strings(&shadows);
@@ -4383,13 +4418,13 @@ mod compact_v2_runtime_memory_tests {
             event
                 .get("c")
                 .and_then(Value::as_str)
-                .is_some_and(|value| value.starts_with("ss:dict:c#"))
+                .is_some_and(|value| value.starts_with("ss:d:c#"))
         }));
         assert!(v2_user_events(&shadows).iter().any(|event| {
             event
                 .get("r")
                 .and_then(Value::as_str)
-                .is_some_and(|value| value.starts_with("ss:dict:r#"))
+                .is_some_and(|value| value.starts_with("ss:d:r#"))
         }));
         assert_v2_raw_events_schema_addressable(&shadows);
         assert_v2_compact_fields_are_strings(&shadows);
@@ -4442,7 +4477,7 @@ mod compact_v2_runtime_memory_tests {
             event
                 .get("i")
                 .and_then(Value::as_str)
-                .is_some_and(|value| value.starts_with("ss:dict:i#"))
+                .is_some_and(|value| value.starts_with("ss:d:i#"))
         }));
         assert_v2_raw_events_schema_addressable(&shadows);
         assert_v2_compact_fields_are_strings(&shadows);
@@ -4593,6 +4628,60 @@ mod compact_v2_runtime_memory_tests {
         assert_eq!(
             resolve_v2_schema_string(&fields["toolInput"], &expanded[0]).as_deref(),
             Some("cargo test -q -p prodex-runtime-mem --lib")
+        );
+    }
+
+    #[test]
+    fn super_slim_v2_intern_expansion_accepts_legacy_dictionary_refs() {
+        let events = [
+            serde_json::json!({
+                "t": RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE,
+                "k": "n",
+                "i": "0",
+                "m": RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT_LEGACY,
+                "v": "legacy_tool"
+            }),
+            serde_json::json!({
+                "t": RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE,
+                "k": "c",
+                "i": "0",
+                "m": RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT_LEGACY,
+                "v": "legacy inline command"
+            }),
+            serde_json::json!({
+                "t": RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE,
+                "k": "r",
+                "i": "0",
+                "m": RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_PREFIX_LEGACY,
+                "v": "psc:legacy-prefix-"
+            }),
+            serde_json::json!({
+                "t": RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE,
+                "i": "call-legacy-dict",
+                "n": "ss:dict:n#0",
+                "c": "run {ss:dict:c#0}"
+            }),
+            serde_json::json!({
+                "t": RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE,
+                "r": "ss:dict:r#0+tail"
+            }),
+        ];
+
+        let expanded = runtime_mem_super_slim_v2_expand_interned_events(events);
+        let tool_fields = v2_schema_fields("prodex-v2-tool-use");
+        let user_fields = v2_schema_fields("prodex-v2-user-message");
+
+        assert_eq!(
+            resolve_v2_schema_string(&tool_fields["toolName"], &expanded[0]).as_deref(),
+            Some("legacy_tool")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&tool_fields["toolInput"], &expanded[0]).as_deref(),
+            Some("run legacy inline command")
+        );
+        assert_eq!(
+            resolve_v2_schema_string(&user_fields["prompt"], &expanded[1]).as_deref(),
+            Some("psc:legacy-prefix-tail")
         );
     }
 

@@ -1553,6 +1553,8 @@ fn super_slim_shadow_user_prompt_stores_summary_counts_and_ref_not_full_prompt()
     assert!(summary.contains("t~="));
     assert!(summary.contains("ref=prodex-artifact:prompt-123"));
     assert!(summary.contains("omit=prompt"));
+    assert!(!summary.contains("; t~="));
+    assert!(!summary.contains("; ref="));
     assert!(!summary.contains("tok~="));
     assert!(!summary.contains("prompt omitted"));
     assert_eq!(shadow_message, "ss:omit");
@@ -1584,6 +1586,7 @@ fn super_slim_shadow_assistant_message_uses_short_summary() {
     assert!(summary.contains("b="));
     assert!(summary.contains("t~="));
     assert!(summary.contains("omit=message"));
+    assert!(!summary.contains("; t~="));
     assert_eq!(
         lookup_test_path(&shadow, "payload.message").and_then(Value::as_str),
         Some("ss:omit")
@@ -1633,6 +1636,7 @@ fn super_slim_shadow_referenced_artifact_uses_shorter_prefix_than_plain_summary(
     assert!(!artifact_summary.contains(tail));
     assert!(artifact_summary.contains("ref=prodex-artifact:sc:short-prefix"));
     assert!(artifact_summary.contains("omit=output"));
+    assert!(!artifact_summary.contains("; ref="));
 }
 
 #[test]
@@ -1961,7 +1965,7 @@ fn super_slim_v2_inline_dictionary_interns_common_runtime_strings_and_expands_ex
         event
             .get("s")
             .and_then(Value::as_str)
-            .is_some_and(|summary| summary.contains("ss:dict:s#"))
+            .is_some_and(|summary| summary.contains("ss:d:s#"))
     }));
 
     let expanded = test_expanded_non_dictionary_events(shadows);

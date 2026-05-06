@@ -122,14 +122,15 @@ fn artifact_marker_uses_short_app_format_and_preserves_rehydrate_metadata() {
     let first_line = marker.lines().next().unwrap();
     assert_eq!(
         first_line,
-        "psc art psc:0123456789abcdef b=12345; ref psc:0123456789abcdef[#Lx-Ly]"
+        "psc art psc:0123456789abcdef b=12345 lines=#Lx-Ly"
     );
     assert!(first_line.len() < old_reusable.len());
     assert!(marker.len() < old_labeled.len());
     assert_eq!(marker.matches("prodex-artifact:").count(), 0);
     assert!(marker.contains("b=12345"));
     assert!(!marker.contains("h=sc:fedcba9876543210"));
-    assert!(marker.contains("psc:0123456789abcdef[#Lx-Ly]"));
+    assert!(marker.contains("psc:0123456789abcdef"));
+    assert!(marker.contains("lines=#Lx-Ly"));
     assert!(marker.ends_with(compacted));
     assert!(!marker.contains("artifact_id:"));
     assert!(!marker.contains("original_bytes:"));
@@ -150,7 +151,7 @@ fn artifact_reference_marker_uses_short_repeat_format_with_exact_ref_fields() {
         artifact.id, artifact.byte_len, artifact.content_hash, artifact.id, artifact.id
     );
 
-    assert_eq!(marker, "psc repeat psc:0123456789abcdef b=456");
+    assert_eq!(marker, "psc rep psc:0123456789abcdef b=456");
     assert!(marker.len() < old_reusable.len());
     assert_eq!(marker.matches("prodex-artifact:").count(), 0);
     assert!(marker.contains("psc:0123456789abcdef"));
@@ -251,11 +252,7 @@ fn command_output_cache_matches_outputs_that_only_differ_by_volatile_values() {
         } if ref_id == "cmd-a" && saved_tokens > 0
     ));
     assert_ne!(rewrite.output, current_text);
-    assert!(
-        rewrite
-            .output
-            .contains("volatile-normalized repeat omitted")
-    );
+    assert!(rewrite.output.contains("vn-repeat omitted"));
 }
 
 #[test]
@@ -455,7 +452,7 @@ fn command_output_cache_replaces_exact_repeated_large_output_with_stable_summary
     ));
     assert_ne!(rewrite.output, output);
     assert!(rewrite.output.len() < output.len());
-    assert!(rewrite.output.contains("psc cmdout unchanged"));
+    assert!(rewrite.output.contains("psc co same"));
     assert!(rewrite.output.contains("id=cmd-b"));
     assert!(rewrite.output.contains("ref=cmd-a"));
     assert!(rewrite.output.contains(&previous.content_hash));
@@ -489,8 +486,8 @@ fn command_output_cache_keeps_changed_output_exact_with_delta_summary() {
             reason: SmartContextCommandOutputCacheKeepReason::ChangedSincePreviousOutput,
             summary: Some(summary),
         } => {
-            assert!(summary.contains("psc cmdout changed"));
-            assert!(summary.contains("exact output kept"));
+            assert!(summary.contains("psc co delta"));
+            assert!(summary.contains("exact kept"));
             assert!(summary.contains(&previous.content_hash));
             assert!(summary.contains(&rewrite.record.content_hash));
         }
@@ -544,7 +541,7 @@ fn command_output_cache_unchanged_summary_preserves_critical_signal_samples() {
         } if ref_id == "cargo-test"
     ));
     assert!(rewrite.output.len() < output.len());
-    assert!(rewrite.output.contains("psc cmdout critical n=2"));
+    assert!(rewrite.output.contains("psc co crit n=2"));
     assert!(rewrite.output.contains("error: build failed"));
     assert!(rewrite.output.contains("panicked at assertion"));
     assert!(rewrite.output.contains(&previous.content_hash));

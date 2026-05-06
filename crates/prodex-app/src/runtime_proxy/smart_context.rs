@@ -39,11 +39,12 @@ const SMART_CONTEXT_REPO_STATE_HASH_CHARS: usize = 12;
 const SMART_CONTEXT_REPO_STATE_TEST_COMMAND_MAX_CHARS: usize = 160;
 const SMART_CONTEXT_REPO_STATE_MAX_FACTS_PER_SET: usize = 32;
 const SMART_CONTEXT_LABEL_SUMMARY: &str = "sum:";
-const SMART_CONTEXT_LABEL_CRITICAL_EXACT: &str = "crit exact:";
+const SMART_CONTEXT_LABEL_CRITICAL_EXACT: &str = "crit:";
+const SMART_CONTEXT_LABEL_CRITICAL_EXACT_V1: &str = "crit exact:";
 const SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY: &str = "critical exact ranges:";
-const SMART_CONTEXT_LABEL_SEMANTIC_EXACT: &str = "sem exact:";
-const SMART_CONTEXT_LABEL_REHYDRATE_PLAN_EXACT: &str = "plan exact:";
-const SMART_CONTEXT_LABEL_DUPLICATE_CHUNKS: &str = "dup exact chunks:";
+const SMART_CONTEXT_LABEL_SEMANTIC_EXACT: &str = "sem:";
+const SMART_CONTEXT_LABEL_REHYDRATE_PLAN_EXACT: &str = "plan:";
+const SMART_CONTEXT_LABEL_DUPLICATE_CHUNKS: &str = "dups:";
 const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
 const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
@@ -51,7 +52,8 @@ const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
 const SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX: &str = "psc static dup ";
 const SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX: &str = "psc static chunk dup ";
 const SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX: &str = "psc static section dup ";
-const SMART_CONTEXT_REPO_STATE_MARKER_PREFIX: &str = "psc repo-state ";
+const SMART_CONTEXT_REPO_STATE_MARKER_PREFIX: &str = "psc repo ";
+const SMART_CONTEXT_REPO_STATE_MARKER_PREFIX_LEGACY: &str = "psc repo-state ";
 const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX: &str = "psc a ";
 const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX_LEGACY: &str = "psc aliases ";
 const SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX: &str = "psc p ";
@@ -1474,27 +1476,30 @@ fn prepare_runtime_smart_context_body<'a>(
         &exactness,
         &mut outcome.stats,
     );
-    if outcome.stats != RuntimeSmartContextTransformStats::default() {
-        let aliases_used = with_runtime_smart_context_proxy_state(shared, |state| {
+    let aliases_used = if outcome.stats != RuntimeSmartContextTransformStats::default() {
+        with_runtime_smart_context_proxy_state(shared, |state| {
             runtime_smart_context_apply_artifact_aliases_to_generated_texts_with_state(
                 &mut value, state,
             )
         })
-        .unwrap_or(false);
-        if aliases_used {
-            persist_runtime_smart_context_token_calibration_metadata(
-                shared,
-                "smart_context_artifact_aliases",
-            );
-        }
-        runtime_smart_context_apply_path_aliases_to_generated_texts(&mut value);
+        .unwrap_or(false)
+    } else {
+        false
+    };
+    if aliases_used {
+        persist_runtime_smart_context_token_calibration_metadata(
+            shared,
+            "smart_context_artifact_aliases",
+        );
     }
+    let path_aliases_used = runtime_smart_context_apply_path_aliases_to_generated_texts(&mut value);
+    let generated_aliases_used = aliases_used || path_aliases_used;
     let stats = outcome.stats.clone();
     if stats.artifacts_stored > 0 {
         persist_runtime_smart_context_artifacts(shared);
     }
 
-    if stats == RuntimeSmartContextTransformStats::default() {
+    if stats == RuntimeSmartContextTransformStats::default() && !generated_aliases_used {
         if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
             runtime_smart_context_log(
                 request_id,
@@ -3915,7 +3920,9 @@ fn runtime_smart_context_text_is_artifact_marker_summary(text: &str, id: &str) -
         || first_line.starts_with("prodex-sc repeat "))
         && first_line.contains(&format!("prodex-artifact:{id}"));
     let short = (first_line.starts_with("psc art ")
+        || first_line.starts_with("psc rep ")
         || first_line.starts_with("psc repeat ")
+        || first_line.starts_with("psc co ")
         || first_line.starts_with("psc cmdout ")
         || first_line.starts_with("prodex-sc artifact ")
         || first_line.starts_with("prodex-sc repeat "))
@@ -4636,7 +4643,9 @@ fn runtime_smart_context_repo_state_text_observation(
     text: &str,
     command: Option<&str>,
 ) -> RuntimeSmartContextRepoStateTextObservation {
-    if text.contains(SMART_CONTEXT_REPO_STATE_MARKER_PREFIX) {
+    if text.contains(SMART_CONTEXT_REPO_STATE_MARKER_PREFIX)
+        || text.contains(SMART_CONTEXT_REPO_STATE_MARKER_PREFIX_LEGACY)
+    {
         return RuntimeSmartContextRepoStateTextObservation::default();
     }
     let command = command.unwrap_or_default().to_ascii_lowercase();
@@ -6217,7 +6226,7 @@ fn runtime_smart_context_tool_argument_summary(
         .take(runtime_smart_context_tool_args_preview_max_chars(tier))
         .collect::<String>();
     format!(
-        "psc args {reference} b={}; p: {}",
+        "psc args {reference} b={} p:{}",
         artifact.byte_len,
         preview.trim()
     )
@@ -6230,15 +6239,10 @@ fn runtime_smart_context_tool_argument_repeat_summary(
     let reference = runtime_smart_context_artifact_ref(&artifact.id);
     let base_reference = previous_artifact
         .filter(|previous| previous.id != artifact.id)
-        .map(|previous| {
-            format!(
-                " same-as={}",
-                runtime_smart_context_artifact_ref(&previous.id)
-            )
-        })
+        .map(|previous| format!(" same={}", runtime_smart_context_artifact_ref(&previous.id)))
         .unwrap_or_default();
     format!(
-        "psc args repeat {reference} b={}{}",
+        "psc args rep {reference} b={}{}",
         artifact.byte_len, base_reference
     )
 }
@@ -6252,10 +6256,10 @@ fn runtime_smart_context_tool_argument_delta_summary(
     let preview = if delta.inserted_preview.is_empty() {
         String::new()
     } else {
-        format!(" p: {}", delta.inserted_preview.trim())
+        format!(" p:{}", delta.inserted_preview.trim())
     };
     format!(
-        "psc args delta {reference} b={} base={base_reference} pre={} suf={} -{} +{} ih={}{}",
+        "psc args d {reference} b={} base={base_reference} pre={} suf={} -{} +{} ih={}{}",
         artifact.byte_len,
         delta.prefix_bytes,
         delta.suffix_bytes,
@@ -6432,7 +6436,7 @@ fn runtime_smart_context_progressive_tool_output_summary(
     }
     if sections.is_empty() {
         sections.push(format!(
-            "{SMART_CONTEXT_LABEL_SUMMARY}\nlarge tool output omitted; use artifact ref or line refs to rehydrate"
+            "{SMART_CONTEXT_LABEL_SUMMARY}\nlarge output omitted; use ref/lines"
         ));
     }
     sections.join("\n\n")
@@ -6463,7 +6467,7 @@ fn runtime_smart_context_progressive_summary_excerpt(text: &str) -> String {
                 .take(SMART_CONTEXT_TOOL_PROGRESSIVE_SUMMARY_MAX_BYTES),
         );
     }
-    summary.push_str("\n[... summary truncated; use artifact ref for full output ...]");
+    summary.push_str("\n[trunc; use ref for full]");
     summary
 }
 
@@ -6498,10 +6502,7 @@ fn runtime_smart_context_dedupe_progressive_summary_chunks(
         if matches < 2 {
             continue;
         }
-        let marker = format!(
-            "[psc dup chunk h={} b={} refs below]",
-            plan.content_hash, plan.byte_len
-        );
+        let marker = format!("[psc dup h={} b={}]", plan.content_hash, plan.byte_len);
         let entry = format!(
             "- h={} b={} x={} refs={}",
             plan.content_hash,
@@ -6665,11 +6666,11 @@ fn runtime_smart_context_render_scored_exact_appendix(
     let Some((mut appendix, _)) = runtime_smart_context_render_exact_appendix(label, selected)
     else {
         let refs = runtime_smart_context_compact_line_refs_if_shorter(&fallback_refs);
-        return Some((format!("{label}\nrefs-only: {refs}"), selected_count));
+        return Some((format!("{label}\nrefs: {refs}"), selected_count));
     };
     if !fallback_refs.is_empty() {
         appendix.push('\n');
-        appendix.push_str("refs-only: ");
+        appendix.push_str("refs: ");
         appendix.push_str(&runtime_smart_context_compact_line_refs_if_shorter(
             &fallback_refs,
         ));
@@ -6893,7 +6894,7 @@ fn runtime_smart_context_render_exact_appendix_range(
         && let Some(existing) = entries.iter_mut().find(|entry| entry.body == range.body)
     {
         let marker = format!(
-            "[psc exact dup h={content_hash} b={byte_len} refs={}]",
+            "[psc exdup h={content_hash} b={byte_len} refs={}]",
             runtime_smart_context_compact_line_refs_if_shorter(&existing.refs)
         );
         let candidate = format!("{}\n{marker}", range.reference);
@@ -6991,6 +6992,7 @@ fn runtime_smart_context_progressive_critical_exact_ranges(
             &repaired,
             &[
                 SMART_CONTEXT_LABEL_CRITICAL_EXACT,
+                SMART_CONTEXT_LABEL_CRITICAL_EXACT_V1,
                 SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY,
             ],
         ) {
@@ -7556,7 +7558,7 @@ fn runtime_smart_context_artifact_marker_line(
         other => other,
     };
     format!(
-        "psc {kind} {reference} b={}; ref {reference}[#Lx-Ly]",
+        "psc {kind} {reference} b={} lines=#Lx-Ly",
         artifact.byte_len
     )
 }
@@ -7892,8 +7894,10 @@ fn runtime_smart_context_generated_control_line(line: &str) -> bool {
         || trimmed.starts_with(SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX)
         || trimmed.starts_with(SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX_LEGACY)
         || trimmed.starts_with("psc art ")
+        || trimmed.starts_with("psc rep ")
         || trimmed.starts_with("psc repeat ")
         || trimmed.starts_with(SMART_CONTEXT_REPO_STATE_MARKER_PREFIX)
+        || trimmed.starts_with(SMART_CONTEXT_REPO_STATE_MARKER_PREFIX_LEGACY)
         || trimmed.starts_with("prodex-sc artifact ")
         || trimmed.starts_with("prodex-sc repeat ")
 }
@@ -8091,9 +8095,12 @@ fn runtime_smart_context_text_is_generated_summary_or_manifest(text: &str) -> bo
     trimmed.starts_with("prodex-sc artifact ")
         || trimmed.starts_with("prodex-sc repeat ")
         || trimmed.starts_with("psc art ")
+        || trimmed.starts_with("psc rep ")
         || trimmed.starts_with("psc repeat ")
+        || trimmed.starts_with("psc co ")
         || trimmed.starts_with("psc cmdout ")
         || trimmed.starts_with(SMART_CONTEXT_REPO_STATE_MARKER_PREFIX)
+        || trimmed.starts_with(SMART_CONTEXT_REPO_STATE_MARKER_PREFIX_LEGACY)
         || trimmed.starts_with("psc m ")
         || trimmed.starts_with("psc manifest ")
 }
@@ -8323,15 +8330,15 @@ fn runtime_smart_context_artifact_manifest_delta_from_entries(
             .filter(|checksum| !checksum.is_empty())
             .map(|checksum| format!(" set={checksum}"))
             .unwrap_or_default();
-        return Some(format!("psc m refs-only{set} unchanged={unchanged_count}"));
+        return Some(format!("psc m refs{set} same={unchanged_count}"));
     }
 
-    let mut header = "psc m refs-only".to_string();
+    let mut header = "psc m refs".to_string();
     if let Some(checksum) = set_checksum.filter(|checksum| !checksum.is_empty()) {
         header.push_str(&format!(" set={checksum}"));
     }
     if unchanged_count > 0 {
-        header.push_str(&format!(" unchanged={unchanged_count}"));
+        header.push_str(&format!(" same={unchanged_count}"));
     }
     let mut lines = vec![header];
     let mut rendered_len = lines[0].len();
@@ -8368,7 +8375,7 @@ fn runtime_smart_context_artifact_manifest_delta_from_entries(
         if rendered_len.saturating_add(line.len()).saturating_add(1)
             > SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS
         {
-            lines.push("[... psc manifest truncated ...]".to_string());
+            lines.push("[psc m trunc]".to_string());
             break;
         }
         rendered_len = rendered_len.saturating_add(line.len()).saturating_add(1);
@@ -8540,7 +8547,7 @@ fn runtime_smart_context_replace_cross_turn_duplicate_refs(
             Some((
                 id,
                 format!(
-                    "[psc repeat {} h={} b={}]",
+                    "[psc rep {} h={} b={}]",
                     runtime_smart_context_artifact_ref(&artifact.id),
                     content_hash,
                     byte_len

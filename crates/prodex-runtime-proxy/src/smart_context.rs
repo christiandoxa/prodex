@@ -294,7 +294,7 @@ pub fn smart_context_artifact_marker(
 
 pub fn smart_context_artifact_reference_marker(artifact: &SmartContextArtifactRef) -> String {
     format!(
-        "psc repeat {} b={}",
+        "psc rep {} b={}",
         smart_context_short_artifact_ref(&artifact.id),
         artifact.byte_len,
     )
@@ -2806,7 +2806,7 @@ fn smart_context_command_output_unchanged_summary(
     text: &str,
 ) -> String {
     let mut summary = format!(
-        "psc cmdout unchanged id={} ref={} h={} b={} tok={}; volatile-normalized repeat omitted",
+        "psc co same id={} ref={} h={} b={} tok={} vn-repeat omitted",
         smart_context_command_output_label(&current.id),
         smart_context_command_output_label(&previous.id),
         current.content_hash,
@@ -2818,7 +2818,7 @@ fn smart_context_command_output_unchanged_summary(
     if critical_signals.count > 0 {
         summary.push('\n');
         summary.push_str(&format!(
-            "psc cmdout critical n={}; exact signals available via h={}",
+            "psc co crit n={} h={}",
             critical_signals.count, current.content_hash
         ));
         for sample in critical_signals.samples {
@@ -2839,7 +2839,7 @@ fn smart_context_command_output_changed_summary(
     let token_delta =
         smart_context_signed_delta_u64(current.estimated_tokens, previous.estimated_tokens);
     format!(
-        "psc cmdout changed id={} ref={} old_h={} new_h={} old_b={} new_b={} old_tok={} new_tok={} db={} dtok={}; exact output kept",
+        "psc co delta id={} ref={} old_h={} new_h={} old_b={} new_b={} old_tok={} new_tok={} db={} dtok={} exact kept",
         smart_context_command_output_label(&current.id),
         smart_context_command_output_label(&previous.id),
         previous.content_hash,
@@ -3566,7 +3566,7 @@ fn smart_context_artifact_marker_line(kind: &str, artifact: &SmartContextArtifac
         other => other,
     };
     format!(
-        "psc {kind} {reference} b={}; ref {reference}[#Lx-Ly]",
+        "psc {kind} {reference} b={} lines=#Lx-Ly",
         artifact.byte_len
     )
 }

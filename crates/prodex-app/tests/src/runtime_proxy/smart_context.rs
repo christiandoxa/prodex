@@ -34,8 +34,7 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
     assert!(output.contains(&format!("b={}", original_output.len())));
     assert!(!output.contains("prodex-artifact:"));
     assert!(!output.contains(" h="));
-    assert!(output.contains("ref psc:"));
-    assert!(output.contains("[#Lx-Ly]"));
+    assert!(output.contains(" lines=#Lx-Ly"));
     assert!(!output.contains("artifact_id:"));
     assert_eq!(stats.artifacts_stored, 1);
     assert_eq!(stats.tool_outputs_condensed, 1);
@@ -189,7 +188,7 @@ fn smart_context_repeated_tool_call_arguments_use_short_repeat_ref() {
     let first = value["input"][0]["arguments"].as_str().unwrap();
     let second = value["input"][2]["arguments"].as_str().unwrap();
     assert!(first.starts_with("psc args psc:"));
-    assert!(second.starts_with("psc args repeat psc:"));
+    assert!(second.starts_with("psc args rep psc:"));
     assert!(!second.contains("same repeated historical argument"));
     assert!(second.len() < first.len());
     assert!(store.artifact_ref_for_exact_text(&argument_text).is_some());
@@ -252,7 +251,7 @@ fn smart_context_similar_tool_call_arguments_use_delta_ref() {
     let first = value["input"][0]["arguments"].as_str().unwrap();
     let second = value["input"][2]["arguments"].as_str().unwrap();
     assert!(first.starts_with("psc args psc:"));
-    assert!(second.starts_with("psc args delta psc:"));
+    assert!(second.starts_with("psc args d psc:"));
     assert!(second.contains(" base=psc:"));
     assert!(second.contains(" pre="));
     assert!(second.contains(" suf="));
@@ -856,7 +855,7 @@ fn smart_context_manifest_default_omits_detail_fields_until_requested() {
     ));
 
     let manifest = value["input"][1]["content"].as_str().unwrap();
-    assert!(manifest.starts_with("psc m refs-only"));
+    assert!(manifest.starts_with("psc m refs"));
     assert!(manifest.contains(" set="));
     assert!(manifest.contains("b="));
     assert!(!manifest.contains("cr="));
@@ -930,7 +929,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
         let changed_manifest = changed["input"][1]["content"].as_str().unwrap();
         assert!(changed_manifest.contains(" set="));
         assert!(!changed_manifest.contains("first artifact"));
-        assert!(changed_manifest.contains("unchanged=1"));
+        assert!(changed_manifest.contains("same=1"));
         assert_eq!(changed_manifest.matches("psc:").count(), 1);
     })
     .unwrap();
@@ -976,7 +975,7 @@ fn smart_context_explicit_manifest_request_keeps_full_manifest() {
             )
         );
         let manifest = second["input"][1]["content"].as_str().unwrap();
-        assert!(manifest.contains("unchanged=1"));
+        assert!(manifest.contains("same=1"));
         assert_eq!(manifest.matches("psc:").count(), 2);
     })
     .unwrap();
@@ -1482,6 +1481,42 @@ fn smart_context_generated_summary_uses_path_aliases_only_when_shorter() {
     assert!(output.contains("psc p $R=/workspace/prodex"));
     assert!(output.contains("$R/crates/prodex-app/src/runtime_proxy/smart_context.rs"));
     assert!(output.len() < before);
+}
+
+#[test]
+fn smart_context_prepare_aliases_existing_generated_paths_without_new_transform() {
+    let shared = smart_context_test_shared("existing-generated-path-aliases");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    let repo = "/workspace/prodex";
+    let request = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": format!(
+                "psc m refs-only\n{repo}/crates/prodex-app/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-app/tests/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-runtime-proxy/src/smart_context.rs\n{repo}/crates/prodex-runtime-mem/src/lib.rs"
+            )
+        }]
+    }));
+    let before_len = request.body.len();
+
+    let prepared = prepare_runtime_smart_context_http_body(
+        135,
+        &request,
+        &shared,
+        RuntimeRouteKind::Responses,
+    );
+
+    let Cow::Owned(body) = prepared else {
+        panic!("expected generated paths to be aliased");
+    };
+    let output = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["input"][0]["output"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(body.len() < before_len);
+    assert!(output.contains("psc p $R=/workspace/prodex"));
+    assert!(output.contains("$R/crates/prodex-app/src/runtime_proxy/smart_context.rs"));
+    assert!(!output.contains("/workspace/prodex/crates/prodex-app/src/runtime_proxy"));
 }
 
 #[test]
@@ -3495,7 +3530,7 @@ Main test command: cargo test -q smart_context";
     };
     let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
     let rewritten = value["input"][0]["output"].as_str().unwrap();
-    assert!(rewritten.starts_with("psc repo-state repeat"));
+    assert!(rewritten.starts_with("psc repo repeat"));
     assert!(rewritten.contains("branch=feature/repo-cache"));
     assert!(rewritten.contains("dirty=1"));
     assert!(rewritten.contains("recent=1"));
@@ -3553,7 +3588,7 @@ Main test command: cargo test -q smart_context";
     let value = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
     let output = value["input"][0]["output"].as_str().unwrap();
     assert_eq!(output, changed_output);
-    assert!(!output.contains("psc repo-state repeat"));
+    assert!(!output.contains("psc repo repeat"));
     assert!(output.contains("crates/prodex-app/src/runtime_proxy/rotation.rs"));
     assert!(output.contains("crates/prodex-app/tests/src/runtime_proxy/rotation.rs"));
 }
@@ -3601,7 +3636,7 @@ Main test command: cargo test -q smart_context";
         ));
         let rewritten = second["instructions"].as_str().unwrap();
         assert!(rewritten.contains("Keep affinity exact."));
-        assert!(rewritten.contains("psc repo-state repeat"));
+        assert!(rewritten.contains("psc repo repeat"));
         assert!(rewritten.contains("branch=feature/repo-cache"));
         assert!(!rewritten.contains("Dirty files:"));
         assert!(!rewritten.contains("crates/prodex-app/src/runtime_proxy/smart_context.rs"));
@@ -3672,7 +3707,7 @@ fn smart_context_reuses_existing_critical_tool_output_with_cache_summary() {
     );
 
     let rewritten = value["input"][0]["output"].as_str().unwrap();
-    assert!(rewritten.starts_with("psc cmdout unchanged"));
+    assert!(rewritten.starts_with("psc co same"));
     assert!(rewritten.contains("id=call_repeat"));
     assert!(rewritten.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
     assert!(rewritten.contains("sig: error: repeated failure"));
@@ -3875,7 +3910,7 @@ fn smart_context_exact_appendices_dedupe_duplicate_range_bodies_when_shorter() {
     assert_eq!(sem_count, 2);
     assert!(crit.len() < naive.len());
     assert_eq!(crit.match_indices(&duplicate).count(), 1);
-    assert!(crit.contains("[psc exact dup h="));
+    assert!(crit.contains("[psc exdup h="));
     assert!(crit.contains(&format!("b={}", duplicate.len())));
     assert!(crit.contains("refs=psc:abc#L1-L24"));
     assert!(sem.contains(SMART_CONTEXT_LABEL_SEMANTIC_EXACT));
@@ -3945,7 +3980,7 @@ fn smart_context_scored_exact_appendix_keeps_high_signal_and_refs_overflow() {
 
     assert_eq!(count, 4);
     assert!(appendix.contains("error[E0425]"));
-    assert!(appendix.contains("refs-only: psc:abc#"));
+    assert!(appendix.contains("refs: psc:abc#"));
     assert!(appendix.contains(",L"));
     assert!(appendix.matches("context line ").count() <= 4);
 }
@@ -3953,16 +3988,27 @@ fn smart_context_scored_exact_appendix_keeps_high_signal_and_refs_overflow() {
 #[test]
 fn smart_context_exact_range_label_parser_accepts_legacy_critical_label() {
     let legacy = "old summary\n\ncritical exact ranges:\nL1-L1:\nerror: legacy";
+    let v1 = "old summary\n\ncrit exact:\nL2-L2:\nerror: v1";
 
     let body = runtime_smart_context_labeled_section_body(
         legacy,
         &[
             SMART_CONTEXT_LABEL_CRITICAL_EXACT,
+            SMART_CONTEXT_LABEL_CRITICAL_EXACT_V1,
+            SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY,
+        ],
+    );
+    let v1_body = runtime_smart_context_labeled_section_body(
+        v1,
+        &[
+            SMART_CONTEXT_LABEL_CRITICAL_EXACT,
+            SMART_CONTEXT_LABEL_CRITICAL_EXACT_V1,
             SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY,
         ],
     );
 
     assert_eq!(body, Some("L1-L1:\nerror: legacy"));
+    assert_eq!(v1_body, Some("L2-L2:\nerror: v1"));
 }
 
 #[test]
