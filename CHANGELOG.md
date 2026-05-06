@@ -2,12 +2,15 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.80.0 - Unreleased
+## 0.82.0 - Unreleased
 
 Changes after `0.79.0`.
 
 ### Runtime
 
+- Harden smart context rewrite fallback (`80f4a87`)
+- Stabilize websocket streaming (`a92f29a`)
+- Avoid broker readiness timeout (`8bc2a85`)
 - Reduce compact pressure for affinity continuations (`dee2401`)
 - Reduce default smart context token overhead (`4a64cc5`)
 
