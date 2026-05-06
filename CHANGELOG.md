@@ -2,7 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## Unreleased
+## 0.85.0 - Unreleased
 
 Changes after `0.84.0`.
 

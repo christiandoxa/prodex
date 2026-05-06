@@ -13,6 +13,6 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1.0.102"
 chrono = { version = "0.4.44", features = ["clock"] }
-prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "../prodex-shared-codex-fs", version = "0.84.0" }
+prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "../prodex-shared-codex-fs", version = "0.85.0" }
 serde_json = "1.0.149"
 toml = "1.1.2"
