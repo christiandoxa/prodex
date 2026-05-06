@@ -1,65 +1,12 @@
 use super::*;
+mod constants;
+mod repo_state;
+
+use constants::*;
+use repo_state::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-
-const SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES: usize = 1024;
-const SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS: u64 = 32_000;
-const SMART_CONTEXT_RESERVED_OUTPUT_TOKENS: u64 = 4_096;
-const SMART_CONTEXT_MODEL_SCAN_MAX_BYTES: usize = 4 * 1024;
-const SMART_CONTEXT_MODEL_NAME_MAX_BYTES: usize = 128;
-const SMART_CONTEXT_TOKEN_USAGE_HISTORY_LIMIT: usize = 8;
-const SMART_CONTEXT_TOKEN_CALIBRATION_HISTORY_LIMIT: usize = 16;
-const SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION: u32 = 1;
-const SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS: u64 = 250;
-const SMART_CONTEXT_REWRITE_TELEMETRY_HISTORY_LIMIT: usize = 16;
-const SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT: usize = 4;
-const SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS: u64 = 6 * 60 * 60;
-const SMART_CONTEXT_PERSISTED_ARTIFACT_ALIAS_LIMIT: usize = 64;
-const SMART_CONTEXT_PERSISTED_STATIC_SECTION_LIMIT: usize = 128;
-const SMART_CONTEXT_SURGICAL_CRITICAL_MAX_RANGES: usize = 12;
-const SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES: usize = 512;
-const SMART_CONTEXT_TOOL_PREVIEW_ESTIMATED_LINE_BYTES: usize = 256;
-const SMART_CONTEXT_TOOL_PREVIEW_MAX_LINE_CHARS: usize = 220;
-const SMART_CONTEXT_TOOL_PROGRESSIVE_SUMMARY_MAX_BYTES: usize = 8 * 1024;
-const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_ENTRIES: usize = 12;
-const SMART_CONTEXT_ARTIFACT_MANIFEST_MAX_CHARS: usize = 1_600;
-const SMART_CONTEXT_ARTIFACT_MANIFEST_COOLDOWN_MS: u64 = 30_000;
-const SMART_CONTEXT_TOOL_ARGS_INLINE_MIN_BYTES: usize = 2 * 1024;
-const SMART_CONTEXT_TOOL_ARGS_DIFF_MIN_COMMON_BYTES: usize = 1024;
-const SMART_CONTEXT_TOOL_ARGS_DIFF_MIN_COMMON_RATIO_PERCENT: usize = 70;
-const SMART_CONTEXT_TOOL_ARGS_DIFF_MAX_CHANGED_RATIO_PERCENT: usize = 35;
-const SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES: usize = 12;
-const SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES: usize = 4;
-const SMART_CONTEXT_BUDGET_AWARE_REHYDRATE_MAX_RANGES: usize = 8;
-const SMART_CONTEXT_BUDGET_AWARE_IMPORT_MAX_RANGES: usize = 3;
-const SMART_CONTEXT_BUDGET_AWARE_IMPORT_SCAN_MAX_LINES: usize = 160;
-const SMART_CONTEXT_REPO_STATE_ARTIFACT_MIN_BYTES: usize = 1024;
-const SMART_CONTEXT_REPO_STATE_HASH_CHARS: usize = 12;
-const SMART_CONTEXT_REPO_STATE_TEST_COMMAND_MAX_CHARS: usize = 160;
-const SMART_CONTEXT_REPO_STATE_MAX_FACTS_PER_SET: usize = 32;
-const SMART_CONTEXT_LABEL_SUMMARY: &str = "sum:";
-const SMART_CONTEXT_LABEL_CRITICAL_EXACT: &str = "crit:";
-const SMART_CONTEXT_LABEL_CRITICAL_EXACT_V1: &str = "crit exact:";
-const SMART_CONTEXT_LABEL_CRITICAL_EXACT_LEGACY: &str = "critical exact ranges:";
-const SMART_CONTEXT_LABEL_SEMANTIC_EXACT: &str = "sem:";
-const SMART_CONTEXT_LABEL_REHYDRATE_PLAN_EXACT: &str = "plan:";
-const SMART_CONTEXT_LABEL_DUPLICATE_CHUNKS: &str = "dups:";
-const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
-const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
-const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
-    "prodex static context unchanged ";
-const SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX: &str = "psc static dup ";
-const SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX: &str = "psc static chunk dup ";
-const SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX: &str = "psc static section dup ";
-const SMART_CONTEXT_REPO_STATE_MARKER_PREFIX: &str = "psc repo ";
-const SMART_CONTEXT_REPO_STATE_MARKER_PREFIX_LEGACY: &str = "psc repo-state ";
-const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX: &str = "psc a ";
-const SMART_CONTEXT_ARTIFACT_ALIAS_LEGEND_PREFIX_LEGACY: &str = "psc aliases ";
-const SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX: &str = "psc p ";
-const SMART_CONTEXT_PATH_ALIAS_LEGEND_PREFIX_LEGACY: &str = "psc path aliases ";
-const RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS: [&str; 3] =
-    ["instructions", "system", "developer"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeSmartContextTransport {
@@ -193,40 +140,6 @@ struct RuntimeSmartContextToolArgumentDelta {
     inserted_preview: String,
     common_bytes: usize,
     changed_bytes: usize,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RuntimeSmartContextRepoStateFacts {
-    branch: Option<String>,
-    dirty_files: Option<BTreeSet<String>>,
-    recent_changed_files: Option<BTreeSet<String>>,
-    package_managers: Option<BTreeSet<String>>,
-    main_test_commands: Option<BTreeSet<String>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeSmartContextRepoStateFactRelation {
-    New,
-    Repeated,
-    Changed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeSmartContextRepoStateListKind {
-    Dirty,
-    RecentChanged,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RuntimeSmartContextRepoStateLineSpan {
-    start: usize,
-    end: usize,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RuntimeSmartContextRepoStateTextObservation {
-    facts: RuntimeSmartContextRepoStateFacts,
-    spans: Vec<RuntimeSmartContextRepoStateLineSpan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1193,11 +1106,7 @@ pub(crate) fn prepare_runtime_smart_context_http_body_for_profile<'a>(
     route_kind: RuntimeRouteKind,
     profile_name: Option<&str>,
 ) -> Cow<'a, [u8]> {
-    if !runtime_smart_context_enabled(shared) {
-        return Cow::Borrowed(&request.body);
-    }
-
-    prepare_runtime_smart_context_body(
+    prepare_runtime_smart_context_body_safely(
         request_id,
         request,
         shared,
@@ -1224,7 +1133,7 @@ pub(super) fn prepare_runtime_smart_context_websocket_text<'a>(
         headers: handshake_request.headers.clone(),
         body: request_text.as_bytes().to_vec(),
     };
-    match prepare_runtime_smart_context_body(
+    match prepare_runtime_smart_context_body_safely(
         request_id,
         &request,
         shared,
@@ -1237,6 +1146,91 @@ pub(super) fn prepare_runtime_smart_context_websocket_text<'a>(
             .map(Cow::Owned)
             .unwrap_or(Cow::Borrowed(request_text)),
     }
+}
+
+fn prepare_runtime_smart_context_body_safely<'a>(
+    request_id: u64,
+    request: &'a RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
+) -> Cow<'a, [u8]> {
+    if !runtime_smart_context_enabled(shared) {
+        return Cow::Borrowed(&request.body);
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE") {
+            std::panic::panic_any(RuntimeSmartContextInjectedPanic);
+        }
+        prepare_runtime_smart_context_body(
+            request_id,
+            request,
+            shared,
+            route_kind,
+            transport,
+            profile_name,
+        )
+    }));
+
+    match result {
+        Ok(body) => body,
+        Err(panic) => {
+            runtime_smart_context_log_panic(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                profile_name,
+                request.body.len(),
+                &panic,
+            );
+            Cow::Borrowed(&request.body)
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeSmartContextInjectedPanic;
+
+fn runtime_smart_context_panic_payload_label(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    if let Some(message) = payload.downcast_ref::<Box<str>>() {
+        return message.to_string();
+    }
+    "non_string_panic".to_string()
+}
+
+fn runtime_smart_context_log_panic(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
+    body_bytes: usize,
+    panic: &(dyn std::any::Any + Send),
+) {
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "smart_context_panic",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", transport.label()),
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("profile", profile_name.unwrap_or("-")),
+                runtime_proxy_log_field("panic", runtime_smart_context_panic_payload_label(panic)),
+                runtime_proxy_log_field("decision", "pass_through"),
+                runtime_proxy_log_field("body_bytes", body_bytes.to_string()),
+            ],
+        ),
+    );
 }
 
 fn prepare_runtime_smart_context_body<'a>(

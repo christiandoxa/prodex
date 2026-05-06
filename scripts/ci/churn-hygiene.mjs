@@ -108,7 +108,8 @@ function printHelp() {
     [
       "Usage: node scripts/ci/churn-hygiene.mjs [selector] [--check] [thresholds]",
       "",
-      "Reports commit/diff churn against lightweight thresholds. Default mode never fails.",
+      "Reports commit/diff churn and generic commit subjects against lightweight thresholds.",
+      "Default mode never fails.",
       "",
       "Selectors:",
       "  --range <rev-range>       inspect a git range",
@@ -230,7 +231,96 @@ function thresholdIssues(summary, thresholds) {
   return issues;
 }
 
-function printHuman(selector, command, summary, thresholds, issues, check) {
+function parseConventionalSubject(subject) {
+  const match = subject.match(/^([a-z]+)(?:\(([^)]+)\))?!?:\s*(.+)$/i);
+  if (!match) {
+    return {
+      type: null,
+      scope: null,
+      title: subject.trim(),
+    };
+  }
+  return {
+    type: match[1].toLowerCase(),
+    scope: (match[2] ?? "").trim().toLowerCase() || null,
+    title: match[3].trim(),
+  };
+}
+
+function genericCommitTitle(title) {
+  const normalized = title.toLowerCase().replace(/\s+/g, " ").trim();
+  return [
+    /^(?:improve|optimize|reduce|trim|tighten)\s+(?:default\s+)?(?:embedded\s+)?(?:smart context\s+)?(?:context\s+)?token\s+(?:efficiency|usage|overhead|budgets|calibration|compaction)$/,
+    /^(?:improve|optimize|reduce|trim|tighten)\s+(?:prodex\s+)?super\s+token\s+(?:efficiency|overhead)$/,
+    /^(?:improve|optimize|reduce|trim|tighten)\s+(?:embedded|context|smart context|super)\s+token\s+(?:efficiency|overhead|usage)$/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function broadCommitScope(scope) {
+  return !scope || ["runtime", "super", "cli", "misc"].includes(scope);
+}
+
+function normalizedSubjectTitle(title) {
+  return title
+    .toLowerCase()
+    .replace(/\b(?:default|embedded|smart|context|prodex|super|token)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function commitSubjectIssues(commits) {
+  const issues = [];
+  const titles = new Map();
+  for (const commit of commits) {
+    const parsed = parseConventionalSubject(commit.subject);
+    if (genericCommitTitle(parsed.title) && broadCommitScope(parsed.scope)) {
+      issues.push(
+        `${commit.hash.slice(0, 7)} generic subject needs narrower scope/title: ${commit.subject}`,
+      );
+    }
+    const normalized = normalizedSubjectTitle(parsed.title);
+    if (normalized) {
+      const bucket = titles.get(normalized) ?? [];
+      bucket.push(commit);
+      titles.set(normalized, bucket);
+    }
+  }
+
+  for (const bucket of titles.values()) {
+    if (bucket.length < 3) {
+      continue;
+    }
+    issues.push(
+      `repeated similar subjects (${bucket.length}): ${bucket
+        .map((commit) => `${commit.hash.slice(0, 7)} ${commit.subject}`)
+        .join("; ")}`,
+    );
+  }
+  return issues;
+}
+
+async function commitsForSelector(selector) {
+  if (selector === "staged" || selector === "worktree") {
+    return [];
+  }
+  const args =
+    selector === "HEAD"
+      ? ["log", "-1", "--format=%H%x09%s", "HEAD"]
+      : ["log", "--format=%H%x09%s", selector];
+  const { stdout } = await git(args, { cwd: repoRoot });
+  return stdout
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .map((line) => {
+      const [hash, ...subjectParts] = line.split("\t");
+      return {
+        hash,
+        subject: subjectParts.join("\t"),
+      };
+    });
+}
+
+function printHuman(selector, command, summary, thresholds, issues, subjectIssues, check) {
   process.stdout.write(`churn hygiene: ${selector}\n`);
   process.stdout.write(`  command: git ${command.join(" ")}\n`);
   process.stdout.write(`  files changed: ${summary.files} (threshold ${thresholds.maxFiles})\n`);
@@ -244,6 +334,12 @@ function printHuman(selector, command, summary, thresholds, issues, check) {
   }
   if (issues.length > 0) {
     process.stdout.write(`  threshold warnings: ${issues.join("; ")}\n`);
+  }
+  if (subjectIssues.length > 0) {
+    process.stdout.write("  subject warnings:\n");
+    for (const issue of subjectIssues) {
+      process.stdout.write(`    - ${issue}\n`);
+    }
   }
   process.stdout.write(`  mode: ${check ? "check" : "report-only"}\n`);
 }
@@ -266,6 +362,9 @@ async function main() {
   const rows = parseNumstat(stdout);
   const summary = summarize(rows);
   const issues = thresholdIssues(summary, args.thresholds);
+  const commits = await commitsForSelector(plan.selector);
+  const subjectIssues = commitSubjectIssues(commits);
+  const checkIssues = [...issues, ...subjectIssues];
 
   if (args.json) {
     process.stdout.write(
@@ -276,6 +375,8 @@ async function main() {
           thresholds: args.thresholds,
           summary,
           issues,
+          commitSubjects: commits,
+          subjectIssues,
           check: args.check,
         },
         null,
@@ -283,10 +384,10 @@ async function main() {
       )}\n`,
     );
   } else {
-    printHuman(plan.selector, plan.command, summary, args.thresholds, issues, args.check);
+    printHuman(plan.selector, plan.command, summary, args.thresholds, issues, subjectIssues, args.check);
   }
 
-  if (args.check && issues.length > 0) {
+  if (args.check && checkIssues.length > 0) {
     process.exitCode = 1;
   }
 }

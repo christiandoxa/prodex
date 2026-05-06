@@ -80,6 +80,8 @@ fn runtime_proxy_hot_path_bench_case_specs_keep_expected_order() {
             "runtime_websocket_stale_reuse_affinity",
             "runtime_sse_lookahead_inspection",
             "runtime_dead_lineage_cleanup",
+            "runtime_smart_context_large_tool_output_rewrite",
+            "runtime_mem_super_slim_token_heavy_shadow",
         ]
     );
     assert!(
@@ -98,6 +100,8 @@ fn runtime_proxy_hot_path_bench_case_specs_keep_expected_order() {
             websocket_stale_reuse: 64,
             sse_inspect: 128,
             lineage_cleanup: 128,
+            smart_context_rewrite: 96,
+            runtime_mem_super_slim: 96,
         }
     );
 }

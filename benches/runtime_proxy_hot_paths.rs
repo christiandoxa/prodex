@@ -3,6 +3,7 @@ use prodex::bench_support::{
     RuntimeProxyCompactSessionSelectionBenchCase, RuntimeProxyHotPathBenchCheckConfig,
     RuntimeProxyLineageCleanupBenchCase, RuntimeProxyMixedPoolSelectionBenchCase,
     RuntimeProxyPreviousResponseBenchCase, RuntimeProxyQuotaFallbackBenchCase,
+    RuntimeProxyRuntimeMemSuperSlimBenchCase, RuntimeProxySmartContextRewriteBenchCase,
     RuntimeProxySseInspectBenchCase, RuntimeProxyWebsocketStaleReuseBenchCase,
     run_runtime_proxy_hot_path_bench_check,
 };
@@ -51,6 +52,16 @@ fn runtime_proxy_hot_paths(c: &mut Criterion) {
     let lineage_cleanup = RuntimeProxyLineageCleanupBenchCase::new(128);
     c.bench_function("runtime_dead_lineage_cleanup", |b| {
         b.iter(|| black_box(lineage_cleanup.clear_dead_response_bindings()))
+    });
+
+    let smart_context_rewrite = RuntimeProxySmartContextRewriteBenchCase::new(96);
+    c.bench_function("runtime_smart_context_large_tool_output_rewrite", |b| {
+        b.iter(|| black_box(smart_context_rewrite.rewrite_large_tool_output()))
+    });
+
+    let runtime_mem_super_slim = RuntimeProxyRuntimeMemSuperSlimBenchCase::new(96);
+    c.bench_function("runtime_mem_super_slim_token_heavy_shadow", |b| {
+        b.iter(|| black_box(runtime_mem_super_slim.shadow_token_heavy_events()))
     });
 }
 

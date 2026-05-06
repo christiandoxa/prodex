@@ -3,11 +3,13 @@ pub use prodex_bench_support::{
     RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_CASE, RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS,
     RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE, RUNTIME_PROXY_MIXED_POOL_BENCH_CASE,
     RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_CASE, RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_CASE,
-    RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE, RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_CASE,
-    RuntimeProxyHotPathBenchCaseSpec, RuntimeProxyHotPathBenchCaseSuite,
-    RuntimeProxyHotPathBenchCheckConfig, RuntimeProxyHotPathBenchCheckResult,
-    RuntimeProxyHotPathBenchScenarioSizes, RuntimeProxyHotPathBenchThreshold,
-    run_runtime_proxy_hot_path_case, run_runtime_proxy_hot_path_case_suite,
+    RUNTIME_PROXY_RUNTIME_MEM_SUPER_SLIM_BENCH_CASE,
+    RUNTIME_PROXY_SMART_CONTEXT_REWRITE_BENCH_CASE, RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE,
+    RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_CASE, RuntimeProxyHotPathBenchCaseSpec,
+    RuntimeProxyHotPathBenchCaseSuite, RuntimeProxyHotPathBenchCheckConfig,
+    RuntimeProxyHotPathBenchCheckResult, RuntimeProxyHotPathBenchScenarioSizes,
+    RuntimeProxyHotPathBenchThreshold, run_runtime_proxy_hot_path_case,
+    run_runtime_proxy_hot_path_case_suite,
 };
 
 static BENCH_CASE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -172,6 +174,10 @@ pub fn run_runtime_proxy_hot_path_bench_check(
         RuntimeProxyWebsocketStaleReuseBenchCase::new(sizes.websocket_stale_reuse);
     let sse_inspect = RuntimeProxySseInspectBenchCase::new(sizes.sse_inspect);
     let lineage_cleanup = RuntimeProxyLineageCleanupBenchCase::new(sizes.lineage_cleanup);
+    let smart_context_rewrite =
+        RuntimeProxySmartContextRewriteBenchCase::new(sizes.smart_context_rewrite);
+    let runtime_mem_super_slim =
+        RuntimeProxyRuntimeMemSuperSlimBenchCase::new(sizes.runtime_mem_super_slim);
 
     run_runtime_proxy_hot_path_case_suite(
         config,
@@ -185,6 +191,8 @@ pub fn run_runtime_proxy_hot_path_bench_check(
             websocket_stale_reuse: || websocket_stale_reuse.evaluate_stale_reuse_affinity(),
             sse_inspect: || sse_inspect.inspect(),
             lineage_cleanup: || lineage_cleanup.clear_dead_response_bindings(),
+            smart_context_rewrite: || smart_context_rewrite.rewrite_large_tool_output(),
+            runtime_mem_super_slim: || runtime_mem_super_slim.shadow_token_heavy_events(),
         },
     )
 }
@@ -874,5 +882,168 @@ impl RuntimeProxyLineageCleanupBenchCase {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         runtime.turn_state_bindings.len()
+    }
+}
+
+#[doc(hidden)]
+pub struct RuntimeProxySmartContextRewriteBenchCase {
+    shared: RuntimeRotationProxyShared,
+    request: RuntimeProxyRequest,
+}
+
+impl RuntimeProxySmartContextRewriteBenchCase {
+    pub fn new(tool_line_count: usize) -> Self {
+        let tool_line_count = tool_line_count.max(32);
+        let paths = bench_paths("smart-context-rewrite");
+        let profile_name = "main".to_string();
+        let state = RuntimeRotationState {
+            paths: paths.clone(),
+            state: AppState {
+                active_profile: Some(profile_name.clone()),
+                profiles: BTreeMap::from([(
+                    profile_name.clone(),
+                    bench_profile_entry(&paths, &profile_name),
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+            include_code_review: false,
+            current_profile: profile_name.clone(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        };
+        let shared = bench_runtime_shared("smart-context-rewrite", state, 8);
+        register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(18_000), None);
+
+        let output = (0..tool_line_count)
+            .map(|index| {
+                format!(
+                    "line {index:04}: /repo/prodex/crates/prodex-app/src/runtime_proxy/smart_context.rs token-heavy-tool-output repeated-context payload={}",
+                    "abcdef0123456789".repeat(8)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "gpt-5.1-codex",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": "Summarize the failing runtime proxy tool output and keep artifact references."
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_bench_large_tool_output",
+                    "output": output
+                }
+            ]
+        }))
+        .expect("benchmark smart-context request body should serialize");
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/responses".to_string(),
+            headers: Vec::new(),
+            body,
+        };
+
+        Self { shared, request }
+    }
+
+    pub fn rewrite_large_tool_output(&self) -> usize {
+        prepare_runtime_smart_context_http_body_for_profile(
+            bench_case_id(),
+            &self.request,
+            &self.shared,
+            RuntimeRouteKind::Responses,
+            Some("main"),
+        )
+        .len()
+    }
+}
+
+#[doc(hidden)]
+pub struct RuntimeProxyRuntimeMemSuperSlimBenchCase {
+    events: Vec<serde_json::Value>,
+}
+
+impl RuntimeProxyRuntimeMemSuperSlimBenchCase {
+    pub fn new(event_count: usize) -> Self {
+        let event_count = event_count.max(16);
+        let large_prompt = format!(
+            "Inspect runtime proxy smart-context/token rewrite paths. {}",
+            "large prompt fragment with repeated token pressure ".repeat(96)
+        );
+        let large_tool_output = (0..48)
+            .map(|index| {
+                format!(
+                    "tool line {index:03}: crates/prodex-runtime-mem/src/lib.rs RuntimeMemRecallIntent psc:0123456789abcdef {}",
+                    "diagnostic-output ".repeat(12)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut events = Vec::with_capacity(event_count);
+        for index in 0..event_count {
+            let event = match index % 4 {
+                0 => serde_json::json!({
+                    "id": format!("event-user-{index:03}"),
+                    "payload": {
+                        "type": "user_message",
+                        "message": large_prompt,
+                        "metadata": {
+                            "prompt_summary": format!("summary {index:03} refs psc:0123456789abcdef")
+                        }
+                    }
+                }),
+                1 => serde_json::json!({
+                    "id": format!("event-tool-{index:03}"),
+                    "payload": {
+                        "type": "function_call_output",
+                        "call_id": format!("call-{index:03}"),
+                        "output": large_tool_output,
+                        "metadata": {
+                            "summary": format!("tool summary {index:03} refs psc:fedcba9876543210"),
+                            "artifact_ref": "psc:fedcba9876543210"
+                        }
+                    }
+                }),
+                2 => serde_json::json!({
+                    "id": format!("event-assistant-{index:03}"),
+                    "payload": {
+                        "type": "agent_message",
+                        "message": "assistant reasoning and answer ".repeat(160),
+                        "summary": format!("assistant summary {index:03}")
+                    }
+                }),
+                _ => serde_json::json!({
+                    "id": format!("event-turn-{index:03}"),
+                    "payload": {
+                        "type": "turn_completed"
+                    }
+                }),
+            };
+            events.push(event);
+        }
+        Self { events }
+    }
+
+    pub fn shadow_token_heavy_events(&self) -> usize {
+        prodex_runtime_mem::runtime_mem_super_slim_v2_shadow_codex_events(self.events.iter())
+            .iter()
+            .map(serde_json::Value::to_string)
+            .map(|value| value.len())
+            .sum()
     }
 }

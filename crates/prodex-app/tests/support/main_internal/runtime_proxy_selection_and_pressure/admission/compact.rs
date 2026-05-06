@@ -1,4 +1,5 @@
 use super::*;
+use super::helpers::*;
 
 #[test]
 fn session_affinity_prefers_bound_profile_for_compact_requests() {
@@ -216,6 +217,68 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
     assert!(
         log.contains("compact_final_failure exit=pressure reason=pressure"),
         "compact pressure failure should emit a terminal marker: {log}"
+    );
+}
+
+#[test]
+fn compact_smart_context_panic_passes_original_body_to_upstream() {
+    let backend = RuntimeProxyBackend::start();
+    let harness =
+        RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+            "main",
+            "main-account",
+            "main@example.com",
+        )
+        .upstream_base_url(backend.base_url())
+        .build();
+    let shared = harness.shared();
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    let body = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": "call_big",
+                "output": "large compact payload\n".repeat(128)
+            }
+        ],
+        "instructions": "compact",
+        "session_id": "sess-main"
+    })
+    .to_string();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("session_id".to_string(), "sess-main".to_string()),
+            ("x-openai-subagent".to_string(), "compact".to_string()),
+        ],
+        body: body.as_bytes().to_vec(),
+    };
+
+    let response = {
+        let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
+        proxy_runtime_standard_request(44, &request, shared)
+            .expect("compact request should survive smart-context panic")
+    };
+    assert!(!runtime_take_fault_injection(
+        "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE"
+    ));
+    let (status, response_body) = tiny_http_response_status_and_body(response);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert_eq!(status, 200, "unexpected compact response: {response_body}");
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(backend.responses_bodies(), vec![body]);
+    assert!(
+        log.contains("smart_context_panic")
+            && log.contains("route=compact")
+            && log.contains("decision=pass_through"),
+        "smart-context panic should be logged as compact pass-through: {log}"
+    );
+    assert!(
+        log.contains("upstream_start"),
+        "compact request should still reach upstream after smart-context fallback: {log}"
     );
 }
 

@@ -6,6 +6,7 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_SCAN_TARGETS = Object.freeze([
   "crates/prodex-app/src/runtime_proxy",
   "crates/prodex-app/src/runtime_launch/proxy_startup.rs",
+  "crates/prodex-runtime-proxy/src",
 ]);
 
 const FORBIDDEN_PATTERNS = Object.freeze([
@@ -24,6 +25,12 @@ const FORBIDDEN_PATTERNS = Object.freeze([
     id: "blocking-thread-spawn",
     description: "OS thread spawn in runtime hot path",
     pattern: /\b(?:std::thread|thread)::spawn\s*\(/,
+  },
+  {
+    id: "blocking-thread-builder-spawn",
+    description: "OS thread Builder spawn in runtime hot path",
+    pattern:
+      /\b(?:std::thread|thread)::Builder\s*::\s*new\s*\(\s*\)(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\([^;\n]*\))*\s*\.\s*spawn\s*\(/,
   },
   {
     id: "spawn-blocking",
@@ -67,6 +74,15 @@ const ALLOWLIST = Object.freeze([
     maxHits: 3,
     reason:
       "debounced token calibration persistence performed by the background save worker, outside request and stream commit paths",
+  },
+  {
+    name: "runtime-websocket-tcp-dns-bounded-executor-threads",
+    file: "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor.rs",
+    id: "blocking-thread-builder-spawn",
+    pattern: /\bthread::Builder::new\(\)\.name\(name\)\.spawn\(job\)\.is_ok\(\)/,
+    maxHits: 2,
+    reason:
+      "bounded websocket TCP/DNS worker and dispatcher pools; one production spawner plus one spawn-outcome test helper",
   },
 ]);
 

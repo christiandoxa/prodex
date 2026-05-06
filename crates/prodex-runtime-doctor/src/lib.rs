@@ -458,8 +458,11 @@ pub struct RuntimeDoctorSmartContextAutopilotEvent {
     pub tool_outputs_condensed: Option<usize>,
     pub duplicate_texts: Option<usize>,
     pub cross_turn_duplicate_texts: Option<usize>,
+    pub repeat_tool_output_refs: Option<usize>,
     pub blob_outputs_condensed: Option<usize>,
     pub rehydrated_refs: Option<usize>,
+    pub static_context_deltas: Option<usize>,
+    pub repo_state_facts: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq)]
@@ -471,6 +474,9 @@ pub struct RuntimeDoctorSmartContextAutopilotSummary {
     pub total_body_bytes_after: usize,
     pub total_body_bytes_saved: usize,
     pub estimated_tokens_saved: usize,
+    pub total_repeat_tool_output_refs: usize,
+    pub total_static_context_deltas: usize,
+    pub total_repo_state_facts: usize,
     pub decision_counts: BTreeMap<String, usize>,
     pub fallback_reason_counts: BTreeMap<String, usize>,
     pub self_check_counts: BTreeMap<String, usize>,
@@ -543,8 +549,14 @@ pub fn runtime_doctor_parse_smart_context_autopilot_line(
             &fields,
             "cross_turn_duplicate_texts",
         ),
+        repeat_tool_output_refs: runtime_doctor_parse_usize_field(
+            &fields,
+            "repeat_tool_output_refs",
+        ),
         blob_outputs_condensed: runtime_doctor_parse_usize_field(&fields, "blob_outputs_condensed"),
         rehydrated_refs: runtime_doctor_parse_usize_field(&fields, "rehydrated_refs"),
+        static_context_deltas: runtime_doctor_parse_usize_field(&fields, "static_context_deltas"),
+        repo_state_facts: runtime_doctor_parse_usize_field(&fields, "repo_state_facts"),
     })
 }
 
@@ -579,6 +591,15 @@ fn runtime_doctor_add_smart_context_autopilot_event(
     summary.estimated_tokens_saved = summary
         .estimated_tokens_saved
         .saturating_add(event.estimated_tokens_saved.unwrap_or(0));
+    summary.total_repeat_tool_output_refs = summary
+        .total_repeat_tool_output_refs
+        .saturating_add(event.repeat_tool_output_refs.unwrap_or(0));
+    summary.total_static_context_deltas = summary
+        .total_static_context_deltas
+        .saturating_add(event.static_context_deltas.unwrap_or(0));
+    summary.total_repo_state_facts = summary
+        .total_repo_state_facts
+        .saturating_add(event.repo_state_facts.unwrap_or(0));
 
     if let Some(decision) = event.decision.as_deref() {
         runtime_doctor_increment_string_count(&mut summary.decision_counts, decision);

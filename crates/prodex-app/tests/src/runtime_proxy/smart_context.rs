@@ -41,6 +41,109 @@ fn smart_context_condenses_tool_output_with_artifact_ref() {
 }
 
 #[test]
+fn smart_context_compact_session_body_does_not_panic() {
+    let shared = smart_context_test_shared("compact-session-body");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    smart_context_observe_minimal_budget(&shared);
+    let tool_output = (0..1600)
+        .map(|index| {
+            format!(
+                "baris {index}: output panjang untuk remote compact; nilai=konfirmasi; path=crates/prodex-app/src/runtime_proxy/smart_context.rs"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = serde_json::json!({
+        "model": "gpt-5.5",
+        "session_id": "sess-compact",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Investigasi kenapa remote compact gagal: café résumé jalur /responses/compact."
+                    }
+                ]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_big",
+                "output": tool_output
+            }
+        ]
+    })
+    .to_string();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/prodex/responses/compact".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: body.into_bytes(),
+    };
+
+    let rewritten = prepare_runtime_smart_context_http_body_for_profile(
+        42,
+        &request,
+        &shared,
+        RuntimeRouteKind::Compact,
+        Some("main"),
+    );
+
+    assert!(matches!(rewritten, Cow::Owned(_) | Cow::Borrowed(_)));
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("smart_context_autopilot"));
+}
+
+#[test]
+fn smart_context_compact_prepare_panic_falls_back_to_original_body() {
+    let shared = smart_context_test_shared("compact-panic-fallback");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    smart_context_observe_minimal_budget(&shared);
+    let body = serde_json::json!({
+        "model": "gpt-5.5",
+        "session_id": "sess-compact",
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": "call_big",
+                "output": "large compact payload\n".repeat(128)
+            }
+        ]
+    })
+    .to_string();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/prodex/responses/compact".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: body.into_bytes(),
+    };
+
+    let rewritten = {
+        let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
+        prepare_runtime_smart_context_http_body_for_profile(
+            43,
+            &request,
+            &shared,
+            RuntimeRouteKind::Compact,
+            Some("main"),
+        )
+    };
+    assert!(!runtime_take_fault_injection(
+        "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE"
+    ));
+
+    assert!(matches!(rewritten, Cow::Borrowed(_)));
+    assert_eq!(rewritten.as_ref(), request.body.as_slice());
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("smart_context_panic"));
+    assert!(log.contains("route=compact"));
+    assert!(log.contains("profile=main"));
+    assert!(log.contains("panic=non_string_panic"));
+    assert!(log.contains("decision=pass_through"));
+}
+
+#[test]
 fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     let hidden_tail = "FULL_TAIL_SHOULD_ONLY_EXIST_IN_ARTIFACT";
     let original_output = std::iter::once("running 1 test".to_string())
