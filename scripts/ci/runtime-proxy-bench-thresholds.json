@@ -2,14 +2,14 @@
   "version": 1,
   "default_scale_percent": 100,
   "case_scale_percent": {
-    "runtime_route_eligible_quota_fallback_scan": 160,
-    "runtime_previous_response_candidate_selection": 170,
-    "runtime_mixed_pool_response_selection": 125,
-    "runtime_compact_session_affinity_selection": 190,
-    "runtime_websocket_stale_reuse_affinity": 190,
-    "runtime_sse_lookahead_inspection": 240,
-    "runtime_dead_lineage_cleanup": 254,
-    "runtime_smart_context_large_tool_output_rewrite": 250,
-    "runtime_mem_super_slim_token_heavy_shadow": 150
+    "runtime_route_eligible_quota_fallback_scan": 145,
+    "runtime_previous_response_candidate_selection": 165,
+    "runtime_mixed_pool_response_selection": 90,
+    "runtime_compact_session_affinity_selection": 50,
+    "runtime_websocket_stale_reuse_affinity": 50,
+    "runtime_sse_lookahead_inspection": 230,
+    "runtime_dead_lineage_cleanup": 220,
+    "runtime_smart_context_large_tool_output_rewrite": 75,
+    "runtime_mem_super_slim_token_heavy_shadow": 145
   }
 }

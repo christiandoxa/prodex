@@ -12,7 +12,8 @@ pub(super) use self::unauthorized_recovery::{
     runtime_try_recover_profile_auth_from_unauthorized_steps,
 };
 use runtime_proxy_crate::{
-    RuntimeWebsocketTarget, inspect_runtime_websocket_text_frame, runtime_interleave_socket_addrs,
+    RuntimeInspectedWebsocketTextFrame, RuntimeWebsocketTarget,
+    inspect_runtime_websocket_text_frame, runtime_interleave_socket_addrs,
     runtime_proxy_websocket_error_payload_text, runtime_realtime_websocket_terminal_event_kind,
     runtime_translate_precommit_previous_response_websocket_text_frame,
     runtime_translate_previous_response_websocket_text_frame, runtime_websocket_authority,
@@ -905,6 +906,13 @@ fn runtime_websocket_precommit_hold_promotion_allowed(
         && promote_committed_profile
 }
 
+fn runtime_websocket_precommit_hold_promotion_signal_seen(
+    inspected: &RuntimeInspectedWebsocketTextFrame,
+) -> bool {
+    inspected.event_type.as_deref() == Some("response.created")
+        && !inspected.response_ids.is_empty()
+}
+
 pub(super) fn attempt_runtime_websocket_request(
     attempt: RuntimeWebsocketAttemptRequest<'_>,
 ) -> Result<RuntimeWebsocketAttempt> {
@@ -1124,6 +1132,7 @@ pub(super) fn attempt_runtime_websocket_request(
     let mut committed_response_ids = BTreeSet::new();
     let mut previous_response_owner_recorded = false;
     let mut precommit_hold_count = 0usize;
+    let mut precommit_hold_promotion_signal_seen = false;
     loop {
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
@@ -1209,13 +1218,18 @@ pub(super) fn attempt_runtime_websocket_request(
                         );
                     }
                     precommit_hold_count = precommit_hold_count.saturating_add(1);
+                    precommit_hold_promotion_signal_seen |=
+                        runtime_websocket_precommit_hold_promotion_signal_seen(&inspected);
                     buffered_precommit_text_frames.push(RuntimeBufferedWebsocketTextFrame {
                         text: text.clone(),
                         response_ids: inspected.response_ids.clone(),
                     });
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
-                    if elapsed_ms >= u128::from(timeout_ms) && precommit_hold_promotion_allowed {
+                    if elapsed_ms >= u128::from(timeout_ms)
+                        && precommit_hold_promotion_allowed
+                        && precommit_hold_promotion_signal_seen
+                    {
                         runtime_proxy_log(
                             shared,
                             runtime_proxy_structured_log_message(
@@ -1601,6 +1615,7 @@ pub(super) fn attempt_runtime_websocket_request(
                     && precommit_hold_count > 0
                     && runtime_websocket_timeout_error(&err)
                     && precommit_hold_promotion_allowed
+                    && precommit_hold_promotion_signal_seen
                 {
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();

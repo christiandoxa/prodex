@@ -2387,11 +2387,13 @@ fn runtime_smart_context_static_context_persistent_section_deduped_text(
     let mut cursor = 0usize;
     let mut changed = false;
     for section in sections {
-        if section.start < cursor || section.end > text.len() {
+        if section.start < cursor {
             continue;
         }
+        let Some(body) = runtime_smart_context_static_heading_section_body(text, &section) else {
+            continue;
+        };
         candidate.push_str(&text[cursor..section.start]);
-        let body = &text[section.start..section.end];
         let key =
             runtime_smart_context_static_section_key(item_id, &section.heading, section.ordinal);
         let marker = previous
@@ -2441,11 +2443,13 @@ fn runtime_smart_context_static_context_section_deduped_text(
     let mut cursor = 0usize;
     let mut changed = false;
     for section in sections {
-        if section.start < cursor || section.end > text.len() {
+        if section.start < cursor {
             continue;
         }
+        let Some(body) = runtime_smart_context_static_heading_section_body(text, &section) else {
+            continue;
+        };
         candidate.push_str(&text[cursor..section.start]);
-        let body = &text[section.start..section.end];
         let body_key = body.trim();
         let content_hash = runtime_proxy_crate::smart_context_hash_text(body_key);
         let key = (
@@ -2465,9 +2469,10 @@ fn runtime_smart_context_static_context_section_deduped_text(
         };
         if !marker.is_empty()
             && marker.len() < body.len()
+            && let Some(suffix) = text.get(section.end..)
             && prodex_context::critical_signal_self_check(
                 text,
-                &format!("{candidate}{marker}{}", &text[section.end..]),
+                &format!("{candidate}{marker}{suffix}"),
             )
             .passed()
         {
@@ -2488,10 +2493,12 @@ fn runtime_smart_context_static_section_fingerprints_from_value(
     let mut fingerprints = Vec::new();
     for item in runtime_smart_context_static_context_items(value) {
         for section in runtime_smart_context_static_context_heading_sections(&item.text) {
-            if section.start >= section.end || section.end > item.text.len() {
+            let Some(body) =
+                runtime_smart_context_static_heading_section_body(&item.text, &section)
+            else {
                 continue;
-            }
-            let body = item.text[section.start..section.end].trim();
+            };
+            let body = body.trim();
             if body.is_empty() {
                 continue;
             }
@@ -2581,6 +2588,20 @@ struct RuntimeSmartContextStaticHeadingSection {
     ordinal: usize,
 }
 
+fn runtime_smart_context_static_heading_section_body<'a>(
+    text: &'a str,
+    section: &RuntimeSmartContextStaticHeadingSection,
+) -> Option<&'a str> {
+    if section.start >= section.end
+        || section.end > text.len()
+        || !text.is_char_boundary(section.start)
+        || !text.is_char_boundary(section.end)
+    {
+        return None;
+    }
+    text.get(section.start..section.end)
+}
+
 fn runtime_smart_context_static_context_heading_sections(
     text: &str,
 ) -> Vec<RuntimeSmartContextStaticHeadingSection> {
@@ -2614,7 +2635,9 @@ fn runtime_smart_context_static_context_heading_sections(
         if end.saturating_sub(*start) < SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES {
             continue;
         }
-        let body = text[*start..end].trim();
+        let Some(body) = text.get(*start..end).map(str::trim) else {
+            continue;
+        };
         if body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
             || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY)
             || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX)

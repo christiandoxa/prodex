@@ -23,7 +23,7 @@ const BEHAVIOR_PATTERNS = Object.freeze([
 
 function parseArgs(argv) {
   const args = {
-    check: false,
+    check: process.env.PRODEX_CHURN_HYGIENE_REPORT_ONLY !== "1",
     dryRun: false,
     json: false,
     thresholds: { ...DEFAULT_THRESHOLDS },
@@ -56,6 +56,10 @@ function parseArgs(argv) {
     }
     if (value === "--check") {
       args.check = true;
+      continue;
+    }
+    if (value === "--report-only") {
+      args.check = false;
       continue;
     }
     if (value === "--dry-run") {
@@ -106,10 +110,10 @@ function requiredValue(value, name) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/churn-hygiene.mjs [selector] [--check] [thresholds]",
+      "Usage: node scripts/ci/churn-hygiene.mjs [selector] [--check|--report-only] [thresholds]",
       "",
       "Reports commit/diff churn and generic commit subjects against lightweight thresholds.",
-      "Default mode never fails.",
+      "Default mode fails on actionable violations. Use --report-only or PRODEX_CHURN_HYGIENE_REPORT_ONLY=1 for exploratory dry runs.",
       "",
       "Selectors:",
       "  --range <rev-range>       inspect a git range",
@@ -118,7 +122,8 @@ function printHelp() {
       "  --worktree                inspect unstaged files",
       "",
       "Options:",
-      "  --check                   fail when thresholds are exceeded",
+      "  --check                   fail when thresholds are exceeded; default unless report-only env is set",
+      "  --report-only             report violations without failing",
       "  --dry-run                 print selected diff command and thresholds only",
       "  --max-files <n>           default 35",
       "  --max-behavior-files <n>  default 25",

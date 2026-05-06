@@ -4397,6 +4397,25 @@ fn smart_context_json_shape_guard_rejects_excessive_node_count_iteratively() {
 }
 
 #[test]
+fn smart_context_static_section_body_rejects_non_char_boundary_offsets_without_panic() {
+    let text = "## Résumé café\n".repeat(90);
+    let bad_start = text.find('é').unwrap() + 1;
+    let section = RuntimeSmartContextStaticHeadingSection {
+        heading: "## Résumé café".to_string(),
+        start: bad_start,
+        end: text.len(),
+        ordinal: 0,
+    };
+
+    let result = std::panic::catch_unwind(|| {
+        runtime_smart_context_static_heading_section_body(&text, &section)
+    });
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), None);
+}
+
+#[test]
 fn smart_context_self_check_passes_through_growth_without_rehydrate() {
     let stats = RuntimeSmartContextTransformStats {
         artifacts_stored: 1,

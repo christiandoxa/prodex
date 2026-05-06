@@ -7,7 +7,7 @@ import {
 
 function parseArgs(argv) {
   const args = {
-    churnCheck: process.env.CI === "true",
+    churnCheck: process.env.PRODEX_PREFLIGHT_CHURN_REPORT_ONLY !== "1",
     dryRun: false,
     jobs: defaultJobCount(),
     fastTests: true,
@@ -25,6 +25,10 @@ function parseArgs(argv) {
       continue;
     }
     if (value === "--no-churn-check") {
+      args.churnCheck = false;
+      continue;
+    }
+    if (value === "--churn-report-only") {
       args.churnCheck = false;
       continue;
     }
@@ -57,7 +61,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--churn-check] [--no-churn-check] [--dry-run]",
+      "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--churn-check|--churn-report-only] [--dry-run]",
       "",
       "Runs the practical local preflight gate before pushing or release prep.",
       "",
@@ -67,14 +71,15 @@ function printHelp() {
       "  - cargo clippy --locked --all-targets --all-features -- -D warnings",
       "  - npm run test:fast -- --tests-only --no-prebuild",
       "",
-      "Churn hygiene reports locally by default and fails in CI by default.",
+      "Churn hygiene fails locally and in CI by default. Use --churn-report-only or PRODEX_PREFLIGHT_CHURN_REPORT_ONLY=1 for exploratory dry runs.",
       "",
       "Options:",
       "  --jobs <n>        set test:fast child process parallelism",
       "  --serial          also run npm run test:serial -- --suite all",
       "  --no-tests        skip test:fast; useful when only checking metadata/clippy",
-      "  --churn-check     fail when churn hygiene thresholds are exceeded",
-      "  --no-churn-check  force churn hygiene report-only mode, including in CI",
+      "  --churn-check        fail when churn hygiene thresholds are exceeded; default unless report-only env is set",
+      "  --churn-report-only  force churn hygiene report-only mode",
+      "  --no-churn-check     deprecated alias for --churn-report-only",
       "  --dry-run         print the command plan without running it",
     ].join("\n") + "\n",
   );
@@ -95,7 +100,7 @@ function preflightSteps(args) {
     {
       label: args.churnCheck ? "churn-hygiene-check" : "churn-hygiene-report",
       command: "node",
-      args: ["scripts/ci/churn-hygiene.mjs", ...(args.churnCheck ? ["--check"] : [])],
+      args: ["scripts/ci/churn-hygiene.mjs", ...(args.churnCheck ? ["--check"] : ["--report-only"])],
     },
     {
       label: "release-preflight",
