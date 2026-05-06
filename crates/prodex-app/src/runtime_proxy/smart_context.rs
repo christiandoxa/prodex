@@ -2627,7 +2627,7 @@ fn runtime_smart_context_apply_static_context_cross_field_dedupe(
         if let Some(first_id) = first_by_hash.get(&content_hash) {
             duplicate_ids.insert(
                 item.id.clone(),
-                runtime_smart_context_static_context_dup_marker(first_id, &content_hash),
+                runtime_smart_context_static_context_dup_marker(first_id),
             );
         } else {
             first_by_hash.insert(content_hash, item.id);
@@ -2746,8 +2746,8 @@ fn runtime_smart_context_record_static_context_chunks(
     }
 }
 
-fn runtime_smart_context_static_context_dup_marker(source_id: &str, content_hash: &str) -> String {
-    format!("{SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX}{source_id} {content_hash}")
+fn runtime_smart_context_static_context_dup_marker(source_id: &str) -> String {
+    format!("{SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX}{source_id}")
 }
 
 fn runtime_smart_context_static_context_chunk_dup_marker(
@@ -8231,7 +8231,6 @@ fn runtime_smart_context_append_artifact_manifest_delta_if_useful(
         manifest_entries,
         detailed_manifest,
         unchanged_count,
-        Some(runtime_smart_context_manifest_set_checksum(&ids)),
     ) else {
         return false;
     };
@@ -8387,39 +8386,22 @@ fn runtime_smart_context_artifact_manifest_from_entries(
     entries: Vec<RuntimeSmartContextArtifactManifestEntry>,
     detailed: bool,
 ) -> Option<String> {
-    let ids = entries
-        .iter()
-        .map(|entry| entry.id.clone())
-        .collect::<BTreeSet<_>>();
-    runtime_smart_context_artifact_manifest_delta_from_entries(
-        entries,
-        detailed,
-        0,
-        Some(runtime_smart_context_manifest_set_checksum(&ids)),
-    )
+    runtime_smart_context_artifact_manifest_delta_from_entries(entries, detailed, 0)
 }
 
 fn runtime_smart_context_artifact_manifest_delta_from_entries(
     entries: Vec<RuntimeSmartContextArtifactManifestEntry>,
     detailed: bool,
     unchanged_count: usize,
-    set_checksum: Option<String>,
 ) -> Option<String> {
     if entries.is_empty() {
         if unchanged_count == 0 {
             return None;
         }
-        let set = set_checksum
-            .filter(|checksum| !checksum.is_empty())
-            .map(|checksum| format!(" set={checksum}"))
-            .unwrap_or_default();
-        return Some(format!("psc m refs{set} same={unchanged_count}"));
+        return Some(format!("psc m refs same={unchanged_count}"));
     }
 
     let mut header = "psc m refs".to_string();
-    if let Some(checksum) = set_checksum.filter(|checksum| !checksum.is_empty()) {
-        header.push_str(&format!(" set={checksum}"));
-    }
     if unchanged_count > 0 {
         header.push_str(&format!(" same={unchanged_count}"));
     }
@@ -8465,19 +8447,6 @@ fn runtime_smart_context_artifact_manifest_delta_from_entries(
         lines.push(line);
     }
     Some(lines.join("\n"))
-}
-
-fn runtime_smart_context_manifest_set_checksum(ids: &BTreeSet<String>) -> String {
-    if ids.is_empty() {
-        return String::new();
-    }
-    let joined = ids.iter().cloned().collect::<Vec<_>>().join("\n");
-    let hash = runtime_proxy_crate::smart_context_hash_text(&joined);
-    hash.strip_prefix("sc:")
-        .unwrap_or(hash.as_str())
-        .chars()
-        .take(12)
-        .collect()
 }
 
 fn runtime_smart_context_append_input_manifest(
@@ -8577,7 +8546,7 @@ fn runtime_smart_context_dedupe_value_text(
             }
             let hash = runtime_proxy_crate::smart_context_hash_text(text);
             if let Some(first_index) = seen.get(&hash) {
-                *text = format!("[psc dup input[{first_index}] h={hash}]");
+                *text = format!("[psc dup input[{first_index}]]");
                 stats.duplicate_texts += 1;
             } else {
                 seen.insert(hash.clone(), item_index);
@@ -8621,7 +8590,7 @@ fn runtime_smart_context_replace_cross_turn_duplicate_refs(
             let runtime_proxy_crate::SmartContextCrossTurnDuplicateRefAction::ReplaceWithArtifactRef {
                 id,
                 artifact,
-                content_hash,
+                content_hash: _,
                 byte_len,
             } = action
             else {
@@ -8630,9 +8599,8 @@ fn runtime_smart_context_replace_cross_turn_duplicate_refs(
             Some((
                 id,
                 format!(
-                    "[psc rep {} h={} b={}]",
+                    "[psc rep {} b={}]",
                     runtime_smart_context_artifact_ref(&artifact.id),
-                    content_hash,
                     byte_len
                 ),
             ))

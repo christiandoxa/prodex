@@ -763,7 +763,7 @@ fn smart_context_artifact_manifest_lists_refs_without_full_content() {
         runtime_smart_context_artifact_manifest(&store).expect("artifact manifest should render");
 
     assert!(manifest.contains("psc m"));
-    assert!(manifest.contains(" set="));
+    assert!(!manifest.contains(" set="));
     assert!(manifest.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
     assert!(manifest.contains(&format!("b={}", artifact_text.len())));
     assert!(!manifest.contains(" h="));
@@ -856,7 +856,7 @@ fn smart_context_manifest_default_omits_detail_fields_until_requested() {
 
     let manifest = value["input"][1]["content"].as_str().unwrap();
     assert!(manifest.starts_with("psc m refs"));
-    assert!(manifest.contains(" set="));
+    assert!(!manifest.contains(" set="));
     assert!(manifest.contains("b="));
     assert!(!manifest.contains("cr="));
     assert!(!manifest.contains("sr="));
@@ -927,7 +927,7 @@ fn smart_context_manifest_delta_appends_only_when_manifest_set_changes() {
         );
         assert_eq!(changed["input"].as_array().unwrap().len(), 2);
         let changed_manifest = changed["input"][1]["content"].as_str().unwrap();
-        assert!(changed_manifest.contains(" set="));
+        assert!(!changed_manifest.contains(" set="));
         assert!(!changed_manifest.contains("first artifact"));
         assert!(changed_manifest.contains("same=1"));
         assert_eq!(changed_manifest.matches("psc:").count(), 1);
@@ -2062,11 +2062,9 @@ fn smart_context_dedupes_repeated_input_text() {
         &mut stats,
     );
 
-    assert!(
-        value["input"][1]["content"]
-            .as_str()
-            .unwrap()
-            .contains("psc dup")
+    assert_eq!(
+        value["input"][1]["content"].as_str(),
+        Some("[psc dup input[0]]")
     );
     assert_eq!(stats.duplicate_texts, 1);
 }
@@ -2812,11 +2810,9 @@ fn smart_context_static_context_cross_field_dedupe_keeps_one_exact_copy() {
     );
 
     assert_eq!(value["instructions"].as_str(), Some(repeated.as_str()));
-    assert!(
-        value["system"]
-            .as_str()
-            .unwrap()
-            .starts_with(SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX)
+    assert_eq!(
+        value["system"].as_str(),
+        Some("psc static dup instructions")
     );
     assert_eq!(value["input"][0]["content"].as_str(), Some("do work"));
     assert_eq!(stats.static_context_deltas, 1);
@@ -3119,6 +3115,15 @@ fn smart_context_cross_turn_duplicate_uses_artifact_plan_and_exact_guard() {
 
     let content = value["input"][0]["content"].as_str().unwrap();
     assert!(content.contains(&runtime_smart_context_artifact_ref(&artifact.id)));
+    assert_eq!(
+        content,
+        format!(
+            "[psc rep {} b={}]",
+            runtime_smart_context_artifact_ref(&artifact.id),
+            repeated.len()
+        )
+    );
+    assert!(!content.contains(" h="));
     assert_eq!(stats.cross_turn_duplicate_texts, 1);
 
     let mut exact_value = serde_json::json!({

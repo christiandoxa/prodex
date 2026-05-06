@@ -21,6 +21,29 @@ fn read_websocket_test_log_after_marker(log_path: &Path, marker: &str) -> String
     }
 }
 
+fn websocket_test_local_pair() -> (RuntimeLocalWebSocket, RuntimeUpstreamWebSocket) {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("test websocket listener should bind");
+    let addr = listener
+        .local_addr()
+        .expect("test websocket listener should expose address");
+    let client = thread::spawn(move || {
+        let (socket, _response) =
+            tungstenite::connect(format!("ws://{addr}")).expect("test websocket client connect");
+        socket
+    });
+    let (server_stream, _addr) = listener
+        .accept()
+        .expect("test websocket server should accept connection");
+    let local_socket =
+        tungstenite::accept(Box::new(server_stream) as Box<dyn TinyReadWrite + Send>)
+            .expect("test websocket server handshake");
+    let client_socket = client
+        .join()
+        .expect("test websocket client thread should join");
+    (local_socket, client_socket)
+}
+
 fn websocket_test_shared(name: &str) -> RuntimeRotationProxyShared {
     let root = std::env::temp_dir().join(format!("prodex-websocket-{name}-{}", std::process::id()));
     let paths = AppPaths {
@@ -253,5 +276,147 @@ fn websocket_local_pressure_connect_error_does_not_mark_profile_transport_failur
         "local pressure should not emit profile transport health markers: {log}"
     );
 
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
+fn websocket_precommit_hold_timeout_commits_instead_of_retrying() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.created","response":{"id":"resp-hold"}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send response.created");
+        thread::sleep(Duration::from_millis(
+            runtime_proxy_websocket_precommit_progress_timeout_ms() + 40,
+        ));
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.completed","response":{"id":"resp-hold"}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send response.completed");
+    });
+
+    let shared = websocket_test_shared("precommit-hold-promoted");
+    let auth_location = {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .expect("runtime state should not be poisoned");
+        runtime.upstream_base_url = format!("http://{upstream_addr}");
+        let codex_home = runtime.paths.root.join("main-home");
+        runtime.state.profiles.insert(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: codex_home.clone(),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Openai,
+            },
+        );
+        let auth_location = secret_store::auth_json_location(&codex_home);
+        runtime.profile_usage_auth.insert(
+            "main".to_string(),
+            RuntimeProfileUsageAuthCacheEntry {
+                auth: UsageAuth {
+                    access_token: "test-token".to_string(),
+                    account_id: None,
+                    refresh_token: None,
+                    expires_at: None,
+                    last_refresh: None,
+                },
+                location: auth_location.clone(),
+                revision: None,
+            },
+        );
+        let now = Local::now().timestamp();
+        runtime.profile_usage_snapshots.insert(
+            "main".to_string(),
+            RuntimeProfileUsageSnapshot {
+                checked_at: now,
+                five_hour_status: RuntimeQuotaWindowStatus::Ready,
+                five_hour_remaining_percent: 100,
+                five_hour_reset_at: now + 18_000,
+                weekly_status: RuntimeQuotaWindowStatus::Ready,
+                weekly_remaining_percent: 100,
+                weekly_reset_at: now + 604_800,
+            },
+        );
+        auth_location
+    };
+    if let secret_store::SecretLocation::File(path) = &auth_location {
+        let _ = std::fs::remove_file(path);
+    }
+
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 31,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("websocket attempt should not fail after precommit hold timeout");
+
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
+    let created = client_socket
+        .read()
+        .expect("client should receive promoted response.created");
+    let completed = client_socket
+        .read()
+        .expect("client should receive response.completed");
+    assert!(
+        created.to_string().contains("response.created"),
+        "first frame should be response.created: {created:?}"
+    );
+    assert!(
+        completed.to_string().contains("response.completed"),
+        "second frame should be response.completed: {completed:?}"
+    );
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+
+    let log =
+        read_websocket_test_log_after_marker(&shared.log_path, "websocket_precommit_hold_promoted");
+    assert!(
+        log.contains("websocket_precommit_hold_promoted")
+            && log.contains("request=31")
+            && !log.contains("websocket_precommit_hold_timeout"),
+        "hold timeout should commit and forward instead of retrying: {log}"
+    );
     let _ = std::fs::remove_file(&shared.log_path);
 }

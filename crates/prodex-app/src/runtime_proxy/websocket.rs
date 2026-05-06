@@ -1133,6 +1133,7 @@ pub(super) fn attempt_runtime_websocket_request(
                     )?;
                     upstream_turn_state = Some(turn_state.to_string());
                 }
+                let mut promoted_precommit_hold = false;
 
                 if !committed {
                     match inspected.retry_kind {
@@ -1185,19 +1186,18 @@ pub(super) fn attempt_runtime_websocket_request(
                     }
                     precommit_hold_count = precommit_hold_count.saturating_add(1);
                     buffered_precommit_text_frames.push(RuntimeBufferedWebsocketTextFrame {
-                        text,
-                        response_ids: inspected.response_ids,
+                        text: text.clone(),
+                        response_ids: inspected.response_ids.clone(),
                     });
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
                     if elapsed_ms >= u128::from(timeout_ms) {
-                        let _ = upstream_socket.close(None);
-                        websocket_session.reset();
                         runtime_proxy_log(
                             shared,
                             runtime_proxy_structured_log_message(
-                                "websocket_precommit_hold_timeout",
+                                "websocket_precommit_hold_promoted",
                                 [
+                                    runtime_proxy_log_field("request", request_id.to_string()),
                                     runtime_proxy_log_field("profile", profile_name),
                                     runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
                                     runtime_proxy_log_field("threshold_ms", timeout_ms.to_string()),
@@ -1212,22 +1212,10 @@ pub(super) fn attempt_runtime_websocket_request(
                                 ],
                             ),
                         );
-                        let transport_error = anyhow::anyhow!(
-                            "runtime websocket upstream remained in pre-commit hold beyond the progress deadline after {elapsed_ms} ms"
-                        );
-                        note_runtime_profile_transport_failure(
-                            shared,
-                            profile_name,
-                            RuntimeRouteKind::Websocket,
-                            "websocket_precommit_hold_timeout",
-                            &transport_error,
-                        );
-                        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                            profile_name: profile_name.to_string(),
-                            event: "precommit_hold_timeout",
-                        });
+                        promoted_precommit_hold = true;
+                    } else {
+                        continue;
                     }
-                    continue;
                 }
 
                 if !committed {
@@ -1283,21 +1271,26 @@ pub(super) fn attempt_runtime_websocket_request(
                         },
                         &mut previous_response_owner_recorded,
                     )?;
+                    if promoted_precommit_hold {
+                        continue;
+                    }
                 }
 
-                committed_response_ids.extend(inspected.response_ids.iter().cloned());
-                remember_runtime_websocket_response_ids(
-                    RuntimeWebsocketResponseBindingContext {
-                        shared,
-                        profile_name,
-                        request_previous_response_id,
-                        request_session_id,
-                        request_turn_state,
-                        response_turn_state: upstream_turn_state.as_deref(),
-                    },
-                    &inspected.response_ids,
-                    &mut previous_response_owner_recorded,
-                )?;
+                if !inspected.precommit_hold {
+                    committed_response_ids.extend(inspected.response_ids.iter().cloned());
+                    remember_runtime_websocket_response_ids(
+                        RuntimeWebsocketResponseBindingContext {
+                            shared,
+                            profile_name,
+                            request_previous_response_id,
+                            request_session_id,
+                            request_turn_state,
+                            response_turn_state: upstream_turn_state.as_deref(),
+                        },
+                        &inspected.response_ids,
+                        &mut previous_response_owner_recorded,
+                    )?;
+                }
                 if committed
                     && runtime_token_usage_event_is_loggable(inspected.event_type.as_deref())
                 {
@@ -1580,15 +1573,15 @@ pub(super) fn attempt_runtime_websocket_request(
                 return Err(transport_error);
             }
             Err(err) => {
-                websocket_session.reset();
                 if !committed && precommit_hold_count > 0 && runtime_websocket_timeout_error(&err) {
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
                     runtime_proxy_log(
                         shared,
                         runtime_proxy_structured_log_message(
-                            "websocket_precommit_hold_timeout",
+                            "websocket_precommit_hold_promoted",
                             [
+                                runtime_proxy_log_field("request", request_id.to_string()),
                                 runtime_proxy_log_field("profile", profile_name),
                                 runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
                                 runtime_proxy_log_field("threshold_ms", timeout_ms.to_string()),
@@ -1603,41 +1596,61 @@ pub(super) fn attempt_runtime_websocket_request(
                             ],
                         ),
                     );
-                    let transport_error = anyhow::anyhow!(
-                        "runtime websocket upstream remained in pre-commit hold beyond the progress deadline after {elapsed_ms} ms: {err}"
-                    );
-                    note_runtime_profile_transport_failure(
+                    runtime_set_upstream_websocket_io_timeout(
+                        &mut upstream_socket,
+                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+                    )
+                    .context("failed to restore runtime websocket idle timeout")?;
+                    remember_runtime_session_id(
+                        shared,
+                        profile_name,
+                        request_session_id,
+                        RuntimeRouteKind::Websocket,
+                    )?;
+                    remember_runtime_turn_state(
+                        shared,
+                        profile_name,
+                        upstream_turn_state.as_deref(),
+                        RuntimeRouteKind::Websocket,
+                    )?;
+                    let _ = commit_runtime_proxy_profile_selection_with_policy(
                         shared,
                         profile_name,
                         RuntimeRouteKind::Websocket,
-                        "websocket_precommit_hold_timeout",
-                        &transport_error,
+                        promote_committed_profile,
+                    )?;
+                    remember_runtime_prompt_cache_profile(
+                        shared,
+                        profile_name,
+                        request_prompt_cache_key,
+                        RuntimeRouteKind::Websocket,
                     );
-                    if reuse_existing_session {
-                        if let Some(started_at) = reuse_started_at {
-                            runtime_proxy_log(
-                                shared,
-                                runtime_proxy_structured_log_message(
-                                    "websocket_reuse_watchdog",
-                                    [
-                                        runtime_proxy_log_field("profile", profile_name),
-                                        runtime_proxy_log_field("event", "precommit_hold_timeout"),
-                                        runtime_proxy_log_field(
-                                            "elapsed_ms",
-                                            started_at.elapsed().as_millis().to_string(),
-                                        ),
-                                        runtime_proxy_log_field("committed", committed.to_string()),
-                                    ],
-                                ),
-                            );
-                        }
-                        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                            profile_name: profile_name.to_string(),
-                            event: "precommit_hold_timeout",
-                        });
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=websocket committed profile={profile_name}"
+                        ),
+                    );
+                    committed = true;
+                    for frame in &buffered_precommit_text_frames {
+                        committed_response_ids.extend(frame.response_ids.iter().cloned());
                     }
-                    return Err(transport_error);
+                    forward_runtime_proxy_buffered_websocket_text_frames(
+                        local_socket,
+                        &mut buffered_precommit_text_frames,
+                        RuntimeWebsocketResponseBindingContext {
+                            shared,
+                            profile_name,
+                            request_previous_response_id,
+                            request_session_id,
+                            request_turn_state,
+                            response_turn_state: upstream_turn_state.as_deref(),
+                        },
+                        &mut previous_response_owner_recorded,
+                    )?;
+                    continue;
                 }
+                websocket_session.reset();
                 if !committed && !first_upstream_frame_seen && runtime_websocket_timeout_error(&err)
                 {
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
