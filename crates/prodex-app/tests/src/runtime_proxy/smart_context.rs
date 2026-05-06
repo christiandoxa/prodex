@@ -2708,6 +2708,41 @@ fn smart_context_prepare_rewrites_when_savings_and_critical_signals_preserved() 
 }
 
 #[test]
+fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure() {
+    let shared = smart_context_test_shared("rewrite-affinity-pressure");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let output = std::iter::once("error: failed at src/main.rs:10:5".to_string())
+        .chain((0..600).map(|index| format!("line {index}: noisy continuation output")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let request = smart_context_test_request(serde_json::json!({
+        "previous_response_id": "resp_owned",
+        "session_id": "sess_owned",
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": output
+        }]
+    }));
+    let before_len = request.body.len();
+
+    let rewritten =
+        prepare_runtime_smart_context_http_body(43, &request, &shared, RuntimeRouteKind::Responses);
+
+    let Cow::Owned(body) = rewritten else {
+        panic!("expected critical continuation to rewrite");
+    };
+    assert!(body.len() < before_len);
+    let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert_eq!(value["previous_response_id"].as_str(), Some("resp_owned"));
+    assert_eq!(value["session_id"].as_str(), Some("sess_owned"));
+    let rewritten_output = value["input"][0]["output"].as_str().unwrap();
+    assert!(rewritten_output.contains("psc:"));
+    assert!(rewritten_output.contains("error: failed at src/main.rs:10:5"));
+}
+
+#[test]
 fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
     let shared = smart_context_test_shared("rewrite-static-prefix");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);

@@ -1290,7 +1290,7 @@ fn prepare_runtime_smart_context_body<'a>(
         },
     );
     let static_observation = runtime_smart_context_observe_static_context(shared, &value);
-    let budget = runtime_smart_context_budget(
+    let mut budget = runtime_smart_context_budget(
         shared,
         &request.body,
         route_kind,
@@ -1300,10 +1300,36 @@ fn prepare_runtime_smart_context_body<'a>(
         missing_rehydrate_refs.clone(),
         static_observation.changed,
     );
+    let affinity_pressure_rewrite =
+        runtime_smart_context_affinity_pressure_rewrite_allowed(&exactness, &budget);
+    let transform_exactness = if affinity_pressure_rewrite {
+        runtime_smart_context_affinity_pressure_rewrite_guard(&exactness)
+    } else {
+        exactness.clone()
+    };
+    if affinity_pressure_rewrite {
+        budget = runtime_smart_context_budget(
+            shared,
+            &request.body,
+            route_kind,
+            transport,
+            profile_name,
+            transform_exactness.clone(),
+            missing_rehydrate_refs.clone(),
+            static_observation.changed,
+        );
+    }
     let tier = budget.tier;
     let intent_signals = runtime_smart_context_collect_intent_signals(&value);
+    let rewrite_reason_label = if affinity_pressure_rewrite {
+        "affinity_pressure"
+    } else {
+        "-"
+    };
 
-    if exactness.decision == runtime_proxy_crate::SmartContextExactnessDecision::RequireExact {
+    if exactness.decision == runtime_proxy_crate::SmartContextExactnessDecision::RequireExact
+        && !affinity_pressure_rewrite
+    {
         if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
             runtime_smart_context_log(
                 request_id,
@@ -1361,7 +1387,7 @@ fn prepare_runtime_smart_context_body<'a>(
             runtime_smart_context_selective_rehydrate_budget_aware_ranges(
                 &mut value,
                 store,
-                &exactness,
+                &transform_exactness,
                 &intent_signals.semantic_terms,
                 &rehydrate_plan,
                 budget
@@ -1374,7 +1400,7 @@ fn prepare_runtime_smart_context_body<'a>(
             &mut value,
             state,
             request_id,
-            &exactness,
+            &transform_exactness,
             budget_allows_rewrite,
             &mut outcome.stats,
         );
@@ -1401,7 +1427,7 @@ fn prepare_runtime_smart_context_body<'a>(
                 runtime_smart_context_dedupe_input_text(
                     &mut value,
                     store,
-                    &exactness,
+                    &transform_exactness,
                     &mut outcome.stats,
                 );
             }
@@ -1424,7 +1450,7 @@ fn prepare_runtime_smart_context_body<'a>(
                 transport,
                 runtime_smart_context_tier_label(tier),
                 "artifact_store_unavailable",
-                "-",
+                rewrite_reason_label,
                 request.body.len(),
                 body.len(),
                 RuntimeSmartContextTransformStats::default(),
@@ -1440,7 +1466,7 @@ fn prepare_runtime_smart_context_body<'a>(
             transport,
             runtime_smart_context_tier_label(tier),
             "artifact_store_unavailable",
-            "-",
+            rewrite_reason_label,
             request.body.len(),
             request.body.len(),
             RuntimeSmartContextTransformStats::default(),
@@ -1452,28 +1478,28 @@ fn prepare_runtime_smart_context_body<'a>(
     runtime_smart_context_apply_static_context_persistent_section_dedupe(
         &mut value,
         shared,
-        &exactness,
+        &transform_exactness,
         &mut outcome.stats,
     );
     runtime_smart_context_apply_static_context_section_dedupe(
         &mut value,
-        &exactness,
+        &transform_exactness,
         &mut outcome.stats,
     );
     runtime_smart_context_apply_static_context_cross_field_dedupe(
         &mut value,
-        &exactness,
+        &transform_exactness,
         &mut outcome.stats,
     );
     runtime_smart_context_apply_static_context_chunk_dedupe(
         &mut value,
-        &exactness,
+        &transform_exactness,
         &mut outcome.stats,
     );
     runtime_smart_context_apply_static_context_delta(
         &mut value,
         &static_observation,
-        &exactness,
+        &transform_exactness,
         &mut outcome.stats,
     );
     let aliases_used = if outcome.stats != RuntimeSmartContextTransformStats::default() {
@@ -1508,7 +1534,7 @@ fn prepare_runtime_smart_context_body<'a>(
                 transport,
                 runtime_smart_context_tier_label(tier),
                 "minified",
-                "-",
+                rewrite_reason_label,
                 request.body.len(),
                 body.len(),
                 stats,
@@ -1524,7 +1550,7 @@ fn prepare_runtime_smart_context_body<'a>(
             transport,
             runtime_smart_context_tier_label(tier),
             "pass_through",
-            "-",
+            rewrite_reason_label,
             request.body.len(),
             request.body.len(),
             stats,
@@ -1544,7 +1570,7 @@ fn prepare_runtime_smart_context_body<'a>(
     let regression_check = runtime_smart_context_regression_self_check(
         &request.body,
         &body,
-        exactness.clone(),
+        transform_exactness.clone(),
         unresolved_rehydrate_refs.clone(),
     );
     let critical_signal_check =
@@ -1555,7 +1581,7 @@ fn prepare_runtime_smart_context_body<'a>(
                 &value,
                 shared,
                 &request.body,
-                &exactness,
+                &transform_exactness,
                 &unresolved_rehydrate_refs,
                 &stats,
             )
@@ -1577,7 +1603,11 @@ fn prepare_runtime_smart_context_body<'a>(
             transport,
             runtime_smart_context_tier_label(tier),
             "rewritten",
-            "surgical_rehydrate",
+            if affinity_pressure_rewrite {
+                "affinity_pressure,surgical_rehydrate"
+            } else {
+                "surgical_rehydrate"
+            },
             request.body.len(),
             repaired_body.len(),
             repaired_stats,
@@ -1606,7 +1636,7 @@ fn prepare_runtime_smart_context_body<'a>(
                 transport,
                 runtime_smart_context_tier_label(tier),
                 "self_check_passthrough",
-                "-",
+                rewrite_reason_label,
                 request.body.len(),
                 body.len(),
                 stats,
@@ -1622,7 +1652,7 @@ fn prepare_runtime_smart_context_body<'a>(
             transport,
             runtime_smart_context_tier_label(tier),
             "self_check_passthrough",
-            "-",
+            rewrite_reason_label,
             request.body.len(),
             request.body.len(),
             stats,
@@ -1645,7 +1675,7 @@ fn prepare_runtime_smart_context_body<'a>(
         transport,
         runtime_smart_context_tier_label(tier),
         "rewritten",
-        "-",
+        rewrite_reason_label,
         request.body.len(),
         body.len(),
         stats,
@@ -1653,6 +1683,59 @@ fn prepare_runtime_smart_context_body<'a>(
         self_check,
     );
     Cow::Owned(body)
+}
+
+fn runtime_smart_context_affinity_pressure_rewrite_allowed(
+    exactness: &runtime_proxy_crate::SmartContextExactnessGuard,
+    budget: &RuntimeSmartContextBudget,
+) -> bool {
+    exactness.decision == runtime_proxy_crate::SmartContextExactnessDecision::RequireExact
+        && !exactness.reasons.is_empty()
+        && exactness
+            .reasons
+            .iter()
+            .all(runtime_smart_context_exactness_reason_is_affinity)
+        && runtime_smart_context_budget_has_critical_pressure(budget)
+        && !runtime_smart_context_budget_has_non_affinity_safety_block(budget)
+}
+
+fn runtime_smart_context_affinity_pressure_rewrite_guard(
+    exactness: &runtime_proxy_crate::SmartContextExactnessGuard,
+) -> runtime_proxy_crate::SmartContextExactnessGuard {
+    runtime_proxy_crate::SmartContextExactnessGuard {
+        decision: runtime_proxy_crate::SmartContextExactnessDecision::Allow,
+        reasons: exactness.reasons.clone(),
+    }
+}
+
+fn runtime_smart_context_exactness_reason_is_affinity(
+    reason: &runtime_proxy_crate::SmartContextExactnessReason,
+) -> bool {
+    matches!(
+        reason,
+        runtime_proxy_crate::SmartContextExactnessReason::PreviousResponseAffinity
+            | runtime_proxy_crate::SmartContextExactnessReason::TurnStateAffinity
+            | runtime_proxy_crate::SmartContextExactnessReason::SessionAffinity
+    )
+}
+
+fn runtime_smart_context_budget_has_critical_pressure(budget: &RuntimeSmartContextBudget) -> bool {
+    budget.available_tokens == 0
+        || budget.tier == runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal
+}
+
+fn runtime_smart_context_budget_has_non_affinity_safety_block(
+    budget: &RuntimeSmartContextBudget,
+) -> bool {
+    budget.policy.reasons.iter().any(|reason| {
+        matches!(
+            reason,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::StaticContextChanged
+                | runtime_proxy_crate::SmartContextBudgetPolicyReason::MissingRehydrateRefs
+                | runtime_proxy_crate::SmartContextBudgetPolicyReason::UnknownTokenWindow
+                | runtime_proxy_crate::SmartContextBudgetPolicyReason::UnsafeAccounting
+        )
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
