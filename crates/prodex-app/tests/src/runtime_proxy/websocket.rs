@@ -337,13 +337,14 @@ fn websocket_local_pressure_connect_error_does_not_mark_profile_transport_failur
 }
 
 #[test]
-fn websocket_precommit_hold_timeout_commits_instead_of_retrying() {
+fn websocket_precommit_hold_response_created_commits_before_terminal_event() {
     let _guard = acquire_test_runtime_lock();
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("upstream websocket listener should bind");
     let upstream_addr = listener
         .local_addr()
         .expect("upstream websocket listener should expose address");
+    let (allow_completed_tx, allow_completed_rx) = mpsc::channel::<()>();
     let upstream = thread::spawn(move || {
         let (stream, _) = listener
             .accept()
@@ -359,9 +360,9 @@ fn websocket_precommit_hold_timeout_commits_instead_of_retrying() {
                     .into(),
             ))
             .expect("upstream should send response.created");
-        thread::sleep(Duration::from_millis(
-            runtime_proxy_websocket_precommit_progress_timeout_ms() + 40,
-        ));
+        allow_completed_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("test should allow terminal event after response.created is forwarded");
         socket
             .send(WsMessage::Text(
                 r#"{"type":"response.completed","response":{"id":"resp-hold"}}"#
@@ -374,38 +375,46 @@ fn websocket_precommit_hold_timeout_commits_instead_of_retrying() {
     let shared = websocket_test_shared_with_main_profile("precommit-hold-promoted", upstream_addr);
 
     let (mut local_socket, mut client_socket) = websocket_test_local_pair();
-    let mut websocket_session = RuntimeWebsocketSessionState::default();
     let handshake_request = RuntimeProxyRequest {
         method: "GET".to_string(),
         path_and_query: "/backend-api/prodex/responses".to_string(),
         headers: Vec::new(),
         body: Vec::new(),
     };
+    let attempt_shared = shared.clone();
+    let attempt = thread::spawn(move || {
+        let mut websocket_session = RuntimeWebsocketSessionState::default();
+        attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+            request_id: 31,
+            local_socket: &mut local_socket,
+            handshake_request: &handshake_request,
+            request_text: r#"{"type":"response.create"}"#,
+            request_previous_response_id: None,
+            request_prompt_cache_key: None,
+            request_session_id: None,
+            request_turn_state: None,
+            shared: &attempt_shared,
+            websocket_session: &mut websocket_session,
+            profile_name: "main",
+            turn_state_override: None,
+            promote_committed_profile: true,
+        })
+    });
 
-    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
-        request_id: 31,
-        local_socket: &mut local_socket,
-        handshake_request: &handshake_request,
-        request_text: r#"{"type":"response.create"}"#,
-        request_previous_response_id: None,
-        request_prompt_cache_key: None,
-        request_session_id: None,
-        request_turn_state: None,
-        shared: &shared,
-        websocket_session: &mut websocket_session,
-        profile_name: "main",
-        turn_state_override: None,
-        promote_committed_profile: true,
-    })
-    .expect("websocket attempt should not fail after precommit hold timeout");
-
-    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
     let created = client_socket
         .read()
-        .expect("client should receive promoted response.created");
+        .expect("client should receive promoted response.created before terminal event");
+    allow_completed_tx
+        .send(())
+        .expect("test should allow upstream terminal event");
     let completed = client_socket
         .read()
         .expect("client should receive response.completed");
+    let attempt = attempt
+        .join()
+        .expect("websocket attempt thread should finish")
+        .expect("websocket attempt should not fail after response.created promotion");
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
     assert!(
         created.to_string().contains("response.created"),
         "first frame should be response.created: {created:?}"
@@ -423,8 +432,9 @@ fn websocket_precommit_hold_timeout_commits_instead_of_retrying() {
     assert!(
         log.contains("websocket_precommit_hold_promoted")
             && log.contains("request=31")
+            && log.contains("event=response_created")
             && !log.contains("websocket_precommit_hold_timeout"),
-        "hold timeout should commit and forward instead of retrying: {log}"
+        "response.created should commit and forward without timeout promotion: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);
 }
@@ -764,7 +774,7 @@ fn websocket_precommit_hold_timeout_does_not_promote_reused_session() {
             && log.contains("upstream_read_error")
             && log.contains("request=34")
             && !log.contains("request=34 transport=websocket committed profile=main")
-            && !log.contains("websocket_precommit_hold_promoted"),
+            && !log.contains("websocket_precommit_hold_promoted request=34"),
         "reused-session hold timeout must not commit/promote: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);

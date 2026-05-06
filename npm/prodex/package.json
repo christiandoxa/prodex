@@ -4,7 +4,7 @@
   "description": "OpenAI profile pooling and safe auto-rotate for Codex CLI and Claude Code",
   "license": "MIT",
   "bin": {
-    "prodex": "./prodex"
+    "prodex": "prodex"
   },
   "engines": {
     "node": ">=18"

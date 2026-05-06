@@ -221,7 +221,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
 }
 
 #[test]
-fn compact_smart_context_panic_passes_original_body_to_upstream() {
+fn compact_smart_context_prepare_fallback_passes_original_body_to_upstream() {
     let backend = RuntimeProxyBackend::start();
     let harness =
         RuntimeProxyProfileHarnessBuilder::single_openai_profile(
@@ -259,7 +259,7 @@ fn compact_smart_context_panic_passes_original_body_to_upstream() {
     let response = {
         let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
         proxy_runtime_standard_request(44, &request, shared)
-            .expect("compact request should survive smart-context panic")
+            .expect("compact request should survive smart-context prepare fallback")
     };
     assert!(!runtime_take_fault_injection(
         "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE"
@@ -271,10 +271,10 @@ fn compact_smart_context_panic_passes_original_body_to_upstream() {
     assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
     assert_eq!(backend.responses_bodies(), vec![body]);
     assert!(
-        log.contains("smart_context_panic")
+        log.contains("smart_context_prepare_fallback")
             && log.contains("route=compact")
             && log.contains("decision=pass_through"),
-        "smart-context panic should be logged as compact pass-through: {log}"
+        "smart-context prepare fallback should be logged as compact pass-through: {log}"
     );
     assert!(
         log.contains("upstream_start"),

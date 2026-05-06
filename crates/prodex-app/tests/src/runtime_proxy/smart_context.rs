@@ -96,8 +96,8 @@ fn smart_context_compact_session_body_does_not_panic() {
 }
 
 #[test]
-fn smart_context_compact_prepare_panic_falls_back_to_original_body() {
-    let shared = smart_context_test_shared("compact-panic-fallback");
+fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
+    let shared = smart_context_test_shared("compact-explicit-fallback");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
     let body = serde_json::json!({
@@ -136,10 +136,11 @@ fn smart_context_compact_prepare_panic_falls_back_to_original_body() {
     assert!(matches!(rewritten, Cow::Borrowed(_)));
     assert_eq!(rewritten.as_ref(), request.body.as_slice());
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
-    assert!(log.contains("smart_context_panic"));
+    assert!(log.contains("smart_context_prepare_fallback"));
     assert!(log.contains("route=compact"));
     assert!(log.contains("profile=main"));
-    assert!(log.contains("panic=non_string_panic"));
+    assert!(!log.contains("panic="));
+    assert!(log.contains("reason=fault_injection"));
     assert!(log.contains("decision=pass_through"));
 }
 
@@ -4407,12 +4408,10 @@ fn smart_context_static_section_body_rejects_non_char_boundary_offsets_without_p
         ordinal: 0,
     };
 
-    let result = std::panic::catch_unwind(|| {
-        runtime_smart_context_static_heading_section_body(&text, &section)
-    });
-
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), None);
+    assert_eq!(
+        runtime_smart_context_static_heading_section_body(&text, &section),
+        None
+    );
 }
 
 #[test]

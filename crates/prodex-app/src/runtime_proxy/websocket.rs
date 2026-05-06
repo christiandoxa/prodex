@@ -906,7 +906,7 @@ fn runtime_websocket_precommit_hold_promotion_allowed(
         && promote_committed_profile
 }
 
-fn runtime_websocket_precommit_hold_promotion_signal_seen(
+fn runtime_websocket_precommit_hold_promotion_event_seen(
     inspected: &RuntimeInspectedWebsocketTextFrame,
 ) -> bool {
     inspected.event_type.as_deref() == Some("response.created")
@@ -1132,7 +1132,7 @@ pub(super) fn attempt_runtime_websocket_request(
     let mut committed_response_ids = BTreeSet::new();
     let mut previous_response_owner_recorded = false;
     let mut precommit_hold_count = 0usize;
-    let mut precommit_hold_promotion_signal_seen = false;
+    let mut precommit_hold_promotion_event_seen = false;
     loop {
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
@@ -1218,18 +1218,13 @@ pub(super) fn attempt_runtime_websocket_request(
                         );
                     }
                     precommit_hold_count = precommit_hold_count.saturating_add(1);
-                    precommit_hold_promotion_signal_seen |=
-                        runtime_websocket_precommit_hold_promotion_signal_seen(&inspected);
+                    precommit_hold_promotion_event_seen |=
+                        runtime_websocket_precommit_hold_promotion_event_seen(&inspected);
                     buffered_precommit_text_frames.push(RuntimeBufferedWebsocketTextFrame {
                         text: text.clone(),
                         response_ids: inspected.response_ids.clone(),
                     });
-                    let elapsed_ms = precommit_started_at.elapsed().as_millis();
-                    let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
-                    if elapsed_ms >= u128::from(timeout_ms)
-                        && precommit_hold_promotion_allowed
-                        && precommit_hold_promotion_signal_seen
-                    {
+                    if precommit_hold_promotion_allowed && precommit_hold_promotion_event_seen {
                         runtime_proxy_log(
                             shared,
                             runtime_proxy_structured_log_message(
@@ -1237,8 +1232,7 @@ pub(super) fn attempt_runtime_websocket_request(
                                 [
                                     runtime_proxy_log_field("request", request_id.to_string()),
                                     runtime_proxy_log_field("profile", profile_name),
-                                    runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
-                                    runtime_proxy_log_field("threshold_ms", timeout_ms.to_string()),
+                                    runtime_proxy_log_field("event", "response_created"),
                                     runtime_proxy_log_field(
                                         "reuse",
                                         reuse_existing_session.to_string(),
@@ -1611,18 +1605,13 @@ pub(super) fn attempt_runtime_websocket_request(
                 return Err(transport_error);
             }
             Err(err) => {
-                if !committed
-                    && precommit_hold_count > 0
-                    && runtime_websocket_timeout_error(&err)
-                    && precommit_hold_promotion_allowed
-                    && precommit_hold_promotion_signal_seen
-                {
+                if !committed && precommit_hold_count > 0 && runtime_websocket_timeout_error(&err) {
                     let elapsed_ms = precommit_started_at.elapsed().as_millis();
                     let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
                     runtime_proxy_log(
                         shared,
                         runtime_proxy_structured_log_message(
-                            "websocket_precommit_hold_promoted",
+                            "websocket_precommit_hold_timeout",
                             [
                                 runtime_proxy_log_field("request", request_id.to_string()),
                                 runtime_proxy_log_field("profile", profile_name),
@@ -1636,62 +1625,17 @@ pub(super) fn attempt_runtime_websocket_request(
                                     "hold_count",
                                     precommit_hold_count.to_string(),
                                 ),
+                                runtime_proxy_log_field(
+                                    "promotion_allowed",
+                                    precommit_hold_promotion_allowed.to_string(),
+                                ),
+                                runtime_proxy_log_field(
+                                    "promotion_event_seen",
+                                    precommit_hold_promotion_event_seen.to_string(),
+                                ),
                             ],
                         ),
                     );
-                    runtime_set_upstream_websocket_io_timeout(
-                        &mut upstream_socket,
-                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
-                    )
-                    .context("failed to restore runtime websocket idle timeout")?;
-                    remember_runtime_session_id(
-                        shared,
-                        profile_name,
-                        request_session_id,
-                        RuntimeRouteKind::Websocket,
-                    )?;
-                    remember_runtime_turn_state(
-                        shared,
-                        profile_name,
-                        upstream_turn_state.as_deref(),
-                        RuntimeRouteKind::Websocket,
-                    )?;
-                    let _ = commit_runtime_proxy_profile_selection_with_policy(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Websocket,
-                        promote_committed_profile,
-                    )?;
-                    remember_runtime_prompt_cache_profile(
-                        shared,
-                        profile_name,
-                        request_prompt_cache_key,
-                        RuntimeRouteKind::Websocket,
-                    );
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=websocket committed profile={profile_name}"
-                        ),
-                    );
-                    committed = true;
-                    for frame in &buffered_precommit_text_frames {
-                        committed_response_ids.extend(frame.response_ids.iter().cloned());
-                    }
-                    forward_runtime_proxy_buffered_websocket_text_frames(
-                        local_socket,
-                        &mut buffered_precommit_text_frames,
-                        RuntimeWebsocketResponseBindingContext {
-                            shared,
-                            profile_name,
-                            request_previous_response_id,
-                            request_session_id,
-                            request_turn_state,
-                            response_turn_state: upstream_turn_state.as_deref(),
-                        },
-                        &mut previous_response_owner_recorded,
-                    )?;
-                    continue;
                 }
                 websocket_session.reset();
                 if !committed && !first_upstream_frame_seen && runtime_websocket_timeout_error(&err)

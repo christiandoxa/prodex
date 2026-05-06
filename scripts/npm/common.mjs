@@ -110,7 +110,7 @@ export function mainPackageManifest(version) {
       "Safe multi-account auto-rotate for Codex CLI with isolated CODEX_HOME profiles",
     license: "MIT",
     bin: {
-      prodex: "./prodex",
+      prodex: "prodex",
     },
     files: ["prodex", "lib", "README.md", "LICENSE"],
     dependencies: {
