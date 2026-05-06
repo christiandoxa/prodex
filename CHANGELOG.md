@@ -2,9 +2,15 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.83.0 - Unreleased
+## 0.84.0 - Unreleased
 
-Changes after `0.82.0`.
+Changes after `0.83.0`.
+
+### Runtime
+
+- Preserve websocket after smart context panic (`0f7e77f`)
+
+## 0.83.0 - 2026-05-06
 
 ### Runtime
 
@@ -138,11 +144,3 @@ Changes after `0.82.0`.
 - Release 0.72.0 (`dde529f`)
 - Satisfy smart context clippy gate (`b432d95`)
 - Add smart context autopilot (`7d98725`)
-
-## 0.71.0 - 2026-05-03
-
-### Misc
-
-- Release 0.71.0 (`84a71b4`)
-- Update refactor guard paths (`30d95c9`)
-- Move app code and tests out of src (`4014e29`)

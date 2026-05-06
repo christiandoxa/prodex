@@ -12,10 +12,10 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.102"
-codex_config = { package = "prodex-codex-config", path = "../prodex-codex-config", version = "0.83.0" }
+codex_config = { package = "prodex-codex-config", path = "../prodex-codex-config", version = "0.84.0" }
 dirs = "6.0.0"
-prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.83.0" }
-prodex_runtime_launch = { package = "prodex-runtime-launch", path = "../prodex-runtime-launch", version = "0.83.0" }
-prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "../prodex-shared-codex-fs", version = "0.83.0" }
-runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "../prodex-runtime-anthropic", version = "0.83.0" }
+prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.84.0" }
+prodex_runtime_launch = { package = "prodex-runtime-launch", path = "../prodex-runtime-launch", version = "0.84.0" }
+prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "../prodex-shared-codex-fs", version = "0.84.0" }
+runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "../prodex-runtime-anthropic", version = "0.84.0" }
 serde_json = "1.0.149"

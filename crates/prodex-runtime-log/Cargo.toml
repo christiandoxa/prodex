@@ -7,5 +7,5 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy", version = "0.83.0" }
+runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy", version = "0.84.0" }
 serde_json = "1.0.149"

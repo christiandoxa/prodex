@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.102"
-prodex_app_reports = { package = "prodex-app-reports", path = "../prodex-app-reports", version = "0.83.0" }
-prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.83.0" }
-prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.83.0" }
+prodex_app_reports = { package = "prodex-app-reports", path = "../prodex-app-reports", version = "0.84.0" }
+prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.84.0" }
+prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.84.0" }
 serde_json = "1.0.149"

@@ -11,5 +11,5 @@ name = "prodex_runtime_store"
 path = "src/lib.rs"
 
 [dependencies]
-prodex_runtime_state = { package = "prodex-runtime-state", path = "../prodex-runtime-state", version = "0.83.0" }
-prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.83.0" }
+prodex_runtime_state = { package = "prodex-runtime-state", path = "../prodex-runtime-state", version = "0.84.0" }
+prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.84.0" }
