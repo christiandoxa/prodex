@@ -36,6 +36,7 @@ function parseArgs(argv) {
   const args = {
     check: process.env.PRODEX_CHURN_HYGIENE_REPORT_ONLY !== "1",
     dryRun: false,
+    ignoreBefore: process.env.PRODEX_CHURN_HYGIENE_IGNORE_BEFORE || null,
     json: false,
     thresholds: { ...DEFAULT_THRESHOLDS },
   };
@@ -63,6 +64,11 @@ function parseArgs(argv) {
     }
     if (value === "--worktree") {
       args.worktree = true;
+      continue;
+    }
+    if (value === "--ignore-before") {
+      index += 1;
+      args.ignoreBefore = requiredValue(argv[index], value);
       continue;
     }
     if (value === "--check") {
@@ -135,6 +141,7 @@ function printHelp() {
       "Options:",
       "  --check                   fail when thresholds are exceeded; default unless report-only env is set",
       "  --report-only             report violations without failing",
+      "  --ignore-before <rev>     for historical ranges, enforce only changes after this reviewed baseline",
       "  --dry-run                 print selected diff command and thresholds only",
       "  --max-files <n>           default 35",
       "  --max-behavior-files <n>  default 25",
@@ -162,6 +169,20 @@ function assertSingleSelector(args) {
   }
 }
 
+function parseSimpleRange(range) {
+  if (range.includes("...")) {
+    return null;
+  }
+  const parts = range.split("..");
+  if (parts.length !== 2 || !parts[0]) {
+    return null;
+  }
+  return {
+    base: parts[0],
+    head: parts[1] || "HEAD",
+  };
+}
+
 async function defaultRangeAvailable() {
   try {
     await git(["rev-parse", "--verify", "HEAD~1"], { cwd: repoRoot });
@@ -173,12 +194,33 @@ async function defaultRangeAvailable() {
 
 async function diffPlan(args) {
   assertSingleSelector(args);
+  let originalSelector = null;
+  let effectiveSelector = null;
+  let effectiveBase = null;
+  let effectiveHead = null;
+
   if (args.range || (args.base && args.head)) {
     const range = args.range ?? `${args.base}..${args.head}`;
+    const parsed = args.range ? parseSimpleRange(args.range) : { base: args.base, head: args.head };
+    if (args.ignoreBefore) {
+      if (!parsed) {
+        throw new Error("--ignore-before requires a simple two-dot range such as --range base..head");
+      }
+      originalSelector = range;
+      effectiveBase = args.ignoreBefore;
+      effectiveHead = parsed.head;
+      effectiveSelector = `${effectiveBase}..${effectiveHead}`;
+      await validateIgnoreBefore(parsed.base, effectiveBase, effectiveHead);
+    }
     return {
-      selector: range,
-      command: ["diff", "--numstat", "--diff-filter=ACMR", range],
+      selector: effectiveSelector ?? range,
+      originalSelector,
+      ignoreBefore: args.ignoreBefore,
+      command: ["diff", "--numstat", "--diff-filter=ACMR", effectiveSelector ?? range],
     };
+  }
+  if (args.ignoreBefore) {
+    throw new Error("--ignore-before requires --range or --base/--head");
   }
   if (args.staged) {
     return {
@@ -202,6 +244,24 @@ async function diffPlan(args) {
     selector: "HEAD",
     command: ["show", "--numstat", "--format=", "--diff-filter=ACMR", "HEAD"],
   };
+}
+
+async function mergeBaseIsAncestor(ancestor, descendant) {
+  try {
+    await git(["merge-base", "--is-ancestor", ancestor, descendant], { cwd: repoRoot });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function validateIgnoreBefore(rangeBase, ignoreBefore, head) {
+  if (!(await mergeBaseIsAncestor(rangeBase, ignoreBefore))) {
+    throw new Error(`--ignore-before ${ignoreBefore} is not within the selected range after ${rangeBase}`);
+  }
+  if (!(await mergeBaseIsAncestor(ignoreBefore, head))) {
+    throw new Error(`--ignore-before ${ignoreBefore} is not an ancestor of ${head}`);
+  }
 }
 
 function summarize(rows) {
@@ -340,8 +400,13 @@ async function commitsForSelector(selector) {
     });
 }
 
-function printHuman(selector, command, summary, thresholds, issues, subjectIssues, check) {
+function printHuman(plan, summary, thresholds, issues, subjectIssues, check) {
+  const { selector, command, originalSelector, ignoreBefore } = plan;
   process.stdout.write(`churn hygiene: ${selector}\n`);
+  if (originalSelector && ignoreBefore) {
+    process.stdout.write(`  original range: ${originalSelector}\n`);
+    process.stdout.write(`  ignored baseline: ${ignoreBefore}\n`);
+  }
   process.stdout.write(`  command: git ${command.join(" ")}\n`);
   process.stdout.write(`  files changed: ${summary.files} (threshold ${thresholds.maxFiles})\n`);
   process.stdout.write(`  behavior files: ${summary.behaviorFiles} (threshold ${thresholds.maxBehaviorFiles})\n`);
@@ -377,6 +442,9 @@ async function main() {
   const plan = await diffPlan(args);
   if (args.dryRun) {
     process.stdout.write(`dry-run: churn hygiene would run git ${plan.command.join(" ")}\n`);
+    if (plan.originalSelector && plan.ignoreBefore) {
+      process.stdout.write(`dry-run: original range ${plan.originalSelector}; ignored baseline ${plan.ignoreBefore}\n`);
+    }
     process.stdout.write(`dry-run: thresholds ${JSON.stringify(args.thresholds)}\n`);
     return;
   }
@@ -394,6 +462,8 @@ async function main() {
       `${JSON.stringify(
         {
           selector: plan.selector,
+          originalSelector: plan.originalSelector,
+          ignoreBefore: plan.ignoreBefore,
           command: ["git", ...plan.command],
           thresholds: args.thresholds,
           summary,
@@ -407,7 +477,7 @@ async function main() {
       )}\n`,
     );
   } else {
-    printHuman(plan.selector, plan.command, summary, args.thresholds, issues, subjectIssues, args.check);
+    printHuman(plan, summary, args.thresholds, issues, subjectIssues, args.check);
   }
 
   if (args.check && checkIssues.length > 0) {

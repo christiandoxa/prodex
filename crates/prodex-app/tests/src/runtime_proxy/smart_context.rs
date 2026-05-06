@@ -196,6 +196,49 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
 }
 
 #[test]
+fn smart_context_panic_recovery_suppresses_only_smart_context_hook_output() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let _guard = acquire_test_runtime_lock();
+
+    struct PanicHookRestore {
+        previous: Option<RuntimeSmartContextPanicHook>,
+    }
+
+    impl Drop for PanicHookRestore {
+        fn drop(&mut self) {
+            if let Some(previous) = self.previous.take() {
+                std::panic::set_hook(previous);
+            }
+        }
+    }
+
+    let hook_calls = Arc::new(AtomicUsize::new(0));
+    let restore = PanicHookRestore {
+        previous: Some(std::panic::take_hook()),
+    };
+    let hook_calls_for_hook = Arc::clone(&hook_calls);
+    std::panic::set_hook(Box::new(move |_| {
+        hook_calls_for_hook.fetch_add(1, Ordering::SeqCst);
+    }));
+
+    let smart_context_panic = catch_runtime_smart_context_unwind_silently(|| {
+        std::panic::panic_any(RuntimeSmartContextInjectedPanic);
+    });
+    assert!(smart_context_panic.is_err());
+    assert_eq!(hook_calls.load(Ordering::SeqCst), 0);
+
+    let normal_panic = std::panic::catch_unwind(|| {
+        panic!("normal panic hook should still run");
+    });
+    assert!(normal_panic.is_err());
+    assert_eq!(hook_calls.load(Ordering::SeqCst), 1);
+
+    drop(restore);
+}
+
+#[test]
 fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     let hidden_tail = "FULL_TAIL_SHOULD_ONLY_EXIST_IN_ARTIFACT";
     let original_output = std::iter::once("running 1 test".to_string())
@@ -2869,7 +2912,7 @@ fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure(
         .chain((0..600).map(|index| format!("line {index}: noisy continuation output")))
         .collect::<Vec<_>>()
         .join("\n");
-    let request = smart_context_test_request(serde_json::json!({
+    let mut request = smart_context_test_request(serde_json::json!({
         "previous_response_id": "resp_owned",
         "session_id": "sess_owned",
         "input": [{
@@ -2878,6 +2921,10 @@ fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure(
             "output": output
         }]
     }));
+    request.headers.push((
+        "x-codex-turn-state".to_string(),
+        "turn_state_owned".to_string(),
+    ));
     let before_len = request.body.len();
 
     let rewritten =
@@ -2893,6 +2940,140 @@ fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure(
     let rewritten_output = value["input"][0]["output"].as_str().unwrap();
     assert!(rewritten_output.contains("psc:"));
     assert!(rewritten_output.contains("error: failed at src/main.rs:10:5"));
+    assert!(
+        prodex_context::critical_signal_self_check(
+            &String::from_utf8_lossy(&request.body),
+            &String::from_utf8_lossy(&body),
+        )
+        .passed()
+    );
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("decision=rewritten"));
+    assert!(log.contains("reasons=affinity_pressure"));
+    assert!(log.contains("policy_reasons=critical_budget"));
+    assert!(log.contains("self_check=ok_saved"));
+}
+
+#[test]
+fn smart_context_prepare_turn_state_only_affinity_rewrites_under_critical_pressure() {
+    let shared = smart_context_test_shared("rewrite-turn-state-affinity-pressure");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let output = std::iter::once("error: turn state owner failed at src/lib.rs:44:9".to_string())
+        .chain((0..600).map(|index| format!("line {index}: noisy turn state continuation output")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut request = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": output
+        }]
+    }));
+    request.headers.push((
+        "x-codex-turn-state".to_string(),
+        "turn_state_only_owner".to_string(),
+    ));
+
+    let rewritten =
+        prepare_runtime_smart_context_http_body(44, &request, &shared, RuntimeRouteKind::Responses);
+
+    let Cow::Owned(body) = rewritten else {
+        panic!("expected turn-state affinity continuation to rewrite");
+    };
+    assert!(body.len() < request.body.len());
+    let value = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+    assert!(value.get("previous_response_id").is_none());
+    assert!(value.get("session_id").is_none());
+    let rewritten_output = value["input"][0]["output"].as_str().unwrap();
+    assert!(rewritten_output.contains("psc:"));
+    assert!(rewritten_output.contains("error: turn state owner failed at src/lib.rs:44:9"));
+    assert!(
+        prodex_context::critical_signal_self_check(
+            &String::from_utf8_lossy(&request.body),
+            &String::from_utf8_lossy(&body),
+        )
+        .passed()
+    );
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("decision=rewritten"));
+    assert!(log.contains("reasons=affinity_pressure"));
+    assert!(log.contains("policy_reasons=critical_budget"));
+}
+
+#[test]
+fn smart_context_prepare_missing_rehydrate_ref_blocks_affinity_pressure_rewrite() {
+    let shared = smart_context_test_shared("rewrite-affinity-missing-rehydrate");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let missing_ref = "prodex-artifact:sc:feedface";
+    let request = smart_context_test_request(serde_json::json!({
+        "previous_response_id": "resp_owned",
+        "input": [{
+            "role": "user",
+            "content": format!("Continue from {missing_ref}")
+        }]
+    }));
+
+    let prepared =
+        prepare_runtime_smart_context_http_body(45, &request, &shared, RuntimeRouteKind::Responses);
+
+    let value = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
+    assert_eq!(value["previous_response_id"].as_str(), Some("resp_owned"));
+    assert!(
+        value["input"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains(missing_ref)
+    );
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("decision=require_exact"));
+    assert!(log.contains("reasons=previous_response,rehydrate"));
+    assert!(log.contains("policy_reasons=exactness_required,missing_rehydrate_refs"));
+    assert!(!log.contains("reasons=affinity_pressure"));
+}
+
+#[test]
+fn smart_context_prepare_changed_static_context_blocks_affinity_pressure_rewrite() {
+    let shared = smart_context_test_shared("rewrite-affinity-static-changed");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let first = smart_context_test_request(serde_json::json!({
+        "instructions": "Use repo rules.\nKeep account affinity.",
+        "input": [{"role": "user", "content": "first request"}]
+    }));
+    let changed = smart_context_test_request(serde_json::json!({
+        "previous_response_id": "resp_owned",
+        "instructions": "Use repo rules.\nAllow account rotation.",
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "error: static changed path src/lib.rs:9:1\n".repeat(600)
+        }]
+    }));
+
+    let _ =
+        prepare_runtime_smart_context_http_body(46, &first, &shared, RuntimeRouteKind::Responses);
+    let prepared =
+        prepare_runtime_smart_context_http_body(47, &changed, &shared, RuntimeRouteKind::Responses);
+
+    let value = serde_json::from_slice::<serde_json::Value>(prepared.as_ref()).unwrap();
+    assert_eq!(value["previous_response_id"].as_str(), Some("resp_owned"));
+    assert_eq!(
+        value["instructions"].as_str(),
+        Some("Use repo rules.\nAllow account rotation.")
+    );
+    assert!(
+        value["input"][0]["output"]
+            .as_str()
+            .unwrap()
+            .contains("error: static changed path src/lib.rs:9:1")
+    );
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("decision=require_exact"));
+    assert!(log.contains("reasons=previous_response"));
+    assert!(log.contains("policy_reasons=exactness_required,static_context_changed"));
+    assert!(!log.contains("reasons=affinity_pressure"));
 }
 
 #[test]

@@ -6,6 +6,7 @@ use constants::*;
 use repo_state::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
 const RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH: usize = 64;
@@ -234,6 +235,11 @@ struct RuntimeSmartContextProxyState {
 static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimeSmartContextProxyState>>,
 > = OnceLock::new();
+static RUNTIME_SMART_CONTEXT_PANIC_HOOK_LOCK: Mutex<()> = Mutex::new(());
+
+thread_local! {
+    static RUNTIME_SMART_CONTEXT_SUPPRESS_PANIC_HOOK: Cell<bool> = const { Cell::new(false) };
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RuntimeSmartContextPersistedTokenCalibration {
@@ -1176,7 +1182,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         return Cow::Borrowed(&request.body);
     }
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let result = catch_runtime_smart_context_unwind_silently(|| {
         if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE") {
             std::panic::panic_any(RuntimeSmartContextInjectedPanic);
         }
@@ -1188,7 +1194,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
             transport,
             profile_name,
         )
-    }));
+    });
 
     match result {
         Ok(body) => body,
@@ -1209,6 +1215,69 @@ fn prepare_runtime_smart_context_body_safely<'a>(
 
 #[derive(Debug)]
 struct RuntimeSmartContextInjectedPanic;
+
+type RuntimeSmartContextPanicHook =
+    Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+type RuntimeSmartContextSharedPanicHook =
+    std::sync::Arc<Mutex<Option<RuntimeSmartContextPanicHook>>>;
+
+struct RuntimeSmartContextPanicHookSuppression {
+    previous: RuntimeSmartContextSharedPanicHook,
+    previous_suppression: bool,
+}
+
+impl RuntimeSmartContextPanicHookSuppression {
+    fn enter() -> Self {
+        let previous_suppression = RUNTIME_SMART_CONTEXT_SUPPRESS_PANIC_HOOK.with(|suppressed| {
+            let previous = suppressed.get();
+            suppressed.set(true);
+            previous
+        });
+        let previous = std::panic::take_hook();
+        let previous = std::sync::Arc::new(Mutex::new(Some(previous)));
+        let hook_previous = std::sync::Arc::clone(&previous);
+        std::panic::set_hook(Box::new(move |info| {
+            if RUNTIME_SMART_CONTEXT_SUPPRESS_PANIC_HOOK.with(Cell::get) {
+                return;
+            }
+            if let Ok(previous) = hook_previous.lock()
+                && let Some(previous) = previous.as_ref()
+            {
+                previous(info);
+            }
+        }));
+        Self {
+            previous,
+            previous_suppression,
+        }
+    }
+}
+
+impl Drop for RuntimeSmartContextPanicHookSuppression {
+    fn drop(&mut self) {
+        let _installed_hook = std::panic::take_hook();
+        if let Ok(mut previous) = self.previous.lock()
+            && let Some(previous) = previous.take()
+        {
+            std::panic::set_hook(previous);
+        }
+        RUNTIME_SMART_CONTEXT_SUPPRESS_PANIC_HOOK
+            .with(|suppressed| suppressed.set(self.previous_suppression));
+    }
+}
+
+fn catch_runtime_smart_context_unwind_silently<F, T>(
+    f: F,
+) -> Result<T, Box<dyn std::any::Any + Send + 'static>>
+where
+    F: FnOnce() -> T,
+{
+    let Ok(_hook_lock) = RUNTIME_SMART_CONTEXT_PANIC_HOOK_LOCK.lock() else {
+        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    };
+    let _suppression = RuntimeSmartContextPanicHookSuppression::enter();
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+}
 
 fn runtime_smart_context_panic_payload_label(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {

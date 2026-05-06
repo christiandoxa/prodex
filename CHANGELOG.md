@@ -2,9 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.84.0 - Unreleased
-
-Changes after `0.83.0`.
+## 0.84.0 - 2026-05-06
 
 ### Runtime
 
@@ -132,15 +130,3 @@ Changes after `0.83.0`.
 ### Misc
 
 - Add smart context autopilot (`7b2a9d7`)
-
-## 0.72.0 - 2026-05-04
-
-### Tests
-
-- Colocate crate tests under crate directories (`1c65070`)
-
-### Misc
-
-- Release 0.72.0 (`dde529f`)
-- Satisfy smart context clippy gate (`b432d95`)
-- Add smart context autopilot (`7d98725`)

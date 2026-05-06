@@ -8,6 +8,8 @@ import {
 function parseArgs(argv) {
   const args = {
     churnCheck: process.env.PRODEX_PREFLIGHT_CHURN_REPORT_ONLY !== "1",
+    churnIgnoreBefore: process.env.PRODEX_PREFLIGHT_CHURN_IGNORE_BEFORE || null,
+    churnRange: process.env.PRODEX_PREFLIGHT_CHURN_RANGE || null,
     dryRun: false,
     jobs: defaultJobCount(),
     fastTests: true,
@@ -30,6 +32,22 @@ function parseArgs(argv) {
     }
     if (value === "--churn-report-only") {
       args.churnCheck = false;
+      continue;
+    }
+    if (value === "--churn-ignore-before") {
+      index += 1;
+      if (!argv[index]) {
+        throw new Error(`${value} requires a value`);
+      }
+      args.churnIgnoreBefore = argv[index];
+      continue;
+    }
+    if (value === "--churn-range") {
+      index += 1;
+      if (!argv[index]) {
+        throw new Error(`${value} requires a value`);
+      }
+      args.churnRange = argv[index];
       continue;
     }
     if (value === "--jobs" || value === "-j") {
@@ -61,7 +79,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--churn-check|--churn-report-only] [--dry-run]",
+      "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--churn-check|--churn-report-only] [--churn-range <range>] [--churn-ignore-before <rev>] [--dry-run]",
       "",
       "Runs the practical local preflight gate before pushing or release prep.",
       "",
@@ -80,12 +98,21 @@ function printHelp() {
       "  --churn-check        fail when churn hygiene thresholds are exceeded; default unless report-only env is set",
       "  --churn-report-only  force churn hygiene report-only mode",
       "  --no-churn-check     deprecated alias for --churn-report-only",
+      "  --churn-range <range>  pass an explicit git range to churn hygiene",
+      "  --churn-ignore-before <rev>  pass a reviewed historical baseline to churn hygiene",
       "  --dry-run         print the command plan without running it",
     ].join("\n") + "\n",
   );
 }
 
 function preflightSteps(args) {
+  const churnArgs = ["scripts/ci/churn-hygiene.mjs", ...(args.churnCheck ? ["--check"] : ["--report-only"])];
+  if (args.churnRange) {
+    churnArgs.push("--range", args.churnRange);
+  }
+  if (args.churnIgnoreBefore) {
+    churnArgs.push("--ignore-before", args.churnIgnoreBefore);
+  }
   const steps = [
     {
       label: "release-metadata-only-guard",
@@ -100,7 +127,7 @@ function preflightSteps(args) {
     {
       label: args.churnCheck ? "churn-hygiene-check" : "churn-hygiene-report",
       command: "node",
-      args: ["scripts/ci/churn-hygiene.mjs", ...(args.churnCheck ? ["--check"] : ["--report-only"])],
+      args: churnArgs,
     },
     {
       label: "release-preflight",
