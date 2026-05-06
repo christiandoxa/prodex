@@ -1176,14 +1176,77 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         return Cow::Borrowed(&request.body);
     }
 
-    prepare_runtime_smart_context_body(
-        request_id,
-        request,
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE") {
+            std::panic::panic_any(RuntimeSmartContextInjectedPanic);
+        }
+        prepare_runtime_smart_context_body(
+            request_id,
+            request,
+            shared,
+            route_kind,
+            transport,
+            profile_name,
+        )
+    }));
+
+    match result {
+        Ok(body) => body,
+        Err(panic) => {
+            runtime_smart_context_log_panic(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                profile_name,
+                request.body.len(),
+                &panic,
+            );
+            Cow::Borrowed(&request.body)
+        }
+    }
+}
+
+#[derive(Debug)]
+struct RuntimeSmartContextInjectedPanic;
+
+fn runtime_smart_context_panic_payload_label(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    if let Some(message) = payload.downcast_ref::<Box<str>>() {
+        return message.to_string();
+    }
+    "non_string_panic".to_string()
+}
+
+fn runtime_smart_context_log_panic(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
+    body_bytes: usize,
+    panic: &(dyn std::any::Any + Send),
+) {
+    runtime_proxy_log(
         shared,
-        route_kind,
-        transport,
-        profile_name,
-    )
+        runtime_proxy_structured_log_message(
+            "smart_context_panic",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", transport.label()),
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("profile", profile_name.unwrap_or("-")),
+                runtime_proxy_log_field("panic", runtime_smart_context_panic_payload_label(panic)),
+                runtime_proxy_log_field("decision", "pass_through"),
+                runtime_proxy_log_field("body_bytes", body_bytes.to_string()),
+            ],
+        ),
+    );
 }
 
 fn runtime_smart_context_log_prepare_fallback(

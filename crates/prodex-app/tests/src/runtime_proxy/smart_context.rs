@@ -145,6 +145,57 @@ fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
 }
 
 #[test]
+fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
+    let shared = smart_context_test_shared("websocket-panic-fallback");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    smart_context_observe_minimal_budget(&shared);
+    let request_text = serde_json::json!({
+        "type": "response.create",
+        "model": "gpt-5.5",
+        "session_id": "sess-websocket",
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": "call_big",
+                "output": "large websocket payload\n".repeat(128)
+            }
+        ]
+    })
+    .to_string();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let rewritten = {
+        let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE", "1");
+        prepare_runtime_smart_context_websocket_text(
+            44,
+            &request_text,
+            &handshake_request,
+            &shared,
+            "main",
+        )
+    };
+    assert!(!runtime_take_fault_injection(
+        "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE"
+    ));
+
+    assert!(matches!(rewritten, Cow::Borrowed(_)));
+    assert_eq!(rewritten.as_ref(), request_text.as_str());
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("smart_context_panic"));
+    assert!(log.contains("transport=websocket"));
+    assert!(log.contains("route=websocket"));
+    assert!(log.contains("profile=main"));
+    assert!(log.contains("panic=non_string_panic"));
+    assert!(log.contains("decision=pass_through"));
+    assert!(!log.contains("runtime_proxy_worker_panic"));
+}
+
+#[test]
 fn smart_context_large_failing_tool_output_uses_progressive_artifact_summary() {
     let hidden_tail = "FULL_TAIL_SHOULD_ONLY_EXIST_IN_ARTIFACT";
     let original_output = std::iter::once("running 1 test".to_string())
