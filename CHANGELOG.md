@@ -10,6 +10,10 @@ Changes after `0.84.0`.
 
 - Close smart context release gaps (`c978eb7`)
 
+### Docs
+
+- Record smart context release gaps (`830065b`)
+
 ## 0.84.0 - 2026-05-06
 
 ### Runtime
