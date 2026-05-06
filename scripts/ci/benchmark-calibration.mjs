@@ -3,13 +3,21 @@ import { readFileSync } from "node:fs";
 
 const jsonPrefix = "runtime_proxy_hot_path_check_json ";
 const legacyMarker = "runtime_proxy_hot_path_check ";
+const defaultMarginPercent = 25;
+const defaultMinChangePercent = 5;
+const defaultMinHeadroomPercent = 15;
+const defaultMinScalePercent = 50;
+const defaultPercentile = 90;
 
 function parseArgs(argv) {
   const args = {
     basis: "max",
     format: "table",
-    marginPercent: 25,
-    percentile: 90,
+    marginPercent: defaultMarginPercent,
+    minChangePercent: defaultMinChangePercent,
+    minHeadroomPercent: defaultMinHeadroomPercent,
+    minScalePercent: defaultMinScalePercent,
+    percentile: defaultPercentile,
     paths: [],
   };
 
@@ -30,6 +38,24 @@ function parseArgs(argv) {
     if (value === "--margin-percent") {
       index += 1;
       args.marginPercent = parsePositiveInteger("--margin-percent", argv[index]);
+      continue;
+    }
+    if (value === "--min-headroom-percent") {
+      index += 1;
+      args.minHeadroomPercent = parsePositiveInteger(
+        "--min-headroom-percent",
+        argv[index],
+      );
+      continue;
+    }
+    if (value === "--min-change-percent") {
+      index += 1;
+      args.minChangePercent = parsePositiveInteger("--min-change-percent", argv[index]);
+      continue;
+    }
+    if (value === "--min-scale-percent") {
+      index += 1;
+      args.minScalePercent = parsePositiveInteger("--min-scale-percent", argv[index]);
       continue;
     }
     if (value === "--percentile") {
@@ -305,6 +331,38 @@ function classifyAction(currentScalePercent, suggestedScalePercent) {
   return "keep";
 }
 
+function requiredScaleWithHeadroom(requiredScalePercent, options) {
+  if (requiredScalePercent === null || !Number.isFinite(requiredScalePercent)) {
+    return options.minScalePercent;
+  }
+  return Math.max(
+    options.minScalePercent,
+    requiredScalePercent + options.minHeadroomPercent,
+  );
+}
+
+function buildThresholdPolicy(options) {
+  return {
+    basis: options.basis,
+    margin_percent: options.marginPercent,
+    min_change_percent: options.minChangePercent,
+    min_headroom_percent: options.minHeadroomPercent,
+    min_scale_percent: options.minScalePercent,
+    percentile: options.percentile,
+  };
+}
+
+function applyChangeDeadband(currentScalePercent, suggestedScalePercent, options) {
+  if (currentScalePercent === null || suggestedScalePercent === null) {
+    return suggestedScalePercent;
+  }
+  const deltaPercent = suggestedScalePercent - currentScalePercent;
+  if (Math.abs(deltaPercent) < options.minChangePercent) {
+    return currentScalePercent;
+  }
+  return suggestedScalePercent;
+}
+
 function summarize(records, options) {
   const grouped = new Map();
   for (const record of records) {
@@ -346,10 +404,23 @@ function summarize(records, options) {
       const suggestedThresholdNs = roundUpReadable(
         (basisNs * (100 + options.marginPercent)) / 100,
       );
-      const suggestedScalePercent = deriveScalePercent(
-        suggestedThresholdNs,
-        baseThresholdNs,
+      const marginScalePercent = deriveScalePercent(suggestedThresholdNs, baseThresholdNs);
+      const policySuggestedScalePercent =
+        marginScalePercent === null
+          ? null
+          : Math.max(
+              marginScalePercent,
+              requiredScaleWithHeadroom(maxRequiredScalePercent, options),
+            );
+      const suggestedScalePercent = applyChangeDeadband(
+        currentScalePercent,
+        policySuggestedScalePercent,
+        options,
       );
+      const effectiveSuggestedThresholdNs =
+        suggestedScalePercent !== null && baseThresholdNs !== null
+          ? Math.floor((baseThresholdNs * suggestedScalePercent) / 100)
+          : null;
       const scaleDeltaPercent =
         currentScalePercent !== null && suggestedScalePercent !== null
           ? suggestedScalePercent - currentScalePercent
@@ -373,7 +444,7 @@ function summarize(records, options) {
         records: caseRecords.length,
         scale_delta_percent: scaleDeltaPercent,
         suggested_scale_percent: suggestedScalePercent,
-        suggested_threshold_ns: suggestedThresholdNs,
+        suggested_threshold_ns: effectiveSuggestedThresholdNs,
       };
     });
 }
@@ -392,9 +463,10 @@ function countActions(summaries) {
   return counts;
 }
 
-function buildSuggestedThresholdConfig(summaries) {
+function buildSuggestedThresholdConfig(summaries, options) {
   return {
     version: 1,
+    policy: buildThresholdPolicy(options),
     default_scale_percent: 100,
     case_scale_percent: Object.fromEntries(
       summaries
@@ -447,11 +519,12 @@ function renderTable(summaries, options, recordCount) {
       .filter((value) => value !== null),
   );
   const actionCounts = countActions(summaries);
-  const suggestedThresholdConfig = buildSuggestedThresholdConfig(summaries);
+  const suggestedThresholdConfig = buildSuggestedThresholdConfig(summaries, options);
 
   process.stdout.write(
     [
       `runtime proxy benchmark calibration records=${recordCount} basis=${options.basis} margin_percent=${options.marginPercent} percentile=${options.percentile}`,
+      `policy min_headroom_percent=${options.minHeadroomPercent} min_scale_percent=${options.minScalePercent} min_change_percent=${options.minChangePercent}`,
       Number.isFinite(suggestedGlobalScalePercent)
         ? `suggested_global_scale_percent=${suggestedGlobalScalePercent}`
         : "suggested_global_scale_percent=-",
@@ -479,12 +552,15 @@ function renderJson(summaries, options, recordCount) {
         basis: options.basis,
         cases: summaries,
         margin_percent: options.marginPercent,
+        min_change_percent: options.minChangePercent,
+        min_headroom_percent: options.minHeadroomPercent,
+        min_scale_percent: options.minScalePercent,
         percentile: options.percentile,
         records: recordCount,
         suggested_global_scale_percent: Number.isFinite(suggestedGlobalScalePercent)
           ? suggestedGlobalScalePercent
           : null,
-        suggested_threshold_config: buildSuggestedThresholdConfig(summaries),
+        suggested_threshold_config: buildSuggestedThresholdConfig(summaries, options),
       },
       null,
       2,
@@ -501,8 +577,11 @@ function usage() {
     "",
     "Options:",
     "  --basis max|percentile     Suggest from max observed median or percentile median (default: max)",
-    "  --margin-percent <n>       Safety margin over selected basis (default: 25)",
-    "  --percentile <n>           Percentile for reporting or --basis percentile (default: 90)",
+    `  --margin-percent <n>       Safety margin over selected basis (default: ${defaultMarginPercent})`,
+    `  --min-change-percent <n>   Keep current scale when suggested delta is smaller (default: ${defaultMinChangePercent})`,
+    `  --min-headroom-percent <n> Safety floor over observed required scale (default: ${defaultMinHeadroomPercent})`,
+    `  --min-scale-percent <n>    Lowest per-case scale to suggest (default: ${defaultMinScalePercent})`,
+    `  --percentile <n>           Percentile for reporting or --basis percentile (default: ${defaultPercentile})`,
     "  --json                     Emit JSON summary",
     "",
     "Example:",

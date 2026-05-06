@@ -1,5 +1,13 @@
 {
   "version": 1,
+  "policy": {
+    "basis": "max",
+    "margin_percent": 25,
+    "min_change_percent": 5,
+    "min_headroom_percent": 15,
+    "min_scale_percent": 50,
+    "percentile": 90
+  },
   "default_scale_percent": 100,
   "case_scale_percent": {
     "runtime_route_eligible_quota_fallback_scan": 145,

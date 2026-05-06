@@ -21,6 +21,17 @@ const BEHAVIOR_PATTERNS = Object.freeze([
   "package.json",
 ]);
 
+const RELEASE_METADATA_FILE_PATTERNS = Object.freeze([
+  "Cargo.toml",
+  "Cargo.lock",
+  "crates/*/Cargo.toml",
+  "npm/prodex/package.json",
+  "npm/platforms/*/package.json",
+  "README.md",
+  "QUICKSTART.md",
+  "CHANGELOG.md",
+]);
+
 function parseArgs(argv) {
   const args = {
     check: process.env.PRODEX_CHURN_HYGIENE_REPORT_ONLY !== "1",
@@ -196,6 +207,9 @@ async function diffPlan(args) {
 function summarize(rows) {
   const files = rows.length;
   const behaviorRows = rows.filter((row) => fileMatchesAnyPattern(row.filePath, BEHAVIOR_PATTERNS));
+  const releaseMetadataOnly =
+    rows.length > 0 &&
+    rows.every((row) => fileMatchesAnyPattern(row.filePath, RELEASE_METADATA_FILE_PATTERNS));
   const insertions = rows.reduce((sum, row) => sum + row.insertions, 0);
   const deletions = rows.reduce((sum, row) => sum + row.deletions, 0);
   const changedLines = insertions + deletions;
@@ -215,12 +229,13 @@ function summarize(rows) {
     changedLines,
     largestFiles,
     binaryFiles: rows.filter((row) => row.binary).map((row) => row.filePath),
+    releaseMetadataOnly,
   };
 }
 
 function thresholdIssues(summary, thresholds) {
   const issues = [];
-  if (summary.files > thresholds.maxFiles) {
+  if (summary.files > thresholds.maxFiles && !summary.releaseMetadataOnly) {
     issues.push(`files changed ${summary.files} > ${thresholds.maxFiles}`);
   }
   if (summary.behaviorFiles > thresholds.maxBehaviorFiles) {
@@ -331,6 +346,9 @@ function printHuman(selector, command, summary, thresholds, issues, subjectIssue
   process.stdout.write(`  files changed: ${summary.files} (threshold ${thresholds.maxFiles})\n`);
   process.stdout.write(`  behavior files: ${summary.behaviorFiles} (threshold ${thresholds.maxBehaviorFiles})\n`);
   process.stdout.write(`  changed lines: ${summary.changedLines} (threshold ${thresholds.maxLines})\n`);
+  if (summary.releaseMetadataOnly) {
+    process.stdout.write("  release metadata only: yes\n");
+  }
   if (summary.largestFiles.length > 0) {
     process.stdout.write("  largest files:\n");
     for (const file of summary.largestFiles) {
