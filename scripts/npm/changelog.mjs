@@ -133,7 +133,7 @@ function parseCommit(hash, subject) {
 
 function isReleaseNoise(commit) {
   const subject = commit.subject.toLowerCase();
-  if (commit.scope === "release") {
+  if (commit.scope === "release" || commit.scope === "changelog") {
     return true;
   }
   return /\b(bump version|prepare \d+\.\d+\.\d+|refresh lockfile for \d+\.\d+\.\d+)\b/.test(

@@ -16,10 +16,6 @@ Changes after `0.82.0`.
 
 - Harden smart context rewrite fallback (`80f4a87`)
 
-### Docs
-
-- Record release sync ci fix (`4b8ac11`)
-
 ### CI
 
 - Fetch full history for release sync (`3a2c6d8`)
