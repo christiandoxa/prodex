@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## Unreleased
+
+Changes after `0.84.0`.
+
+### Runtime
+
+- Close smart context release gaps (`c978eb7`)
+
 ## 0.84.0 - 2026-05-06
 
 ### Runtime
