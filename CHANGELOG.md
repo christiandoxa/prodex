@@ -2,13 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## Unreleased
+## 0.83.0 - Unreleased
 
 Changes after `0.82.0`.
 
 ### Runtime
 
+- Close residual release guard gaps (`51ba501`)
 - Close runtime and release guard gaps (`8f9f61c`)
+
+### Misc
+
+- Ignore changelog-only entries (`9b2746e`)
 
 ## 0.82.0 - 2026-05-06
 
