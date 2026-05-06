@@ -99,7 +99,7 @@ function printHelp() {
       "  --churn-report-only  force churn hygiene report-only mode",
       "  --no-churn-check     deprecated alias for --churn-report-only",
       "  --churn-range <range>  pass an explicit git range to churn hygiene",
-      "  --churn-ignore-before <rev>  pass a reviewed historical baseline to churn hygiene",
+      "  --churn-ignore-before <rev>  pass a reviewed historical baseline to churn hygiene; latest-tag is supported",
       "  --dry-run         print the command plan without running it",
     ].join("\n") + "\n",
   );

@@ -140,7 +140,7 @@ function isReleaseNoise(commit) {
     commit.scope === "changelog" &&
     ["chore", "docs"].includes(commit.type) &&
     /\b(changelog|release notes?|unreleased)\b/.test(subject) &&
-    /\b(add|generate|regenerate|refresh|update|sync|prepare|reopen)\b/.test(subject)
+    /\b(add|generate|regenerate|refresh|update|sync|prepare|reopen|record)\b/.test(subject)
   ) {
     return true;
   }

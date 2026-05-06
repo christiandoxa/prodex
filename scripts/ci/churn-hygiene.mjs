@@ -31,6 +31,8 @@ const RELEASE_METADATA_FILE_PATTERNS = Object.freeze([
   "QUICKSTART.md",
   "CHANGELOG.md",
 ]);
+const VERSION_TAG_PATTERN = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+const LATEST_TAG_BASELINE_ALIASES = new Set(["latest-tag", "latest-version-tag", "latest-release-tag"]);
 
 function parseArgs(argv) {
   const args = {
@@ -142,6 +144,7 @@ function printHelp() {
       "  --check                   fail when thresholds are exceeded; default unless report-only env is set",
       "  --report-only             report violations without failing",
       "  --ignore-before <rev>     for historical ranges, enforce only changes after this reviewed baseline",
+      "                            use latest-tag to select the newest version tag inside the range",
       "  --dry-run                 print selected diff command and thresholds only",
       "  --max-files <n>           default 35",
       "  --max-behavior-files <n>  default 25",
@@ -206,8 +209,9 @@ async function diffPlan(args) {
       if (!parsed) {
         throw new Error("--ignore-before requires a simple two-dot range such as --range base..head");
       }
+      const resolvedIgnoreBefore = await resolveIgnoreBefore(args.ignoreBefore, parsed.base, parsed.head);
       originalSelector = range;
-      effectiveBase = args.ignoreBefore;
+      effectiveBase = resolvedIgnoreBefore.value;
       effectiveHead = parsed.head;
       effectiveSelector = `${effectiveBase}..${effectiveHead}`;
       await validateIgnoreBefore(parsed.base, effectiveBase, effectiveHead);
@@ -215,7 +219,8 @@ async function diffPlan(args) {
     return {
       selector: effectiveSelector ?? range,
       originalSelector,
-      ignoreBefore: args.ignoreBefore,
+      ignoreBefore: effectiveBase,
+      ignoreBeforeInput: args.ignoreBefore,
       command: ["diff", "--numstat", "--diff-filter=ACMR", effectiveSelector ?? range],
     };
   }
@@ -253,6 +258,26 @@ async function mergeBaseIsAncestor(ancestor, descendant) {
   } catch {
     return false;
   }
+}
+
+async function resolveIgnoreBefore(ignoreBefore, rangeBase, head) {
+  if (!LATEST_TAG_BASELINE_ALIASES.has(ignoreBefore)) {
+    return { value: ignoreBefore };
+  }
+
+  const { stdout } = await git(["tag", "--merged", head, "--sort=-version:refname"], { cwd: repoRoot });
+  const versionTags = stdout
+    .split(/\r?\n/)
+    .map((tag) => tag.trim())
+    .filter((tag) => VERSION_TAG_PATTERN.test(tag));
+
+  for (const tag of versionTags) {
+    if ((await mergeBaseIsAncestor(rangeBase, tag)) && (await mergeBaseIsAncestor(tag, head))) {
+      return { value: tag };
+    }
+  }
+
+  throw new Error(`--ignore-before ${ignoreBefore} found no version tag within ${rangeBase}..${head}`);
 }
 
 async function validateIgnoreBefore(rangeBase, ignoreBefore, head) {
@@ -401,11 +426,12 @@ async function commitsForSelector(selector) {
 }
 
 function printHuman(plan, summary, thresholds, issues, subjectIssues, check) {
-  const { selector, command, originalSelector, ignoreBefore } = plan;
+  const { selector, command, originalSelector, ignoreBefore, ignoreBeforeInput } = plan;
   process.stdout.write(`churn hygiene: ${selector}\n`);
   if (originalSelector && ignoreBefore) {
     process.stdout.write(`  original range: ${originalSelector}\n`);
-    process.stdout.write(`  ignored baseline: ${ignoreBefore}\n`);
+    const suffix = ignoreBeforeInput && ignoreBeforeInput !== ignoreBefore ? ` (from ${ignoreBeforeInput})` : "";
+    process.stdout.write(`  ignored baseline: ${ignoreBefore}${suffix}\n`);
   }
   process.stdout.write(`  command: git ${command.join(" ")}\n`);
   process.stdout.write(`  files changed: ${summary.files} (threshold ${thresholds.maxFiles})\n`);
@@ -443,7 +469,13 @@ async function main() {
   if (args.dryRun) {
     process.stdout.write(`dry-run: churn hygiene would run git ${plan.command.join(" ")}\n`);
     if (plan.originalSelector && plan.ignoreBefore) {
-      process.stdout.write(`dry-run: original range ${plan.originalSelector}; ignored baseline ${plan.ignoreBefore}\n`);
+      const suffix =
+        plan.ignoreBeforeInput && plan.ignoreBeforeInput !== plan.ignoreBefore
+          ? ` (from ${plan.ignoreBeforeInput})`
+          : "";
+      process.stdout.write(
+        `dry-run: original range ${plan.originalSelector}; ignored baseline ${plan.ignoreBefore}${suffix}\n`,
+      );
     }
     process.stdout.write(`dry-run: thresholds ${JSON.stringify(args.thresholds)}\n`);
     return;
@@ -464,6 +496,7 @@ async function main() {
           selector: plan.selector,
           originalSelector: plan.originalSelector,
           ignoreBefore: plan.ignoreBefore,
+          ignoreBeforeInput: plan.ignoreBeforeInput,
           command: ["git", ...plan.command],
           thresholds: args.thresholds,
           summary,
