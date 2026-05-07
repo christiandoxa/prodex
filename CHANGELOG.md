@@ -19,6 +19,7 @@ Changes after `0.86.0`.
 
 ### CI
 
+- Enforce rust size guard (`520cedf`)
 - Refresh upstream baseline (`d1a8be2`)
 - Add rust size guard (`429b44b`)
 - Add changed path test selector (`7b451c6`)
