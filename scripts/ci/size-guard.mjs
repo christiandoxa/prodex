@@ -49,11 +49,6 @@ const DEFAULT_ALLOWLIST = Object.freeze([
     reason: "existing runtime selection file above production threshold; keep capped until split",
   },
   {
-    file: "crates/prodex-app/tests/src/runtime_proxy/smart_context.rs",
-    maxLines: 2802,
-    reason: "existing smart-context regression test monolith; keep capped until split",
-  },
-  {
     file: "crates/prodex-context/tests/src/lib.rs",
     maxLines: 3816,
     reason: "existing context regression test monolith; keep capped until split",
