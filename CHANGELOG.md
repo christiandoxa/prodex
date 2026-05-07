@@ -8,6 +8,7 @@ Changes after `0.86.0`.
 
 ### Runtime
 
+- Extract smart context types (`1bdc3bd`)
 - Extract recall selection (`5ff71d1`)
 - Extract smart context rehydration (`092b3a4`)
 - Extract artifact refs (`6b38c2e`)
