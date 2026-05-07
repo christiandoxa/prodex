@@ -68,11 +68,6 @@ const DEFAULT_ALLOWLIST = Object.freeze([
     maxLines: 3150,
     reason: "existing main-internal test support monolith; keep capped until split",
   },
-  {
-    file: "crates/prodex-runtime-proxy/tests/src/smart_context.rs",
-    maxLines: 2788,
-    reason: "existing runtime proxy smart-context test monolith; keep capped until split",
-  },
 ]);
 
 function envPositiveInteger(name, fallback) {
