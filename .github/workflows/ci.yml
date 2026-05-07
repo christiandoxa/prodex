@@ -363,8 +363,8 @@ jobs:
               log-paths|main_internal_tests::runtime_proxy_log_paths_
               worker-count|main_internal_tests::runtime_proxy_worker_count_
               endpoint-child|main_internal_tests::runtime_proxy_endpoint_child_
-              claude-launch-root|main_internal_tests::runtime_proxy_claude_launch_
-              claude-caveman-root|main_internal_tests::prepare_runtime_proxy_claude_
+              claude-launch-root|main_internal_tests::claude_launch::runtime_proxy_claude_launch_
+              claude-caveman-root|main_internal_tests::claude_launch::prepare_runtime_proxy_claude_
           - suite: selection
             label: selection and quota
             filters: |

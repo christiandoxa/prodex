@@ -84,12 +84,12 @@ export const RUNTIME_CI_BROAD_SHARD_FILTERS = [
   },
   {
     id: "root-claude-launch",
-    filter: "main_internal_tests::runtime_proxy_claude_launch_",
+    filter: "main_internal_tests::claude_launch::runtime_proxy_claude_launch_",
     label: "claude-launch-root",
   },
   {
     id: "root-claude-caveman",
-    filter: "main_internal_tests::prepare_runtime_proxy_claude_",
+    filter: "main_internal_tests::claude_launch::prepare_runtime_proxy_claude_",
     label: "claude-caveman-root",
   },
   {
