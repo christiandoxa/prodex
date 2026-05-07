@@ -11,7 +11,7 @@
   "default_scale_percent": 100,
   "case_scale_percent": {
     "runtime_route_eligible_quota_fallback_scan": 145,
-    "runtime_previous_response_candidate_selection": 165,
+    "runtime_previous_response_candidate_selection": 170,
     "runtime_mixed_pool_response_selection": 90,
     "runtime_compact_session_affinity_selection": 50,
     "runtime_websocket_stale_reuse_affinity": 50,
