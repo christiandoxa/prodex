@@ -10,6 +10,10 @@ Changes after `0.85.0`.
 
 - Recover auth and websocket precommit failures (`7fb8890`)
 
+### CI
+
+- Relax dead lineage bench threshold (`423ae81`)
+
 ## 0.85.0 - 2026-05-06
 
 ### Runtime
