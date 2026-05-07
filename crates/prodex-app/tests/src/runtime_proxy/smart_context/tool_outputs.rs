@@ -460,3 +460,488 @@ fn smart_context_similar_tool_call_arguments_use_delta_ref() {
     assert_eq!(stats.artifacts_stored, 2);
     assert_eq!(stats.tool_call_args_condensed, 2);
 }
+
+#[test]
+fn smart_context_keeps_active_tool_call_arguments_exact() {
+    let completed_arguments = serde_json::json!({
+        "cmd": "python3",
+        "script": "print('completed historical argument')\n".repeat(180),
+    });
+    let active_arguments = serde_json::json!({
+        "cmd": "python3",
+        "script": "print('active current argument must remain exact')\n".repeat(180),
+    });
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "arguments": completed_arguments
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "completed"
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_active",
+                "arguments": active_arguments
+            }
+        ]
+    });
+    let original_active = value["input"][2]["arguments"].clone();
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_historical_tool_call_arguments(
+        &mut value,
+        &mut store,
+        11,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        8 * 1024,
+        &mut stats,
+    );
+
+    assert!(value["input"][0]["arguments"].as_str().is_some());
+    assert_eq!(value["input"][2]["arguments"], original_active);
+    assert_eq!(stats.artifacts_stored, 1);
+    assert_eq!(stats.tool_call_args_condensed, 1);
+}
+
+#[test]
+fn smart_context_progressive_summary_replaces_exact_duplicate_chunks_with_refs() {
+    const CHUNK_LINES: usize = 32;
+    let chunk = (1..=CHUNK_LINES)
+        .map(|line| format!("duplicate block line {line}: exact payload"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let original_output = [chunk.as_str(), chunk.as_str(), chunk.as_str()].join("\n");
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(7, &original_output).unwrap();
+    let summary = [chunk.as_str(), chunk.as_str()].join("\n");
+
+    let deduped = runtime_smart_context_dedupe_progressive_summary_chunks(
+        &artifact.id,
+        &original_output,
+        &summary,
+        store.chunk_index(&artifact.id),
+    );
+
+    assert!(deduped.contains(SMART_CONTEXT_LABEL_DUPLICATE_CHUNKS));
+    assert!(deduped.contains(&runtime_smart_context_artifact_line_ref(
+        &artifact.id,
+        1,
+        CHUNK_LINES
+    )));
+    assert!(deduped.contains(&format!(",L{}-L{}", CHUNK_LINES + 1, CHUNK_LINES * 2)));
+    assert_eq!(deduped.match_indices(&chunk).count(), 1);
+    assert!(deduped.len() < summary.len());
+}
+
+#[test]
+fn smart_context_progressive_artifact_ref_rehydrates_full_content_on_explicit_ref() {
+    let original_output = std::iter::once("error: progressive failure".to_string())
+        .chain((0..300).map(|index| format!("artifact body line {index}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": original_output
+        }]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        512,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+    let marker = value["input"][0]["output"].as_str().unwrap().to_string();
+    let artifact = runtime_smart_context_collect_artifact_refs(&serde_json::Value::String(marker))
+        .into_iter()
+        .next()
+        .expect("condensed output should include artifact ref");
+    let mut rehydrate_value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("please inspect prodex-artifact:{}", artifact.id)
+        }]
+    });
+    let mut rehydrate_stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_rehydrate_value(&mut rehydrate_value, &store, &mut rehydrate_stats);
+
+    assert_eq!(
+        rehydrate_value["input"][0]["content"],
+        format!("please inspect {original_output}")
+    );
+    assert_eq!(rehydrate_stats.rehydrated_refs, 1);
+}
+
+#[test]
+fn smart_context_uses_command_metadata_hint_for_tool_output_compaction() {
+    let original_output = std::iter::once("src/lib.rs:42:needle once".to_string())
+        .chain((0..120).map(|index| format!("filler line {index}: no match here")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"rg needle src\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": original_output
+            }
+        ]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+
+    let output = value["input"][1]["output"].as_str().unwrap();
+    assert!(output.contains("psc art psc:"));
+    assert!(output.contains("sum: search matches=1, files=1"));
+    assert!(output.contains("src/lib.rs (1 matches):"));
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_tool_metadata_diet_keeps_command_exit_kind_without_huge_hint() {
+    let huge_metadata_path = "src/huge_metadata_should_not_leak.rs";
+    let value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": serde_json::json!({
+                    "cmd": "cargo test smart_context::metadata_hint",
+                    "exit_code": 101,
+                    "metadata": format!("{huge_metadata_path}\n{}", "noise ".repeat(4000))
+                }).to_string()
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_2",
+                "name": "exec_command",
+                "arguments": serde_json::json!({
+                    "kind": "search",
+                    "metadata": "ignored compact metadata"
+                }).to_string()
+            }
+        ]
+    });
+
+    let first = value["input"][0].as_object().unwrap();
+    let second = value["input"][1].as_object().unwrap();
+    let first_metadata = runtime_smart_context_tool_item_metadata(first);
+    let second_metadata = runtime_smart_context_tool_item_metadata(second);
+    let signals = runtime_smart_context_collect_intent_signals(&value);
+
+    assert_eq!(
+        first_metadata.command.as_deref(),
+        Some("cargo test smart_context::metadata_hint")
+    );
+    assert_eq!(first_metadata.exit_code, Some(101));
+    assert_eq!(
+        first_metadata.kind_hint,
+        Some(prodex_context::CommandOutputKind::RustDiagnostics)
+    );
+    assert_eq!(
+        second_metadata.kind_hint,
+        Some(prodex_context::CommandOutputKind::Search)
+    );
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"smart_context::metadata_hint".to_string())
+    );
+    assert!(
+        !signals
+            .intent_terms
+            .contains(&huge_metadata_path.to_string())
+    );
+    assert!(signals.command_kind_hints.contains("rust-diagnostics"));
+    assert!(signals.command_kind_hints.contains("search"));
+}
+
+#[test]
+fn smart_context_uses_success_summary_for_long_success_tool_output() {
+    let mut original_output = String::new();
+    original_output.push_str("added 82 packages, and audited 83 packages in 2s\n");
+    original_output.push_str("found 0 vulnerabilities\n");
+    original_output.push_str("vite v5.0.0 building for production...\n");
+    for index in 0..60 {
+        original_output.push_str(&format!("transforming src/module_{index}.ts\n"));
+    }
+    original_output.push_str("dist/index.html                  0.45 kB\n");
+    original_output.push_str("dist/assets/app.js             24.12 kB\n");
+    original_output.push_str("built in 1.42s\n");
+    for index in 0..60 {
+        original_output.push_str(&format!("src/generated/file_{index}.rs\n"));
+    }
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"npm install && npm run build && find src -type f\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": original_output
+            }
+        ]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+
+    let output = value["input"][1]["output"].as_str().unwrap();
+    assert!(output.contains("psc art psc:"));
+    assert!(output.contains("pcs: success cmd"));
+    assert!(output.contains("command: npm install && npm run build && find src -type f"));
+    assert!(output.contains("exit: (unknown)"));
+    assert!(output.contains("touched files ("));
+    assert!(!output.contains("transforming src/module_59.ts"));
+    assert!(
+        store
+            .artifact_ref_for_exact_text(&original_output)
+            .is_some()
+    );
+    assert_eq!(stats.artifacts_stored, 1);
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_keeps_failure_output_on_critical_preserving_path() {
+    let original_output =
+        std::iter::once("added 82 packages, and audited 83 packages in 2s".to_string())
+            .chain((0..80).map(|index| format!("transforming src/module_{index}.ts")))
+            .chain([
+                "error: build script failed".to_string(),
+                "src/build.rs:42:9".to_string(),
+                "process didn't exit successfully: `cargo build` (exit status: 101)".to_string(),
+            ])
+            .collect::<Vec<_>>()
+            .join("\n");
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"npm install && cargo build\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": original_output
+            }
+        ]
+    });
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &RuntimeSmartContextIntentSignals::default(),
+        &mut stats,
+    );
+
+    let output = value["input"][1]["output"].as_str().unwrap();
+    assert!(output.contains("psc art psc:"));
+    assert!(!output.contains("successful command output"));
+    assert!(output.contains(SMART_CONTEXT_LABEL_CRITICAL_EXACT));
+    assert!(output.contains("error: build script failed"));
+    assert!(output.contains("src/build.rs:42:9"));
+    assert!(output.contains("exit status: 101"));
+    assert!(
+        store
+            .artifact_ref_for_exact_text(&original_output)
+            .is_some()
+    );
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_intent_signals_collect_request_terms_metadata_and_refs() {
+    let value = serde_json::json!({
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": "Focus src/runtime_proxy/smart_context.rs error[E0425] smart_context::intent_signal_bus MissingIntentSymbol prodex-artifact:sc:abc123"
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"cargo test smart_context::metadata_hint\"}"
+            }
+        ]
+    });
+
+    let signals = runtime_smart_context_collect_intent_signals(&value);
+
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"src/runtime_proxy/smart_context.rs".to_string())
+    );
+    assert!(signals.intent_terms.contains(&"E0425".to_string()));
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"smart_context::intent_signal_bus".to_string())
+    );
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"MissingIntentSymbol".to_string())
+    );
+    assert!(
+        signals
+            .intent_terms
+            .contains(&"smart_context::metadata_hint".to_string())
+    );
+    assert!(
+        signals
+            .semantic_terms
+            .file_paths
+            .contains("src/runtime_proxy/smart_context.rs")
+    );
+    assert!(signals.semantic_terms.error_codes.contains("E0425"));
+    assert!(
+        signals
+            .semantic_terms
+            .test_symbols
+            .contains("smart_context::intent_signal_bus")
+    );
+    assert!(signals.semantic_terms.command_kinds.contains("cargo-test"));
+    assert_eq!(signals.artifact_refs.len(), 1);
+    assert_eq!(signals.artifact_refs[0].id, "sc:abc123");
+    assert!(signals.command_kind_hints.contains("rust-diagnostics"));
+}
+
+#[test]
+fn smart_context_request_intent_terms_prioritize_tool_output_compaction() {
+    let original_output = std::iter::once("build started".to_string())
+        .chain((0..70).map(|index| format!("early filler line {index}: no signal")))
+        .chain([
+            "src/runtime_proxy/smart_context.rs:314:5: intent path hit".to_string(),
+            "error[E0425]: cannot find value `intent_missing` in this scope".to_string(),
+            "---- smart_context::intent_signal_bus stdout ----".to_string(),
+            "thread 'smart_context::intent_signal_bus' panicked at MissingIntentSymbol".to_string(),
+        ])
+        .chain((0..70).map(|index| format!("late filler line {index}: no signal")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut value = serde_json::json!({
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": "Investigate src/runtime_proxy/smart_context.rs E0425 smart_context::intent_signal_bus MissingIntentSymbol"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": original_output
+            }
+        ]
+    });
+    let intent_signals = runtime_smart_context_collect_intent_signals(&value);
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    runtime_smart_context_condense_tool_outputs(
+        &mut value,
+        &mut store,
+        7,
+        runtime_proxy_crate::SmartContextTokenBudgetTier::Minimal,
+        256,
+        &intent_signals,
+        &mut stats,
+    );
+
+    let output = value["input"][1]["output"].as_str().unwrap();
+    assert!(output.contains("int:"));
+    assert!(output.contains("src/runtime_proxy/smart_context.rs"));
+    assert!(output.contains("error[E0425]"));
+    assert!(output.contains("smart_context::intent_signal_bus"));
+    assert!(output.contains("MissingIntentSymbol"));
+    assert_eq!(stats.artifacts_stored, 1);
+    assert_eq!(stats.tool_outputs_condensed, 1);
+}
+
+#[test]
+fn smart_context_intent_signals_collect_exit_status_and_command_intent() {
+    let value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": "Run cargo test metadata_hint for smart_context.rs; previous run exited with exit code 101 and status code 500"
+        }]
+    });
+
+    let signals = runtime_smart_context_collect_intent_signals(&value);
+
+    assert!(
+        signals
+            .semantic_terms
+            .test_symbols
+            .contains("metadata_hint")
+    );
+    assert!(
+        signals
+            .semantic_terms
+            .file_paths
+            .contains("smart_context.rs")
+    );
+    assert!(signals.semantic_terms.error_codes.contains("exit_code_101"));
+    assert!(
+        signals
+            .semantic_terms
+            .error_codes
+            .contains("status_code_500")
+    );
+    assert!(signals.semantic_terms.command_kinds.contains("cargo-test"));
+}

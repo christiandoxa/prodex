@@ -50,7 +50,7 @@ const DEFAULT_ALLOWLIST = Object.freeze([
   },
   {
     file: "crates/prodex-app/tests/src/runtime_proxy/smart_context.rs",
-    maxLines: 4516,
+    maxLines: 4031,
     reason: "existing smart-context regression test monolith; keep capped until split",
   },
   {
