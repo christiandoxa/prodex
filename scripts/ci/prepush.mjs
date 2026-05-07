@@ -51,6 +51,7 @@ function printHelp() {
       "Checks:",
       "  - changelog freshness",
       "  - churn hygiene over upstream merge-base..HEAD when available",
+      "  - Rust source file size guard",
       "  - cargo fmt --check",
       "  - npm/docs version sync idempotence",
       "",
@@ -101,6 +102,11 @@ async function prepushSteps(args) {
       args: ["scripts/npm/changelog.mjs", "--check"],
     },
     await churnStep(args),
+    {
+      label: "size-guard",
+      command: "node",
+      args: ["scripts/ci/size-guard.mjs"],
+    },
     {
       label: "fmt-check",
       command: "cargo",

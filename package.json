@@ -28,6 +28,7 @@
     "ci:changed": "node scripts/ci/changed-tests.mjs",
     "ci:prepush": "node scripts/ci/prepush.mjs",
     "ci:preflight": "node scripts/ci/preflight.mjs",
+    "ci:size-guard": "node scripts/ci/size-guard.mjs",
     "ci:release-metadata-guard": "node scripts/ci/release-metadata-only-guard.mjs",
     "ci:runtime-hotpath-guard": "node scripts/ci/runtime-hotpath-guard.mjs",
     "ci:churn-hygiene": "node scripts/ci/churn-hygiene.mjs",

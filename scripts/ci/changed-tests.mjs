@@ -218,6 +218,15 @@ function isNodeScriptPath(filePath) {
   );
 }
 
+function isSizeGuardRelevantPath(filePath) {
+  return (
+    filePath.endsWith(".rs") ||
+    filePath === "package.json" ||
+    filePath === "scripts/ci/guard-common.mjs" ||
+    filePath === "scripts/ci/size-guard.mjs"
+  );
+}
+
 function crateDirForPath(filePath) {
   const parts = filePath.split("/");
   if (parts[0] === "crates" && parts.length >= 2) {
@@ -299,8 +308,16 @@ async function buildSteps(paths) {
         command: "node",
         args: [
           "-e",
-          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); for (const name of ['ci:changed','test:changed']) { if (pkg.scripts?.[name] !== 'node scripts/ci/changed-tests.mjs') throw new Error(`${name} script mismatch`); }",
+          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const expected={'ci:changed':'node scripts/ci/changed-tests.mjs','test:changed':'node scripts/ci/changed-tests.mjs','ci:size-guard':'node scripts/ci/size-guard.mjs'}; for (const [name, command] of Object.entries(expected)) { if (pkg.scripts?.[name] !== command) throw new Error(`${name} script mismatch`); }",
         ],
+      });
+    }
+
+    if (isSizeGuardRelevantPath(filePath)) {
+      addStep(steps, "size-guard", {
+        label: "size-guard",
+        command: "node",
+        args: ["scripts/ci/size-guard.mjs"],
       });
     }
 
