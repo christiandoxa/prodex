@@ -95,6 +95,20 @@ async function tagDate(tag) {
   return date || "unknown date";
 }
 
+async function headCommit() {
+  const stdout = await git(["log", "-1", "--format=%H%x09%s", "HEAD"]);
+  if (!stdout) {
+    return null;
+  }
+  const [hash, subject] = stdout.split("\t", 2);
+  return parseCommit(hash, subject);
+}
+
+async function headDate() {
+  const date = await git(["log", "-1", "--format=%cs", "HEAD"]);
+  return date || "unknown date";
+}
+
 async function commitsForRange(range) {
   const stdout = await git(["log", "--format=%H%x09%s", range]);
   if (!stdout) {
@@ -146,6 +160,34 @@ function isReleaseNoise(commit) {
   }
   return /\b(bump version|prepare \d+\.\d+\.\d+|refresh lockfile for \d+\.\d+\.\d+)\b/.test(
     subject,
+  );
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function subjectIncludesVersion(subject, version) {
+  return new RegExp(`(^|[^0-9A-Za-z.])v?${escapeRegExp(version)}($|[^0-9A-Za-z.-])`, "i").test(
+    subject,
+  );
+}
+
+function isPendingReleaseCommit(commit, version) {
+  if (!commit || !subjectIncludesVersion(commit.subject, version)) {
+    return false;
+  }
+
+  const type = commit.type ?? "";
+  const title = commit.title.toLowerCase();
+  if (type === "release") {
+    return true;
+  }
+
+  return (
+    commit.scope === "release" &&
+    type === "chore" &&
+    /\b(bump version|prepare|release)\b/.test(title)
   );
 }
 
@@ -241,6 +283,15 @@ function renderGroups(groups) {
   return lines;
 }
 
+function appendReleasedVersion(lines, version, date, groups) {
+  lines.push(`## ${version} - ${date}`, "");
+  if (hasEntries(groups)) {
+    lines.push(...renderGroups(groups));
+    return;
+  }
+  lines.push("- No grouped changes.", "");
+}
+
 async function renderChangelog({ releases }) {
   const tags = await versionTags();
   const latestTag = tags.at(-1) ?? null;
@@ -251,23 +302,33 @@ async function renderChangelog({ releases }) {
     "Generated from conventional commits. Run `npm run changelog` to refresh.",
     "",
   ];
+  let pendingReleaseRendered = false;
 
   if (latestTag) {
     const unreleasedCommits = await commitsForRange(`${latestTag}..HEAD`);
     const unreleasedGroups = groupedEntries(unreleasedCommits);
-    if (hasEntries(unreleasedGroups)) {
-      const latestVersion = tagVersion(latestTag);
-      const pendingVersion =
-        currentVersion !== latestVersion && !tags.some((tag) => tagVersion(tag) === currentVersion)
-          ? currentVersion
-          : null;
+    const latestVersion = tagVersion(latestTag);
+    const pendingVersion =
+      currentVersion !== latestVersion && !tags.some((tag) => tagVersion(tag) === currentVersion)
+        ? currentVersion
+        : null;
+    // Release commits must render the same section before and after the tag is created.
+    const pendingReleaseCommit = pendingVersion
+      ? isPendingReleaseCommit(await headCommit(), pendingVersion)
+      : false;
+
+    if (pendingVersion && pendingReleaseCommit) {
+      appendReleasedVersion(lines, pendingVersion, await headDate(), unreleasedGroups);
+      pendingReleaseRendered = true;
+    } else if (hasEntries(unreleasedGroups)) {
       lines.push(pendingVersion ? `## ${pendingVersion} - Unreleased` : "## Unreleased", "");
       lines.push(`Changes after \`${latestTag}\`.`, "");
       lines.push(...renderGroups(unreleasedGroups));
     }
   }
 
-  const selectedTags = tags.slice(Math.max(0, tags.length - releases)).reverse();
+  const selectedReleaseCount = Math.max(0, releases - (pendingReleaseRendered ? 1 : 0));
+  const selectedTags = tags.slice(Math.max(0, tags.length - selectedReleaseCount)).reverse();
   for (const tag of selectedTags) {
     const tagIndex = tags.indexOf(tag);
     const previousTag = tagIndex > 0 ? tags[tagIndex - 1] : null;
@@ -275,12 +336,7 @@ async function renderChangelog({ releases }) {
     const groups = groupedEntries(await commitsForRange(range));
     const date = await tagDate(tag);
 
-    lines.push(`## ${tagVersion(tag)} - ${date}`, "");
-    if (hasEntries(groups)) {
-      lines.push(...renderGroups(groups));
-    } else {
-      lines.push("- No grouped changes.", "");
-    }
+    appendReleasedVersion(lines, tagVersion(tag), date, groups);
   }
 
   return `${lines.join("\n").trimEnd()}\n`;
