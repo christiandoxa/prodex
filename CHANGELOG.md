@@ -19,6 +19,7 @@ Changes after `0.86.0`.
 
 ### CI
 
+- Refresh upstream baseline (`d1a8be2`)
 - Add rust size guard (`429b44b`)
 - Add changed path test selector (`7b451c6`)
 - Align prepush guard with push range (`7826a0e`)
