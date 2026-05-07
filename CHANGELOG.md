@@ -8,6 +8,8 @@ Changes after `0.86.0`.
 
 ### Runtime
 
+- Extract artifact refs (`6b38c2e`)
+- Extract smart context repo state (`7748ac1`)
 - Split schema and watch helpers (`8e0816e`)
 - Extract smart context artifact refs (`cd31871`)
 - Extract smart context modules (`552005b`)
@@ -15,11 +17,13 @@ Changes after `0.86.0`.
 
 ### CI
 
+- Add changed path test selector (`7b451c6`)
 - Align prepush guard with push range (`7826a0e`)
 - Add local prepush guard (`dce11d6`)
 
 ### Misc
 
+- Split command output compaction (`34b691d`)
 - Split signal and blob noise modules (`cece18e`)
 
 ## 0.86.0 - 2026-05-07
