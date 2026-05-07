@@ -8,6 +8,7 @@ Changes after `0.86.0`.
 
 ### Runtime
 
+- Extract smart context modules (`552005b`)
 - Split smart context internals (`7790eb4`)
 
 ## 0.86.0 - 2026-05-07
