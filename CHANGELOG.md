@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## Unreleased
+
+Changes after `0.87.0`.
+
+### Misc
+
+- Stabilize release section generation (`d5080b9`)
+
 ## 0.87.0 - 2026-05-07
 
 ### Runtime
