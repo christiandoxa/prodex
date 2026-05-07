@@ -194,7 +194,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm run changelog:check
+          npm run changelog:ci-check
           npm run npm:sync-version
           git diff --exit-code -- Cargo.toml crates npm README.md QUICKSTART.md scripts/npm
 

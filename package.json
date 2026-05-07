@@ -14,6 +14,7 @@
     "npm:publish": "node scripts/npm/publish.mjs",
     "changelog": "node scripts/npm/changelog.mjs",
     "changelog:check": "node scripts/npm/changelog.mjs --check",
+    "changelog:ci-check": "node scripts/npm/changelog.mjs --ci-check",
     "compat:capture": "node scripts/compat/capture-replay.mjs",
     "load:mock-upstream": "node tests/load/mock-upstream.mjs",
     "load:runtime-proxy": "node tests/load/runtime-proxy-load.mjs",

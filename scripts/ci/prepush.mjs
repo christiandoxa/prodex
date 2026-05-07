@@ -49,7 +49,7 @@ function printHelp() {
       "Runs cheap local checks that mirror CI's push-facing guard.",
       "",
       "Checks:",
-      "  - changelog freshness",
+      "  - release changelog freshness",
       "  - churn hygiene over upstream merge-base..HEAD when available",
       "  - Rust source file size guard",
       "  - cargo fmt --check",
@@ -97,9 +97,9 @@ async function churnStep(args) {
 async function prepushSteps(args) {
   return [
     {
-      label: "changelog-check",
+      label: "changelog-ci-check",
       command: "node",
-      args: ["scripts/npm/changelog.mjs", "--check"],
+      args: ["scripts/npm/changelog.mjs", "--ci-check"],
     },
     await churnStep(args),
     {

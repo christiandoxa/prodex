@@ -37,7 +37,7 @@ function platformRepoDir(spec) {
 }
 
 function parseArgs(argv) {
-  const args = { dryRun: false, cargoTest: true };
+  const args = { changelogMode: "strict", dryRun: false, cargoTest: true };
   for (let index = 2; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--dry-run") {
@@ -46,6 +46,10 @@ function parseArgs(argv) {
     }
     if (value === "--no-cargo-test") {
       args.cargoTest = false;
+      continue;
+    }
+    if (value === "--ci-changelog-check") {
+      args.changelogMode = "ci";
       continue;
     }
     if (value === "--help" || value === "-h") {
@@ -73,6 +77,7 @@ function printHelp() {
       "  - cargo fmt plus full cargo test all-target compile",
       "",
       "--no-cargo-test skips test binary compilation and runs cargo check instead.",
+      "--ci-changelog-check uses the push-facing changelog gate; release prep should normally use the strict default.",
     ].join("\n") + "\n",
   );
 }
@@ -302,7 +307,12 @@ async function main() {
   }
 
   await checkReleaseMetadata();
-  await runStep("changelog", "npm", ["run", "changelog:check"], args);
+  await runStep(
+    "changelog",
+    "npm",
+    ["run", args.changelogMode === "ci" ? "changelog:ci-check" : "changelog:check"],
+    args,
+  );
   await runStep("docs-lint", "npm", ["run", "docs:lint"], args);
   await runStep("upstream-compat", "node", ["scripts/compat/check-upstream-baseline.mjs"], args);
   await runStep("runtime-manifest", "npm", ["run", "ci:runtime-manifest"], args);

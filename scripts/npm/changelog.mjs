@@ -30,6 +30,10 @@ function parseArgs(argv) {
       args.mode = "check";
       continue;
     }
+    if (value === "--ci-check") {
+      args.mode = "ci-check";
+      continue;
+    }
     if (value === "--write") {
       args.mode = "write";
       continue;
@@ -66,6 +70,7 @@ function printHelp() {
       "",
       "Groups commits into runtime, CLI, Claude, docs, tests, ci, deps, and misc.",
       "Default mode writes CHANGELOG.md. --check verifies the checked-in file.",
+      "--ci-check verifies release history, but requires fresh unreleased notes only on release commits.",
     ].join("\n") + "\n",
   );
 }
@@ -173,7 +178,7 @@ function subjectIncludesVersion(subject, version) {
   );
 }
 
-function isPendingReleaseCommit(commit, version) {
+function isReleaseCommitForVersion(commit, version) {
   if (!commit || !subjectIncludesVersion(commit.subject, version)) {
     return false;
   }
@@ -314,7 +319,7 @@ async function renderChangelog({ releases }) {
         : null;
     // Release commits must render the same section before and after the tag is created.
     const pendingReleaseCommit = pendingVersion
-      ? isPendingReleaseCommit(await headCommit(), pendingVersion)
+      ? isReleaseCommitForVersion(await headCommit(), pendingVersion)
       : false;
 
     if (pendingVersion && pendingReleaseCommit) {
@@ -382,6 +387,44 @@ async function checkChangelog(expected) {
   process.stdout.write("changelog: ok\n");
 }
 
+function releaseHistory(contents) {
+  const lines = contents.trimEnd().split(/\r?\n/);
+  const start = lines.findIndex((line) => /^##\s+/.test(line) && !/\bUnreleased$/.test(line));
+  if (start < 0) {
+    return "";
+  }
+  return `${lines.slice(start).join("\n")}\n`;
+}
+
+async function ciCheckChangelog(expected) {
+  const currentVersion = await readCargoVersion();
+  const commit = await headCommit();
+  if (isReleaseCommitForVersion(commit, currentVersion)) {
+    await checkChangelog(expected);
+    return;
+  }
+
+  let actual;
+  try {
+    actual = await fs.readFile(changelogPath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error("CHANGELOG.md is missing; run npm run changelog");
+    }
+    throw error;
+  }
+
+  if (releaseHistory(actual) !== releaseHistory(expected)) {
+    const diff = firstDiffLine(releaseHistory(actual), releaseHistory(expected));
+    const detail = diff
+      ? ` first release-history mismatch at line ${diff.line}: expected ${JSON.stringify(diff.expected)}, found ${JSON.stringify(diff.actual)}`
+      : "";
+    throw new Error(`CHANGELOG.md release history is stale; run npm run changelog.${detail}`);
+  }
+
+  process.stdout.write("changelog: ci ok (unreleased notes deferred for non-release commit)\n");
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
@@ -392,6 +435,10 @@ async function main() {
   const contents = await renderChangelog(args);
   if (args.mode === "check") {
     await checkChangelog(contents);
+    return;
+  }
+  if (args.mode === "ci-check") {
+    await ciCheckChangelog(contents);
     return;
   }
   if (args.mode === "print") {

@@ -81,7 +81,7 @@ function printHelp() {
     [
       "Usage: node scripts/ci/preflight.mjs [--jobs <n>] [--no-tests] [--serial] [--churn-check|--churn-report-only] [--churn-range <range>] [--churn-ignore-before <rev>] [--dry-run]",
       "",
-      "Runs the practical local preflight gate before pushing or release prep.",
+      "Runs the practical local preflight gate before pushing.",
       "",
       "Default checks:",
       "  - release metadata-only, Rust size, runtime hot-path, churn hygiene, version sync",
@@ -135,9 +135,9 @@ function preflightSteps(args) {
       args: churnArgs,
     },
     {
-      label: "release-preflight",
+      label: "metadata-preflight",
       command: "node",
-      args: ["scripts/npm/release-prepare.mjs", "--no-cargo-test"],
+      args: ["scripts/npm/release-prepare.mjs", "--no-cargo-test", "--ci-changelog-check"],
     },
     {
       label: "clippy",
