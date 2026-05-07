@@ -189,7 +189,8 @@ function isSmartContextPath(filePath) {
   return (
     filePath === "crates/prodex-app/src/runtime_proxy/smart_context.rs" ||
     filePath.startsWith("crates/prodex-app/src/runtime_proxy/smart_context/") ||
-    filePath === "crates/prodex-app/tests/src/runtime_proxy/smart_context.rs"
+    filePath === "crates/prodex-app/tests/src/runtime_proxy/smart_context.rs" ||
+    filePath.startsWith("crates/prodex-app/tests/src/runtime_proxy/smart_context/")
   );
 }
 
