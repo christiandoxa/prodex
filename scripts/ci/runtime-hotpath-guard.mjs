@@ -59,7 +59,7 @@ const ALLOWLIST = Object.freeze([
   },
   {
     name: "smart-context-token-calibration-save-worker",
-    file: "crates/prodex-app/src/runtime_proxy/smart_context.rs",
+    file: "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs",
     id: "blocking-thread-spawn",
     pattern: /\bthread::spawn\s*\(/,
     maxHits: 1,
@@ -68,7 +68,7 @@ const ALLOWLIST = Object.freeze([
   },
   {
     name: "smart-context-token-calibration-save-io",
-    file: "crates/prodex-app/src/runtime_proxy/smart_context.rs",
+    file: "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs",
     id: "blocking-disk-io",
     pattern: /\bfs::(?:create_dir_all|read|write)\s*\(/,
     maxHits: 3,
