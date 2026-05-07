@@ -33,6 +33,7 @@ Changes after `0.86.0`.
 
 ### CI
 
+- Relax previous response hot path threshold (`26733f1`)
 - Run churn hygiene in changed tests (`16402c8`)
 - Enforce rust size guard (`520cedf`)
 - Refresh upstream baseline (`d1a8be2`)
