@@ -10,7 +10,7 @@ const DEFAULT_TEST_LINE_LIMIT = 2500;
 const DEFAULT_ALLOWLIST = Object.freeze([
   {
     file: "crates/prodex-app/src/runtime_proxy/smart_context.rs",
-    maxLines: 5382,
+    maxLines: 5200,
     reason: "existing smart context monolith; keep capped until split",
   },
   {

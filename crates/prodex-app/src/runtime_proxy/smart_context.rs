@@ -7,6 +7,7 @@ mod repo_state;
 mod rewrite_telemetry;
 mod static_context;
 mod token_calibration;
+mod types;
 
 use artifact_refs::*;
 use constants::*;
@@ -18,173 +19,10 @@ use static_context::*;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use token_calibration::*;
+use types::*;
 
 const RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH: usize = 64;
 const RUNTIME_SMART_CONTEXT_MAX_JSON_NODES: usize = 50_000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RuntimeSmartContextTransport {
-    Http,
-    Websocket,
-}
-
-impl RuntimeSmartContextTransport {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Http => "http",
-            Self::Websocket => "websocket",
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextTransformStats {
-    artifacts_stored: usize,
-    tool_outputs_condensed: usize,
-    tool_call_args_condensed: usize,
-    duplicate_texts: usize,
-    cross_turn_duplicate_texts: usize,
-    repeat_tool_output_refs: usize,
-    blob_outputs_condensed: usize,
-    rehydrated_refs: usize,
-    static_context_deltas: usize,
-    repo_state_facts: usize,
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextTransformOutcome {
-    stats: RuntimeSmartContextTransformStats,
-    deferred_rehydrate_refs: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RuntimeSmartContextRewriteSafetyObservation {
-    safe: bool,
-    saved_tokens: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RuntimeSmartContextRewriteSafetyRecord {
-    observation: RuntimeSmartContextRewriteSafetyObservation,
-    observed_at_unix_secs: u64,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RuntimeSmartContextSelectiveRehydrateTerms {
-    file_paths: BTreeSet<String>,
-    error_codes: BTreeSet<String>,
-    test_symbols: BTreeSet<String>,
-    command_kinds: BTreeSet<String>,
-    diff_hunks: Vec<RuntimeSmartContextSelectiveDiffHunkTerm>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextSelectiveDiffHunkTerm {
-    path: Option<String>,
-    old_start: Option<usize>,
-    new_start: Option<usize>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RuntimeSmartContextIntentSignals {
-    intent_terms: Vec<String>,
-    semantic_terms: RuntimeSmartContextSelectiveRehydrateTerms,
-    artifact_refs: Vec<RuntimeSmartContextArtifactReference>,
-    command_kind_hints: BTreeSet<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RuntimeSmartContextToolCallMetadata {
-    command: Option<String>,
-    exit_code: Option<i32>,
-    kind_hint: Option<prodex_context::CommandOutputKind>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RuntimeSmartContextToolOutputCompactionMetadata {
-    kind_hint: Option<prodex_context::CommandOutputKind>,
-    command: Option<String>,
-    exit_code: Option<i32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextToolArgumentCandidate {
-    artifact: runtime_proxy_crate::SmartContextArtifactRef,
-    text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextToolArgumentDelta {
-    base_artifact: runtime_proxy_crate::SmartContextArtifactRef,
-    prefix_bytes: usize,
-    suffix_bytes: usize,
-    removed_bytes: usize,
-    inserted_bytes: usize,
-    inserted_hash: String,
-    inserted_preview: String,
-    common_bytes: usize,
-    changed_bytes: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextDuplicateChunkSummaryPlan {
-    text: String,
-    content_hash: String,
-    byte_len: usize,
-    occurrence_count: usize,
-    refs: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextExactAppendixRange {
-    reference: String,
-    body: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextScoredExactAppendixRange {
-    range: RuntimeSmartContextExactAppendixRange,
-    score: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextSeenExactAppendixBody {
-    body: String,
-    refs: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextArtifactAlias {
-    id: String,
-    alias: String,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RuntimeSmartContextArtifactIndexes<'a> {
-    line_index: Option<&'a RuntimeSmartContextArtifactLineIndex>,
-    chunk_index: Option<&'a RuntimeSmartContextArtifactChunkIndex>,
-}
-
-#[derive(Debug, Default)]
-struct RuntimeSmartContextProxyState {
-    enabled: bool,
-    model_context_window_tokens: Option<u64>,
-    artifacts: RuntimeSmartContextArtifactStore,
-    artifact_path: Option<PathBuf>,
-    last_token_usage: Option<RuntimeTokenUsage>,
-    token_usage_history: Vec<RuntimeTokenUsage>,
-    token_calibration_history: Vec<RuntimeSmartContextTokenCalibrationObservation>,
-    rewrite_telemetry_history: Vec<RuntimeSmartContextRewriteTelemetryRecord>,
-    rewrite_safety_history: Vec<RuntimeSmartContextRewriteSafetyRecord>,
-    last_static_context_fingerprints: Vec<runtime_proxy_crate::SmartContextFingerprint>,
-    last_static_context_prompt_cache_hash: Option<String>,
-    last_artifact_manifest_ids: BTreeSet<String>,
-    last_artifact_manifest_emitted_at: Option<Instant>,
-    artifact_aliases: BTreeMap<String, String>,
-    next_artifact_alias_index: usize,
-    static_section_fingerprints: BTreeMap<String, RuntimeSmartContextStaticSectionFingerprint>,
-    repo_state_facts: RuntimeSmartContextRepoStateFacts,
-}
 
 static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimeSmartContextProxyState>>,
@@ -1115,26 +953,6 @@ fn runtime_smart_context_budget_has_non_affinity_safety_block(
         )
     })
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeSmartContextBudget {
-    tier: runtime_proxy_crate::SmartContextTokenBudgetTier,
-    policy: runtime_proxy_crate::SmartContextAdaptiveBudgetPolicy,
-    model_context_window_tokens: u64,
-    model_context_window_source: &'static str,
-    available_tokens: usize,
-    observed_context_tokens: Option<usize>,
-    token_usage_source: &'static str,
-}
-
-type RuntimeSmartContextBudgetInputs = (
-    Vec<RuntimeTokenUsage>,
-    Vec<RuntimeTokenUsage>,
-    Vec<runtime_proxy_crate::SmartContextTokenCalibrationSample>,
-    Option<u64>,
-    runtime_proxy_crate::SmartContextRecentRewriteSafety,
-    Vec<runtime_proxy_crate::SmartContextRewriteTelemetrySample>,
-);
 
 #[allow(clippy::too_many_arguments)]
 fn runtime_smart_context_budget(
