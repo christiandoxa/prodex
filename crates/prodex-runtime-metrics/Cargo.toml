@@ -11,4 +11,4 @@ name = "runtime_metrics"
 path = "src/lib.rs"
 
 [dependencies]
-prodex_runtime_broker = { package = "prodex-runtime-broker", path = "../prodex-runtime-broker", version = "0.85.0" }
+prodex_runtime_broker = { package = "prodex-runtime-broker", path = "../prodex-runtime-broker", version = "0.86.0" }

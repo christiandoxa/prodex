@@ -12,5 +12,5 @@ path = "src/lib.rs"
 
 [dependencies]
 base64 = "0.22.1"
-prodex-runtime-tuning = { path = "../prodex-runtime-tuning", version = "0.85.0" }
+prodex-runtime-tuning = { path = "../prodex-runtime-tuning", version = "0.86.0" }
 serde_json = "1.0.149"

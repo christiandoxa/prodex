@@ -12,5 +12,5 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.102"
-prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.85.0" }
+prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.86.0" }
 serde_json = "1.0.149"

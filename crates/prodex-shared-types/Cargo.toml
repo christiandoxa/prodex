@@ -11,7 +11,7 @@ name = "prodex_shared_types"
 path = "src/lib.rs"
 
 [dependencies]
-prodex_quota = { package = "prodex-quota", path = "../prodex-quota", version = "0.85.0" }
-prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy", version = "0.85.0" }
-prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.85.0" }
+prodex_quota = { package = "prodex-quota", path = "../prodex-quota", version = "0.86.0" }
+prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy", version = "0.86.0" }
+prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.86.0" }
 serde = { version = "1.0.228", features = ["derive"] }

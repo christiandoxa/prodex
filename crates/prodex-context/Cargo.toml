@@ -14,4 +14,4 @@ path = "src/lib.rs"
 anyhow = "1.0.102"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-terminal_ui = { package = "prodex-terminal-ui", path = "../prodex-terminal-ui", version = "0.85.0" }
+terminal_ui = { package = "prodex-terminal-ui", path = "../prodex-terminal-ui", version = "0.86.0" }
