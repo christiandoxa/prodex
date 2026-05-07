@@ -2,9 +2,15 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.85.0 - Unreleased
+## 0.86.0 - Unreleased
 
-Changes after `0.84.0`.
+Changes after `0.85.0`.
+
+### Runtime
+
+- Recover auth and websocket precommit failures (`7fb8890`)
+
+## 0.85.0 - 2026-05-06
 
 ### Runtime
 
@@ -136,9 +142,3 @@ Changes after `0.84.0`.
 ### Misc
 
 - Release 0.74.0 (`a15618d`)
-
-## 0.73.0 - 2026-05-04
-
-### Misc
-
-- Add smart context autopilot (`7b2a9d7`)
