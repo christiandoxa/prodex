@@ -2,9 +2,15 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.86.0 - Unreleased
+## Unreleased
 
-Changes after `0.85.0`.
+Changes after `0.86.0`.
+
+### Runtime
+
+- Split smart context internals (`7790eb4`)
+
+## 0.86.0 - 2026-05-07
 
 ### Runtime
 
@@ -136,13 +142,3 @@ Changes after `0.85.0`.
 - Improve smart context token efficiency (`8c82f51`)
 - Reduce super context token overhead (`a20286e`)
 - Improve super token efficiency (`b8012cd`)
-
-## 0.74.0 - 2026-05-04
-
-### CLI
-
-- Prevent login profile email mismatch (`618664f`)
-
-### Misc
-
-- Release 0.74.0 (`a15618d`)
