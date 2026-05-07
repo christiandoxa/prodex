@@ -63,11 +63,6 @@ const DEFAULT_ALLOWLIST = Object.freeze([
     maxLines: 3300,
     reason: "existing runtime selection test support monolith; keep capped until split",
   },
-  {
-    file: "crates/prodex-app/tests/support/main_internal_body.rs",
-    maxLines: 3150,
-    reason: "existing main-internal test support monolith; keep capped until split",
-  },
 ]);
 
 function envPositiveInteger(name, fallback) {
