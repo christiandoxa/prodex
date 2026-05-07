@@ -21,6 +21,7 @@ Changes after `0.86.0`.
 
 ### Tests
 
+- Extract smart context manifest cases (`77bb0ca`)
 - Extend smart context tool output split (`8751a11`)
 - Split smart context tool output cases (`8585e5f`)
 
