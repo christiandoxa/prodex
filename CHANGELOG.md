@@ -19,6 +19,10 @@ Changes after `0.86.0`.
 - Extract smart context modules (`552005b`)
 - Split smart context internals (`7790eb4`)
 
+### Tests
+
+- Split smart context tool output cases (`8585e5f`)
+
 ### CI
 
 - Run churn hygiene in changed tests (`16402c8`)
