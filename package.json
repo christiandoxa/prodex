@@ -24,6 +24,7 @@
     "test:fast": "node scripts/ci/test-fast.mjs",
     "test:runtime-smoke": "node scripts/ci/test-serial.mjs --suite runtime-smoke",
     "test:serial": "node scripts/ci/test-serial.mjs",
+    "ci:prepush": "npm run changelog:check && npm run ci:churn-hygiene:check && cargo fmt --check && npm run npm:sync-version && git diff --exit-code -- Cargo.toml npm README.md QUICKSTART.md scripts/npm",
     "ci:preflight": "node scripts/ci/preflight.mjs",
     "ci:release-metadata-guard": "node scripts/ci/release-metadata-only-guard.mjs",
     "ci:runtime-hotpath-guard": "node scripts/ci/runtime-hotpath-guard.mjs",
