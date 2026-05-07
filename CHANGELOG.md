@@ -21,6 +21,7 @@ Changes after `0.86.0`.
 
 ### Tests
 
+- Extract intent compaction cases (`67c82ba`)
 - Extract git and search output cases (`da4a966`)
 - Extract command output basics (`7f1dcd1`)
 - Extract smart context budget cases (`33c7bdc`)
