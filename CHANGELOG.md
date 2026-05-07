@@ -15,6 +15,7 @@ Changes after `0.86.0`.
 
 ### CI
 
+- Align prepush guard with push range (`7826a0e`)
 - Add local prepush guard (`dce11d6`)
 
 ### Misc
