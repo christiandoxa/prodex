@@ -8,8 +8,18 @@ Changes after `0.86.0`.
 
 ### Runtime
 
+- Split schema and watch helpers (`8e0816e`)
+- Extract smart context artifact refs (`cd31871`)
 - Extract smart context modules (`552005b`)
 - Split smart context internals (`7790eb4`)
+
+### CI
+
+- Add local prepush guard (`dce11d6`)
+
+### Misc
+
+- Split signal and blob noise modules (`cece18e`)
 
 ## 0.86.0 - 2026-05-07
 
