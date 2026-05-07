@@ -100,6 +100,9 @@ jobs:
             npm run ci:churn-hygiene:check
           fi
 
+      - name: Enforce Rust file size guard
+        run: npm run ci:size-guard
+
   supply-chain:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -10,17 +10,17 @@ const DEFAULT_TEST_LINE_LIMIT = 2500;
 const DEFAULT_ALLOWLIST = Object.freeze([
   {
     file: "crates/prodex-app/src/runtime_proxy/smart_context.rs",
-    maxLines: 6111,
+    maxLines: 5382,
     reason: "existing smart context monolith; keep capped until split",
   },
   {
     file: "crates/prodex-context/src/command_output.rs",
-    maxLines: 5014,
+    maxLines: 3811,
     reason: "existing command-output compression monolith; keep capped until split",
   },
   {
     file: "crates/prodex-runtime-mem/src/lib.rs",
-    maxLines: 4126,
+    maxLines: 3155,
     reason: "existing runtime memory-mode monolith; keep capped until split",
   },
   {

@@ -84,7 +84,7 @@ function printHelp() {
       "Runs the practical local preflight gate before pushing or release prep.",
       "",
       "Default checks:",
-      "  - release metadata-only, runtime hot-path, churn hygiene, version sync",
+      "  - release metadata-only, Rust size, runtime hot-path, churn hygiene, version sync",
       "  - docs lint, upstream baseline, runtime manifest, fmt, cargo check",
       "  - cargo clippy --locked --all-targets --all-features -- -D warnings",
       "  - npm run test:fast -- --tests-only --no-prebuild",
@@ -118,6 +118,11 @@ function preflightSteps(args) {
       label: "release-metadata-only-guard",
       command: "node",
       args: ["scripts/ci/release-metadata-only-guard.mjs"],
+    },
+    {
+      label: "size-guard",
+      command: "node",
+      args: ["scripts/ci/size-guard.mjs"],
     },
     {
       label: "runtime-hotpath-guard",
