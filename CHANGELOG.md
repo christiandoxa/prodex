@@ -8,6 +8,8 @@ Changes after `0.86.0`.
 
 ### Runtime
 
+- Extract recall selection (`5ff71d1`)
+- Extract smart context rehydration (`092b3a4`)
 - Extract artifact refs (`6b38c2e`)
 - Extract smart context repo state (`7748ac1`)
 - Split schema and watch helpers (`8e0816e`)
@@ -17,12 +19,14 @@ Changes after `0.86.0`.
 
 ### CI
 
+- Add rust size guard (`429b44b`)
 - Add changed path test selector (`7b451c6`)
 - Align prepush guard with push range (`7826a0e`)
 - Add local prepush guard (`dce11d6`)
 
 ### Misc
 
+- Split command output helpers (`1788c46`)
 - Split command output compaction (`34b691d`)
 - Split signal and blob noise modules (`cece18e`)
 
