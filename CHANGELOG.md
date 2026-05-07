@@ -21,6 +21,7 @@ Changes after `0.86.0`.
 
 ### Tests
 
+- Extract claude launch support cases (`ea468e9`)
 - Extract smart context golden corpus (`95ec42c`)
 - Extract diagnostics output cases (`97d13a4`)
 - Extract intent compaction cases (`67c82ba`)
