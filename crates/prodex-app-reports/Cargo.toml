@@ -12,11 +12,11 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono = { version = "0.4.44", features = ["clock"] }
-prodex_quota = { package = "prodex-quota", path = "../prodex-quota", version = "0.86.0" }
-prodex_runtime_state = { package = "prodex-runtime-state", path = "../prodex-runtime-state", version = "0.86.0" }
-prodex_runtime_tuning = { package = "prodex-runtime-tuning", path = "../prodex-runtime-tuning", version = "0.86.0" }
-prodex_shared_types = { package = "prodex-shared-types", path = "../prodex-shared-types", version = "0.86.0" }
-prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.86.0" }
+prodex_quota = { workspace = true }
+prodex_runtime_state = { workspace = true }
+prodex_runtime_tuning = { workspace = true }
+prodex_shared_types = { workspace = true }
+prodex_state = { workspace = true }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-terminal_ui = { package = "prodex-terminal-ui", path = "../prodex-terminal-ui", version = "0.86.0" }
+terminal_ui = { workspace = true }

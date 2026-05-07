@@ -11,4 +11,4 @@ name = "prodex_runtime_broker_log"
 path = "src/lib.rs"
 
 [dependencies]
-prodex_runtime_broker = { package = "prodex-runtime-broker", path = "../prodex-runtime-broker", version = "0.86.0" }
+prodex_runtime_broker = { workspace = true }

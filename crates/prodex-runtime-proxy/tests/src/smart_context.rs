@@ -36,6 +36,29 @@ fn structural_minify_json_body_passes_invalid_json_unchanged() {
 }
 
 #[test]
+fn model_name_helpers_extract_full_or_prefix_json_and_reject_invalid_names() {
+    let full = br#"{"model":" gpt-5.5 ","input":[]}"#;
+    let padded = format!(
+        r#"{{"model":"gpt-5.5-mini","input":"{}"}}"#,
+        "x".repeat(8 * 1024)
+    );
+
+    assert_eq!(
+        smart_context_model_name_from_body(full),
+        Some("gpt-5.5".to_string())
+    );
+    assert_eq!(
+        smart_context_model_name_from_body(padded.as_bytes()),
+        Some("gpt-5.5-mini".to_string())
+    );
+    assert_eq!(smart_context_normalized_model_name(Some(" \n ")), None);
+    assert_eq!(
+        smart_context_normalized_model_name(Some("bad\u{0007}model")),
+        None
+    );
+}
+
+#[test]
 fn exactness_guard_blocks_context_affinity_and_missing_rehydrate() {
     let guard = smart_context_exactness_guard(SmartContextExactnessInput {
         previous_response_id: Some("resp_1".to_string()),

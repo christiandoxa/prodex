@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::RuntimeTokenUsage;
 
 const SMART_CONTEXT_SHORT_ARTIFACT_REF_PREFIX: &str = "psc:";
+const SMART_CONTEXT_MODEL_SCAN_MAX_BYTES: usize = 4 * 1024;
+const SMART_CONTEXT_MODEL_NAME_MAX_BYTES: usize = 128;
 
 pub fn smart_context_structural_minify_json_body(body: &[u8]) -> Cow<'_, [u8]> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
@@ -21,6 +23,61 @@ pub fn smart_context_structural_minify_json_value_body<'a>(
         Ok(body) if body != original_body => Cow::Owned(body),
         _ => Cow::Borrowed(original_body),
     }
+}
+
+pub fn smart_context_model_name_from_body(body: &[u8]) -> Option<String> {
+    if body.is_empty() {
+        return None;
+    }
+    if body.len() <= SMART_CONTEXT_MODEL_SCAN_MAX_BYTES
+        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
+    {
+        return smart_context_model_name_from_value(&value);
+    }
+    let scan_len = body.len().min(SMART_CONTEXT_MODEL_SCAN_MAX_BYTES);
+    let scan = std::str::from_utf8(&body[..scan_len]).ok()?;
+    smart_context_model_name_from_json_prefix(scan)
+}
+
+pub fn smart_context_normalized_model_name(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty()
+        || value.len() > SMART_CONTEXT_MODEL_NAME_MAX_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn smart_context_model_name_from_value(value: &serde_json::Value) -> Option<String> {
+    smart_context_normalized_model_name(value.get("model")?.as_str())
+}
+
+fn smart_context_model_name_from_json_prefix(text: &str) -> Option<String> {
+    let (_, after_key) = text.split_once("\"model\"")?;
+    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
+    let mut chars = after_colon.strip_prefix('"')?.chars();
+    let mut model = String::new();
+    let mut escaped = false;
+    for ch in chars.by_ref() {
+        if escaped {
+            model.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            return smart_context_normalized_model_name(Some(&model));
+        } else if ch.is_control() {
+            return None;
+        } else {
+            model.push(ch);
+        }
+        if model.len() > SMART_CONTEXT_MODEL_NAME_MAX_BYTES {
+            return None;
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

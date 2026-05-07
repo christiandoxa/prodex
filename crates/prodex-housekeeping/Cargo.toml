@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono = { version = "0.4.44", features = ["clock"] }
-prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.86.0" }
-prodex_runtime_claude = { package = "prodex-runtime-claude", path = "../prodex-runtime-claude", version = "0.86.0" }
-prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.86.0" }
+prodex_core = { workspace = true }
+prodex_runtime_claude = { workspace = true }
+prodex_state = { workspace = true }
 serde_json = "1.0.149"

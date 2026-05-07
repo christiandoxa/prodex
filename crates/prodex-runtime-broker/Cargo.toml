@@ -11,6 +11,6 @@ name = "prodex_runtime_broker"
 path = "src/lib.rs"
 
 [dependencies]
-prodex_runtime_state = { package = "prodex-runtime-state", path = "../prodex-runtime-state", version = "0.86.0" }
+prodex_runtime_state = { workspace = true }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

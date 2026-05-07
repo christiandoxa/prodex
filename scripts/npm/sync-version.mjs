@@ -81,13 +81,13 @@ async function updateCargoToml(filePath, version) {
   let section = "";
   let changed = false;
 
-  const internalPackages = new Set([
-    "prodex-codex-config",
-    "prodex-redaction",
-    "prodex-runtime-metrics",
-    "prodex-secret-store",
-    "prodex-terminal-ui",
-  ]);
+  const isInternalDependencyLine = (line) =>
+    /\bpath\s*=\s*"crates\/prodex-/.test(line) ||
+    /\bpackage\s*=\s*"prodex-/.test(line);
+
+  const updateInlineVersion = (line) =>
+    line.replace(/\bversion\s*=\s*"[^"]+"/, `version = "${version}"`);
+
   for (let index = 0; index < lines.length; index += 1) {
     const trimmed = lines[index].trim();
     if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
@@ -105,10 +105,10 @@ async function updateCargoToml(filePath, version) {
     }
 
     if (
-      section === "[dependencies]" &&
-      [...internalPackages].some((packageName) => lines[index].includes(`package = "${packageName}"`))
+      (section === "[workspace.dependencies]" || section === "[dependencies]") &&
+      isInternalDependencyLine(lines[index])
     ) {
-      const updated = lines[index].replace(/version\s*=\s*"=[^"]+"/, `version = "=${version}"`);
+      const updated = updateInlineVersion(lines[index]);
       if (updated !== lines[index]) {
         lines[index] = updated;
         changed = true;

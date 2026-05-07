@@ -1,12 +1,13 @@
 use super::*;
 mod constants;
+mod panic_guard;
 mod repo_state;
 
 use constants::*;
+use panic_guard::*;
 use repo_state::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
 const RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH: usize = 64;
@@ -235,11 +236,6 @@ struct RuntimeSmartContextProxyState {
 static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimeSmartContextProxyState>>,
 > = OnceLock::new();
-static RUNTIME_SMART_CONTEXT_PANIC_HOOK_LOCK: Mutex<()> = Mutex::new(());
-
-thread_local! {
-    static RUNTIME_SMART_CONTEXT_SUPPRESS_PANIC_HOOK: Cell<bool> = const { Cell::new(false) };
-}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RuntimeSmartContextPersistedTokenCalibration {
@@ -1213,137 +1209,6 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     }
 }
 
-#[derive(Debug)]
-struct RuntimeSmartContextInjectedPanic;
-
-type RuntimeSmartContextPanicHook =
-    Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
-type RuntimeSmartContextSharedPanicHook =
-    std::sync::Arc<Mutex<Option<RuntimeSmartContextPanicHook>>>;
-
-struct RuntimeSmartContextPanicHookSuppression {
-    previous: RuntimeSmartContextSharedPanicHook,
-    previous_suppression: bool,
-}
-
-impl RuntimeSmartContextPanicHookSuppression {
-    fn enter() -> Self {
-        let previous_suppression = RUNTIME_SMART_CONTEXT_SUPPRESS_PANIC_HOOK.with(|suppressed| {
-            let previous = suppressed.get();
-            suppressed.set(true);
-            previous
-        });
-        let previous = std::panic::take_hook();
-        let previous = std::sync::Arc::new(Mutex::new(Some(previous)));
-        let hook_previous = std::sync::Arc::clone(&previous);
-        std::panic::set_hook(Box::new(move |info| {
-            if RUNTIME_SMART_CONTEXT_SUPPRESS_PANIC_HOOK.with(Cell::get) {
-                return;
-            }
-            if let Ok(previous) = hook_previous.lock()
-                && let Some(previous) = previous.as_ref()
-            {
-                previous(info);
-            }
-        }));
-        Self {
-            previous,
-            previous_suppression,
-        }
-    }
-}
-
-impl Drop for RuntimeSmartContextPanicHookSuppression {
-    fn drop(&mut self) {
-        let _installed_hook = std::panic::take_hook();
-        if let Ok(mut previous) = self.previous.lock()
-            && let Some(previous) = previous.take()
-        {
-            std::panic::set_hook(previous);
-        }
-        RUNTIME_SMART_CONTEXT_SUPPRESS_PANIC_HOOK
-            .with(|suppressed| suppressed.set(self.previous_suppression));
-    }
-}
-
-fn catch_runtime_smart_context_unwind_silently<F, T>(
-    f: F,
-) -> Result<T, Box<dyn std::any::Any + Send + 'static>>
-where
-    F: FnOnce() -> T,
-{
-    let Ok(_hook_lock) = RUNTIME_SMART_CONTEXT_PANIC_HOOK_LOCK.lock() else {
-        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    };
-    let _suppression = RuntimeSmartContextPanicHookSuppression::enter();
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
-}
-
-fn runtime_smart_context_panic_payload_label(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return (*message).to_string();
-    }
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    if let Some(message) = payload.downcast_ref::<Box<str>>() {
-        return message.to_string();
-    }
-    "non_string_panic".to_string()
-}
-
-fn runtime_smart_context_log_panic(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    route_kind: RuntimeRouteKind,
-    transport: RuntimeSmartContextTransport,
-    profile_name: Option<&str>,
-    body_bytes: usize,
-    panic: &(dyn std::any::Any + Send),
-) {
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "smart_context_panic",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("transport", transport.label()),
-                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                runtime_proxy_log_field("profile", profile_name.unwrap_or("-")),
-                runtime_proxy_log_field("panic", runtime_smart_context_panic_payload_label(panic)),
-                runtime_proxy_log_field("decision", "pass_through"),
-                runtime_proxy_log_field("body_bytes", body_bytes.to_string()),
-            ],
-        ),
-    );
-}
-
-fn runtime_smart_context_log_prepare_fallback(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    route_kind: RuntimeRouteKind,
-    transport: RuntimeSmartContextTransport,
-    profile_name: Option<&str>,
-    body_bytes: usize,
-    reason: &str,
-) {
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "smart_context_prepare_fallback",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("transport", transport.label()),
-                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                runtime_proxy_log_field("profile", profile_name.unwrap_or("-")),
-                runtime_proxy_log_field("reason", reason),
-                runtime_proxy_log_field("decision", "pass_through"),
-                runtime_proxy_log_field("body_bytes", body_bytes.to_string()),
-            ],
-        ),
-    );
-}
-
 fn prepare_runtime_smart_context_body<'a>(
     request_id: u64,
     request: &'a RuntimeProxyRequest,
@@ -2040,7 +1905,7 @@ fn runtime_smart_context_token_calibration_bucket_key_with_model(
 ) -> runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
     runtime_proxy_crate::SmartContextTokenCalibrationBucketKey {
         route: Some(runtime_route_kind_label(route_kind).to_string()),
-        model: runtime_smart_context_normalized_model_name(model_name),
+        model: runtime_proxy_crate::smart_context_normalized_model_name(model_name),
         profile: profile_name
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -2050,58 +1915,11 @@ fn runtime_smart_context_token_calibration_bucket_key_with_model(
 }
 
 pub(crate) fn runtime_smart_context_model_name_from_body(body: &[u8]) -> Option<String> {
-    if body.is_empty() {
-        return None;
-    }
-    if body.len() <= SMART_CONTEXT_MODEL_SCAN_MAX_BYTES
-        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
-    {
-        return runtime_smart_context_model_name_from_value(&value);
-    }
-    let scan_len = body.len().min(SMART_CONTEXT_MODEL_SCAN_MAX_BYTES);
-    let scan = std::str::from_utf8(&body[..scan_len]).ok()?;
-    runtime_smart_context_model_name_from_json_prefix(scan)
-}
-
-fn runtime_smart_context_model_name_from_value(value: &serde_json::Value) -> Option<String> {
-    runtime_smart_context_normalized_model_name(value.get("model")?.as_str())
-}
-
-fn runtime_smart_context_model_name_from_json_prefix(text: &str) -> Option<String> {
-    let (_, after_key) = text.split_once("\"model\"")?;
-    let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
-    let mut chars = after_colon.strip_prefix('"')?.chars();
-    let mut model = String::new();
-    let mut escaped = false;
-    for ch in chars.by_ref() {
-        if escaped {
-            model.push(ch);
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == '"' {
-            return runtime_smart_context_normalized_model_name(Some(&model));
-        } else if ch.is_control() {
-            return None;
-        } else {
-            model.push(ch);
-        }
-        if model.len() > SMART_CONTEXT_MODEL_NAME_MAX_BYTES {
-            return None;
-        }
-    }
-    None
+    runtime_proxy_crate::smart_context_model_name_from_body(body)
 }
 
 pub(crate) fn runtime_smart_context_normalized_model_name(value: Option<&str>) -> Option<String> {
-    let value = value?.trim();
-    if value.is_empty()
-        || value.len() > SMART_CONTEXT_MODEL_NAME_MAX_BYTES
-        || value.chars().any(char::is_control)
-    {
-        return None;
-    }
-    Some(value.to_string())
+    runtime_proxy_crate::smart_context_normalized_model_name(value)
 }
 
 fn runtime_smart_context_budget_inputs(

@@ -12,12 +12,12 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.102"
-codex_config = { package = "prodex-codex-config", path = "../prodex-codex-config", version = "0.86.0" }
-prodex_quota = { package = "prodex-quota", path = "../prodex-quota", version = "0.86.0" }
-prodex_shared_types = { package = "prodex-shared-types", path = "../prodex-shared-types", version = "0.86.0" }
-prodex_state = { package = "prodex-state", path = "../prodex-state", version = "0.86.0" }
-prodex_core = { package = "prodex-core", path = "../prodex-core", version = "0.86.0" }
-redaction = { package = "prodex-redaction", path = "../prodex-redaction", version = "0.86.0" }
+codex_config = { workspace = true }
+prodex_quota = { workspace = true }
+prodex_shared_types = { workspace = true }
+prodex_state = { workspace = true }
+prodex_core = { workspace = true }
+redaction = { workspace = true }
 reqwest = { version = "0.13.2", default-features = false }
-runtime_proxy = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy", version = "0.86.0" }
-terminal_ui = { package = "prodex-terminal-ui", path = "../prodex-terminal-ui", version = "0.86.0" }
+runtime_proxy = { workspace = true }
+terminal_ui = { workspace = true }
