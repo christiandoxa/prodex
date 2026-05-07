@@ -50,7 +50,7 @@ const DEFAULT_ALLOWLIST = Object.freeze([
   },
   {
     file: "crates/prodex-context/tests/src/lib.rs",
-    maxLines: 3311,
+    maxLines: 2854,
     reason: "existing context regression test monolith; keep capped until split",
   },
   {
