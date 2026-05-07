@@ -83,6 +83,18 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
             {
                 continue;
             }
+            if status == 401 {
+                note_runtime_profile_auth_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Standard,
+                    status,
+                );
+                return Ok(RuntimeStandardAttempt::AuthFailed {
+                    profile_name: profile_name.to_string(),
+                    response: build_runtime_proxy_response_from_parts(parts),
+                });
+            }
             if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
                 update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
             }
@@ -180,6 +192,19 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
                 ),
             );
             return Ok(RuntimeStandardAttempt::StaleContinuation { response });
+        }
+
+        if status == 401 {
+            note_runtime_profile_auth_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Standard,
+                status,
+            );
+            return Ok(RuntimeStandardAttempt::AuthFailed {
+                profile_name: profile_name.to_string(),
+                response,
+            });
         }
 
         if retryable_quota {
@@ -381,6 +406,19 @@ pub(super) fn attempt_runtime_standard_request(
                 ),
             );
             return Ok(RuntimeStandardAttempt::StaleContinuation { response });
+        }
+
+        if status == 401 {
+            note_runtime_profile_auth_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Compact,
+                status,
+            );
+            return Ok(RuntimeStandardAttempt::AuthFailed {
+                profile_name: profile_name.to_string(),
+                response,
+            });
         }
 
         if retryable_quota || retryable_overload {

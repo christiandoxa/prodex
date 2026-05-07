@@ -155,6 +155,113 @@ fn websocket_test_shared_with_main_profile(
     shared
 }
 
+fn websocket_unused_local_addr() -> std::net::SocketAddr {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("unused local listener should bind");
+    listener
+        .local_addr()
+        .expect("unused local listener should expose address")
+}
+
+#[test]
+fn websocket_fresh_connect_failure_returns_retryable_transport_attempt() {
+    let _guard = acquire_test_runtime_lock();
+    let _env_lock = TestEnvVarGuard::lock();
+    let _http_proxy = TestEnvVarGuard::unset("HTTP_PROXY");
+    let _http_proxy_lower = TestEnvVarGuard::unset("http_proxy");
+    let _https_proxy = TestEnvVarGuard::unset("HTTPS_PROXY");
+    let _https_proxy_lower = TestEnvVarGuard::unset("https_proxy");
+    let _all_proxy = TestEnvVarGuard::unset("ALL_PROXY");
+    let _all_proxy_lower = TestEnvVarGuard::unset("all_proxy");
+    let _proxy = TestEnvVarGuard::unset("PROXY");
+    let _proxy_lower = TestEnvVarGuard::unset("proxy");
+    let upstream_addr = websocket_unused_local_addr();
+    let shared = websocket_test_shared_with_main_profile("fresh-connect-failed", upstream_addr);
+    let (mut local_socket, _client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 37,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create","session_id":"sess-fresh"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: Some("sess-fresh"),
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("fresh precommit connect failure should be retryable");
+
+    assert!(matches!(
+        attempt,
+        RuntimeWebsocketAttempt::TransportFailed {
+            profile_name,
+            stage: "connect",
+        } if profile_name == "main"
+    ));
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
+fn websocket_hard_affinity_connect_failure_does_not_return_retryable_transport_attempt() {
+    let _guard = acquire_test_runtime_lock();
+    let _env_lock = TestEnvVarGuard::lock();
+    let _http_proxy = TestEnvVarGuard::unset("HTTP_PROXY");
+    let _http_proxy_lower = TestEnvVarGuard::unset("http_proxy");
+    let _https_proxy = TestEnvVarGuard::unset("HTTPS_PROXY");
+    let _https_proxy_lower = TestEnvVarGuard::unset("https_proxy");
+    let _all_proxy = TestEnvVarGuard::unset("ALL_PROXY");
+    let _all_proxy_lower = TestEnvVarGuard::unset("all_proxy");
+    let _proxy = TestEnvVarGuard::unset("PROXY");
+    let _proxy_lower = TestEnvVarGuard::unset("proxy");
+    let upstream_addr = websocket_unused_local_addr();
+    let shared =
+        websocket_test_shared_with_main_profile("hard-affinity-connect-failed", upstream_addr);
+    let (mut local_socket, _client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let err = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 38,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create","previous_response_id":"resp-owner"}"#,
+        request_previous_response_id: Some("resp-owner"),
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: false,
+    })
+    .expect_err("hard-affinity connect failure should not be retryable");
+
+    assert!(
+        err.to_string()
+            .contains("failed to connect runtime websocket upstream"),
+        "unexpected hard-affinity connect error: {err:?}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
 #[test]
 fn websocket_upstream_connect_uses_http_connect_proxy_from_env() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test proxy should bind");
@@ -475,7 +582,7 @@ fn websocket_precommit_hold_timeout_does_not_promote_without_response_id_signal(
         body: Vec::new(),
     };
 
-    let err = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
         request_id: 35,
         local_socket: &mut local_socket,
         handshake_request: &handshake_request,
@@ -490,13 +597,15 @@ fn websocket_precommit_hold_timeout_does_not_promote_without_response_id_signal(
         turn_state_override: None,
         promote_committed_profile: true,
     })
-    .expect_err("hold timeout without response id signal should not promote buffered frames");
+    .expect("hold timeout without response id signal should be retryable before commit");
 
-    assert!(
-        err.to_string()
-            .contains("runtime websocket upstream failed before response.completed"),
-        "unexpected no-id timeout error: {err:?}"
-    );
+    assert!(matches!(
+        attempt,
+        RuntimeWebsocketAttempt::TransportFailed {
+            profile_name,
+            stage: "read_error",
+        } if profile_name == "main"
+    ));
     upstream
         .join()
         .expect("upstream websocket thread should finish");
@@ -549,7 +658,7 @@ fn websocket_precommit_hold_timeout_does_not_promote_created_frame_without_usabl
         body: Vec::new(),
     };
 
-    let err = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
         request_id: 36,
         local_socket: &mut local_socket,
         handshake_request: &handshake_request,
@@ -564,13 +673,15 @@ fn websocket_precommit_hold_timeout_does_not_promote_created_frame_without_usabl
         turn_state_override: None,
         promote_committed_profile: true,
     })
-    .expect_err("created hold timeout without usable response id should not promote");
+    .expect("created hold timeout without usable response id should be retryable before commit");
 
-    assert!(
-        err.to_string()
-            .contains("runtime websocket upstream failed before response.completed"),
-        "unexpected created-without-id timeout error: {err:?}"
-    );
+    assert!(matches!(
+        attempt,
+        RuntimeWebsocketAttempt::TransportFailed {
+            profile_name,
+            stage: "read_error",
+        } if profile_name == "main"
+    ));
     upstream
         .join()
         .expect("upstream websocket thread should finish");

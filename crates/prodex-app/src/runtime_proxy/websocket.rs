@@ -906,6 +906,20 @@ fn runtime_websocket_precommit_hold_promotion_allowed(
         && promote_committed_profile
 }
 
+fn runtime_websocket_precommit_transport_retry_allowed(
+    reuse_existing_session: bool,
+    request_previous_response_id: Option<&str>,
+    request_turn_state: Option<&str>,
+    turn_state_override: Option<&str>,
+    promote_committed_profile: bool,
+) -> bool {
+    !reuse_existing_session
+        && request_previous_response_id.is_none()
+        && request_turn_state.is_none()
+        && turn_state_override.is_none()
+        && promote_committed_profile
+}
+
 fn runtime_websocket_precommit_hold_promotion_event_seen(
     inspected: &RuntimeInspectedWebsocketTextFrame,
 ) -> bool {
@@ -1004,6 +1018,13 @@ pub(super) fn attempt_runtime_websocket_request(
         turn_state_override,
         promote_committed_profile,
     );
+    let precommit_transport_retry_allowed = runtime_websocket_precommit_transport_retry_allowed(
+        reuse_existing_session,
+        request_previous_response_id,
+        request_turn_state,
+        turn_state_override,
+        promote_committed_profile,
+    );
     let reuse_started_at = reuse_existing_session.then(Instant::now);
     let precommit_started_at = Instant::now();
     let (mut upstream_socket, mut upstream_turn_state, mut inflight_guard) =
@@ -1052,8 +1073,8 @@ pub(super) fn attempt_runtime_websocket_request(
                 shared,
                 profile_name,
                 turn_state_override,
-            )? {
-                RuntimeWebsocketConnectResult::Connected { socket, turn_state } => (
+            ) {
+                Ok(RuntimeWebsocketConnectResult::Connected { socket, turn_state }) => (
                     socket,
                     turn_state,
                     Some(acquire_runtime_profile_inflight_guard(
@@ -1062,18 +1083,25 @@ pub(super) fn attempt_runtime_websocket_request(
                         "websocket_session",
                     )?),
                 ),
-                RuntimeWebsocketConnectResult::QuotaBlocked(payload) => {
+                Ok(RuntimeWebsocketConnectResult::QuotaBlocked(payload)) => {
                     return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
                         profile_name: profile_name.to_string(),
                         payload,
                     });
                 }
-                RuntimeWebsocketConnectResult::Overloaded(payload) => {
+                Ok(RuntimeWebsocketConnectResult::Overloaded(payload)) => {
                     return Ok(RuntimeWebsocketAttempt::Overloaded {
                         profile_name: profile_name.to_string(),
                         payload,
                     });
                 }
+                Err(_err) if precommit_transport_retry_allowed => {
+                    return Ok(RuntimeWebsocketAttempt::TransportFailed {
+                        profile_name: profile_name.to_string(),
+                        stage: "connect",
+                    });
+                }
+                Err(err) => return Err(err),
             }
         };
     runtime_set_upstream_websocket_io_timeout(
@@ -1121,6 +1149,12 @@ pub(super) fn attempt_runtime_websocket_request(
             return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
                 profile_name: profile_name.to_string(),
                 event: "upstream_send_error",
+            });
+        }
+        if precommit_transport_retry_allowed {
+            return Ok(RuntimeWebsocketAttempt::TransportFailed {
+                profile_name: profile_name.to_string(),
+                stage: "send",
             });
         }
         return Err(transport_error);
@@ -1555,6 +1589,12 @@ pub(super) fn attempt_runtime_websocket_request(
                         event: "upstream_close_before_commit",
                     });
                 }
+                if !committed && precommit_transport_retry_allowed {
+                    return Ok(RuntimeWebsocketAttempt::TransportFailed {
+                        profile_name: profile_name.to_string(),
+                        stage: "upstream_close_before_commit",
+                    });
+                }
                 return Err(transport_error);
             }
             Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
@@ -1600,6 +1640,12 @@ pub(super) fn attempt_runtime_websocket_request(
                     return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
                         profile_name: profile_name.to_string(),
                         event: "connection_closed_before_commit",
+                    });
+                }
+                if !committed && precommit_transport_retry_allowed {
+                    return Ok(RuntimeWebsocketAttempt::TransportFailed {
+                        profile_name: profile_name.to_string(),
+                        stage: "connection_closed_before_commit",
                     });
                 }
                 return Err(transport_error);
@@ -1690,6 +1736,12 @@ pub(super) fn attempt_runtime_websocket_request(
                             event: "no_first_upstream_frame_before_deadline",
                         });
                     }
+                    if precommit_transport_retry_allowed {
+                        return Ok(RuntimeWebsocketAttempt::TransportFailed {
+                            profile_name: profile_name.to_string(),
+                            stage: "first_frame_timeout",
+                        });
+                    }
                     return Err(transport_error);
                 }
                 if let Some(started_at) = reuse_started_at {
@@ -1735,6 +1787,12 @@ pub(super) fn attempt_runtime_websocket_request(
                     return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
                         profile_name: profile_name.to_string(),
                         event: "upstream_read_error",
+                    });
+                }
+                if !committed && precommit_transport_retry_allowed {
+                    return Ok(RuntimeWebsocketAttempt::TransportFailed {
+                        profile_name: profile_name.to_string(),
+                        stage: "read_error",
                     });
                 }
                 return Err(transport_error);

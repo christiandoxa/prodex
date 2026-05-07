@@ -57,33 +57,52 @@ impl<'a> UsageFetchFlow<'a> {
     }
 
     fn send_with_unauthorized_retry(&mut self) -> Result<(reqwest::StatusCode, Vec<u8>)> {
-        let initial = self.send()?;
-        if initial.0.as_u16() != 401 {
-            return Ok(initial);
+        let mut response = self.send()?;
+        if response.0.as_u16() != 401 {
+            return Ok(response);
         }
 
-        if let Some(retried) = self.retry_after_unauthorized()? {
-            return Ok(retried);
+        if self.reload_auth_after_unauthorized() {
+            response = self.send()?;
+            if response.0.as_u16() != 401 {
+                return Ok(response);
+            }
         }
 
-        Ok(initial)
+        if self.refresh_auth_after_unauthorized() {
+            response = self.send()?;
+        }
+
+        Ok(response)
     }
 
     fn send(&self) -> Result<(reqwest::StatusCode, Vec<u8>)> {
         send_usage_request(&self.client, &self.usage_url, &self.auth)
     }
 
-    fn retry_after_unauthorized(&mut self) -> Result<Option<(reqwest::StatusCode, Vec<u8>)>> {
-        let Ok(outcome) = sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
+    fn reload_auth_after_unauthorized(&mut self) -> bool {
+        let Ok(latest) = read_usage_auth(self.codex_home) else {
+            return false;
+        };
+        if !usage_auth_changed(Some(&self.auth), &latest) {
+            return false;
+        }
+
+        self.auth = latest;
+        true
+    }
+
+    fn refresh_auth_after_unauthorized(&mut self) -> bool {
+        let Ok(outcome) = refresh_usage_auth_from_disk_with_proxy_policy(
             self.codex_home,
             Some(&self.auth),
             self.upstream_no_proxy,
         ) else {
-            return Ok(None);
+            return false;
         };
 
         self.auth = outcome.auth;
-        self.send().map(Some)
+        true
     }
 
     fn ensure_success(&self, status: reqwest::StatusCode, body: &[u8]) -> Result<()> {
@@ -160,6 +179,15 @@ pub(crate) fn sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
         ));
     }
 
+    refresh_usage_auth_from_disk_with_proxy_policy(codex_home, expected_current, upstream_no_proxy)
+}
+
+fn refresh_usage_auth_from_disk_with_proxy_policy(
+    codex_home: &Path,
+    expected_current: Option<&UsageAuth>,
+    upstream_no_proxy: bool,
+) -> Result<UsageAuthSyncOutcome> {
+    let latest = read_usage_auth(codex_home)?;
     let refresh_token = latest
         .refresh_token
         .as_deref()

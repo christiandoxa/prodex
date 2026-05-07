@@ -1345,6 +1345,41 @@ pub(crate) fn release_runtime_quota_blocked_affinity(
     turn_state: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<bool> {
+    release_runtime_profile_affinity(
+        shared,
+        profile_name,
+        previous_response_id,
+        turn_state,
+        session_id,
+        "quota",
+    )
+}
+
+pub(crate) fn release_runtime_auth_failed_affinity(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<bool> {
+    release_runtime_profile_affinity(
+        shared,
+        profile_name,
+        previous_response_id,
+        turn_state,
+        session_id,
+        "auth_failed",
+    )
+}
+
+fn release_runtime_profile_affinity(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+    reason: &str,
+) -> Result<bool> {
     let mut runtime = shared
         .runtime
         .lock()
@@ -1363,13 +1398,13 @@ pub(crate) fn release_runtime_quota_blocked_affinity(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("quota_release:{profile_name}"),
+            &format!("{reason}_release:{profile_name}"),
         );
         drop(runtime);
         runtime_proxy_log(
             shared,
             format!(
-                "quota_release_affinity profile={profile_name} previous_response_id={:?} turn_state={:?} session_id={:?}",
+                "{reason}_release_affinity profile={profile_name} previous_response_id={:?} turn_state={:?} session_id={:?}",
                 previous_response_id, turn_state, session_id
             ),
         );

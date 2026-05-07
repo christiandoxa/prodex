@@ -9,6 +9,10 @@ pub(super) enum RuntimeResponsesAttempt {
         profile_name: String,
         response: RuntimeResponsesReply,
     },
+    AuthFailed {
+        profile_name: String,
+        response: RuntimeResponsesReply,
+    },
     PreviousResponseNotFound {
         profile_name: String,
         response: RuntimeResponsesReply,
@@ -32,6 +36,10 @@ pub(super) enum RuntimeStandardAttempt {
         profile_name: String,
         response: tiny_http::ResponseBox,
         overload: bool,
+    },
+    AuthFailed {
+        profile_name: String,
+        response: tiny_http::ResponseBox,
     },
     LocalSelectionBlocked {
         profile_name: String,
@@ -168,6 +176,10 @@ pub(super) enum RuntimeWebsocketAttempt {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
         turn_state: Option<String>,
+    },
+    TransportFailed {
+        profile_name: String,
+        stage: &'static str,
     },
     ReuseWatchdogTripped {
         profile_name: String,

@@ -88,6 +88,7 @@ pub(super) fn fake_jwt_with_exp_and_account_id(exp: i64, account_id: &str) -> St
 pub(super) enum TokenAwareServerMode {
     RuntimeStatus,
     Usage,
+    Responses,
 }
 
 pub(super) struct TokenAwareServer {
@@ -146,6 +147,9 @@ impl TokenAwareServer {
                             TokenAwareServerMode::Usage => {
                                 path.ends_with("/backend-api/wham/usage")
                                     || path.ends_with("/api/codex/usage")
+                            }
+                            TokenAwareServerMode::Responses => {
+                                path.ends_with("/backend-api/codex/responses")
                             }
                         };
                         let authorized = authorization == format!("Bearer {expected_token}")
@@ -210,6 +214,21 @@ impl TokenAwareServer {
             expected_token,
             expected_account_id,
             runtime_proxy_usage_body(email),
+        )
+    }
+
+    pub(super) fn start_responses(expected_token: &str, expected_account_id: &str) -> Self {
+        Self::start(
+            TokenAwareServerMode::Responses,
+            expected_token,
+            expected_account_id,
+            serde_json::json!({
+                "id": "resp-fresh",
+                "object": "response",
+                "status": "completed",
+                "output": []
+            })
+            .to_string(),
         )
     }
 

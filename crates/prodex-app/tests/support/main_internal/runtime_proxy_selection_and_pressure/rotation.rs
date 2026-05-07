@@ -108,6 +108,185 @@ fn fetch_usage_json_refreshes_access_token_after_401() {
 }
 
 #[test]
+fn runtime_responses_refreshes_access_token_after_401_before_rotating() {
+    let temp_dir = TestDir::isolated();
+    let backend = TokenAwareServer::start_responses("fresh-token", "main-account");
+    let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
+    let _refresh_guard =
+        TestEnvVarGuard::set(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, &refresh_server.url());
+    let codex_home = temp_dir.path.join("homes/main");
+    write_auth_json_with_tokens(
+        &codex_home.join("auth.json"),
+        "stale-token",
+        "main-account",
+        Some("stale-refresh-token"),
+        None,
+    );
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([(
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: codex_home.clone(),
+                        managed: true,
+                        email: Some("main@example.com".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                )]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"input":"hello"}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_responses_request(1, &request, &shared)
+        .expect("responses request should refresh auth and succeed");
+
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("expected buffered responses reply");
+    };
+    assert_eq!(parts.status, 200);
+    let body: serde_json::Value =
+        serde_json::from_slice(&parts.body).expect("response body should parse");
+    assert_eq!(body["id"], "resp-fresh");
+    let auth_headers = backend.auth_headers();
+    assert_eq!(
+        auth_headers.first().map(String::as_str),
+        Some("Bearer stale-token")
+    );
+    assert_eq!(
+        auth_headers.last().map(String::as_str),
+        Some("Bearer fresh-token")
+    );
+    assert_eq!(refresh_server.request_bodies().len(), 1);
+
+    let auth_json = fs::read_to_string(codex_home.join("auth.json"))
+        .expect("updated auth.json should be readable");
+    let auth_json: serde_json::Value =
+        serde_json::from_str(&auth_json).expect("updated auth.json should parse");
+    assert_eq!(auth_json["tokens"]["access_token"], "fresh-token");
+    assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
+}
+
+#[test]
+fn fresh_runtime_responses_rotates_after_unrecoverable_401() {
+    let temp_dir = TestDir::isolated();
+    let backend = RuntimeProxyBackend::start_http_unauthorized_main();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: main_home,
+                            managed: true,
+                            email: Some("main@example.com".to_string()),
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                    (
+                        "second".to_string(),
+                        ProfileEntry {
+                            codex_home: second_home,
+                            managed: true,
+                            email: Some("second@example.com".to_string()),
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                ]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::new(),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"input":"hello","stream":true}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_responses_request(2, &request, &shared)
+        .expect("fresh responses request should rotate after unrecoverable 401");
+
+    match response {
+        RuntimeResponsesReply::Buffered(parts) => assert_eq!(parts.status, 200),
+        RuntimeResponsesReply::Streaming(stream) => assert_eq!(stream.status, 200),
+    }
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("auth_failed profile=main"),
+        "unrecoverable 401 should be logged as an auth failure: {log}"
+    );
+}
+
+#[test]
 fn read_auth_summary_classifies_api_key_auth() {
     let temp_dir = TestDir::isolated();
     let codex_home = temp_dir.path.join("homes/main");

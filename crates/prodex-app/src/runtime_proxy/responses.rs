@@ -444,6 +444,47 @@ fn try_runtime_responses_direct_current_profile_fallback(
             *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
             Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
         }
+        RuntimeResponsesAttempt::AuthFailed {
+            profile_name,
+            response,
+        } => {
+            runtime_proxy_log(
+                fallback.shared,
+                format!(
+                    "request={} transport=http auth_failed profile={} via=direct_current_profile_fallback",
+                    fallback.request_id, profile_name
+                ),
+            );
+            if !affinity_state.quota_blocked_affinity_is_releasable(
+                &profile_name,
+                fallback.request_requires_previous_response_affinity,
+                fallback.previous_response_fresh_fallback_shape,
+            ) {
+                return Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+                    Box::new(response),
+                )));
+            }
+            let released_affinity = release_runtime_auth_failed_affinity(
+                fallback.shared,
+                &profile_name,
+                fallback.previous_response_id,
+                fallback.request_turn_state,
+                fallback.request_session_id,
+            )?;
+            affinity_state.clear_profile_affinity(&profile_name, true);
+            if released_affinity {
+                runtime_proxy_log(
+                    fallback.shared,
+                    format!(
+                        "request={} transport=http auth_failed_affinity_released profile={} via=direct_current_profile_fallback",
+                        fallback.request_id, profile_name
+                    ),
+                );
+            }
+            excluded_profiles.insert(profile_name);
+            *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
+            Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
+        }
         RuntimeResponsesAttempt::PreviousResponseNotFound {
             profile_name,
             response,
@@ -897,6 +938,48 @@ pub(crate) fn proxy_runtime_responses_request(
                 excluded_profiles.insert(profile_name);
                 last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
             }
+            RuntimeResponsesAttempt::AuthFailed {
+                profile_name,
+                response,
+            } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http auth_failed profile={profile_name}"
+                    ),
+                );
+                if !affinity_state.quota_blocked_affinity_is_releasable(
+                    &profile_name,
+                    request_requires_previous_response_affinity,
+                    previous_response_fresh_fallback_shape,
+                ) {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http upstream_auth_failure_passthrough route=responses profile={profile_name} reason=hard_affinity"
+                        ),
+                    );
+                    return Ok(response);
+                }
+                let released_affinity = release_runtime_auth_failed_affinity(
+                    shared,
+                    &profile_name,
+                    previous_response_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    request_session_id.as_deref(),
+                )?;
+                affinity_state.clear_profile_affinity(&profile_name, true);
+                if released_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http auth_failed_affinity_released profile={profile_name}"
+                        ),
+                    );
+                }
+                excluded_profiles.insert(profile_name);
+                last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
+            }
             RuntimeResponsesAttempt::LocalSelectionBlocked {
                 profile_name,
                 reason,
@@ -1093,6 +1176,18 @@ pub(crate) fn attempt_runtime_responses_request(
                 && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
             let response = RuntimeResponsesReply::Buffered(parts);
 
+            if status == 401 {
+                note_runtime_profile_auth_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    status,
+                );
+                return Ok(RuntimeResponsesAttempt::AuthFailed {
+                    profile_name: profile_name.to_string(),
+                    response,
+                });
+            }
             if retryable_quota {
                 return Ok(RuntimeResponsesAttempt::QuotaBlocked {
                     profile_name: profile_name.to_string(),

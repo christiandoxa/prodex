@@ -1,5 +1,4 @@
 use super::*;
-#[cfg(test)]
 use runtime_proxy_crate::runtime_proxy_websocket_error_payload_text;
 
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
@@ -32,6 +31,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 )?;
                 self.apply_previous_response_not_found_action(action, payload)
             }
+            RuntimeWebsocketAttempt::TransportFailed {
+                profile_name,
+                stage,
+            } => self.handle_direct_current_transport_failed(profile_name, stage),
             RuntimeWebsocketAttempt::ReuseWatchdogTripped { profile_name, .. } => {
                 self.excluded_profiles.insert(profile_name);
                 Ok(RuntimeWebsocketMessageLoopAction::Continue)
@@ -70,6 +73,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 profile_name,
                 event,
             } => self.handle_reuse_watchdog_tripped(profile_name, event, turn_state_override),
+            RuntimeWebsocketAttempt::TransportFailed {
+                profile_name,
+                stage,
+            } => self.handle_candidate_transport_failed(profile_name, stage),
             RuntimeWebsocketAttempt::PreviousResponseNotFound {
                 profile_name,
                 payload,
@@ -85,6 +92,50 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.apply_previous_response_not_found_action(action, payload)
             }
         }
+    }
+
+    pub(super) fn handle_direct_current_transport_failed(
+        &mut self,
+        profile_name: String,
+        stage: &'static str,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        self.handle_transport_failed(profile_name, stage, Some("direct_current_profile_fallback"))
+    }
+
+    pub(super) fn handle_candidate_transport_failed(
+        &mut self,
+        profile_name: String,
+        stage: &'static str,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        self.handle_transport_failed(profile_name, stage, None)
+    }
+
+    fn handle_transport_failed(
+        &mut self,
+        profile_name: String,
+        stage: &'static str,
+        via: Option<&'static str>,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        let via_suffix = via.map(|via| format!(" via={via}")).unwrap_or_default();
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} transport_failed profile={} stage={}{}",
+                self.request_id, self.session_id, profile_name, stage, via_suffix
+            ),
+        );
+        self.excluded_profiles.insert(profile_name);
+        self.last_failure = Some((
+            RuntimeUpstreamFailureResponse::Websocket(RuntimeWebsocketErrorPayload::Text(
+                runtime_proxy_websocket_error_payload_text(
+                    503,
+                    "service_unavailable",
+                    runtime_proxy_local_selection_failure_message(),
+                ),
+            )),
+            true,
+        ));
+        Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 
     pub(super) fn handle_direct_current_quota_blocked(

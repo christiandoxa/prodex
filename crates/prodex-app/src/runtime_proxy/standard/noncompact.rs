@@ -65,6 +65,7 @@ pub(super) fn proxy_runtime_noncompact_request(
             }
             RuntimeStandardAttempt::StaleContinuation { response } => Ok(response),
             RuntimeStandardAttempt::RetryableFailure { response, .. } => Ok(response),
+            RuntimeStandardAttempt::AuthFailed { response, .. } => Ok(response),
             RuntimeStandardAttempt::LocalSelectionBlocked { .. } => {
                 Ok(build_runtime_proxy_text_response(
                     503,
@@ -283,6 +284,37 @@ pub(super) fn proxy_runtime_noncompact_request(
                     RuntimeRouteKind::Standard,
                 )? {
                     return Ok(response);
+                }
+                excluded_profiles.insert(profile_name);
+                last_failure = Some((response, true));
+            }
+            RuntimeStandardAttempt::AuthFailed {
+                profile_name,
+                response,
+            } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http standard_auth_failed profile={profile_name}"
+                    ),
+                );
+                let released_affinity = release_runtime_auth_failed_affinity(
+                    shared,
+                    &profile_name,
+                    None,
+                    None,
+                    request_session_id.as_deref(),
+                )?;
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
+                }
+                if released_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http auth_failed_affinity_released profile={profile_name} route=standard"
+                        ),
+                    );
                 }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some((response, true));

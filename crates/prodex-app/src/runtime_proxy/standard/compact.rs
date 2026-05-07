@@ -241,6 +241,26 @@ pub(super) fn proxy_runtime_compact_request(
                     );
                     Ok(response)
                 }
+                RuntimeStandardAttempt::AuthFailed {
+                    profile_name,
+                    response,
+                } => {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        RuntimeProxyCompactFinalFailureLog {
+                            request_id,
+                            exit: "precommit_budget_exhausted_fallback",
+                            reason: "auth",
+                            selection_attempts,
+                            selection_started_at,
+                            pressure_mode,
+                            last_failure_kind,
+                            saw_inflight_saturation,
+                            profile_name: Some(&profile_name),
+                        },
+                    );
+                    Ok(response)
+                }
                 RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
                     log_runtime_proxy_compact_final_failure(
                         shared,
@@ -400,6 +420,26 @@ pub(super) fn proxy_runtime_compact_request(
                             request_id,
                             exit: "candidate_exhausted_fallback",
                             reason: if overload { "overload" } else { "quota" },
+                            selection_attempts,
+                            selection_started_at,
+                            pressure_mode,
+                            last_failure_kind,
+                            saw_inflight_saturation,
+                            profile_name: Some(&profile_name),
+                        },
+                    );
+                    Ok(response)
+                }
+                RuntimeStandardAttempt::AuthFailed {
+                    profile_name,
+                    response,
+                } => {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        RuntimeProxyCompactFinalFailureLog {
+                            request_id,
+                            exit: "candidate_exhausted_fallback",
+                            reason: "auth",
                             selection_attempts,
                             selection_started_at,
                             pressure_mode,
@@ -660,6 +700,88 @@ pub(super) fn proxy_runtime_compact_request(
                 }
                 excluded_profiles.insert(profile_name);
                 last_failure = Some((response, !overload));
+            }
+            RuntimeStandardAttempt::AuthFailed {
+                profile_name,
+                response,
+            } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http compact_auth_failed profile={profile_name}"
+                    ),
+                );
+                if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+                    route_kind: RuntimeRouteKind::Compact,
+                    candidate_name: &profile_name,
+                    strict_affinity_profile: compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    pinned_profile: None,
+                    turn_state_profile: None,
+                    session_profile: session_profile.as_deref(),
+                    trusted_previous_response_affinity: false,
+                }) {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        RuntimeProxyCompactFinalFailureLog {
+                            request_id,
+                            exit: "hard_affinity_auth_failure",
+                            reason: "auth",
+                            selection_attempts,
+                            selection_started_at,
+                            pressure_mode,
+                            last_failure_kind: runtime_proxy_compact_last_failure_kind(
+                                last_failure.as_ref(),
+                            ),
+                            saw_inflight_saturation,
+                            profile_name: Some(&profile_name),
+                        },
+                    );
+                    return Ok(response);
+                }
+
+                let released_affinity = release_runtime_auth_failed_affinity(
+                    shared,
+                    &profile_name,
+                    None,
+                    None,
+                    request_session_id.as_deref(),
+                )?;
+                let released_compact_lineage = release_runtime_compact_lineage(
+                    shared,
+                    &profile_name,
+                    request_session_id.as_deref(),
+                    request_turn_state.as_deref(),
+                    "auth_failed",
+                )?;
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    session_profile = None;
+                }
+                if compact_followup_profile
+                    .as_ref()
+                    .is_some_and(|(owner, _)| owner == &profile_name)
+                {
+                    compact_followup_profile = None;
+                }
+                if released_affinity {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http auth_failed_affinity_released profile={profile_name} route=compact"
+                        ),
+                    );
+                }
+                if released_compact_lineage {
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http compact_lineage_released profile={profile_name} reason=auth_failed"
+                        ),
+                    );
+                }
+                excluded_profiles.insert(profile_name);
+                last_failure = Some((response, true));
             }
             RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
                 runtime_proxy_log(
