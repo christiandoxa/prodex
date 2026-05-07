@@ -393,6 +393,39 @@ async function buildSteps(paths) {
   return [...steps.values()];
 }
 
+function churnHygieneSteps(selection, args) {
+  const steps = [];
+  if (selection.base) {
+    steps.push({
+      label: "churn-hygiene:range",
+      command: "node",
+      args: [
+        "scripts/ci/churn-hygiene.mjs",
+        "--check",
+        "--base",
+        selection.base.base,
+        "--head",
+        args.head,
+      ],
+    });
+  }
+  if (args.includeWorktree) {
+    steps.push(
+      {
+        label: "churn-hygiene:staged",
+        command: "node",
+        args: ["scripts/ci/churn-hygiene.mjs", "--check", "--staged"],
+      },
+      {
+        label: "churn-hygiene:worktree",
+        command: "node",
+        args: ["scripts/ci/churn-hygiene.mjs", "--check", "--worktree"],
+      },
+    );
+  }
+  return steps;
+}
+
 async function diffSnapshot(paths) {
   const result = await git(["diff", "--no-ext-diff", "--binary", "HEAD", "--", ...paths], { cwd: repoRoot });
   return result.stdout;
@@ -442,7 +475,7 @@ async function main() {
     process.stdout.write(`  ${filePath}\n`);
   }
 
-  const steps = await buildSteps(selection.paths);
+  const steps = [...churnHygieneSteps(selection, args), ...(await buildSteps(selection.paths))];
   if (steps.length === 0) {
     process.stdout.write("changed-tests: no focused local checks mapped for these paths\n");
     return;
