@@ -49,11 +49,6 @@ const DEFAULT_ALLOWLIST = Object.freeze([
     reason: "existing runtime selection file above production threshold; keep capped until split",
   },
   {
-    file: "crates/prodex-context/tests/src/lib.rs",
-    maxLines: 2854,
-    reason: "existing context regression test monolith; keep capped until split",
-  },
-  {
     file: "crates/prodex-app/tests/support/main_internal/runtime_proxy_selection_and_pressure/rotation.rs",
     maxLines: 3512,
     reason: "existing runtime rotation test support monolith; keep capped until split",
