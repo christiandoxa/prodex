@@ -21,6 +21,7 @@ Changes after `0.86.0`.
 
 ### Tests
 
+- Extract command output basics (`7f1dcd1`)
 - Extract smart context budget cases (`33c7bdc`)
 - Extract smart context semantic cases (`ba14a06`)
 - Extract smart context alias cases (`9e701cc`)
