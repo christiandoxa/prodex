@@ -98,30 +98,11 @@ function withOptionalRange(script, range) {
 }
 
 function releaseHygieneSteps(range) {
-  const rangeGuards = [
-    "release-metadata-only-guard.mjs",
-    "version-metadata-release-guard.mjs",
-    "release-empty-commit-guard.mjs",
-    "release-duplicate-version-guard.mjs",
-  ];
-
   return [
-    ...rangeGuards.map((script) => ({
-      label: range
-        ? script.replace(/\.mjs$/, "-push-range")
-        : script.replace(/\.mjs$/, "-default-range"),
-      command: "node",
-      args: withOptionalRange(`scripts/ci/${script}`, range),
-    })),
     {
-      label: range ? "release-tag-changelog-guard-push-range" : "release-tag-changelog-guard-default-range",
+      label: range ? "release-hygiene-push-range" : "release-hygiene-default-range",
       command: "node",
-      args: withOptionalRange("scripts/ci/release-tag-changelog-guard.mjs", range),
-    },
-    {
-      label: "release-guard-fixtures",
-      command: "node",
-      args: ["scripts/ci/release-guard-fixture-tests.mjs"],
+      args: withOptionalRange("scripts/ci/release-hygiene.mjs", range),
     },
   ];
 }

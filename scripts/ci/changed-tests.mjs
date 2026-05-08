@@ -234,6 +234,9 @@ function isReleaseGuardFixturesRelevantPath(filePath) {
   return (
     filePath === "package.json" ||
     filePath === ".github/workflows/ci.yml" ||
+    filePath === "scripts/ci/preflight.mjs" ||
+    filePath === "scripts/ci/prepush.mjs" ||
+    filePath === "scripts/ci/release-hygiene.mjs" ||
     filePath === "scripts/ci/release-guard-common.mjs" ||
     filePath === "scripts/ci/release-guard-fixture-tests.mjs" ||
     (filePath.startsWith("scripts/ci/") &&
@@ -328,7 +331,7 @@ async function buildSteps(paths) {
         command: "node",
         args: [
           "-e",
-          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const expected={'ci:changed':'node scripts/ci/changed-tests.mjs','test:changed':'node scripts/ci/changed-tests.mjs','ci:size-guard':'node scripts/ci/size-guard.mjs'}; for (const [name, command] of Object.entries(expected)) { if (pkg.scripts?.[name] !== command) throw new Error(`${name} script mismatch`); }",
+          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const expected={'ci:changed':'node scripts/ci/changed-tests.mjs','test:changed':'node scripts/ci/changed-tests.mjs','ci:size-guard':'node scripts/ci/size-guard.mjs','ci:release-hygiene':'node scripts/ci/release-hygiene.mjs'}; for (const [name, command] of Object.entries(expected)) { if (pkg.scripts?.[name] !== command) throw new Error(`${name} script mismatch`); }",
         ],
       });
     }
@@ -346,6 +349,11 @@ async function buildSteps(paths) {
         label: "release-guard-fixtures",
         command: "node",
         args: ["scripts/ci/release-guard-fixture-tests.mjs"],
+      });
+      addStep(steps, "release-hygiene-dry-run", {
+        label: "release-hygiene-dry-run",
+        command: "node",
+        args: ["scripts/ci/release-hygiene.mjs", "--dry-run"],
       });
     }
 

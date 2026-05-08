@@ -115,34 +115,9 @@ function preflightSteps(args) {
   }
   const steps = [
     {
-      label: "release-metadata-only-guard",
+      label: "release-hygiene",
       command: "node",
-      args: ["scripts/ci/release-metadata-only-guard.mjs"],
-    },
-    {
-      label: "version-metadata-release-guard",
-      command: "node",
-      args: ["scripts/ci/version-metadata-release-guard.mjs"],
-    },
-    {
-      label: "release-empty-commit-guard",
-      command: "node",
-      args: ["scripts/ci/release-empty-commit-guard.mjs"],
-    },
-    {
-      label: "release-duplicate-version-guard",
-      command: "node",
-      args: ["scripts/ci/release-duplicate-version-guard.mjs"],
-    },
-    {
-      label: "release-tag-changelog-guard",
-      command: "node",
-      args: ["scripts/ci/release-tag-changelog-guard.mjs"],
-    },
-    {
-      label: "release-guard-fixtures",
-      command: "node",
-      args: ["scripts/ci/release-guard-fixture-tests.mjs"],
+      args: ["scripts/ci/release-hygiene.mjs"],
     },
     {
       label: "size-guard",
