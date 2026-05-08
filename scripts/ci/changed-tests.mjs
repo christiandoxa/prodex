@@ -7,6 +7,13 @@ import { repoRoot } from "../npm/common.mjs";
 
 const VERSION_SYNC_PATHS = Object.freeze(["Cargo.toml", "npm", "README.md", "QUICKSTART.md", "scripts/npm"]);
 const WATCH_UPSTREAM_FIXTURE_TESTS_PATH = "scripts/compat/watch-upstream-fixture-tests.mjs";
+const UPSTREAM_COMPAT_SCRIPT_PATHS = Object.freeze([
+  "scripts/compat/check-upstream-baseline.mjs",
+  "scripts/compat/upstream-compat-common.mjs",
+  "scripts/compat/upstream-compat-summary.mjs",
+  "scripts/compat/watch-upstream.mjs",
+  WATCH_UPSTREAM_FIXTURE_TESTS_PATH,
+]);
 
 function parseArgs(argv) {
   const args = {
@@ -186,6 +193,35 @@ function addStep(steps, key, step) {
   }
 }
 
+async function addNodeCheckStep(steps, filePath) {
+  if (!(await pathExists(filePath))) {
+    return;
+  }
+  addStep(steps, `node-check:${filePath}`, {
+    label: `node-check:${filePath}`,
+    command: "node",
+    args: ["--check", filePath],
+  });
+}
+
+async function addUpstreamCompatSteps(steps) {
+  for (const scriptPath of UPSTREAM_COMPAT_SCRIPT_PATHS) {
+    await addNodeCheckStep(steps, scriptPath);
+  }
+  addStep(steps, "upstream-baseline-guard", {
+    label: "upstream-baseline-guard",
+    command: "node",
+    args: ["scripts/compat/check-upstream-baseline.mjs"],
+  });
+  if (await pathExists(WATCH_UPSTREAM_FIXTURE_TESTS_PATH)) {
+    addStep(steps, "watch-upstream-fixtures", {
+      label: "watch-upstream-fixtures",
+      command: "node",
+      args: [WATCH_UPSTREAM_FIXTURE_TESTS_PATH],
+    });
+  }
+}
+
 function isSmartContextPath(filePath) {
   return (
     filePath === "crates/prodex-app/src/runtime_proxy/smart_context.rs" ||
@@ -247,7 +283,11 @@ function isReleaseGuardFixturesRelevantPath(filePath) {
 }
 
 function isUpstreamCompatRelevantPath(filePath) {
-  return filePath === ".github/workflows/upstream-compat.yml" || filePath.startsWith("scripts/compat/");
+  return (
+    filePath === "package.json" ||
+    filePath === ".github/workflows/upstream-compat.yml" ||
+    filePath.startsWith("scripts/compat/")
+  );
 }
 
 function crateDirForPath(filePath) {
@@ -317,12 +357,8 @@ async function buildSteps(paths) {
 
   const markdownPaths = [];
   for (const filePath of paths) {
-    if (isNodeScriptPath(filePath) && (await pathExists(filePath))) {
-      addStep(steps, `node-check:${filePath}`, {
-        label: `node-check:${filePath}`,
-        command: "node",
-        args: ["--check", filePath],
-      });
+    if (isNodeScriptPath(filePath)) {
+      await addNodeCheckStep(steps, filePath);
     }
 
     if (filePath === "package.json") {
@@ -331,7 +367,7 @@ async function buildSteps(paths) {
         command: "node",
         args: [
           "-e",
-          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const expected={'ci:changed':'node scripts/ci/changed-tests.mjs','test:changed':'node scripts/ci/changed-tests.mjs','ci:size-guard':'node scripts/ci/size-guard.mjs','ci:release-hygiene':'node scripts/ci/release-hygiene.mjs'}; for (const [name, command] of Object.entries(expected)) { if (pkg.scripts?.[name] !== command) throw new Error(`${name} script mismatch`); }",
+          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const expected={'ci:changed':'node scripts/ci/changed-tests.mjs','test:changed':'node scripts/ci/changed-tests.mjs','ci:size-guard':'node scripts/ci/size-guard.mjs','ci:release-hygiene':'node scripts/ci/release-hygiene.mjs','compat:check':'node scripts/compat/check-upstream-baseline.mjs','compat:watch':'node scripts/compat/watch-upstream.mjs','compat:watch-fixtures':'node scripts/compat/watch-upstream-fixture-tests.mjs'}; for (const [name, command] of Object.entries(expected)) { if (pkg.scripts?.[name] !== command) throw new Error(`${name} script mismatch`); }",
         ],
       });
     }
@@ -358,18 +394,7 @@ async function buildSteps(paths) {
     }
 
     if (isUpstreamCompatRelevantPath(filePath)) {
-      addStep(steps, "upstream-baseline-guard", {
-        label: "upstream-baseline-guard",
-        command: "node",
-        args: ["scripts/compat/check-upstream-baseline.mjs"],
-      });
-      if (await pathExists(WATCH_UPSTREAM_FIXTURE_TESTS_PATH)) {
-        addStep(steps, "watch-upstream-fixtures", {
-          label: "watch-upstream-fixtures",
-          command: "node",
-          args: [WATCH_UPSTREAM_FIXTURE_TESTS_PATH],
-        });
-      }
+      await addUpstreamCompatSteps(steps);
     }
 
     if (filePath.endsWith(".md") && (await pathExists(filePath))) {

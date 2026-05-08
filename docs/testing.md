@@ -48,8 +48,9 @@ npm run changelog:check
 npm run docs:lint
 npm run ci:runtime-manifest
 npm run test:runtime-smoke
-node scripts/compat/check-upstream-baseline.mjs
-node scripts/compat/watch-upstream.mjs
+npm run compat:check
+npm run compat:watch
+npm run compat:watch-fixtures
 npm run compat:capture -- --input /path/to/capture.jsonl --name codex_live_sample
 node scripts/ci/runtime-proxy-shard.mjs
 npm run ci:runtime-stress -- --suite stress
@@ -123,9 +124,11 @@ When changing `prodex-context` audit, prose compression, or command-output conte
 
 When changing `prodex info` runtime tuning output, run the focused `cargo test -q runtime_tuning_snapshot_reports_effective_policy_and_env_values -- --test-threads=1` check so env, policy, and default-derived values stay aligned.
 
-Use `node scripts/compat/check-upstream-baseline.mjs` before changing runtime proxy assumptions. It is offline and verifies that `scripts/compat/upstream-baseline.json` still records the critical upstream Codex files, Responses/compact routes, SSE/websocket stream events, and headers that Prodex preserves or replaces. Baseline format version 2 also records semantic check groups that tie route, header, event, and co-occurrence expectations back to specific upstream files instead of relying only on flat `required_contains` tokens.
+Use `npm run compat:check` before changing runtime proxy assumptions. It is offline and verifies that `scripts/compat/upstream-baseline.json` still records the critical upstream Codex files, Responses/compact routes, SSE/websocket stream events, and headers that Prodex preserves or replaces. Baseline format version 2 also records semantic check groups that tie route, header, event, and co-occurrence expectations back to specific upstream files instead of relying only on flat `required_contains` tokens.
 
-Use `node scripts/compat/watch-upstream.mjs` when network access is available. It fetches current upstream Codex critical files from the latest release tag, falls back to `main` only when the tag raw file is unavailable, and reports missing required tokens or semantic groups as upstream drift.
+Use `npm run compat:watch` when network access is available. It fetches current upstream Codex critical files from the latest release tag, falls back to `main` only when the tag raw file is unavailable, and reports missing required tokens or semantic groups as upstream drift.
+
+Use `npm run compat:watch-fixtures` after changing upstream watch logic or fixtures. It runs the offline fixture regression tests for the upstream watch tool.
 
 Use `npm run compat:capture -- --input capture.jsonl --name codex_live_sample` to convert offline captured Codex or Claude traffic into scrubbed replay fixtures under `crates/prodex-app/tests/fixtures/compat_replay`. The tool does not capture traffic and never uses the network; it only normalizes local JSON, JSONL, or text input into a deterministic fixture.
 
