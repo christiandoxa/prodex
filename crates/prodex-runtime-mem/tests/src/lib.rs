@@ -1028,18 +1028,135 @@ fn super_default_transcript_mode_upgrades_only_slim_to_super_slim() {
 }
 
 #[test]
-fn slim_and_full_schema_outputs_stay_unchanged() {
+fn slim_and_full_schema_keep_legacy_fields_and_include_codex_129_events() {
     let slim = runtime_mem_default_codex_schema().to_string();
     assert!(slim.contains("0.4-slim"));
     assert!(slim.contains("\"prompt\":\"payload.message\""));
+    assert!(slim.contains("payload.content[0].text"));
+    assert!(slim.contains("local_shell_call"));
     assert!(slim.contains("output omitted"));
     assert!(!slim.contains("\"toolResponse\":\"payload.output\""));
 
     let full = runtime_mem_full_codex_schema().to_string();
     assert!(full.contains("Full schema"));
     assert!(full.contains("\"prompt\":\"payload.message\""));
+    assert!(full.contains("payload.content[0].text"));
+    assert!(full.contains("local_shell_call"));
     assert!(full.contains("\"toolResponse\":\"payload.output\""));
     assert!(full.contains("\"message\":\"payload.message\""));
+}
+
+#[test]
+fn codex_129_response_item_schema_resolves_messages_and_local_shell_calls() {
+    let response_user = serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [
+                { "type": "input_text", "text": "new Codex prompt" }
+            ]
+        }
+    });
+    let response_assistant = serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                { "type": "output_text", "text": "new Codex answer" }
+            ]
+        }
+    });
+    let local_shell = serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "local_shell_call",
+            "call_id": "call-shell",
+            "action": { "command": "cargo test -q -p prodex-runtime-mem" }
+        }
+    });
+
+    let slim_schema = runtime_mem_default_codex_schema();
+    assert_eq!(
+        resolve_schema_event_string(
+            &slim_schema,
+            "response-user-message",
+            "prompt",
+            &response_user
+        )
+        .as_deref(),
+        Some("new Codex prompt")
+    );
+    assert_eq!(
+        resolve_schema_event_string(
+            &slim_schema,
+            "response-assistant-message",
+            "message",
+            &response_assistant
+        )
+        .as_deref(),
+        Some("new Codex answer")
+    );
+    assert_eq!(
+        resolve_schema_event_string(&slim_schema, "tool-use", "toolInput", &local_shell).as_deref(),
+        Some("cargo test -q -p prodex-runtime-mem")
+    );
+
+    let full_schema = runtime_mem_full_codex_schema();
+    assert_eq!(
+        resolve_schema_event_string(
+            &full_schema,
+            "response-user-message",
+            "prompt",
+            &response_user
+        )
+        .as_deref(),
+        Some("new Codex prompt")
+    );
+
+    let super_slim_schema = runtime_mem_super_slim_codex_schema();
+    assert_eq!(
+        resolve_schema_event_string(
+            &super_slim_schema,
+            "response-user-message",
+            "prompt",
+            &response_user
+        )
+        .as_deref(),
+        Some("ss:omit=prompt")
+    );
+    let summarized_user = serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [
+                { "type": "input_text", "text": "raw prompt should not be recalled by super-slim" }
+            ],
+            "metadata": {
+                "prompt_summary": "short Codex 0.129 prompt summary"
+            }
+        }
+    });
+    assert_eq!(
+        resolve_schema_event_string(
+            &super_slim_schema,
+            "response-user-message",
+            "prompt",
+            &summarized_user
+        )
+        .as_deref(),
+        Some("short Codex 0.129 prompt summary")
+    );
+    let super_slim_prompt_field =
+        schema_event_field(&super_slim_schema, "response-user-message", "prompt")
+            .expect("super-slim response user prompt field should exist")
+            .to_string();
+    assert!(
+        !super_slim_prompt_field.contains("payload.content"),
+        "super-slim schema must not recall raw Codex 0.129 prompt content"
+    );
 }
 
 #[test]
@@ -1145,6 +1262,7 @@ fn transcript_watch_super_slim_schema_is_shadow_safe_and_full_mode_remains_full(
     assert!(super_slim_schema_text.contains("pm2:u"));
     assert!(super_slim_schema_text.contains("prompt_summary"));
     assert!(!super_slim_schema_text.contains("payload.message"));
+    assert!(!super_slim_schema_text.contains("payload.content"));
     assert!(!super_slim_schema_text.contains("payload.output"));
 
     ensure_runtime_mem_codex_watch_for_sessions_root_with_mode(
@@ -1565,6 +1683,75 @@ fn super_slim_shadow_user_prompt_stores_summary_counts_and_ref_not_full_prompt()
     assert_eq!(
         resolve_schema_user_prompt(&runtime_mem_super_slim_codex_schema(), &shadow).as_deref(),
         Some(summary)
+    );
+}
+
+#[test]
+fn super_slim_shadow_codex_129_response_messages_omit_raw_content_text() {
+    let prompt = "Implement Codex 0.129 transcript compatibility\n".to_string()
+        + &"large prompt detail ".repeat(300);
+    let user_event = serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [
+                { "type": "input_text", "text": prompt },
+                { "type": "input_text", "text": "secondary prompt chunk" }
+            ],
+            "metadata": {
+                "artifact_ref": "prodex-artifact:prompt-129"
+            }
+        }
+    });
+    let assistant_event = serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                { "type": "output_text", "text": "Completed Codex 0.129 support\n".to_string() + &"assistant detail ".repeat(300) }
+            ]
+        }
+    });
+    let shell_event = serde_json::json!({
+        "type": "response_item",
+        "payload": {
+            "type": "local_shell_call",
+            "call_id": "call-129",
+            "action": { "command": "cargo test -q -p prodex-runtime-mem" }
+        }
+    });
+
+    let user_shadow = runtime_mem_super_slim_shadow_codex_event(&user_event);
+    let assistant_shadow = runtime_mem_super_slim_shadow_codex_event(&assistant_event);
+    assert_eq!(
+        lookup_test_path(&user_shadow, "payload.content[0].text").and_then(Value::as_str),
+        Some("ss:omit")
+    );
+    assert_eq!(
+        lookup_test_path(&assistant_shadow, "payload.content[0].text").and_then(Value::as_str),
+        Some("ss:omit")
+    );
+    let user_summary = lookup_test_path(&user_shadow, "payload.prompt_summary")
+        .and_then(Value::as_str)
+        .expect("Codex 0.129 user message should have prompt summary");
+    let assistant_summary = lookup_test_path(&assistant_shadow, "payload.summary")
+        .and_then(Value::as_str)
+        .expect("Codex 0.129 assistant message should have summary");
+    assert!(user_summary.starts_with("u: Implement Codex 0.129 transcript compatibility"));
+    assert!(assistant_summary.starts_with("a: Completed Codex 0.129 support"));
+
+    let shadows = runtime_mem_super_slim_v2_shadow_codex_events(
+        [&user_event, &assistant_event, &shell_event].into_iter(),
+    );
+    assert_eq!(shadows[0]["t"].as_str(), Some("pm2:u"));
+    assert_eq!(shadows[0]["r"].as_str(), Some("prodex-artifact:prompt-129"));
+    assert_eq!(shadows[1]["t"].as_str(), Some("pm2:a"));
+    assert_eq!(shadows[2]["t"].as_str(), Some("pm2:tu"));
+    assert_eq!(
+        shadows[2]["c"].as_str(),
+        Some("cargo test -q -p prodex-runtime-mem")
     );
 }
 
@@ -2004,33 +2191,29 @@ fn test_expanded_non_dictionary_events(events: Vec<Value>) -> Vec<Value> {
 }
 
 fn schema_user_prompt_field(schema: &Value) -> Option<&Value> {
-    schema
-        .get("events")?
-        .as_array()?
-        .iter()
-        .find(|event| event.get("name").and_then(Value::as_str) == Some("user-message"))?
-        .get("fields")?
-        .get("prompt")
+    schema_event_field(schema, "user-message", "prompt")
 }
 
 fn schema_assistant_message_field(schema: &Value) -> Option<&Value> {
-    schema
-        .get("events")?
-        .as_array()?
-        .iter()
-        .find(|event| event.get("name").and_then(Value::as_str) == Some("assistant-message"))?
-        .get("fields")?
-        .get("message")
+    schema_event_field(schema, "assistant-message", "message")
 }
 
 fn schema_tool_response_field(schema: &Value) -> Option<&Value> {
+    schema_event_field(schema, "tool-result", "toolResponse")
+}
+
+fn schema_event_field<'a>(
+    schema: &'a Value,
+    event_name: &str,
+    field_name: &str,
+) -> Option<&'a Value> {
     schema
         .get("events")?
         .as_array()?
         .iter()
-        .find(|event| event.get("name").and_then(Value::as_str) == Some("tool-result"))?
+        .find(|event| event.get("name").and_then(Value::as_str) == Some(event_name))?
         .get("fields")?
-        .get("toolResponse")
+        .get(field_name)
 }
 
 fn resolve_schema_user_prompt(schema: &Value, entry: &Value) -> Option<String> {
@@ -2051,6 +2234,19 @@ fn resolve_schema_assistant_message(schema: &Value, entry: &Value) -> Option<Str
 
 fn resolve_schema_tool_response(schema: &Value, entry: &Value) -> Option<String> {
     let field = schema_tool_response_field(schema)?;
+    resolve_test_field(field, entry).and_then(|value| match value {
+        Value::String(value) => Some(value),
+        _ => None,
+    })
+}
+
+fn resolve_schema_event_string(
+    schema: &Value,
+    event_name: &str,
+    field_name: &str,
+    entry: &Value,
+) -> Option<String> {
+    let field = schema_event_field(schema, event_name, field_name)?;
     resolve_test_field(field, entry).and_then(|value| match value {
         Value::String(value) => Some(value),
         _ => None,
@@ -2082,7 +2278,31 @@ fn resolve_test_field(spec: &Value, entry: &Value) -> Option<Value> {
 fn lookup_test_path<'a>(entry: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = entry;
     for part in path.split('.') {
-        current = current.get(part)?;
+        current = lookup_test_path_part(current, part)?;
+    }
+    Some(current)
+}
+
+fn lookup_test_path_part<'a>(value: &'a Value, part: &str) -> Option<&'a Value> {
+    let mut current = value;
+    let mut rest = part;
+    if let Some(bracket_index) = rest.find('[') {
+        if bracket_index > 0 {
+            current = current.get(&rest[..bracket_index])?;
+        }
+        rest = &rest[bracket_index..];
+    } else {
+        return current.get(rest);
+    }
+    while !rest.is_empty() {
+        let inner = rest.strip_prefix('[')?;
+        let close_index = inner.find(']')?;
+        let index = inner[..close_index].parse::<usize>().ok()?;
+        current = current.get(index)?;
+        rest = &inner[close_index + 1..];
+        if !rest.is_empty() && !rest.starts_with('[') {
+            return None;
+        }
     }
     Some(current)
 }

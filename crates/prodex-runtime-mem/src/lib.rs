@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 
 mod artifact_refs;
+mod json_path;
 mod recall_selection;
 mod schema;
+mod text;
 mod watch;
 
 pub use artifact_refs::runtime_mem_content_hash;
@@ -14,6 +16,10 @@ pub(crate) use artifact_refs::{
     runtime_mem_extract_artifact_marker, runtime_mem_first_artifact_ref_text_at_paths,
     runtime_mem_first_prodex_artifact_ref_at_paths, runtime_mem_normalize_prodex_artifact_ref,
     runtime_mem_parse_artifact_ref_token, runtime_mem_prodex_artifact_ref,
+};
+pub(crate) use json_path::{
+    runtime_mem_first_text_at_paths, runtime_mem_first_text_path_at_paths,
+    runtime_mem_lookup_json_path, runtime_mem_set_json_path,
 };
 pub(crate) use recall_selection::runtime_mem_prompt_term_is_path;
 pub use recall_selection::{
@@ -36,6 +42,9 @@ pub use schema::{
     runtime_mem_codex_schema_for_mode, runtime_mem_default_codex_schema,
     runtime_mem_full_codex_schema, runtime_mem_super_slim_codex_schema,
     runtime_mem_super_slim_v1_codex_schema,
+};
+pub(crate) use text::{
+    runtime_mem_approx_token_count, runtime_mem_first_useful_line, runtime_mem_truncate_chars,
 };
 pub use watch::{
     ensure_runtime_mem_codex_watch_for_home, ensure_runtime_mem_codex_watch_for_home_at_path,
@@ -67,6 +76,14 @@ const CLAUDE_MEM_FULL_FLAG: &str = "--mem-full";
 const CLAUDE_MEM_SUPER_SLIM_FLAG: &str = "--mem-super-slim";
 const RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS: &[&str] =
     &["payload.prompt_summary", "payload.metadata.prompt_summary"];
+const RUNTIME_MEM_MESSAGE_TEXT_PATHS: &[&str] = &[
+    "payload.message",
+    "payload.content[0].text",
+    "payload.content[1].text",
+    "payload.content[2].text",
+    "payload.content[3].text",
+    "payload.content[4].text",
+];
 const RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS: &[&str] = &[
     "payload.metadata.artifact_ref",
     "payload.metadata.artifact_id",
@@ -219,19 +236,12 @@ fn runtime_mem_event_has_super_slim_v2_prompt_reference(event: &Value) -> bool {
 
 pub fn runtime_mem_super_slim_shadow_codex_event(event: &Value) -> Value {
     let mut shadow = event.clone();
-    let Some(payload_type) = runtime_mem_lookup_json_path(&shadow, "payload.type")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-    else {
-        return shadow;
-    };
-
-    match payload_type.as_str() {
-        "user_message" => runtime_mem_shadow_user_message(&mut shadow),
-        "agent_message" => runtime_mem_shadow_assistant_message(&mut shadow),
-        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {
-            runtime_mem_shadow_tool_output(&mut shadow)
+    match runtime_mem_codex_payload_kind(&shadow) {
+        RuntimeMemCodexPayloadKind::UserMessage => runtime_mem_shadow_user_message(&mut shadow),
+        RuntimeMemCodexPayloadKind::AssistantMessage => {
+            runtime_mem_shadow_assistant_message(&mut shadow)
         }
+        RuntimeMemCodexPayloadKind::ToolOutput => runtime_mem_shadow_tool_output(&mut shadow),
         _ => {}
     }
     shadow
@@ -327,9 +337,18 @@ pub fn runtime_mem_extract_mode_with_detail(
 
 #[derive(Debug, Clone, Copy)]
 struct RuntimeMemEventContentSpec {
-    content_path: &'static str,
+    content_paths: &'static [&'static str],
     summary_paths: &'static [&'static str],
     artifact_ref_paths: &'static [&'static str],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeMemCodexPayloadKind {
+    UserMessage,
+    AssistantMessage,
+    ToolUse,
+    ToolOutput,
+    Other,
 }
 
 #[derive(Debug, Clone)]
@@ -365,15 +384,7 @@ impl RuntimeMemConversationElisionState {
     }
 
     fn remember_event(&mut self, event: &Value) {
-        let Some(payload_type) =
-            runtime_mem_lookup_json_path(event, "payload.type").and_then(Value::as_str)
-        else {
-            return;
-        };
-        if !matches!(
-            payload_type,
-            "function_call" | "custom_tool_call" | "web_search_call" | "exec_command"
-        ) {
+        if runtime_mem_codex_payload_kind(event) != RuntimeMemCodexPayloadKind::ToolUse {
             return;
         }
         let Some(tool_id) = runtime_mem_first_text_at_paths(event, &["payload.call_id"]) else {
@@ -381,7 +392,12 @@ impl RuntimeMemConversationElisionState {
         };
         let Some(command) = runtime_mem_first_text_at_paths(
             event,
-            &["payload.command", "payload.action", "payload.name"],
+            &[
+                "payload.command",
+                "payload.action.command",
+                "payload.action",
+                "payload.name",
+            ],
         ) else {
             return;
         };
@@ -413,6 +429,31 @@ impl RuntimeMemConversationElisionKind {
             Self::Assistant => "assistant",
             Self::Tool => "tool",
         }
+    }
+}
+
+fn runtime_mem_codex_payload_kind(event: &Value) -> RuntimeMemCodexPayloadKind {
+    let Some(payload_type) =
+        runtime_mem_lookup_json_path(event, "payload.type").and_then(Value::as_str)
+    else {
+        return RuntimeMemCodexPayloadKind::Other;
+    };
+    match payload_type {
+        "user_message" => RuntimeMemCodexPayloadKind::UserMessage,
+        "agent_message" => RuntimeMemCodexPayloadKind::AssistantMessage,
+        "message" => {
+            match runtime_mem_lookup_json_path(event, "payload.role").and_then(Value::as_str) {
+                Some("user") => RuntimeMemCodexPayloadKind::UserMessage,
+                Some("assistant") => RuntimeMemCodexPayloadKind::AssistantMessage,
+                _ => RuntimeMemCodexPayloadKind::Other,
+            }
+        }
+        "function_call" | "custom_tool_call" | "web_search_call" | "exec_command"
+        | "local_shell_call" => RuntimeMemCodexPayloadKind::ToolUse,
+        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {
+            RuntimeMemCodexPayloadKind::ToolOutput
+        }
+        _ => RuntimeMemCodexPayloadKind::Other,
     }
 }
 
@@ -488,17 +529,16 @@ fn runtime_mem_super_slim_shadow_codex_event_with_dedupe(
 ) -> Value {
     let spec = runtime_mem_event_content_spec(event);
     let replacement = spec.and_then(|spec| {
-        let content_replacement = runtime_mem_lookup_json_path(event, spec.content_path)
-            .and_then(Value::as_str)
-            .and_then(|content| {
+        let content_replacement = runtime_mem_first_text_path_at_paths(event, spec.content_paths)
+            .and_then(|(_, content)| {
                 let artifact_ref = runtime_mem_first_prodex_artifact_ref_at_paths(
                     event,
                     spec.artifact_ref_paths,
-                    content,
+                    &content,
                 );
                 dedupe_state.replacement_for_optional_content(
                     runtime_mem_event_dedupe_id(event, index),
-                    content,
+                    &content,
                     artifact_ref,
                 )
             });
@@ -537,48 +577,24 @@ fn runtime_mem_elide_old_conversation_event(
     if !elision_state.event_is_old(index) {
         return;
     }
-    let Some(payload_type) =
-        runtime_mem_lookup_json_path(event, "payload.type").and_then(Value::as_str)
-    else {
+    let Some((kind, spec)) = runtime_mem_conversation_elision_spec(event) else {
         return;
     };
-    let (kind, content_path, summary_paths, artifact_ref_paths) = match payload_type {
-        "user_message" => (
-            RuntimeMemConversationElisionKind::User,
-            "payload.message",
-            RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS,
-            RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS,
-        ),
-        "agent_message" => (
-            RuntimeMemConversationElisionKind::Assistant,
-            "payload.message",
-            RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS,
-            RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
-        ),
-        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => (
-            RuntimeMemConversationElisionKind::Tool,
-            "payload.output",
-            RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS,
-            RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
-        ),
-        _ => return,
-    };
 
-    let Some(content) = runtime_mem_lookup_json_path(event, content_path)
-        .and_then(Value::as_str)
-        .map(str::trim)
+    let Some(content) = runtime_mem_first_text_path_at_paths(event, spec.content_paths)
+        .map(|(_, content)| content.trim().to_string())
         .filter(|content| content.len() >= RUNTIME_MEM_CONVERSATION_ELISION_MIN_CONTENT_BYTES)
     else {
         return;
     };
     let artifact_ref =
-        runtime_mem_first_prodex_artifact_ref_at_paths(event, artifact_ref_paths, content);
+        runtime_mem_first_prodex_artifact_ref_at_paths(event, spec.artifact_ref_paths, &content);
     let command = (kind == RuntimeMemConversationElisionKind::Tool)
         .then(|| elision_state.command_for_event(event))
         .flatten();
     let summary =
-        runtime_mem_conversation_elision_summary(kind, content, command, artifact_ref.as_deref());
-    for path in summary_paths {
+        runtime_mem_conversation_elision_summary(kind, &content, command, artifact_ref.as_deref());
+    for path in spec.summary_paths {
         runtime_mem_set_json_path(shadow, path, Value::String(summary.clone()));
     }
     if let Some(artifact_ref) = artifact_ref {
@@ -595,8 +611,7 @@ fn runtime_mem_assistant_summary_duplicate_replacement(
     index: usize,
     dedupe_state: &mut RuntimeMemEventDedupeState,
 ) -> Option<RuntimeMemDedupeReplacement> {
-    let payload_type = runtime_mem_lookup_json_path(event, "payload.type")?.as_str()?;
-    if payload_type != "agent_message" {
+    if runtime_mem_codex_payload_kind(event) != RuntimeMemCodexPayloadKind::AssistantMessage {
         return None;
     }
     let summary = runtime_mem_lookup_json_path(event, "payload.summary")?
@@ -612,27 +627,41 @@ fn runtime_mem_assistant_summary_duplicate_replacement(
 }
 
 fn runtime_mem_event_content_spec(event: &Value) -> Option<RuntimeMemEventContentSpec> {
-    let payload_type = runtime_mem_lookup_json_path(event, "payload.type")?.as_str()?;
-    match payload_type {
-        "user_message" => Some(RuntimeMemEventContentSpec {
-            content_path: "payload.message",
+    match runtime_mem_codex_payload_kind(event) {
+        RuntimeMemCodexPayloadKind::UserMessage => Some(RuntimeMemEventContentSpec {
+            content_paths: RUNTIME_MEM_MESSAGE_TEXT_PATHS,
             summary_paths: RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS,
             artifact_ref_paths: RUNTIME_MEM_SUPER_SLIM_ARTIFACT_REF_PATHS,
         }),
-        "agent_message" => Some(RuntimeMemEventContentSpec {
-            content_path: "payload.message",
+        RuntimeMemCodexPayloadKind::AssistantMessage => Some(RuntimeMemEventContentSpec {
+            content_paths: RUNTIME_MEM_MESSAGE_TEXT_PATHS,
             summary_paths: RUNTIME_MEM_SUPER_SLIM_ASSISTANT_SUMMARY_PATHS,
             artifact_ref_paths: RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
         }),
-        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {
-            Some(RuntimeMemEventContentSpec {
-                content_path: "payload.output",
-                summary_paths: RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS,
-                artifact_ref_paths: RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
-            })
-        }
+        RuntimeMemCodexPayloadKind::ToolOutput => Some(RuntimeMemEventContentSpec {
+            content_paths: &["payload.output"],
+            summary_paths: RUNTIME_MEM_SUPER_SLIM_TOOL_SUMMARY_PATHS,
+            artifact_ref_paths: RUNTIME_MEM_SUPER_SLIM_TOOL_REF_PATHS,
+        }),
         _ => None,
     }
+}
+
+fn runtime_mem_conversation_elision_spec(
+    event: &Value,
+) -> Option<(
+    RuntimeMemConversationElisionKind,
+    RuntimeMemEventContentSpec,
+)> {
+    let kind = match runtime_mem_codex_payload_kind(event) {
+        RuntimeMemCodexPayloadKind::UserMessage => RuntimeMemConversationElisionKind::User,
+        RuntimeMemCodexPayloadKind::AssistantMessage => {
+            RuntimeMemConversationElisionKind::Assistant
+        }
+        RuntimeMemCodexPayloadKind::ToolOutput => RuntimeMemConversationElisionKind::Tool,
+        _ => return None,
+    };
+    Some((kind, runtime_mem_event_content_spec(event)?))
 }
 
 fn runtime_mem_event_dedupe_id(event: &Value, index: usize) -> String {
@@ -938,21 +967,13 @@ fn runtime_mem_conversation_line_has_decision_signal(line: &str) -> bool {
         || lower.contains("fixed")
 }
 
-fn runtime_mem_lookup_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    let mut current = value;
-    for part in path.split('.') {
-        current = current.get(part)?;
-    }
-    Some(current)
-}
-
 fn runtime_mem_shadow_user_message(event: &mut Value) {
     let summary =
         runtime_mem_first_text_at_paths(event, RUNTIME_MEM_SUPER_SLIM_PROMPT_SUMMARY_PATHS)
             .or_else(|| {
-                runtime_mem_shadow_summary_for_path(
+                runtime_mem_shadow_summary_for_paths(
                     event,
-                    "payload.message",
+                    RUNTIME_MEM_MESSAGE_TEXT_PATHS,
                     "user prompt",
                     "prompt",
                 )
@@ -982,32 +1003,36 @@ fn runtime_mem_shadow_user_message(event: &mut Value) {
             Value::String(artifact_ref),
         );
     }
-    if runtime_mem_lookup_json_path(event, "payload.message").is_some() {
-        runtime_mem_set_json_path(
-            event,
-            "payload.message",
-            Value::String(RUNTIME_MEM_SUPER_SLIM_OMITTED.to_string()),
-        );
+    for path in RUNTIME_MEM_MESSAGE_TEXT_PATHS {
+        if runtime_mem_lookup_json_path(event, path).is_some() {
+            runtime_mem_set_json_path(
+                event,
+                path,
+                Value::String(RUNTIME_MEM_SUPER_SLIM_OMITTED.to_string()),
+            );
+        }
     }
 }
 
 fn runtime_mem_shadow_assistant_message(event: &mut Value) {
     if runtime_mem_lookup_json_path(event, "payload.summary").is_none()
-        && let Some(summary) = runtime_mem_shadow_summary_for_path(
+        && let Some(summary) = runtime_mem_shadow_summary_for_paths(
             event,
-            "payload.message",
+            RUNTIME_MEM_MESSAGE_TEXT_PATHS,
             "assistant response",
             "message",
         )
     {
         runtime_mem_set_json_path(event, "payload.summary", Value::String(summary));
     }
-    if runtime_mem_lookup_json_path(event, "payload.message").is_some() {
-        runtime_mem_set_json_path(
-            event,
-            "payload.message",
-            Value::String(RUNTIME_MEM_SUPER_SLIM_OMITTED.to_string()),
-        );
+    for path in RUNTIME_MEM_MESSAGE_TEXT_PATHS {
+        if runtime_mem_lookup_json_path(event, path).is_some() {
+            runtime_mem_set_json_path(
+                event,
+                path,
+                Value::String(RUNTIME_MEM_SUPER_SLIM_OMITTED.to_string()),
+            );
+        }
     }
 }
 
@@ -1041,14 +1066,8 @@ fn runtime_mem_shadow_tool_output(event: &mut Value) {
 }
 
 fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
-    let Some(payload_type) =
-        runtime_mem_lookup_json_path(event, "payload.type").and_then(Value::as_str)
-    else {
-        return event.clone();
-    };
-
-    match payload_type {
-        "user_message" => {
+    match runtime_mem_codex_payload_kind(event) {
+        RuntimeMemCodexPayloadKind::UserMessage => {
             let mut shadow =
                 runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE);
             let summary =
@@ -1069,7 +1088,7 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
             }
             Value::Object(shadow)
         }
-        "agent_message" => {
+        RuntimeMemCodexPayloadKind::AssistantMessage => {
             let mut shadow =
                 runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE);
             if let Some(summary) = runtime_mem_first_text_at_paths(
@@ -1080,7 +1099,7 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
             }
             Value::Object(shadow)
         }
-        "function_call" | "custom_tool_call" | "web_search_call" | "exec_command" => {
+        RuntimeMemCodexPayloadKind::ToolUse => {
             let mut shadow =
                 runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE);
             if let Some(tool_id) = runtime_mem_first_text_at_paths(event, &["payload.call_id"]) {
@@ -1090,12 +1109,17 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
                 runtime_mem_first_text_at_paths(event, &["payload.name", "payload.type"]);
             let tool_input = runtime_mem_first_text_at_paths(
                 event,
-                &["payload.command", "payload.action", "payload.name"],
+                &[
+                    "payload.command",
+                    "payload.action.command",
+                    "payload.action",
+                    "payload.name",
+                ],
             );
             runtime_mem_insert_super_slim_v2_tool_use_fields(&mut shadow, tool_name, tool_input);
             Value::Object(shadow)
         }
-        "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {
+        RuntimeMemCodexPayloadKind::ToolOutput => {
             let mut shadow =
                 runtime_mem_short_shadow_event(RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE);
             if let Some(tool_id) = runtime_mem_first_text_at_paths(event, &["payload.call_id"]) {
@@ -1119,7 +1143,7 @@ fn runtime_mem_super_slim_v2_shadow_from_v1_shadow(event: &Value) -> Value {
             }
             Value::Object(shadow)
         }
-        _ => event.clone(),
+        RuntimeMemCodexPayloadKind::Other => event.clone(),
     }
 }
 
@@ -2194,6 +2218,22 @@ fn runtime_mem_shadow_summary_for_path(
     ))
 }
 
+fn runtime_mem_shadow_summary_for_paths(
+    event: &Value,
+    paths: &[&str],
+    label: &str,
+    omitted_name: &str,
+) -> Option<String> {
+    let (_, text) = runtime_mem_first_text_path_at_paths(event, paths)?;
+    let artifact_ref = runtime_mem_extract_artifact_marker(event);
+    Some(runtime_mem_shadow_summary_from_text(
+        &text,
+        label,
+        omitted_name,
+        artifact_ref.as_deref(),
+    ))
+}
+
 fn runtime_mem_shadow_summary_from_text(
     text: &str,
     label: &str,
@@ -2231,56 +2271,6 @@ fn runtime_mem_shadow_summary_prefix_char_limit(artifact_ref: Option<&str>) -> u
         RUNTIME_MEM_SUPER_SLIM_REFERENCED_SUMMARY_PREFIX_CHAR_LIMIT
     } else {
         RUNTIME_MEM_SUPER_SLIM_SUMMARY_PREFIX_CHAR_LIMIT
-    }
-}
-
-fn runtime_mem_first_useful_line(text: &str) -> Option<&str> {
-    text.lines().map(str::trim).find(|line| !line.is_empty())
-}
-
-fn runtime_mem_truncate_chars(text: &str, max_chars: usize) -> String {
-    let mut chars = text.chars();
-    let truncated = chars.by_ref().take(max_chars).collect::<String>();
-    if chars.next().is_some() {
-        format!("{truncated}...")
-    } else {
-        truncated
-    }
-}
-
-fn runtime_mem_approx_token_count(text: &str) -> usize {
-    text.split_whitespace().count()
-}
-
-fn runtime_mem_first_text_at_paths(event: &Value, paths: &[&str]) -> Option<String> {
-    paths.iter().find_map(|path| {
-        runtime_mem_lookup_json_path(event, path)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_string)
-    })
-}
-
-fn runtime_mem_set_json_path(value: &mut Value, path: &str, new_value: Value) {
-    let mut current = value;
-    let mut parts = path.split('.').peekable();
-    while let Some(part) = parts.next() {
-        if parts.peek().is_none() {
-            if let Value::Object(object) = current {
-                object.insert(part.to_string(), new_value);
-            }
-            return;
-        }
-        if !current.is_object() {
-            *current = serde_json::json!({});
-        }
-        let object = current
-            .as_object_mut()
-            .expect("json path container should be object");
-        current = object
-            .entry(part.to_string())
-            .or_insert_with(|| serde_json::json!({}));
     }
 }
 
