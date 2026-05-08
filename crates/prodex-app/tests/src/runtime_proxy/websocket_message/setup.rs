@@ -1,5 +1,6 @@
 use super::super::test_support::{
-    test_runtime_local_websocket_pair, test_runtime_shared, test_runtime_websocket_flow,
+    read_runtime_local_websocket_text, test_runtime_local_websocket_pair, test_runtime_shared,
+    test_runtime_websocket_flow,
 };
 use super::*;
 
@@ -42,4 +43,44 @@ fn should_promote_committed_profile_only_for_fresh_requests() {
 
     flow.bound_session_profile = Some("alpha".to_string());
     assert!(!flow.should_promote_committed_profile());
+}
+
+#[test]
+fn response_processed_is_forwarded_one_way_on_existing_upstream_session() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = test_runtime_shared("setup-response-processed");
+    let (mut local_socket, _local_peer) = test_runtime_local_websocket_pair();
+    let (mut upstream_peer, upstream_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    websocket_session.store(
+        upstream_socket,
+        "alpha",
+        Some("turn-alpha".to_string()),
+        None,
+    );
+
+    let request_text = r#"{"type":"response.processed","response_id":"resp-alpha"}"#;
+    proxy_runtime_websocket_text_message(
+        77,
+        88,
+        &mut local_socket,
+        &RuntimeProxyRequest {
+            method: "GET".to_string(),
+            path_and_query: "/backend-api/prodex/responses".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        },
+        request_text,
+        &RuntimeWebsocketRequestMetadata::default(),
+        &shared,
+        &mut websocket_session,
+    )
+    .expect("response.processed should be best-effort one-way forwarding");
+
+    assert_eq!(
+        read_runtime_local_websocket_text(&mut upstream_peer),
+        request_text
+    );
+    assert_eq!(websocket_session.profile_name.as_deref(), Some("alpha"));
+    assert_eq!(websocket_session.turn_state.as_deref(), Some("turn-alpha"));
 }

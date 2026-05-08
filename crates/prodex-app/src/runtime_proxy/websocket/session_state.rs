@@ -10,13 +10,17 @@ pub(in crate::runtime_proxy) struct RuntimeWebsocketSessionState {
 }
 
 impl RuntimeWebsocketSessionState {
-    pub(super) fn can_reuse(&self, profile_name: &str, turn_state_override: Option<&str>) -> bool {
+    pub(in crate::runtime_proxy) fn can_reuse(
+        &self,
+        profile_name: &str,
+        turn_state_override: Option<&str>,
+    ) -> bool {
         self.upstream_socket.is_some()
             && self.profile_name.as_deref() == Some(profile_name)
             && turn_state_override.is_none_or(|value| self.turn_state.as_deref() == Some(value))
     }
 
-    pub(super) fn take_socket(&mut self) -> Option<RuntimeUpstreamWebSocket> {
+    pub(in crate::runtime_proxy) fn take_socket(&mut self) -> Option<RuntimeUpstreamWebSocket> {
         self.upstream_socket.take()
     }
 
@@ -24,7 +28,7 @@ impl RuntimeWebsocketSessionState {
         self.last_terminal_at.map(|timestamp| timestamp.elapsed())
     }
 
-    pub(super) fn store(
+    pub(in crate::runtime_proxy) fn store(
         &mut self,
         socket: RuntimeUpstreamWebSocket,
         profile_name: &str,
@@ -40,14 +44,14 @@ impl RuntimeWebsocketSessionState {
         }
     }
 
-    pub(super) fn reset(&mut self) {
+    pub(in crate::runtime_proxy) fn reset(&mut self) {
         self.upstream_socket = None;
         self.profile_name = None;
         self.turn_state = None;
         self.inflight_guard = None;
     }
 
-    pub(super) fn close(&mut self) {
+    pub(in crate::runtime_proxy) fn close(&mut self) {
         if let Some(mut socket) = self.upstream_socket.take() {
             let _ = socket.close(None);
         }

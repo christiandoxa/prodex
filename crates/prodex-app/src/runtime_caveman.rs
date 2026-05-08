@@ -62,6 +62,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if let Some(mem_mode) = self.mem_mode {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home_with_mode(&caveman_home, mem_mode)?;
+            prodex_caveman_assets::trust_claude_mem_codex_plugin_hooks(&caveman_home)?;
         }
         let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
         if self.args.no_proxy && runtime_proxy.is_none() {

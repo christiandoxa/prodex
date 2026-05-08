@@ -36,6 +36,16 @@ pub(super) fn proxy_runtime_websocket_text_message(
     shared: &RuntimeRotationProxyShared,
     websocket_session: &mut RuntimeWebsocketSessionState,
 ) -> Result<()> {
+    if forward_runtime_response_processed_websocket_request(
+        session_id,
+        request_id,
+        request_text,
+        shared,
+        websocket_session,
+    )? {
+        return Ok(());
+    }
+
     RuntimeWebsocketTextMessageFlow::new(
         session_id,
         request_id,
@@ -47,6 +57,92 @@ pub(super) fn proxy_runtime_websocket_text_message(
         websocket_session,
     )?
     .run()
+}
+
+fn forward_runtime_response_processed_websocket_request(
+    session_id: u64,
+    request_id: u64,
+    request_text: &str,
+    shared: &RuntimeRotationProxyShared,
+    websocket_session: &mut RuntimeWebsocketSessionState,
+) -> Result<bool> {
+    let Some(response_id) = runtime_response_processed_response_id(request_text) else {
+        return Ok(false);
+    };
+    let Some(profile_name) = websocket_session.profile_name.clone() else {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} websocket_session={session_id} response_processed_skipped response_id={response_id} reason=no_upstream_session"
+            ),
+        );
+        return Ok(true);
+    };
+    let turn_state = websocket_session.turn_state.clone();
+    let Some(mut upstream_socket) = websocket_session.take_socket() else {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} websocket_session={session_id} response_processed_skipped response_id={response_id} profile={profile_name} reason=no_upstream_socket"
+            ),
+        );
+        return Ok(true);
+    };
+
+    runtime_set_upstream_websocket_io_timeout(
+        &mut upstream_socket,
+        Some(Duration::from_millis(
+            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+        )),
+    )
+    .context("failed to configure response.processed websocket send timeout")?;
+    match upstream_socket.send(WsMessage::Text(request_text.to_string().into())) {
+        Ok(()) => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} websocket_session={session_id} response_processed_forwarded response_id={response_id} profile={profile_name}"
+                ),
+            );
+            websocket_session.store(upstream_socket, &profile_name, turn_state, None);
+        }
+        Err(err) => {
+            let _ = upstream_socket.close(None);
+            websocket_session.reset();
+            let transport_error =
+                anyhow::anyhow!("failed to forward response.processed upstream: {err}");
+            note_runtime_profile_transport_failure(
+                shared,
+                &profile_name,
+                RuntimeRouteKind::Websocket,
+                "websocket_response_processed_send",
+                &transport_error,
+            );
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} websocket_session={session_id} response_processed_send_error response_id={response_id} profile={profile_name} error={err}"
+                ),
+            );
+        }
+    }
+    Ok(true)
+}
+
+fn runtime_response_processed_response_id(request_text: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(request_text).ok()?;
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("response.processed") {
+        return None;
+    }
+    Some(
+        value
+            .get("response_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|response_id| !response_id.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| "-".to_string()),
+    )
 }
 
 struct RuntimeWebsocketTextMessageFlow<'a> {
@@ -210,6 +306,16 @@ pub(super) mod test_support {
         match socket
             .read()
             .expect("test websocket client should read a frame")
+        {
+            WsMessage::Text(text) => text.to_string(),
+            other => panic!("expected websocket text frame, got {other:?}"),
+        }
+    }
+
+    pub(super) fn read_runtime_local_websocket_text(socket: &mut RuntimeLocalWebSocket) -> String {
+        match socket
+            .read()
+            .expect("test websocket server should read a frame")
         {
             WsMessage::Text(text) => text.to_string(),
             other => panic!("expected websocket text frame, got {other:?}"),

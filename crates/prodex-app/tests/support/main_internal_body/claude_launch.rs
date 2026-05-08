@@ -416,6 +416,14 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
             .as_str()
             .is_some_and(|command| command.contains("CAVEMAN MODE ACTIVE"))
     );
+    let hook_key = format!("{}:session_start:0:0", temp_config.display());
+    let trusted_hash = parsed_config["hooks"]["state"][&hook_key]["trusted_hash"]
+        .as_str()
+        .expect("Caveman hook should be auto-trusted for the temporary config source");
+    assert!(
+        trusted_hash.starts_with("sha256:") && trusted_hash.len() == "sha256:".len() + 64,
+        "trusted hook hash should use Codex canonical sha256 format"
+    );
 
     let shared_rendered = fs::read_to_string(&shared_config).expect("shared config should read");
     assert!(
@@ -463,6 +471,111 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
             .join("plugins/cache/prodex-caveman/caveman/0.1.0/skills/compress/SKILL.md")
             .exists(),
         "compress skill should not install in the default plugin cache"
+    );
+}
+
+#[test]
+fn trust_claude_mem_codex_plugin_hooks_updates_temporary_caveman_config_only() {
+    let _env_guard = TestEnvVarGuard::unset(PRODEX_CAVEMAN_FULL_ASSETS_ENV);
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.clone(),
+        state_file: temp_dir.path.join("state.json"),
+        managed_profiles_root: temp_dir.path.join("profiles"),
+        shared_codex_root: temp_dir.path.join(".codex"),
+        legacy_shared_codex_root: temp_dir.path.join("shared"),
+    };
+    create_codex_home_if_missing(&paths.managed_profiles_root).expect("managed root");
+
+    let base_home = paths.managed_profiles_root.join("main");
+    create_codex_home_if_missing(&base_home).expect("base home");
+    fs::write(
+        base_home.join("config.toml"),
+        r#"
+[features]
+plugin_hooks = true
+
+[plugins."claude-mem@claude-mem-local"]
+enabled = true
+"#,
+    )
+    .expect("base config should write");
+
+    let plugin_root = base_home
+        .join("plugins/cache/claude-mem-local/claude-mem/12.7.5");
+    fs::create_dir_all(plugin_root.join(".codex-plugin")).expect("manifest dir should create");
+    fs::create_dir_all(plugin_root.join("hooks")).expect("hooks dir should create");
+    fs::write(
+        plugin_root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"claude-mem","version":"12.7.5","hooks":"./hooks/codex-hooks.json"}"#,
+    )
+    .expect("plugin manifest should write");
+    fs::write(
+        plugin_root.join("hooks/codex-hooks.json"),
+        r#"{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          { "type": "command", "command": "node hook-a.js", "timeout": 5 },
+          { "type": "command", "command": "node hook-b.js", "timeout": 60, "statusMessage": "Loading claude-mem context" }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "ignored by Codex for this event",
+        "hooks": [
+          { "type": "command", "command": "node prompt.js" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node stop.js" }
+        ]
+      }
+    ]
+  }
+}"#,
+    )
+    .expect("hooks manifest should write");
+
+    let caveman_home =
+        prepare_caveman_launch_home(&paths, &base_home).expect("caveman home should prepare");
+    prodex_caveman_assets::trust_claude_mem_codex_plugin_hooks(&caveman_home)
+        .expect("Claude-Mem Codex hooks should be trusted in the temp home");
+
+    let temp_config = caveman_home.join("config.toml");
+    let rendered_config = fs::read_to_string(&temp_config).expect("temp config should read");
+    let parsed_config: toml::Value =
+        toml::from_str(&rendered_config).expect("temp config should parse");
+    let state = parsed_config["hooks"]["state"]
+        .as_table()
+        .expect("hook trust state should be a TOML table");
+    for suffix in [
+        "session_start:0:0",
+        "session_start:0:1",
+        "user_prompt_submit:0:0",
+        "stop:0:0",
+    ] {
+        let hook_key = format!("claude-mem@claude-mem-local:hooks/codex-hooks.json:{suffix}");
+        let trusted_hash = state[&hook_key]["trusted_hash"]
+            .as_str()
+            .expect("Claude-Mem hook should be trusted");
+        assert!(
+            trusted_hash.starts_with("sha256:") && trusted_hash.len() == "sha256:".len() + 64,
+            "trusted hook hash should use Codex canonical sha256 format"
+        );
+    }
+
+    let base_rendered =
+        fs::read_to_string(base_home.join("config.toml")).expect("base config should read");
+    assert!(
+        !base_rendered.contains("claude-mem-local:hooks/codex-hooks.json"),
+        "base Codex config must stay unchanged"
     );
 }
 
