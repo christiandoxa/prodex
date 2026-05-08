@@ -140,6 +140,11 @@ function preflightSteps(args) {
       args: ["scripts/ci/release-tag-changelog-guard.mjs"],
     },
     {
+      label: "release-guard-fixtures",
+      command: "node",
+      args: ["scripts/ci/release-guard-fixture-tests.mjs"],
+    },
+    {
       label: "size-guard",
       command: "node",
       args: ["scripts/ci/size-guard.mjs"],

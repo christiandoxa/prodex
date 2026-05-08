@@ -1,16 +1,5 @@
 #!/usr/bin/env node
-import fs from "node:fs/promises";
-import path from "node:path";
-import { git, normalizeGitPath } from "./guard-common.mjs";
-import { repoRoot } from "../npm/common.mjs";
-
-const RELEASE_MESSAGE_PATTERNS = Object.freeze([
-  /^release(?:\([^)]*\))?!?:/i,
-  /^release\s+v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/i,
-  /^chore(?:\([^)]*\))?!?:\s*release\b/i,
-  /^chore\(release\)!?:/i,
-  /^bump(?:\([^)]*\))?!?:\s*(?:prodex\s+)?v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/i,
-]);
+import { isReleaseLikeMessage, selectedChanges } from "./release-guard-common.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -123,105 +112,6 @@ function assertValidArgs(args) {
   }
 }
 
-function isReleaseLikeMessage(message) {
-  const subject = message.split(/\r?\n/, 1)[0]?.trim() ?? "";
-  return RELEASE_MESSAGE_PATTERNS.some((pattern) => pattern.test(subject));
-}
-
-async function messageFromArgs(args, fallback) {
-  if (args.messageFile) {
-    return fs.readFile(path.resolve(repoRoot, args.messageFile), "utf8");
-  }
-  return args.message ?? fallback;
-}
-
-async function commitMessage(rev) {
-  const { stdout } = await git(["log", "-1", "--format=%B", rev], { cwd: repoRoot });
-  return stdout.trimEnd();
-}
-
-async function commitFiles(rev) {
-  const { stdout } = await git(["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", rev], {
-    cwd: repoRoot,
-  });
-  return stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map(normalizeGitPath);
-}
-
-async function rangeCommits(range) {
-  const { stdout } = await git(["rev-list", "--reverse", range], { cwd: repoRoot });
-  return stdout.split(/\r?\n/).filter(Boolean);
-}
-
-async function changedFilesForSynthetic(staged) {
-  const diffArgs = staged ? ["diff", "--cached", "--name-only"] : ["diff", "--name-only"];
-  const { stdout } = await git(diffArgs, { cwd: repoRoot });
-  const files = stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map(normalizeGitPath);
-
-  if (!staged) {
-    const { stdout: untrackedStdout } = await git(["ls-files", "--others", "--exclude-standard"], {
-      cwd: repoRoot,
-    });
-    files.push(
-      ...untrackedStdout
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map(normalizeGitPath),
-    );
-  }
-
-  return [...new Set(files)].sort();
-}
-
-async function selectedChanges(args) {
-  assertValidArgs(args);
-
-  if (args.range || (args.base && args.head)) {
-    const range = args.range ?? `${args.base}..${args.head}`;
-    const commits = await rangeCommits(range);
-    const changes = [];
-    for (const rev of commits) {
-      changes.push({
-        label: rev,
-        message: await messageFromArgs(args, await commitMessage(rev)),
-        files: await commitFiles(rev),
-      });
-    }
-    return { selector: range, changes };
-  }
-
-  if (args.staged || args.worktree) {
-    const staged = Boolean(args.staged);
-    return {
-      selector: staged ? "staged" : "worktree",
-      changes: [
-        {
-          label: staged ? "staged" : "worktree",
-          message: await messageFromArgs(args, ""),
-          files: await changedFilesForSynthetic(staged),
-        },
-      ],
-    };
-  }
-
-  const rev = args.commit ?? "HEAD";
-  return {
-    selector: rev,
-    changes: [
-      {
-        label: rev,
-        message: await messageFromArgs(args, await commitMessage(rev)),
-        files: await commitFiles(rev),
-      },
-    ],
-  };
-}
-
 function evaluateChange(change) {
   const subject = change.message.split(/\r?\n/, 1)[0]?.trim() ?? "";
   const releaseLike = isReleaseLikeMessage(change.message);
@@ -259,7 +149,9 @@ async function main() {
     return;
   }
 
-  const { selector, changes } = await selectedChanges(args);
+  assertValidArgs(args);
+  const selectionArgs = args.worktree ? { ...args, includeUntracked: true } : args;
+  const { selector, changes } = await selectedChanges(selectionArgs);
   const results = changes.map(evaluateChange);
   if (args.json) {
     process.stdout.write(`${JSON.stringify({ selector, results }, null, 2)}\n`);

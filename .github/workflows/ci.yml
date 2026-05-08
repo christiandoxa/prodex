@@ -116,7 +116,8 @@ jobs:
             for guard in "${range_guards[@]}"; do
               npm run "${guard}" -- --base "${base}" --head "${head}"
             done
-            npm run ci:release-tag-changelog-guard -- --rev "${head}"
+            npm run ci:release-tag-changelog-guard -- --base "${base}" --head "${head}"
+            npm run ci:release-guard-fixtures
             exit 0
           fi
 
@@ -126,12 +127,14 @@ jobs:
             for guard in "${range_guards[@]}"; do
               npm run "${guard}" -- --base "${before}" --head "${after}"
             done
-            npm run ci:release-tag-changelog-guard -- --rev "${after}"
+            npm run ci:release-tag-changelog-guard -- --base "${before}" --head "${after}"
+            npm run ci:release-guard-fixtures
           else
             for guard in "${range_guards[@]}"; do
               npm run "${guard}"
             done
             npm run ci:release-tag-changelog-guard
+            npm run ci:release-guard-fixtures
           fi
 
       - name: Enforce Rust file size guard

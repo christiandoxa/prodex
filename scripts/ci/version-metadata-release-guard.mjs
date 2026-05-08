@@ -1,31 +1,9 @@
 #!/usr/bin/env node
-import fs from "node:fs/promises";
-import path from "node:path";
-import { fileMatchesAnyPattern, git, normalizeGitPath } from "./guard-common.mjs";
-import { repoRoot } from "../npm/common.mjs";
-
-const VERSION_METADATA_PATTERNS = Object.freeze([
-  "Cargo.toml",
-  "Cargo.lock",
-  "crates/*/Cargo.toml",
-  "npm/prodex/package.json",
-  "npm/platforms/*/package.json",
-  "package-lock.json",
-  "npm/package-lock.json",
-  "npm/prodex/package-lock.json",
-  "npm/platforms/*/package-lock.json",
-  "README.md",
-  "QUICKSTART.md",
-  "CHANGELOG.md",
-]);
-
-const RELEASE_MESSAGE_PATTERNS = Object.freeze([
-  /^release(?:\([^)]*\))?!?:/i,
-  /^release\s+v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/i,
-  /^chore(?:\([^)]*\))?!?:\s*release\b/i,
-  /^chore\(release\)!?:/i,
-  /^bump(?:\([^)]*\))?!?:\s*(?:prodex\s+)?v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/i,
-]);
+import {
+  isReleaseLikeMessage,
+  isVersionMetadataPath,
+  selectedChanges,
+} from "./release-guard-common.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -142,107 +120,6 @@ function assertSingleSelector(args) {
   }
 }
 
-function isVersionMetadataPath(filePath) {
-  return fileMatchesAnyPattern(filePath, VERSION_METADATA_PATTERNS);
-}
-
-function isReleaseLikeMessage(message) {
-  const subject = message.split(/\r?\n/, 1)[0]?.trim() ?? "";
-  return RELEASE_MESSAGE_PATTERNS.some((pattern) => pattern.test(subject));
-}
-
-async function commitMessage(rev) {
-  const { stdout } = await git(["log", "-1", "--format=%B", rev], { cwd: repoRoot });
-  return stdout.trimEnd();
-}
-
-async function commitFiles(rev) {
-  const { stdout } = await git(["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", rev], {
-    cwd: repoRoot,
-  });
-  return stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map(normalizeGitPath);
-}
-
-async function rangeCommits(range) {
-  const { stdout } = await git(["rev-list", "--reverse", range], { cwd: repoRoot });
-  return stdout.split(/\r?\n/).filter(Boolean);
-}
-
-async function messageOverride(args) {
-  if (args.messageFile) {
-    return fs.readFile(path.resolve(repoRoot, args.messageFile), "utf8");
-  }
-  return args.message;
-}
-
-async function changedFilesForSynthetic(args) {
-  const diffArgs = args.staged ? ["diff", "--cached", "--name-only"] : ["diff", "--name-only"];
-  const { stdout } = await git(diffArgs, { cwd: repoRoot });
-  const files = stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map(normalizeGitPath);
-
-  if (args.includeUntracked) {
-    const untracked = await git(["ls-files", "--others", "--exclude-standard"], { cwd: repoRoot });
-    files.push(
-      ...untracked.stdout
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map(normalizeGitPath),
-    );
-  }
-
-  return [...new Set(files)].sort();
-}
-
-async function selectedChanges(args) {
-  assertSingleSelector(args);
-  const override = await messageOverride(args);
-
-  if (args.range || (args.base && args.head)) {
-    const range = args.range ?? `${args.base}..${args.head}`;
-    const commits = await rangeCommits(range);
-    const changes = [];
-    for (const rev of commits) {
-      changes.push({
-        label: rev,
-        message: override ?? (await commitMessage(rev)),
-        files: await commitFiles(rev),
-      });
-    }
-    return { selector: range, changes };
-  }
-
-  if (args.staged || args.worktree) {
-    return {
-      selector: args.staged ? "staged" : "worktree",
-      changes: [
-        {
-          label: args.staged ? "staged" : "worktree",
-          message: override ?? "",
-          files: await changedFilesForSynthetic(args),
-        },
-      ],
-    };
-  }
-
-  const rev = args.commit ?? "HEAD";
-  return {
-    selector: rev,
-    changes: [
-      {
-        label: rev,
-        message: override ?? (await commitMessage(rev)),
-        files: await commitFiles(rev),
-      },
-    ],
-  };
-}
-
 function evaluateChange(change) {
   const metadataFiles = change.files.filter(isVersionMetadataPath);
   const nonMetadataFiles = change.files.filter((filePath) => !isVersionMetadataPath(filePath));
@@ -300,6 +177,7 @@ async function main() {
     return;
   }
 
+  assertSingleSelector(args);
   const { selector, changes } = await selectedChanges(args);
   const results = changes.map(evaluateChange);
   if (args.json) {

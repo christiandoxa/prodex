@@ -1,30 +1,8 @@
 #!/usr/bin/env node
-import { git } from "./guard-common.mjs";
-import { repoRoot } from "../npm/common.mjs";
-
-const SEMVER_SOURCE = String.raw`v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)`;
-const RELEASE_SUBJECT_PATTERNS = Object.freeze([
-  {
-    action: "release",
-    pattern: new RegExp(String.raw`^chore\(release\)!?:\s*release\s+${SEMVER_SOURCE}\s*$`, "i"),
-  },
-  {
-    action: "prepare",
-    pattern: new RegExp(String.raw`^chore\(release\)!?:\s*prepare\s+${SEMVER_SOURCE}\s*$`, "i"),
-  },
-  {
-    action: "release",
-    pattern: new RegExp(String.raw`^release(?:\([^)]*\))?!?:\s*${SEMVER_SOURCE}\s*$`, "i"),
-  },
-  {
-    action: "release",
-    pattern: new RegExp(String.raw`^release\s+${SEMVER_SOURCE}\s*$`, "i"),
-  },
-  {
-    action: "bump",
-    pattern: new RegExp(String.raw`^bump(?:\([^)]*\))?!?:\s*${SEMVER_SOURCE}\s*$`, "i"),
-  },
-]);
+import {
+  releaseEntryFromSubject,
+  selectedCommitSummaries as selectedCommits,
+} from "./release-guard-common.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -115,62 +93,6 @@ function assertSingleSelector(args) {
   }
 }
 
-function releaseEntryFromSubject(subject) {
-  const trimmed = subject.trim();
-  for (const { action, pattern } of RELEASE_SUBJECT_PATTERNS) {
-    const match = trimmed.match(pattern);
-    if (match) {
-      return { action, version: match[1] };
-    }
-  }
-  return null;
-}
-
-async function rangeCommits(range) {
-  const { stdout } = await git(["rev-list", "--reverse", range], { cwd: repoRoot });
-  return stdout.split(/\r?\n/).filter(Boolean);
-}
-
-async function selectedCommitRevs(args) {
-  assertSingleSelector(args);
-  if (args.range || (args.base && args.head)) {
-    const range = args.range ?? `${args.base}..${args.head}`;
-    return {
-      selector: range,
-      revs: await rangeCommits(range),
-    };
-  }
-
-  const rev = args.commit ?? "HEAD";
-  return {
-    selector: rev,
-    revs: [rev],
-  };
-}
-
-async function commitSummary(rev) {
-  const { stdout } = await git(["log", "-1", "--format=%H%x00%h%x00%s", rev], { cwd: repoRoot });
-  const [hash, shortHash, subject] = stdout.trimEnd().split("\0");
-  if (!hash || !shortHash) {
-    throw new Error(`failed to read commit subject for ${rev}`);
-  }
-  return {
-    rev,
-    hash,
-    shortHash,
-    subject: subject ?? "",
-  };
-}
-
-async function selectedCommits(args) {
-  const { selector, revs } = await selectedCommitRevs(args);
-  const commits = [];
-  for (const rev of revs) {
-    commits.push(await commitSummary(rev));
-  }
-  return { selector, commits };
-}
-
 function evaluateCommits(commits) {
   const releaseCommits = [];
   const subjectsByKey = new Map();
@@ -236,6 +158,7 @@ async function main() {
     return;
   }
 
+  assertSingleSelector(args);
   const { selector, commits } = await selectedCommits(args);
   const evaluation = evaluateCommits(commits);
   const result = {

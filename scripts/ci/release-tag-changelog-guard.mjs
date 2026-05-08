@@ -1,16 +1,23 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
-import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
-
-const VERSION_TAG_PATTERN = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/;
+import {
+  hasChangelogHeading,
+  rangeCommits,
+  requiredValue,
+  versionTagsAtRev,
+} from "./release-guard-common.mjs";
 
 function parseArgs(argv) {
   const args = {
+    base: null,
     changelog: "CHANGELOG.md",
+    head: null,
     json: false,
+    range: null,
     rev: "HEAD",
+    revProvided: false,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -18,6 +25,22 @@ function parseArgs(argv) {
     if (value === "--rev") {
       index += 1;
       args.rev = requiredValue(argv[index], value);
+      args.revProvided = true;
+      continue;
+    }
+    if (value === "--range") {
+      index += 1;
+      args.range = requiredValue(argv[index], value);
+      continue;
+    }
+    if (value === "--base") {
+      index += 1;
+      args.base = requiredValue(argv[index], value);
+      continue;
+    }
+    if (value === "--head") {
+      index += 1;
+      args.head = requiredValue(argv[index], value);
       continue;
     }
     if (value === "--changelog") {
@@ -36,14 +59,21 @@ function parseArgs(argv) {
     throw new Error(`unknown argument: ${value}`);
   }
 
+  validateSelectorArgs(args);
   return args;
 }
 
-function requiredValue(value, name) {
-  if (!value) {
-    throw new Error(`${name} requires a value`);
+function validateSelectorArgs(args) {
+  const hasRange = args.range !== null;
+  const hasBaseHead = args.base !== null || args.head !== null;
+  const selectorCount = Number(args.revProvided) + Number(hasRange) + Number(hasBaseHead);
+
+  if (selectorCount > 1) {
+    throw new Error("use only one selector: --rev, --range, or --base with --head");
   }
-  return value;
+  if (hasBaseHead && (!args.base || !args.head)) {
+    throw new Error("--base and --head must be used together");
+  }
 }
 
 function printHelp() {
@@ -55,6 +85,9 @@ function printHelp() {
       "",
       "Options:",
       "  --rev <rev>             revision to inspect; default HEAD",
+      "  --range <rev-range>     revision range to inspect, e.g. HEAD~5..HEAD",
+      "  --base <rev>            base revision for --base <rev> --head <rev>",
+      "  --head <rev>            head revision for --base <rev> --head <rev>",
       "  --changelog <path>      changelog path; default CHANGELOG.md",
       "  --json                  print machine-readable result",
       "  --help, -h              show help",
@@ -62,34 +95,58 @@ function printHelp() {
   );
 }
 
-function normalizeVersionTag(tag) {
-  const match = VERSION_TAG_PATTERN.exec(tag);
-  return match?.[1] ?? null;
+function selectorFromArgs(args) {
+  if (args.range) {
+    return {
+      kind: "range",
+      label: args.range,
+      revs: [args.range],
+    };
+  }
+  if (args.base && args.head) {
+    return {
+      kind: "base-head",
+      label: `${args.base}..${args.head}`,
+      revs: [`${args.base}..${args.head}`],
+      base: args.base,
+      head: args.head,
+    };
+  }
+  return {
+    kind: "rev",
+    label: args.rev,
+    revs: [args.rev],
+  };
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+async function selectedCommits(selector) {
+  if (selector.kind === "rev") {
+    return [selector.revs[0]];
+  }
+
+  return rangeCommits(selector.revs[0]);
 }
 
-function hasChangelogHeading(changelog, version) {
-  const pattern = new RegExp(`^##\\s+${escapeRegExp(version)}\\s+-\\s+`, "m");
-  return pattern.test(changelog);
+async function versionTagsAtCommit(commit) {
+  return (await versionTagsAtRev(commit)).map(({ tag, version }) => ({ commit, tag, version }));
 }
 
-async function versionTagsAtRev(rev) {
-  const { stdout } = await git(["tag", "--points-at", rev], { cwd: repoRoot });
-  return stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((tag) => ({ tag, version: normalizeVersionTag(tag) }))
-    .filter(({ version }) => version);
+async function versionTagsAtSelectedCommits(commits) {
+  const tags = [];
+  for (const commit of commits) {
+    tags.push(...(await versionTagsAtCommit(commit)));
+  }
+  return tags;
 }
 
 async function check(args) {
-  const tags = await versionTagsAtRev(args.rev);
+  const selector = selectorFromArgs(args);
+  const commits = await selectedCommits(selector);
+  const tags = await versionTagsAtSelectedCommits(commits);
   const changelogPath = path.resolve(repoRoot, args.changelog);
   const changelog = tags.length > 0 ? await fs.readFile(changelogPath, "utf8") : "";
-  const checked = tags.map(({ tag, version }) => ({
+  const checked = tags.map(({ commit, tag, version }) => ({
+    commit,
     tag,
     version,
     found: hasChangelogHeading(changelog, version),
@@ -98,7 +155,13 @@ async function check(args) {
 
   return {
     ok: missing.length === 0,
-    rev: args.rev,
+    selector: selector.kind,
+    label: selector.label,
+    rev: selector.kind === "rev" ? args.rev : undefined,
+    range: selector.kind !== "rev" ? selector.label : undefined,
+    base: selector.base,
+    head: selector.head,
+    commits: commits.length,
     changelog: path.relative(repoRoot, changelogPath) || ".",
     tags: checked,
     missing,
@@ -107,7 +170,8 @@ async function check(args) {
 
 function printHuman(result) {
   if (result.tags.length === 0) {
-    process.stdout.write(`release-tag-changelog-guard: ok, no version tags at ${result.rev}\n`);
+    const preposition = result.selector === "rev" ? "at" : "in";
+    process.stdout.write(`release-tag-changelog-guard: ok, no version tags ${preposition} ${result.label}\n`);
     return;
   }
   if (result.ok) {
