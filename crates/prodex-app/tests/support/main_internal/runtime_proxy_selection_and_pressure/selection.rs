@@ -2695,7 +2695,7 @@ fn caveman_command_accepts_full_access_shortcut_after_mem_prefix() {
 }
 
 #[test]
-fn super_command_parses_as_distinct_subcommand_and_expands_to_caveman_mem_full_access() {
+fn super_command_parses_as_distinct_subcommand_and_expands_to_caveman_mem_rtk_full_access() {
     let command = parse_cli_command_from([
         "prodex",
         "super",
@@ -2709,10 +2709,6 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_caveman_mem_full_a
         panic!("expected super command");
     };
     assert_eq!(args.profile.as_deref(), Some("main"));
-    assert_eq!(
-        args.codex_args,
-        vec![OsString::from("exec"), OsString::from("review this repo")]
-    );
 
     let args = args.into_caveman_args();
     assert_eq!(args.profile.as_deref(), Some("main"));
@@ -2721,6 +2717,7 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_caveman_mem_full_a
         args.codex_args,
         vec![
             OsString::from("mem"),
+            OsString::from("rtk"),
             OsString::from("exec"),
             OsString::from("review this repo")
         ]
@@ -2740,12 +2737,15 @@ fn super_command_mem_full_expands_to_full_mem_prefix() {
         args.codex_args,
         vec![
             OsString::from("mem-full"),
+            OsString::from("rtk"),
             OsString::from("exec"),
             OsString::from("review")
         ]
     );
-    let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
+    let (mem_mode, rtk_enabled, codex_args) =
+        runtime_caveman_extract_launch_prefixes(&args.codex_args);
     assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
+    assert!(rtk_enabled);
     assert_eq!(codex_args, vec![OsString::from("exec"), OsString::from("review")]);
 }
 
@@ -2799,6 +2799,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     assert_eq!(rendered.first().map(String::as_str), Some("mem"));
+    assert_eq!(rendered.get(1).map(String::as_str), Some("rtk"));
     assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
     assert!(rendered.contains(&"model=\"local/qwen\"".to_string()));
     assert!(rendered.contains(
@@ -2818,8 +2819,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         ["exec", "review this repo"]
     );
 
-    let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
-    assert!(mem_mode);
+    let (_, _, codex_args) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
     assert_eq!(
         codex_cli_config_override_value(&codex_args, "model_provider").as_deref(),
         Some("prodex-local")

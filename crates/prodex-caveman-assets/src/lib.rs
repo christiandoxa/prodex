@@ -17,9 +17,47 @@ pub const PRODEX_CAVEMAN_PLUGIN_ID: &str = "caveman@prodex-caveman";
 pub const PRODEX_CAVEMAN_SOURCE_REPO: &str = "https://github.com/JuliusBrussee/caveman.git";
 pub const PRODEX_CAVEMAN_FULL_ASSETS_ENV: &str = "PRODEX_CAVEMAN_FULL_ASSETS";
 pub const PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME: &str = "caveman";
+pub const PRODEX_RTK_SOURCE_REPO: &str = "https://github.com/rtk-ai/rtk.git";
 const CLAUDE_MEM_PLUGIN_NAME: &str = "claude-mem";
 const PRODEX_CAVEMAN_HOOK_TIMEOUT_SEC: u64 = 600;
 const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "echo 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.'";
+const RTK_MD: &str = "RTK.md";
+const AGENTS_MD: &str = "AGENTS.md";
+const PRODEX_RTK_CODEX_AWARENESS: &str = r#"# RTK - Rust Token Killer (Codex CLI)
+
+RTK is a token-optimized CLI proxy for shell commands.
+
+## Rule
+
+Prefix shell commands with `rtk` when RTK is available.
+
+Examples:
+
+```bash
+rtk git status
+rtk cargo test
+rtk npm run build
+rtk pytest -q
+```
+
+If `rtk` is not installed or `rtk gain` fails, run the command raw and tell the user RTK is unavailable.
+
+## Meta Commands
+
+```bash
+rtk gain
+rtk gain --history
+rtk proxy <cmd>
+```
+
+## Verification
+
+```bash
+rtk --version
+rtk gain
+which rtk
+```
+"#;
 
 struct EmbeddedCavemanFile {
     relative_path: &'static str,
@@ -279,6 +317,15 @@ pub fn configure_caveman_launch_home(codex_home: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn configure_rtk_codex_home(codex_home: &Path) -> Result<()> {
+    prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
+    let rtk_md_path = codex_home.join(RTK_MD);
+    fs::write(&rtk_md_path, PRODEX_RTK_CODEX_AWARENESS)
+        .with_context(|| format!("failed to write {}", rtk_md_path.display()))?;
+    localize_rtk_agents_file(codex_home)?;
+    ensure_rtk_agents_reference(codex_home, &rtk_md_path)
+}
+
 pub fn trust_claude_mem_codex_plugin_hooks(codex_home: &Path) -> Result<()> {
     let config_path = codex_home.join("config.toml");
     if !config_path.is_file() {
@@ -376,6 +423,57 @@ fn localize_caveman_config_file(codex_home: &Path) -> Result<()> {
                 .with_context(|| format!("failed to inspect {}", config_path.display()));
         }
     }
+    Ok(())
+}
+
+fn localize_rtk_agents_file(codex_home: &Path) -> Result<()> {
+    let agents_path = codex_home.join(AGENTS_MD);
+    match fs::symlink_metadata(&agents_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let contents = fs::read_to_string(&agents_path)
+                .with_context(|| format!("failed to read {}", agents_path.display()))?;
+            fs::remove_file(&agents_path)
+                .with_context(|| format!("failed to remove {}", agents_path.display()))?;
+            fs::write(&agents_path, contents)
+                .with_context(|| format!("failed to write {}", agents_path.display()))?;
+        }
+        Ok(metadata) if metadata.is_dir() => {
+            bail!("{} is a directory, expected a file", agents_path.display());
+        }
+        Ok(_) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            fs::write(&agents_path, "")
+                .with_context(|| format!("failed to write {}", agents_path.display()))?;
+        }
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to inspect {}", agents_path.display()));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_rtk_agents_reference(codex_home: &Path, rtk_md_path: &Path) -> Result<()> {
+    let agents_path = codex_home.join(AGENTS_MD);
+    let reference = format!("@{}", rtk_md_path.display());
+    let contents = fs::read_to_string(&agents_path)
+        .with_context(|| format!("failed to read {}", agents_path.display()))?;
+    if contents.lines().any(|line| line.trim() == reference) {
+        return Ok(());
+    }
+
+    let mut updated = String::new();
+    if contents.trim().is_empty() {
+        updated.push_str(&reference);
+        updated.push('\n');
+    } else {
+        updated.push_str(contents.trim_end());
+        updated.push_str("\n\n");
+        updated.push_str(&reference);
+        updated.push('\n');
+    }
+    fs::write(&agents_path, updated)
+        .with_context(|| format!("failed to write {}", agents_path.display()))?;
     Ok(())
 }
 
@@ -799,4 +897,71 @@ fn caveman_full_assets_enabled() -> bool {
                 "" | "0" | "false" | "no" | "off"
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        env::temp_dir().join(format!(
+            "prodex-caveman-assets-{name}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn configure_rtk_codex_home_writes_awareness_and_agents_reference() {
+        let dir = temp_dir("rtk");
+        configure_rtk_codex_home(&dir).expect("rtk codex home should configure");
+
+        let rtk_md = fs::read_to_string(dir.join("RTK.md")).expect("RTK.md should exist");
+        assert!(rtk_md.contains("RTK - Rust Token Killer"));
+        assert!(rtk_md.contains("rtk gain"));
+
+        let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
+        assert_eq!(agents, format!("@{}\n", dir.join("RTK.md").display()));
+
+        configure_rtk_codex_home(&dir).expect("rtk codex home should be idempotent");
+        let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
+        assert_eq!(agents.matches("@").count(), 1);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configure_rtk_codex_home_localizes_agents_symlink() {
+        let source = temp_dir("rtk-source");
+        let overlay = temp_dir("rtk-overlay");
+        fs::create_dir_all(&source).expect("source dir");
+        fs::create_dir_all(&overlay).expect("overlay dir");
+        fs::write(source.join("AGENTS.md"), "# Shared\n").expect("source AGENTS.md");
+        std::os::unix::fs::symlink(source.join("AGENTS.md"), overlay.join("AGENTS.md"))
+            .expect("agents symlink");
+
+        configure_rtk_codex_home(&overlay).expect("rtk codex home should configure");
+
+        assert!(
+            !fs::symlink_metadata(overlay.join("AGENTS.md"))
+                .expect("overlay AGENTS metadata")
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            fs::read_to_string(source.join("AGENTS.md")).expect("source AGENTS.md"),
+            "# Shared\n"
+        );
+        let overlay_agents =
+            fs::read_to_string(overlay.join("AGENTS.md")).expect("overlay AGENTS.md");
+        assert!(overlay_agents.contains("# Shared"));
+        assert!(overlay_agents.contains(&format!("@{}", overlay.join("RTK.md").display())));
+
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(overlay);
+    }
 }

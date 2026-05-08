@@ -445,7 +445,25 @@ fn prodex_local_midnight_epoch(date: chrono::NaiveDate) -> Option<i64> {
         .map(|datetime| datetime.timestamp())
 }
 
+fn prodex_session_file_latest_epoch(path: &Path) -> Option<i64> {
+    let input = fs::File::open(path).ok()?;
+    let reader = io::BufReader::new(input);
+    reader
+        .lines()
+        .map_while(Result::ok)
+        .filter_map(|line| prodex_history_line_epoch(line.trim()))
+        .max()
+}
+
 fn prodex_session_file_is_stale(path: &Path, oldest_allowed: i64) -> bool {
+    if let Some(latest_epoch) = prodex_session_file_latest_epoch(path) {
+        return latest_epoch < oldest_allowed;
+    }
+
+    if let Some(modified) = prodex_file_modified_epoch(path) {
+        return modified < oldest_allowed;
+    }
+
     if let Some(date) = prodex_session_path_date(path) {
         return date
             .succ_opt()
@@ -453,7 +471,7 @@ fn prodex_session_file_is_stale(path: &Path, oldest_allowed: i64) -> bool {
             .is_some_and(|next_day_epoch| next_day_epoch <= oldest_allowed);
     }
 
-    prodex_file_modified_epoch(path).is_some_and(|modified| modified < oldest_allowed)
+    false
 }
 
 fn cleanup_codex_session_history_tree_at(root: &Path, oldest_allowed: i64) -> usize {

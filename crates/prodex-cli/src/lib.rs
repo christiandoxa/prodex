@@ -100,7 +100,7 @@ pub enum Commands {
     #[command(
         trailing_var_arg = true,
         visible_alias = "s",
-        about = "Alias for `prodex caveman mem --full-access`.",
+        about = "Alias for `prodex caveman mem rtk --full-access`.",
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),
@@ -303,6 +303,9 @@ pub struct SessionListArgs {
     /// Limit the number of sessions shown after sorting newest first.
     #[arg(long, value_name = "N")]
     pub limit: Option<usize>,
+    /// Include spawned subagent sessions. Default output shows only resumable parent sessions.
+    #[arg(long)]
+    pub include_subagents: bool,
 }
 
 #[derive(Args, Debug)]
@@ -328,6 +331,9 @@ pub struct SessionCurrentArgs {
     /// Directory used for matching sessions. Defaults to the current working directory.
     #[arg(long, value_name = "PATH", hide = true)]
     pub cwd: Option<PathBuf>,
+    /// Include spawned subagent sessions. Default output shows only resumable parent sessions.
+    #[arg(long)]
+    pub include_subagents: bool,
 }
 
 #[derive(Args, Debug)]
@@ -633,7 +639,7 @@ impl SuperArgs {
         let skip_quota_check = self.skip_quota_check || local_mode;
 
         let mut codex_args =
-            Vec::with_capacity(self.codex_args.len() + 1 + local_provider_args.len());
+            Vec::with_capacity(self.codex_args.len() + 2 + local_provider_args.len());
         codex_args.push(OsString::from(if self.mem_super_slim {
             "mem-super-slim"
         } else if self.mem_full {
@@ -641,6 +647,7 @@ impl SuperArgs {
         } else {
             "mem"
         }));
+        codex_args.push(OsString::from("rtk"));
         codex_args.extend(local_provider_args);
         codex_args.extend(self.codex_args);
         CavemanArgs {

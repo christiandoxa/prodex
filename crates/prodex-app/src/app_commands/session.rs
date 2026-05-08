@@ -11,6 +11,7 @@ pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
                 args.limit,
                 args.profile.as_deref(),
                 args.query.as_deref(),
+                args.include_subagents,
             )?;
             print_session_reports(&reports, output_mode, "No sessions found")
         }
@@ -25,6 +26,7 @@ pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
                 args.limit,
                 args.profile.as_deref(),
                 args.query.as_deref(),
+                args.include_subagents,
             )?;
             print_session_reports(
                 &reports,
@@ -41,6 +43,7 @@ fn load_session_reports(
     limit: Option<usize>,
     profile: Option<&str>,
     query: Option<&str>,
+    include_subagents: bool,
 ) -> Result<Vec<SessionReport>> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
@@ -50,6 +53,7 @@ fn load_session_reports(
             current_dir,
             profile,
             query,
+            include_subagents,
         },
         &state,
     )?;

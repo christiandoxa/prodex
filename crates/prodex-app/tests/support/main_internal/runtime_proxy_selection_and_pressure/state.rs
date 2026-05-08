@@ -777,7 +777,7 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
 }
 
 #[test]
-fn perform_prodex_cleanup_prunes_chat_history_older_than_one_week() {
+fn perform_prodex_cleanup_prunes_chat_history_older_than_thirty_days() {
     let temp_dir = TestDir::isolated();
     let paths = AppPaths {
         root: temp_dir.path.join("prodex"),
@@ -790,11 +790,11 @@ fn perform_prodex_cleanup_prunes_chat_history_older_than_one_week() {
     fs::create_dir_all(&paths.managed_profiles_root).expect("managed profiles root should exist");
 
     let now = Local
-        .with_ymd_and_hms(2026, 4, 20, 12, 0, 0)
+        .with_ymd_and_hms(2026, 5, 20, 12, 0, 0)
         .single()
         .expect("fixed timestamp should be valid")
         .timestamp();
-    let old_ts = now - (8 * 24 * 60 * 60);
+    let old_ts = now - (31 * 24 * 60 * 60);
     let recent_ts = now - (2 * 24 * 60 * 60);
     fs::write(
         paths.shared_codex_root.join("history.jsonl"),
@@ -807,14 +807,27 @@ fn perform_prodex_cleanup_prunes_chat_history_older_than_one_week() {
     .expect("shared codex history should write");
 
     let old_session_dir = paths.shared_codex_root.join("sessions/2026/04/10");
-    let recent_session_dir = paths.shared_codex_root.join("sessions/2026/04/18");
+    let recent_session_dir = paths.shared_codex_root.join("sessions/2026/05/18");
     fs::create_dir_all(&old_session_dir).expect("old codex session dir should exist");
     fs::create_dir_all(&recent_session_dir).expect("recent codex session dir should exist");
-    fs::write(old_session_dir.join("old.jsonl"), "{\"old\":true}\n")
-        .expect("old codex session should write");
+    fs::write(
+        old_session_dir.join("old.jsonl"),
+        format!(
+            "{{\"timestamp\":\"{}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\"}}}}\n",
+            Local.timestamp_opt(old_ts, 0).single().unwrap().to_rfc3339()
+        ),
+    )
+    .expect("old codex session should write");
     fs::write(
         recent_session_dir.join("recent.jsonl"),
-        "{\"recent\":true}\n",
+        format!(
+            "{{\"timestamp\":\"{}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\"}}}}\n",
+            Local
+                .timestamp_opt(recent_ts, 0)
+                .single()
+                .unwrap()
+                .to_rfc3339()
+        ),
     )
     .expect("recent codex session should write");
 
@@ -845,7 +858,10 @@ fn perform_prodex_cleanup_prunes_chat_history_older_than_one_week() {
     fs::create_dir_all(&profile_old_session_dir).expect("profile old session dir should exist");
     fs::write(
         profile_old_session_dir.join("profile-old.json"),
-        "{\"old\":true}\n",
+        format!(
+            "{{\"timestamp\":\"{}\",\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\"}}}}\n",
+            Local.timestamp_opt(old_ts, 0).single().unwrap().to_rfc3339()
+        ),
     )
     .expect("profile old session should write");
 

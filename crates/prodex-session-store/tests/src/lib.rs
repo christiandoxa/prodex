@@ -72,6 +72,49 @@ fn session_current_filters_by_cwd() {
 }
 
 #[test]
+fn session_reports_exclude_subagents_by_default() {
+    let root = test_temp_dir("session-subagents");
+    let sessions = root.join("sessions");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    fs::write(
+        sessions.join("parent.jsonl"),
+        "{\"timestamp\":\"2026-04-29T12:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"parent\",\"cwd\":\"/tmp/workspace\"}}\n",
+    )
+    .expect("parent session should be written");
+    fs::write(
+        sessions.join("child.jsonl"),
+        "{\"timestamp\":\"2026-04-29T12:01:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"child\",\"cwd\":\"/tmp/workspace\",\"source\":{\"subagent\":{\"thread_spawn\":{\"parent_thread_id\":\"parent\"}}}}}\n",
+    )
+    .expect("child session should be written");
+
+    let reports =
+        collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].id, "parent");
+
+    let reports = collect_session_reports_with_filter(
+        &root,
+        SessionReportFilter {
+            include_subagents: true,
+            ..SessionReportFilter::default()
+        },
+        &AppState::default(),
+    )
+    .expect("sessions collect");
+    assert_eq!(reports.len(), 2);
+    assert!(reports.iter().any(|report| report.id == "child"));
+    assert_eq!(
+        reports
+            .iter()
+            .find(|report| report.id == "child")
+            .and_then(|report| report.parent_thread_id.as_deref()),
+        Some("parent")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn session_reports_attach_profile_bindings() {
     let root = test_temp_dir("session-profile");
     let sessions = root.join("sessions");
@@ -151,6 +194,7 @@ fn session_reports_filter_by_profile_and_query() {
             current_dir: None,
             profile: Some("main"),
             query: Some("triage"),
+            include_subagents: false,
         },
         &state,
     )
@@ -164,6 +208,7 @@ fn session_reports_filter_by_profile_and_query() {
             current_dir: None,
             profile: None,
             query: Some("workspacebeta"),
+            include_subagents: false,
         },
         &state,
     )
@@ -177,6 +222,7 @@ fn session_reports_filter_by_profile_and_query() {
             current_dir: None,
             profile: None,
             query: Some("ALPHA-SPECIAL-PATH"),
+            include_subagents: false,
         },
         &state,
     )
@@ -190,6 +236,7 @@ fn session_reports_filter_by_profile_and_query() {
             current_dir: None,
             profile: None,
             query: Some("ALT"),
+            include_subagents: false,
         },
         &state,
     )

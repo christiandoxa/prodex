@@ -81,6 +81,7 @@ Run through `prodex`:
 prodex
 prodex caveman
 prodex caveman mem
+prodex caveman mem rtk
 prodex super
 prodex exec "review this repo"
 prodex claude -- -p "summarize this repo"
@@ -115,6 +116,7 @@ printf 'context from stdin' | prodex run exec "summarize this"
 ```bash
 prodex caveman
 prodex caveman mem
+prodex caveman mem rtk
 prodex caveman --dry-run
 prodex caveman --profile main
 prodex caveman exec "review this repo in caveman mode"
@@ -124,6 +126,8 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 `prodex caveman` runs Codex with a temporary overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
 If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup to the active Prodex session path instead of the default `~/.codex/sessions`.
+
+Add the `rtk` prefix after `mem` when you want Prodex to inject RTK shell-command guidance into the temporary Codex overlay for that launch. RTK is still an external binary; install it separately from `rtk-ai/rtk` if `rtk gain` is unavailable.
 
 ### Run Super mode
 
@@ -136,9 +140,9 @@ prodex super exec "review this repo in super mode"
 prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 ```
 
-`prodex super` is a shortcut for `prodex caveman mem --full-access`.
+`prodex super` is a shortcut for `prodex caveman mem rtk --full-access`.
 
-Use this when you want Caveman mode, Claude-Mem transcript watching, and launch-time full access together. Full access maps to Codex's sandbox-bypass launch flag, so use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
+Use this when you want Caveman mode, Claude-Mem transcript watching, RTK shell-command guidance, and launch-time full access together. Full access maps to Codex's sandbox-bypass launch flag, so use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 Super uses Prodex's slim Claude-Mem Codex schema by default to avoid storing full assistant/tool output in recall context. Add `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies for leaner recall, or add `--mem-full` when you need the full transcript schema.
 Super also enables Smart Context Autopilot in the runtime proxy. It keeps exact pass-through for continuation-sensitive requests, but when safe it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cacheable context, and critical-signal self-checks to reduce token load without dropping failure details.
 
@@ -210,7 +214,7 @@ git diff | prodex context compact-output --kind git-diff
 ```
 
 `prodex info` includes the effective runtime tuning values after environment, policy, and default resolution.
-`prodex session list` shows shared Codex session metadata, and `prodex session current` filters that list to sessions started from the current directory.
+`prodex session list` shows shared Codex parent session metadata, and `prodex session current` filters that list to sessions started from the current directory. Add `--include-subagents` only when you explicitly need spawned agent sessions for diagnostics.
 `prodex context audit` reports approximate token weight for shared instruction and memory files. `prodex context compress` is deterministic, only touches Markdown/text files, skips `.original.md` backups, and writes an `.original.md` backup before replacing a file.
 `prodex context compact-output` is an explicit stdin/file helper for compacting copied command output such as `git status`, `git diff`, `rg`/`grep`, `find`/`tree`, or generic long logs. The same logic is exposed by the `prodex-context` crate and does not rewrite Codex runtime payloads.
 For full policy keys, env overrides, and runtime log path resolution, see [docs/runtime-policy.md](./docs/runtime-policy.md).

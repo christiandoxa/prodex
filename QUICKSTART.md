@@ -15,6 +15,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Codex CLI if you want to use `prodex`
 - Claude Code (`claude`) if you want to use `prodex claude`
 - Optional: `claude-mem` if you want `prodex caveman mem`, `prodex claude mem`, or `prodex claude caveman mem`
+- Optional: RTK (`rtk-ai/rtk`) if you want `prodex caveman mem rtk` or default `prodex super` RTK shell-command guidance
 
 If you install `@christiandoxa/prodex` from npm, the runtime dependency `@openai/codex@latest` is installed for you at install or update time. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
@@ -48,10 +49,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.90.0`:
+The current local version in this repo is `0.91.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.90.0
+npm install -g @christiandoxa/prodex@0.91.0
 ```
 
 Dependency status in this repo:
@@ -120,7 +121,7 @@ prodex info
 prodex quota --all --once
 ```
 
-Use `prodex session list` to inspect shared Codex sessions, or `prodex session current` to show sessions started from the current directory.
+Use `prodex session list` to inspect shared Codex parent sessions, or `prodex session current` to show parent sessions started from the current directory. Add `--include-subagents` only when you explicitly need spawned agent sessions for diagnostics.
 
 `prodex info` includes the effective runtime worker, admission, websocket, lane, and inflight tuning values after environment, policy, and default resolution.
 For the full policy key reference, see [docs/runtime-policy.md](./docs/runtime-policy.md).
@@ -162,6 +163,7 @@ If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex sk
 ```bash
 prodex caveman
 prodex caveman mem
+prodex caveman mem rtk
 prodex super --url http://127.0.0.1:8131
 prodex super --url http://127.0.0.1:8131 --dry-run
 prodex caveman --profile second
@@ -173,8 +175,9 @@ Use this path when you want Codex itself as the front end but want Caveman mode 
 If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
 
 Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
+Add `rtk` after `mem` to inject RTK shell-command guidance into the temporary Codex overlay. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
 Mem mode uses a slim Codex transcript schema by default so recall stays lower-token; use `prodex super --mem-super-slim` to store prompt summaries/references instead of full prompt bodies, or `prodex super --mem-full` when you need full assistant/tool transcript capture.
-`prodex super` and its `prodex s` alias also enable Smart Context Autopilot. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cacheable context, and critical-signal self-checks.
+`prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cacheable context, and critical-signal self-checks.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
@@ -254,7 +257,7 @@ tail -n 200 "$(prodex doctor --runtime --json | jq -r '.log_path')"
 The default runtime log directory is the OS temp directory, usually `/tmp` on Linux, but `PRODEX_RUNTIME_LOG_DIR` or `runtime.log_dir` in `policy.toml` can override it.
 Use `prodex doctor --runtime --json` to find the active `log_path`, resolved `runtime_logs.directory`, and live broker metrics before tailing files.
 
-Use `prodex cleanup` when you want to clear stale local runtime logs, temp login homes, transient runtime cache files and stale root temp files inside `.prodex`, prune Codex and Claude chat history older than one week, collapse duplicate profiles that point at the same OpenAI workspace identity into one surviving profile, clear dead broker artifacts, and remove old orphaned managed profile homes that are no longer tracked.
+Use `prodex cleanup` when you want to clear stale local runtime logs, temp login homes, transient runtime cache files and stale root temp files inside `.prodex`, prune Codex and Claude chat history whose last chat is older than 30 days, collapse duplicate profiles that point at the same OpenAI workspace identity into one surviving profile, clear dead broker artifacts, and remove old orphaned managed profile homes that are no longer tracked.
 
 Use `prodex audit` when you want to inspect the local append-only audit log. It supports `--tail`, `--component`, `--action`, `--outcome`, and `--json`.
 

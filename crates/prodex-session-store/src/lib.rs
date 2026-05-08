@@ -14,6 +14,7 @@ pub struct SessionReportFilter<'a> {
     pub current_dir: Option<&'a Path>,
     pub profile: Option<&'a str>,
     pub query: Option<&'a str>,
+    pub include_subagents: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +90,10 @@ pub fn session_report_matches_filter(
     if let Some(current_dir) = filter.current_dir
         && !report.matches_current_dir(current_dir)
     {
+        return false;
+    }
+
+    if !filter.include_subagents && report.is_subagent() {
         return false;
     }
 

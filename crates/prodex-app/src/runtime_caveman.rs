@@ -7,13 +7,15 @@ pub(crate) struct CavemanLaunchStrategy {
     codex_args: Vec<OsString>,
     include_code_review: bool,
     mem_mode: Option<RuntimeMemTranscriptMode>,
+    rtk_enabled: bool,
     model_provider_override: Option<String>,
     model_context_window_tokens: Option<u64>,
 }
 
 impl CavemanLaunchStrategy {
     pub(crate) fn new(args: CavemanArgs) -> Self {
-        let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
+        let (mem_mode, rtk_enabled, codex_args) =
+            runtime_caveman_extract_launch_prefixes(&args.codex_args);
         let mem_mode = if args.smart_context {
             runtime_mem_super_default_transcript_mode(mem_mode)
         } else {
@@ -30,6 +32,7 @@ impl CavemanLaunchStrategy {
             codex_args,
             include_code_review,
             mem_mode,
+            rtk_enabled,
             model_provider_override,
             model_context_window_tokens,
         }
@@ -59,6 +62,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
     ) -> Result<RuntimeLaunchPlan> {
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
+        if self.rtk_enabled {
+            prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;
+        }
         if let Some(mem_mode) = self.mem_mode {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home_with_mode(&caveman_home, mem_mode)?;
@@ -86,6 +92,37 @@ pub(super) fn prepare_caveman_launch_home(
     )
 }
 
+pub(crate) fn runtime_caveman_extract_launch_prefixes(
+    args: &[OsString],
+) -> (Option<RuntimeMemTranscriptMode>, bool, Vec<OsString>) {
+    let mut mem_mode = None;
+    let mut rtk_enabled = false;
+    let mut remaining = args.to_vec();
+
+    loop {
+        if remaining
+            .first()
+            .and_then(|arg| arg.to_str())
+            .is_some_and(|arg| arg == "rtk")
+        {
+            rtk_enabled = true;
+            remaining.remove(0);
+            continue;
+        }
+
+        let (next_mem_mode, next_remaining) = runtime_mem_extract_mode_with_detail(&remaining);
+        if next_mem_mode.is_some() && next_remaining.len() != remaining.len() {
+            mem_mode = next_mem_mode;
+            remaining = next_remaining;
+            continue;
+        }
+
+        break;
+    }
+
+    (mem_mode, rtk_enabled, remaining)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,6 +142,7 @@ mod tests {
             CavemanLaunchStrategy::new(super_as_caveman_args(&["prodex", "super", "exec", "hi"]));
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
+        assert!(strategy.rtk_enabled);
         assert_eq!(
             strategy.codex_args,
             vec![
@@ -121,6 +159,7 @@ mod tests {
             CavemanLaunchStrategy::new(super_as_caveman_args(&["prodex", "s", "exec", "hi"]));
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
+        assert!(strategy.rtk_enabled);
     }
 
     #[test]
@@ -134,6 +173,7 @@ mod tests {
         ]));
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::Full));
+        assert!(strategy.rtk_enabled);
     }
 
     #[test]
@@ -152,5 +192,41 @@ mod tests {
         });
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::Slim));
+        assert!(!strategy.rtk_enabled);
+    }
+
+    #[test]
+    fn caveman_launch_prefixes_extract_mem_then_rtk() {
+        let (mem_mode, rtk_enabled, codex_args) = runtime_caveman_extract_launch_prefixes(&[
+            OsString::from("mem"),
+            OsString::from("rtk"),
+            OsString::from("--full-access"),
+            OsString::from("exec"),
+            OsString::from("hi"),
+        ]);
+
+        assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Slim));
+        assert!(rtk_enabled);
+        assert_eq!(
+            codex_args,
+            vec![
+                OsString::from("--full-access"),
+                OsString::from("exec"),
+                OsString::from("hi")
+            ]
+        );
+    }
+
+    #[test]
+    fn caveman_launch_prefixes_extract_rtk_then_mem() {
+        let (mem_mode, rtk_enabled, codex_args) = runtime_caveman_extract_launch_prefixes(&[
+            OsString::from("rtk"),
+            OsString::from("mem-full"),
+            OsString::from("exec"),
+        ]);
+
+        assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
+        assert!(rtk_enabled);
+        assert_eq!(codex_args, vec![OsString::from("exec")]);
     }
 }

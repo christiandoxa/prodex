@@ -68,7 +68,8 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
 }
 
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
-    let (_mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
+    let (_mem_mode, _rtk_enabled, codex_args) =
+        runtime_caveman_extract_launch_prefixes(&args.codex_args);
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);

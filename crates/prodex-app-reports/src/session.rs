@@ -11,6 +11,8 @@ pub struct SessionReport {
     pub cwd: Option<String>,
     pub profile: Option<String>,
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_thread_id: Option<String>,
     #[serde(skip)]
     updated_sort_key: i64,
     #[serde(skip)]
@@ -26,6 +28,7 @@ impl SessionReport {
             cwd: None,
             profile: None,
             path: path.display().to_string(),
+            parent_thread_id: None,
             updated_sort_key: modified_epoch,
             cwd_path: None,
         }
@@ -39,6 +42,10 @@ impl SessionReport {
         self.cwd_path.as_ref().is_some_and(|cwd| {
             normalize_path_for_compare(cwd) == normalize_path_for_compare(current_dir)
         })
+    }
+
+    pub fn is_subagent(&self) -> bool {
+        self.parent_thread_id.is_some()
     }
 }
 
@@ -181,6 +188,24 @@ pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value
     ) {
         report.updated_sort_key = epoch;
         report.updated_at = Some(format_epoch(epoch));
+    }
+
+    if let Some(parent_thread_id) = first_string_value(
+        value,
+        &[
+            &[
+                "payload",
+                "source",
+                "subagent",
+                "thread_spawn",
+                "parent_thread_id",
+            ],
+            &["source", "subagent", "thread_spawn", "parent_thread_id"],
+            &["payload", "parent_thread_id"],
+            &["parent_thread_id"],
+        ],
+    ) {
+        report.parent_thread_id = Some(parent_thread_id);
     }
 }
 

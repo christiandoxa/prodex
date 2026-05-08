@@ -13,3 +13,15 @@ fn parses_session_metadata_from_jsonl_values() {
     assert_eq!(report.cwd.as_deref(), Some("/tmp/workspace"));
     assert_eq!(report.updated_at.as_deref(), Some("2026-04-29T12:00:00Z"));
 }
+
+#[test]
+fn parses_subagent_parent_thread_id() {
+    let mut report = SessionReport::from_path(Path::new("/tmp/child.jsonl"), 0);
+    apply_session_json_line(
+        &mut report,
+        r#"{"timestamp":"2026-04-29T12:00:00Z","type":"session_meta","payload":{"id":"child","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent"}}}}}"#,
+    );
+
+    assert!(report.is_subagent());
+    assert_eq!(report.parent_thread_id.as_deref(), Some("parent"));
+}

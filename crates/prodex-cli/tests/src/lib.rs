@@ -85,13 +85,14 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
 }
 
 #[test]
-fn super_mem_super_slim_expands_to_super_slim_mem_prefix() {
+fn super_mem_super_slim_expands_to_super_slim_mem_and_rtk_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "--mem-super-slim", "exec", "review"]);
 
     assert_eq!(
         args.codex_args,
         vec![
             OsString::from("mem-super-slim"),
+            OsString::from("rtk"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -99,13 +100,14 @@ fn super_mem_super_slim_expands_to_super_slim_mem_prefix() {
 }
 
 #[test]
-fn super_default_keeps_slim_mem_prefix() {
+fn super_default_keeps_slim_mem_and_rtk_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
 
     assert_eq!(
         args.codex_args,
         vec![
             OsString::from("mem"),
+            OsString::from("rtk"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -181,6 +183,7 @@ fn session_list_parses_line_modes_and_filters() {
         "triage",
         "--limit",
         "5",
+        "--include-subagents",
     ])
     .expect("session list should parse");
     let Commands::Session(SessionCommands::List(args)) = command else {
@@ -192,6 +195,7 @@ fn session_list_parses_line_modes_and_filters() {
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert_eq!(args.query.as_deref(), Some("triage"));
     assert_eq!(args.limit, Some(5));
+    assert!(args.include_subagents);
 }
 
 #[test]
@@ -218,6 +222,7 @@ fn session_current_parses_resume_command_filters_and_cwd() {
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert_eq!(args.query.as_deref(), Some("triage"));
     assert_eq!(args.cwd.as_deref(), Some(std::path::Path::new("/tmp/work")));
+    assert!(!args.include_subagents);
 }
 
 #[test]

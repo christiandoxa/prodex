@@ -93,6 +93,7 @@ Notes:
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
   Prefix Codex args with `mem` to point Claude-Mem transcript watching at the selected Prodex session path.
+  Add the `rtk` prefix after `mem` to inject RTK shell-command guidance into the temporary Codex overlay.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
@@ -103,8 +104,8 @@ Examples:
   prodex super --profile main
 
 Notes:
-  `prodex super` is a shortcut for `prodex caveman mem --full-access`.
-  It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, and launch-time full access.
+  `prodex super` is a shortcut for `prodex caveman mem rtk --full-access`.
+  It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, RTK shell-command guidance, and launch-time full access.
   Use `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies in Claude-Mem recall.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
@@ -135,6 +136,7 @@ Examples:
   prodex session list --json
   prodex session list --id-only
   prodex session list --resume-command
+  prodex session list --include-subagents
   prodex session list --profile main --query triage
   prodex session current
   prodex session current --resume-command
@@ -145,4 +147,4 @@ Examples:
   prodex cleanup
 
 Notes:
-  Removes stale local artifacts and prunes Codex/Claude chat history older than one week.";
+  Removes stale local artifacts and prunes Codex/Claude chat history whose last chat is older than 30 days.";
