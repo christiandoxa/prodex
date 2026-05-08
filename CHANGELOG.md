@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.90.0 - 2026-05-08
+
+- No grouped changes.
+
 ## 0.89.0 - 2026-05-08
 
 ### Misc
@@ -150,27 +154,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Satisfy ci clippy gate (`a895b53`)
 - Optimize smart context token usage (`0cc7747`)
 - Improve smart context token efficiency (`93b4f97`)
-
-## 0.78.0 - 2026-05-05
-
-### CLI
-
-- Improve embedded token efficiency (`8fbb819`)
-- Trim embedded token overhead (`449d145`)
-- Reduce smart context token overhead (`a65ef71`)
-- Improve token-efficient context calibration (`fe27e49`)
-- Tighten smart context token budgets (`c13709c`)
-- Reduce smart context token overhead (`0e68795`)
-- Reduce embedded context token overhead (`a6cd544`)
-
-### Tests
-
-- Relax smart context rewrite timeout (`b0df72d`)
-
-### CI
-
-- Satisfy clippy warning gate (`5bcad24`)
-
-### Misc
-
-- Sanitize personal fixture data (`0c3e8b5`)
