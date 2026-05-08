@@ -4,7 +4,9 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.89.0 - 2026-05-08
 
-- No grouped changes.
+### Misc
+
+- Set Apache copyright notice (`51f67fa`)
 
 ## 0.88.0 - 2026-05-08
 
