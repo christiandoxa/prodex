@@ -1742,9 +1742,11 @@ fn super_slim_shadow_codex_129_response_messages_omit_raw_content_text() {
     assert!(user_summary.starts_with("u: Implement Codex 0.129 transcript compatibility"));
     assert!(assistant_summary.starts_with("a: Completed Codex 0.129 support"));
 
-    let shadows = runtime_mem_super_slim_v2_shadow_codex_events(
-        [&user_event, &assistant_event, &shell_event].into_iter(),
-    );
+    let shadows = runtime_mem_super_slim_v2_shadow_codex_events([
+        &user_event,
+        &assistant_event,
+        &shell_event,
+    ]);
     assert_eq!(shadows[0]["t"].as_str(), Some("pm2:u"));
     assert_eq!(shadows[0]["r"].as_str(), Some("prodex-artifact:prompt-129"));
     assert_eq!(shadows[1]["t"].as_str(), Some("pm2:a"));
