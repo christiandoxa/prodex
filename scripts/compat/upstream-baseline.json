@@ -14,7 +14,9 @@
             "/responses",
             "RESPONSES_COMPACT_ENDPOINT",
             "/responses/compact",
-            "build_conversation_headers",
+            "build_responses_headers",
+            "build_responses_identity_headers",
+            "build_session_headers",
             "previous_response_id",
             "X_CODEX_INSTALLATION_ID_HEADER",
             "x-codex-installation-id",
@@ -188,7 +190,9 @@
           "file": "codex-rs/core/src/client.rs",
           "reason": "Conversation metadata headers are forwarded together for affinity and upstream Codex behavior.",
           "file_contains_all": [
-            "build_conversation_headers",
+            "build_responses_headers",
+            "build_responses_identity_headers",
+            "build_session_headers",
             "x-codex-installation-id",
             "x-codex-turn-state",
             "x-codex-turn-metadata",
@@ -217,7 +221,9 @@
           "file": "codex-rs/core/src/client.rs",
           "reason": "Prodex must keep preserving upstream Codex metadata headers that drive affinity, subagent behavior, beta transport, and client identity.",
           "file_contains_all": [
-            "build_conversation_headers",
+            "build_responses_headers",
+            "build_responses_identity_headers",
+            "build_session_headers",
             "x-openai-subagent",
             "x-codex-turn-state",
             "x-codex-turn-metadata",
@@ -408,28 +414,28 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.128.0",
-      "name": "0.128.0",
-      "published_at": "2026-04-30T16:40:28Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.128.0",
+      "tag_name": "rust-v0.129.0",
+      "name": "0.129.0",
+      "published_at": "2026-05-07T17:02:13Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.129.0",
       "body_head": [
         "## New Features",
-        "- Added persisted `/goal` workflows with app-server APIs, model tools, runtime continuation, and TUI controls for create, pause, resume, and clear. (#18073, #18074, #18075, #18076, #18077, #20082)",
-        "- Added `codex update`, configurable TUI keymaps, plan-mode nudges, action-required terminal titles, and active-turn `/statusline` and `/title` edits. (#19933, #18593, #19901, #18372, #19917)",
-        "- Expanded permission profiles with built-in defaults, sandbox CLI profile selection, cwd controls, and active-profile metadata for clients. (#19900, #20117, #20118, #20095)",
-        "- Improved plugin workflows with marketplace installation, remote bundle caching, remote uninstall, plugin-bundled hooks, hook enablement state, and external-agent config import. (#18704, #19914, #19456, #19705, #19840, #19949)",
-        "- Added external agent session import, including background imports and imported-session title handling. (#19895, #20284, #20261)",
-        "- Made MultiAgentV2 configuration more explicit with thread caps, wait-time controls, root/subagent hints, and v2-specific depth handling. (#19360, #19792, #19805, #20052, #20180)",
+        "- The TUI now supports modal Vim editing in the composer, including `/vim`, default-mode config, and Vim-specific keymap contexts. (#18595)",
+        "- TUI workflows are easier to resume and copy from with a redesigned resume/fork picker, raw scrollback mode, `/ide` context injection, and workspace-aware `/diff`. (#20065, #20819, #20294, #21001)",
+        "- The status line can show theme-aware colors plus optional PR and branch-change summaries, and `/keymap debug` helps inspect terminal key events. (#19631, #20892, #20794)",
+        "- Plugin management now supports workspace sharing, share access controls, source filtering, local share path tracking, marketplace removal/upgrades, remote bundle sync, and admin-disabled status handling. (#20278, #21124, #21419, #20560, #19843, #20478, #20268, #20298)",
+        "- Hooks can be browsed and toggled from `/hooks`, can run before/after compaction, and can add `PreToolUse` context; Codex Apps auth and eligible MCP elicitations now surface through TUI/Guardian flows. (#19882, #19905, #20692, #19193, #19431)",
+        "- Experimental goals are now discoverable, stay paused across resume unless the user opts back in, and show clearer validation and multi-day duration output. (#20083, #20790, #20746, #20558)",
         "## Bug Fixes"
       ]
     }
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.132",
-      "name": "v2.1.132",
-      "published_at": "2026-05-06T22:08:13Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.132"
+      "tag_name": "v2.1.133",
+      "name": "v2.1.133",
+      "published_at": "2026-05-07T23:49:04Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.133"
     },
     "docs": [
       {

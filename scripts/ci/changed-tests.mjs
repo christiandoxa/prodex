@@ -6,6 +6,7 @@ import { formatCommand, runStep, runStepsSerial } from "./main-internal-test-run
 import { repoRoot } from "../npm/common.mjs";
 
 const VERSION_SYNC_PATHS = Object.freeze(["Cargo.toml", "npm", "README.md", "QUICKSTART.md", "scripts/npm"]);
+const WATCH_UPSTREAM_FIXTURE_TESTS_PATH = "scripts/compat/watch-upstream-fixture-tests.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -242,6 +243,10 @@ function isReleaseGuardFixturesRelevantPath(filePath) {
   );
 }
 
+function isUpstreamCompatRelevantPath(filePath) {
+  return filePath === ".github/workflows/upstream-compat.yml" || filePath.startsWith("scripts/compat/");
+}
+
 function crateDirForPath(filePath) {
   const parts = filePath.split("/");
   if (parts[0] === "crates" && parts.length >= 2) {
@@ -342,6 +347,21 @@ async function buildSteps(paths) {
         command: "node",
         args: ["scripts/ci/release-guard-fixture-tests.mjs"],
       });
+    }
+
+    if (isUpstreamCompatRelevantPath(filePath)) {
+      addStep(steps, "upstream-baseline-guard", {
+        label: "upstream-baseline-guard",
+        command: "node",
+        args: ["scripts/compat/check-upstream-baseline.mjs"],
+      });
+      if (await pathExists(WATCH_UPSTREAM_FIXTURE_TESTS_PATH)) {
+        addStep(steps, "watch-upstream-fixtures", {
+          label: "watch-upstream-fixtures",
+          command: "node",
+          args: [WATCH_UPSTREAM_FIXTURE_TESTS_PATH],
+        });
+      }
     }
 
     if (filePath.endsWith(".md") && (await pathExists(filePath))) {

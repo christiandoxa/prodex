@@ -107,6 +107,8 @@ jobs:
             const codex = report.current?.codex?.latestRelease ?? {};
             const claude = report.current?.claude?.latestRelease ?? {};
             const diffs = Array.isArray(report.diffs) ? report.diffs : [];
+            const diffSummary = report.diff_summary || {};
+            const statusLabel = String(diffSummary.status || (diffs.length === 0 ? "in_sync" : "drift_detected")).replace(/_/g, " ");
 
             lines.push(`- Codex latest release: [${codex.tag_name || "unknown"}](${codex.html_url || "https://github.com/openai/codex/releases/latest"})`);
             lines.push(`- Claude latest release: [${claude.tag_name || "unknown"}](${claude.html_url || "https://github.com/anthropics/claude-code/releases/latest"})`);
@@ -116,11 +118,26 @@ jobs:
             if (diffs.length === 0) {
               lines.push("Status: in sync");
             } else {
-              lines.push(`Status: drift detected (${diffs.length} change${diffs.length === 1 ? "" : "s"})`);
+              lines.push(`Status: ${statusLabel} (${diffs.length} change${diffs.length === 1 ? "" : "s"})`);
+              if (Number.isInteger(diffSummary.blocking)) {
+                lines.push(`- Blocking compatibility diffs: \`${diffSummary.blocking}\``);
+              }
+              if (Number.isInteger(diffSummary.non_blocking)) {
+                lines.push(`- Non-blocking drift diffs: \`${diffSummary.non_blocking}\``);
+              }
+              if (diffSummary.labels && typeof diffSummary.labels === "object") {
+                lines.push("");
+                lines.push("### Drift labels");
+                for (const [label, count] of Object.entries(diffSummary.labels)) {
+                  lines.push(`- \`${label}\`: ${count}`);
+                }
+              }
               lines.push("");
               lines.push("### Drift paths");
               for (const diff of diffs.slice(0, 20)) {
-                lines.push(`- \`${diff.path}\``);
+                const label = diff.label ? `[${diff.label}] ` : "";
+                const blocking = diff.blocking ? " blocking" : "";
+                lines.push(`- ${label}\`${diff.path}\`${blocking}`);
               }
               if (diffs.length > 20) {
                 lines.push(`- ... and ${diffs.length - 20} more`);
