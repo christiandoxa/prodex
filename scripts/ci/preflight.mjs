@@ -84,7 +84,7 @@ function printHelp() {
       "Runs the practical local preflight gate before pushing.",
       "",
       "Default checks:",
-      "  - release metadata-only, Rust size, crate boundaries, runtime hot-path, churn hygiene, version sync",
+      "  - release hygiene, Rust size, crate boundaries, runtime hot-path, churn hygiene, version sync",
       "  - docs lint, upstream baseline, runtime manifest, fmt, cargo check",
       "  - cargo clippy --locked --all-targets --all-features -- -D warnings",
       "  - npm run test:fast -- --tests-only --no-prebuild",
@@ -118,6 +118,26 @@ function preflightSteps(args) {
       label: "release-metadata-only-guard",
       command: "node",
       args: ["scripts/ci/release-metadata-only-guard.mjs"],
+    },
+    {
+      label: "version-metadata-release-guard",
+      command: "node",
+      args: ["scripts/ci/version-metadata-release-guard.mjs"],
+    },
+    {
+      label: "release-empty-commit-guard",
+      command: "node",
+      args: ["scripts/ci/release-empty-commit-guard.mjs"],
+    },
+    {
+      label: "release-duplicate-version-guard",
+      command: "node",
+      args: ["scripts/ci/release-duplicate-version-guard.mjs"],
+    },
+    {
+      label: "release-tag-changelog-guard",
+      command: "node",
+      args: ["scripts/ci/release-tag-changelog-guard.mjs"],
     },
     {
       label: "size-guard",

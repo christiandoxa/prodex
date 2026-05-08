@@ -100,6 +100,40 @@ jobs:
             npm run ci:churn-hygiene:check
           fi
 
+      - name: Enforce release hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          range_guards=(
+            ci:release-metadata-guard
+            ci:version-metadata-release-guard
+            ci:release-empty-commit-guard
+            ci:release-duplicate-version-guard
+          )
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            for guard in "${range_guards[@]}"; do
+              npm run "${guard}" -- --base "${base}" --head "${head}"
+            done
+            npm run ci:release-tag-changelog-guard -- --rev "${head}"
+            exit 0
+          fi
+
+          before="${{ github.event.before }}"
+          after="${{ github.sha }}"
+          if [ -n "${before}" ] && [ "${before}" != "0000000000000000000000000000000000000000" ]; then
+            for guard in "${range_guards[@]}"; do
+              npm run "${guard}" -- --base "${before}" --head "${after}"
+            done
+            npm run ci:release-tag-changelog-guard -- --rev "${after}"
+          else
+            for guard in "${range_guards[@]}"; do
+              npm run "${guard}"
+            done
+            npm run ci:release-tag-changelog-guard
+          fi
+
       - name: Enforce Rust file size guard
         run: npm run ci:size-guard
 
