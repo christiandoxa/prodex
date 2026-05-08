@@ -100,6 +100,154 @@ fn session_reports_attach_profile_bindings() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn session_reports_filter_by_profile_and_query() {
+    let root = test_temp_dir("session-filter");
+    let sessions = root.join("sessions");
+    let alpha_cwd = root.join("WorkspaceAlpha");
+    let beta_cwd = root.join("WorkspaceBeta");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    fs::create_dir_all(&alpha_cwd).expect("alpha cwd should be created");
+    fs::create_dir_all(&beta_cwd).expect("beta cwd should be created");
+    fs::write(
+        sessions.join("alpha-special-path.jsonl"),
+        format!(
+            "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"payload\":{{\"id\":\"alpha-session\",\"thread_name\":\"Issue Triage\",\"cwd\":\"{}\"}}}}\n",
+            alpha_cwd.display()
+        ),
+    )
+    .expect("alpha session should be written");
+    fs::write(
+        sessions.join("beta-special-path.jsonl"),
+        format!(
+            "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"payload\":{{\"id\":\"beta-session\",\"thread_name\":\"Docs Review\",\"cwd\":\"{}\"}}}}\n",
+            beta_cwd.display()
+        ),
+    )
+    .expect("beta session should be written");
+    let state = AppState {
+        session_profile_bindings: BTreeMap::from([
+            (
+                "alpha-session".to_string(),
+                prodex_state::ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: 1,
+                },
+            ),
+            (
+                "beta-session".to_string(),
+                prodex_state::ResponseProfileBinding {
+                    profile_name: "alt".to_string(),
+                    bound_at: 1,
+                },
+            ),
+        ]),
+        ..AppState::default()
+    };
+
+    let profile_reports = collect_session_reports_with_filter(
+        &root,
+        SessionReportFilter {
+            current_dir: None,
+            profile: Some("main"),
+            query: Some("triage"),
+        },
+        &state,
+    )
+    .expect("sessions collect");
+    assert_eq!(profile_reports.len(), 1);
+    assert_eq!(profile_reports[0].id, "alpha-session");
+
+    let cwd_reports = collect_session_reports_with_filter(
+        &root,
+        SessionReportFilter {
+            current_dir: None,
+            profile: None,
+            query: Some("workspacebeta"),
+        },
+        &state,
+    )
+    .expect("sessions collect");
+    assert_eq!(cwd_reports.len(), 1);
+    assert_eq!(cwd_reports[0].id, "beta-session");
+
+    let path_reports = collect_session_reports_with_filter(
+        &root,
+        SessionReportFilter {
+            current_dir: None,
+            profile: None,
+            query: Some("ALPHA-SPECIAL-PATH"),
+        },
+        &state,
+    )
+    .expect("sessions collect");
+    assert_eq!(path_reports.len(), 1);
+    assert_eq!(path_reports[0].id, "alpha-session");
+
+    let profile_query_reports = collect_session_reports_with_filter(
+        &root,
+        SessionReportFilter {
+            current_dir: None,
+            profile: None,
+            query: Some("ALT"),
+        },
+        &state,
+    )
+    .expect("sessions collect");
+    assert_eq!(profile_query_reports.len(), 1);
+    assert_eq!(profile_query_reports[0].id, "beta-session");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_resolver_handles_unique_ambiguous_and_missing_ids() {
+    let root = test_temp_dir("session-resolve");
+    let sessions = root.join("sessions");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let first_id = "11111111-1111-1111-1111-111111111111";
+    let second_id = "11111111-1111-1111-1111-222222222222";
+    fs::write(
+        sessions.join("first.jsonl"),
+        format!(
+            "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"payload\":{{\"id\":\"{first_id}\"}}}}\n"
+        ),
+    )
+    .expect("first session should be written");
+    fs::write(
+        sessions.join("second.jsonl"),
+        format!(
+            "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"payload\":{{\"id\":\"{second_id}\"}}}}\n"
+        ),
+    )
+    .expect("second session should be written");
+
+    let reports =
+        collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+    assert_eq!(
+        resolve_session_report_by_id(&reports, &first_id.to_uppercase())
+            .expect("exact match should resolve")
+            .id,
+        first_id
+    );
+    assert_eq!(
+        resolve_session_report_by_id(&reports, "11111111-1111-1111-1111-222")
+            .expect("unique prefix should resolve")
+            .id,
+        second_id
+    );
+    assert!(matches!(
+        resolve_session_report_by_id(&reports, "11111111").unwrap_err(),
+        SessionResolveError::Ambiguous { .. }
+    ));
+    assert!(matches!(
+        resolve_session_report_by_id(&reports, "99999999").unwrap_err(),
+        SessionResolveError::Missing { .. }
+    ));
+
+    let _ = fs::remove_dir_all(root);
+}
+
 fn test_temp_dir(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
         "prodex-session-store-{name}-{}-{}",

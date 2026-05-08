@@ -3,7 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
-const defaultFiles = ["README.md", "QUICKSTART.md", "docs/testing.md", "docs/runtime-policy.md"];
+const defaultFiles = [
+  "README.md",
+  "QUICKSTART.md",
+  "docs/testing.md",
+  "docs/runtime-policy.md",
+  "docs/architecture.md",
+];
 
 function parseArgs(argv) {
   const files = [];

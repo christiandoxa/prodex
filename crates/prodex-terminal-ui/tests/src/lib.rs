@@ -97,6 +97,24 @@ fn session_report_renderer_keeps_existing_columns_and_profile_line() {
 }
 
 #[test]
+fn session_report_renderer_prints_full_id_when_id_column_is_truncated() {
+    let long_id = "550e8400-e29b-41d4-a716-446655440000";
+    let rendered = render_session_reports_with_width(
+        &[SessionReportDisplay {
+            id: long_id,
+            updated_at: Some("2026-04-29T12:30:00Z"),
+            thread_name: Some("Issue triage"),
+            cwd: Some("/repo"),
+            profile: None,
+            path: "/tmp/sessions/550e8400-e29b-41d4-a716-446655440000.jsonl",
+        }],
+        80,
+    );
+
+    assert!(rendered.contains(&format!("  id: {long_id}")));
+}
+
+#[test]
 fn runtime_launch_scored_candidate_message_formats_blocked_selected_profile() {
     let output =
         format_runtime_launch_scored_candidate_message(RuntimeLaunchScoredCandidateMessage {

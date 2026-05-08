@@ -1,9 +1,10 @@
 use secret_store::SecretBackendKind;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use std::path::PathBuf;
 
 pub const PRODEX_POLICY_FILE_NAME: &str = "policy.toml";
 pub const PRODEX_POLICY_VERSION: u32 = 1;
+pub const PRODEX_RUNTIME_PROXY_PRESET_ENV: &str = "PRODEX_RUNTIME_PROXY_PRESET";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -56,9 +57,151 @@ pub struct RuntimePolicySecretsSettings {
     pub keyring_service: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimePolicyProxyPreset {
+    Low,
+    Default,
+    ManyTerminals,
+    Aggressive,
+}
+
+impl RuntimePolicyProxyPreset {
+    pub const VALID_VALUES: &'static [&'static str] =
+        &["low", "default", "many-terminals", "aggressive"];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Default => "default",
+            Self::ManyTerminals => "many-terminals",
+            Self::Aggressive => "aggressive",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "low" => Some(Self::Low),
+            "default" => Some(Self::Default),
+            "many-terminals" | "many_terminals" => Some(Self::ManyTerminals),
+            "aggressive" => Some(Self::Aggressive),
+            _ => None,
+        }
+    }
+
+    fn settings(self) -> RuntimePolicyProxySettings {
+        let preset = RuntimePolicyProxyPresetSelection::selected(self);
+        // Presets only tune local concurrency/admission knobs. Transport timeouts stay unset
+        // to preserve upstream Codex stream and reconnect behavior.
+        match self {
+            Self::Low => RuntimePolicyProxySettings {
+                preset,
+                worker_count: Some(4),
+                long_lived_worker_count: Some(8),
+                probe_refresh_worker_count: Some(2),
+                async_worker_count: Some(2),
+                long_lived_queue_capacity: Some(128),
+                active_request_limit: Some(48),
+                profile_inflight_soft_limit: Some(2),
+                profile_inflight_hard_limit: Some(4),
+                responses_active_limit: Some(36),
+                compact_active_limit: Some(3),
+                websocket_active_limit: Some(8),
+                standard_active_limit: Some(2),
+                websocket_connect_worker_count: Some(4),
+                websocket_connect_queue_capacity: Some(32),
+                websocket_connect_overflow_capacity: Some(64),
+                websocket_dns_worker_count: Some(2),
+                websocket_dns_queue_capacity: Some(16),
+                websocket_dns_overflow_capacity: Some(32),
+                startup_sync_probe_warm_limit: Some(1),
+                ..RuntimePolicyProxySettings::default()
+            },
+            Self::Default => RuntimePolicyProxySettings {
+                preset,
+                ..RuntimePolicyProxySettings::default()
+            },
+            Self::ManyTerminals => RuntimePolicyProxySettings {
+                preset,
+                worker_count: Some(12),
+                long_lived_worker_count: Some(32),
+                probe_refresh_worker_count: Some(4),
+                async_worker_count: Some(4),
+                long_lived_queue_capacity: Some(512),
+                active_request_limit: Some(160),
+                profile_inflight_soft_limit: Some(4),
+                profile_inflight_hard_limit: Some(8),
+                responses_active_limit: Some(120),
+                compact_active_limit: Some(8),
+                websocket_active_limit: Some(32),
+                standard_active_limit: Some(8),
+                websocket_connect_worker_count: Some(12),
+                websocket_connect_queue_capacity: Some(96),
+                websocket_connect_overflow_capacity: Some(384),
+                websocket_dns_worker_count: Some(6),
+                websocket_dns_queue_capacity: Some(48),
+                websocket_dns_overflow_capacity: Some(96),
+                startup_sync_probe_warm_limit: Some(2),
+                ..RuntimePolicyProxySettings::default()
+            },
+            Self::Aggressive => RuntimePolicyProxySettings {
+                preset,
+                worker_count: Some(24),
+                long_lived_worker_count: Some(96),
+                probe_refresh_worker_count: Some(8),
+                async_worker_count: Some(8),
+                long_lived_queue_capacity: Some(1024),
+                active_request_limit: Some(384),
+                profile_inflight_soft_limit: Some(8),
+                profile_inflight_hard_limit: Some(16),
+                responses_active_limit: Some(288),
+                compact_active_limit: Some(16),
+                websocket_active_limit: Some(96),
+                standard_active_limit: Some(16),
+                websocket_connect_worker_count: Some(16),
+                websocket_connect_queue_capacity: Some(128),
+                websocket_connect_overflow_capacity: Some(512),
+                websocket_dns_worker_count: Some(8),
+                websocket_dns_queue_capacity: Some(64),
+                websocket_dns_overflow_capacity: Some(128),
+                startup_sync_probe_warm_limit: Some(3),
+                ..RuntimePolicyProxySettings::default()
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimePolicyProxyPresetSelection(Option<RuntimePolicyProxyPreset>);
+
+impl RuntimePolicyProxyPresetSelection {
+    pub fn selected(preset: RuntimePolicyProxyPreset) -> Self {
+        Self(Some(preset))
+    }
+
+    pub fn get(self) -> Option<RuntimePolicyProxyPreset> {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RuntimePolicyProxyPresetSelection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        RuntimePolicyProxyPreset::parse(&value)
+            .map(Self::selected)
+            .ok_or_else(|| {
+                de::Error::unknown_variant(value.trim(), RuntimePolicyProxyPreset::VALID_VALUES)
+            })
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyProxySettings {
+    #[serde(default)]
+    pub preset: RuntimePolicyProxyPresetSelection,
     pub worker_count: Option<usize>,
     pub long_lived_worker_count: Option<usize>,
     pub probe_refresh_worker_count: Option<usize>,
@@ -97,6 +240,80 @@ pub struct RuntimePolicyProxySettings {
     pub sync_probe_pressure_pause_ms: Option<u64>,
     pub responses_critical_floor_percent: Option<i64>,
     pub startup_sync_probe_warm_limit: Option<usize>,
+}
+
+impl RuntimePolicyProxySettings {
+    pub fn preset(&self) -> Option<RuntimePolicyProxyPreset> {
+        self.preset.get()
+    }
+
+    pub fn with_effective_preset(
+        self,
+        env_preset: Option<RuntimePolicyProxyPreset>,
+    ) -> RuntimePolicyProxySettings {
+        let selected_preset = env_preset.or_else(|| self.preset());
+        let Some(selected_preset) = selected_preset else {
+            return self;
+        };
+
+        let mut effective = selected_preset.settings();
+        effective.apply_non_preset_overrides(self);
+        effective.preset = RuntimePolicyProxyPresetSelection::selected(selected_preset);
+        effective
+    }
+
+    fn apply_non_preset_overrides(&mut self, overrides: RuntimePolicyProxySettings) {
+        macro_rules! apply_optional_overrides {
+            ($($field:ident),+ $(,)?) => {
+                $(
+                    if overrides.$field.is_some() {
+                        self.$field = overrides.$field;
+                    }
+                )+
+            };
+        }
+
+        apply_optional_overrides!(
+            worker_count,
+            long_lived_worker_count,
+            probe_refresh_worker_count,
+            async_worker_count,
+            long_lived_queue_capacity,
+            active_request_limit,
+            profile_inflight_soft_limit,
+            profile_inflight_hard_limit,
+            responses_active_limit,
+            compact_active_limit,
+            websocket_active_limit,
+            standard_active_limit,
+            http_connect_timeout_ms,
+            stream_idle_timeout_ms,
+            sse_lookahead_timeout_ms,
+            prefetch_backpressure_retry_ms,
+            prefetch_backpressure_timeout_ms,
+            prefetch_max_buffered_bytes,
+            websocket_connect_timeout_ms,
+            websocket_happy_eyeballs_delay_ms,
+            websocket_precommit_progress_timeout_ms,
+            websocket_connect_worker_count,
+            websocket_connect_queue_capacity,
+            websocket_connect_overflow_capacity,
+            websocket_dns_worker_count,
+            websocket_dns_queue_capacity,
+            websocket_dns_overflow_capacity,
+            broker_ready_timeout_ms,
+            broker_health_connect_timeout_ms,
+            broker_health_read_timeout_ms,
+            websocket_previous_response_reuse_stale_ms,
+            admission_wait_budget_ms,
+            pressure_admission_wait_budget_ms,
+            long_lived_queue_wait_budget_ms,
+            pressure_long_lived_queue_wait_budget_ms,
+            sync_probe_pressure_pause_ms,
+            responses_critical_floor_percent,
+            startup_sync_probe_warm_limit,
+        );
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

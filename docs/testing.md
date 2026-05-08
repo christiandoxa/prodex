@@ -40,6 +40,7 @@ npm run test:serial
 npm run ci:preflight
 npm run ci:release-metadata-guard
 npm run ci:runtime-hotpath-guard
+npm run ci:crate-boundary
 npm run ci:churn-hygiene
 npm run release:prepare
 npm run changelog:check
@@ -98,11 +99,13 @@ To exercise an already-running proxy, pass the Codex-facing base URL:
 npm run load:runtime-proxy -- --scenario spike --target http://127.0.0.1:9901/backend-api --runtime-log-dir /tmp/prodex-runtime
 ```
 
-Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release metadata-only, runtime hot-path, churn hygiene, version/docs/runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Churn hygiene fails on actionable violations by default; use `npm run ci:preflight -- --churn-report-only` or `PRODEX_PREFLIGHT_CHURN_REPORT_ONLY=1 npm run ci:preflight` only for exploratory local runs. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan. For local historical audits only, `-- --churn-range old..HEAD --churn-ignore-before latest-tag` keeps churn enforcement focused on commits after the newest version tag inside the selected range.
+Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release metadata-only, size, crate-boundary, runtime hot-path, churn hygiene, version/docs/runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Churn hygiene fails on actionable violations by default; use `npm run ci:preflight -- --churn-report-only` or `PRODEX_PREFLIGHT_CHURN_REPORT_ONLY=1 npm run ci:preflight` only for exploratory local runs. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan. For local historical audits only, `-- --churn-range old..HEAD --churn-ignore-before latest-tag` keeps churn enforcement focused on commits after the newest version tag inside the selected range.
 
 Use `npm run ci:release-metadata-guard` to keep release/chore release commits metadata-only. By default it checks `HEAD`; use `-- --range main..HEAD` for a branch range, or `-- --staged --assume-release` before committing a release bump. The guard fails only when a release-like commit changes both version metadata files such as `Cargo.toml`, `Cargo.lock`, npm package manifests, `README.md`, or `QUICKSTART.md`, and non-metadata files.
 
 Use `npm run ci:runtime-hotpath-guard` after proxy hot-path work. It strips `#[cfg(test)]` Rust items, scans runtime proxy hot-path targets for blocking `std::fs`/`fs::` disk operations, file opens, `spawn_blocking`, and OS `thread::spawn`, then permits only narrow allowlisted existing cases with rationale.
+
+Use `npm run ci:crate-boundary` after adding workspace dependencies. It parses Cargo manifests and fails on direct dependency edges from focused/helper crates into app orchestration, terminal rendering, or runtime-proxy-incompatible layers.
 
 Use `PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE=scripts/ci/runtime-proxy-bench-thresholds.json cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths` after benchmark-sensitive proxy changes. Checked-in runtime proxy bench scales use the policy encoded in `scripts/ci/runtime-proxy-bench-thresholds.json`: calibrate against the max observed median, keep a 25% nanosecond margin, require at least 15 scale points above observed required scale, avoid per-case scales below 50%, and suppress suggestions smaller than 5 scale points. `node scripts/ci/benchmark-calibration.mjs <bench-log>` applies the same defaults so local or pasted CI logs do not silently tighten tiny benchmark cases to machine-specific values.
 

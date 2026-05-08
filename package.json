@@ -30,6 +30,7 @@
     "ci:prepush": "node scripts/ci/prepush.mjs",
     "ci:preflight": "node scripts/ci/preflight.mjs",
     "ci:size-guard": "node scripts/ci/size-guard.mjs",
+    "ci:crate-boundary": "node scripts/ci/crate-boundary-guard.mjs",
     "ci:release-metadata-guard": "node scripts/ci/release-metadata-only-guard.mjs",
     "ci:runtime-hotpath-guard": "node scripts/ci/runtime-hotpath-guard.mjs",
     "ci:churn-hygiene": "node scripts/ci/churn-hygiene.mjs",

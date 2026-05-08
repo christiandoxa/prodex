@@ -40,6 +40,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             "Runtime policy".to_string(),
             format_runtime_policy_summary(policy_summary.as_ref()),
         ),
+        ("Runtime preset".to_string(), format_runtime_proxy_preset()),
         (
             "Secret backend".to_string(),
             format_secret_backend_summary(),

@@ -203,6 +203,12 @@ pub(crate) fn format_runtime_policy_summary(summary: Option<&RuntimePolicySummar
     )
 }
 
+pub(crate) fn format_runtime_proxy_preset() -> String {
+    runtime_policy_proxy()
+        .and_then(|policy| policy.preset().map(|preset| preset.as_str().to_string()))
+        .unwrap_or_else(|| "default".to_string())
+}
+
 pub(crate) fn format_runtime_logs_summary() -> String {
     let directory = runtime_proxy_log_dir().display().to_string();
     prodex_app_reports::format_runtime_logs_summary(&directory, runtime_proxy_log_format().as_str())

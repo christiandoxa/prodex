@@ -2,12 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## Unreleased
+## 0.88.0 - 2026-05-08
 
-Changes after `0.87.0`.
+### CI
+
+- Defer changelog freshness for non-release commits (`0e82478`)
 
 ### Misc
 
+- Satisfy rust 1.95 clippy (`5c04ca3`)
+- Sync package version 0.88.0 (`dee2036`)
+- Trust caveman hooks for 0.129 (`e434bfd`)
+- Support codex 0.129 transcript events (`91880c6`)
 - Stabilize release section generation (`d5080b9`)
 
 ## 0.87.0 - 2026-05-07
@@ -174,9 +180,3 @@ Changes after `0.87.0`.
 ### CI
 
 - Satisfy clippy warning gate (`05544d4`)
-
-## 0.76.0 - 2026-05-04
-
-### CLI
-
-- Improve prodex super token efficiency (`e7eb552`)

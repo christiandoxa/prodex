@@ -105,6 +105,14 @@
         "Authorization",
         "ChatGPT-Account-Id"
       ],
+      "proxy_skipped_headers": [
+        "Host",
+        "Connection",
+        "Content-Length",
+        "Transfer-Encoding",
+        "Upgrade",
+        "sec-websocket-*"
+      ],
       "expected_routes": [
         "/responses",
         "/responses/compact",
@@ -112,6 +120,12 @@
         "websocket_url_for_path(\"responses\")"
       ],
       "expected_stream_events": [
+        "response.created",
+        "response.in_progress",
+        "response.queued",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.reasoning_summary_part.added",
         "response.completed",
         "response.failed",
         "response.metadata",
@@ -129,6 +143,30 @@
           ],
           "expected_routes_all": [
             "/responses"
+          ]
+        },
+        {
+          "id": "sse.responses-http-route-behavior",
+          "kind": "route_event_group",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "SSE Responses traffic must keep the upstream stream parser, response metadata headers, and lifecycle event assumptions tied to the /responses route.",
+          "file_contains_all": [
+            "spawn_response_stream",
+            "process_sse",
+            "process_responses_event",
+            "x-codex-turn-state",
+            "openai-model",
+            "x-reasoning-included",
+            "X-Models-Etag"
+          ],
+          "expected_routes_all": [
+            "/responses"
+          ],
+          "expected_stream_events_all": [
+            "response.created",
+            "response.completed",
+            "response.failed",
+            "response.metadata"
           ]
         },
         {
@@ -174,6 +212,28 @@
           ]
         },
         {
+          "id": "proxy.preserved-headers",
+          "kind": "header_group",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Prodex must keep preserving upstream Codex metadata headers that drive affinity, subagent behavior, beta transport, and client identity.",
+          "file_contains_all": [
+            "build_conversation_headers",
+            "x-openai-subagent",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-beta-features",
+            "OPENAI_BETA_HEADER"
+          ],
+          "expected_headers_all": [
+            "session_id",
+            "x-openai-subagent",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-beta-features",
+            "User-Agent"
+          ]
+        },
+        {
           "id": "client.websocket-beta",
           "kind": "co_occurrence",
           "file": "codex-rs/core/src/client.rs",
@@ -214,6 +274,7 @@
             "response.metadata"
           ],
           "expected_stream_events_all": [
+            "response.created",
             "response.completed",
             "response.failed",
             "response.metadata"
@@ -243,6 +304,38 @@
           ]
         },
         {
+          "id": "websocket.session-behavior",
+          "kind": "route_event_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Websocket sessions must preserve upstream route selection, request metadata merge behavior, turn-state affinity, lifecycle events, and wrapped error handling.",
+          "file_contains_all": [
+            "ResponsesWebsocketConnection",
+            "websocket_url_for_path(\"responses\")",
+            "merge_request_headers",
+            "add_auth_headers",
+            "x-codex-turn-state",
+            "parse_wrapped_websocket_error_event",
+            "websocket_connection_limit_reached"
+          ],
+          "expected_routes_all": [
+            "websocket_url_for_path(\"responses\")"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-state"
+          ],
+          "expected_stream_events_all": [
+            "response.created",
+            "response.in_progress",
+            "response.queued",
+            "response.output_item.added",
+            "response.content_part.added",
+            "response.reasoning_summary_part.added",
+            "response.completed",
+            "response.failed",
+            "codex.rate_limits"
+          ]
+        },
+        {
           "id": "websocket.responses-events",
           "kind": "event_group",
           "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
@@ -252,7 +345,14 @@
             "codex.rate_limits"
           ],
           "expected_stream_events_all": [
+            "response.created",
+            "response.in_progress",
+            "response.queued",
+            "response.output_item.added",
+            "response.content_part.added",
+            "response.reasoning_summary_part.added",
             "response.completed",
+            "response.failed",
             "codex.rate_limits"
           ]
         },
@@ -272,6 +372,37 @@
           "proxy_replaced_headers_all": [
             "Authorization",
             "ChatGPT-Account-Id"
+          ]
+        },
+        {
+          "id": "proxy.replaced-headers",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Selected Prodex profiles replace upstream auth/account headers instead of forwarding caller-supplied values.",
+          "file_contains_all": [
+            "merge_request_headers",
+            "add_auth_headers"
+          ],
+          "proxy_replaced_headers_all": [
+            "Authorization",
+            "ChatGPT-Account-Id"
+          ]
+        },
+        {
+          "id": "proxy.skipped-transport-headers",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Prodex must keep treating hop-by-hop and websocket handshake headers as transport-local rather than upstream metadata.",
+          "file_contains_all": [
+            "merge_request_headers"
+          ],
+          "proxy_skipped_headers_all": [
+            "Host",
+            "Connection",
+            "Content-Length",
+            "Transfer-Encoding",
+            "Upgrade",
+            "sec-websocket-*"
           ]
         }
       ]

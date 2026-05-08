@@ -85,6 +85,7 @@ struct RuntimeDoctorJsonView {
     prodex_binary_mismatch: bool,
     runtime_broker_mismatch: bool,
     failure_class_counts: BTreeMap<String, usize>,
+    incident_explainer: Vec<RuntimeDoctorIncidentExplanation>,
     profiles: Vec<RuntimeDoctorProfileSummary>,
     diagnosis: String,
 }
@@ -254,6 +255,7 @@ impl From<&RuntimeDoctorSummary> for RuntimeDoctorJsonView {
             prodex_binary_mismatch: summary.prodex_binary_mismatch,
             runtime_broker_mismatch: summary.runtime_broker_mismatch,
             failure_class_counts: summary.failure_class_counts.clone(),
+            incident_explainer: diagnosis::runtime_doctor_incident_explainer(summary),
             profiles: summary.profiles.clone(),
             diagnosis: summary.diagnosis.clone(),
         }
@@ -360,6 +362,39 @@ fn runtime_doctor_request_timeline_text(summary: &RuntimeDoctorSummary) -> Strin
         .collect::<Vec<_>>()
         .join(" -> ");
     format!("request={request_id} {events}")
+}
+
+fn runtime_doctor_incident_explainer_text(incident: &RuntimeDoctorIncidentExplanation) -> String {
+    let evidence = if incident.evidence.is_empty() {
+        "-".to_string()
+    } else {
+        incident.evidence.join(", ")
+    };
+    format!(
+        "{} Evidence: {evidence}. Next: {}",
+        incident.cause, incident.next_action
+    )
+}
+
+fn runtime_doctor_push_incident_explainer_rows(
+    fields: &mut FieldRowsBuilder,
+    summary: &RuntimeDoctorSummary,
+) {
+    let incidents = diagnosis::runtime_doctor_incident_explainer(summary);
+    if incidents.is_empty() {
+        fields.push("Incident explainer", "-");
+        return;
+    }
+    for (index, incident) in incidents.iter().take(6).enumerate() {
+        fields.push(
+            format!("Incident {}", index + 1),
+            runtime_doctor_incident_explainer_text(incident),
+        );
+    }
+    let hidden = incidents.len().saturating_sub(6);
+    if hidden > 0 {
+        fields.push("Incident hidden", hidden.to_string());
+    }
 }
 
 fn runtime_doctor_push_marker_detail_rows(
@@ -1094,6 +1129,7 @@ pub fn runtime_doctor_fields_for_summary(
         )
         .push("Latest log", latest_log)
         .push("Log sample", format!("{} lines", summary.line_count));
+    runtime_doctor_push_incident_explainer_rows(&mut fields, summary);
     for (label, marker) in RUNTIME_DOCTOR_COUNT_FIELD_ROWS {
         fields.push(
             *label,

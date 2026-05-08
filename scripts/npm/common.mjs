@@ -108,7 +108,7 @@ export function mainPackageManifest(version) {
     version,
     description:
       "Safe multi-account auto-rotate for Codex CLI with isolated CODEX_HOME profiles",
-    license: "MIT",
+    license: "Apache-2.0",
     bin: {
       prodex: "prodex",
     },
@@ -136,7 +136,7 @@ export function platformPackageManifest(spec, version) {
     name: spec.packageName,
     version,
     description: `Native prodex binary for ${spec.target}`,
-    license: "MIT",
+    license: "Apache-2.0",
     os: [spec.os],
     cpu: [spec.cpu],
     files: ["vendor", "LICENSE"],

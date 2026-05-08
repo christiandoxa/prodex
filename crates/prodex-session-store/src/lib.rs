@@ -4,13 +4,64 @@ use prodex_app_reports::{
     is_session_metadata_file, sort_session_reports,
 };
 use prodex_state::AppState;
+use std::fmt;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SessionReportFilter<'a> {
+    pub current_dir: Option<&'a Path>,
+    pub profile: Option<&'a str>,
+    pub query: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionResolveError {
+    Missing {
+        selector: String,
+    },
+    Ambiguous {
+        selector: String,
+        matches: Vec<String>,
+    },
+}
+
+impl fmt::Display for SessionResolveError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Missing { selector } => {
+                write!(formatter, "no session found matching id '{selector}'")
+            }
+            Self::Ambiguous { selector, matches } => write!(
+                formatter,
+                "session id '{selector}' is ambiguous; matches: {}",
+                matches.join(", ")
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SessionResolveError {}
+
 pub fn collect_session_reports(
     shared_codex_root: &Path,
     current_dir: Option<&Path>,
+    state: &AppState,
+) -> Result<Vec<SessionReport>> {
+    collect_session_reports_with_filter(
+        shared_codex_root,
+        SessionReportFilter {
+            current_dir,
+            ..SessionReportFilter::default()
+        },
+        state,
+    )
+}
+
+pub fn collect_session_reports_with_filter(
+    shared_codex_root: &Path,
+    filter: SessionReportFilter<'_>,
     state: &AppState,
 ) -> Result<Vec<SessionReport>> {
     let sessions_root = shared_codex_root.join("sessions");
@@ -21,7 +72,7 @@ pub fn collect_session_reports(
     let mut reports = Vec::new();
     for path in session_paths {
         let report = read_session_report(&path, state)?;
-        if current_dir.is_some_and(|current_dir| !report.matches_current_dir(current_dir)) {
+        if !session_report_matches_filter(&report, &filter) {
             continue;
         }
         reports.push(report);
@@ -29,6 +80,98 @@ pub fn collect_session_reports(
 
     sort_session_reports(&mut reports);
     Ok(reports)
+}
+
+pub fn session_report_matches_filter(
+    report: &SessionReport,
+    filter: &SessionReportFilter<'_>,
+) -> bool {
+    if let Some(current_dir) = filter.current_dir
+        && !report.matches_current_dir(current_dir)
+    {
+        return false;
+    }
+
+    if let Some(profile) = filter.profile
+        && report.profile.as_deref() != Some(profile)
+    {
+        return false;
+    }
+
+    if let Some(query) = filter
+        .query
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+        && !session_report_matches_query(report, query)
+    {
+        return false;
+    }
+
+    true
+}
+
+pub fn session_report_matches_query(report: &SessionReport, query: &str) -> bool {
+    let query = query.to_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+
+    [
+        Some(report.id.as_str()),
+        report.thread_name.as_deref(),
+        report.cwd.as_deref(),
+        report.profile.as_deref(),
+        Some(report.path.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value.to_lowercase().contains(&query))
+}
+
+pub fn resolve_session_report_by_id<'a>(
+    reports: &'a [SessionReport],
+    selector: &str,
+) -> std::result::Result<&'a SessionReport, SessionResolveError> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return Err(SessionResolveError::Missing {
+            selector: selector.to_string(),
+        });
+    }
+
+    let exact_matches = reports
+        .iter()
+        .filter(|report| report.id.eq_ignore_ascii_case(selector))
+        .collect::<Vec<_>>();
+    if exact_matches.len() == 1 {
+        return Ok(exact_matches[0]);
+    }
+    if exact_matches.len() > 1 {
+        return Err(SessionResolveError::Ambiguous {
+            selector: selector.to_string(),
+            matches: session_match_ids(&exact_matches),
+        });
+    }
+
+    let selector_lower = selector.to_lowercase();
+    let prefix_matches = reports
+        .iter()
+        .filter(|report| report.id.to_lowercase().starts_with(&selector_lower))
+        .collect::<Vec<_>>();
+    match prefix_matches.len() {
+        0 => Err(SessionResolveError::Missing {
+            selector: selector.to_string(),
+        }),
+        1 => Ok(prefix_matches[0]),
+        _ => Err(SessionResolveError::Ambiguous {
+            selector: selector.to_string(),
+            matches: session_match_ids(&prefix_matches),
+        }),
+    }
+}
+
+fn session_match_ids(matches: &[&SessionReport]) -> Vec<String> {
+    matches.iter().map(|report| report.id.clone()).collect()
 }
 
 fn collect_session_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {

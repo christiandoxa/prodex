@@ -637,6 +637,9 @@ pub fn render_session_reports_with_width(
             report.path,
             widths,
         ));
+        if text_width(report.id) > widths.id {
+            lines.push(format!("  id: {}", report.id));
+        }
         if let Some(profile) = report.profile {
             lines.push(format!("  profile: {profile}"));
         }

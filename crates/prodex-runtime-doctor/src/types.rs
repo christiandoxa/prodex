@@ -116,6 +116,15 @@ pub struct RuntimeDoctorSummary {
     pub diagnosis: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RuntimeDoctorIncidentExplanation {
+    pub id: String,
+    pub cause: String,
+    pub evidence: Vec<String>,
+    pub markers: Vec<String>,
+    pub next_action: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeDoctorRequestTimelineEvent {
     pub timestamp: Option<String>,

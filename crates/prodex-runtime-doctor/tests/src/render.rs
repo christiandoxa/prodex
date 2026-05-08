@@ -3,10 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 const LANE_PRESSURE_LOG: &[u8] = include_bytes!("../fixtures/runtime_doctor/lane_pressure.log");
+const ACTIVE_REQUEST_PRESSURE_LOG: &[u8] =
+    include_bytes!("../fixtures/runtime_doctor/active_request_pressure.log");
 const PERSISTENCE_BACKPRESSURE_LOG: &[u8] =
     include_bytes!("../fixtures/runtime_doctor/persistence_backpressure.log");
 const PREVIOUS_RESPONSE_FAIL_CLOSED_LOG: &[u8] =
     include_bytes!("../fixtures/runtime_doctor/previous_response_fail_closed.log");
+const PROFILE_INFLIGHT_SATURATION_LOG: &[u8] =
+    include_bytes!("../fixtures/runtime_doctor/profile_inflight_saturation.log");
 const ROUTE_SCOPED_PROFILE_HEALTH_LOG: &[u8] =
     include_bytes!("../fixtures/runtime_doctor/route_scoped_profile_health.log");
 const WEBSOCKET_CONNECT_OVERFLOW_LOG: &[u8] =
@@ -46,6 +50,18 @@ fn runtime_doctor_json_string<'a>(value: &'a serde_json::Value, key: &str) -> &'
         .unwrap_or_else(|| panic!("{key} should be a JSON string"))
 }
 
+fn runtime_doctor_json_incident<'a>(
+    value: &'a serde_json::Value,
+    id: &str,
+) -> &'a serde_json::Value {
+    value["incident_explainer"]
+        .as_array()
+        .expect("incident_explainer should be an array")
+        .iter()
+        .find(|incident| incident["id"] == id)
+        .unwrap_or_else(|| panic!("missing incident {id}: {value:#?}"))
+}
+
 #[test]
 fn runtime_doctor_fixture_lane_pressure_surfaces_doctor_json_and_fields() {
     let summary = runtime_doctor_fixture_summary(LANE_PRESSURE_LOG);
@@ -71,6 +87,19 @@ fn runtime_doctor_fixture_lane_pressure_surfaces_doctor_json_and_fields() {
         runtime_doctor_json_string(&value, "diagnosis")
             .contains("per-lane admission limit was triggered on compact")
     );
+    assert_eq!(value["incident_explainer"][0]["id"], "lane_saturation");
+    assert!(
+        value["incident_explainer"][0]["cause"]
+            .as_str()
+            .expect("incident cause should be a string")
+            .contains("compact lane")
+    );
+    assert!(
+        fields
+            .get("Incident 1")
+            .expect("incident explainer should be rendered")
+            .contains("runtime_proxy_lane_limit_reached=2")
+    );
     assert!(
         fields
             .get("Lane next step")
@@ -82,6 +111,96 @@ fn runtime_doctor_fixture_lane_pressure_surfaces_doctor_json_and_fields() {
             .get("Failure classes")
             .expect("failure classes should be rendered"),
         "admission=2"
+    );
+}
+
+#[test]
+fn runtime_doctor_incident_explainer_classifies_pressure_fixture_logs() {
+    let summary = runtime_doctor_fixture_summary(ACTIVE_REQUEST_PRESSURE_LOG);
+    let value = runtime_doctor_json_value(&summary);
+    let active = runtime_doctor_json_incident(&value, "active_request_pressure");
+    assert!(
+        active["evidence"]
+            .as_array()
+            .expect("active evidence should be an array")
+            .iter()
+            .any(|evidence| evidence == "runtime_proxy_active_limit_reached=2")
+    );
+    assert!(
+        active["next_action"]
+            .as_str()
+            .expect("active next action should be a string")
+            .contains("in-flight requests to drain")
+    );
+
+    let summary = runtime_doctor_fixture_summary(PROFILE_INFLIGHT_SATURATION_LOG);
+    let fields = runtime_doctor_fixture_fields(&summary);
+    let value = runtime_doctor_json_value(&summary);
+    let inflight = runtime_doctor_json_incident(&value, "profile_inflight_saturation");
+    assert_eq!(inflight["markers"][0], "profile_inflight_saturated");
+    assert!(
+        inflight["cause"]
+            .as_str()
+            .expect("inflight cause should be a string")
+            .contains("Profile main")
+    );
+    assert!(
+        fields
+            .get("Incident 1")
+            .expect("incident explainer should be rendered")
+            .contains("hard_limit=8")
+    );
+}
+
+#[test]
+fn runtime_doctor_incident_explainer_classifies_transport_and_quota_fixture_logs() {
+    let summary = runtime_doctor_fixture_summary(ROUTE_SCOPED_PROFILE_HEALTH_LOG);
+    let value = runtime_doctor_json_value(&summary);
+    let transport = runtime_doctor_json_incident(&value, "transport_backoff");
+    assert!(
+        transport["next_action"]
+            .as_str()
+            .expect("transport next action should be a string")
+            .contains("alpha/responses")
+    );
+
+    let summary = runtime_doctor_fixture_summary(REQUEST_TIMELINE_LOG);
+    let value = runtime_doctor_json_value(&summary);
+    let quota = runtime_doctor_json_incident(&value, "quota_pressure");
+    assert!(
+        quota["cause"]
+            .as_str()
+            .expect("quota cause should be a string")
+            .contains("Quota guard")
+    );
+    assert!(
+        quota["evidence"]
+            .as_array()
+            .expect("quota evidence should be an array")
+            .iter()
+            .any(|evidence| evidence == "quota_critical_floor_before_send=1")
+    );
+}
+
+#[test]
+fn runtime_doctor_incident_explainer_classifies_precommit_budget() {
+    let mut summary = runtime_doctor_fixture_summary(
+        b"[2026-04-24 12:00:00.000 +07:00] request=80 precommit_budget_exhausted route=responses attempts=3 reason=candidate_exhausted\n[2026-04-24 12:00:01.000 +07:00] request=81 compact_precommit_budget_exhausted route=/responses/compact attempts=2 reason=quota\n",
+    );
+    diagnosis::runtime_doctor_finalize_summary(&mut summary);
+    let value = runtime_doctor_json_value(&summary);
+    let precommit = runtime_doctor_json_incident(&value, "precommit_budget_exhausted");
+    assert!(
+        precommit["cause"]
+            .as_str()
+            .expect("precommit cause should be a string")
+            .contains("before any upstream response was committed")
+    );
+    assert!(
+        precommit["next_action"]
+            .as_str()
+            .expect("precommit next action should be a string")
+            .contains("retrying compact")
     );
 }
 
@@ -431,6 +550,7 @@ fn runtime_doctor_json_value_keeps_stable_top_level_shape() {
         "prodex_binary_mismatch",
         "runtime_broker_mismatch",
         "failure_class_counts",
+        "incident_explainer",
         "profiles",
         "diagnosis",
     ]

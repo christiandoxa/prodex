@@ -8,8 +8,9 @@ pub use self::cache::clear_runtime_policy_cache;
 pub use self::load::{load_runtime_policy_cached, load_runtime_policy_from_root};
 pub use self::paths::{resolve_runtime_policy_path, runtime_policy_path};
 pub use self::types::{
-    PRODEX_POLICY_FILE_NAME, PRODEX_POLICY_VERSION, RuntimeLogFormat, RuntimePolicyConfig,
-    RuntimePolicyFile, RuntimePolicyProxySettings, RuntimePolicyRuntimeFile,
+    PRODEX_POLICY_FILE_NAME, PRODEX_POLICY_VERSION, PRODEX_RUNTIME_PROXY_PRESET_ENV,
+    RuntimeLogFormat, RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyProxyPreset,
+    RuntimePolicyProxyPresetSelection, RuntimePolicyProxySettings, RuntimePolicyRuntimeFile,
     RuntimePolicyRuntimeSettings, RuntimePolicySecretsFile, RuntimePolicySecretsSettings,
     RuntimePolicySummary,
 };
@@ -58,10 +59,19 @@ pub fn runtime_policy_proxy() -> Option<RuntimePolicyProxySettings> {
         return None;
     }
     let paths = AppPaths::discover().ok()?;
-    load_runtime_policy_cached(&paths.root)
+    let env_preset = runtime_proxy_preset_from_env();
+    let loaded = load_runtime_policy_cached(&paths.root).ok().flatten();
+    if let Some(config) = loaded {
+        return Some(config.runtime_proxy.with_effective_preset(env_preset));
+    }
+    env_preset
+        .map(|preset| RuntimePolicyProxySettings::default().with_effective_preset(Some(preset)))
+}
+
+pub fn runtime_proxy_preset_from_env() -> Option<RuntimePolicyProxyPreset> {
+    std::env::var(PRODEX_RUNTIME_PROXY_PRESET_ENV)
         .ok()
-        .flatten()
-        .map(|config| config.runtime_proxy)
+        .and_then(|value| RuntimePolicyProxyPreset::parse(&value))
 }
 
 pub fn runtime_policy_secrets() -> Option<RuntimePolicySecretsSettings> {

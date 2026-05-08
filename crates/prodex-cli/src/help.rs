@@ -133,8 +133,13 @@ pub const CLI_SESSION_AFTER_HELP: &str = "\
 Examples:
   prodex session list
   prodex session list --json
+  prodex session list --id-only
+  prodex session list --resume-command
+  prodex session list --profile main --query triage
   prodex session current
-  prodex session current --limit 20";
+  prodex session current --resume-command
+  prodex session current --limit 20
+  prodex session resume 1234abcd";
 pub const CLI_CLEANUP_AFTER_HELP: &str = "\
 Examples:
   prodex cleanup

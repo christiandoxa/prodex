@@ -103,6 +103,9 @@ jobs:
       - name: Enforce Rust file size guard
         run: npm run ci:size-guard
 
+      - name: Enforce crate boundaries
+        run: npm run ci:crate-boundary
+
   supply-chain:
     runs-on: ubuntu-latest
     timeout-minutes: 30

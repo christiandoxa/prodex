@@ -94,7 +94,25 @@ const REQUIRED_EXPECTED_HEADERS = [
   "User-Agent",
 ];
 
+const REQUIRED_PRESERVED_TRANSPARENCY_HEADERS = [
+  "session_id",
+  "x-openai-subagent",
+  "x-codex-turn-state",
+  "x-codex-turn-metadata",
+  "x-codex-beta-features",
+  "User-Agent",
+];
+
 const REQUIRED_PROXY_REPLACED_HEADERS = ["Authorization", "ChatGPT-Account-Id"];
+
+const REQUIRED_PROXY_SKIPPED_HEADERS = [
+  "Host",
+  "Connection",
+  "Content-Length",
+  "Transfer-Encoding",
+  "Upgrade",
+  "sec-websocket-*",
+];
 
 const REQUIRED_EXPECTED_ROUTES = [
   "/responses",
@@ -104,6 +122,12 @@ const REQUIRED_EXPECTED_ROUTES = [
 ];
 
 const REQUIRED_STREAM_EVENTS = [
+  "response.created",
+  "response.in_progress",
+  "response.queued",
+  "response.output_item.added",
+  "response.content_part.added",
+  "response.reasoning_summary_part.added",
   "response.completed",
   "response.failed",
   "response.metadata",
@@ -119,6 +143,27 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file: "codex-rs/core/src/client.rs",
     file_contains_all: ["RESPONSES_ENDPOINT", "/responses"],
     expected_routes_all: ["/responses"],
+  },
+  {
+    id: "sse.responses-http-route-behavior",
+    kind: "route_event_group",
+    file: "codex-rs/codex-api/src/sse/responses.rs",
+    file_contains_all: [
+      "spawn_response_stream",
+      "process_sse",
+      "process_responses_event",
+      "x-codex-turn-state",
+      "openai-model",
+      "x-reasoning-included",
+      "X-Models-Etag",
+    ],
+    expected_routes_all: ["/responses"],
+    expected_stream_events_all: [
+      "response.created",
+      "response.completed",
+      "response.failed",
+      "response.metadata",
+    ],
   },
   {
     id: "client.responses-compact-route",
@@ -156,6 +201,20 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
+    id: "proxy.preserved-headers",
+    kind: "header_group",
+    file: "codex-rs/core/src/client.rs",
+    file_contains_all: [
+      "build_conversation_headers",
+      "x-openai-subagent",
+      "x-codex-turn-state",
+      "x-codex-turn-metadata",
+      "x-codex-beta-features",
+      "OPENAI_BETA_HEADER",
+    ],
+    expected_headers_all: REQUIRED_PRESERVED_TRANSPARENCY_HEADERS,
+  },
+  {
     id: "client.websocket-beta",
     kind: "co_occurrence",
     file: "codex-rs/core/src/client.rs",
@@ -179,7 +238,12 @@ const REQUIRED_SEMANTIC_CHECKS = [
     kind: "event_group",
     file: "codex-rs/codex-api/src/sse/responses.rs",
     file_contains_all: ["process_responses_event", "response.completed", "response.failed", "response.metadata"],
-    expected_stream_events_all: ["response.completed", "response.failed", "response.metadata"],
+    expected_stream_events_all: [
+      "response.created",
+      "response.completed",
+      "response.failed",
+      "response.metadata",
+    ],
   },
   {
     id: "sse.quota-codes",
@@ -195,11 +259,48 @@ const REQUIRED_SEMANTIC_CHECKS = [
     expected_routes_all: ["websocket_url_for_path(\"responses\")"],
   },
   {
+    id: "websocket.session-behavior",
+    kind: "route_event_group",
+    file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    file_contains_all: [
+      "ResponsesWebsocketConnection",
+      "websocket_url_for_path(\"responses\")",
+      "merge_request_headers",
+      "add_auth_headers",
+      "x-codex-turn-state",
+      "parse_wrapped_websocket_error_event",
+      "websocket_connection_limit_reached",
+    ],
+    expected_routes_all: ["websocket_url_for_path(\"responses\")"],
+    expected_headers_all: ["x-codex-turn-state"],
+    expected_stream_events_all: [
+      "response.created",
+      "response.in_progress",
+      "response.queued",
+      "response.output_item.added",
+      "response.content_part.added",
+      "response.reasoning_summary_part.added",
+      "response.completed",
+      "response.failed",
+      "codex.rate_limits",
+    ],
+  },
+  {
     id: "websocket.responses-events",
     kind: "event_group",
     file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
     file_contains_all: ["response.completed", "codex.rate_limits"],
-    expected_stream_events_all: ["response.completed", "codex.rate_limits"],
+    expected_stream_events_all: [
+      "response.created",
+      "response.in_progress",
+      "response.queued",
+      "response.output_item.added",
+      "response.content_part.added",
+      "response.reasoning_summary_part.added",
+      "response.completed",
+      "response.failed",
+      "codex.rate_limits",
+    ],
   },
   {
     id: "websocket.header-auth-merge",
@@ -209,12 +310,27 @@ const REQUIRED_SEMANTIC_CHECKS = [
     expected_headers_all: ["x-codex-turn-state"],
     proxy_replaced_headers_all: ["Authorization", "ChatGPT-Account-Id"],
   },
+  {
+    id: "proxy.replaced-headers",
+    kind: "header_group",
+    file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    file_contains_all: ["merge_request_headers", "add_auth_headers"],
+    proxy_replaced_headers_all: ["Authorization", "ChatGPT-Account-Id"],
+  },
+  {
+    id: "proxy.skipped-transport-headers",
+    kind: "header_group",
+    file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    file_contains_all: ["merge_request_headers"],
+    proxy_skipped_headers_all: REQUIRED_PROXY_SKIPPED_HEADERS,
+  },
 ];
 
 const SEMANTIC_LIST_FIELDS = [
   "file_contains_all",
   "expected_headers_all",
   "proxy_replaced_headers_all",
+  "proxy_skipped_headers_all",
   "expected_routes_all",
   "expected_stream_events_all",
 ];
@@ -246,6 +362,10 @@ function parseArgs(argv) {
     }
     if (value === "--json") {
       args.json = true;
+      continue;
+    }
+    if (value === "--self-test") {
+      args.selfTest = true;
       continue;
     }
     if (value === "--help" || value === "-h") {
@@ -395,6 +515,7 @@ function validateSemanticChecks({ compat, files, errors, warnings }) {
 
   const expectedHeaders = stringArray(compat.expected_headers);
   const proxyReplacedHeaders = stringArray(compat.proxy_replaced_headers);
+  const proxySkippedHeaders = stringArray(compat.proxy_skipped_headers);
   const expectedRoutes = stringArray(compat.expected_routes);
   const expectedStreamEvents = stringArray(compat.expected_stream_events);
 
@@ -447,6 +568,14 @@ function validateSemanticChecks({ compat, files, errors, warnings }) {
       field: "proxy_replaced_headers_all",
       label: "codex.compatibility.proxy_replaced_headers",
       allowedValues: proxyReplacedHeaders,
+      errors,
+      warnings,
+    }).length;
+    checkedFieldCount += validateSemanticListField({
+      check,
+      field: "proxy_skipped_headers_all",
+      label: "codex.compatibility.proxy_skipped_headers",
+      allowedValues: proxySkippedHeaders,
       errors,
       warnings,
     }).length;
@@ -527,6 +656,14 @@ function validateBaseline(baseline) {
     }
   }
 
+  if (!Array.isArray(compat.proxy_skipped_headers)) {
+    errors.push("codex.compatibility.proxy_skipped_headers must be an array");
+  } else {
+    for (const header of missingValues(REQUIRED_PROXY_SKIPPED_HEADERS, stringArray(compat.proxy_skipped_headers))) {
+      errors.push(`codex.compatibility.proxy_skipped_headers missing ${header}`);
+    }
+  }
+
   if (!Array.isArray(compat.expected_routes)) {
     errors.push("codex.compatibility.expected_routes must be an array");
   } else {
@@ -587,16 +724,112 @@ function renderReport(report) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+function buildSelfTestBaseline() {
+  return {
+    codex: {
+      compatibility: {
+        upstream_repository: "self-test",
+        guard_command: "node scripts/compat/check-upstream-baseline.mjs --self-test",
+        format_version: COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS,
+        critical_files: REQUIRED_CRITICAL_FILES.map((filePath) => ({
+          path: filePath,
+          reason: "self-test critical file",
+          required_contains: REQUIRED_FILE_CONTAINS[filePath],
+        })),
+        expected_headers: REQUIRED_EXPECTED_HEADERS,
+        proxy_replaced_headers: REQUIRED_PROXY_REPLACED_HEADERS,
+        proxy_skipped_headers: REQUIRED_PROXY_SKIPPED_HEADERS,
+        expected_routes: REQUIRED_EXPECTED_ROUTES,
+        expected_stream_events: REQUIRED_STREAM_EVENTS,
+        semantic_checks: REQUIRED_SEMANTIC_CHECKS.map((check) => ({
+          reason: "self-test semantic group",
+          ...check,
+        })),
+      },
+    },
+  };
+}
+
+function assertSelfTestError({ name, mutate, expectedMessage }) {
+  const baseline = buildSelfTestBaseline();
+  mutate(baseline.codex.compatibility);
+  const { errors } = validateBaseline(baseline);
+  if (!errors.includes(expectedMessage)) {
+    throw new Error(
+      [
+        `self-test ${name} failed`,
+        `expected error: ${expectedMessage}`,
+        `actual errors: ${errors.length === 0 ? "(none)" : errors.join("; ")}`,
+      ].join("\n"),
+    );
+  }
+}
+
+function semanticCheck(compat, id) {
+  const check = compat.semantic_checks.find((candidate) => candidate.id === id);
+  if (!check) {
+    throw new Error(`self-test fixture is missing semantic check ${id}`);
+  }
+  return check;
+}
+
+function runSelfTest() {
+  const valid = validateBaseline(buildSelfTestBaseline());
+  if (valid.errors.length > 0) {
+    throw new Error(`self-test valid baseline failed: ${valid.errors.join("; ")}`);
+  }
+
+  assertSelfTestError({
+    name: "missing semantic group",
+    mutate: (compat) => {
+      compat.semantic_checks = compat.semantic_checks.filter((check) => check.id !== "proxy.preserved-headers");
+    },
+    expectedMessage: "codex.compatibility.semantic_checks missing proxy.preserved-headers",
+  });
+
+  assertSelfTestError({
+    name: "missing semantic header token",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "proxy.preserved-headers");
+      check.expected_headers_all = check.expected_headers_all.filter((header) => header !== "session_id");
+    },
+    expectedMessage: 'codex.compatibility.semantic_checks.proxy.preserved-headers.expected_headers_all missing "session_id"',
+  });
+
+  assertSelfTestError({
+    name: "missing semantic file token",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "sse.responses-http-route-behavior");
+      check.file_contains_all = check.file_contains_all.filter((token) => token !== "process_sse");
+    },
+    expectedMessage: 'codex.compatibility.semantic_checks.sse.responses-http-route-behavior.file_contains_all missing "process_sse"',
+  });
+
+  assertSelfTestError({
+    name: "missing skipped transport header",
+    mutate: (compat) => {
+      compat.proxy_skipped_headers = compat.proxy_skipped_headers.filter((header) => header !== "sec-websocket-*");
+    },
+    expectedMessage: "codex.compatibility.proxy_skipped_headers missing sec-websocket-*",
+  });
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: node scripts/compat/check-upstream-baseline.mjs [--baseline <path>] [--report <path>] [--json]",
+        "Usage: node scripts/compat/check-upstream-baseline.mjs [--baseline <path>] [--report <path>] [--json] [--self-test]",
         "",
         "Offline guard for critical upstream Codex runtime assumptions recorded in scripts/compat/upstream-baseline.json.",
       ].join("\n") + "\n",
     );
+    return;
+  }
+
+  if (args.selfTest) {
+    runSelfTest();
+    process.stdout.write("upstream baseline guard self-test passed\n");
     return;
   }
 
@@ -613,6 +846,7 @@ async function main() {
       critical_files: REQUIRED_CRITICAL_FILES,
       expected_headers: REQUIRED_EXPECTED_HEADERS,
       proxy_replaced_headers: REQUIRED_PROXY_REPLACED_HEADERS,
+      proxy_skipped_headers: REQUIRED_PROXY_SKIPPED_HEADERS,
       expected_routes: REQUIRED_EXPECTED_ROUTES,
       expected_stream_events: REQUIRED_STREAM_EVENTS,
       semantic_checks: REQUIRED_SEMANTIC_CHECKS.map((check) => check.id),

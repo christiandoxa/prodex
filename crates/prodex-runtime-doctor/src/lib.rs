@@ -33,8 +33,9 @@ pub use suggestions::{
 };
 pub use types::{
     RuntimeDoctorBindingProfileSummary, RuntimeDoctorBindingSourceSummary,
-    RuntimeDoctorBindingStateSummary, RuntimeDoctorProfileSummary,
-    RuntimeDoctorRequestTimelineEvent, RuntimeDoctorRouteSummary, RuntimeDoctorSummary,
+    RuntimeDoctorBindingStateSummary, RuntimeDoctorIncidentExplanation,
+    RuntimeDoctorProfileSummary, RuntimeDoctorRequestTimelineEvent, RuntimeDoctorRouteSummary,
+    RuntimeDoctorSummary,
 };
 
 pub const RUNTIME_DOCTOR_FACETS: &[&str] = &[

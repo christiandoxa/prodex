@@ -23,6 +23,12 @@ Defaults below are production defaults. Test builds use smaller timeouts and lim
 
 ## Runtime Proxy Keys
 
+`runtime_proxy.preset` selects a conservative preset before individual `runtime_proxy` keys are applied.
+Valid values are `low`, `default`, `many-terminals`, and `aggressive`; `PRODEX_RUNTIME_PROXY_PRESET` selects the preset from the environment.
+Specific environment overrides for individual keys still have highest priority.
+Unknown policy preset values are rejected when `policy.toml` is parsed. Unknown environment preset values are ignored so the configured policy or built-in defaults still apply.
+The preset changes only local concurrency and admission tuning; transport timeouts remain on their normal defaults unless configured directly.
+
 <!-- BEGIN GENERATED RUNTIME_PROXY_KEYS -->
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
@@ -79,6 +85,7 @@ log_format = "json"
 log_dir = "runtime-logs"
 
 [runtime_proxy]
+preset = "many-terminals"
 worker_count = 16
 active_request_limit = 128
 responses_active_limit = 96

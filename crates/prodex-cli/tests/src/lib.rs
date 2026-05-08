@@ -167,3 +167,81 @@ fn s_is_recognized_as_super_not_default_run_argument() {
     };
     assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
 }
+
+#[test]
+fn session_list_parses_line_modes_and_filters() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "session",
+        "list",
+        "--id-only",
+        "--profile",
+        "main",
+        "--query",
+        "triage",
+        "--limit",
+        "5",
+    ])
+    .expect("session list should parse");
+    let Commands::Session(SessionCommands::List(args)) = command else {
+        panic!("expected session list command");
+    };
+
+    assert!(args.id_only);
+    assert!(!args.resume_command);
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert_eq!(args.query.as_deref(), Some("triage"));
+    assert_eq!(args.limit, Some(5));
+}
+
+#[test]
+fn session_current_parses_resume_command_filters_and_cwd() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "session",
+        "current",
+        "--resume-command",
+        "--profile",
+        "main",
+        "--query",
+        "triage",
+        "--cwd",
+        "/tmp/work",
+    ])
+    .expect("session current should parse");
+    let Commands::Session(SessionCommands::Current(args)) = command else {
+        panic!("expected session current command");
+    };
+
+    assert!(!args.id_only);
+    assert!(args.resume_command);
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert_eq!(args.query.as_deref(), Some("triage"));
+    assert_eq!(args.cwd.as_deref(), Some(std::path::Path::new("/tmp/work")));
+}
+
+#[test]
+fn session_line_modes_conflict_with_json_and_each_other() {
+    assert!(parse_cli_command_from(["prodex", "session", "list", "--json", "--id-only"]).is_err());
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "session",
+            "current",
+            "--id-only",
+            "--resume-command",
+        ])
+        .is_err()
+    );
+}
+
+#[test]
+fn session_resume_parses_partial_id() {
+    let command = parse_cli_command_from(["prodex", "session", "resume", "1234abcd"])
+        .expect("session resume should parse");
+    let Commands::Session(SessionCommands::Resume(args)) = command else {
+        panic!("expected session resume command");
+    };
+
+    assert_eq!(args.id, "1234abcd");
+}
