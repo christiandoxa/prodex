@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.91.0 - 2026-05-08
+
+### Misc
+
+- Add rtk mode and repair session resume (`59d47a9`)
+
 ## 0.90.0 - 2026-05-08
 
 - No grouped changes.
@@ -141,16 +147,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Avoid broker readiness timeout (`8bc2a85`)
 - Reduce compact pressure for affinity continuations (`dee2401`)
 - Reduce default smart context token overhead (`4a64cc5`)
-
-## 0.79.0 - 2026-05-05
-
-### CLI
-
-- Improve embedded token efficiency (`37bf326`)
-
-### Misc
-
-- Improve super token efficiency (`7072bc3`)
-- Satisfy ci clippy gate (`a895b53`)
-- Optimize smart context token usage (`0cc7747`)
-- Improve smart context token efficiency (`93b4f97`)

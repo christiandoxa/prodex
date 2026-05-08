@@ -403,8 +403,7 @@ fn localize_caveman_config_file(codex_home: &Path) -> Result<()> {
     let config_path = codex_home.join("config.toml");
     match fs::symlink_metadata(&config_path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
-            let contents = fs::read_to_string(&config_path)
-                .with_context(|| format!("failed to read {}", config_path.display()))?;
+            let contents = read_optional_link_target_contents(&config_path)?;
             fs::remove_file(&config_path)
                 .with_context(|| format!("failed to remove {}", config_path.display()))?;
             fs::write(&config_path, contents)
@@ -430,8 +429,7 @@ fn localize_rtk_agents_file(codex_home: &Path) -> Result<()> {
     let agents_path = codex_home.join(AGENTS_MD);
     match fs::symlink_metadata(&agents_path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
-            let contents = fs::read_to_string(&agents_path)
-                .with_context(|| format!("failed to read {}", agents_path.display()))?;
+            let contents = read_optional_link_target_contents(&agents_path)?;
             fs::remove_file(&agents_path)
                 .with_context(|| format!("failed to remove {}", agents_path.display()))?;
             fs::write(&agents_path, contents)
@@ -451,6 +449,14 @@ fn localize_rtk_agents_file(codex_home: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn read_optional_link_target_contents(path: &Path) -> Result<String> {
+    match fs::read_to_string(path) {
+        Ok(contents) => Ok(contents),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
 }
 
 fn ensure_rtk_agents_reference(codex_home: &Path, rtk_md_path: &Path) -> Result<()> {
@@ -963,5 +969,87 @@ mod tests {
 
         let _ = fs::remove_dir_all(source);
         let _ = fs::remove_dir_all(overlay);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configure_rtk_codex_home_replaces_broken_agents_symlink() {
+        let overlay = temp_dir("rtk-broken-overlay");
+        fs::create_dir_all(&overlay).expect("overlay dir");
+        std::os::unix::fs::symlink(overlay.join("missing-AGENTS.md"), overlay.join("AGENTS.md"))
+            .expect("broken agents symlink");
+
+        configure_rtk_codex_home(&overlay).expect("rtk codex home should configure");
+
+        assert!(
+            !fs::symlink_metadata(overlay.join("AGENTS.md"))
+                .expect("overlay AGENTS metadata")
+                .file_type()
+                .is_symlink()
+        );
+        let overlay_agents =
+            fs::read_to_string(overlay.join("AGENTS.md")).expect("overlay AGENTS.md");
+        assert_eq!(
+            overlay_agents,
+            format!("@{}\n", overlay.join("RTK.md").display())
+        );
+
+        let _ = fs::remove_dir_all(overlay);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_caveman_home_then_rtk_handles_broken_agents_symlink() {
+        let base = temp_dir("rtk-broken-base");
+        let managed_root = temp_dir("rtk-broken-managed");
+        fs::create_dir_all(&base).expect("base dir");
+        std::os::unix::fs::symlink(base.join("missing-AGENTS.md"), base.join("AGENTS.md"))
+            .expect("broken base agents symlink");
+
+        let overlay = prepare_caveman_launch_home(&managed_root, &base)
+            .expect("caveman launch home should prepare");
+        configure_rtk_codex_home(&overlay).expect("rtk codex home should configure");
+
+        assert!(
+            !fs::symlink_metadata(overlay.join("AGENTS.md"))
+                .expect("overlay AGENTS metadata")
+                .file_type()
+                .is_symlink()
+        );
+        let overlay_agents =
+            fs::read_to_string(overlay.join("AGENTS.md")).expect("overlay AGENTS.md");
+        assert_eq!(
+            overlay_agents,
+            format!("@{}\n", overlay.join("RTK.md").display())
+        );
+
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(managed_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_caveman_home_handles_broken_config_symlink() {
+        let base = temp_dir("broken-config-base");
+        let managed_root = temp_dir("broken-config-managed");
+        fs::create_dir_all(&base).expect("base dir");
+        std::os::unix::fs::symlink(base.join("missing-config.toml"), base.join("config.toml"))
+            .expect("broken config symlink");
+
+        let overlay = prepare_caveman_launch_home(&managed_root, &base)
+            .expect("caveman launch home should prepare");
+
+        assert!(
+            !fs::symlink_metadata(overlay.join("config.toml"))
+                .expect("overlay config metadata")
+                .file_type()
+                .is_symlink()
+        );
+        let overlay_config =
+            fs::read_to_string(overlay.join("config.toml")).expect("overlay config.toml");
+        assert!(overlay_config.contains("prodex-caveman"));
+
+        let _ = fs::remove_dir_all(base);
+        let _ = fs::remove_dir_all(managed_root);
     }
 }
