@@ -2,6 +2,20 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## Unreleased
+
+Changes after `0.92.0`.
+
+### CI
+
+- Enforce release hygiene guards (`f93c52c`)
+
+## 0.92.0 - 2026-05-08
+
+### Misc
+
+- Harden caveman rtk launch overlays (`a02baf3`)
+
 ## 0.91.0 - 2026-05-08
 
 ### Misc
@@ -139,11 +153,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Stabilize websocket streaming (`a92f29a`)
-
-## 0.80.0 - 2026-05-06
-
-### Runtime
-
-- Avoid broker readiness timeout (`8bc2a85`)
-- Reduce compact pressure for affinity continuations (`dee2401`)
-- Reduce default smart context token overhead (`4a64cc5`)
