@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.89.0 - 2026-05-08
+
+- No grouped changes.
+
 ## 0.88.0 - 2026-05-08
 
 ### CI
@@ -168,15 +172,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Sanitize personal fixture data (`0c3e8b5`)
-
-## 0.77.0 - 2026-05-05
-
-### CLI
-
-- Trim smart context token overhead (`9ad2f58`)
-- Improve token-efficient context compaction (`d17c97f`)
-- Reduce context token overhead (`f4b8c71`)
-
-### CI
-
-- Satisfy clippy warning gate (`05544d4`)
