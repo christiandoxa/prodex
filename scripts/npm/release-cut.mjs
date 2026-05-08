@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   cargoTomlPath,
   packageVersionPattern,
   readCargoVersion,
   repoRoot,
 } from "./common.mjs";
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
   const args = {
@@ -94,13 +98,14 @@ function formatCommand(command, args) {
 
 function runStep(label, command, args, options = {}) {
   const dryRun = options.dryRun ?? false;
+  const displayCommand = options.displayCommand ?? formatCommand(command, args);
   if (dryRun) {
-    process.stdout.write(`dry-run: ${label}: ${formatCommand(command, args)}\n`);
+    process.stdout.write(`dry-run: ${label}: ${displayCommand}\n`);
     return Promise.resolve({ stdout: "", stderr: "", code: 0 });
   }
 
   return new Promise((resolve, reject) => {
-    process.stdout.write(`${label}: ${formatCommand(command, args)}\n`);
+    process.stdout.write(`${label}: ${displayCommand}\n`);
     const child = spawn(command, args, {
       cwd: repoRoot,
       env: {
@@ -143,6 +148,17 @@ function runStep(label, command, args, options = {}) {
 
 async function git(args, options = {}) {
   return runStep(`git ${args[0]}`, "git", args, options);
+}
+
+function scriptPath(relativePath) {
+  return path.join(scriptDir, "..", "..", relativePath);
+}
+
+async function runNodeScript(label, relativePath, args = [], options = {}) {
+  return runStep(label, process.execPath, [scriptPath(relativePath), ...args], {
+    ...options,
+    displayCommand: formatCommand("node", [relativePath, ...args]),
+  });
 }
 
 async function gitOutput(args) {
@@ -220,19 +236,16 @@ function releaseSubject(version) {
 
 async function runReleaseMetadataGuards(version) {
   const subject = releaseSubject(version);
-  await runStep("release-metadata-only-staged", "node", [
-    "scripts/ci/release-metadata-only-guard.mjs",
+  await runNodeScript("release-metadata-only-staged", "scripts/ci/release-metadata-only-guard.mjs", [
     "--staged",
     "--assume-release",
   ]);
-  await runStep("version-metadata-release-staged", "node", [
-    "scripts/ci/version-metadata-release-guard.mjs",
+  await runNodeScript("version-metadata-release-staged", "scripts/ci/version-metadata-release-guard.mjs", [
     "--staged",
     "--message",
     subject,
   ]);
-  await runStep("release-empty-commit-staged", "node", [
-    "scripts/ci/release-empty-commit-guard.mjs",
+  await runNodeScript("release-empty-commit-staged", "scripts/ci/release-empty-commit-guard.mjs", [
     "--staged",
     "--message",
     subject,
@@ -289,10 +302,10 @@ async function releaseCut(args) {
 
   if (currentVersion !== version) {
     await setCargoPackageVersion(version);
-    await runStep("npm-sync-version", "node", ["scripts/npm/sync-version.mjs", "--root", "npm"]);
-    await runStep("npm-sync-docs-version", "node", ["scripts/npm/sync-docs-version.mjs"]);
+    await runNodeScript("npm-sync-version", "scripts/npm/sync-version.mjs", ["--root", "npm"]);
+    await runNodeScript("npm-sync-docs-version", "scripts/npm/sync-docs-version.mjs");
     await runStep("cargo-update-workspace", "cargo", ["update", "-w"]);
-    await runStep("changelog", "node", ["scripts/npm/changelog.mjs", "--release-version", version]);
+    await runNodeScript("changelog", "scripts/npm/changelog.mjs", ["--release-version", version]);
   } else {
     const subject = await headSubject();
     if (subject !== releaseSubject(version)) {
@@ -303,8 +316,7 @@ async function releaseCut(args) {
   }
 
   if (args.verify) {
-    await runStep("release-prepare", "node", [
-      "scripts/npm/release-prepare.mjs",
+    await runNodeScript("release-prepare", "scripts/npm/release-prepare.mjs", [
       "--no-cargo-test",
       "--release-version",
       version,
@@ -327,13 +339,12 @@ async function releaseCut(args) {
   if (args.commit) {
     await git(["commit", "-m", releaseSubject(version)]);
     if (args.verify) {
-      await runStep("release-hygiene-head", "node", [
-        "scripts/ci/release-hygiene.mjs",
+      await runNodeScript("release-hygiene-head", "scripts/ci/release-hygiene.mjs", [
         "--commit",
         "HEAD",
         "--no-fixtures",
       ]);
-      await runStep("changelog-check", "node", ["scripts/npm/changelog.mjs", "--check"]);
+      await runNodeScript("changelog-check", "scripts/npm/changelog.mjs", ["--check"]);
     }
   } else {
     process.stdout.write(`release-cut: staged release metadata for ${version}; commit disabled\n`);
@@ -343,8 +354,7 @@ async function releaseCut(args) {
   if (args.tag) {
     await tagRelease(version, args.dryRun);
     if (args.verify) {
-      await runStep("release-tag-changelog-guard", "node", [
-        "scripts/ci/release-tag-changelog-guard.mjs",
+      await runNodeScript("release-tag-changelog-guard", "scripts/ci/release-tag-changelog-guard.mjs", [
         "--rev",
         "HEAD",
       ]);

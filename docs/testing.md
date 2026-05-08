@@ -40,6 +40,7 @@ npm run test:serial
 npm run ci:preflight
 npm run ci:release-hygiene
 npm run ci:release-metadata-guard
+npm run ci:release-cut-fixtures
 npm run ci:runtime-hotpath-guard
 npm run ci:crate-boundary
 npm run ci:churn-hygiene
@@ -105,7 +106,7 @@ npm run load:runtime-proxy -- --scenario spike --target http://127.0.0.1:9901/ba
 
 Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release hygiene, size, crate-boundary, runtime hot-path, churn hygiene, version/docs/runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Churn hygiene fails on actionable violations by default; use `npm run ci:preflight -- --churn-report-only` or `PRODEX_PREFLIGHT_CHURN_REPORT_ONLY=1 npm run ci:preflight` only for exploratory local runs. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan. For local historical audits only, `-- --churn-range old..HEAD --churn-ignore-before latest-tag` keeps churn enforcement focused on commits after the newest version tag inside the selected range.
 
-Use `npm run ci:release-hygiene` for the full release gate. By default it checks `HEAD`; use `-- --range main..HEAD` or `-- --base origin/main --head HEAD` for branch ranges. The runner executes metadata-only, version metadata, empty release commit, duplicate release version, tag/changelog, and historical fixture checks as one serial gate.
+Use `npm run ci:release-hygiene` for the full release gate. By default it checks `HEAD`; use `-- --range main..HEAD` or `-- --base origin/main --head HEAD` for branch ranges. The runner executes metadata-only, version metadata, empty release commit, duplicate release version, tag/changelog, release guard fixtures, and release-cut fixtures as one serial gate.
 
 Use `npm run ci:release-metadata-guard` for the focused metadata-only check. By default it checks `HEAD`; use `-- --range main..HEAD` for a branch range, or `-- --staged --assume-release` before committing a release bump. The guard fails only when a release-like commit changes both version metadata files such as `Cargo.toml`, `Cargo.lock`, npm package manifests, `README.md`, or `QUICKSTART.md`, and non-metadata files.
 
@@ -118,6 +119,8 @@ Use `PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FIL
 Use `npm run ci:churn-hygiene` for a lightweight churn gate. It fails on actionable violations by default and checks `HEAD~1..HEAD` when available. Use `-- --report-only` or `PRODEX_CHURN_HYGIENE_REPORT_ONLY=1 npm run ci:churn-hygiene` only for exploratory local reports, or pass `-- --range main..HEAD`, `-- --staged`, custom `--max-files`, `--max-lines`, `--max-behavior-files`, or `--max-file-lines` values for stricter local review. Historical release/tag ranges may include already-reviewed broad churn; for those local audits, use `-- --range old..HEAD --ignore-before latest-tag` to report the original range while checking only changes after the newest version tag inside the selected range. A pinned reviewed baseline is still accepted when a specific non-release review point is intentional. Do not use baseline options for PR or push guard runs, where the full new range should stay enforced. Release metadata-only sweeps across Cargo manifests, npm package manifests, versioned install snippets, or changelog files may exceed the file-count threshold, but line-count, largest-file, behavior-file, and subject checks still apply.
 
 Use `npm run release:cut -- --version <semver>` to cut a release from a clean worktree. It bumps Cargo/npm/docs metadata, refreshes `Cargo.lock` workspace package versions, renders `CHANGELOG.md` as a final release section, runs release metadata guards, creates `chore(release): release <semver>`, and tags the commit with the plain `<semver>` tag. Use `-- --dry-run` to inspect the plan without mutating files.
+
+Use `npm run ci:release-cut-fixtures` after changing release automation. It runs `release:cut` against synthetic git repositories and verifies commit/tag idempotence, duplicate tag rejection, dirty worktree rejection before mutation, and ambiguous existing-version rejection.
 
 Use `npm run release:prepare` before release-adjacent work that should not commit or tag. It checks version/doc sync, available lockfile consistency, generated changelog freshness, docs lint, upstream compatibility baseline, runtime manifest, cargo fmt, and full Rust test binary compilation without publishing.
 The default test-compile guard runs `cargo test --locked --workspace --all-targets --all-features --no-run` so workspace lib, bin, integration test, example, and benchmark targets stay compile-covered. Use `npm run release:prepare -- --no-cargo-test` to skip test binary compilation and run `cargo check --locked --workspace --all-targets --all-features` instead. Use `-- --release-version <semver>` only inside release automation that has already rendered the pending changelog as a final release section.

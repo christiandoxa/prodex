@@ -142,6 +142,11 @@ export function releaseHygieneSteps(args = {}) {
       command: "node",
       args: ["scripts/ci/release-guard-fixture-tests.mjs"],
     });
+    steps.push({
+      label: "release-cut-fixtures",
+      command: "node",
+      args: ["scripts/ci/release-cut-fixture-tests.mjs"],
+    });
   }
 
   return steps;

@@ -348,6 +348,11 @@ async function buildSteps(paths) {
         command: "node",
         args: ["scripts/ci/release-guard-fixture-tests.mjs"],
       });
+      addStep(steps, "release-cut-fixtures", {
+        label: "release-cut-fixtures",
+        command: "node",
+        args: ["scripts/ci/release-cut-fixture-tests.mjs"],
+      });
       addStep(steps, "release-hygiene-dry-run", {
         label: "release-hygiene-dry-run",
         command: "node",

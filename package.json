@@ -43,6 +43,7 @@
     "ci:release-duplicate-version-guard": "node scripts/ci/release-duplicate-version-guard.mjs",
     "ci:release-tag-changelog-guard": "node scripts/ci/release-tag-changelog-guard.mjs",
     "ci:release-guard-fixtures": "node scripts/ci/release-guard-fixture-tests.mjs",
+    "ci:release-cut-fixtures": "node scripts/ci/release-cut-fixture-tests.mjs",
     "ci:runtime-hotpath-guard": "node scripts/ci/runtime-hotpath-guard.mjs",
     "ci:churn-hygiene": "node scripts/ci/churn-hygiene.mjs",
     "ci:churn-hygiene:check": "node scripts/ci/churn-hygiene.mjs --check",
