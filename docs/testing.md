@@ -43,6 +43,7 @@ npm run ci:release-metadata-guard
 npm run ci:runtime-hotpath-guard
 npm run ci:crate-boundary
 npm run ci:churn-hygiene
+npm run release:cut -- --version 0.x.y --dry-run
 npm run release:prepare
 npm run changelog:check
 npm run docs:lint
@@ -51,6 +52,7 @@ npm run test:runtime-smoke
 npm run compat:check
 npm run compat:watch
 npm run compat:watch-fixtures
+npm run compat:watch-ci
 npm run compat:capture -- --input /path/to/capture.jsonl --name codex_live_sample
 node scripts/ci/runtime-proxy-shard.mjs
 npm run ci:runtime-stress -- --suite stress
@@ -115,8 +117,10 @@ Use `PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FIL
 
 Use `npm run ci:churn-hygiene` for a lightweight churn gate. It fails on actionable violations by default and checks `HEAD~1..HEAD` when available. Use `-- --report-only` or `PRODEX_CHURN_HYGIENE_REPORT_ONLY=1 npm run ci:churn-hygiene` only for exploratory local reports, or pass `-- --range main..HEAD`, `-- --staged`, custom `--max-files`, `--max-lines`, `--max-behavior-files`, or `--max-file-lines` values for stricter local review. Historical release/tag ranges may include already-reviewed broad churn; for those local audits, use `-- --range old..HEAD --ignore-before latest-tag` to report the original range while checking only changes after the newest version tag inside the selected range. A pinned reviewed baseline is still accepted when a specific non-release review point is intentional. Do not use baseline options for PR or push guard runs, where the full new range should stay enforced. Release metadata-only sweeps across Cargo manifests, npm package manifests, versioned install snippets, or changelog files may exceed the file-count threshold, but line-count, largest-file, behavior-file, and subject checks still apply.
 
-Use `npm run release:prepare` before release work. It checks version/doc sync, available lockfile consistency, generated changelog freshness, docs lint, upstream compatibility baseline, runtime manifest, cargo fmt, and full Rust test binary compilation without publishing.
-The default test-compile guard runs `cargo test --locked --workspace --all-targets --all-features --no-run` so workspace lib, bin, integration test, example, and benchmark targets stay compile-covered. Use `npm run release:prepare -- --no-cargo-test` to skip test binary compilation and run `cargo check --locked --workspace --all-targets --all-features` instead.
+Use `npm run release:cut -- --version <semver>` to cut a release from a clean worktree. It bumps Cargo/npm/docs metadata, refreshes `Cargo.lock` workspace package versions, renders `CHANGELOG.md` as a final release section, runs release metadata guards, creates `chore(release): release <semver>`, and tags the commit with the plain `<semver>` tag. Use `-- --dry-run` to inspect the plan without mutating files.
+
+Use `npm run release:prepare` before release-adjacent work that should not commit or tag. It checks version/doc sync, available lockfile consistency, generated changelog freshness, docs lint, upstream compatibility baseline, runtime manifest, cargo fmt, and full Rust test binary compilation without publishing.
+The default test-compile guard runs `cargo test --locked --workspace --all-targets --all-features --no-run` so workspace lib, bin, integration test, example, and benchmark targets stay compile-covered. Use `npm run release:prepare -- --no-cargo-test` to skip test binary compilation and run `cargo check --locked --workspace --all-targets --all-features` instead. Use `-- --release-version <semver>` only inside release automation that has already rendered the pending changelog as a final release section.
 
 Use `npm run ci:runtime-manifest` after adding or renaming runtime proxy tests. New `main_internal_tests::runtime_proxy_` tests should normally get a targeted `RUNTIME_CI_TEST_CASES` entry; only add or rely on `RUNTIME_CI_BROAD_SHARD_FILTERS` when a broad CI shard intentionally owns that whole module or prefix. Broad shard filters must mirror the `label|filter` entries in the `main-internal-runtime-proxy` matrix in `.github/workflows/ci.yml` and must not match tests outside runtime CI ownership.
 
@@ -128,7 +132,9 @@ Use `npm run compat:check` before changing runtime proxy assumptions. It is offl
 
 Use `npm run compat:watch` when network access is available. It fetches current upstream Codex critical files from the latest release tag, falls back to `main` only when the tag raw file is unavailable, and reports missing required tokens or semantic groups as upstream drift.
 
-Use `npm run compat:watch-fixtures` after changing upstream watch logic or fixtures. It runs the offline fixture regression tests for the upstream watch tool.
+Use `npm run compat:watch-ci` to run the same artifact-producing wrapper used by `.github/workflows/upstream-compat.yml`. It writes `report.json`, text logs, metadata, and `summary.md` under `RUNNER_TEMP/upstream-compat` or `target/upstream-compat`.
+
+Use `npm run compat:watch-fixtures` after changing upstream watch logic or fixtures. It runs the offline fixture regression tests for the upstream watch tool. Release hygiene fixtures are synthetic temp git repos, so they no longer depend on preserving specific historical bad commits.
 
 Use `npm run compat:capture -- --input capture.jsonl --name codex_live_sample` to convert offline captured Codex or Claude traffic into scrubbed replay fixtures under `crates/prodex-app/tests/fixtures/compat_replay`. The tool does not capture traffic and never uses the network; it only normalizes local JSON, JSONL, or text input into a deterministic fixture.
 

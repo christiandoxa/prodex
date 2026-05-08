@@ -22,7 +22,7 @@ const categories = [
 ];
 
 function parseArgs(argv) {
-  const args = { mode: "write", releases: defaultReleaseCount, help: false };
+  const args = { mode: "write", releaseVersion: null, releases: defaultReleaseCount, help: false };
 
   for (let index = 2; index < argv.length; index += 1) {
     const value = argv[index];
@@ -51,6 +51,14 @@ function parseArgs(argv) {
       args.releases = count;
       continue;
     }
+    if (value === "--release-version") {
+      index += 1;
+      args.releaseVersion = argv[index] ?? null;
+      if (!args.releaseVersion || !versionTagPattern.test(args.releaseVersion)) {
+        throw new Error("--release-version expects a semver version");
+      }
+      continue;
+    }
     if (value === "--help" || value === "-h") {
       args.help = true;
       continue;
@@ -71,6 +79,7 @@ function printHelp() {
       "Groups commits into runtime, CLI, Claude, docs, tests, ci, deps, and misc.",
       "Default mode writes CHANGELOG.md. --check verifies the checked-in file.",
       "--ci-check verifies release history, but requires fresh unreleased notes only on release commits.",
+      "--release-version <version> renders the pending current version as a final release section.",
     ].join("\n") + "\n",
   );
 }
@@ -297,10 +306,13 @@ function appendReleasedVersion(lines, version, date, groups) {
   lines.push("- No grouped changes.", "");
 }
 
-async function renderChangelog({ releases }) {
+async function renderChangelog({ releaseVersion, releases }) {
   const tags = await versionTags();
   const latestTag = tags.at(-1) ?? null;
   const currentVersion = await readCargoVersion();
+  if (releaseVersion && releaseVersion !== currentVersion) {
+    throw new Error(`--release-version ${releaseVersion} does not match Cargo.toml version ${currentVersion}`);
+  }
   const lines = [
     "# Changelog",
     "",
@@ -319,7 +331,7 @@ async function renderChangelog({ releases }) {
         : null;
     // Release commits must render the same section before and after the tag is created.
     const pendingReleaseCommit = pendingVersion
-      ? isReleaseCommitForVersion(await headCommit(), pendingVersion)
+      ? releaseVersion === pendingVersion || isReleaseCommitForVersion(await headCommit(), pendingVersion)
       : false;
 
     if (pendingVersion && pendingReleaseCommit) {

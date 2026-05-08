@@ -1,57 +1,19 @@
 #!/usr/bin/env node
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { repoRoot } from "../npm/common.mjs";
 
-const FIXTURES = Object.freeze([
-  {
-    name: "mixed release metadata fails metadata-only guard",
-    script: "release-metadata-only-guard.mjs",
-    args: ["--commit", "72c710c"],
-    expectedExit: 1,
-  },
-  {
-    name: "mixed release metadata fails version metadata guard",
-    script: "version-metadata-release-guard.mjs",
-    args: ["--commit", "72c710c"],
-    expectedExit: 1,
-  },
-  {
-    name: "empty release commit fails empty commit guard",
-    script: "release-empty-commit-guard.mjs",
-    args: ["--commit", "7c80038"],
-    expectedExit: 1,
-  },
-  {
-    name: "duplicate release 0.89.0 range fails duplicate guard",
-    script: "release-duplicate-version-guard.mjs",
-    args: ["--range", "7c80038^..45f3ecd"],
-    expectedExit: 1,
-  },
-  {
-    name: "tag 0.91.0 has changelog section",
-    script: "release-tag-changelog-guard.mjs",
-    args: ["--rev", "0.91.0"],
-    expectedExit: 0,
-  },
-  {
-    name: "current head range has matching tag changelog state",
-    script: "release-tag-changelog-guard.mjs",
-    args: ["--range", "HEAD^..HEAD"],
-    expectedExit: 0,
-  },
-  {
-    name: "normal prepare and release range passes duplicate guard",
-    script: "release-duplicate-version-guard.mjs",
-    args: ["--range", "b9a6122^..41397d2"],
-    expectedExit: 0,
-  },
-]);
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const guardDir = scriptDir;
 
-function runGuard({ script, args }) {
+function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const commandArgs = [`scripts/ci/${script}`, ...args];
-    const child = spawn(process.execPath, commandArgs, {
-      cwd: repoRoot,
+    const child = spawn(command, args, {
+      cwd: options.cwd ?? repoRoot,
+      env: options.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -69,12 +31,164 @@ function runGuard({ script, args }) {
     child.on("close", (code, signal) => {
       resolve({
         code: signal ? null : code,
-        command: [process.execPath, ...commandArgs].join(" "),
+        command: [command, ...args].join(" "),
         signal,
         stdout: stdout.trim(),
         stderr: stderr.trim(),
       });
     });
+  });
+}
+
+async function git(fixtureRoot, args) {
+  const result = await run("git", args, { cwd: fixtureRoot });
+  if (result.signal || result.code !== 0) {
+    throw new Error(
+      [
+        `git ${args.join(" ")} failed`,
+        result.stdout ? `stdout: ${result.stdout}` : null,
+        result.stderr ? `stderr: ${result.stderr}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+  return result.stdout;
+}
+
+async function writeFile(fixtureRoot, relativePath, contents) {
+  const filePath = path.join(fixtureRoot, relativePath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, contents);
+}
+
+async function appendFile(fixtureRoot, relativePath, contents) {
+  const filePath = path.join(fixtureRoot, relativePath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.appendFile(filePath, contents);
+}
+
+async function commit(fixtureRoot, subject, options = {}) {
+  await git(fixtureRoot, ["add", "."]);
+  const args = ["commit", "-m", subject];
+  if (options.allowEmpty) {
+    args.splice(1, 0, "--allow-empty");
+  }
+  await git(fixtureRoot, args);
+  return (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
+}
+
+async function setupFixtureRepo() {
+  const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-release-guards-"));
+  await git(fixtureRoot, ["init", "-q"]);
+  await git(fixtureRoot, ["config", "user.name", "Prodex Fixture"]);
+  await git(fixtureRoot, ["config", "user.email", "fixtures@example.invalid"]);
+  await writeFile(
+    fixtureRoot,
+    "Cargo.toml",
+    ['[package]', 'name = "prodex-fixture"', 'version = "0.1.0"', 'edition = "2024"', ""].join("\n"),
+  );
+  await writeFile(
+    fixtureRoot,
+    "CHANGELOG.md",
+    ["# Changelog", "", "## 0.1.0 - 2026-01-01", "", "- Initial fixture.", ""].join("\n"),
+  );
+  await writeFile(fixtureRoot, "README.md", "Fixture README\n");
+  await writeFile(fixtureRoot, "QUICKSTART.md", "Fixture quickstart\n");
+  await writeFile(fixtureRoot, "src/lib.rs", "pub fn fixture() -> &'static str { \"fixture\" }\n");
+  await writeFile(
+    fixtureRoot,
+    "npm/prodex/package.json",
+    `${JSON.stringify({ name: "@christiandoxa/prodex", version: "0.1.0" }, null, 2)}\n`,
+  );
+  await commit(fixtureRoot, "test: seed release guard fixture");
+  return fixtureRoot;
+}
+
+async function buildFixtures(fixtureRoot) {
+  await writeFile(
+    fixtureRoot,
+    "Cargo.toml",
+    ['[package]', 'name = "prodex-fixture"', 'version = "0.2.0"', 'edition = "2024"', ""].join("\n"),
+  );
+  await appendFile(fixtureRoot, "src/lib.rs", "pub fn mixed_release_change() {}\n");
+  const mixedRelease = await commit(fixtureRoot, "chore(release): prepare 0.2.0");
+
+  const emptyRelease = await commit(fixtureRoot, "chore(release): release 0.2.0", { allowEmpty: true });
+
+  const duplicateBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.3.0 - 2026-01-02\n\n- First release marker.\n");
+  const duplicateOne = await commit(fixtureRoot, "chore(release): release 0.3.0");
+  await appendFile(fixtureRoot, "README.md", "\nDuplicate release marker.\n");
+  const duplicateTwo = await commit(fixtureRoot, "chore(release): release 0.3.0");
+
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.4.0 - 2026-01-03\n\n- Tagged release marker.\n");
+  const taggedParent = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
+  const taggedRelease = await commit(fixtureRoot, "chore(release): release 0.4.0");
+  await git(fixtureRoot, ["tag", "0.4.0", taggedRelease]);
+
+  const normalBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.5.0 - Unreleased\n\n- Prepare marker.\n");
+  const normalPrepare = await commit(fixtureRoot, "chore(release): prepare 0.5.0");
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\nRelease marker.\n");
+  const normalRelease = await commit(fixtureRoot, "chore(release): release 0.5.0");
+
+  return [
+    {
+      name: "mixed release metadata fails metadata-only guard",
+      script: "release-metadata-only-guard.mjs",
+      args: ["--commit", mixedRelease],
+      expectedExit: 1,
+    },
+    {
+      name: "mixed release metadata fails version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", mixedRelease],
+      expectedExit: 1,
+    },
+    {
+      name: "empty release commit fails empty commit guard",
+      script: "release-empty-commit-guard.mjs",
+      args: ["--commit", emptyRelease],
+      expectedExit: 1,
+    },
+    {
+      name: "duplicate release range fails duplicate guard",
+      script: "release-duplicate-version-guard.mjs",
+      args: ["--range", `${duplicateBase}..${duplicateTwo}`],
+      expectedExit: 1,
+      dependsOn: [duplicateOne],
+    },
+    {
+      name: "tagged release has changelog section",
+      script: "release-tag-changelog-guard.mjs",
+      args: ["--rev", "0.4.0"],
+      expectedExit: 0,
+    },
+    {
+      name: "current tagged range has matching changelog state",
+      script: "release-tag-changelog-guard.mjs",
+      args: ["--range", `${taggedParent}..${taggedRelease}`],
+      expectedExit: 0,
+    },
+    {
+      name: "normal prepare and release range passes duplicate guard",
+      script: "release-duplicate-version-guard.mjs",
+      args: ["--range", `${normalBase}..${normalRelease}`],
+      expectedExit: 0,
+      dependsOn: [normalPrepare],
+    },
+  ];
+}
+
+async function runGuard(fixtureRoot, { script, args }) {
+  const commandArgs = [path.join(guardDir, script), ...args];
+  return run(process.execPath, commandArgs, {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      PRODEX_REPO_ROOT: fixtureRoot,
+    },
   });
 }
 
@@ -92,21 +206,35 @@ function printFailure(fixture, result) {
   );
 }
 
-let failures = 0;
-for (const fixture of FIXTURES) {
-  const result = await runGuard(fixture);
-  if (!result.signal && result.code === fixture.expectedExit) {
-    process.stdout.write(`ok - ${fixture.name}\n`);
-    continue;
+async function main() {
+  const fixtureRoot = await setupFixtureRepo();
+  try {
+    const fixtures = await buildFixtures(fixtureRoot);
+    let failures = 0;
+    for (const fixture of fixtures) {
+      const result = await runGuard(fixtureRoot, fixture);
+      if (!result.signal && result.code === fixture.expectedExit) {
+        process.stdout.write(`ok - ${fixture.name}\n`);
+        continue;
+      }
+
+      failures += 1;
+      printFailure(fixture, result);
+    }
+
+    if (failures > 0) {
+      process.stderr.write(`release guard fixtures: ${failures} failed\n`);
+      process.exitCode = 1;
+    } else {
+      process.stdout.write(`release guard fixtures: ${fixtures.length} passed\n`);
+    }
+  } finally {
+    if (process.env.PRODEX_KEEP_RELEASE_GUARD_FIXTURES !== "1") {
+      await fs.rm(fixtureRoot, { recursive: true, force: true });
+    } else {
+      process.stdout.write(`release guard fixtures kept at ${fixtureRoot}\n`);
+    }
   }
-
-  failures += 1;
-  printFailure(fixture, result);
 }
 
-if (failures > 0) {
-  process.stderr.write(`release guard fixtures: ${failures} failed\n`);
-  process.exitCode = 1;
-} else {
-  process.stdout.write(`release guard fixtures: ${FIXTURES.length} passed\n`);
-}
+await main();

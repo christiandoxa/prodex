@@ -7,6 +7,7 @@ import {
   mainPackageName,
   openaiCodexDependencySpecifier,
   packageSlug,
+  packageVersionPattern,
   platformPackages,
   readCargoVersion,
   readJsonFile,
@@ -37,7 +38,7 @@ function platformRepoDir(spec) {
 }
 
 function parseArgs(argv) {
-  const args = { changelogMode: "strict", dryRun: false, cargoTest: true };
+  const args = { changelogMode: "strict", dryRun: false, cargoTest: true, releaseVersion: null };
   for (let index = 2; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--dry-run") {
@@ -52,6 +53,14 @@ function parseArgs(argv) {
       args.changelogMode = "ci";
       continue;
     }
+    if (value === "--release-version") {
+      index += 1;
+      args.releaseVersion = argv[index] ?? null;
+      if (!args.releaseVersion || !packageVersionPattern.test(args.releaseVersion)) {
+        throw new Error("--release-version expects a semver version");
+      }
+      continue;
+    }
     if (value === "--help" || value === "-h") {
       args.help = true;
       continue;
@@ -64,7 +73,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: npm run release:prepare -- [--dry-run] [--no-cargo-test]",
+      "Usage: npm run release:prepare -- [--dry-run] [--no-cargo-test] [--release-version <semver>]",
       "",
       "Runs release prep guards without publishing or mutating tracked files.",
       "",
@@ -78,6 +87,7 @@ function printHelp() {
       "",
       "--no-cargo-test skips test binary compilation and runs cargo check instead.",
       "--ci-changelog-check uses the push-facing changelog gate; release prep should normally use the strict default.",
+      "--release-version renders and verifies the current version as a final changelog release section before the release commit exists.",
     ].join("\n") + "\n",
   );
 }
@@ -307,12 +317,14 @@ async function main() {
   }
 
   await checkReleaseMetadata();
-  await runStep(
-    "changelog",
-    "npm",
-    ["run", args.changelogMode === "ci" ? "changelog:ci-check" : "changelog:check"],
-    args,
-  );
+  const changelogArgs = [
+    "scripts/npm/changelog.mjs",
+    args.changelogMode === "ci" ? "--ci-check" : "--check",
+  ];
+  if (args.releaseVersion) {
+    changelogArgs.push("--release-version", args.releaseVersion);
+  }
+  await runStep("changelog", "node", changelogArgs, args);
   await runStep("docs-lint", "npm", ["run", "docs:lint"], args);
   await runStep("upstream-compat", "node", ["scripts/compat/check-upstream-baseline.mjs"], args);
   await runStep("runtime-manifest", "npm", ["run", "ci:runtime-manifest"], args);

@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
-export const repoRoot = path.resolve(scriptDir, "..", "..");
+export const repoRoot = process.env.PRODEX_REPO_ROOT
+  ? path.resolve(process.env.PRODEX_REPO_ROOT)
+  : path.resolve(scriptDir, "..", "..");
 export const cargoTomlPath = path.join(repoRoot, "Cargo.toml");
 export const npmScope = "@christiandoxa";
 export const mainPackageName = `${npmScope}/prodex`;

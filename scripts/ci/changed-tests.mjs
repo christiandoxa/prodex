@@ -3,17 +3,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { git, normalizeGitPath } from "./guard-common.mjs";
 import { formatCommand, runStep, runStepsSerial } from "./main-internal-test-runner.mjs";
-import { repoRoot } from "../npm/common.mjs";
-
-const VERSION_SYNC_PATHS = Object.freeze(["Cargo.toml", "npm", "README.md", "QUICKSTART.md", "scripts/npm"]);
-const WATCH_UPSTREAM_FIXTURE_TESTS_PATH = "scripts/compat/watch-upstream-fixture-tests.mjs";
-const UPSTREAM_COMPAT_SCRIPT_PATHS = Object.freeze([
-  "scripts/compat/check-upstream-baseline.mjs",
-  "scripts/compat/upstream-compat-common.mjs",
-  "scripts/compat/upstream-compat-summary.mjs",
-  "scripts/compat/watch-upstream.mjs",
+import {
+  PACKAGE_SCRIPT_ALIASES,
+  PATH_GROUPS,
+  UPSTREAM_COMPAT_SCRIPT_PATHS,
+  VERSION_SYNC_PATHS,
   WATCH_UPSTREAM_FIXTURE_TESTS_PATH,
-]);
+  pathMatchesSpec,
+} from "./test-impact-manifest.mjs";
+import { repoRoot } from "../npm/common.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -223,30 +221,15 @@ async function addUpstreamCompatSteps(steps) {
 }
 
 function isSmartContextPath(filePath) {
-  return (
-    filePath === "crates/prodex-app/src/runtime_proxy/smart_context.rs" ||
-    filePath.startsWith("crates/prodex-app/src/runtime_proxy/smart_context/") ||
-    filePath === "crates/prodex-app/tests/src/runtime_proxy/smart_context.rs" ||
-    filePath.startsWith("crates/prodex-app/tests/src/runtime_proxy/smart_context/")
-  );
+  return pathMatchesSpec(filePath, PATH_GROUPS.smartContext);
 }
 
 function isRuntimeHotPath(filePath) {
-  return (
-    filePath.startsWith("crates/prodex-app/src/runtime_proxy/") ||
-    filePath === "crates/prodex-app/src/runtime_launch/proxy_startup.rs" ||
-    filePath.startsWith("crates/prodex-runtime-proxy/src/")
-  );
+  return pathMatchesSpec(filePath, PATH_GROUPS.runtimeHotPath);
 }
 
 function isVersionManagedPath(filePath) {
-  return (
-    filePath === "Cargo.toml" ||
-    filePath === "README.md" ||
-    filePath === "QUICKSTART.md" ||
-    filePath.startsWith("npm/") ||
-    filePath.startsWith("scripts/npm/")
-  );
+  return pathMatchesSpec(filePath, PATH_GROUPS.versionManaged);
 }
 
 function isNodeScriptPath(filePath) {
@@ -257,37 +240,15 @@ function isNodeScriptPath(filePath) {
 }
 
 function isSizeGuardRelevantPath(filePath) {
-  return (
-    filePath.endsWith(".rs") ||
-    filePath === "package.json" ||
-    filePath === "scripts/ci/guard-common.mjs" ||
-    filePath === "scripts/ci/size-guard.mjs"
-  );
+  return pathMatchesSpec(filePath, PATH_GROUPS.sizeGuardRelevant);
 }
 
 function isReleaseGuardFixturesRelevantPath(filePath) {
-  const fileName = filePath.split("/").pop() ?? "";
-  return (
-    filePath === "package.json" ||
-    filePath === ".github/workflows/ci.yml" ||
-    filePath === "scripts/ci/preflight.mjs" ||
-    filePath === "scripts/ci/prepush.mjs" ||
-    filePath === "scripts/ci/release-hygiene.mjs" ||
-    filePath === "scripts/ci/release-guard-common.mjs" ||
-    filePath === "scripts/ci/release-guard-fixture-tests.mjs" ||
-    (filePath.startsWith("scripts/ci/") &&
-      filePath.endsWith(".mjs") &&
-      fileName.includes("release") &&
-      fileName.includes("guard"))
-  );
+  return pathMatchesSpec(filePath, PATH_GROUPS.releaseGuardRelevant);
 }
 
 function isUpstreamCompatRelevantPath(filePath) {
-  return (
-    filePath === "package.json" ||
-    filePath === ".github/workflows/upstream-compat.yml" ||
-    filePath.startsWith("scripts/compat/")
-  );
+  return pathMatchesSpec(filePath, PATH_GROUPS.upstreamCompatRelevant);
 }
 
 function crateDirForPath(filePath) {
@@ -367,7 +328,8 @@ async function buildSteps(paths) {
         command: "node",
         args: [
           "-e",
-          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const expected={'ci:changed':'node scripts/ci/changed-tests.mjs','test:changed':'node scripts/ci/changed-tests.mjs','ci:size-guard':'node scripts/ci/size-guard.mjs','ci:release-hygiene':'node scripts/ci/release-hygiene.mjs','compat:check':'node scripts/compat/check-upstream-baseline.mjs','compat:watch':'node scripts/compat/watch-upstream.mjs','compat:watch-fixtures':'node scripts/compat/watch-upstream-fixture-tests.mjs'}; for (const [name, command] of Object.entries(expected)) { if (pkg.scripts?.[name] !== command) throw new Error(`${name} script mismatch`); }",
+          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const expected=JSON.parse(process.argv[1]); for (const [name, command] of Object.entries(expected)) { if (pkg.scripts?.[name] !== command) throw new Error(`${name} script mismatch`); }",
+          JSON.stringify(PACKAGE_SCRIPT_ALIASES),
         ],
       });
     }
@@ -433,9 +395,7 @@ async function buildSteps(paths) {
     }
 
     if (
-      filePath === "scripts/ci/runtime-test-manifest.mjs" ||
-      filePath === "scripts/ci/runtime-test-manifest-guard.mjs" ||
-      filePath === ".github/workflows/ci.yml"
+      pathMatchesSpec(filePath, PATH_GROUPS.runtimeManifestRelevant)
     ) {
       addStep(steps, "runtime-test-manifest-guard", {
         label: "runtime-test-manifest-guard",
@@ -445,9 +405,7 @@ async function buildSteps(paths) {
     }
 
     if (
-      filePath === "docs/runtime-policy.md" ||
-      filePath === "scripts/docs/runtime-policy.mjs" ||
-      filePath.startsWith("crates/prodex-runtime-policy/")
+      pathMatchesSpec(filePath, PATH_GROUPS.runtimePolicyDocsRelevant)
     ) {
       addStep(steps, "docs-runtime-policy-check", {
         label: "docs-runtime-policy-check",
