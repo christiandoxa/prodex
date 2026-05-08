@@ -228,6 +228,20 @@ function isSizeGuardRelevantPath(filePath) {
   );
 }
 
+function isReleaseGuardFixturesRelevantPath(filePath) {
+  const fileName = filePath.split("/").pop() ?? "";
+  return (
+    filePath === "package.json" ||
+    filePath === ".github/workflows/ci.yml" ||
+    filePath === "scripts/ci/release-guard-common.mjs" ||
+    filePath === "scripts/ci/release-guard-fixture-tests.mjs" ||
+    (filePath.startsWith("scripts/ci/") &&
+      filePath.endsWith(".mjs") &&
+      fileName.includes("release") &&
+      fileName.includes("guard"))
+  );
+}
+
 function crateDirForPath(filePath) {
   const parts = filePath.split("/");
   if (parts[0] === "crates" && parts.length >= 2) {
@@ -319,6 +333,14 @@ async function buildSteps(paths) {
         label: "size-guard",
         command: "node",
         args: ["scripts/ci/size-guard.mjs"],
+      });
+    }
+
+    if (isReleaseGuardFixturesRelevantPath(filePath)) {
+      addStep(steps, "release-guard-fixtures", {
+        label: "release-guard-fixtures",
+        command: "node",
+        args: ["scripts/ci/release-guard-fixture-tests.mjs"],
       });
     }
 

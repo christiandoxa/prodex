@@ -49,6 +49,8 @@ function printHelp() {
       "Runs cheap local checks that mirror CI's push-facing guard.",
       "",
       "Checks:",
+      "  - release hygiene guards over upstream merge-base..HEAD by default",
+      "  - release guard historical fixtures",
       "  - release changelog freshness",
       "  - churn hygiene over upstream merge-base..HEAD when available",
       "  - Rust source file size guard",
@@ -56,8 +58,8 @@ function printHelp() {
       "  - npm/docs version sync idempotence",
       "",
       "Options:",
-      "  --base <rev>  explicit churn-hygiene base",
-      "  --head <rev>  explicit churn-hygiene head; default HEAD",
+      "  --base <rev>  explicit release/churn hygiene base",
+      "  --head <rev>  explicit release/churn hygiene head; default HEAD",
       "  --dry-run     print the command plan without running it",
     ].join("\n") + "\n",
   );
@@ -80,28 +82,71 @@ async function upstreamMergeBase(head) {
   }
 }
 
-async function churnStep(args) {
+async function prepushRange(args) {
   const explicitBase = args.base;
   const base = explicitBase ?? (await upstreamMergeBase(args.head));
+  return base ? { base, head: args.head } : null;
+}
+
+function withOptionalRange(script, range) {
+  const guardArgs = [script];
+  if (range) {
+    guardArgs.push("--base", range.base, "--head", range.head);
+  }
+  return guardArgs;
+}
+
+function releaseHygieneSteps(range) {
+  const rangeGuards = [
+    "release-metadata-only-guard.mjs",
+    "version-metadata-release-guard.mjs",
+    "release-empty-commit-guard.mjs",
+    "release-duplicate-version-guard.mjs",
+  ];
+
+  return [
+    ...rangeGuards.map((script) => ({
+      label: range
+        ? script.replace(/\.mjs$/, "-push-range")
+        : script.replace(/\.mjs$/, "-default-range"),
+      command: "node",
+      args: withOptionalRange(`scripts/ci/${script}`, range),
+    })),
+    {
+      label: range ? "release-tag-changelog-guard-push-range" : "release-tag-changelog-guard-default-range",
+      command: "node",
+      args: withOptionalRange("scripts/ci/release-tag-changelog-guard.mjs", range),
+    },
+    {
+      label: "release-guard-fixtures",
+      command: "node",
+      args: ["scripts/ci/release-guard-fixture-tests.mjs"],
+    },
+  ];
+}
+
+function churnStep(range) {
   const churnArgs = ["scripts/ci/churn-hygiene.mjs", "--check"];
-  if (base) {
-    churnArgs.push("--base", base, "--head", args.head);
+  if (range) {
+    churnArgs.push("--base", range.base, "--head", range.head);
   }
   return {
-    label: base ? "churn-hygiene-push-range" : "churn-hygiene-default-range",
+    label: range ? "churn-hygiene-push-range" : "churn-hygiene-default-range",
     command: "node",
     args: churnArgs,
   };
 }
 
 async function prepushSteps(args) {
+  const range = await prepushRange(args);
   return [
     {
       label: "changelog-ci-check",
       command: "node",
       args: ["scripts/npm/changelog.mjs", "--ci-check"],
     },
-    await churnStep(args),
+    ...releaseHygieneSteps(range),
+    churnStep(range),
     {
       label: "size-guard",
       command: "node",
