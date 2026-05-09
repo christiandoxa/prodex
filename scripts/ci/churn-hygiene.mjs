@@ -318,7 +318,65 @@ function summarize(rows) {
   };
 }
 
-function thresholdIssues(summary, thresholds) {
+function structuralGroup(filePath) {
+  const parts = filePath.split("/");
+  if (parts[0] === "crates" && parts[1]) {
+    return `crates/${parts[1]}`;
+  }
+  return parts.slice(0, -1).join("/") || ".";
+}
+
+function mostlyOneWayChange(insertions, deletions) {
+  const smaller = Math.min(insertions, deletions);
+  const larger = Math.max(insertions, deletions);
+  return smaller <= 50 || smaller <= Math.floor(larger * 0.1);
+}
+
+function structuralExtractionGroups(rows, thresholds) {
+  const largeDeletionGroups = new Set(
+    rows
+      .filter(
+        (row) =>
+          !row.binary &&
+          row.deletions > thresholds.maxFileLines &&
+          mostlyOneWayChange(row.insertions, row.deletions),
+      )
+      .map((row) => structuralGroup(row.filePath)),
+  );
+  const largeAdditionGroups = new Set(
+    rows
+      .filter(
+        (row) =>
+          !row.binary &&
+          row.insertions > thresholds.maxFileLines &&
+          mostlyOneWayChange(row.insertions, row.deletions),
+      )
+      .map((row) => structuralGroup(row.filePath)),
+  );
+  return [...largeDeletionGroups].filter((group) => largeAdditionGroups.has(group));
+}
+
+function structuralExtractionApplies(rows, summary, thresholds) {
+  if (summary.files > thresholds.maxFiles || summary.behaviorFiles > thresholds.maxBehaviorFiles) {
+    return false;
+  }
+  const groups = new Set(structuralExtractionGroups(rows, thresholds));
+  if (groups.size === 0) {
+    return false;
+  }
+
+  const nonExtractionLines = rows
+    .filter((row) => !groups.has(structuralGroup(row.filePath)))
+    .reduce((sum, row) => sum + row.insertions + row.deletions, 0);
+  const largest = summary.largestFiles[0];
+  return (
+    nonExtractionLines <= thresholds.maxLines &&
+    largest &&
+    groups.has(structuralGroup(largest.filePath))
+  );
+}
+
+function thresholdIssues(summary, thresholds, options = {}) {
   const issues = [];
   if (summary.files > thresholds.maxFiles && !summary.releaseMetadataOnly) {
     issues.push(`files changed ${summary.files} > ${thresholds.maxFiles}`);
@@ -326,11 +384,11 @@ function thresholdIssues(summary, thresholds) {
   if (summary.behaviorFiles > thresholds.maxBehaviorFiles) {
     issues.push(`behavior files ${summary.behaviorFiles} > ${thresholds.maxBehaviorFiles}`);
   }
-  if (summary.changedLines > thresholds.maxLines) {
+  if (summary.changedLines > thresholds.maxLines && !options.structuralExtraction) {
     issues.push(`changed lines ${summary.changedLines} > ${thresholds.maxLines}`);
   }
   const largest = summary.largestFiles[0];
-  if (largest && largest.lines > thresholds.maxFileLines) {
+  if (largest && largest.lines > thresholds.maxFileLines && !options.structuralExtraction) {
     issues.push(`largest file ${largest.filePath} changed ${largest.lines} lines > ${thresholds.maxFileLines}`);
   }
   return issues;
@@ -425,7 +483,7 @@ async function commitsForSelector(selector) {
     });
 }
 
-function printHuman(plan, summary, thresholds, issues, subjectIssues, check) {
+function printHuman(plan, summary, thresholds, issues, subjectIssues, check, options = {}) {
   const { selector, command, originalSelector, ignoreBefore, ignoreBeforeInput } = plan;
   process.stdout.write(`churn hygiene: ${selector}\n`);
   if (originalSelector && ignoreBefore) {
@@ -439,6 +497,9 @@ function printHuman(plan, summary, thresholds, issues, subjectIssues, check) {
   process.stdout.write(`  changed lines: ${summary.changedLines} (threshold ${thresholds.maxLines})\n`);
   if (summary.releaseMetadataOnly) {
     process.stdout.write("  release metadata only: yes\n");
+  }
+  if (options.structuralExtraction) {
+    process.stdout.write("  structural extraction: yes\n");
   }
   if (summary.largestFiles.length > 0) {
     process.stdout.write("  largest files:\n");
@@ -484,7 +545,8 @@ async function main() {
   const { stdout } = await git(plan.command, { cwd: repoRoot });
   const rows = parseNumstat(stdout);
   const summary = summarize(rows);
-  const issues = thresholdIssues(summary, args.thresholds);
+  const structuralExtraction = structuralExtractionApplies(rows, summary, args.thresholds);
+  const issues = thresholdIssues(summary, args.thresholds, { structuralExtraction });
   const commits = await commitsForSelector(plan.selector);
   const subjectIssues = commitSubjectIssues(commits);
   const checkIssues = [...issues, ...subjectIssues];
@@ -500,6 +562,7 @@ async function main() {
           command: ["git", ...plan.command],
           thresholds: args.thresholds,
           summary,
+          structuralExtraction,
           issues,
           commitSubjects: commits,
           subjectIssues,
@@ -510,7 +573,9 @@ async function main() {
       )}\n`,
     );
   } else {
-    printHuman(plan, summary, args.thresholds, issues, subjectIssues, args.check);
+    printHuman(plan, summary, args.thresholds, issues, subjectIssues, args.check, {
+      structuralExtraction,
+    });
   }
 
   if (args.check && checkIssues.length > 0) {
