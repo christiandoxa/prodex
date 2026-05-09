@@ -2,13 +2,23 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## Unreleased
-
-Changes after `0.92.0`.
+## 0.93.0 - 2026-05-09
 
 ### CI
 
+- Rerun workflow after release guard (`5a4ed3b`)
+- Streamline release and compat automation (`cfb2198`)
+- Consolidate upstream compat tooling (`5e88ae9`)
+- Consolidate release hygiene gate (`f902996`)
+- Harden upstream compatibility watchdog (`693c77a`)
+- Run release hygiene before push (`1dc85b9`)
+- Refactor release hygiene guards (`f2973f5`)
 - Enforce release hygiene guards (`f93c52c`)
+
+### Misc
+
+- Add safe housekeeping controls (`95ec69b`)
+- Share Codex environments config (`9517257`)
 
 ## 0.92.0 - 2026-05-08
 
@@ -147,9 +157,3 @@ Changes after `0.92.0`.
 ### CI
 
 - Fetch full history for release sync (`3a2c6d8`)
-
-## 0.81.0 - 2026-05-06
-
-### Runtime
-
-- Stabilize websocket streaming (`a92f29a`)

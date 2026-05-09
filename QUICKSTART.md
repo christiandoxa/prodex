@@ -49,10 +49,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.92.0`:
+The current local version in this repo is `0.93.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.92.0
+npm install -g @christiandoxa/prodex@0.93.0
 ```
 
 Dependency status in this repo:
@@ -259,7 +259,7 @@ tail -n 200 "$(prodex doctor --runtime --json | jq -r '.log_path')"
 The default runtime log directory is the OS temp directory, usually `/tmp` on Linux, but `PRODEX_RUNTIME_LOG_DIR` or `runtime.log_dir` in `policy.toml` can override it.
 Use `prodex doctor --runtime --json` to find the active `log_path`, resolved `runtime_logs.directory`, and live broker metrics before tailing files.
 
-Use `prodex cleanup` when you want to clear stale local runtime logs, temp login homes, transient runtime cache files and stale root temp files inside `.prodex`, prune Codex and Claude chat history whose last chat is older than 30 days, collapse duplicate profiles that point at the same OpenAI workspace identity into one surviving profile, clear dead broker artifacts, and remove old orphaned managed profile homes that are no longer tracked.
+Prodex also schedules non-blocking automatic housekeeping for stale runtime logs, temp login homes, stale root temp files, and dead broker artifacts. Use `prodex cleanup` when you want a manual cleanup that also clears transient runtime cache files, collapses duplicate profiles that point at the same OpenAI workspace identity into one surviving profile, and removes old orphaned managed profile homes that are no longer tracked. Orphaned managed profile homes use a conservative 7-day threshold by default; override that explicitly with `prodex cleanup --older-than 1d` or `prodex cleanup --aggressive` when you want faster reclaim. Codex and Claude chat histories are left to the upstream runtimes.
 
 Use `prodex audit` when you want to inspect the local append-only audit log. It supports `--tail`, `--component`, `--action`, `--outcome`, and `--json`.
 
