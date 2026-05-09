@@ -1,0 +1,710 @@
+use super::broker::runtime_doctor_broker_issue_diagnosis;
+use super::marker_accessors::*;
+use super::next_steps::*;
+use super::*;
+use std::collections::BTreeMap;
+
+fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeMap<String, usize> {
+    let classes: [(&str, &[&str]); 6] = [
+        (
+            "admission",
+            &[
+                "runtime_proxy_queue_overloaded",
+                "runtime_proxy_active_limit_reached",
+                "runtime_proxy_lane_limit_reached",
+                "runtime_proxy_overload_backoff",
+                "runtime_proxy_admission_wait_started",
+                "runtime_proxy_admission_wait_exhausted",
+                "runtime_proxy_queue_wait_started",
+                "runtime_proxy_queue_wait_exhausted",
+                "profile_inflight_saturated",
+                "websocket_connect_overflow_reject",
+                "websocket_connect_overflow_rejected",
+                "compact_precommit_budget_exhausted",
+                "compact_candidate_exhausted",
+            ],
+        ),
+        (
+            "auth",
+            &[
+                "profile_auth_recovery_failed",
+                "profile_auth_proactive_sync_failed",
+            ],
+        ),
+        (
+            "continuation",
+            &[
+                "previous_response_not_found",
+                "previous_response_negative_cache",
+                "previous_response_fresh_fallback",
+                "chain_retried_owner",
+                "chain_dead_upstream_confirmed",
+                "stale_continuation",
+                "previous_response_fresh_fallback_blocked",
+                "compact_fresh_fallback_blocked",
+                "compact_pressure_shed",
+            ],
+        ),
+        (
+            "persistence",
+            &[
+                "state_save_error",
+                "state_save_queue_backpressure",
+                "state_save_skipped",
+                "continuation_journal_save_error",
+                "continuation_journal_queue_backpressure",
+            ],
+        ),
+        (
+            "quota",
+            &[
+                "profile_retry_backoff",
+                "profile_transport_backoff",
+                "profile_circuit_open",
+                "profile_circuit_half_open_probe",
+                "profile_health",
+                "profile_latency",
+                "profile_bad_pairing",
+                "profile_quota_quarantine",
+                "profile_auth_backoff",
+                "profile_probe_refresh_error",
+                "profile_probe_refresh_panic",
+                "profile_probe_refresh_backpressure",
+                "selection_skip_sync_probe",
+                "runtime_proxy_sync_probe_pressure_pause",
+                "local_selection_blocked",
+                "responses_pre_send_skip",
+                "websocket_pre_send_skip",
+                "quota_blocked",
+                "quota_critical_floor_before_send",
+                "upstream_usage_limit_passthrough",
+                "upstream_overload_passthrough",
+                "upstream_overloaded",
+                "compact_retryable_failure",
+                "compact_overload_conservative_retry",
+                "compact_quota_unclassified",
+            ],
+        ),
+        (
+            "transport",
+            &[
+                "upstream_connect_timeout",
+                "upstream_connect_dns_error",
+                "upstream_tls_handshake_error",
+                "upstream_connect_error",
+                "upstream_connect_http",
+                "upstream_close_before_completed",
+                "upstream_connection_closed",
+                "upstream_read_error",
+                "upstream_send_error",
+                "upstream_stream_error",
+                "profile_transport_failure",
+                "stream_read_error",
+                "local_writer_error",
+                "websocket_precommit_frame_timeout",
+                "websocket_precommit_hold_timeout",
+                "websocket_dns_resolve_timeout",
+                "websocket_dns_overflow_enqueue",
+                "websocket_dns_overflow_dispatch",
+                "websocket_dns_overflow_reject",
+                "websocket_connect_local_pressure",
+                "websocket_connect_overflow_enqueue",
+                "websocket_connect_overflow_dispatch",
+            ],
+        ),
+    ];
+
+    classes
+        .into_iter()
+        .map(|(class, markers)| {
+            (
+                class.to_string(),
+                markers
+                    .iter()
+                    .map(|marker| runtime_doctor_marker_count(summary, marker))
+                    .sum(),
+            )
+        })
+        .filter(|(_, count)| *count > 0)
+        .collect()
+}
+
+pub fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
+    summary.state_save_queue_backlog =
+        runtime_doctor_marker_last_usize_field(summary, "state_save_queue_backpressure", "backlog")
+            .or_else(|| {
+                runtime_doctor_marker_last_usize_field(summary, "state_save_queued", "backlog")
+            });
+    summary.state_save_lag_ms =
+        runtime_doctor_marker_last_u64_field(summary, "state_save_ok", "lag_ms")
+            .or_else(|| {
+                runtime_doctor_marker_last_u64_field(summary, "state_save_skipped", "lag_ms")
+            })
+            .or_else(|| {
+                runtime_doctor_marker_last_u64_field(summary, "state_save_error", "lag_ms")
+            });
+    summary.continuation_journal_save_backlog = runtime_doctor_marker_last_usize_field(
+        summary,
+        "continuation_journal_queue_backpressure",
+        "backlog",
+    )
+    .or_else(|| {
+        runtime_doctor_marker_last_usize_field(
+            summary,
+            "continuation_journal_save_queued",
+            "backlog",
+        )
+    });
+    summary.continuation_journal_save_lag_ms =
+        runtime_doctor_marker_last_u64_field(summary, "continuation_journal_save_ok", "lag_ms")
+            .or_else(|| {
+                runtime_doctor_marker_last_u64_field(
+                    summary,
+                    "continuation_journal_save_error",
+                    "lag_ms",
+                )
+            });
+    summary.profile_probe_refresh_backlog = runtime_doctor_marker_last_usize_field(
+        summary,
+        "profile_probe_refresh_backpressure",
+        "backlog",
+    )
+    .or_else(|| {
+        runtime_doctor_marker_last_usize_field(summary, "profile_probe_refresh_queued", "backlog")
+    });
+    summary.profile_probe_refresh_lag_ms =
+        runtime_doctor_marker_last_u64_field(summary, "profile_probe_refresh_ok", "lag_ms")
+            .or_else(|| {
+                runtime_doctor_marker_last_u64_field(
+                    summary,
+                    "profile_probe_refresh_error",
+                    "lag_ms",
+                )
+            });
+    // Count quota-floor pre-send skips via the reason facet so the doctor keeps
+    // exposing the hardening signal even though the runtime logs it as a reason,
+    // not as a standalone marker.
+    let quota_floor_before_send_count =
+        runtime_doctor_facet_count(summary, "reason", "quota_critical_floor_before_send");
+    if quota_floor_before_send_count > 0 {
+        *summary
+            .marker_counts
+            .entry("quota_critical_floor_before_send")
+            .or_insert(0) += quota_floor_before_send_count;
+    }
+    summary.compat_warning_count = runtime_doctor_marker_count(summary, "compat_warning");
+    summary.top_client_family = runtime_doctor_top_facet(summary, "family");
+    summary.top_client = runtime_doctor_top_facet(summary, "client");
+    summary.top_tool_surface = runtime_doctor_top_facet(summary, "tool_surface");
+    summary.top_compat_warning = runtime_doctor_top_facet(summary, "warning");
+    summary.failure_class_counts = runtime_doctor_failure_class_counts(summary);
+}
+
+fn runtime_doctor_previous_response_continuation_label(
+    summary: &RuntimeDoctorSummary,
+    marker: &str,
+) -> String {
+    let request_shape = if marker == "previous_response_fresh_fallback_blocked"
+        && runtime_doctor_has_context_dependent_fail_closed(summary)
+    {
+        Some("continuation_only".to_string())
+    } else {
+        runtime_doctor_marker_last_field(summary, marker, "request_shape")
+            .map(str::to_string)
+            .or_else(|| {
+                summary
+                    .facet_counts
+                    .get("request_shape")
+                    .and_then(|counts| counts.get("session_replayable"))
+                    .map(|_| "session_replayable".to_string())
+            })
+    };
+    match request_shape.as_deref() {
+        Some("session_replayable") => "session-scoped previous_response_id continuation",
+        Some("empty_input") => "empty-input previous_response_id continuation",
+        Some("replayable_input") => "input-only previous_response_id continuation",
+        Some("tool_output_only") => "tool-output previous_response_id continuation",
+        Some("continuation_only") => "context-dependent previous_response_id continuation",
+        _ => "previous_response_id continuation",
+    }
+    .to_string()
+}
+
+fn runtime_doctor_previous_response_fresh_fallback_blocked_shape_count(
+    summary: &RuntimeDoctorSummary,
+    request_shape: &str,
+) -> usize {
+    let counted = summary
+        .previous_response_fresh_fallback_blocked_by_request_shape
+        .get(request_shape)
+        .copied()
+        .unwrap_or(0);
+    if counted > 0 {
+        return counted;
+    }
+    if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback_blocked") > 0
+        && runtime_doctor_marker_last_field(
+            summary,
+            "previous_response_fresh_fallback_blocked",
+            "request_shape",
+        ) == Some(request_shape)
+    {
+        return 1;
+    }
+    0
+}
+
+pub(super) fn runtime_doctor_has_context_dependent_fail_closed(
+    summary: &RuntimeDoctorSummary,
+) -> bool {
+    runtime_doctor_previous_response_fresh_fallback_blocked_shape_count(
+        summary,
+        "continuation_only",
+    ) > 0
+}
+
+fn runtime_doctor_compact_exit_counts(summary: &RuntimeDoctorSummary) -> BTreeMap<String, usize> {
+    let compact_markers: [(&str, &[&str]); 10] = [
+        (
+            "candidate_exhausted",
+            &[
+                "compact_candidate_exhausted",
+                "compact_exit_candidate_exhausted",
+            ],
+        ),
+        (
+            "committed",
+            &["compact_committed", "compact_exit_committed"],
+        ),
+        (
+            "committed_owner",
+            &["compact_committed_owner", "compact_exit_committed_owner"],
+        ),
+        (
+            "followup_owner",
+            &["compact_followup_owner", "compact_exit_followup_owner"],
+        ),
+        (
+            "lineage_released",
+            &["compact_lineage_released", "compact_exit_lineage_released"],
+        ),
+        (
+            "owner_retry",
+            &[
+                "compact_overload_conservative_retry",
+                "compact_exit_overload_conservative_retry",
+            ],
+        ),
+        (
+            "precommit_budget",
+            &[
+                "compact_precommit_budget_exhausted",
+                "compact_exit_precommit_budget_exhausted",
+            ],
+        ),
+        (
+            "pressure_shed",
+            &["compact_pressure_shed", "compact_exit_pressure_shed"],
+        ),
+        (
+            "quota_misc",
+            &[
+                "compact_quota_unclassified",
+                "compact_exit_quota_unclassified",
+            ],
+        ),
+        (
+            "retryable_failure",
+            &[
+                "compact_retryable_failure",
+                "compact_exit_retryable_failure",
+            ],
+        ),
+    ];
+
+    compact_markers
+        .into_iter()
+        .filter_map(|(label, markers)| {
+            let count = markers
+                .iter()
+                .map(|marker| runtime_doctor_marker_count(summary, marker))
+                .sum::<usize>();
+            (count > 0).then(|| (label.to_string(), count))
+        })
+        .collect()
+}
+
+pub fn runtime_doctor_top_facet(summary: &RuntimeDoctorSummary, facet: &str) -> Option<String> {
+    summary.facet_counts.get(facet).and_then(|counts| {
+        counts
+            .iter()
+            .max_by_key(|(value, count)| (**count, value.as_str()))
+            .map(|(value, count)| format!("{value} ({count})"))
+    })
+}
+
+fn runtime_doctor_selection_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS) {
+        "elevated".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+fn runtime_doctor_transport_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS) {
+        "elevated".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+fn runtime_doctor_persistence_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS) {
+        "elevated".to_string()
+    } else if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_ACTIVE_PERSISTENCE_MARKERS) {
+        "active".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+fn runtime_doctor_startup_audit_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if !summary.orphan_managed_dirs.is_empty()
+        || runtime_doctor_marker_count(summary, "runtime_proxy_startup_audit") > 0
+            && summary
+                .marker_last_fields
+                .get("runtime_proxy_startup_audit")
+                .is_some_and(|fields| {
+                    fields
+                        .get("missing_managed_dirs")
+                        .is_some_and(|value| value != "0")
+                        || fields
+                            .get("orphan_managed_dirs")
+                            .is_some_and(|value| value != "0")
+                })
+    {
+        "elevated".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+fn runtime_doctor_quota_freshness_pressure(summary: &RuntimeDoctorSummary) -> String {
+    if summary.stale_persisted_usage_snapshots > 0
+        || runtime_doctor_marker_count(summary, "profile_probe_refresh_error") > 0
+        || runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure") > 0
+        || runtime_doctor_marker_count(summary, "selection_skip_sync_probe") > 0
+        || runtime_doctor_top_facet(summary, "quota_source")
+            .is_some_and(|value| value.starts_with("persisted_snapshot "))
+    {
+        "stale_risk".to_string()
+    } else if runtime_doctor_has_any_markers(summary, RUNTIME_DOCTOR_ACTIVE_QUOTA_REFRESH_MARKERS) {
+        "active".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -> String {
+    if !summary.pointer_exists {
+        "No runtime log pointer has been created yet.".to_string()
+    } else if !summary.log_exists {
+        "Latest runtime log path does not exist.".to_string()
+    } else if summary.line_count == 0 {
+        "Latest runtime log is empty.".to_string()
+    } else if let Some(diagnosis) = runtime_doctor_broker_issue_diagnosis(summary) {
+        diagnosis
+    } else if runtime_doctor_marker_count(summary, "runtime_proxy_overload_backoff") > 0 {
+        "Recent local proxy overload backoff was triggered.".to_string()
+    } else if runtime_doctor_marker_count(summary, "runtime_proxy_lane_limit_reached") > 0 {
+        let lane =
+            runtime_doctor_marker_last_field(summary, "runtime_proxy_lane_limit_reached", "lane")
+                .unwrap_or("unknown");
+        format!(
+            "Recent per-lane admission limit was triggered on {lane}. Next step: {}",
+            runtime_doctor_lane_pressure_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "runtime_proxy_active_limit_reached") > 0 {
+        format!(
+            "Recent global active-request admission limit was triggered. Next step: {}",
+            runtime_doctor_active_pressure_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "runtime_proxy_queue_overloaded") > 0 {
+        "Recent proxy saturation detected before commit.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_circuit_open") > 0 {
+        "Recent route-level circuit breaker opened; fresh selection is temporarily steering away from a degraded profile.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_circuit_half_open_probe") > 0 {
+        "Recent route-level circuit breaker entered half-open probing; fresh selection is cautiously testing a degraded profile before fully restoring it.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_precommit_frame_timeout") > 0 {
+        "Recent websocket reuse/connect path failed to produce a first upstream frame before the pre-commit deadline.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_precommit_hold_timeout") > 0 {
+        "Recent websocket pre-commit hold timed out before an upstream terminal frame arrived."
+            .to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_dns_resolve_timeout") > 0 {
+        "Recent websocket DNS resolution timed out before upstream connect completed.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_dns_overflow_reject") > 0 {
+        "Recent websocket DNS resolution work was rejected after the overflow queue saturated."
+            .to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_dns_overflow_enqueue") > 0
+        || runtime_doctor_marker_count(summary, "websocket_dns_overflow_dispatch") > 0
+    {
+        "Recent websocket DNS resolution overflow queueing was observed.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_local_pressure") > 0 {
+        "Recent websocket connect failed due local pressure before upstream commit.".to_string()
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_overflow_rejected") > 0
+        || runtime_doctor_marker_count(summary, "websocket_connect_overflow_reject") > 0
+    {
+        format!(
+            "Recent websocket connect work was rejected after the overflow queue saturated. Next step: {}",
+            runtime_doctor_websocket_connect_overflow_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_overflow_enqueue") > 0 {
+        format!(
+            "Recent websocket connect overflow queueing was observed. Next step: {}",
+            runtime_doctor_websocket_connect_overflow_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "websocket_connect_overflow_dispatch") > 0 {
+        format!(
+            "Recent websocket connect overflow dispatch was observed. Next step: {}",
+            runtime_doctor_websocket_connect_overflow_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "websocket_proxy_tunnel_failure") > 0 {
+        "Recent websocket upstream proxy tunnel failed before the upstream websocket handshake completed. Next step: inspect HTTPS_PROXY/NO_PROXY and the proxy's CONNECT support.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_inflight_saturated") > 0 {
+        let profile =
+            runtime_doctor_marker_last_field(summary, "profile_inflight_saturated", "profile")
+                .unwrap_or("an eligible profile");
+        let hard_limit =
+            runtime_doctor_marker_last_field(summary, "profile_inflight_saturated", "hard_limit")
+                .map(|limit| format!(" at hard limit {limit}"))
+                .unwrap_or_default();
+        format!(
+            "Recent per-profile in-flight saturation blocked {profile}{hard_limit}. Next step: {}",
+            runtime_doctor_profile_inflight_saturated_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "profile_health") > 0 {
+        let scope = runtime_doctor_marker_scope(summary, "profile_health", "profile", "route")
+            .unwrap_or_else(|| "unknown route".to_string());
+        let score =
+            runtime_doctor_marker_last_field(summary, "profile_health", "score").unwrap_or("-");
+        let reason = runtime_doctor_marker_last_field(summary, "profile_health", "reason")
+            .unwrap_or("unknown_reason");
+        format!(
+            "Recent route-specific health penalty is steering fresh selection away from {scope} (score {score}, reason {reason}). Next step: {}",
+            runtime_doctor_route_health_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "profile_bad_pairing") > 0 {
+        "Recent route-specific bad pairing memory is steering fresh selection away from a flaky account.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_auth_recovery_failed") > 0 {
+        format!(
+            "Recent profile auth recovery failed after an upstream unauthorized response. Next step: {}",
+            runtime_doctor_profile_auth_recovery_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "compact_fresh_fallback_blocked") > 0 {
+        "Recent compact lineage guard failed closed so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
+    } else if runtime_doctor_marker_count(summary, "compact_pressure_shed") > 0 {
+        "Recent pressure mode is shedding fresh compact requests to preserve continuation-heavy traffic.".to_string()
+    } else if runtime_doctor_marker_count(summary, "chain_dead_upstream_confirmed") > 0 {
+        format!(
+            "Recent previous_response_id chain was confirmed dead upstream after owner retries. Latest chain event: {}.",
+            summary
+                .latest_chain_event
+                .clone()
+                .unwrap_or_else(|| "inspect chain_dead_upstream_confirmed markers".to_string())
+        )
+    } else if runtime_doctor_marker_count(summary, "stale_continuation") > 0 {
+        format!(
+            "Recent stale continuation was surfaced to Codex via fail-closed handling. Latest reason: {}.",
+            summary
+                .latest_stale_continuation_reason
+                .clone()
+                .unwrap_or_else(|| "inspect stale_continuation markers".to_string())
+        )
+    } else if runtime_doctor_marker_count(summary, "chain_retried_owner") > 0 {
+        format!(
+            "Recent continuation chain was retried on the owning profile before commit. Latest chain event: {}.",
+            summary
+                .latest_chain_event
+                .clone()
+                .unwrap_or_else(|| "inspect chain_retried_owner markers".to_string())
+        )
+    } else if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback_blocked") > 0 {
+        let marker = "previous_response_fresh_fallback_blocked";
+        let label = runtime_doctor_previous_response_continuation_label(summary, marker);
+        let reason = runtime_doctor_marker_last_field(summary, marker, "reason")
+            .unwrap_or("inspect previous_response_fresh_fallback_blocked markers");
+        if runtime_doctor_has_context_dependent_fail_closed(summary) {
+            format!(
+                "Recent context-dependent previous_response_id continuation failed closed before commit. Fresh replay is disabled to preserve continuity. Latest reason: {reason}. Next step: {}",
+                runtime_doctor_previous_response_fail_closed_next_step(summary)
+            )
+        } else {
+            format!(
+                "Recent {label} failed closed before commit. Fresh replay is disabled for stale continuation handling. Latest reason: {reason}. Next step: {}",
+                runtime_doctor_previous_response_fail_closed_next_step(summary)
+            )
+        }
+    } else if runtime_doctor_marker_count(summary, "previous_response_fresh_fallback") > 0 {
+        let marker = "previous_response_fresh_fallback";
+        let label = runtime_doctor_previous_response_continuation_label(summary, marker);
+        let reason = runtime_doctor_marker_last_field(summary, marker, "reason")
+            .unwrap_or("inspect previous_response_fresh_fallback markers");
+        format!(
+            "Legacy previous_response recovery marker was observed for {label}, but current runtime should fail closed instead of treating this as recoverable. Latest reason: {reason}. Restart active prodex/codex sessions if this came from a live broker."
+        )
+    } else if runtime_doctor_marker_count(summary, "previous_response_not_found") > 0 {
+        format!(
+            "Recent previous_response_id continuity failures were observed: {}.",
+            runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route)
+        )
+    } else if runtime_doctor_marker_count(summary, "compact_final_failure") > 0 {
+        let exit = runtime_doctor_marker_last_field(summary, "compact_final_failure", "exit")
+            .unwrap_or("-");
+        let reason = runtime_doctor_marker_last_field(summary, "compact_final_failure", "reason")
+            .unwrap_or("-");
+        format!(
+            "Recent compact final failure exited via {exit} with reason {reason}. Next step: {}",
+            runtime_doctor_compact_final_failure_next_step(summary)
+        )
+    } else if !runtime_doctor_compact_exit_counts(summary).is_empty() {
+        format!(
+            "Recent compact exit paths were logged: {}.",
+            runtime_doctor_count_breakdown(&runtime_doctor_compact_exit_counts(summary))
+        )
+    } else if summary.compat_warning_count > 0 {
+        format!(
+            "Recent compatibility warnings were observed for {}: {}.",
+            summary
+                .top_client
+                .clone()
+                .or_else(|| summary.top_client_family.clone())
+                .unwrap_or_else(|| "unknown client".to_string()),
+            summary
+                .top_compat_warning
+                .clone()
+                .unwrap_or_else(|| "inspect compat_warning markers".to_string())
+        )
+    } else if summary.persisted_dead_continuations > 0 {
+        format!(
+            "Some persisted continuations are currently dead and will be pruned: {}.",
+            summary.persisted_dead_continuations
+        )
+    } else if !summary.suspect_continuation_bindings.is_empty() {
+        format!(
+            "Some persisted continuations are currently suspect: {}.",
+            summary.suspect_continuation_bindings.join(", ")
+        )
+    } else if runtime_doctor_marker_count(summary, "websocket_reuse_watchdog") > 0 {
+        "Recent websocket session reuse degraded before a terminal event; fresh reuse may be steering away from that profile.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_auth_recovered") > 0 {
+        format!(
+            "Recent profile auth recovered after an upstream unauthorized response. Next step: {}",
+            runtime_doctor_profile_auth_recovery_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "selection_pick") > 0
+        || runtime_doctor_marker_count(summary, "selection_skip_current") > 0
+    {
+        "Recent selection decisions were logged; inspect the last marker for why a profile was picked or skipped.".to_string()
+    } else if runtime_doctor_marker_count(summary, "precommit_budget_exhausted") > 0 {
+        "Recent candidate selection exhausted before commit.".to_string()
+    } else if runtime_doctor_marker_count(summary, "upstream_usage_limit_passthrough") > 0
+        || runtime_doctor_marker_count(summary, "responses_pre_send_skip") > 0
+        || runtime_doctor_marker_count(summary, "websocket_pre_send_skip") > 0
+        || runtime_doctor_marker_count(summary, "quota_critical_floor_before_send") > 0
+    {
+        "Recent quota hardening skipped near-exhausted sends or passed through upstream usage-limit responses.".to_string()
+    } else if runtime_doctor_marker_count(summary, "stream_read_error") > 0 {
+        "Recent upstream stream read failure detected after commit.".to_string()
+    } else if runtime_doctor_marker_count(summary, "local_writer_error") > 0 {
+        "Recent local writer failure detected while forwarding an upstream stream.".to_string()
+    } else if runtime_doctor_marker_count(summary, "upstream_connect_timeout") > 0
+        || runtime_doctor_marker_count(summary, "upstream_connect_dns_error") > 0
+        || runtime_doctor_marker_count(summary, "upstream_tls_handshake_error") > 0
+        || runtime_doctor_marker_count(summary, "upstream_connect_error") > 0
+    {
+        "Recent upstream connect failures detected.".to_string()
+    } else if runtime_doctor_marker_count(summary, "state_save_error") > 0 {
+        "Recent runtime state save failures detected.".to_string()
+    } else if runtime_doctor_marker_count(summary, "state_save_queue_backpressure") > 0
+        || runtime_doctor_marker_count(summary, "continuation_journal_queue_backpressure") > 0
+    {
+        format!(
+            "Recent background persistence queue backpressure was detected. Next step: {}",
+            runtime_doctor_persistence_backpressure_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "selection_skip_sync_probe") > 0 {
+        let route = runtime_doctor_marker_last_field(summary, "selection_skip_sync_probe", "route")
+            .unwrap_or("unknown");
+        format!(
+            "Recent fresh selection skipped inline quota probing on route {route} under pressure mode. Next step: {}",
+            runtime_doctor_sync_probe_skip_next_step(summary)
+        )
+    } else if runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure") > 0 {
+        let profile = runtime_doctor_marker_last_field(
+            summary,
+            "profile_probe_refresh_backpressure",
+            "profile",
+        )
+        .unwrap_or("unknown");
+        let backlog = runtime_doctor_marker_last_usize_field(
+            summary,
+            "profile_probe_refresh_backpressure",
+            "backlog",
+        )
+        .map(|backlog| format!(" with backlog {backlog}"))
+        .unwrap_or_default();
+        format!(
+            "Recent background quota refresh queue backpressure was detected for profile {profile}{backlog}. Next step: {}",
+            runtime_doctor_probe_refresh_backpressure_next_step(summary)
+        )
+    } else if !summary.degraded_routes.is_empty() {
+        format!(
+            "Persisted degraded runtime routes are still active: {}",
+            summary.degraded_routes.join(", ")
+        )
+    } else if !summary.orphan_managed_dirs.is_empty() {
+        format!(
+            "Orphan managed profile directories were detected: {}",
+            summary.orphan_managed_dirs.join(", ")
+        )
+    } else if runtime_doctor_marker_count(summary, "profile_probe_refresh_error") > 0 {
+        "Recent background quota refresh failures detected; fresh selection may rely on stale quota snapshots.".to_string()
+    } else if runtime_doctor_marker_count(summary, "profile_probe_refresh_start") > 0 {
+        "Background quota refresh activity was detected; inspect the last marker for the most recent profile refresh.".to_string()
+    } else if runtime_doctor_marker_count(summary, "first_upstream_chunk") > 0
+        && runtime_doctor_marker_count(summary, "first_local_chunk") == 0
+    {
+        "Likely writer stall: upstream produced data but the local writer did not emit a first chunk in the sampled tail."
+            .to_string()
+    } else if summary.runtime_broker_mismatch {
+        "A running runtime broker uses a different prodex binary than this command; restart active prodex/codex sessions so the patched runtime is loaded.".to_string()
+    } else if summary.prodex_binary_mismatch {
+        "Multiple prodex binaries on PATH differ by version or hash; align installs so new sessions use the patched runtime.".to_string()
+    } else {
+        "No recent overload or stream-failure markers were detected in the sampled runtime tail."
+            .to_string()
+    }
+}
+
+pub fn runtime_doctor_finalize_summary(summary: &mut RuntimeDoctorSummary) {
+    summary.selection_pressure = runtime_doctor_selection_pressure(summary);
+    summary.transport_pressure = runtime_doctor_transport_pressure(summary);
+    summary.persistence_pressure = runtime_doctor_persistence_pressure(summary);
+    summary.startup_audit_pressure = runtime_doctor_startup_audit_pressure(summary);
+    summary.quota_freshness_pressure = runtime_doctor_quota_freshness_pressure(summary);
+    if summary.diagnosis.is_empty() {
+        summary.diagnosis = runtime_doctor_default_diagnosis(summary);
+    }
+}
+
+pub fn runtime_doctor_append_pointer_note(
+    summary: &mut RuntimeDoctorSummary,
+    pointer_note: Option<&str>,
+) {
+    if let Some(note) = pointer_note
+        && !summary.diagnosis.contains(note)
+    {
+        summary.diagnosis = format!("{} {}", summary.diagnosis, note);
+    }
+}
