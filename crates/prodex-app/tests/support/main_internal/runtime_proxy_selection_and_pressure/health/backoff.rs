@@ -131,7 +131,7 @@ fn responses_selection_ignores_websocket_transport_backoff() {
                         label: "chatgpt".to_string(),
                         quota_compatible: true,
                     },
-                    result: Ok(usage_with_main_windows(100, 18_000, 100, 604_800)),
+                    result: Ok(usage_with_main_windows(80, 18_000, 80, 604_800)),
                 },
             ),
         ]),
