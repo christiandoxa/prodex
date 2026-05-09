@@ -18,51 +18,54 @@ struct PreparedRuntimeStateSelectedSnapshotSave {
     backoffs: Option<RuntimeProfileBackoffs>,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct RuntimeStateSnapshotSaveInput<'a> {
+    pub(crate) paths: &'a AppPaths,
+    pub(crate) snapshot: &'a AppState,
+    pub(crate) continuations: &'a RuntimeContinuationStore,
+    pub(crate) profile_scores: &'a BTreeMap<String, RuntimeProfileHealth>,
+    pub(crate) usage_snapshots: &'a BTreeMap<String, RuntimeProfileUsageSnapshot>,
+    pub(crate) backoffs: &'a RuntimeProfileBackoffs,
+    pub(crate) revision: u64,
+    pub(crate) latest_revision: &'a AtomicU64,
+}
+
 pub(crate) fn save_runtime_state_snapshot_if_latest(
-    paths: &AppPaths,
-    snapshot: &AppState,
-    continuations: &RuntimeContinuationStore,
-    profile_scores: &BTreeMap<String, RuntimeProfileHealth>,
-    usage_snapshots: &BTreeMap<String, RuntimeProfileUsageSnapshot>,
-    backoffs: &RuntimeProfileBackoffs,
-    revision: u64,
-    latest_revision: &AtomicU64,
+    input: RuntimeStateSnapshotSaveInput<'_>,
 ) -> Result<bool> {
     for attempt in 0..=RUNTIME_SIDECAR_STALE_SAVE_RETRY_LIMIT {
         if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
-            latest_revision,
-            revision,
+            input.latest_revision,
+            input.revision,
         ) {
             return Ok(false);
         }
 
-        let _lock = acquire_state_file_lock(paths)?;
+        let _lock = acquire_state_file_lock(input.paths)?;
 
         if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
-            latest_revision,
-            revision,
+            input.latest_revision,
+            input.revision,
         ) {
             return Ok(false);
         }
 
         let prepared = prepare_runtime_state_snapshot_save(
-            paths,
-            snapshot,
-            continuations,
-            profile_scores,
-            usage_snapshots,
-            backoffs,
+            input.paths,
+            input.snapshot,
+            input.continuations,
+            input.profile_scores,
+            input.usage_snapshots,
+            input.backoffs,
         )?;
 
         if !prodex_runtime_state::runtime_state_snapshot_is_latest_revision(
-            latest_revision,
-            revision,
+            input.latest_revision,
+            input.revision,
         ) {
             return Ok(false);
         }
 
-        match persist_runtime_state_snapshot_save(paths, &prepared) {
+        match persist_runtime_state_snapshot_save(input.paths, &prepared) {
             Ok(()) => return Ok(true),
             Err(err)
                 if runtime_sidecar_generation_error_is_stale(&err)

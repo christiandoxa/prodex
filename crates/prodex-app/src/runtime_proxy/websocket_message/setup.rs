@@ -110,23 +110,29 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     pub(super) fn recompute_route_affinity(&mut self, reason: &'static str) -> Result<()> {
-        refresh_and_log_runtime_response_route_affinity(
-            self.shared,
-            self.request_id,
-            Some(self.session_id),
-            reason,
-            self.previous_response_id.as_deref(),
-            self.bound_profile.as_deref(),
-            self.turn_state_profile.as_deref(),
-            self.request_turn_state.as_deref(),
-            self.request_session_id.as_deref(),
-            self.explicit_request_session_id.as_ref(),
-            self.websocket_session.profile_name.as_deref(),
-            &mut self.bound_session_profile,
-            &mut self.compact_followup_profile,
-            &mut self.compact_session_profile,
-            &mut self.session_profile,
-            &mut self.pinned_profile,
+        refresh_and_log_runtime_response_route_affinity_for_request(
+            RuntimeResponseRouteAffinityLogContext {
+                shared: self.shared,
+                request_id: self.request_id,
+                websocket_session_id: Some(self.session_id),
+                reason,
+            },
+            RuntimeResponseRouteAffinityRequest {
+                previous_response_id: self.previous_response_id.as_deref(),
+                bound_profile: self.bound_profile.as_deref(),
+                turn_state_profile: self.turn_state_profile.as_deref(),
+                request_turn_state: self.request_turn_state.as_deref(),
+                request_session_id: self.request_session_id.as_deref(),
+                explicit_request_session_id: self.explicit_request_session_id.as_ref(),
+                websocket_session_profile: self.websocket_session.profile_name.as_deref(),
+            },
+            RuntimeResponseRouteAffinityRefreshSlots {
+                bound_session_profile: &mut self.bound_session_profile,
+                compact_followup_profile: &mut self.compact_followup_profile,
+                compact_session_profile: &mut self.compact_session_profile,
+                session_profile: &mut self.session_profile,
+                pinned_profile: &mut self.pinned_profile,
+            },
         )
     }
 

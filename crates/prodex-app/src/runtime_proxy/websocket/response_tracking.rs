@@ -548,16 +548,16 @@ pub(crate) fn attempt_runtime_websocket_request(
                 if committed
                     && runtime_token_usage_event_is_loggable(inspected.event_type.as_deref())
                 {
-                    log_runtime_token_usage(
+                    log_runtime_token_usage(RuntimeTokenUsageLog {
                         shared,
                         request_id,
-                        "websocket",
+                        transport: "websocket",
                         profile_name,
-                        "responses_websocket",
-                        request_prompt_cache_key,
-                        request_model_name.as_deref(),
-                        inspected.token_usage,
-                    );
+                        source: "responses_websocket",
+                        prompt_cache_key: request_prompt_cache_key,
+                        model_name: request_model_name.as_deref(),
+                        usage: inspected.token_usage,
+                    });
                 }
                 let committed_previous_response_not_found = committed
                     && matches!(

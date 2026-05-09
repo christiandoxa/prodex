@@ -69,17 +69,28 @@ fn runtime_prompt_cache_key_hash_label(prompt_cache_key: Option<&str>) -> String
         .unwrap_or_else(|| "none".to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn log_runtime_token_usage(
-    shared: &RuntimeRotationProxyShared,
-    request_id: u64,
-    transport: &'static str,
-    profile_name: &str,
-    source: &'static str,
-    prompt_cache_key: Option<&str>,
-    model_name: Option<&str>,
-    usage: Option<RuntimeTokenUsage>,
-) {
+pub(crate) struct RuntimeTokenUsageLog<'a> {
+    pub(crate) shared: &'a RuntimeRotationProxyShared,
+    pub(crate) request_id: u64,
+    pub(crate) transport: &'static str,
+    pub(crate) profile_name: &'a str,
+    pub(crate) source: &'static str,
+    pub(crate) prompt_cache_key: Option<&'a str>,
+    pub(crate) model_name: Option<&'a str>,
+    pub(crate) usage: Option<RuntimeTokenUsage>,
+}
+
+pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
+    let RuntimeTokenUsageLog {
+        shared,
+        request_id,
+        transport,
+        profile_name,
+        source,
+        prompt_cache_key,
+        model_name,
+        usage,
+    } = input;
     let Some(usage) = usage else {
         return;
     };

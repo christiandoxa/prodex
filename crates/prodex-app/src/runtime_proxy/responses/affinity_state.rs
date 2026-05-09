@@ -13,6 +13,16 @@ pub(super) struct RuntimeResponsesAffinityState {
     saw_previous_response_not_found: bool,
 }
 
+pub(super) struct RuntimeResponsesRefreshRouteAffinityInput<'a> {
+    pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) request_id: u64,
+    pub(super) reason: &'a str,
+    pub(super) previous_response_id: Option<&'a str>,
+    pub(super) request_turn_state: Option<&'a str>,
+    pub(super) request_session_id: Option<&'a str>,
+    pub(super) explicit_request_session_id: Option<&'a RuntimeExplicitSessionId>,
+}
+
 impl RuntimeResponsesAffinityState {
     pub(super) fn new(
         bound_profile: Option<String>,
@@ -32,34 +42,33 @@ impl RuntimeResponsesAffinityState {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn refresh_route_affinity(
         &mut self,
-        shared: &RuntimeRotationProxyShared,
-        request_id: u64,
-        reason: &str,
-        previous_response_id: Option<&str>,
-        request_turn_state: Option<&str>,
-        request_session_id: Option<&str>,
-        explicit_request_session_id: Option<&RuntimeExplicitSessionId>,
+        input: RuntimeResponsesRefreshRouteAffinityInput<'_>,
     ) -> Result<()> {
-        refresh_and_log_runtime_response_route_affinity(
-            shared,
-            request_id,
-            None,
-            reason,
-            previous_response_id,
-            self.bound_profile.as_deref(),
-            self.turn_state_profile.as_deref(),
-            request_turn_state,
-            request_session_id,
-            explicit_request_session_id,
-            None,
-            &mut self.route_affinity.bound_session_profile,
-            &mut self.route_affinity.compact_followup_profile,
-            &mut self.route_affinity.compact_session_profile,
-            &mut self.route_affinity.session_profile,
-            &mut self.route_affinity.pinned_profile,
+        refresh_and_log_runtime_response_route_affinity_for_request(
+            RuntimeResponseRouteAffinityLogContext {
+                shared: input.shared,
+                request_id: input.request_id,
+                websocket_session_id: None,
+                reason: input.reason,
+            },
+            RuntimeResponseRouteAffinityRequest {
+                previous_response_id: input.previous_response_id,
+                bound_profile: self.bound_profile.as_deref(),
+                turn_state_profile: self.turn_state_profile.as_deref(),
+                request_turn_state: input.request_turn_state,
+                request_session_id: input.request_session_id,
+                explicit_request_session_id: input.explicit_request_session_id,
+                websocket_session_profile: None,
+            },
+            RuntimeResponseRouteAffinityRefreshSlots {
+                bound_session_profile: &mut self.route_affinity.bound_session_profile,
+                compact_followup_profile: &mut self.route_affinity.compact_followup_profile,
+                compact_session_profile: &mut self.route_affinity.compact_session_profile,
+                session_profile: &mut self.route_affinity.session_profile,
+                pinned_profile: &mut self.route_affinity.pinned_profile,
+            },
         )
     }
 

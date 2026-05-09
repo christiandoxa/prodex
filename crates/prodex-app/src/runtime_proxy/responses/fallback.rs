@@ -192,18 +192,22 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
         } => {
             match handle_runtime_previous_response_not_found(
                 runtime_responses_previous_response_not_found_context(
-                    fallback.shared,
-                    fallback.request_id,
-                    &profile_name,
-                    turn_state,
-                    Some("direct_current_profile_fallback"),
-                    fallback.previous_response_id,
-                    fallback.request_turn_state,
-                    fallback.request_session_id,
-                    fallback.request_requires_previous_response_affinity,
-                    affinity_state.trusted_previous_response_affinity(),
-                    fallback.previous_response_fresh_fallback_shape,
-                    RuntimePreviousResponseNotFoundPolicy::responses(false),
+                    RuntimeResponsesPreviousResponseNotFoundContextInput {
+                        shared: fallback.shared,
+                        request_id: fallback.request_id,
+                        profile_name: &profile_name,
+                        turn_state,
+                        via: Some("direct_current_profile_fallback"),
+                        previous_response_id: fallback.previous_response_id,
+                        request_turn_state: fallback.request_turn_state,
+                        request_session_id: fallback.request_session_id,
+                        request_requires_previous_response_affinity: fallback
+                            .request_requires_previous_response_affinity,
+                        trusted_previous_response_affinity: affinity_state
+                            .trusted_previous_response_affinity(),
+                        fresh_fallback_shape: fallback.previous_response_fresh_fallback_shape,
+                        policy: RuntimePreviousResponseNotFoundPolicy::responses(false),
+                    },
                 ),
                 affinity_state.previous_response_not_found_state(excluded_profiles, false),
             )? {

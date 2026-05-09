@@ -212,16 +212,16 @@ fn prompt_cache_profile_hit_ignores_zero_or_absent_cached_tokens() {
         Some("main")
     );
 
-    super::super::log_runtime_token_usage(
-        &shared,
-        1,
-        "http",
-        "second",
-        "test",
-        Some(prompt_cache_key),
-        None,
-        None,
-    );
+    super::super::log_runtime_token_usage(super::super::RuntimeTokenUsageLog {
+        shared: &shared,
+        request_id: 1,
+        transport: "http",
+        profile_name: "second",
+        source: "test",
+        prompt_cache_key: Some(prompt_cache_key),
+        model_name: None,
+        usage: None,
+    });
     assert_eq!(
         runtime_prompt_cache_bound_profile_at(Some(prompt_cache_key), now + 2).as_deref(),
         Some("main")
@@ -235,36 +235,36 @@ fn prompt_cache_token_usage_logs_bounded_redacted_cache_telemetry() {
     let prompt_cache_key = "raw-cache-key-must-not-leak";
     let expected_hash = runtime_proxy_crate::smart_context_hash_text(prompt_cache_key);
 
-    super::super::log_runtime_token_usage(
-        &shared,
-        77,
-        "http",
-        "main",
-        "unit-test",
-        Some(prompt_cache_key),
-        None,
-        Some(RuntimeTokenUsage {
+    super::super::log_runtime_token_usage(super::super::RuntimeTokenUsageLog {
+        shared: &shared,
+        request_id: 77,
+        transport: "http",
+        profile_name: "main",
+        source: "unit-test",
+        prompt_cache_key: Some(prompt_cache_key),
+        model_name: None,
+        usage: Some(RuntimeTokenUsage {
             input_tokens: 300,
             cached_input_tokens: 120,
             output_tokens: 40,
             reasoning_tokens: 7,
         }),
-    );
-    super::super::log_runtime_token_usage(
-        &shared,
-        78,
-        "websocket",
-        "main",
-        "unit-test",
-        Some(prompt_cache_key),
-        None,
-        Some(RuntimeTokenUsage {
+    });
+    super::super::log_runtime_token_usage(super::super::RuntimeTokenUsageLog {
+        shared: &shared,
+        request_id: 78,
+        transport: "websocket",
+        profile_name: "main",
+        source: "unit-test",
+        prompt_cache_key: Some(prompt_cache_key),
+        model_name: None,
+        usage: Some(RuntimeTokenUsage {
             input_tokens: 320,
             cached_input_tokens: 100,
             output_tokens: 41,
             reasoning_tokens: 8,
         }),
-    );
+    });
 
     let log = fs::read_to_string(&shared.log_path).expect("token usage log should exist");
     assert!(log.contains("token_usage"));

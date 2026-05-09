@@ -80,16 +80,16 @@ pub(crate) fn schedule_runtime_state_save_request(
                 ],
             ),
         );
-        match save_runtime_state_snapshot_if_latest(
-            &request.paths,
-            &request.state,
-            &request.continuations,
-            &request.profile_scores,
-            &request.usage_snapshots,
-            &request.backoffs,
+        match save_runtime_state_snapshot_if_latest(RuntimeStateSnapshotSaveInput {
+            paths: &request.paths,
+            snapshot: &request.state,
+            continuations: &request.continuations,
+            profile_scores: &request.profile_scores,
+            usage_snapshots: &request.usage_snapshots,
+            backoffs: &request.backoffs,
             revision,
-            &shared.state_save_revision,
-        ) {
+            latest_revision: &shared.state_save_revision,
+        }) {
             Ok(true) => runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(

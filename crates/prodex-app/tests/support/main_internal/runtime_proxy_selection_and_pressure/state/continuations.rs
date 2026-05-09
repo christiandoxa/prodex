@@ -221,16 +221,16 @@ fn runtime_state_snapshot_save_retries_stale_continuation_generation() {
     };
     let revision = AtomicU64::new(1);
     assert!(
-        save_runtime_state_snapshot_if_latest(
-            &paths,
-            &snapshot,
-            &runtime_continuation_store_from_app_state(&snapshot),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &RuntimeProfileBackoffs::default(),
-            1,
-            &revision,
-        )
+        save_runtime_state_snapshot_if_latest(RuntimeStateSnapshotSaveInput {
+            paths: &paths,
+            snapshot: &snapshot,
+            continuations: &runtime_continuation_store_from_app_state(&snapshot),
+            profile_scores: &BTreeMap::new(),
+            usage_snapshots: &BTreeMap::new(),
+            backoffs: &RuntimeProfileBackoffs::default(),
+            revision: 1,
+            latest_revision: &revision,
+        })
         .expect("state snapshot save should succeed after stale retry")
     );
 
@@ -325,16 +325,16 @@ fn runtime_state_snapshot_retry_does_not_resurrect_released_response_binding() {
     };
     let revision = AtomicU64::new(1);
     assert!(
-        save_runtime_state_snapshot_if_latest(
-            &paths,
-            &snapshot,
-            &runtime_continuation_store_from_app_state(&snapshot),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &RuntimeProfileBackoffs::default(),
-            1,
-            &revision,
-        )
+        save_runtime_state_snapshot_if_latest(RuntimeStateSnapshotSaveInput {
+            paths: &paths,
+            snapshot: &snapshot,
+            continuations: &runtime_continuation_store_from_app_state(&snapshot),
+            profile_scores: &BTreeMap::new(),
+            usage_snapshots: &BTreeMap::new(),
+            backoffs: &RuntimeProfileBackoffs::default(),
+            revision: 1,
+            latest_revision: &revision,
+        })
         .expect("state snapshot save should succeed after stale retry")
     );
 

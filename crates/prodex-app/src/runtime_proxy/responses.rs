@@ -6,7 +6,9 @@ mod fallback;
 mod local_selection;
 mod previous_response;
 
-use self::affinity_state::RuntimeResponsesAffinityState;
+use self::affinity_state::{
+    RuntimeResponsesAffinityState, RuntimeResponsesRefreshRouteAffinityInput,
+};
 pub(crate) use self::attempt::attempt_runtime_responses_request;
 use self::fallback::{
     RuntimeResponsesDirectCurrentFallback, RuntimeResponsesDirectCurrentFallbackAction,
@@ -17,7 +19,10 @@ use self::local_selection::{
     RuntimeResponsesLocalSelectionAction, runtime_responses_local_selection_action,
     runtime_responses_local_selection_failure_reply,
 };
-use self::previous_response::runtime_responses_previous_response_not_found_context;
+use self::previous_response::{
+    RuntimeResponsesPreviousResponseNotFoundContextInput,
+    runtime_responses_previous_response_not_found_context,
+};
 
 pub(crate) fn proxy_runtime_responses_request(
     request_id: u64,
@@ -79,15 +84,15 @@ pub(crate) fn proxy_runtime_responses_request(
         trusted_previous_response_affinity,
         turn_state_profile,
     );
-    affinity_state.refresh_route_affinity(
+    affinity_state.refresh_route_affinity(RuntimeResponsesRefreshRouteAffinityInput {
         shared,
         request_id,
-        "initial",
-        previous_response_id.as_deref(),
-        request_turn_state.as_deref(),
-        request_session_id.as_deref(),
-        explicit_request_session_id.as_ref(),
-    )?;
+        reason: "initial",
+        previous_response_id: previous_response_id.as_deref(),
+        request_turn_state: request_turn_state.as_deref(),
+        request_session_id: request_session_id.as_deref(),
+        explicit_request_session_id: explicit_request_session_id.as_ref(),
+    })?;
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure: Option<(RuntimeUpstreamFailureResponse, bool)> = None;
     let mut saw_inflight_saturation = false;
@@ -487,18 +492,21 @@ pub(crate) fn proxy_runtime_responses_request(
             } => {
                 match handle_runtime_previous_response_not_found(
                     runtime_responses_previous_response_not_found_context(
-                        shared,
-                        request_id,
-                        &profile_name,
-                        turn_state,
-                        None,
-                        previous_response_id.as_deref(),
-                        request_turn_state.as_deref(),
-                        request_session_id.as_deref(),
-                        request_requires_previous_response_affinity,
-                        affinity_state.trusted_previous_response_affinity(),
-                        previous_response_fresh_fallback_shape,
-                        RuntimePreviousResponseNotFoundPolicy::responses(true),
+                        RuntimeResponsesPreviousResponseNotFoundContextInput {
+                            shared,
+                            request_id,
+                            profile_name: &profile_name,
+                            turn_state,
+                            via: None,
+                            previous_response_id: previous_response_id.as_deref(),
+                            request_turn_state: request_turn_state.as_deref(),
+                            request_session_id: request_session_id.as_deref(),
+                            request_requires_previous_response_affinity,
+                            trusted_previous_response_affinity: affinity_state
+                                .trusted_previous_response_affinity(),
+                            fresh_fallback_shape: previous_response_fresh_fallback_shape,
+                            policy: RuntimePreviousResponseNotFoundPolicy::responses(true),
+                        },
                     ),
                     affinity_state.previous_response_not_found_state(&mut excluded_profiles, true),
                 )? {

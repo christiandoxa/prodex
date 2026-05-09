@@ -77,14 +77,16 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache(
     for key in RUNTIME_SMART_CONTEXT_STATIC_PROMPT_FIELDS {
         if let Some(serde_json::Value::String(text)) = object.get_mut(key) {
             rewritten |= runtime_smart_context_apply_repo_state_micro_cache_to_text(
-                text,
-                None,
-                &cache_before,
-                &mut cache_after,
-                &mut state.artifacts,
-                request_id,
-                allow_rewrite,
-                stats,
+                RuntimeSmartContextRepoStateMicroCacheTextInput {
+                    text,
+                    command: None,
+                    cache_before: &cache_before,
+                    cache_after: &mut cache_after,
+                    store: &mut state.artifacts,
+                    request_id,
+                    allow_rewrite,
+                    stats,
+                },
             );
         }
     }
@@ -117,14 +119,16 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache(
             for field in ["content", "input_text"] {
                 if let Some(serde_json::Value::String(text)) = item_object.get_mut(field) {
                     rewritten |= runtime_smart_context_apply_repo_state_micro_cache_to_text(
-                        text,
-                        None,
-                        &cache_before,
-                        &mut cache_after,
-                        &mut state.artifacts,
-                        request_id,
-                        allow_rewrite,
-                        stats,
+                        RuntimeSmartContextRepoStateMicroCacheTextInput {
+                            text,
+                            command: None,
+                            cache_before: &cache_before,
+                            cache_after: &mut cache_after,
+                            store: &mut state.artifacts,
+                            request_id,
+                            allow_rewrite,
+                            stats,
+                        },
                     );
                 }
             }
@@ -140,14 +144,16 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache(
         for field in ["output", "content"] {
             if let Some(serde_json::Value::String(text)) = item_object.get_mut(field) {
                 rewritten |= runtime_smart_context_apply_repo_state_micro_cache_to_text(
-                    text,
-                    command.as_deref(),
-                    &cache_before,
-                    &mut cache_after,
-                    &mut state.artifacts,
-                    request_id,
-                    allow_rewrite,
-                    stats,
+                    RuntimeSmartContextRepoStateMicroCacheTextInput {
+                        text,
+                        command: command.as_deref(),
+                        cache_before: &cache_before,
+                        cache_after: &mut cache_after,
+                        store: &mut state.artifacts,
+                        request_id,
+                        allow_rewrite,
+                        stats,
+                    },
                 );
             }
         }
@@ -159,17 +165,30 @@ pub(super) fn runtime_smart_context_apply_repo_state_micro_cache(
     rewritten
 }
 
-#[allow(clippy::too_many_arguments)]
-fn runtime_smart_context_apply_repo_state_micro_cache_to_text(
-    text: &mut String,
-    command: Option<&str>,
-    cache_before: &RuntimeSmartContextRepoStateFacts,
-    cache_after: &mut RuntimeSmartContextRepoStateFacts,
-    store: &mut RuntimeSmartContextArtifactStore,
+struct RuntimeSmartContextRepoStateMicroCacheTextInput<'a> {
+    text: &'a mut String,
+    command: Option<&'a str>,
+    cache_before: &'a RuntimeSmartContextRepoStateFacts,
+    cache_after: &'a mut RuntimeSmartContextRepoStateFacts,
+    store: &'a mut RuntimeSmartContextArtifactStore,
     request_id: u64,
     allow_rewrite: bool,
-    stats: &mut RuntimeSmartContextTransformStats,
+    stats: &'a mut RuntimeSmartContextTransformStats,
+}
+
+fn runtime_smart_context_apply_repo_state_micro_cache_to_text(
+    input: RuntimeSmartContextRepoStateMicroCacheTextInput<'_>,
 ) -> bool {
+    let RuntimeSmartContextRepoStateMicroCacheTextInput {
+        text,
+        command,
+        cache_before,
+        cache_after,
+        store,
+        request_id,
+        allow_rewrite,
+        stats,
+    } = input;
     let observation = runtime_smart_context_repo_state_text_observation(text, command);
     if observation.facts.is_empty() {
         return false;

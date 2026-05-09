@@ -9,6 +9,7 @@ const DEFAULT_THRESHOLDS = Object.freeze({
   maxLines: 1200,
   maxFileLines: 500,
 });
+const STRUCTURAL_EXTRACTION_INCIDENTAL_LINE_MULTIPLIER = 2;
 
 const BEHAVIOR_PATTERNS = Object.freeze([
   ".github/workflows/**",
@@ -386,10 +387,16 @@ function structuralExtractionApplies(rows, summary, thresholds) {
   const nonExtractionRows = rows.filter((row) => !groups.has(structuralGroup(row.filePath)));
   const nonExtractionLines = nonExtractionRows
     .reduce((sum, row) => sum + row.insertions + row.deletions, 0);
+  const nonExtractionLineLimit =
+    thresholds.maxLines * STRUCTURAL_EXTRACTION_INCIDENTAL_LINE_MULTIPLIER;
+  const nonExtractionLargest = nonExtractionRows
+    .filter((row) => !row.binary)
+    .reduce((max, row) => Math.max(max, row.insertions + row.deletions), 0);
   const largest = summary.largestFiles[0];
   return (
     nonExtractionRows.length <= thresholds.maxFiles &&
-    nonExtractionLines <= thresholds.maxLines &&
+    nonExtractionLines <= nonExtractionLineLimit &&
+    nonExtractionLargest <= thresholds.maxFileLines &&
     largest &&
     groups.has(structuralGroup(largest.filePath))
   );

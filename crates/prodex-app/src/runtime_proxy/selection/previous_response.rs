@@ -10,11 +10,12 @@ pub(crate) fn next_runtime_previous_response_candidate(
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let now = Local::now().timestamp();
     struct RuntimePreviousResponseDiscoveryEntry {
-        name: String,
         codex_home: PathBuf,
         cached_auth_summary: Option<AuthSummary>,
         auth_failure_active: bool,
         negative_cache_active: bool,
+        quota_summary: RuntimeQuotaSummary,
+        quota_source: Option<RuntimeQuotaSource>,
     }
 
     let (selection_catalog, current_profile, previous_response_owner, discovery_entries) = {
@@ -26,31 +27,45 @@ pub(crate) fn next_runtime_previous_response_candidate(
         let discovery_entries = selection_catalog
             .entries
             .iter()
-            .map(|profile| RuntimePreviousResponseDiscoveryEntry {
-                name: profile.name.clone(),
-                codex_home: profile.codex_home.clone(),
-                cached_auth_summary: runtime_profile_cached_auth_summary_from_maps_for_selection(
-                    &profile.name,
-                    &runtime.profile_usage_auth,
-                    &runtime.profile_probe_cache,
-                ),
-                auth_failure_active: runtime_profile_auth_failure_active_with_auth_cache(
-                    &runtime.profile_health,
-                    &runtime.profile_usage_auth,
-                    &profile.name,
-                    now,
-                ),
-                negative_cache_active: previous_response_id.is_some_and(|response_id| {
-                    runtime_previous_response_negative_cache_active(
-                        &runtime.profile_health,
-                        response_id,
+            .map(|profile| {
+                let (quota_summary, quota_source) =
+                    runtime_profile_quota_summary_for_route_from_state(
+                        &runtime,
                         &profile.name,
                         route_kind,
                         now,
-                    )
-                }),
+                    );
+                (
+                    profile.name.clone(),
+                    RuntimePreviousResponseDiscoveryEntry {
+                        codex_home: profile.codex_home.clone(),
+                        cached_auth_summary:
+                            runtime_profile_cached_auth_summary_from_maps_for_selection(
+                                &profile.name,
+                                &runtime.profile_usage_auth,
+                                &runtime.profile_probe_cache,
+                            ),
+                        auth_failure_active: runtime_profile_auth_failure_active_with_auth_cache(
+                            &runtime.profile_health,
+                            &runtime.profile_usage_auth,
+                            &profile.name,
+                            now,
+                        ),
+                        negative_cache_active: previous_response_id.is_some_and(|response_id| {
+                            runtime_previous_response_negative_cache_active(
+                                &runtime.profile_health,
+                                response_id,
+                                &profile.name,
+                                route_kind,
+                                now,
+                            )
+                        }),
+                        quota_summary,
+                        quota_source,
+                    },
+                )
             })
-            .collect::<Vec<_>>();
+            .collect::<BTreeMap<_, _>>();
         (
             selection_catalog,
             runtime.current_profile.clone(),
@@ -68,8 +83,7 @@ pub(crate) fn next_runtime_previous_response_candidate(
         && !excluded_profiles.contains(owner)
         && selection_catalog.contains(owner)
         && !discovery_entries
-            .iter()
-            .find(|entry| entry.name == owner)
+            .get(owner)
             .is_some_and(|entry| entry.negative_cache_active)
     {
         return Ok(Some(owner.to_string()));
@@ -82,7 +96,7 @@ pub(crate) fn next_runtime_previous_response_candidate(
         if excluded_profiles.contains(&name) {
             continue;
         }
-        let Some(entry) = discovery_entries.iter().find(|entry| entry.name == name) else {
+        let Some(entry) = discovery_entries.get(&name) else {
             continue;
         };
         if let Some(previous_response_id) = previous_response_id
@@ -126,10 +140,8 @@ pub(crate) fn next_runtime_previous_response_candidate(
             );
             continue;
         }
-        let (quota_summary, quota_source) =
-            runtime_profile_quota_summary_for_route(shared, &name, route_kind)?;
-        if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
-            || runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
+        if entry.quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
+            || runtime_quota_precommit_guard_reason(entry.quota_summary, route_kind).is_some()
         {
             runtime_proxy_log(
                 shared,
@@ -142,17 +154,22 @@ pub(crate) fn next_runtime_previous_response_candidate(
                             runtime_proxy_log_field("profile", name.as_str()),
                             runtime_proxy_log_field(
                                 "reason",
-                                runtime_quota_precommit_guard_reason(quota_summary, route_kind)
-                                    .unwrap_or_else(|| {
-                                        runtime_quota_pressure_band_reason(quota_summary.route_band)
-                                    }),
+                                runtime_quota_precommit_guard_reason(
+                                    entry.quota_summary,
+                                    route_kind,
+                                )
+                                .unwrap_or_else(|| {
+                                    runtime_quota_pressure_band_reason(
+                                        entry.quota_summary.route_band,
+                                    )
+                                }),
                             ),
                             runtime_proxy_log_field(
                                 "quota_source",
-                                runtime_selection_quota_source_label(quota_source),
+                                runtime_selection_quota_source_label(entry.quota_source),
                             ),
                         ],
-                        quota_summary,
+                        entry.quota_summary,
                     ),
                 ),
             );

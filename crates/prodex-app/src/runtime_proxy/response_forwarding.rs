@@ -123,16 +123,16 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
                 RuntimeRouteKind::Responses,
             )?;
         }
-        log_runtime_token_usage(
+        log_runtime_token_usage(RuntimeTokenUsageLog {
             shared,
             request_id,
-            "http",
+            transport: "http",
             profile_name,
-            "responses_unary",
-            request_prompt_cache_key,
-            request_model_name,
-            extract_runtime_token_usage_from_body_bytes(&parts.body),
-        );
+            source: "responses_unary",
+            prompt_cache_key: request_prompt_cache_key,
+            model_name: request_model_name,
+            usage: extract_runtime_token_usage_from_body_bytes(&parts.body),
+        });
         if !response_ids.is_empty() && response_turn_state.is_some() {
             let _ = release_runtime_compact_lineage(
                 shared,
@@ -314,16 +314,16 @@ fn apply_runtime_sse_tap_effects(
                 );
             }
             RuntimeSseTapEffect::LogTokenUsage(token_usage) => {
-                log_runtime_token_usage(
+                log_runtime_token_usage(RuntimeTokenUsageLog {
                     shared,
                     request_id,
-                    "http",
+                    transport: "http",
                     profile_name,
-                    "responses_sse",
+                    source: "responses_sse",
                     prompt_cache_key,
                     model_name,
-                    Some(token_usage),
-                );
+                    usage: Some(token_usage),
+                });
             }
         }
     }

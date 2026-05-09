@@ -603,7 +603,21 @@ pub(crate) fn runtime_profile_quota_summary_for_route(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
-    Ok(runtime
+    Ok(runtime_profile_quota_summary_for_route_from_state(
+        &runtime,
+        profile_name,
+        route_kind,
+        now,
+    ))
+}
+
+pub(crate) fn runtime_profile_quota_summary_for_route_from_state(
+    runtime: &RuntimeRotationState,
+    profile_name: &str,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
+    runtime
         .profile_probe_cache
         .get(profile_name)
         .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
@@ -641,7 +655,7 @@ pub(crate) fn runtime_profile_quota_summary_for_route(
                 route_band: RuntimeQuotaPressureBand::Unknown,
             },
             None,
-        )))
+        ))
 }
 
 pub(crate) fn runtime_profile_cached_auth_summary_for_selection(

@@ -17,16 +17,16 @@ pub(crate) fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) 
             } = job;
             let result = match payload {
                 RuntimeStateSavePayload::Snapshot(snapshot) => {
-                    save_runtime_state_snapshot_if_latest(
-                        &snapshot.paths,
-                        &snapshot.state,
-                        &snapshot.continuations,
-                        &snapshot.profile_scores,
-                        &snapshot.usage_snapshots,
-                        &snapshot.backoffs,
+                    save_runtime_state_snapshot_if_latest(RuntimeStateSnapshotSaveInput {
+                        paths: &snapshot.paths,
+                        snapshot: &snapshot.state,
+                        continuations: &snapshot.continuations,
+                        profile_scores: &snapshot.profile_scores,
+                        usage_snapshots: &snapshot.usage_snapshots,
+                        backoffs: &snapshot.backoffs,
                         revision,
-                        &latest_revision,
-                    )
+                        latest_revision: &latest_revision,
+                    })
                 }
                 RuntimeStateSavePayload::Live { shared, sections } => {
                     runtime_state_save_selected_snapshot_from_shared(&shared, sections).and_then(

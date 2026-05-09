@@ -53,6 +53,26 @@ assertStructuralExtraction("tests/support module split", [
   row("tests/support/foo/helpers.rs", thresholds.maxFileLines + 30, 1),
 ], "tests/support/foo");
 
+{
+  const rows = [
+    row("src/foo.rs", 2, thresholds.maxFileLines + 20),
+    row("src/foo/parser.rs", thresholds.maxFileLines + 20, 1),
+    row("crates/prodex-context/src/lib.rs", 260, 230),
+    row("crates/prodex-context/src/lib/compression.rs", 260, 0),
+    row("crates/prodex-runtime-store/src/smart_context_store.rs", 230, 260),
+    row("crates/prodex-runtime-store/src/smart_context_store/json.rs", 0, 260),
+  ];
+  const summary = summarize(rows);
+  const structuralExtraction = structuralExtractionApplies(rows, summary, thresholds);
+  assert.deepEqual(structuralExtractionGroups(rows, thresholds), ["src/foo"]);
+  assert.equal(structuralExtraction, true, "incidental extraction-sized edits remain structural");
+  assert.deepEqual(
+    thresholdIssues(summary, thresholds, { structuralExtraction }),
+    [],
+    "incidental extraction-sized edits are suppressed",
+  );
+}
+
 const unrelatedLargeMove = [
   row("src/foo.rs", 1, thresholds.maxFileLines + 20),
   row("src/bar/extracted.rs", thresholds.maxFileLines + 20, 1),

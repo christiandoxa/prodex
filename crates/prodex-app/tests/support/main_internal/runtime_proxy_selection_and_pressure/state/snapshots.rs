@@ -70,16 +70,16 @@ fn runtime_state_snapshot_save_preserves_concurrent_profiles() {
     };
     let revision = AtomicU64::new(1);
     assert!(
-        save_runtime_state_snapshot_if_latest(
-            &paths,
-            &snapshot,
-            &runtime_continuation_store_from_app_state(&snapshot),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &RuntimeProfileBackoffs::default(),
-            1,
-            &revision,
-        )
+        save_runtime_state_snapshot_if_latest(RuntimeStateSnapshotSaveInput {
+            paths: &paths,
+            snapshot: &snapshot,
+            continuations: &runtime_continuation_store_from_app_state(&snapshot),
+            profile_scores: &BTreeMap::new(),
+            usage_snapshots: &BTreeMap::new(),
+            backoffs: &RuntimeProfileBackoffs::default(),
+            revision: 1,
+            latest_revision: &revision,
+        })
         .expect("runtime snapshot save should succeed")
     );
 
@@ -571,16 +571,16 @@ fn runtime_state_snapshot_save_returns_error_on_injected_failure() {
     };
     let latest_revision = AtomicU64::new(1);
 
-    let err = save_runtime_state_snapshot_if_latest(
-        &paths,
-        &snapshot,
-        &runtime_continuation_store_from_app_state(&snapshot),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &RuntimeProfileBackoffs::default(),
-        1,
-        &latest_revision,
-    )
+    let err = save_runtime_state_snapshot_if_latest(RuntimeStateSnapshotSaveInput {
+        paths: &paths,
+        snapshot: &snapshot,
+        continuations: &runtime_continuation_store_from_app_state(&snapshot),
+        profile_scores: &BTreeMap::new(),
+        usage_snapshots: &BTreeMap::new(),
+        backoffs: &RuntimeProfileBackoffs::default(),
+        revision: 1,
+        latest_revision: &latest_revision,
+    })
     .expect_err("injected save failure should bubble up");
     assert!(
         err.to_string()
