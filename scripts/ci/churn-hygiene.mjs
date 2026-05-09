@@ -323,6 +323,10 @@ function structuralGroup(filePath) {
   if (parts[0] === "crates" && parts[1]) {
     return `crates/${parts[1]}`;
   }
+  if (parts[0] === "tests" && parts[1]) {
+    const rootTest = parts[1].endsWith(".rs") ? parts[1].slice(0, -".rs".length) : parts[1];
+    return `tests/${rootTest}`;
+  }
   return parts.slice(0, -1).join("/") || ".";
 }
 
