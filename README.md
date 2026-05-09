@@ -90,7 +90,7 @@ prodex claude mem -- -p "recall past work on this repo"
 
 ### Shared Codex history
 
-Managed Prodex profiles keep account credentials isolated per profile, but Codex-owned shared state uses the native Codex home by default. In practice, profile `history.jsonl`, `sessions`, `config.toml`, plugins, skills, and related shared files link to the same Codex home that direct Codex uses (`~/.codex` on Unix-like systems).
+Managed Prodex profiles keep account credentials isolated per profile, but Codex-owned shared state uses the native Codex home by default. In practice, profile `history.jsonl`, `sessions`, `config.toml`, `environments.toml`, plugins, skills, and related shared files link to the same Codex home that direct Codex uses (`~/.codex` on Unix-like systems).
 
 This matches direct Codex behavior: logging out or switching accounts does not hide chat history. Older Prodex state from `$PRODEX_HOME/.codex` is merged into the native Codex home on the next managed-profile launch. Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shared Codex root.
 
@@ -108,6 +108,8 @@ prodex exec "review this repo"
 prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
+
+Unknown top-level Codex subcommands remain managed Codex launches. For example, `prodex remote-control` is equivalent to `prodex run remote-control` unless Prodex explicitly owns that command.
 
 `prodex update` passes through to `codex update` directly and does not use Prodex profile selection, quota preflight, or the local runtime proxy.
 

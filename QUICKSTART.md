@@ -99,7 +99,7 @@ prodex profile add second
 prodex login --profile second
 ```
 
-Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history and session state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl` and `sessions` aligned with direct Codex, so logout or account switching does not hide prior chats.
+Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history, session, and environment state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl`, `sessions`, and `environments.toml` aligned with direct Codex, so logout or account switching does not hide prior chats.
 
 Older Prodex shared state from `$PRODEX_HOME/.codex` is merged into the native Codex home on the next managed-profile launch. Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shared Codex root.
 
@@ -153,6 +153,8 @@ printf 'context from stdin' | prodex run exec "summarize this"
 ```
 
 Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation.
+
+New Codex top-level subcommands stay on this managed path by default. For example, `prodex remote-control` is treated as `prodex run remote-control` unless Prodex explicitly adds its own command with that name.
 
 Codex CLI 0.124.0 added first-class Amazon Bedrock and OpenAI-compatible custom provider support. Configure Bedrock or another provider in the selected profile's Codex `config.toml`, for example with `model_provider = "amazon-bedrock"`.
 

@@ -115,3 +115,7 @@ fn ensure_shared_codex_entry(
 
     ensure_symlink_to_shared(&local_path, &shared_path, entry.kind)
 }
+
+#[cfg(test)]
+#[path = "../tests/src/prepare.rs"]
+mod tests;

@@ -39,6 +39,7 @@ const SHARED_CODEX_DIR_NAMES: &[&str] = &[
 const SHARED_CODEX_FILE_NAMES: &[&str] = &[
     "history.jsonl",
     "config.toml",
+    "environments.toml",
     "AGENTS.md",
     "AGENTS.override.md",
     ".tmp/plugins.sha",

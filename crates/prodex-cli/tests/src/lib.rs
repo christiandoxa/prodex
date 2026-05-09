@@ -171,6 +171,23 @@ fn s_is_recognized_as_super_not_default_run_argument() {
 }
 
 #[test]
+fn codex_remote_control_defaults_to_managed_run_passthrough() {
+    assert!(should_default_cli_invocation_to_run(&os_args(&[
+        "prodex",
+        "remote-control",
+        "--help",
+    ])));
+
+    let command = parse_cli_command_from(["prodex", "remote-control", "--help"])
+        .expect("remote-control should parse as run passthrough");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+
+    assert_eq!(args.codex_args, os_args(&["remote-control", "--help"]));
+}
+
+#[test]
 fn session_list_parses_line_modes_and_filters() {
     let command = parse_cli_command_from([
         "prodex",
