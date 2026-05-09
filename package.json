@@ -36,6 +36,7 @@
     "ci:preflight": "node scripts/ci/preflight.mjs",
     "ci:size-guard": "node scripts/ci/size-guard.mjs",
     "ci:crate-boundary": "node scripts/ci/crate-boundary-guard.mjs",
+    "ci:churn-hygiene-fixtures": "node scripts/ci/churn-hygiene-fixture-tests.mjs",
     "ci:release-hygiene": "node scripts/ci/release-hygiene.mjs",
     "ci:release-metadata-guard": "node scripts/ci/release-metadata-only-guard.mjs",
     "ci:version-metadata-release-guard": "node scripts/ci/version-metadata-release-guard.mjs",

@@ -190,7 +190,7 @@ pub(crate) fn handle_runtime_previous_response_not_found(
         }
     }
     if plan.clear_response_profile_affinity {
-        clear_runtime_response_profile_affinity(
+        clear_runtime_response_profile_affinity(RuntimeResponseProfileAffinityClear {
             profile_name,
             bound_profile,
             session_profile,
@@ -198,10 +198,11 @@ pub(crate) fn handle_runtime_previous_response_not_found(
             candidate_turn_state_retry_value,
             pinned_profile,
             previous_response_retry_index,
-            policy.reset_previous_response_retry_index_on_rotate,
+            reset_previous_response_retry_index: policy
+                .reset_previous_response_retry_index_on_rotate,
             turn_state_profile,
             compact_followup_profile,
-        );
+        });
     }
     if plan.clear_trusted_affinity
         && let Some(trusted_previous_response_affinity) = trusted_previous_response_affinity_mut

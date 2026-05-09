@@ -251,6 +251,10 @@ function isUpstreamCompatRelevantPath(filePath) {
   return pathMatchesSpec(filePath, PATH_GROUPS.upstreamCompatRelevant);
 }
 
+function isChurnHygieneRelevantPath(filePath) {
+  return pathMatchesSpec(filePath, PATH_GROUPS.churnHygieneRelevant);
+}
+
 function crateDirForPath(filePath) {
   const parts = filePath.split("/");
   if (parts[0] === "crates" && parts.length >= 2) {
@@ -362,6 +366,14 @@ async function buildSteps(paths) {
 
     if (isUpstreamCompatRelevantPath(filePath)) {
       await addUpstreamCompatSteps(steps);
+    }
+
+    if (isChurnHygieneRelevantPath(filePath)) {
+      addStep(steps, "churn-hygiene-fixtures", {
+        label: "churn-hygiene-fixtures",
+        command: "node",
+        args: ["scripts/ci/churn-hygiene-fixture-tests.mjs"],
+      });
     }
 
     if (filePath.endsWith(".md") && (await pathExists(filePath))) {

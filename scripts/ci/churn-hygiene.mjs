@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from "node:url";
 import { fileMatchesAnyPattern, git, parseNumstat, parsePositiveInteger } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
@@ -320,10 +321,20 @@ function summarize(rows) {
 
 function structuralGroup(filePath) {
   const parts = filePath.split("/");
+  const fileName = parts.at(-1) ?? "";
+  const stem = fileName.endsWith(".rs") ? fileName.slice(0, -".rs".length) : null;
   if (parts[0] === "crates" && parts[1]) {
     return `crates/${parts[1]}`;
   }
+  // Treat Rust module extraction as one group, e.g. src/foo.rs -> src/foo/*.rs.
+  if (stem && parts.length === 2 && parts[0] === "src") {
+    return `src/${stem}`;
+  }
   if (parts[0] === "tests" && parts[1]) {
+    if ((parts[1] === "src" || parts[1] === "support") && parts[2]) {
+      const root = parts.length === 3 && stem ? stem : parts[2];
+      return `tests/${parts[1]}/${root}`;
+    }
     const rootTest = parts[1].endsWith(".rs") ? parts[1].slice(0, -".rs".length) : parts[1];
     return `tests/${rootTest}`;
   }
@@ -591,10 +602,21 @@ async function main() {
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`churn-hygiene: ${message}\n`);
-  process.exitCode = 1;
+export {
+  DEFAULT_THRESHOLDS,
+  structuralExtractionApplies,
+  structuralExtractionGroups,
+  structuralGroup,
+  summarize,
+  thresholdIssues,
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`churn-hygiene: ${message}\n`);
+    process.exitCode = 1;
+  }
 }

@@ -361,42 +361,45 @@ impl RuntimeResponseRouteAffinityRefreshSlots<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct RuntimeResponseProfileAffinityClear<'a> {
+    pub(crate) profile_name: &'a str,
+    pub(crate) bound_profile: &'a mut Option<String>,
+    pub(crate) session_profile: &'a mut Option<String>,
+    pub(crate) candidate_turn_state_retry_profile: &'a mut Option<String>,
+    pub(crate) candidate_turn_state_retry_value: &'a mut Option<String>,
+    pub(crate) pinned_profile: &'a mut Option<String>,
+    pub(crate) previous_response_retry_index: &'a mut usize,
+    pub(crate) reset_previous_response_retry_index: bool,
+    pub(crate) turn_state_profile: &'a mut Option<String>,
+    pub(crate) compact_followup_profile: Option<&'a mut Option<(String, &'static str)>>,
+}
+
 pub(crate) fn clear_runtime_response_profile_affinity(
-    profile_name: &str,
-    bound_profile: &mut Option<String>,
-    session_profile: &mut Option<String>,
-    candidate_turn_state_retry_profile: &mut Option<String>,
-    candidate_turn_state_retry_value: &mut Option<String>,
-    pinned_profile: &mut Option<String>,
-    previous_response_retry_index: &mut usize,
-    reset_previous_response_retry_index: bool,
-    turn_state_profile: &mut Option<String>,
-    compact_followup_profile: Option<&mut Option<(String, &'static str)>>,
+    clear: RuntimeResponseProfileAffinityClear<'_>,
 ) {
-    if bound_profile.as_deref() == Some(profile_name) {
-        *bound_profile = None;
+    if clear.bound_profile.as_deref() == Some(clear.profile_name) {
+        *clear.bound_profile = None;
     }
-    if session_profile.as_deref() == Some(profile_name) {
-        *session_profile = None;
+    if clear.session_profile.as_deref() == Some(clear.profile_name) {
+        *clear.session_profile = None;
     }
-    if candidate_turn_state_retry_profile.as_deref() == Some(profile_name) {
-        *candidate_turn_state_retry_profile = None;
-        *candidate_turn_state_retry_value = None;
+    if clear.candidate_turn_state_retry_profile.as_deref() == Some(clear.profile_name) {
+        *clear.candidate_turn_state_retry_profile = None;
+        *clear.candidate_turn_state_retry_value = None;
     }
-    if pinned_profile.as_deref() == Some(profile_name) {
-        *pinned_profile = None;
-        if reset_previous_response_retry_index {
-            *previous_response_retry_index = 0;
+    if clear.pinned_profile.as_deref() == Some(clear.profile_name) {
+        *clear.pinned_profile = None;
+        if clear.reset_previous_response_retry_index {
+            *clear.previous_response_retry_index = 0;
         }
     }
-    if turn_state_profile.as_deref() == Some(profile_name) {
-        *turn_state_profile = None;
+    if clear.turn_state_profile.as_deref() == Some(clear.profile_name) {
+        *clear.turn_state_profile = None;
     }
-    if let Some(compact_followup_profile) = compact_followup_profile
+    if let Some(compact_followup_profile) = clear.compact_followup_profile
         && compact_followup_profile
             .as_ref()
-            .is_some_and(|(owner, _)| owner == profile_name)
+            .is_some_and(|(owner, _)| owner == clear.profile_name)
     {
         *compact_followup_profile = None;
     }

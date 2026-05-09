@@ -303,18 +303,18 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         profile_name: &str,
         reset_previous_response_retry_index: bool,
     ) {
-        clear_runtime_response_profile_affinity(
+        clear_runtime_response_profile_affinity(RuntimeResponseProfileAffinityClear {
             profile_name,
-            &mut self.bound_profile,
-            &mut self.session_profile,
-            &mut self.candidate_turn_state_retry_profile,
-            &mut self.candidate_turn_state_retry_value,
-            &mut self.pinned_profile,
-            &mut self.previous_response_retry_index,
+            bound_profile: &mut self.bound_profile,
+            session_profile: &mut self.session_profile,
+            candidate_turn_state_retry_profile: &mut self.candidate_turn_state_retry_profile,
+            candidate_turn_state_retry_value: &mut self.candidate_turn_state_retry_value,
+            pinned_profile: &mut self.pinned_profile,
+            previous_response_retry_index: &mut self.previous_response_retry_index,
             reset_previous_response_retry_index,
-            &mut self.turn_state_profile,
-            None,
-        );
+            turn_state_profile: &mut self.turn_state_profile,
+            compact_followup_profile: None,
+        });
     }
 
     pub(super) fn mark_overload_backoff(&self, profile_name: &str) -> Result<()> {

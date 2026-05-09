@@ -23,6 +23,7 @@ export const PACKAGE_SCRIPT_ALIASES = Object.freeze({
   "ci:changed": "node scripts/ci/changed-tests.mjs",
   "test:changed": "node scripts/ci/changed-tests.mjs",
   "ci:size-guard": "node scripts/ci/size-guard.mjs",
+  "ci:churn-hygiene-fixtures": "node scripts/ci/churn-hygiene-fixture-tests.mjs",
   "ci:release-hygiene": "node scripts/ci/release-hygiene.mjs",
   "ci:release-cut-fixtures": "node scripts/ci/release-cut-fixture-tests.mjs",
   "release:cut": "node scripts/npm/release-cut.mjs",
@@ -91,6 +92,15 @@ export const PATH_GROUPS = Object.freeze({
   runtimePolicyDocsRelevant: {
     exact: ["docs/runtime-policy.md", "scripts/docs/runtime-policy.mjs"],
     prefixes: ["crates/prodex-runtime-policy/"],
+  },
+  churnHygieneRelevant: {
+    exact: [
+      "package.json",
+      "scripts/ci/changed-tests.mjs",
+      "scripts/ci/churn-hygiene.mjs",
+      "scripts/ci/churn-hygiene-fixture-tests.mjs",
+      TEST_IMPACT_MANIFEST_PATH,
+    ],
   },
 });
 

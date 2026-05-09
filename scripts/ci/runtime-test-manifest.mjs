@@ -74,12 +74,12 @@ export const RUNTIME_CI_BROAD_SHARD_FILTERS = [
   },
   {
     id: "root-worker-count",
-    filter: "main_internal_tests::runtime_proxy_worker_count_",
+    filter: "main_internal_tests::runtime_broker_tuning::runtime_proxy_worker_count_",
     label: "worker-count",
   },
   {
     id: "root-endpoint-child",
-    filter: "main_internal_tests::runtime_proxy_endpoint_child_",
+    filter: "main_internal_tests::runtime_broker_tuning::runtime_proxy_endpoint_child_",
     label: "endpoint-child",
   },
   {
