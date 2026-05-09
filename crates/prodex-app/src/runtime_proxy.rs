@@ -67,8 +67,10 @@ pub(crate) use self::standard::*;
 pub(super) use self::transport_failure::*;
 pub(crate) use self::upstream::*;
 pub(crate) use self::websocket::*;
-use self::websocket_message::proxy_runtime_websocket_text_message;
 use self::websocket_message::runtime_profile_uncached_auth_summary_for_selection;
+use self::websocket_message::{
+    RuntimeWebsocketTextMessageInput, proxy_runtime_websocket_text_message,
+};
 
 pub(super) fn runtime_proxy_precommit_budget(
     continuation: bool,

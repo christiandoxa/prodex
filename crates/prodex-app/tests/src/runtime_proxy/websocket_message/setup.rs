@@ -60,21 +60,21 @@ fn response_processed_is_forwarded_one_way_on_existing_upstream_session() {
     );
 
     let request_text = r#"{"type":"response.processed","response_id":"resp-alpha"}"#;
-    proxy_runtime_websocket_text_message(
-        77,
-        88,
-        &mut local_socket,
-        &RuntimeProxyRequest {
+    proxy_runtime_websocket_text_message(RuntimeWebsocketTextMessageInput {
+        session_id: 77,
+        request_id: 88,
+        local_socket: &mut local_socket,
+        handshake_request: &RuntimeProxyRequest {
             method: "GET".to_string(),
             path_and_query: "/backend-api/prodex/responses".to_string(),
             headers: Vec::new(),
             body: Vec::new(),
         },
         request_text,
-        &RuntimeWebsocketRequestMetadata::default(),
-        &shared,
-        &mut websocket_session,
-    )
+        request_metadata: &RuntimeWebsocketRequestMetadata::default(),
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+    })
     .expect("response.processed should be best-effort one-way forwarding");
 
     assert_eq!(

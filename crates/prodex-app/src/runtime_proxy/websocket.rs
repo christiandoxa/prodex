@@ -54,16 +54,16 @@ pub(super) fn run_runtime_proxy_websocket_session(
                     text.as_ref(),
                 );
                 runtime_proxy_log_request_compatibility(shared, message_id, &compat_surface);
-                proxy_runtime_websocket_text_message(
+                proxy_runtime_websocket_text_message(RuntimeWebsocketTextMessageInput {
                     session_id,
-                    message_id,
+                    request_id: message_id,
                     local_socket,
                     handshake_request,
-                    text.as_ref(),
-                    &request_metadata,
+                    request_text: text.as_ref(),
+                    request_metadata: &request_metadata,
                     shared,
-                    &mut websocket_session,
-                )?;
+                    websocket_session: &mut websocket_session,
+                })?;
             }
             Ok(WsMessage::Binary(_)) => {
                 runtime_proxy_log(

@@ -25,17 +25,30 @@ fn runtime_websocket_should_promote_committed_profile(
         && bound_session_profile.is_none()
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct RuntimeWebsocketTextMessageInput<'a> {
+    pub(super) session_id: u64,
+    pub(super) request_id: u64,
+    pub(super) local_socket: &'a mut RuntimeLocalWebSocket,
+    pub(super) handshake_request: &'a RuntimeProxyRequest,
+    pub(super) request_text: &'a str,
+    pub(super) request_metadata: &'a RuntimeWebsocketRequestMetadata,
+    pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) websocket_session: &'a mut RuntimeWebsocketSessionState,
+}
+
 pub(super) fn proxy_runtime_websocket_text_message(
-    session_id: u64,
-    request_id: u64,
-    local_socket: &mut RuntimeLocalWebSocket,
-    handshake_request: &RuntimeProxyRequest,
-    request_text: &str,
-    request_metadata: &RuntimeWebsocketRequestMetadata,
-    shared: &RuntimeRotationProxyShared,
-    websocket_session: &mut RuntimeWebsocketSessionState,
+    input: RuntimeWebsocketTextMessageInput<'_>,
 ) -> Result<()> {
+    let RuntimeWebsocketTextMessageInput {
+        session_id,
+        request_id,
+        local_socket,
+        handshake_request,
+        request_text,
+        request_metadata,
+        shared,
+        websocket_session,
+    } = input;
     if forward_runtime_response_processed_websocket_request(
         session_id,
         request_id,
@@ -46,7 +59,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
         return Ok(());
     }
 
-    RuntimeWebsocketTextMessageFlow::new(
+    RuntimeWebsocketTextMessageFlow::new(RuntimeWebsocketTextMessageInput {
         session_id,
         request_id,
         local_socket,
@@ -55,7 +68,7 @@ pub(super) fn proxy_runtime_websocket_text_message(
         request_metadata,
         shared,
         websocket_session,
-    )?
+    })?
     .run()
 }
 

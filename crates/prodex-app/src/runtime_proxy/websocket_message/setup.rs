@@ -1,17 +1,17 @@
 use super::*;
 
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
-        session_id: u64,
-        request_id: u64,
-        local_socket: &'a mut RuntimeLocalWebSocket,
-        handshake_request: &RuntimeProxyRequest,
-        request_text: &str,
-        request_metadata: &RuntimeWebsocketRequestMetadata,
-        shared: &'a RuntimeRotationProxyShared,
-        websocket_session: &'a mut RuntimeWebsocketSessionState,
-    ) -> Result<Self> {
+    pub(super) fn new(input: RuntimeWebsocketTextMessageInput<'a>) -> Result<Self> {
+        let RuntimeWebsocketTextMessageInput {
+            session_id,
+            request_id,
+            local_socket,
+            handshake_request,
+            request_text,
+            request_metadata,
+            shared,
+            websocket_session,
+        } = input;
         let handshake_request = handshake_request.clone();
         let request_text = request_text.to_string();
         let request_requires_previous_response_affinity =

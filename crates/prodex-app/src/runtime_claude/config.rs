@@ -11,7 +11,7 @@ pub(crate) use prodex_runtime_claude::{
     runtime_proxy_claude_removed_env, runtime_proxy_claude_settings_path,
 };
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn runtime_proxy_shared_claude_config_dir(
     paths: &crate::AppPaths,
 ) -> std::path::PathBuf {
