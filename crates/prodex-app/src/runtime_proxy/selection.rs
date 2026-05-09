@@ -31,14 +31,14 @@ pub(crate) use self::policy::{
     runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed,
 };
 
+pub(crate) use self::affinity::runtime_previous_response_affinity_is_trusted;
 use self::affinity::{RuntimeAffinitySelectionDecision, runtime_affinity_selection_decision};
-pub(crate) use self::affinity::{
-    runtime_previous_response_affinity_is_bound, runtime_previous_response_affinity_is_trusted,
-};
 pub(crate) use self::catalog::*;
+#[allow(unused_imports)]
 pub(crate) use self::current::runtime_proxy_optimistic_current_candidate_for_route;
 use self::current::runtime_proxy_optimistic_current_candidate_for_route_with_selection;
 pub(crate) use self::dispatch::*;
+#[allow(unused_imports)]
 pub(crate) use self::next::next_runtime_response_candidate_for_route;
 use self::next::next_runtime_response_candidate_for_route_with_prompt_cache_key;
 pub(crate) use self::previous_response::next_runtime_previous_response_candidate;
