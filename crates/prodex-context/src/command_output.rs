@@ -103,25 +103,27 @@ impl Default for CommandOutputCompactOptions {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CommandOutputCompactLimits {
+    pub kind: CommandOutputKind,
+    pub max_lines: usize,
+    pub head_lines: usize,
+    pub tail_lines: usize,
+    pub max_line_chars: usize,
+    pub max_search_matches_per_file: usize,
+    pub max_path_entries: usize,
+}
+
 impl CommandOutputCompactOptions {
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_limits(
-        kind: CommandOutputKind,
-        max_lines: usize,
-        head_lines: usize,
-        tail_lines: usize,
-        max_line_chars: usize,
-        max_search_matches_per_file: usize,
-        max_path_entries: usize,
-    ) -> Self {
+    pub fn from_limits(limits: CommandOutputCompactLimits) -> Self {
         Self {
-            kind,
-            max_lines,
-            head_lines,
-            tail_lines,
-            max_line_chars,
-            max_search_matches_per_file,
-            max_path_entries,
+            kind: limits.kind,
+            max_lines: limits.max_lines,
+            head_lines: limits.head_lines,
+            tail_lines: limits.tail_lines,
+            max_line_chars: limits.max_line_chars,
+            max_search_matches_per_file: limits.max_search_matches_per_file,
+            max_path_entries: limits.max_path_entries,
         }
     }
 }

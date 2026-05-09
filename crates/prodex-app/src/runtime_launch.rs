@@ -24,9 +24,11 @@ pub(super) use proxy_args::{runtime_proxy_codex_args, runtime_proxy_codex_args_w
 pub(super) use proxy_startup::start_runtime_rotation_proxy;
 #[cfg(test)]
 pub(super) use proxy_startup::start_runtime_rotation_proxy_with_listen_addr;
-pub(super) use proxy_startup::start_runtime_rotation_proxy_with_options;
 pub(super) use proxy_startup::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, start_runtime_local_rewrite_proxy,
+};
+pub(super) use proxy_startup::{
+    RuntimeRotationProxyStartOptions, start_runtime_rotation_proxy_with_options,
 };
 
 pub(super) fn runtime_launch_cli_model_context_window_tokens(args: &[OsString]) -> Option<u64> {

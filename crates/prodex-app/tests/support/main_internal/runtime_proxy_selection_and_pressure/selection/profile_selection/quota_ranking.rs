@@ -27,6 +27,34 @@ fn ready_profile_ranking_prefers_larger_reserve_when_resets_match() {
 }
 
 #[test]
+fn ready_profile_ranking_uses_order_index_as_final_deterministic_tiebreaker() {
+    let usage = usage_with_main_windows(90, 18_000, 90, 604_800);
+    let candidates = vec![
+        ReadyProfileCandidate {
+            name: "later".to_string(),
+            usage: usage.clone(),
+            order_index: 2,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+        ReadyProfileCandidate {
+            name: "earlier".to_string(),
+            usage,
+            order_index: 1,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+    ];
+
+    let mut ranked = candidates;
+    ranked.sort_by_key(ready_profile_sort_key);
+    assert_eq!(ranked[0].name, "earlier");
+    assert_eq!(ranked[1].name, "later");
+}
+
+#[test]
 fn ready_profile_candidates_prefer_openai_pool_before_other_providers() {
     let state = AppState {
         active_profile: Some("copilot".to_string()),
@@ -93,14 +121,11 @@ fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
 
     let selected = select_runtime_response_candidate_for_route(
         &shared,
-        &BTreeSet::new(),
-        None,
-        Some("main"),
-        None,
-        None,
-        false,
-        Some("resp_unbound"),
-        RuntimeRouteKind::Responses,
+        RuntimeResponseCandidateSelection {
+            pinned_profile: Some("main"),
+            previous_response_id: Some("resp_unbound"),
+            ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), RuntimeRouteKind::Responses)
+        },
     )
     .expect("selection should succeed");
 

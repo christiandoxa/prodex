@@ -286,20 +286,17 @@ pub(super) fn proxy_runtime_compact_request(
         }
         selection_attempts = selection_attempts.saturating_add(1);
 
-        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_selection(
+        let Some(candidate_name) = select_runtime_response_candidate_for_route(
             shared,
             RuntimeResponseCandidateSelection {
-                excluded_profiles: &excluded_profiles,
                 strict_affinity_profile: compact_followup_profile
                     .as_ref()
                     .map(|(profile_name, _)| profile_name.as_str()),
-                pinned_profile: None,
-                turn_state_profile: None,
                 session_profile: session_profile.as_deref(),
-                prompt_cache_key: None,
-                discover_previous_response_owner: false,
-                previous_response_id: None,
-                route_kind: RuntimeRouteKind::Compact,
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &excluded_profiles,
+                    RuntimeRouteKind::Compact,
+                )
             },
         )?
         else {

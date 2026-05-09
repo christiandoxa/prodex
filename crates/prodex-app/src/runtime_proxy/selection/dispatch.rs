@@ -1,35 +1,6 @@
 use super::*;
 
-#[cfg_attr(not(test), allow(dead_code))]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn select_runtime_response_candidate_for_route(
-    shared: &RuntimeRotationProxyShared,
-    excluded_profiles: &BTreeSet<String>,
-    strict_affinity_profile: Option<&str>,
-    pinned_profile: Option<&str>,
-    turn_state_profile: Option<&str>,
-    session_profile: Option<&str>,
-    discover_previous_response_owner: bool,
-    previous_response_id: Option<&str>,
-    route_kind: RuntimeRouteKind,
-) -> Result<Option<String>> {
-    select_runtime_response_candidate_for_route_with_selection(
-        shared,
-        RuntimeResponseCandidateSelection {
-            excluded_profiles,
-            strict_affinity_profile,
-            pinned_profile,
-            turn_state_profile,
-            session_profile,
-            prompt_cache_key: None,
-            discover_previous_response_owner,
-            previous_response_id,
-            route_kind,
-        },
-    )
-}
-
-pub(crate) fn select_runtime_response_candidate_for_route_with_selection(
     shared: &RuntimeRotationProxyShared,
     selection: RuntimeResponseCandidateSelection<'_>,
 ) -> Result<Option<String>> {

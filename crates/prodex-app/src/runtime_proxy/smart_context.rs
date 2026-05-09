@@ -291,37 +291,37 @@ fn prepare_runtime_smart_context_body<'a>(
         static_context_changed: false,
     });
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
-        runtime_smart_context_log(
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
             route_kind,
             transport,
-            "invalid_json",
-            "pass_through",
-            "-",
-            request.body.len(),
-            request.body.len(),
-            RuntimeSmartContextTransformStats::default(),
-            &budget,
-            "pass_through",
-        );
+            tier: "invalid_json",
+            decision: "pass_through",
+            reasons: "-",
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
+            stats: RuntimeSmartContextTransformStats::default(),
+            budget: &budget,
+            self_check: "pass_through",
+        });
         return Cow::Borrowed(&request.body);
     };
     if let Some(reason) = runtime_smart_context_unsupported_json_shape_reason(&value) {
-        runtime_smart_context_log(
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
             route_kind,
             transport,
-            runtime_smart_context_tier_label(budget.tier),
-            "unsupported_json_shape",
-            reason,
-            request.body.len(),
-            request.body.len(),
-            RuntimeSmartContextTransformStats::default(),
-            &budget,
-            "pass_through",
-        );
+            tier: runtime_smart_context_tier_label(budget.tier),
+            decision: "unsupported_json_shape",
+            reasons: reason,
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
+            stats: RuntimeSmartContextTransformStats::default(),
+            budget: &budget,
+            self_check: "pass_through",
+        });
         return Cow::Borrowed(&request.body);
     }
 
@@ -378,36 +378,36 @@ fn prepare_runtime_smart_context_body<'a>(
         && !affinity_pressure_rewrite
     {
         if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
-            runtime_smart_context_log(
+            runtime_smart_context_log(RuntimeSmartContextLogInput {
                 request_id,
                 shared,
                 route_kind,
                 transport,
-                runtime_smart_context_tier_label(tier),
-                "require_exact",
-                &runtime_smart_context_reason_labels(&exactness.reasons),
-                request.body.len(),
-                body.len(),
-                RuntimeSmartContextTransformStats::default(),
-                &budget,
-                "ok_minified",
-            );
+                tier: runtime_smart_context_tier_label(tier),
+                decision: "require_exact",
+                reasons: &runtime_smart_context_reason_labels(&exactness.reasons),
+                body_bytes_before: request.body.len(),
+                body_bytes_after: body.len(),
+                stats: RuntimeSmartContextTransformStats::default(),
+                budget: &budget,
+                self_check: "ok_minified",
+            });
             return Cow::Owned(body);
         }
-        runtime_smart_context_log(
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
             route_kind,
             transport,
-            runtime_smart_context_tier_label(tier),
-            "require_exact",
-            &runtime_smart_context_reason_labels(&exactness.reasons),
-            request.body.len(),
-            request.body.len(),
-            RuntimeSmartContextTransformStats::default(),
-            &budget,
-            "pass_through_exact",
-        );
+            tier: runtime_smart_context_tier_label(tier),
+            decision: "require_exact",
+            reasons: &runtime_smart_context_reason_labels(&exactness.reasons),
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
+            stats: RuntimeSmartContextTransformStats::default(),
+            budget: &budget,
+            self_check: "pass_through_exact",
+        });
         return Cow::Borrowed(&request.body);
     }
 
@@ -490,36 +490,36 @@ fn prepare_runtime_smart_context_body<'a>(
         outcome
     }) else {
         if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
-            runtime_smart_context_log(
+            runtime_smart_context_log(RuntimeSmartContextLogInput {
                 request_id,
                 shared,
                 route_kind,
                 transport,
-                runtime_smart_context_tier_label(tier),
-                "artifact_store_unavailable",
-                rewrite_reason_label,
-                request.body.len(),
-                body.len(),
-                RuntimeSmartContextTransformStats::default(),
-                &budget,
-                "ok_minified",
-            );
+                tier: runtime_smart_context_tier_label(tier),
+                decision: "artifact_store_unavailable",
+                reasons: rewrite_reason_label,
+                body_bytes_before: request.body.len(),
+                body_bytes_after: body.len(),
+                stats: RuntimeSmartContextTransformStats::default(),
+                budget: &budget,
+                self_check: "ok_minified",
+            });
             return Cow::Owned(body);
         }
-        runtime_smart_context_log(
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
             route_kind,
             transport,
-            runtime_smart_context_tier_label(tier),
-            "artifact_store_unavailable",
-            rewrite_reason_label,
-            request.body.len(),
-            request.body.len(),
-            RuntimeSmartContextTransformStats::default(),
-            &budget,
-            "pass_through",
-        );
+            tier: runtime_smart_context_tier_label(tier),
+            decision: "artifact_store_unavailable",
+            reasons: rewrite_reason_label,
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
+            stats: RuntimeSmartContextTransformStats::default(),
+            budget: &budget,
+            self_check: "pass_through",
+        });
         return Cow::Borrowed(&request.body);
     };
     runtime_smart_context_apply_static_context_persistent_section_dedupe(
@@ -574,36 +574,36 @@ fn prepare_runtime_smart_context_body<'a>(
 
     if stats == RuntimeSmartContextTransformStats::default() && !generated_aliases_used {
         if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
-            runtime_smart_context_log(
+            runtime_smart_context_log(RuntimeSmartContextLogInput {
                 request_id,
                 shared,
                 route_kind,
                 transport,
-                runtime_smart_context_tier_label(tier),
-                "minified",
-                rewrite_reason_label,
-                request.body.len(),
-                body.len(),
+                tier: runtime_smart_context_tier_label(tier),
+                decision: "minified",
+                reasons: rewrite_reason_label,
+                body_bytes_before: request.body.len(),
+                body_bytes_after: body.len(),
                 stats,
-                &budget,
-                "ok_minified",
-            );
+                budget: &budget,
+                self_check: "ok_minified",
+            });
             return Cow::Owned(body);
         }
-        runtime_smart_context_log(
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
             route_kind,
             transport,
-            runtime_smart_context_tier_label(tier),
-            "pass_through",
-            rewrite_reason_label,
-            request.body.len(),
-            request.body.len(),
+            tier: runtime_smart_context_tier_label(tier),
+            decision: "pass_through",
+            reasons: rewrite_reason_label,
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
             stats,
-            &budget,
-            "noop",
-        );
+            budget: &budget,
+            self_check: "noop",
+        });
         return Cow::Borrowed(&request.body);
     }
 
@@ -643,24 +643,24 @@ fn prepare_runtime_smart_context_body<'a>(
                 ),
             },
         );
-        runtime_smart_context_log(
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
             route_kind,
             transport,
-            runtime_smart_context_tier_label(tier),
-            "rewritten",
-            if affinity_pressure_rewrite {
+            tier: runtime_smart_context_tier_label(tier),
+            decision: "rewritten",
+            reasons: if affinity_pressure_rewrite {
                 "affinity_pressure,surgical_rehydrate"
             } else {
                 "surgical_rehydrate"
             },
-            request.body.len(),
-            repaired_body.len(),
-            repaired_stats,
-            &budget,
-            "ok_surgical_rehydrate",
-        );
+            body_bytes_before: request.body.len(),
+            body_bytes_after: repaired_body.len(),
+            stats: repaired_stats,
+            budget: &budget,
+            self_check: "ok_surgical_rehydrate",
+        });
         return Cow::Owned(repaired_body);
     }
     if let Some(fallback_reason) = runtime_smart_context_fallback_exact_reason(
@@ -676,36 +676,36 @@ fn prepare_runtime_smart_context_body<'a>(
             },
         );
         if let Some(body) = runtime_smart_context_minified_json_body_from_original(&request.body) {
-            runtime_smart_context_log(
+            runtime_smart_context_log(RuntimeSmartContextLogInput {
                 request_id,
                 shared,
                 route_kind,
                 transport,
-                runtime_smart_context_tier_label(tier),
-                "self_check_passthrough",
-                rewrite_reason_label,
-                request.body.len(),
-                body.len(),
+                tier: runtime_smart_context_tier_label(tier),
+                decision: "self_check_passthrough",
+                reasons: rewrite_reason_label,
+                body_bytes_before: request.body.len(),
+                body_bytes_after: body.len(),
                 stats,
-                &budget,
-                fallback_reason,
-            );
+                budget: &budget,
+                self_check: fallback_reason,
+            });
             return Cow::Owned(body);
         }
-        runtime_smart_context_log(
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
             request_id,
             shared,
             route_kind,
             transport,
-            runtime_smart_context_tier_label(tier),
-            "self_check_passthrough",
-            rewrite_reason_label,
-            request.body.len(),
-            request.body.len(),
+            tier: runtime_smart_context_tier_label(tier),
+            decision: "self_check_passthrough",
+            reasons: rewrite_reason_label,
+            body_bytes_before: request.body.len(),
+            body_bytes_after: request.body.len(),
             stats,
-            &budget,
-            fallback_reason,
-        );
+            budget: &budget,
+            self_check: fallback_reason,
+        });
         return Cow::Borrowed(&request.body);
     }
     observe_runtime_smart_context_rewrite_safety(
@@ -715,20 +715,20 @@ fn prepare_runtime_smart_context_body<'a>(
             saved_tokens: regression_check.saved_tokens,
         },
     );
-    runtime_smart_context_log(
+    runtime_smart_context_log(RuntimeSmartContextLogInput {
         request_id,
         shared,
         route_kind,
         transport,
-        runtime_smart_context_tier_label(tier),
-        "rewritten",
-        rewrite_reason_label,
-        request.body.len(),
-        body.len(),
+        tier: runtime_smart_context_tier_label(tier),
+        decision: "rewritten",
+        reasons: rewrite_reason_label,
+        body_bytes_before: request.body.len(),
+        body_bytes_after: body.len(),
         stats,
-        &budget,
+        budget: &budget,
         self_check,
-    );
+    });
     Cow::Owned(body)
 }
 

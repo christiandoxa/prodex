@@ -37,15 +37,11 @@ pub struct RuntimeAnthropicSseReader {
 }
 
 impl RuntimeAnthropicSseReader {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         inner: Box<dyn Read + Send>,
         model: String,
         want_thinking: bool,
-        carried_web_search_requests: u64,
-        carried_web_fetch_requests: u64,
-        carried_code_execution_requests: u64,
-        carried_tool_search_requests: u64,
+        carried_usage: RuntimeAnthropicServerToolUsage,
         server_tools: RuntimeAnthropicServerTools,
     ) -> Self {
         let mut reader = Self {
@@ -64,10 +60,10 @@ impl RuntimeAnthropicSseReader {
             input_tokens: 0,
             output_tokens: 0,
             cached_tokens: None,
-            web_search_requests: carried_web_search_requests,
-            web_fetch_requests: carried_web_fetch_requests,
-            code_execution_requests: carried_code_execution_requests,
-            tool_search_requests: carried_tool_search_requests,
+            web_search_requests: carried_usage.web_search_requests,
+            web_fetch_requests: carried_usage.web_fetch_requests,
+            code_execution_requests: carried_usage.code_execution_requests,
+            tool_search_requests: carried_usage.tool_search_requests,
             server_tools,
             active_tool_use: None,
             terminal_sent: false,
@@ -89,10 +85,10 @@ impl RuntimeAnthropicSseReader {
                         "input_tokens": 0,
                         "output_tokens": 0,
                         "server_tool_use": {
-                            "web_search_requests": carried_web_search_requests,
-                            "web_fetch_requests": carried_web_fetch_requests,
-                            "code_execution_requests": carried_code_execution_requests,
-                            "tool_search_requests": carried_tool_search_requests,
+                            "web_search_requests": carried_usage.web_search_requests,
+                            "web_fetch_requests": carried_usage.web_fetch_requests,
+                            "code_execution_requests": carried_usage.code_execution_requests,
+                            "tool_search_requests": carried_usage.tool_search_requests,
                         }
                     }
                 }

@@ -150,7 +150,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     pub(super) fn select_candidate(&self) -> Result<Option<String>> {
-        select_runtime_response_candidate_for_route_with_selection(
+        select_runtime_response_candidate_for_route(
             self.shared,
             RuntimeResponseCandidateSelection {
                 excluded_profiles: &self.excluded_profiles,

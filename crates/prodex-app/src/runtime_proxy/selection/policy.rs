@@ -159,6 +159,25 @@ pub(crate) struct RuntimeResponseCandidateSelection<'a> {
     pub(crate) route_kind: RuntimeRouteKind,
 }
 
+impl<'a> RuntimeResponseCandidateSelection<'a> {
+    pub(crate) fn fresh(
+        excluded_profiles: &'a BTreeSet<String>,
+        route_kind: RuntimeRouteKind,
+    ) -> Self {
+        Self {
+            excluded_profiles,
+            strict_affinity_profile: None,
+            pinned_profile: None,
+            turn_state_profile: None,
+            session_profile: None,
+            prompt_cache_key: None,
+            discover_previous_response_owner: false,
+            previous_response_id: None,
+            route_kind,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RuntimeAffinitySelectionKind {
     Strict,

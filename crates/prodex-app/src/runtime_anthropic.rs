@@ -217,10 +217,7 @@ pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
         body,
         requested_model,
         want_thinking,
-        carried_usage.web_search_requests,
-        carried_usage.web_fetch_requests,
-        carried_usage.code_execution_requests,
-        carried_usage.tool_search_requests,
+        carried_usage,
         server_tools,
     )
     .map(buffered_parts_from_anthropic)
@@ -384,10 +381,12 @@ pub(super) fn translate_runtime_responses_reply_to_anthropic(
                     response.body,
                     request.requested_model.clone(),
                     request.want_thinking,
-                    request.carried_web_search_requests,
-                    request.carried_web_fetch_requests,
-                    request.carried_code_execution_requests,
-                    request.carried_tool_search_requests,
+                    RuntimeAnthropicServerToolUsage {
+                        web_search_requests: request.carried_web_search_requests,
+                        web_fetch_requests: request.carried_web_fetch_requests,
+                        code_execution_requests: request.carried_code_execution_requests,
+                        tool_search_requests: request.carried_tool_search_requests,
+                    },
                     request.server_tools.clone(),
                 )),
                 request_id: response.request_id,

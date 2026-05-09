@@ -84,14 +84,13 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
     assert_eq!(
         select_runtime_response_candidate_for_route(
             &shared,
-            &BTreeSet::new(),
-            Some("second"),
-            None,
-            None,
-            None,
-            false,
-            None,
-            RuntimeRouteKind::Responses,
+            RuntimeResponseCandidateSelection {
+                strict_affinity_profile: Some("second"),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                )
+            },
         )
         .expect("candidate lookup should succeed"),
         Some("second".to_string())
@@ -220,14 +219,13 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
     assert_eq!(
         select_runtime_response_candidate_for_route(
             &shared,
-            &BTreeSet::new(),
-            None,
-            None,
-            None,
-            Some("main"),
-            false,
-            None,
-            RuntimeRouteKind::Responses,
+            RuntimeResponseCandidateSelection {
+                session_profile: Some("main"),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                )
+            },
         )
         .expect("candidate lookup should succeed"),
         Some("second".to_string())
@@ -342,14 +340,13 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
     assert_eq!(
         select_runtime_response_candidate_for_route(
             &shared,
-            &BTreeSet::new(),
-            None,
-            None,
-            None,
-            Some("main"),
-            false,
-            None,
-            RuntimeRouteKind::Responses,
+            RuntimeResponseCandidateSelection {
+                session_profile: Some("main"),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                )
+            },
         )
         .expect("candidate lookup should succeed"),
         Some("second".to_string())
@@ -466,14 +463,14 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
     assert_eq!(
         select_runtime_response_candidate_for_route(
             &shared,
-            &BTreeSet::new(),
-            None,
-            None,
-            None,
-            None,
-            true,
-            Some("resp-second"),
-            RuntimeRouteKind::Responses,
+            RuntimeResponseCandidateSelection {
+                discover_previous_response_owner: true,
+                previous_response_id: Some("resp-second"),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Responses,
+                )
+            },
         )
         .expect("candidate lookup should succeed"),
         Some("second".to_string())

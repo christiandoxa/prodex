@@ -161,7 +161,7 @@ pub(crate) fn proxy_runtime_responses_request(
             ));
         }
 
-        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_selection(
+        let Some(candidate_name) = select_runtime_response_candidate_for_route(
             shared,
             affinity_state.candidate_selection(
                 &excluded_profiles,
@@ -182,19 +182,19 @@ pub(crate) fn proxy_runtime_responses_request(
                 ),
             );
             if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                RuntimeInflightReliefWait::new(
+                RuntimeInflightReliefWait {
                     request_id,
-                    &request,
+                    request: &request,
                     shared,
-                    &excluded_profiles,
-                    RuntimeRouteKind::Responses,
+                    excluded_profiles: &excluded_profiles,
+                    route_kind: RuntimeRouteKind::Responses,
                     selection_started_at,
-                    affinity_state.has_continuation_priority(
+                    continuation: affinity_state.has_continuation_priority(
                         previous_response_id.as_deref(),
                         request_turn_state.as_deref(),
                     ),
-                    affinity_state.wait_affinity_owner(),
-                ),
+                    wait_affinity_owner: affinity_state.wait_affinity_owner(),
+                },
             )? {
                 continue;
             }
@@ -296,19 +296,19 @@ pub(crate) fn proxy_runtime_responses_request(
             );
             saw_inflight_saturation = true;
             if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                RuntimeInflightReliefWait::new(
+                RuntimeInflightReliefWait {
                     request_id,
-                    &request,
+                    request: &request,
                     shared,
-                    &excluded_profiles,
-                    RuntimeRouteKind::Responses,
+                    excluded_profiles: &excluded_profiles,
+                    route_kind: RuntimeRouteKind::Responses,
                     selection_started_at,
-                    affinity_state.has_continuation_priority(
+                    continuation: affinity_state.has_continuation_priority(
                         previous_response_id.as_deref(),
                         request_turn_state.as_deref(),
                     ),
-                    affinity_state.wait_affinity_owner(),
-                ),
+                    wait_affinity_owner: affinity_state.wait_affinity_owner(),
+                },
             )? {
                 continue;
             }

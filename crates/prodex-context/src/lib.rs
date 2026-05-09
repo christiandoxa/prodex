@@ -18,9 +18,10 @@ pub use blob_noise::{
 #[cfg(test)]
 pub(crate) use command_output::is_generated_compaction_header_line;
 pub use command_output::{
-    CommandOutputCompactOptions, CommandOutputCompactReport, CommandOutputIntentCompactOptions,
-    CommandOutputKind, CommandSuccessOutputCompactOptions, CommandSuccessOutputCompactReport,
-    MAX_EXTRACTED_INTENT_TERMS, command_output_kind_hint_for_command, compact_command_output,
+    CommandOutputCompactLimits, CommandOutputCompactOptions, CommandOutputCompactReport,
+    CommandOutputIntentCompactOptions, CommandOutputKind, CommandSuccessOutputCompactOptions,
+    CommandSuccessOutputCompactReport, MAX_EXTRACTED_INTENT_TERMS,
+    command_output_kind_hint_for_command, compact_command_output,
     compact_command_output_with_intent_options, compact_command_output_with_intent_terms,
     compact_command_output_with_options, compact_command_output_with_options_and_kind_hint,
     compact_successful_command_output_with_options, extract_intent_terms_from_prompt,

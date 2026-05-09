@@ -3,17 +3,17 @@ use super::*;
 pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let mut proxy = start_runtime_rotation_proxy_with_options(
-        &paths,
-        &state,
-        &args.current_profile,
-        args.upstream_base_url.clone(),
-        args.include_code_review,
-        args.upstream_no_proxy,
-        args.smart_context_enabled,
-        args.model_context_window_tokens,
-        args.listen_addr.as_deref(),
-    )?;
+    let mut proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
+        paths: &paths,
+        state: &state,
+        current_profile: &args.current_profile,
+        upstream_base_url: args.upstream_base_url.clone(),
+        include_code_review: args.include_code_review,
+        upstream_no_proxy: args.upstream_no_proxy,
+        smart_context_enabled: args.smart_context_enabled,
+        model_context_window_tokens: args.model_context_window_tokens,
+        preferred_listen_addr: args.listen_addr.as_deref(),
+    })?;
     if proxy.owner_lock.is_none() {
         runtime_proxy_log_to_path(
             &proxy.log_path,

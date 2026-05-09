@@ -88,14 +88,13 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
     assert_eq!(
         select_runtime_response_candidate_for_route(
             &shared,
-            &BTreeSet::new(),
-            None,
-            None,
-            None,
-            Some("main"),
-            false,
-            None,
-            RuntimeRouteKind::Websocket,
+            RuntimeResponseCandidateSelection {
+                session_profile: Some("main"),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &BTreeSet::new(),
+                    RuntimeRouteKind::Websocket,
+                )
+            },
         )
         .expect("candidate lookup should succeed"),
         Some("second".to_string())

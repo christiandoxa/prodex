@@ -163,22 +163,13 @@ pub(super) fn proxy_runtime_noncompact_request(
 
         let candidate_name = if excluded_profiles.is_empty() {
             preferred_profile.clone()
-        } else if let Some(candidate_name) =
-            select_runtime_response_candidate_for_route_with_selection(
-                shared,
-                RuntimeResponseCandidateSelection {
-                    excluded_profiles: &excluded_profiles,
-                    strict_affinity_profile: None,
-                    pinned_profile: None,
-                    turn_state_profile: None,
-                    session_profile: None,
-                    prompt_cache_key: None,
-                    discover_previous_response_owner: false,
-                    previous_response_id: None,
-                    route_kind: RuntimeRouteKind::Standard,
-                },
-            )?
-        {
+        } else if let Some(candidate_name) = select_runtime_response_candidate_for_route(
+            shared,
+            RuntimeResponseCandidateSelection::fresh(
+                &excluded_profiles,
+                RuntimeRouteKind::Standard,
+            ),
+        )? {
             candidate_name
         } else {
             let remaining_cold_start_profiles =

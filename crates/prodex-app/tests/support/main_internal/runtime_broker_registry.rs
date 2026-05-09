@@ -240,17 +240,17 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
         listen_addr: None,
     };
 
-    let proxy = start_runtime_rotation_proxy_with_options(
-        &paths,
-        &state,
-        &args.current_profile,
-        args.upstream_base_url.clone(),
-        args.include_code_review,
-        args.upstream_no_proxy,
-        args.smart_context_enabled,
-        args.model_context_window_tokens,
-        args.listen_addr.as_deref(),
-    )
+    let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
+        paths: &paths,
+        state: &state,
+        current_profile: &args.current_profile,
+        upstream_base_url: args.upstream_base_url.clone(),
+        include_code_review: args.include_code_review,
+        upstream_no_proxy: args.upstream_no_proxy,
+        smart_context_enabled: args.smart_context_enabled,
+        model_context_window_tokens: args.model_context_window_tokens,
+        preferred_listen_addr: args.listen_addr.as_deref(),
+    })
     .expect("follower runtime broker proxy should start");
     assert!(
         proxy.owner_lock.is_none(),

@@ -60,10 +60,12 @@ fn runtime_anthropic_response_from_json_value_preserves_claude_web_fetch_tool_us
         }),
         &translated.requested_model,
         translated.want_thinking,
-        translated.carried_web_search_requests,
-        translated.carried_web_fetch_requests,
-        translated.carried_code_execution_requests,
-        translated.carried_tool_search_requests,
+        RuntimeAnthropicServerToolUsage {
+            web_search_requests: translated.carried_web_search_requests,
+            web_fetch_requests: translated.carried_web_fetch_requests,
+            code_execution_requests: translated.carried_code_execution_requests,
+            tool_search_requests: translated.carried_tool_search_requests,
+        },
         Some(&translated.server_tools),
     );
 
@@ -168,10 +170,12 @@ fn runtime_anthropic_response_from_json_value_preserves_claude_web_search_tool_u
         }),
         &translated.requested_model,
         translated.want_thinking,
-        translated.carried_web_search_requests,
-        translated.carried_web_fetch_requests,
-        translated.carried_code_execution_requests,
-        translated.carried_tool_search_requests,
+        RuntimeAnthropicServerToolUsage {
+            web_search_requests: translated.carried_web_search_requests,
+            web_fetch_requests: translated.carried_web_fetch_requests,
+            code_execution_requests: translated.carried_code_execution_requests,
+            tool_search_requests: translated.carried_tool_search_requests,
+        },
         Some(&translated.server_tools),
     );
 
@@ -265,10 +269,12 @@ fn runtime_anthropic_response_from_json_value_preserves_generic_server_tool_use_
         }),
         &translated.requested_model,
         translated.want_thinking,
-        translated.carried_web_search_requests,
-        translated.carried_web_fetch_requests,
-        translated.carried_code_execution_requests,
-        translated.carried_tool_search_requests,
+        RuntimeAnthropicServerToolUsage {
+            web_search_requests: translated.carried_web_search_requests,
+            web_fetch_requests: translated.carried_web_fetch_requests,
+            code_execution_requests: translated.carried_code_execution_requests,
+            tool_search_requests: translated.carried_tool_search_requests,
+        },
         Some(&translated.server_tools),
     );
 
@@ -335,10 +341,12 @@ fn runtime_anthropic_response_from_json_value_preserves_code_execution_server_to
         }),
         &translated.requested_model,
         translated.want_thinking,
-        translated.carried_web_search_requests,
-        translated.carried_web_fetch_requests,
-        translated.carried_code_execution_requests,
-        translated.carried_tool_search_requests,
+        RuntimeAnthropicServerToolUsage {
+            web_search_requests: translated.carried_web_search_requests,
+            web_fetch_requests: translated.carried_web_fetch_requests,
+            code_execution_requests: translated.carried_code_execution_requests,
+            tool_search_requests: translated.carried_tool_search_requests,
+        },
         Some(&translated.server_tools),
     );
 

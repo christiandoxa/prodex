@@ -50,17 +50,17 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
     upstream_no_proxy: bool,
     preferred_listen_addr: Option<&str>,
 ) -> Result<RuntimeRotationProxy> {
-    start_runtime_rotation_proxy_with_options(
+    start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
         paths,
         state,
         current_profile,
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
-        false,
-        None,
+        smart_context_enabled: false,
+        model_context_window_tokens: None,
         preferred_listen_addr,
-    )
+    })
 }
 
 pub(crate) fn start_runtime_local_rewrite_proxy(
@@ -466,18 +466,32 @@ fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
         || lower.starts_with("x-prodex-internal-")
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct RuntimeRotationProxyStartOptions<'a> {
+    pub(crate) paths: &'a AppPaths,
+    pub(crate) state: &'a AppState,
+    pub(crate) current_profile: &'a str,
+    pub(crate) upstream_base_url: String,
+    pub(crate) include_code_review: bool,
+    pub(crate) upstream_no_proxy: bool,
+    pub(crate) smart_context_enabled: bool,
+    pub(crate) model_context_window_tokens: Option<u64>,
+    pub(crate) preferred_listen_addr: Option<&'a str>,
+}
+
 pub(crate) fn start_runtime_rotation_proxy_with_options(
-    paths: &AppPaths,
-    state: &AppState,
-    current_profile: &str,
-    upstream_base_url: String,
-    include_code_review: bool,
-    upstream_no_proxy: bool,
-    smart_context_enabled: bool,
-    model_context_window_tokens: Option<u64>,
-    preferred_listen_addr: Option<&str>,
+    options: RuntimeRotationProxyStartOptions<'_>,
 ) -> Result<RuntimeRotationProxy> {
+    let RuntimeRotationProxyStartOptions {
+        paths,
+        state,
+        current_profile,
+        upstream_base_url,
+        include_code_review,
+        upstream_no_proxy,
+        smart_context_enabled,
+        model_context_window_tokens,
+        preferred_listen_addr,
+    } = options;
     let log_path = initialize_runtime_proxy_log_path();
     let (server, listen_addr) = match preferred_listen_addr {
         Some(preferred) => match TinyServer::http(preferred) {

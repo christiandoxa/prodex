@@ -228,20 +228,20 @@ fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
     });
 
     for index in 0..(SMART_CONTEXT_REWRITE_TELEMETRY_HISTORY_LIMIT + 2) {
-        runtime_smart_context_log(
-            index as u64,
-            &shared,
-            RuntimeRouteKind::Responses,
-            RuntimeSmartContextTransport::Http,
-            "minimal",
-            "self_check_passthrough",
-            "-",
-            400 + index,
-            300,
-            RuntimeSmartContextTransformStats::default(),
-            &budget,
-            "critical_signal_loss",
-        );
+        runtime_smart_context_log(RuntimeSmartContextLogInput {
+            request_id: index as u64,
+            shared: &shared,
+            route_kind: RuntimeRouteKind::Responses,
+            transport: RuntimeSmartContextTransport::Http,
+            tier: "minimal",
+            decision: "self_check_passthrough",
+            reasons: "-",
+            body_bytes_before: 400 + index,
+            body_bytes_after: 300,
+            stats: RuntimeSmartContextTransformStats::default(),
+            budget: &budget,
+            self_check: "critical_signal_loss",
+        });
     }
 
     with_runtime_smart_context_proxy_state(&shared, |state| {

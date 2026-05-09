@@ -190,23 +190,16 @@ pub fn runtime_anthropic_response_from_json_value(
         value,
         requested_model,
         want_thinking,
-        0,
-        0,
-        0,
-        0,
+        RuntimeAnthropicServerToolUsage::default(),
         None,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn runtime_anthropic_response_from_json_value_with_carried_usage(
     value: &serde_json::Value,
     requested_model: &str,
     want_thinking: bool,
-    carried_web_search_requests: u64,
-    carried_web_fetch_requests: u64,
-    carried_code_execution_requests: u64,
-    carried_tool_search_requests: u64,
+    carried_usage: RuntimeAnthropicServerToolUsage,
     server_tools: Option<&RuntimeAnthropicServerTools>,
 ) -> serde_json::Value {
     let (input_tokens, output_tokens, cached_tokens) = runtime_anthropic_usage_from_value(value);
@@ -220,23 +213,23 @@ pub fn runtime_anthropic_response_from_json_value_with_carried_usage(
             &output,
             server_tools,
         ))
-        .max(carried_web_search_requests);
+        .max(carried_usage.web_search_requests);
     let web_fetch_requests =
         runtime_anthropic_web_fetch_request_count_from_output(&output, server_tools)
-            .max(carried_web_fetch_requests);
+            .max(carried_usage.web_fetch_requests);
     let code_execution_requests =
         runtime_anthropic_tool_usage_code_execution_requests_from_value(value)
             .max(runtime_anthropic_code_execution_request_count_from_output(
                 &output,
                 server_tools,
             ))
-            .max(carried_code_execution_requests);
+            .max(carried_usage.code_execution_requests);
     let tool_search_requests = runtime_anthropic_tool_usage_tool_search_requests_from_value(value)
         .max(runtime_anthropic_tool_search_request_count_from_output(
             &output,
             server_tools,
         ))
-        .max(carried_tool_search_requests);
+        .max(carried_usage.tool_search_requests);
     let (content, has_tool_calls) =
         runtime_anthropic_output_blocks_from_json(&output, want_thinking, server_tools);
     let usage = runtime_anthropic_usage_json(
@@ -275,16 +268,19 @@ pub fn translate_runtime_buffered_responses_reply_to_anthropic(
         .to_ascii_lowercase();
     let looks_like_sse = content_type.contains("text/event-stream")
         || runtime_response_body_looks_like_sse(&parts.body);
+    let carried_usage = RuntimeAnthropicServerToolUsage {
+        web_search_requests: request.carried_web_search_requests,
+        web_fetch_requests: request.carried_web_fetch_requests,
+        code_execution_requests: request.carried_code_execution_requests,
+        tool_search_requests: request.carried_tool_search_requests,
+    };
     if request.stream && looks_like_sse {
         return Ok(RuntimeResponsesReply::Buffered(
             runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
                 &parts.body,
                 &request.requested_model,
                 request.want_thinking,
-                request.carried_web_search_requests,
-                request.carried_web_fetch_requests,
-                request.carried_code_execution_requests,
-                request.carried_tool_search_requests,
+                carried_usage,
                 &request.server_tools,
             )?,
         ));
@@ -295,10 +291,7 @@ pub fn translate_runtime_buffered_responses_reply_to_anthropic(
             &parts.body,
             &request.requested_model,
             request.want_thinking,
-            request.carried_web_search_requests,
-            request.carried_web_fetch_requests,
-            request.carried_code_execution_requests,
-            request.carried_tool_search_requests,
+            carried_usage,
             Some(&request.server_tools),
         )?
     } else {
@@ -313,10 +306,7 @@ pub fn translate_runtime_buffered_responses_reply_to_anthropic(
             &value,
             &request.requested_model,
             request.want_thinking,
-            request.carried_web_search_requests,
-            request.carried_web_fetch_requests,
-            request.carried_code_execution_requests,
-            request.carried_tool_search_requests,
+            carried_usage,
             Some(&request.server_tools),
         )
     };

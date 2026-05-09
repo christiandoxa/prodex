@@ -16,14 +16,11 @@ fn response_selection_preserves_bound_previous_response_affinity_despite_quota()
 
     let selected = select_runtime_response_candidate_for_route(
         &shared,
-        &BTreeSet::new(),
-        None,
-        Some("main"),
-        None,
-        None,
-        false,
-        Some("resp_123"),
-        RuntimeRouteKind::Responses,
+        RuntimeResponseCandidateSelection {
+            pinned_profile: Some("main"),
+            previous_response_id: Some("resp_123"),
+            ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), RuntimeRouteKind::Responses)
+        },
     )
     .expect("selection should succeed");
 
@@ -60,7 +57,7 @@ fn response_selection_uses_prompt_cache_affinity_for_fresh_ties() {
         })
         .expect("test should find a key that prefers second");
 
-    let selected = select_runtime_response_candidate_for_route_with_selection(
+    let selected = select_runtime_response_candidate_for_route(
         &shared,
         RuntimeResponseCandidateSelection {
             excluded_profiles: &BTreeSet::new(),
@@ -110,7 +107,7 @@ fn response_selection_keeps_inflight_pressure_ahead_of_prompt_cache_owner() {
         RuntimeRouteKind::Responses,
     );
 
-    let selected = select_runtime_response_candidate_for_route_with_selection(
+    let selected = select_runtime_response_candidate_for_route(
         &shared,
         RuntimeResponseCandidateSelection {
             excluded_profiles: &BTreeSet::new(),
@@ -212,7 +209,7 @@ fn response_selection_prefers_recorded_prompt_cache_owner_for_fresh_request() {
         RuntimeRouteKind::Responses,
     );
 
-    let selected = select_runtime_response_candidate_for_route_with_selection(
+    let selected = select_runtime_response_candidate_for_route(
         &shared,
         RuntimeResponseCandidateSelection {
             excluded_profiles: &BTreeSet::new(),
@@ -303,14 +300,14 @@ fn hard_affinity_selection_matrix_ignores_local_penalties() {
 
         let selected = select_runtime_response_candidate_for_route(
             &shared,
-            &BTreeSet::new(),
-            case.strict_affinity_profile,
-            case.pinned_profile,
-            case.turn_state_profile,
-            case.session_profile,
-            false,
-            case.previous_response_id,
-            case.route_kind,
+            RuntimeResponseCandidateSelection {
+                strict_affinity_profile: case.strict_affinity_profile,
+                pinned_profile: case.pinned_profile,
+                turn_state_profile: case.turn_state_profile,
+                session_profile: case.session_profile,
+                previous_response_id: case.previous_response_id,
+                ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), case.route_kind)
+            },
         )
         .expect("selection should succeed");
 

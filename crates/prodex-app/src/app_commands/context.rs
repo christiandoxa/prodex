@@ -2,8 +2,8 @@ use super::*;
 use std::io::IsTerminal;
 
 pub(crate) use prodex_context::{
-    CommandOutputCompactOptions, CommandOutputKind, collect_context_audit_report,
-    compact_command_output_with_options, compress_context_path,
+    CommandOutputCompactLimits, CommandOutputCompactOptions, CommandOutputKind,
+    collect_context_audit_report, compact_command_output_with_options, compress_context_path,
     render_context_audit_report_with_width, render_context_compress_report,
 };
 
@@ -58,15 +58,15 @@ pub(crate) fn handle_context_compact_output(args: ContextCompactOutputArgs) -> R
             .context("failed to read command output from stdin")?;
         input
     };
-    let options = CommandOutputCompactOptions::from_limits(
-        context_compact_output_kind(args.kind),
-        args.max_lines,
-        args.head_lines,
-        args.tail_lines,
-        args.max_line_chars,
-        args.max_search_matches_per_file,
-        args.max_path_entries,
-    );
+    let options = CommandOutputCompactOptions::from_limits(CommandOutputCompactLimits {
+        kind: context_compact_output_kind(args.kind),
+        max_lines: args.max_lines,
+        head_lines: args.head_lines,
+        tail_lines: args.tail_lines,
+        max_line_chars: args.max_line_chars,
+        max_search_matches_per_file: args.max_search_matches_per_file,
+        max_path_entries: args.max_path_entries,
+    });
     let report = compact_command_output_with_options(&input, &options);
 
     if args.json {

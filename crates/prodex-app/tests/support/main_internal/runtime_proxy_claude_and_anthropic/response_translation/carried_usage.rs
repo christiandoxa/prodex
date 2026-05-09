@@ -97,10 +97,10 @@ fn runtime_anthropic_response_from_json_value_applies_carried_web_search_usage()
         &value,
         "claude-sonnet-4-6",
         false,
-        1,
-        0,
-        0,
-        0,
+        RuntimeAnthropicServerToolUsage {
+            web_search_requests: 1,
+            ..RuntimeAnthropicServerToolUsage::default()
+        },
         None,
     );
 
@@ -325,10 +325,7 @@ fn runtime_anthropic_sse_reader_emits_web_search_usage_in_message_delta() {
         Box::new(Cursor::new(upstream)),
         "claude-sonnet-4-6".to_string(),
         false,
-        0,
-        0,
-        0,
-        0,
+        RuntimeAnthropicServerToolUsage::default(),
         RuntimeAnthropicServerTools::default(),
     );
     let mut emitted = Vec::new();
@@ -359,10 +356,7 @@ fn runtime_anthropic_sse_reader_preserves_mcp_tool_result_error_flag() {
         Box::new(Cursor::new(upstream)),
         "claude-sonnet-4-6".to_string(),
         false,
-        0,
-        0,
-        0,
-        0,
+        RuntimeAnthropicServerToolUsage::default(),
         RuntimeAnthropicServerTools::default(),
     );
     let mut emitted = Vec::new();

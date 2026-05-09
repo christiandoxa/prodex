@@ -465,14 +465,10 @@ impl RuntimeProxyMixedPoolSelectionBenchCase {
     pub fn select_fresh_response_candidate(&self) -> Option<String> {
         select_runtime_response_candidate_for_route(
             &self.shared,
-            &self.excluded_profiles,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            RuntimeRouteKind::Responses,
+            RuntimeResponseCandidateSelection::fresh(
+                &self.excluded_profiles,
+                RuntimeRouteKind::Responses,
+            ),
         )
         .expect("benchmark mixed-pool selection should succeed")
     }
@@ -559,14 +555,13 @@ impl RuntimeProxyCompactSessionSelectionBenchCase {
             .expect("benchmark compact session lookup should succeed");
         select_runtime_response_candidate_for_route(
             &self.shared,
-            &self.excluded_profiles,
-            None,
-            None,
-            None,
-            session_profile.as_deref(),
-            false,
-            None,
-            RuntimeRouteKind::Compact,
+            RuntimeResponseCandidateSelection {
+                session_profile: session_profile.as_deref(),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &self.excluded_profiles,
+                    RuntimeRouteKind::Compact,
+                )
+            },
         )
         .expect("benchmark compact session selection should succeed")
     }
@@ -688,14 +683,15 @@ impl RuntimeProxyWebsocketStaleReuseBenchCase {
             );
         let candidate = select_runtime_response_candidate_for_route(
             &self.shared,
-            &self.excluded_profiles,
-            None,
-            bound_profile.as_deref(),
-            None,
-            None,
-            true,
-            Some(&self.previous_response_id),
-            RuntimeRouteKind::Websocket,
+            RuntimeResponseCandidateSelection {
+                pinned_profile: bound_profile.as_deref(),
+                discover_previous_response_owner: true,
+                previous_response_id: Some(&self.previous_response_id),
+                ..RuntimeResponseCandidateSelection::fresh(
+                    &self.excluded_profiles,
+                    RuntimeRouteKind::Websocket,
+                )
+            },
         )
         .expect("benchmark websocket stale reuse selection should succeed");
 

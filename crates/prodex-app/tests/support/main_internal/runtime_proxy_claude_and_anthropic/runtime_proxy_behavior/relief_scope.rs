@@ -239,16 +239,16 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
     };
     let excluded_profiles = BTreeSet::new();
     assert!(
-        !runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait::new(
-            45,
-            &request,
-            &shared,
-            &excluded_profiles,
-            RuntimeRouteKind::Responses,
-            Instant::now(),
-            true,
-            Some("main"),
-        ),)
+        !runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+            request_id: 45,
+            request: &request,
+            shared: &shared,
+            excluded_profiles: &excluded_profiles,
+            route_kind: RuntimeRouteKind::Responses,
+            selection_started_at: Instant::now(),
+            continuation: true,
+            wait_affinity_owner: Some("main"),
+        },)
         .expect("owner-scoped wait should complete"),
         "non-owner release should not count as useful relief"
     );

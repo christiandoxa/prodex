@@ -210,40 +210,14 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
 }
 
 pub(crate) struct RuntimeInflightReliefWait<'a> {
-    request_id: u64,
-    request: &'a RuntimeProxyRequest,
-    shared: &'a RuntimeRotationProxyShared,
-    excluded_profiles: &'a BTreeSet<String>,
-    route_kind: RuntimeRouteKind,
-    selection_started_at: Instant,
-    continuation: bool,
-    wait_affinity_owner: Option<&'a str>,
-}
-
-impl<'a> RuntimeInflightReliefWait<'a> {
-    #[cfg_attr(not(test), allow(dead_code))]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        request_id: u64,
-        request: &'a RuntimeProxyRequest,
-        shared: &'a RuntimeRotationProxyShared,
-        excluded_profiles: &'a BTreeSet<String>,
-        route_kind: RuntimeRouteKind,
-        selection_started_at: Instant,
-        continuation: bool,
-        wait_affinity_owner: Option<&'a str>,
-    ) -> Self {
-        Self {
-            request_id,
-            request,
-            shared,
-            excluded_profiles,
-            route_kind,
-            selection_started_at,
-            continuation,
-            wait_affinity_owner,
-        }
-    }
+    pub(crate) request_id: u64,
+    pub(crate) request: &'a RuntimeProxyRequest,
+    pub(crate) shared: &'a RuntimeRotationProxyShared,
+    pub(crate) excluded_profiles: &'a BTreeSet<String>,
+    pub(crate) route_kind: RuntimeRouteKind,
+    pub(crate) selection_started_at: Instant,
+    pub(crate) continuation: bool,
+    pub(crate) wait_affinity_owner: Option<&'a str>,
 }
 
 pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(

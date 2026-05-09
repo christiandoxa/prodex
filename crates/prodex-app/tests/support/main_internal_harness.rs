@@ -38,14 +38,16 @@ fn select_runtime_response_candidate(
 ) -> Result<Option<String>> {
     select_runtime_response_candidate_for_route(
         shared,
-        excluded_profiles,
-        None,
-        pinned_profile,
-        turn_state_profile,
-        session_profile,
-        discover_previous_response_owner,
-        None,
-        RuntimeRouteKind::Responses,
+        RuntimeResponseCandidateSelection {
+            pinned_profile,
+            turn_state_profile,
+            session_profile,
+            discover_previous_response_owner,
+            ..RuntimeResponseCandidateSelection::fresh(
+                excluded_profiles,
+                RuntimeRouteKind::Responses,
+            )
+        },
     )
 }
 

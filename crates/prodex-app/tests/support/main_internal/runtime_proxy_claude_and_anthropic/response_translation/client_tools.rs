@@ -565,10 +565,7 @@ fn runtime_anthropic_response_from_json_value_uses_registered_server_tool_aliase
         }),
         "claude-sonnet-4-6",
         false,
-        0,
-        0,
-        0,
-        0,
+        RuntimeAnthropicServerToolUsage::default(),
         Some(&server_tools),
     );
 

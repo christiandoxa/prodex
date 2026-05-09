@@ -54,21 +54,36 @@ fn runtime_smart_context_rewrite_telemetry_record_safe_saved(
         && record.estimated_tokens_after < record.estimated_tokens_before
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn runtime_smart_context_log(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    route_kind: RuntimeRouteKind,
-    transport: RuntimeSmartContextTransport,
-    tier: &str,
-    decision: &str,
-    reasons: &str,
-    body_bytes_before: usize,
-    body_bytes_after: usize,
-    stats: RuntimeSmartContextTransformStats,
-    budget: &RuntimeSmartContextBudget,
-    self_check: &'static str,
-) {
+pub(super) struct RuntimeSmartContextLogInput<'a> {
+    pub(super) request_id: u64,
+    pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) route_kind: RuntimeRouteKind,
+    pub(super) transport: RuntimeSmartContextTransport,
+    pub(super) tier: &'a str,
+    pub(super) decision: &'a str,
+    pub(super) reasons: &'a str,
+    pub(super) body_bytes_before: usize,
+    pub(super) body_bytes_after: usize,
+    pub(super) stats: RuntimeSmartContextTransformStats,
+    pub(super) budget: &'a RuntimeSmartContextBudget,
+    pub(super) self_check: &'static str,
+}
+
+pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) {
+    let RuntimeSmartContextLogInput {
+        request_id,
+        shared,
+        route_kind,
+        transport,
+        tier,
+        decision,
+        reasons,
+        body_bytes_before,
+        body_bytes_after,
+        stats,
+        budget,
+        self_check,
+    } = input;
     runtime_smart_context_record_rewrite_telemetry(
         shared,
         RuntimeSmartContextRewriteTelemetryRecord {

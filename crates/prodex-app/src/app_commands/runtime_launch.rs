@@ -454,17 +454,17 @@ fn start_fixed_runtime_proxy_endpoint(
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, selection);
     let fixed_state = fixed_runtime_proxy_state(state, &selection.selected_profile_name)?;
-    let proxy = start_runtime_rotation_proxy_with_options(
+    let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
         paths,
-        &fixed_state,
-        &selection.selected_profile_name,
-        runtime_upstream_base_url,
-        request.include_code_review,
-        request.upstream_no_proxy,
-        request.smart_context_enabled,
+        state: &fixed_state,
+        current_profile: &selection.selected_profile_name,
+        upstream_base_url: runtime_upstream_base_url,
+        include_code_review: request.include_code_review,
+        upstream_no_proxy: request.upstream_no_proxy,
+        smart_context_enabled: request.smart_context_enabled,
         model_context_window_tokens,
-        None,
-    )?;
+        preferred_listen_addr: None,
+    })?;
     Ok(RuntimeProxyEndpoint {
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
