@@ -337,6 +337,7 @@ fn run() -> Result<()> {
         let _ = show_update_notice_if_available(&command);
     }
     ensure_runtime_policy_valid()?;
+    schedule_prodex_auto_runtime_housekeeping(&command);
     command.execute()
 }
 

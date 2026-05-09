@@ -1,13 +1,21 @@
 use super::*;
 
-pub(crate) fn handle_cleanup() -> Result<()> {
+pub(crate) fn handle_cleanup(args: CleanupArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
     let runtime_log_dir = runtime_proxy_log_dir();
-    let summary = perform_prodex_cleanup(&paths, &mut state)?;
+    let cleanup_options = cleanup_options_from_args(&args);
+    let summary = perform_prodex_cleanup_with_options(&paths, &mut state, cleanup_options)?;
 
     let fields = vec![
         ("Prodex root".to_string(), paths.root.display().to_string()),
+        (
+            "Orphan threshold".to_string(),
+            cleanup_orphan_threshold_label(
+                &args,
+                cleanup_options.orphan_managed_profile_retention_seconds,
+            ),
+        ),
         (
             "Duplicate profiles".to_string(),
             summary.duplicate_profiles_removed.to_string(),
@@ -49,8 +57,8 @@ pub(crate) fn handle_cleanup() -> Result<()> {
             summary.stale_root_temp_files_removed.to_string(),
         ),
         (
-            "Chat history over 7 days".to_string(),
-            summary.chat_history_entries_removed.to_string(),
+            "Chat history".to_string(),
+            "left untouched (Codex-managed)".to_string(),
         ),
         (
             "Dead broker leases".to_string(),
@@ -67,4 +75,44 @@ pub(crate) fn handle_cleanup() -> Result<()> {
     ];
     print_panel("Cleanup", &fields);
     Ok(())
+}
+
+fn cleanup_options_from_args(args: &CleanupArgs) -> ProdexCleanupOptions {
+    ProdexCleanupOptions {
+        orphan_managed_profile_retention_seconds: if args.aggressive {
+            0
+        } else {
+            args.older_than
+                .map(CleanupOlderThan::seconds)
+                .unwrap_or(ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS)
+        },
+    }
+}
+
+fn cleanup_orphan_threshold_label(args: &CleanupArgs, seconds: i64) -> String {
+    let mode = if args.aggressive {
+        "aggressive"
+    } else if args.older_than.is_some() {
+        "explicit"
+    } else {
+        "default"
+    };
+    format!("{} ({mode})", cleanup_duration_label(seconds))
+}
+
+fn cleanup_duration_label(seconds: i64) -> String {
+    const MINUTE: i64 = 60;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+
+    if seconds % DAY == 0 {
+        return format!("{}d", seconds / DAY);
+    }
+    if seconds % HOUR == 0 {
+        return format!("{}h", seconds / HOUR);
+    }
+    if seconds % MINUTE == 0 {
+        return format!("{}m", seconds / MINUTE);
+    }
+    format!("{seconds}s")
 }

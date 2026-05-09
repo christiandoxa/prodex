@@ -3,9 +3,24 @@ use super::*;
 mod duplicates;
 
 use self::duplicates::cleanup_duplicate_profiles;
+use fs2::FileExt;
 use prodex_core::{runtime_broker_artifact_key, runtime_broker_lease_pid};
 
 pub(crate) use prodex_housekeeping::ProdexCleanupSummary;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ProdexCleanupOptions {
+    pub(crate) orphan_managed_profile_retention_seconds: i64,
+}
+
+impl Default for ProdexCleanupOptions {
+    fn default() -> Self {
+        Self {
+            orphan_managed_profile_retention_seconds:
+                ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS,
+        }
+    }
+}
 
 fn prodex_cleanup_transient_root_file_paths(paths: &AppPaths) -> Vec<PathBuf> {
     vec![
@@ -52,16 +67,17 @@ pub(crate) fn collect_orphan_managed_profile_dirs(
     collect_orphan_managed_profile_dirs_at(paths, state, SystemTime::now())
 }
 
-pub(crate) fn cleanup_orphan_managed_profile_dirs_at(
+pub(crate) fn cleanup_orphan_managed_profile_dirs_with_retention_at(
     paths: &AppPaths,
     state: &AppState,
     now: SystemTime,
+    retention_seconds: i64,
 ) -> usize {
     prodex_housekeeping::cleanup_orphan_managed_profile_dirs_at(
         paths,
         state,
         now,
-        ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS,
+        retention_seconds,
         |path| remove_dir_if_exists(path).is_ok(),
     )
 }
@@ -86,10 +102,134 @@ pub(crate) fn newest_runtime_proxy_log_in_dir(dir: &Path) -> Option<PathBuf> {
 
 pub(crate) use prodex_housekeeping::cleanup_runtime_proxy_latest_pointer;
 
-pub(crate) fn cleanup_runtime_proxy_log_housekeeping() {
-    let temp_dir = runtime_proxy_log_dir();
-    cleanup_runtime_proxy_logs_in_dir(&temp_dir, SystemTime::now());
-    cleanup_runtime_proxy_latest_pointer(&runtime_proxy_latest_log_pointer_path());
+pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool {
+    !matches!(
+        command,
+        Commands::Cleanup(_) | Commands::RuntimeBroker(_) | Commands::Update(_)
+    )
+}
+
+pub(crate) fn schedule_prodex_auto_runtime_housekeeping(command: &Commands) {
+    if !command_runs_auto_runtime_housekeeping(command) {
+        return;
+    }
+    let _ = thread::Builder::new()
+        .name("prodex-housekeeping".to_string())
+        .spawn(|| {
+            let _ = run_prodex_auto_runtime_housekeeping();
+        });
+}
+
+fn auto_runtime_housekeeping_lock_path(paths: &AppPaths) -> PathBuf {
+    paths.root.join(AUTO_RUNTIME_HOUSEKEEPING_LOCK_FILE)
+}
+
+fn auto_runtime_housekeeping_stamp_path(paths: &AppPaths) -> PathBuf {
+    paths.root.join(AUTO_RUNTIME_HOUSEKEEPING_STAMP_FILE)
+}
+
+fn try_acquire_auto_runtime_housekeeping_lock(paths: &AppPaths) -> Result<Option<fs::File>> {
+    fs::create_dir_all(&paths.root)
+        .with_context(|| format!("failed to create {}", paths.root.display()))?;
+    let lock_path = auto_runtime_housekeeping_lock_path(paths);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open {}", lock_path.display()))?;
+    match file.try_lock_exclusive() {
+        Ok(()) => Ok(Some(file)),
+        Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to lock {}", lock_path.display())),
+    }
+}
+
+fn auto_runtime_housekeeping_is_due_at(
+    paths: &AppPaths,
+    now: SystemTime,
+    interval_seconds: i64,
+) -> bool {
+    if interval_seconds <= 0 {
+        return true;
+    }
+    let Some(now_epoch) = prodex_core::system_time_to_unix_seconds(now) else {
+        return false;
+    };
+    let stamp_path = auto_runtime_housekeeping_stamp_path(paths);
+    let last_run = fs::read_to_string(&stamp_path)
+        .ok()
+        .and_then(|content| content.trim().parse::<i64>().ok())
+        .or_else(|| {
+            fs::metadata(stamp_path)
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(prodex_core::system_time_to_unix_seconds)
+        });
+    last_run.is_none_or(|last_run| now_epoch.saturating_sub(last_run) >= interval_seconds)
+}
+
+fn record_auto_runtime_housekeeping_run_at(paths: &AppPaths, now: SystemTime) {
+    let stamp_path = auto_runtime_housekeeping_stamp_path(paths);
+    if let Some(parent) = stamp_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let epoch = prodex_core::system_time_to_unix_seconds(now).unwrap_or_default();
+    let _ = fs::write(stamp_path, format!("{epoch}\n"));
+}
+
+pub(crate) fn perform_prodex_auto_runtime_housekeeping_at(
+    paths: &AppPaths,
+    runtime_log_dir: &Path,
+    runtime_log_pointer_path: &Path,
+    now: SystemTime,
+) -> Result<ProdexCleanupSummary> {
+    Ok(ProdexCleanupSummary {
+        runtime_logs_removed: cleanup_runtime_proxy_logs_in_dir(runtime_log_dir, now),
+        stale_runtime_log_pointer_removed: usize::from(cleanup_runtime_proxy_latest_pointer(
+            runtime_log_pointer_path,
+        )),
+        stale_login_dirs_removed: cleanup_stale_login_dirs_at(paths, now),
+        stale_root_temp_files_removed: cleanup_prodex_stale_root_temp_files_at(paths, now),
+        dead_runtime_broker_leases_removed: cleanup_runtime_broker_stale_leases_for_all(paths),
+        dead_runtime_broker_registries_removed: cleanup_runtime_broker_stale_registries(paths)?,
+        ..ProdexCleanupSummary::default()
+    })
+}
+
+pub(crate) fn run_prodex_auto_runtime_housekeeping() -> Result<Option<ProdexCleanupSummary>> {
+    let paths = AppPaths::discover()?;
+    run_prodex_auto_runtime_housekeeping_for_paths_at(
+        &paths,
+        &runtime_proxy_log_dir(),
+        &runtime_proxy_latest_log_pointer_path(),
+        SystemTime::now(),
+        AUTO_RUNTIME_HOUSEKEEPING_INTERVAL_SECONDS,
+    )
+}
+
+pub(crate) fn run_prodex_auto_runtime_housekeeping_for_paths_at(
+    paths: &AppPaths,
+    runtime_log_dir: &Path,
+    runtime_log_pointer_path: &Path,
+    now: SystemTime,
+    interval_seconds: i64,
+) -> Result<Option<ProdexCleanupSummary>> {
+    let Some(_lock) = try_acquire_auto_runtime_housekeeping_lock(paths)? else {
+        return Ok(None);
+    };
+    if !auto_runtime_housekeeping_is_due_at(paths, now, interval_seconds) {
+        return Ok(None);
+    }
+    let summary = perform_prodex_auto_runtime_housekeeping_at(
+        paths,
+        runtime_log_dir,
+        runtime_log_pointer_path,
+        now,
+    )?;
+    record_auto_runtime_housekeeping_run_at(paths, now);
+    Ok(Some(summary))
 }
 
 pub(crate) fn cleanup_stale_login_dirs_at(paths: &AppPaths, now: SystemTime) -> usize {
@@ -99,10 +239,6 @@ pub(crate) fn cleanup_stale_login_dirs_at(paths: &AppPaths, now: SystemTime) -> 
         PROD_EX_TMP_LOGIN_RETENTION_SECONDS,
         |path| remove_dir_if_exists(path).is_ok(),
     )
-}
-
-pub(crate) fn cleanup_stale_login_dirs(paths: &AppPaths) -> usize {
-    cleanup_stale_login_dirs_at(paths, SystemTime::now())
 }
 
 fn runtime_broker_artifact_keys(paths: &AppPaths) -> Vec<String> {
@@ -173,25 +309,31 @@ pub(crate) fn cleanup_runtime_broker_stale_leases_for_all(paths: &AppPaths) -> u
     removed
 }
 
-pub(crate) fn cleanup_prodex_chat_history_at(
-    paths: &AppPaths,
-    state: &AppState,
-    now: SystemTime,
-) -> usize {
-    prodex_housekeeping::cleanup_prodex_chat_history_at(
-        paths,
-        state,
-        now,
-        PRODEX_CHAT_HISTORY_RETENTION_SECONDS,
-    )
-}
-
+#[cfg(test)]
 pub(crate) fn perform_prodex_cleanup_at(
     paths: &AppPaths,
     state: &AppState,
     runtime_log_dir: &Path,
     runtime_log_pointer_path: &Path,
     now: SystemTime,
+) -> Result<ProdexCleanupSummary> {
+    perform_prodex_cleanup_with_options_at(
+        paths,
+        state,
+        runtime_log_dir,
+        runtime_log_pointer_path,
+        now,
+        ProdexCleanupOptions::default(),
+    )
+}
+
+pub(crate) fn perform_prodex_cleanup_with_options_at(
+    paths: &AppPaths,
+    state: &AppState,
+    runtime_log_dir: &Path,
+    runtime_log_pointer_path: &Path,
+    now: SystemTime,
+    options: ProdexCleanupOptions,
 ) -> Result<ProdexCleanupSummary> {
     Ok(ProdexCleanupSummary {
         duplicate_profiles_removed: 0,
@@ -201,28 +343,40 @@ pub(crate) fn perform_prodex_cleanup_at(
             runtime_log_pointer_path,
         )),
         stale_login_dirs_removed: cleanup_stale_login_dirs_at(paths, now),
-        orphan_managed_profile_dirs_removed: cleanup_orphan_managed_profile_dirs_at(
-            paths, state, now,
+        orphan_managed_profile_dirs_removed: cleanup_orphan_managed_profile_dirs_with_retention_at(
+            paths,
+            state,
+            now,
+            options.orphan_managed_profile_retention_seconds,
         ),
         transient_root_files_removed: cleanup_prodex_transient_root_files(paths),
         stale_root_temp_files_removed: cleanup_prodex_stale_root_temp_files_at(paths, now),
-        chat_history_entries_removed: cleanup_prodex_chat_history_at(paths, state, now),
         dead_runtime_broker_leases_removed: cleanup_runtime_broker_stale_leases_for_all(paths),
         dead_runtime_broker_registries_removed: cleanup_runtime_broker_stale_registries(paths)?,
     })
 }
 
+#[cfg(test)]
 pub(crate) fn perform_prodex_cleanup(
     paths: &AppPaths,
     state: &mut AppState,
 ) -> Result<ProdexCleanupSummary> {
+    perform_prodex_cleanup_with_options(paths, state, ProdexCleanupOptions::default())
+}
+
+pub(crate) fn perform_prodex_cleanup_with_options(
+    paths: &AppPaths,
+    state: &mut AppState,
+    options: ProdexCleanupOptions,
+) -> Result<ProdexCleanupSummary> {
     let duplicate_summary = cleanup_duplicate_profiles(paths, state)?;
-    let artifact_summary = perform_prodex_cleanup_at(
+    let artifact_summary = perform_prodex_cleanup_with_options_at(
         paths,
         state,
         &runtime_proxy_log_dir(),
         &runtime_proxy_latest_log_pointer_path(),
         SystemTime::now(),
+        options,
     )?;
     Ok(duplicate_summary.merge(artifact_summary))
 }

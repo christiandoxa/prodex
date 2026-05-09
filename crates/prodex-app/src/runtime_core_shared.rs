@@ -69,7 +69,6 @@ pub(super) fn runtime_proxy_latest_log_pointer_path() -> PathBuf {
 }
 
 pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
-    cleanup_runtime_proxy_log_housekeeping();
     let log_path = create_runtime_proxy_log_path();
     let _ = fs::write(
         runtime_proxy_latest_log_pointer_path(),

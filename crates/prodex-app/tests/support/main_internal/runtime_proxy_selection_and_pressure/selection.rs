@@ -2527,7 +2527,7 @@ fn bare_prodex_with_codex_args_defaults_to_run_command() {
 #[test]
 fn cleanup_command_does_not_default_to_run() {
     let command = parse_cli_command_from(["prodex", "cleanup"]).expect("cleanup command");
-    assert!(matches!(command, Commands::Cleanup));
+    assert!(matches!(command, Commands::Cleanup(_)));
 }
 
 #[test]

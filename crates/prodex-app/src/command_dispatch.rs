@@ -86,9 +86,9 @@ impl CommandExecute for ClaudeArgs {
     }
 }
 
-impl CommandExecute for CleanupCommand {
+impl CommandExecute for CleanupArgs {
     fn execute(self) -> Result<()> {
-        handle_cleanup()
+        handle_cleanup(self)
     }
 }
 
@@ -217,7 +217,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Doctor(command) => RoutedCommand::new(command),
         Commands::Audit(command) => RoutedCommand::new(command),
         Commands::Context(command) => RoutedCommand::new(command),
-        Commands::Cleanup => RoutedCommand::new(CleanupCommand),
+        Commands::Cleanup(command) => RoutedCommand::new(command),
         Commands::Login(command) => RoutedCommand::new(command),
         Commands::Logout(command) => RoutedCommand::new(command),
         Commands::Update(command) => RoutedCommand::new(command),

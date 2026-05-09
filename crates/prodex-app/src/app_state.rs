@@ -28,7 +28,6 @@ pub(crate) trait AppStateIoExt: Sized {
 
 impl AppStateIoExt for AppState {
     fn load_with_recovery(paths: &AppPaths) -> Result<RecoveredLoad<Self>> {
-        cleanup_stale_login_dirs(paths);
         if !paths.state_file.exists() && !state_last_good_file_path(paths).exists() {
             return Ok(RecoveredLoad {
                 value: Self::default(),
@@ -51,7 +50,6 @@ impl AppStateIoExt for AppState {
     }
 
     fn save(&self, paths: &AppPaths) -> Result<()> {
-        cleanup_stale_login_dirs(paths);
         let _lock = acquire_state_file_lock(paths)?;
         let existing = Self::load(paths)?;
         let merged = compact_app_state(

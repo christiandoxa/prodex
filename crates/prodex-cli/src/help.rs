@@ -145,6 +145,8 @@ Examples:
 pub const CLI_CLEANUP_AFTER_HELP: &str = "\
 Examples:
   prodex cleanup
+  prodex cleanup --older-than 1d
+  prodex cleanup --aggressive
 
 Notes:
-  Removes stale local artifacts and prunes Codex/Claude chat history whose last chat is older than 30 days.";
+  Removes stale local artifacts. Non-blocking automatic housekeeping already clears stale runtime logs, temp homes, stale root temp files, and dead broker artifacts. --older-than controls only orphaned managed profile homes; --aggressive is equivalent to --older-than 0d. Codex/Claude chat histories are left to the upstream runtimes.";

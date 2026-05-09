@@ -49,7 +49,10 @@ pub(crate) const ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS: i64 =
 pub(crate) const RUNTIME_PROXY_LOG_RETENTION_SECONDS: i64 =
     if cfg!(test) { 120 } else { 7 * 24 * 60 * 60 };
 pub(crate) const RUNTIME_PROXY_LOG_RETENTION_COUNT: usize = if cfg!(test) { 4 } else { 40 };
-pub(crate) const PRODEX_CHAT_HISTORY_RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
+pub(crate) const AUTO_RUNTIME_HOUSEKEEPING_INTERVAL_SECONDS: i64 =
+    if cfg!(test) { 0 } else { 6 * 60 * 60 };
+pub(crate) const AUTO_RUNTIME_HOUSEKEEPING_LOCK_FILE: &str = "runtime-housekeeping.lock";
+pub(crate) const AUTO_RUNTIME_HOUSEKEEPING_STAMP_FILE: &str = "runtime-housekeeping.last-run";
 #[cfg(test)]
 pub(crate) const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
 
