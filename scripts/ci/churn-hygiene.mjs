@@ -337,27 +337,30 @@ function mostlyOneWayChange(insertions, deletions) {
 }
 
 function structuralExtractionGroups(rows, thresholds) {
-  const largeDeletionGroups = new Set(
-    rows
-      .filter(
-        (row) =>
-          !row.binary &&
-          row.deletions > thresholds.maxFileLines &&
-          mostlyOneWayChange(row.insertions, row.deletions),
-      )
-      .map((row) => structuralGroup(row.filePath)),
-  );
-  const largeAdditionGroups = new Set(
-    rows
-      .filter(
-        (row) =>
-          !row.binary &&
-          row.insertions > thresholds.maxFileLines &&
-          mostlyOneWayChange(row.insertions, row.deletions),
-      )
-      .map((row) => structuralGroup(row.filePath)),
-  );
-  return [...largeDeletionGroups].filter((group) => largeAdditionGroups.has(group));
+  const groups = new Map();
+  for (const row of rows) {
+    if (row.binary || !mostlyOneWayChange(row.insertions, row.deletions)) {
+      continue;
+    }
+    const group = structuralGroup(row.filePath);
+    const aggregate = groups.get(group) ?? {
+      insertionLines: 0,
+      deletionLines: 0,
+      largeDeletion: false,
+    };
+    aggregate.insertionLines += row.insertions;
+    aggregate.deletionLines += row.deletions;
+    aggregate.largeDeletion ||= row.deletions > thresholds.maxFileLines;
+    groups.set(group, aggregate);
+  }
+  return [...groups.entries()]
+    .filter(
+      ([, aggregate]) =>
+        aggregate.largeDeletion &&
+        aggregate.deletionLines > thresholds.maxFileLines &&
+        aggregate.insertionLines > thresholds.maxFileLines,
+    )
+    .map(([group]) => group);
 }
 
 function structuralExtractionApplies(rows, summary, thresholds) {
