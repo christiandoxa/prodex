@@ -64,12 +64,12 @@ export const RUNTIME_SMOKE_TESTS = [
 export const RUNTIME_CI_BROAD_SHARD_FILTERS = [
   {
     id: "root-broker",
-    filter: "main_internal_tests::runtime_proxy_broker_",
+    filter: "main_internal_tests::info_and_broker::runtime_proxy_broker_",
     label: "broker",
   },
   {
     id: "root-log-paths",
-    filter: "main_internal_tests::runtime_proxy_log_paths_",
+    filter: "main_internal_tests::info_and_broker::runtime_proxy_log_paths_",
     label: "log-paths",
   },
   {

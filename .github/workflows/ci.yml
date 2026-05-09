@@ -381,8 +381,8 @@ jobs:
           - suite: root
             label: root proxy helpers
             filters: |
-              broker|main_internal_tests::runtime_proxy_broker_
-              log-paths|main_internal_tests::runtime_proxy_log_paths_
+              broker|main_internal_tests::info_and_broker::runtime_proxy_broker_
+              log-paths|main_internal_tests::info_and_broker::runtime_proxy_log_paths_
               worker-count|main_internal_tests::runtime_broker_tuning::runtime_proxy_worker_count_
               endpoint-child|main_internal_tests::runtime_broker_tuning::runtime_proxy_endpoint_child_
               claude-launch-root|main_internal_tests::claude_launch::runtime_proxy_claude_launch_
