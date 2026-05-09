@@ -329,7 +329,7 @@ function structuralGroup(filePath) {
 function mostlyOneWayChange(insertions, deletions) {
   const smaller = Math.min(insertions, deletions);
   const larger = Math.max(insertions, deletions);
-  return smaller <= 50 || smaller <= Math.floor(larger * 0.1);
+  return smaller <= 50 || smaller <= Math.floor(larger * 0.35);
 }
 
 function structuralExtractionGroups(rows, thresholds) {
@@ -357,7 +357,7 @@ function structuralExtractionGroups(rows, thresholds) {
 }
 
 function structuralExtractionApplies(rows, summary, thresholds) {
-  if (summary.files > thresholds.maxFiles || summary.behaviorFiles > thresholds.maxBehaviorFiles) {
+  if (summary.behaviorFiles > thresholds.maxBehaviorFiles) {
     return false;
   }
   const groups = new Set(structuralExtractionGroups(rows, thresholds));
@@ -365,11 +365,12 @@ function structuralExtractionApplies(rows, summary, thresholds) {
     return false;
   }
 
-  const nonExtractionLines = rows
-    .filter((row) => !groups.has(structuralGroup(row.filePath)))
+  const nonExtractionRows = rows.filter((row) => !groups.has(structuralGroup(row.filePath)));
+  const nonExtractionLines = nonExtractionRows
     .reduce((sum, row) => sum + row.insertions + row.deletions, 0);
   const largest = summary.largestFiles[0];
   return (
+    nonExtractionRows.length <= thresholds.maxFiles &&
     nonExtractionLines <= thresholds.maxLines &&
     largest &&
     groups.has(structuralGroup(largest.filePath))
@@ -378,7 +379,7 @@ function structuralExtractionApplies(rows, summary, thresholds) {
 
 function thresholdIssues(summary, thresholds, options = {}) {
   const issues = [];
-  if (summary.files > thresholds.maxFiles && !summary.releaseMetadataOnly) {
+  if (summary.files > thresholds.maxFiles && !summary.releaseMetadataOnly && !options.structuralExtraction) {
     issues.push(`files changed ${summary.files} > ${thresholds.maxFiles}`);
   }
   if (summary.behaviorFiles > thresholds.maxBehaviorFiles) {

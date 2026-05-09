@@ -7,58 +7,7 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_PRODUCTION_LINE_LIMIT = 1500;
 const DEFAULT_TEST_LINE_LIMIT = 2500;
 
-const DEFAULT_ALLOWLIST = Object.freeze([
-  {
-    file: "crates/prodex-app/src/runtime_proxy/smart_context.rs",
-    maxLines: 4059,
-    reason: "existing smart context monolith; keep capped until split",
-  },
-  {
-    file: "crates/prodex-context/src/command_output.rs",
-    maxLines: 3811,
-    reason: "existing command-output compression monolith; keep capped until split",
-  },
-  {
-    file: "crates/prodex-runtime-proxy/src/smart_context.rs",
-    maxLines: 3667,
-    reason: "existing runtime proxy smart-context monolith; keep capped until split",
-  },
-  {
-    file: "crates/prodex-runtime-store/src/lib.rs",
-    maxLines: 3004,
-    reason: "existing runtime store monolith; keep capped until split",
-  },
-  {
-    file: "crates/prodex-app/src/runtime_state_shared.rs",
-    maxLines: 2814,
-    reason: "existing runtime state monolith; keep capped until split",
-  },
-  {
-    file: "crates/prodex-app/src/runtime_proxy/websocket.rs",
-    maxLines: 1806,
-    reason: "existing websocket proxy file above production threshold; keep capped until split",
-  },
-  {
-    file: "crates/prodex-app/src/runtime_proxy/selection.rs",
-    maxLines: 1609,
-    reason: "existing runtime selection file above production threshold; keep capped until split",
-  },
-  {
-    file: "crates/prodex-app/tests/support/main_internal/runtime_proxy_selection_and_pressure/rotation.rs",
-    maxLines: 3512,
-    reason: "existing runtime rotation test support monolith; keep capped until split",
-  },
-  {
-    file: "crates/prodex-app/tests/support/main_internal/runtime_proxy_claude_and_anthropic/request_translation.rs",
-    maxLines: 3408,
-    reason: "existing request translation test support monolith; keep capped until split",
-  },
-  {
-    file: "crates/prodex-app/tests/support/main_internal/runtime_proxy_selection_and_pressure/selection.rs",
-    maxLines: 3300,
-    reason: "existing runtime selection test support monolith; keep capped until split",
-  },
-]);
+const DEFAULT_ALLOWLIST = Object.freeze([]);
 
 function envPositiveInteger(name, fallback) {
   const value = process.env[name];
@@ -151,12 +100,13 @@ function printHelp() {
       "",
       "Fails when Rust files exceed line-count limits.",
       "Production files use a lower limit; test and benchmark files use a higher limit.",
+      "Allowlist entries are ratcheted: stale entries and oversized caps fail by default.",
       "",
       "Options:",
       "  --production-lines <n>  production Rust line limit",
       "  --prod-lines <n>        alias for --production-lines",
       "  --test-lines <n>        test/benchmark Rust line limit; must exceed production limit",
-      "  --allow <path>:<n>      allow one file up to n lines; may be repeated",
+      "  --allow <path>:<n>      allow one file up to an exact current cap; may be repeated",
       "  --no-default-allowlist  ignore built-in caps for current hot spots",
       "  --warn-only             print violations but exit successfully",
       "  --json                  print machine-readable results",
@@ -232,6 +182,8 @@ async function scan(args) {
   const files = [];
   const violations = [];
   const allowlistHits = [];
+  const staleAllowlistEntries = [];
+  const seenAllowlistFiles = new Set();
 
   for (const filePath of await rustFiles()) {
     const contents = await readExistingRustFile(filePath);
@@ -245,14 +197,40 @@ async function scan(args) {
     const file = { filePath, kind, lineCount, limit };
     files.push(file);
 
+    const allowlistEntry = allowed.get(filePath);
+    if (allowlistEntry) {
+      seenAllowlistFiles.add(filePath);
+    }
+
+    if (allowlistEntry && lineCount <= limit) {
+      staleAllowlistEntries.push({
+        ...file,
+        maxLines: allowlistEntry.maxLines,
+        reason: allowlistEntry.reason,
+        type: "allowlist-under-limit",
+      });
+      continue;
+    }
+
     if (lineCount <= limit) {
       continue;
     }
 
-    const allowlistEntry = allowed.get(filePath);
-    if (allowlistEntry && lineCount <= allowlistEntry.maxLines) {
-      allowlistHits.push({ ...file, maxLines: allowlistEntry.maxLines, reason: allowlistEntry.reason });
-      continue;
+    if (allowlistEntry) {
+      if (lineCount < allowlistEntry.maxLines) {
+        staleAllowlistEntries.push({
+          ...file,
+          maxLines: allowlistEntry.maxLines,
+          reason: allowlistEntry.reason,
+          type: "allowlist-cap-stale",
+        });
+        continue;
+      }
+
+      if (lineCount <= allowlistEntry.maxLines) {
+        allowlistHits.push({ ...file, maxLines: allowlistEntry.maxLines, reason: allowlistEntry.reason });
+        continue;
+      }
     }
 
     violations.push({
@@ -263,11 +241,27 @@ async function scan(args) {
     });
   }
 
-  return { allowlistHits, files, violations };
+  for (const allowlistEntry of allowed.values()) {
+    if (seenAllowlistFiles.has(allowlistEntry.file)) {
+      continue;
+    }
+    staleAllowlistEntries.push({
+      filePath: allowlistEntry.file,
+      kind: null,
+      lineCount: null,
+      limit: null,
+      maxLines: allowlistEntry.maxLines,
+      reason: allowlistEntry.reason,
+      type: "allowlist-missing",
+    });
+  }
+
+  return { allowlistHits, files, staleAllowlistEntries, violations };
 }
 
 function printHuman(args, result) {
-  if (result.violations.length === 0) {
+  const findingCount = result.violations.length + result.staleAllowlistEntries.length;
+  if (findingCount === 0) {
     process.stdout.write(
       [
         `size guard: ok (${result.files.length} Rust file(s), ${result.allowlistHits.length} allowlist hit(s))`,
@@ -279,7 +273,7 @@ function printHuman(args, result) {
   }
 
   const prefix = args.warnOnly ? "warning" : "violation";
-  process.stderr.write(`size guard: ${result.violations.length} ${prefix}(s)\n`);
+  process.stderr.write(`size guard: ${findingCount} ${prefix}(s)\n`);
   for (const violation of result.violations) {
     if (violation.type === "allowlist-exceeded") {
       process.stderr.write(
@@ -291,8 +285,25 @@ function printHuman(args, result) {
       `${violation.filePath}: ${violation.lineCount} ${violation.kind} line(s), limit ${violation.limit}\n`,
     );
   }
+  for (const entry of result.staleAllowlistEntries) {
+    if (entry.type === "allowlist-missing") {
+      process.stderr.write(
+        `${entry.filePath}: no tracked Rust file found; remove stale allowlist entry with cap ${entry.maxLines}\n`,
+      );
+      continue;
+    }
+    if (entry.type === "allowlist-under-limit") {
+      process.stderr.write(
+        `${entry.filePath}: ${entry.lineCount} ${entry.kind} line(s), normal limit ${entry.limit}; remove stale allowlist entry with cap ${entry.maxLines}\n`,
+      );
+      continue;
+    }
+    process.stderr.write(
+      `${entry.filePath}: ${entry.lineCount} ${entry.kind} line(s), allowlist cap ${entry.maxLines}; lower cap to ${entry.lineCount} or split below normal limit ${entry.limit}\n`,
+    );
+  }
   process.stderr.write(
-    "\nSplit large files, raise the configured limit deliberately, or add a narrow allowlist cap with rationale.\n",
+    "\nSplit large files, raise the configured limit deliberately, add a narrow allowlist cap with rationale, ratchet stale caps, or remove stale allowlist entries.\n",
   );
 }
 
@@ -322,7 +333,7 @@ async function main() {
     printHuman(args, result);
   }
 
-  if (result.violations.length > 0 && !args.warnOnly) {
+  if ((result.violations.length > 0 || result.staleAllowlistEntries.length > 0) && !args.warnOnly) {
     process.exitCode = 1;
   }
 }
