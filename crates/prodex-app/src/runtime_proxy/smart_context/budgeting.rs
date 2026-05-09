@@ -1,21 +1,24 @@
 use super::*;
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct RuntimeSmartContextBudgetInput<'a> {
+    pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) body: &'a [u8],
+    pub(super) route_kind: RuntimeRouteKind,
+    pub(super) transport: RuntimeSmartContextTransport,
+    pub(super) profile_name: Option<&'a str>,
+    pub(super) exactness_guard: runtime_proxy_crate::SmartContextExactnessGuard,
+    pub(super) missing_rehydrate_refs: Vec<String>,
+    pub(super) static_context_changed: bool,
+}
+
 pub(super) fn runtime_smart_context_budget(
-    shared: &RuntimeRotationProxyShared,
-    body: &[u8],
-    route_kind: RuntimeRouteKind,
-    transport: RuntimeSmartContextTransport,
-    profile_name: Option<&str>,
-    exactness_guard: runtime_proxy_crate::SmartContextExactnessGuard,
-    missing_rehydrate_refs: Vec<String>,
-    static_context_changed: bool,
+    input: RuntimeSmartContextBudgetInput<'_>,
 ) -> RuntimeSmartContextBudget {
-    let model_name = runtime_smart_context_model_name_from_body(body);
+    let model_name = runtime_smart_context_model_name_from_body(input.body);
     let bucket_key = runtime_smart_context_token_calibration_bucket_key_with_model(
-        route_kind,
-        transport,
-        profile_name,
+        input.route_kind,
+        input.transport,
+        input.profile_name,
         model_name.as_deref(),
     );
     let (
@@ -25,7 +28,7 @@ pub(super) fn runtime_smart_context_budget(
         configured_context_window_tokens,
         recent_rewrite_safety,
         rewrite_telemetry_samples,
-    ) = runtime_smart_context_budget_inputs(shared, &bucket_key);
+    ) = runtime_smart_context_budget_inputs(input.shared, &bucket_key);
     let history = if bucket_history.is_empty() {
         global_history
     } else {
@@ -45,9 +48,9 @@ pub(super) fn runtime_smart_context_budget(
                 model_context_window_tokens: Some(model_context_window_tokens),
                 reserved_output_tokens: SMART_CONTEXT_RESERVED_OUTPUT_TOKENS,
                 current_input_tokens,
-                current_request_body_bytes: body.len(),
+                current_request_body_bytes: input.body.len(),
                 current_request_estimated_tokens: Some(
-                    runtime_proxy_crate::smart_context_estimate_tokens_from_body(body),
+                    runtime_proxy_crate::smart_context_estimate_tokens_from_body(input.body),
                 ),
                 observed_usage: history,
             },
@@ -58,11 +61,11 @@ pub(super) fn runtime_smart_context_budget(
     let available_context_tokens = accounting.available_context_tokens;
     let mut policy = runtime_proxy_crate::smart_context_adaptive_budget_policy(
         runtime_proxy_crate::SmartContextAdaptiveBudgetPolicyInput {
-            exactness_guard,
+            exactness_guard: input.exactness_guard,
             accounting,
             recent_rewrite_safety,
-            static_context_changed,
-            missing_rehydrate_refs,
+            static_context_changed: input.static_context_changed,
+            missing_rehydrate_refs: input.missing_rehydrate_refs,
         },
     );
     let telemetry_decision = runtime_proxy_crate::smart_context_rewrite_telemetry_budget_decision(

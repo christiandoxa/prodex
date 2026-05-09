@@ -14,18 +14,18 @@ fn smart_context_budget_uses_runtime_token_usage_observation() {
         },
     );
 
-    let budget = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        None,
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
 
     assert_eq!(
         budget.tier,
@@ -51,18 +51,18 @@ fn smart_context_budget_uses_configured_model_context_window() {
         },
     );
 
-    let budget = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        None,
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
 
     assert_eq!(
         budget.tier,
@@ -102,30 +102,30 @@ fn smart_context_budget_uses_matching_token_calibration_bucket() {
         )),
     );
 
-    let alpha = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        Some("alpha"),
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let alpha = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: Some("alpha"),
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
-    let beta = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Websocket,
-        RuntimeSmartContextTransport::Websocket,
-        Some("beta"),
-        runtime_proxy_crate::smart_context_exactness_guard(
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
+    let beta = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Websocket,
+        transport: RuntimeSmartContextTransport::Websocket,
+        profile_name: Some("beta"),
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
 
     assert_eq!(
         alpha.tier,
@@ -174,30 +174,30 @@ fn smart_context_budget_uses_model_specific_token_calibration_bucket() {
         ),
     );
 
-    let gpt5 = runtime_smart_context_budget(
-        &shared,
-        br#"{"model":"gpt-5","input":"small current request body payload"}"#,
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        Some("alpha"),
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let gpt5 = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: br#"{"model":"gpt-5","input":"small current request body payload"}"#,
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: Some("alpha"),
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
-    let gpt52 = runtime_smart_context_budget(
-        &shared,
-        br#"{"model":"gpt-5.2","input":"small current request body payload"}"#,
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        Some("alpha"),
-        runtime_proxy_crate::smart_context_exactness_guard(
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
+    let gpt52 = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: br#"{"model":"gpt-5.2","input":"small current request body payload"}"#,
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: Some("alpha"),
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
 
     assert_eq!(gpt5.observed_context_tokens, Some(44_000));
     assert_eq!(gpt52.observed_context_tokens, Some(56_000));
@@ -224,18 +224,18 @@ fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
         },
     );
 
-    let before = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        None,
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let before = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
     observe_runtime_smart_context_rewrite_safety(
         &shared,
         RuntimeSmartContextRewriteSafetyObservation {
@@ -243,18 +243,18 @@ fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
             saved_tokens: runtime_proxy_crate::SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS,
         },
     );
-    let after = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        None,
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let after = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
 
     assert_eq!(
         before.tier,
@@ -308,18 +308,18 @@ fn smart_context_budget_loads_persisted_recent_safe_rewrite() {
         Some(64_000),
         Some(artifact_path.clone()),
     );
-    let budget = runtime_smart_context_budget(
-        &fresh_shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        None,
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &fresh_shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
 
     assert_eq!(
         budget.tier,
@@ -385,18 +385,18 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
     })
     .unwrap();
 
-    let budget = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        None,
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
 
     assert_eq!(
         budget.tier,
@@ -443,18 +443,18 @@ fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
     })
     .unwrap();
 
-    let budget = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        None,
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
     assert_eq!(
         budget.policy.max_inline_tool_output_bytes,
         (32 * 1024) * 9 / 10
@@ -475,18 +475,18 @@ fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
             });
     })
     .unwrap();
-    let fallback_budget = runtime_smart_context_budget(
-        &shared,
-        b"small current request body payload",
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        None,
-        runtime_proxy_crate::smart_context_exactness_guard(
+    let fallback_budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: b"small current request body payload",
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
             runtime_proxy_crate::SmartContextExactnessInput::default(),
         ),
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
     assert_eq!(
         fallback_budget.policy.max_inline_tool_output_bytes,
         (32 * 1024) * 9 / 10

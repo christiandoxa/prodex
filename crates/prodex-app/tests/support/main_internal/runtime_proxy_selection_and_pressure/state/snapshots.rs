@@ -187,25 +187,29 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         response_profile_bindings: BTreeMap::new(),
         session_profile_bindings: BTreeMap::new(),
     };
-    schedule_runtime_state_save(
+    schedule_runtime_state_save_request(
         &shared,
-        first_state.clone(),
-        runtime_continuation_store_from_app_state(&first_state),
-        BTreeMap::from([(
+        RuntimeStateSaveRequest::from_snapshot(
+            RuntimeStateSaveSnapshot {
+                paths: paths.clone(),
+                state: first_state.clone(),
+                continuations: runtime_continuation_store_from_app_state(&first_state),
+                profile_scores: BTreeMap::from([(
             runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
             RuntimeProfileHealth {
                 score: RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
                 updated_at: now - 20,
             },
         )]),
-        BTreeMap::new(),
-        RuntimeProfileBackoffs {
+                usage_snapshots: BTreeMap::new(),
+                backoffs: RuntimeProfileBackoffs {
             retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
             transport_backoff_until: BTreeMap::new(),
             route_circuit_open_until: BTreeMap::new(),
         },
-        paths.clone(),
-        "first",
+            },
+            "first",
+        ),
     );
     let second_state = AppState {
         active_profile: Some("second".to_string()),
@@ -226,19 +230,22 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             },
         )]),
     };
-    schedule_runtime_state_save(
+    schedule_runtime_state_save_request(
         &shared,
-        second_state.clone(),
-        runtime_continuation_store_from_app_state(&second_state),
-        BTreeMap::from([(
+        RuntimeStateSaveRequest::from_snapshot(
+            RuntimeStateSaveSnapshot {
+                paths: paths.clone(),
+                state: second_state.clone(),
+                continuations: runtime_continuation_store_from_app_state(&second_state),
+                profile_scores: BTreeMap::from([(
             runtime_profile_route_health_key("second", RuntimeRouteKind::Compact),
             RuntimeProfileHealth {
                 score: RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
                 updated_at: now - 10,
             },
         )]),
-        BTreeMap::new(),
-        RuntimeProfileBackoffs {
+                usage_snapshots: BTreeMap::new(),
+                backoffs: RuntimeProfileBackoffs {
             retry_backoff_until: BTreeMap::new(),
             transport_backoff_until: BTreeMap::from([(
                 runtime_profile_transport_backoff_key("second", RuntimeRouteKind::Responses),
@@ -246,8 +253,9 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             )]),
             route_circuit_open_until: BTreeMap::new(),
         },
-        paths.clone(),
-        "second",
+            },
+            "second",
+        ),
     );
 
     let persisted = wait_for_state(&paths, |state| {

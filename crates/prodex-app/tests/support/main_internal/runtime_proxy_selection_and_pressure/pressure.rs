@@ -463,15 +463,19 @@ fn runtime_state_save_accepts_legacy_backoffs_without_last_good_backup() {
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
 
-    schedule_runtime_state_save(
+    schedule_runtime_state_save_request(
         &shared,
-        state.clone(),
-        runtime_continuation_store_from_app_state(&state),
-        BTreeMap::new(),
-        BTreeMap::new(),
-        RuntimeProfileBackoffs::default(),
-        paths.clone(),
-        "legacy_backoffs",
+        RuntimeStateSaveRequest::from_snapshot(
+            RuntimeStateSaveSnapshot {
+                paths: paths.clone(),
+                state: state.clone(),
+                continuations: runtime_continuation_store_from_app_state(&state),
+                profile_scores: BTreeMap::new(),
+                usage_snapshots: BTreeMap::new(),
+                backoffs: RuntimeProfileBackoffs::default(),
+            },
+            "legacy_backoffs",
+        ),
     );
     wait_for_runtime_background_queues_idle();
 

@@ -213,19 +213,19 @@ fn smart_context_persisted_static_section_fingerprints_dedupe_fresh_start() {
 fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
     let shared = smart_context_test_shared("rewrite-telemetry");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
-    let budget = runtime_smart_context_budget(
-        &shared,
-        br#"{"input":"test"}"#,
-        RuntimeRouteKind::Responses,
-        RuntimeSmartContextTransport::Http,
-        Some("main"),
-        runtime_proxy_crate::SmartContextExactnessGuard {
+    let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: br#"{"input":"test"}"#,
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: Some("main"),
+        exactness_guard: runtime_proxy_crate::SmartContextExactnessGuard {
             decision: runtime_proxy_crate::SmartContextExactnessDecision::Allow,
             reasons: Vec::new(),
         },
-        Vec::new(),
-        false,
-    );
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
 
     for index in 0..(SMART_CONTEXT_REWRITE_TELEMETRY_HISTORY_LIMIT + 2) {
         runtime_smart_context_log(
