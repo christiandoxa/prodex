@@ -94,7 +94,20 @@ async function setupFixtureRepo() {
     ["# Changelog", "", "## 0.1.0 - 2026-01-01", "", "- Initial fixture.", ""].join("\n"),
   );
   await writeFile(fixtureRoot, "README.md", "Fixture README\n");
-  await writeFile(fixtureRoot, "QUICKSTART.md", "Fixture quickstart\n");
+  await writeFile(
+    fixtureRoot,
+    "QUICKSTART.md",
+    [
+      "Fixture quickstart",
+      "",
+      "The current local version in this repo is `0.1.0`:",
+      "",
+      "```bash",
+      "npm install -g @christiandoxa/prodex@0.1.0",
+      "```",
+      "",
+    ].join("\n"),
+  );
   await writeFile(fixtureRoot, "src/lib.rs", "pub fn fixture() -> &'static str { \"fixture\" }\n");
   await writeFile(
     fixtureRoot,
@@ -114,7 +127,37 @@ async function buildFixtures(fixtureRoot) {
   await appendFile(fixtureRoot, "src/lib.rs", "pub fn mixed_release_change() {}\n");
   const mixedRelease = await commit(fixtureRoot, "chore(release): prepare 0.2.0");
 
+  await appendFile(fixtureRoot, "README.md", "\n## Feature docs\n\nCodex environment setup notes.\n");
+  await appendFile(fixtureRoot, "QUICKSTART.md", "\n## Feature docs\n\nCodex environment setup notes.\n");
+  const docsFeatureEdit = await commit(fixtureRoot, "docs: document codex environments");
+
+  await writeFile(
+    fixtureRoot,
+    "QUICKSTART.md",
+    [
+      "Fixture quickstart",
+      "",
+      "The current local version in this repo is `0.2.0`:",
+      "",
+      "```bash",
+      "npm install -g @christiandoxa/prodex@0.2.0",
+      "```",
+      "",
+    ].join("\n"),
+  );
+  const docsVersionEdit = await commit(fixtureRoot, "docs: update install version");
+
   const emptyRelease = await commit(fixtureRoot, "chore(release): release 0.2.0", { allowEmpty: true });
+
+  await writeFile(
+    fixtureRoot,
+    "CHANGELOG.md",
+    ["# Changelog", "", "## 0.2.0 - Unreleased", "", "- Refresh-only fixture.", ""].join("\n"),
+  );
+  const changelogOnlyNoise = await commit(fixtureRoot, "docs(changelog): refresh budget test split notes");
+
+  await appendFile(fixtureRoot, "scripts/npm/changelog.mjs", "export const fixture = true;\n");
+  const changelogScriptFix = await commit(fixtureRoot, "fix(changelog): preserve release rendering");
 
   const duplicateBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
   await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.3.0 - 2026-01-02\n\n- First release marker.\n");
@@ -126,6 +169,10 @@ async function buildFixtures(fixtureRoot) {
   const taggedParent = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
   const taggedRelease = await commit(fixtureRoot, "chore(release): release 0.4.0");
   await git(fixtureRoot, ["tag", "0.4.0", taggedRelease]);
+
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.4.1 - 2026-01-03\n\n- Bad tagged release marker.\n");
+  const badSubjectTaggedRelease = await commit(fixtureRoot, "feat: tag release 0.4.1 incorrectly");
+  await git(fixtureRoot, ["tag", "0.4.1", badSubjectTaggedRelease]);
 
   const normalBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
   await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.5.0 - Unreleased\n\n- Prepare marker.\n");
@@ -147,10 +194,34 @@ async function buildFixtures(fixtureRoot) {
       expectedExit: 1,
     },
     {
+      name: "docs feature edits pass version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", docsFeatureEdit],
+      expectedExit: 0,
+    },
+    {
+      name: "docs version snippet edits fail version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", docsVersionEdit],
+      expectedExit: 1,
+    },
+    {
       name: "empty release commit fails empty commit guard",
       script: "release-empty-commit-guard.mjs",
       args: ["--commit", emptyRelease],
       expectedExit: 1,
+    },
+    {
+      name: "changelog-only refresh fails noise guard",
+      script: "changelog-noise-guard.mjs",
+      args: ["--commit", changelogOnlyNoise],
+      expectedExit: 1,
+    },
+    {
+      name: "changelog script fix passes noise guard",
+      script: "changelog-noise-guard.mjs",
+      args: ["--commit", changelogScriptFix],
+      expectedExit: 0,
     },
     {
       name: "duplicate release range fails duplicate guard",
@@ -160,10 +231,16 @@ async function buildFixtures(fixtureRoot) {
       dependsOn: [duplicateOne],
     },
     {
-      name: "tagged release has changelog section",
+      name: "tagged release has changelog section and release subject",
       script: "release-tag-changelog-guard.mjs",
       args: ["--rev", "0.4.0"],
       expectedExit: 0,
+    },
+    {
+      name: "tagged release with non-release subject fails tag guard",
+      script: "release-tag-changelog-guard.mjs",
+      args: ["--rev", "0.4.1"],
+      expectedExit: 1,
     },
     {
       name: "current tagged range has matching changelog state",

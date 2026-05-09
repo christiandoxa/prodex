@@ -4,6 +4,7 @@ import { runStepsSerial } from "./main-internal-test-runner.mjs";
 import { requiredValue } from "./release-guard-common.mjs";
 
 const RANGE_GUARDS = Object.freeze([
+  "changelog-noise-guard.mjs",
   "release-metadata-only-guard.mjs",
   "version-metadata-release-guard.mjs",
   "release-empty-commit-guard.mjs",

@@ -62,6 +62,7 @@ export const PATH_GROUPS = Object.freeze({
     exact: [
       "package.json",
       ".github/workflows/ci.yml",
+      "scripts/ci/changelog-noise-guard.mjs",
       "scripts/ci/preflight.mjs",
       "scripts/ci/prepush.mjs",
       "scripts/ci/release-hygiene.mjs",

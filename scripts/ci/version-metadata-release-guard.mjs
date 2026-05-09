@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {
+  isVersionMetadataChangePath,
   isReleaseLikeMessage,
-  isVersionMetadataPath,
   selectedChanges,
 } from "./release-guard-common.mjs";
 
@@ -121,8 +121,8 @@ function assertSingleSelector(args) {
 }
 
 function evaluateChange(change) {
-  const metadataFiles = change.files.filter(isVersionMetadataPath);
-  const nonMetadataFiles = change.files.filter((filePath) => !isVersionMetadataPath(filePath));
+  const metadataFiles = change.files.filter((filePath) => isVersionMetadataChangePath(change, filePath));
+  const nonMetadataFiles = change.files.filter((filePath) => !isVersionMetadataChangePath(change, filePath));
   const releaseLike = isReleaseLikeMessage(change.message);
   const reasons = [];
   if (metadataFiles.length > 0 && !releaseLike) {
@@ -178,7 +178,7 @@ async function main() {
   }
 
   assertSingleSelector(args);
-  const { selector, changes } = await selectedChanges(args);
+  const { selector, changes } = await selectedChanges(args, { includeChangedLines: true });
   const results = changes.map(evaluateChange);
   if (args.json) {
     process.stdout.write(`${JSON.stringify({ selector, results }, null, 2)}\n`);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {
+  isReleaseMetadataChangePath,
   isReleaseLikeMessage,
-  isReleaseMetadataPath,
   selectedChanges,
 } from "./release-guard-common.mjs";
 
@@ -126,8 +126,8 @@ function assertSingleSelector(args) {
 }
 
 function evaluateChange(change, args) {
-  const metadataFiles = change.files.filter(isReleaseMetadataPath);
-  const nonMetadataFiles = change.files.filter((filePath) => !isReleaseMetadataPath(filePath));
+  const metadataFiles = change.files.filter((filePath) => isReleaseMetadataChangePath(change, filePath));
+  const nonMetadataFiles = change.files.filter((filePath) => !isReleaseMetadataChangePath(change, filePath));
   const releaseLike = args.assumeRelease || isReleaseLikeMessage(change.message);
   return {
     label: change.label,
@@ -147,7 +147,7 @@ async function selectedMetadataOnlyChanges(args) {
         message: undefined,
         messageFile: undefined,
       },
-      { diffFilter: "ACMR" },
+      { diffFilter: "ACMR", includeChangedLines: true },
     );
   }
 
@@ -157,11 +157,11 @@ async function selectedMetadataOnlyChanges(args) {
         ...args,
         messageFile: undefined,
       },
-      { diffFilter: "ACMR" },
+      { diffFilter: "ACMR", includeChangedLines: true },
     );
   }
 
-  return selectedChanges(args, { diffFilter: "ACMR" });
+  return selectedChanges(args, { diffFilter: "ACMR", includeChangedLines: true });
 }
 
 function printHuman(selector, results) {

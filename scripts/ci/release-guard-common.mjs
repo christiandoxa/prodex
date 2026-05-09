@@ -13,8 +13,6 @@ export const VERSION_METADATA_PATTERNS = Object.freeze([
   "npm/package-lock.json",
   "npm/prodex/package-lock.json",
   "npm/platforms/*/package-lock.json",
-  "README.md",
-  "QUICKSTART.md",
   "CHANGELOG.md",
 ]);
 
@@ -23,14 +21,19 @@ export const RELEASE_METADATA_PATTERNS = Object.freeze([
   "Cargo.lock",
   "CHANGELOG.md",
   "crates/*/Cargo.toml",
-  "README.md",
-  "QUICKSTART.md",
   "package-lock.json",
   "npm/package-lock.json",
   "npm/prodex/package.json",
   "npm/prodex/package-lock.json",
   "npm/platforms/*/package.json",
   "npm/platforms/*/package-lock.json",
+]);
+
+export const DOC_METADATA_PATHS = Object.freeze(["README.md", "QUICKSTART.md"]);
+
+export const DOC_VERSION_METADATA_LINE_PATTERNS = Object.freeze([
+  /\bThe current local version in this repo is\b/,
+  /\bnpm install -g @christiandoxa\/prodex@v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\b/,
 ]);
 
 export const RELEASE_MESSAGE_PATTERNS = Object.freeze([
@@ -111,6 +114,28 @@ export function isVersionMetadataPath(filePath) {
 
 export function isReleaseMetadataPath(filePath) {
   return fileMatchesAnyPattern(filePath, RELEASE_METADATA_PATTERNS);
+}
+
+export function isDocMetadataPath(filePath) {
+  return DOC_METADATA_PATHS.includes(normalizeGitPath(filePath));
+}
+
+export function isDocVersionMetadataLine(line) {
+  return DOC_VERSION_METADATA_LINE_PATTERNS.some((pattern) => pattern.test(line));
+}
+
+export function isDocVersionMetadataChange(change, filePath) {
+  const normalized = normalizeGitPath(filePath);
+  const changedLines = change.changedLinesByFile?.get?.(normalized) ?? [];
+  return changedLines.some((line) => isDocVersionMetadataLine(line.text));
+}
+
+export function isVersionMetadataChangePath(change, filePath) {
+  return isVersionMetadataPath(filePath) || (isDocMetadataPath(filePath) && isDocVersionMetadataChange(change, filePath));
+}
+
+export function isReleaseMetadataChangePath(change, filePath) {
+  return isReleaseMetadataPath(filePath) || (isDocMetadataPath(filePath) && isDocVersionMetadataChange(change, filePath));
 }
 
 export function normalizeVersionTag(tag) {
@@ -272,6 +297,61 @@ export async function commitFiles(rev) {
     .map(normalizeGitPath);
 }
 
+export function parseChangedLinesByFile(diff) {
+  const changedLinesByFile = new Map();
+  let currentFile = null;
+  let oldFile = null;
+
+  for (const line of diff.split(/\r?\n/)) {
+    if (line.startsWith("--- ")) {
+      const rawPath = line.slice(4).trim();
+      oldFile = rawPath === "/dev/null" ? null : normalizeGitPath(rawPath.replace(/^a\//, ""));
+      continue;
+    }
+
+    if (line.startsWith("+++ ")) {
+      const rawPath = line.slice(4).trim();
+      currentFile = rawPath === "/dev/null" ? oldFile : normalizeGitPath(rawPath.replace(/^b\//, ""));
+      if (currentFile && !changedLinesByFile.has(currentFile)) {
+        changedLinesByFile.set(currentFile, []);
+      }
+      continue;
+    }
+
+    if (!currentFile || line.startsWith("+++") || line.startsWith("---")) {
+      continue;
+    }
+
+    const marker = line[0];
+    if (marker !== "+" && marker !== "-") {
+      continue;
+    }
+
+    changedLinesByFile.get(currentFile).push({
+      type: marker === "+" ? "add" : "delete",
+      text: line.slice(1),
+    });
+  }
+
+  return changedLinesByFile;
+}
+
+export async function commitChangedLines(rev, options = {}) {
+  const { stdout } = await git(
+    [
+      "show",
+      "--format=",
+      "--no-ext-diff",
+      "--no-color",
+      "--unified=0",
+      ...diffFilterArgs(options.diffFilter),
+      rev,
+    ],
+    { cwd: repoRoot },
+  );
+  return parseChangedLinesByFile(stdout);
+}
+
 export async function rangeCommits(range) {
   const { stdout } = await git(["rev-list", "--reverse", range], { cwd: repoRoot });
   return stdout.split(/\r?\n/).filter(Boolean);
@@ -325,6 +405,31 @@ export async function changedFilesForSynthetic(args, options = {}) {
   return [...new Set(files)].sort();
 }
 
+export async function changedLinesForSynthetic(args, options = {}) {
+  const diffArgs = args.staged
+    ? ["diff", "--cached", "--no-ext-diff", "--no-color", "--unified=0", ...diffFilterArgs(options.diffFilter)]
+    : ["diff", "--no-ext-diff", "--no-color", "--unified=0", ...diffFilterArgs(options.diffFilter)];
+  const { stdout } = await git(diffArgs, { cwd: repoRoot });
+  const changedLinesByFile = parseChangedLinesByFile(stdout);
+
+  if (args.includeUntracked) {
+    const untracked = await git(["ls-files", "--others", "--exclude-standard"], { cwd: repoRoot });
+    for (const filePath of untracked.stdout.split(/\r?\n/).filter(Boolean).map(normalizeGitPath)) {
+      try {
+        const contents = await fs.readFile(path.resolve(repoRoot, filePath), "utf8");
+        changedLinesByFile.set(
+          filePath,
+          contents.split(/\r?\n/).map((line) => ({ type: "add", text: line })),
+        );
+      } catch {
+        // Ignore unreadable untracked files; path-level classification still applies.
+      }
+    }
+  }
+
+  return changedLinesByFile;
+}
+
 export function diffFilterArgs(diffFilter) {
   return diffFilter ? [`--diff-filter=${diffFilter}`] : [];
 }
@@ -368,6 +473,7 @@ export async function selectedChanges(args, options = {}) {
         label: rev,
         message: override ?? (await commitMessage(rev)),
         files: await commitFiles(rev),
+        changedLinesByFile: options.includeChangedLines ? await commitChangedLines(rev, options) : undefined,
       });
     }
     return { selector: range, changes };
@@ -382,6 +488,7 @@ export async function selectedChanges(args, options = {}) {
           label,
           message: override ?? "",
           files: await changedFilesForSynthetic(args, options),
+          changedLinesByFile: options.includeChangedLines ? await changedLinesForSynthetic(args, options) : undefined,
         },
       ],
     };
@@ -395,6 +502,7 @@ export async function selectedChanges(args, options = {}) {
         label: rev,
         message: override ?? (await commitMessage(rev)),
         files: await commitFiles(rev),
+        changedLinesByFile: options.includeChangedLines ? await commitChangedLines(rev, options) : undefined,
       },
     ],
   };

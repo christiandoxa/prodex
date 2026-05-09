@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 import {
+  commitSummary,
   hasChangelogHeading,
   rangeCommits,
   requiredValue,
@@ -81,7 +82,8 @@ function printHelp() {
     [
       "Usage: node scripts/ci/release-tag-changelog-guard.mjs [options]",
       "",
-      "Fails when a version tag points at a revision but CHANGELOG.md lacks the matching release section.",
+      "Fails when a version tag points at a revision but CHANGELOG.md lacks the matching release section",
+      "or the tagged commit subject is not chore(release): release <version>.",
       "",
       "Options:",
       "  --rev <rev>             revision to inspect; default HEAD",
@@ -128,7 +130,19 @@ async function selectedCommits(selector) {
 }
 
 async function versionTagsAtCommit(commit) {
-  return (await versionTagsAtRev(commit)).map(({ tag, version }) => ({ commit, tag, version }));
+  const tags = await versionTagsAtRev(commit);
+  if (tags.length === 0) {
+    return [];
+  }
+
+  const summary = await commitSummary(commit);
+  return tags.map(({ tag, version }) => ({
+    commit,
+    tag,
+    version,
+    subject: summary.subject,
+    shortHash: summary.shortHash,
+  }));
 }
 
 async function versionTagsAtSelectedCommits(commits) {
@@ -145,16 +159,21 @@ async function check(args) {
   const tags = await versionTagsAtSelectedCommits(commits);
   const changelogPath = path.resolve(repoRoot, args.changelog);
   const changelog = tags.length > 0 ? await fs.readFile(changelogPath, "utf8") : "";
-  const checked = tags.map(({ commit, tag, version }) => ({
+  const checked = tags.map(({ commit, tag, version, subject, shortHash }) => ({
     commit,
+    shortHash,
     tag,
     version,
+    expectedSubject: `chore(release): release ${version}`,
+    subject,
+    subjectOk: subject === `chore(release): release ${version}`,
     found: hasChangelogHeading(changelog, version),
   }));
   const missing = checked.filter(({ found }) => !found);
+  const invalidSubjects = checked.filter(({ subjectOk }) => !subjectOk);
 
   return {
-    ok: missing.length === 0,
+    ok: missing.length === 0 && invalidSubjects.length === 0,
     selector: selector.kind,
     label: selector.label,
     rev: selector.kind === "rev" ? args.rev : undefined,
@@ -165,6 +184,7 @@ async function check(args) {
     changelog: path.relative(repoRoot, changelogPath) || ".",
     tags: checked,
     missing,
+    invalidSubjects,
   };
 }
 
@@ -180,8 +200,16 @@ function printHuman(result) {
     return;
   }
 
-  const missing = result.missing.map(({ version }) => version).join(", ");
-  process.stderr.write(`release-tag-changelog-guard: missing changelog section for ${missing}\n`);
+  if (result.missing.length > 0) {
+    const missing = result.missing.map(({ version }) => version).join(", ");
+    process.stderr.write(`release-tag-changelog-guard: missing changelog section for ${missing}\n`);
+  }
+  if (result.invalidSubjects.length > 0) {
+    const invalid = result.invalidSubjects
+      .map(({ tag, expectedSubject, subject }) => `${tag}: expected "${expectedSubject}", got "${subject}"`)
+      .join("; ");
+    process.stderr.write(`release-tag-changelog-guard: invalid tagged commit subject: ${invalid}\n`);
+  }
 }
 
 async function main() {

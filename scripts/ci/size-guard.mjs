@@ -19,11 +19,6 @@ const DEFAULT_ALLOWLIST = Object.freeze([
     reason: "existing command-output compression monolith; keep capped until split",
   },
   {
-    file: "crates/prodex-runtime-mem/src/lib.rs",
-    maxLines: 3155,
-    reason: "existing runtime memory-mode monolith; keep capped until split",
-  },
-  {
     file: "crates/prodex-runtime-proxy/src/smart_context.rs",
     maxLines: 3667,
     reason: "existing runtime proxy smart-context monolith; keep capped until split",
