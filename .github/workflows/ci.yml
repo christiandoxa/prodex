@@ -122,6 +122,9 @@ jobs:
       - name: Enforce Rust file size guard
         run: npm run ci:size-guard
 
+      - name: Enforce Rust allow attribute guard
+        run: npm run ci:allow-guard
+
       - name: Enforce crate boundaries
         run: npm run ci:crate-boundary
 

@@ -12,10 +12,6 @@ pub(crate) const DEFAULT_CODEX_DIR: &str = ".codex";
 pub(crate) const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 pub(crate) const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
-#[allow(unused_imports)]
-pub(crate) use runtime_anthropic_crate::{
-    RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH, RUNTIME_PROXY_ANTHROPIC_MODELS_PATH,
-};
 pub(crate) const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
 #[allow(dead_code)]
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";

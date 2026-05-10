@@ -37,6 +37,40 @@ fn scheduler_prefers_rested_profile_within_near_optimal_band() {
 }
 
 #[test]
+fn scheduler_preserves_order_index_tiebreaker_for_identical_candidates() {
+    let state = AppState {
+        active_profile: None,
+        profiles: BTreeMap::new(),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let usage = usage_with_main_windows(96, 18_000, 96, 604_800);
+    let candidates = vec![
+        ReadyProfileCandidate {
+            name: "later".to_string(),
+            usage: usage.clone(),
+            order_index: 2,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+        ReadyProfileCandidate {
+            name: "earlier".to_string(),
+            usage,
+            order_index: 1,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+    ];
+
+    let ranked = schedule_ready_profile_candidates(candidates, &state, None);
+    assert_eq!(ranked[0].name, "earlier");
+    assert_eq!(ranked[1].name, "later");
+}
+
+#[test]
 fn scheduler_allows_switch_when_preferred_profile_is_in_cooldown() {
     let now = Local::now().timestamp();
     let state = AppState {

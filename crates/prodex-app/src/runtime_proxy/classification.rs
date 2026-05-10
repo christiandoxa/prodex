@@ -1,9 +1,8 @@
 use super::*;
 
-#[allow(unused_imports)]
+#[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
-    RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeHttpErrorPhase, RuntimeHttpErrorPolicy,
-    runtime_http_error_action_label, runtime_http_error_class_label, runtime_http_error_policy,
+    RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeHttpErrorPhase, runtime_http_error_policy,
 };
 pub(crate) use runtime_proxy_crate::{
     is_runtime_realtime_call_path, is_runtime_realtime_websocket_path,

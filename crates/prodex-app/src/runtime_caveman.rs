@@ -1,5 +1,5 @@
 use super::*;
-#[allow(unused_imports)]
+#[cfg(test)]
 pub(crate) use prodex_caveman_assets::PRODEX_CAVEMAN_FULL_ASSETS_ENV;
 
 pub(crate) struct CavemanLaunchStrategy {

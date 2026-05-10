@@ -344,6 +344,11 @@ async function buildSteps(paths) {
         command: "node",
         args: ["scripts/ci/size-guard.mjs"],
       });
+      addStep(steps, "allow-attribute-guard", {
+        label: "allow-attribute-guard",
+        command: "node",
+        args: ["scripts/ci/allow-attribute-guard.mjs"],
+      });
     }
 
     if (isReleaseGuardFixturesRelevantPath(filePath)) {

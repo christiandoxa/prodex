@@ -1,0 +1,359 @@
+use super::*;
+
+#[test]
+fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let source_dir = ProfileCommandsTestDir::new("export-source");
+    let source_paths = profile_commands_test_paths(&source_dir.path);
+    let main_home = source_paths.managed_profiles_root.join("main");
+    let second_home = source_paths.managed_profiles_root.join("second");
+    profile_commands_write_profile_auth(&main_home, "main");
+    profile_commands_write_profile_auth(&second_home, "second");
+
+    let source_state = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: false,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        ..AppState::default()
+    };
+
+    let selected_names = vec!["main".to_string(), "second".to_string()];
+    let payload =
+        build_profile_export_payload(&source_state, &selected_names).expect("payload builds");
+    let encoded =
+        serialize_profile_export_payload(&payload, None).expect("plain export should encode");
+    let decoded = prodex_profile_export::decode_profile_export_envelope(
+        serde_json::from_slice(&encoded).expect("encoded bundle should parse"),
+        || unreachable!("plain export should not request a password"),
+    )
+    .expect("plain export should decode");
+
+    let target_dir = ProfileCommandsTestDir::new("export-target");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let mut target_state = AppState::default();
+    let commit = import_profile_export_payload(&target_paths, &mut target_state, &decoded)
+        .expect("import should succeed");
+
+    assert_eq!(
+        commit.imported_names,
+        vec!["main".to_string(), "second".to_string()]
+    );
+    assert_eq!(target_state.active_profile.as_deref(), Some("second"));
+
+    let imported_main = target_state
+        .profiles
+        .get("main")
+        .expect("main profile should exist");
+    assert!(imported_main.managed);
+    assert_eq!(imported_main.email.as_deref(), Some("main@example.com"));
+    assert_eq!(
+        fs::read_to_string(imported_main.codex_home.join("auth.json"))
+            .expect("imported auth should exist"),
+        profile_commands_sample_auth_json("main")
+    );
+
+    let imported_second = target_state
+        .profiles
+        .get("second")
+        .expect("second profile should exist");
+    assert!(imported_second.managed);
+    assert_eq!(imported_second.email.as_deref(), Some("second@example.com"));
+    assert_eq!(
+        fs::read_to_string(imported_second.codex_home.join("auth.json"))
+            .expect("imported auth should exist"),
+        profile_commands_sample_auth_json("second")
+    );
+}
+
+#[test]
+fn profile_export_round_trip_encrypted_requires_matching_password() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: Some("main@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: profile_commands_sample_auth_json("main"),
+        }],
+    };
+
+    let encoded = serialize_profile_export_payload(&payload, Some("secret-password"))
+        .expect("encrypted export should encode");
+    let envelope: ProfileExportEnvelope =
+        serde_json::from_slice(&encoded).expect("encrypted bundle should parse");
+    let decoded = match envelope {
+        ProfileExportEnvelope::Encrypted {
+            format,
+            version,
+            cipher,
+            kdf,
+            iterations,
+            salt_base64,
+            nonce_base64,
+            ciphertext_base64,
+        } => {
+            validate_profile_export_header(&format, version).expect("header should validate");
+            assert_eq!(cipher, PROFILE_EXPORT_CIPHER);
+            assert_eq!(kdf, PROFILE_EXPORT_KDF);
+            let salt = base64::engine::general_purpose::STANDARD
+                .decode(salt_base64)
+                .expect("salt should decode");
+            let nonce = base64::engine::general_purpose::STANDARD
+                .decode(nonce_base64)
+                .expect("nonce should decode");
+            let ciphertext = base64::engine::general_purpose::STANDARD
+                .decode(ciphertext_base64)
+                .expect("ciphertext should decode");
+            let key = derive_profile_export_key("secret-password", &salt, iterations);
+            let cipher = Aes256GcmSiv::new_from_slice(&key).expect("cipher should init");
+            let plaintext = cipher
+                .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+                .expect("ciphertext should decrypt");
+            serde_json::from_slice::<ProfileExportPayload>(&plaintext)
+                .expect("payload should parse")
+        }
+        _ => panic!("expected encrypted bundle"),
+    };
+
+    assert_eq!(decoded.active_profile.as_deref(), Some("main"));
+    assert_eq!(decoded.profiles.len(), 1);
+    assert_eq!(
+        decoded.profiles[0].auth_json,
+        profile_commands_sample_auth_json("main")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn profile_export_bundle_is_written_with_private_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let target_dir = ProfileCommandsTestDir::new("export-bundle-permissions");
+    let output_path = target_dir.path.join("bundle.json");
+
+    prodex_profile_export::write_profile_export_bundle(&output_path, b"{\"secret\":true}")
+        .expect("profile export bundle should be written");
+
+    let mode = fs::metadata(&output_path)
+        .expect("profile export bundle should exist")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn profile_import_copilot_reads_provider_metadata_from_logged_in_cli_state() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let copilot_home = sandbox_dir.path.join("home/.copilot");
+    fs::create_dir_all(&copilot_home).expect("copilot home should be created");
+
+    let server = ProfileCommandsOneShotHttpServer::start_json(serde_json::json!({
+        "login": "copilot-user",
+        "access_type_sku": "copilot_standalone_seat_quota",
+        "copilot_plan": "business",
+        "endpoints": {
+            "api": "https://api.example.githubcopilot.test"
+        }
+    }));
+    let host = server.base_url.clone();
+    let account_key = format!("{host}:copilot-user");
+    fs::write(
+        copilot_home.join("config.json"),
+        serde_json::json!({
+            "lastLoggedInUser": {
+                "host": host,
+                "login": "copilot-user"
+            },
+            "copilotTokens": {
+                account_key: "copilot-token"
+            }
+        })
+        .to_string(),
+    )
+    .expect("copilot config should be written");
+
+    handle_import_profiles(ImportProfileArgs {
+        path: PathBuf::from("copilot"),
+        name: Some("copilot-main".to_string()),
+        activate: true,
+    })
+    .expect("copilot import should succeed");
+
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let state = AppState::load(&paths).expect("state should load");
+    let profile = state
+        .profiles
+        .get("copilot-main")
+        .expect("copilot profile should exist");
+    assert!(profile.managed);
+    assert_eq!(state.active_profile.as_deref(), Some("copilot-main"));
+    assert_eq!(profile.email.as_deref(), Some("copilot-user"));
+    assert!(profile.codex_home.exists());
+    match &profile.provider {
+        ProfileProvider::Copilot {
+            host,
+            login,
+            api_url,
+            access_type_sku,
+            copilot_plan,
+        } => {
+            assert_eq!(host, &server.base_url);
+            assert_eq!(login, "copilot-user");
+            assert_eq!(api_url, "https://api.example.githubcopilot.test");
+            assert_eq!(
+                access_type_sku.as_deref(),
+                Some("copilot_standalone_seat_quota")
+            );
+            assert_eq!(copilot_plan.as_deref(), Some("business"));
+        }
+        other => panic!("expected copilot provider, got {other:?}"),
+    }
+}
+
+#[test]
+fn copilot_quota_lookup_reads_provider_quota_for_the_selected_account() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let copilot_home = sandbox_dir.path.join("home/.copilot");
+    fs::create_dir_all(&copilot_home).expect("copilot home should be created");
+
+    let server = ProfileCommandsOneShotHttpServer::start_json(serde_json::json!({
+        "login": "copilot-user",
+        "access_type_sku": "free_limited_copilot",
+        "copilot_plan": "individual",
+        "limited_user_quotas": {
+            "chat": 450,
+            "completions": 4000
+        },
+        "monthly_quotas": {
+            "chat": 500,
+            "completions": 4000
+        },
+        "limited_user_reset_date": "2026-05-09",
+        "endpoints": {
+            "api": "https://api.individual.githubcopilot.com"
+        }
+    }));
+    let host = server.base_url.clone();
+    let account_key = format!("{host}:copilot-user");
+    fs::write(
+        copilot_home.join("config.json"),
+        serde_json::json!({
+            "lastLoggedInUser": {
+                "host": host,
+                "login": "copilot-user"
+            },
+            "copilotTokens": {
+                account_key: "copilot-token"
+            }
+        })
+        .to_string(),
+    )
+    .expect("copilot config should be written");
+
+    let info = fetch_copilot_user_info_for_account(&server.base_url, "copilot-user")
+        .expect("copilot quota lookup should succeed");
+
+    assert_eq!(info.login.as_deref(), Some("copilot-user"));
+    assert_eq!(info.copilot_plan.as_deref(), Some("individual"));
+    assert_eq!(
+        info.access_type_sku.as_deref(),
+        Some("free_limited_copilot")
+    );
+    assert_eq!(info.limited_user_quotas.get("chat").copied(), Some(450));
+    assert_eq!(info.monthly_quotas.get("chat").copied(), Some(500));
+    assert_eq!(info.limited_user_reset_date.as_deref(), Some("2026-05-09"));
+}
+
+#[test]
+fn profile_export_round_trip_preserves_copilot_provider_metadata() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let source_dir = ProfileCommandsTestDir::new("copilot-export-source");
+    let source_paths = profile_commands_test_paths(&source_dir.path);
+    let copilot_home = source_paths.managed_profiles_root.join("copilot-main");
+    create_codex_home_if_missing(&copilot_home).expect("copilot home should exist");
+
+    let source_state = AppState {
+        active_profile: Some("copilot-main".to_string()),
+        profiles: BTreeMap::from([(
+            "copilot-main".to_string(),
+            ProfileEntry {
+                codex_home: copilot_home,
+                managed: true,
+                email: Some("copilot-user".to_string()),
+                provider: ProfileProvider::Copilot {
+                    host: "https://github.com".to_string(),
+                    login: "copilot-user".to_string(),
+                    api_url: "https://api.example.githubcopilot.test".to_string(),
+                    access_type_sku: Some("copilot_standalone_seat_quota".to_string()),
+                    copilot_plan: Some("business".to_string()),
+                },
+            },
+        )]),
+        ..AppState::default()
+    };
+
+    let payload = build_profile_export_payload(&source_state, &["copilot-main".to_string()])
+        .expect("payload should build");
+    assert_eq!(payload.profiles.len(), 1);
+    assert!(payload.profiles[0].auth_json.is_empty());
+
+    let target_dir = ProfileCommandsTestDir::new("copilot-export-target");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let mut target_state = AppState::default();
+    import_profile_export_payload(&target_paths, &mut target_state, &payload)
+        .expect("copilot import should succeed");
+
+    let imported = target_state
+        .profiles
+        .get("copilot-main")
+        .expect("copilot profile should be imported");
+    assert_eq!(imported.email.as_deref(), Some("copilot-user"));
+    assert!(!imported.codex_home.join("auth.json").exists());
+    match &imported.provider {
+        ProfileProvider::Copilot {
+            host,
+            login,
+            api_url,
+            access_type_sku,
+            copilot_plan,
+        } => {
+            assert_eq!(host, "https://github.com");
+            assert_eq!(login, "copilot-user");
+            assert_eq!(api_url, "https://api.example.githubcopilot.test");
+            assert_eq!(
+                access_type_sku.as_deref(),
+                Some("copilot_standalone_seat_quota")
+            );
+            assert_eq!(copilot_plan.as_deref(), Some("business"));
+        }
+        other => panic!("expected copilot provider, got {other:?}"),
+    }
+}

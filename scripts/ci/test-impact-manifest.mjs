@@ -22,6 +22,7 @@ export const UPSTREAM_COMPAT_SCRIPT_PATHS = Object.freeze([
 export const PACKAGE_SCRIPT_ALIASES = Object.freeze({
   "ci:changed": "node scripts/ci/changed-tests.mjs",
   "test:changed": "node scripts/ci/changed-tests.mjs",
+  "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",
   "ci:size-guard": "node scripts/ci/size-guard.mjs",
   "ci:churn-hygiene-fixtures": "node scripts/ci/churn-hygiene-fixture-tests.mjs",
   "ci:release-hygiene": "node scripts/ci/release-hygiene.mjs",
@@ -56,7 +57,12 @@ export const PATH_GROUPS = Object.freeze({
     prefixes: ["npm/", "scripts/npm/"],
   },
   sizeGuardRelevant: {
-    exact: ["package.json", "scripts/ci/guard-common.mjs", "scripts/ci/size-guard.mjs"],
+    exact: [
+      "package.json",
+      "scripts/ci/allow-attribute-guard.mjs",
+      "scripts/ci/guard-common.mjs",
+      "scripts/ci/size-guard.mjs",
+    ],
     suffixes: [".rs"],
   },
   releaseGuardRelevant: {

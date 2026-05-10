@@ -54,7 +54,7 @@ function printHelp() {
       "  - release changelog freshness",
       "  - upstream compatibility baseline guard",
       "  - churn hygiene over upstream merge-base..HEAD when available",
-      "  - Rust source file size guard",
+      "  - Rust source file size and allow attribute guards",
       "  - cargo fmt --check",
       "  - npm/docs version sync idempotence",
       "",
@@ -138,6 +138,11 @@ async function prepushSteps(args) {
       label: "size-guard",
       command: "node",
       args: ["scripts/ci/size-guard.mjs"],
+    },
+    {
+      label: "allow-attribute-guard",
+      command: "node",
+      args: ["scripts/ci/allow-attribute-guard.mjs"],
     },
     {
       label: "fmt-check",
