@@ -535,6 +535,9 @@ function printHuman(plan, summary, thresholds, issues, subjectIssues, check, opt
   }
   if (issues.length > 0) {
     process.stdout.write(`  threshold warnings: ${issues.join("; ")}\n`);
+    process.stdout.write(
+      "  guidance: split broad structural work into narrower commits or reduce non-extraction churn\n",
+    );
   }
   if (subjectIssues.length > 0) {
     process.stdout.write("  subject warnings:\n");
