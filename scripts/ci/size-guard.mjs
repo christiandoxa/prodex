@@ -4,8 +4,8 @@ import path from "node:path";
 import { git, normalizeGitPath, parsePositiveInteger } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
-const DEFAULT_PRODUCTION_LINE_LIMIT = 900;
-const DEFAULT_TEST_LINE_LIMIT = 1000;
+const DEFAULT_PRODUCTION_LINE_LIMIT = 895;
+const DEFAULT_TEST_LINE_LIMIT = 925;
 
 const DEFAULT_ALLOWLIST = Object.freeze([]);
 

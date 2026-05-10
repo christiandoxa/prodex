@@ -32,6 +32,7 @@
     "test:runtime-smoke": "node scripts/ci/test-serial.mjs --suite runtime-smoke",
     "test:serial": "node scripts/ci/test-serial.mjs",
     "ci:changed": "node scripts/ci/changed-tests.mjs",
+    "ci:install-hooks": "git config core.hooksPath scripts/git-hooks",
     "ci:prepush": "node scripts/ci/prepush.mjs",
     "ci:preflight": "node scripts/ci/preflight.mjs",
     "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",

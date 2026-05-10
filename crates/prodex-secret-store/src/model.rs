@@ -20,7 +20,6 @@ impl SecretLocation {
         Self::File(path.into())
     }
 
-    #[allow(dead_code)]
     pub fn auth_json(codex_home: impl AsRef<Path>) -> Self {
         Self::File(codex_home.as_ref().join("auth.json"))
     }
@@ -33,7 +32,6 @@ impl SecretLocation {
         }
     }
 
-    #[allow(dead_code)]
     pub fn is_file(&self) -> bool {
         matches!(self, Self::File(_))
     }
@@ -46,7 +44,6 @@ pub enum SecretValue {
 }
 
 impl SecretValue {
-    #[allow(dead_code)]
     pub fn text(value: impl Into<String>) -> Self {
         Self::Text(value.into())
     }
@@ -56,7 +53,6 @@ impl SecretValue {
         Self::Bytes(value.into())
     }
 
-    #[allow(dead_code)]
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Self::Text(value) => Some(value.as_str()),
@@ -121,12 +117,10 @@ pub enum SecretBackendKind {
 }
 
 impl SecretBackendKind {
-    #[allow(dead_code)]
     pub fn file() -> Self {
         Self::File
     }
 
-    #[allow(dead_code)]
     pub fn keyring() -> Self {
         Self::Keyring
     }
@@ -225,7 +219,6 @@ impl<B> SecretManager<B> {
         Self { backend }
     }
 
-    #[allow(dead_code)]
     pub fn backend(&self) -> &B {
         &self.backend
     }

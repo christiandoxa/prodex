@@ -138,7 +138,6 @@ pub fn parse_identity_from_auth_json(raw_auth_json: &str) -> Result<ProfileIdent
     parse_identity_from_stored_auth(&stored_auth)
 }
 
-#[allow(dead_code)]
 pub fn parse_email_from_auth_json(raw_auth_json: &str) -> Result<Option<String>> {
     Ok(parse_identity_from_auth_json(raw_auth_json)?.email)
 }
@@ -190,7 +189,6 @@ pub fn parse_identity_from_id_token(raw_jwt: &str) -> Result<ProfileIdentity> {
     })
 }
 
-#[allow(dead_code)]
 pub fn parse_email_from_id_token(raw_jwt: &str) -> Result<Option<String>> {
     Ok(parse_identity_from_id_token(raw_jwt)?.email)
 }

@@ -77,11 +77,6 @@ pub(in crate::smart_context) fn smart_context_artifact_marker_line(
     )
 }
 
-#[allow(dead_code)]
-pub(in crate::smart_context) fn smart_context_legacy_artifact_ref(id: &str) -> String {
-    format!("prodex-artifact:{id}")
-}
-
 pub(in crate::smart_context) fn smart_context_short_artifact_label(id: &str) -> &str {
     id.strip_prefix("sc:").unwrap_or(id)
 }

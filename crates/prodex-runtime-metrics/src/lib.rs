@@ -655,7 +655,6 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
     }
 }
 
-#[allow(dead_code)]
 pub fn format_runtime_broker_snapshot_summary(snapshot: &RuntimeBrokerSnapshot) -> String {
     format!(
         "broker_key={} listen_addr={} profile={} active_requests={} limits={}/{}/{}/{} degraded_profiles={} degraded_routes={}",
