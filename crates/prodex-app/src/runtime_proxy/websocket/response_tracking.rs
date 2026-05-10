@@ -1,5 +1,7 @@
 use super::*;
+mod commit;
 mod precommit;
+pub(crate) use commit::*;
 pub(crate) use precommit::*;
 
 pub(crate) fn attempt_runtime_websocket_request(
@@ -372,58 +374,26 @@ pub(crate) fn attempt_runtime_websocket_request(
                 }
 
                 if !committed {
-                    runtime_set_upstream_websocket_io_timeout(
-                        &mut upstream_socket,
-                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
-                    )
-                    .context("failed to restore runtime websocket idle timeout")?;
-                    remember_runtime_session_id(
-                        shared,
-                        profile_name,
-                        request_session_id,
-                        RuntimeRouteKind::Websocket,
-                    )?;
-                    remember_runtime_turn_state(
-                        shared,
-                        profile_name,
-                        upstream_turn_state.as_deref(),
-                        RuntimeRouteKind::Websocket,
-                    )?;
-                    let _ = commit_runtime_proxy_profile_selection_with_policy(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Websocket,
-                        promote_committed_profile,
-                    )?;
-                    remember_runtime_prompt_cache_profile(
-                        shared,
-                        profile_name,
-                        request_prompt_cache_key,
-                        RuntimeRouteKind::Websocket,
-                    );
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=websocket committed profile={profile_name}"
-                        ),
-                    );
-                    committed = true;
                     for frame in &buffered_precommit_text_frames {
                         committed_response_ids.extend(frame.response_ids.iter().cloned());
                     }
-                    forward_runtime_proxy_buffered_websocket_text_frames(
+                    commit_runtime_websocket_attempt(RuntimeWebsocketCommitRequest {
+                        request_id,
                         local_socket,
-                        &mut buffered_precommit_text_frames,
-                        RuntimeWebsocketResponseBindingContext {
-                            shared,
-                            profile_name,
-                            request_previous_response_id,
-                            request_session_id,
-                            request_turn_state,
-                            response_turn_state: upstream_turn_state.as_deref(),
-                        },
-                        &mut previous_response_owner_recorded,
-                    )?;
+                        upstream_socket: &mut upstream_socket,
+                        shared,
+                        profile_name,
+                        request_previous_response_id,
+                        request_session_id,
+                        request_turn_state,
+                        response_turn_state: upstream_turn_state.as_deref(),
+                        promote_committed_profile,
+                        request_prompt_cache_key,
+                        buffered_precommit_text_frames: &mut buffered_precommit_text_frames,
+                        previous_response_owner_recorded: &mut previous_response_owner_recorded,
+                        log_event: "committed",
+                    })?;
+                    committed = true;
                     if promoted_precommit_hold {
                         continue;
                     }
@@ -546,55 +516,23 @@ pub(crate) fn attempt_runtime_websocket_request(
                     .context("failed to restore runtime websocket upstream timeout")?;
                 }
                 if !committed {
-                    runtime_set_upstream_websocket_io_timeout(
-                        &mut upstream_socket,
-                        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
-                    )
-                    .context("failed to restore runtime websocket idle timeout")?;
-                    remember_runtime_session_id(
-                        shared,
-                        profile_name,
-                        request_session_id,
-                        RuntimeRouteKind::Websocket,
-                    )?;
-                    remember_runtime_turn_state(
-                        shared,
-                        profile_name,
-                        upstream_turn_state.as_deref(),
-                        RuntimeRouteKind::Websocket,
-                    )?;
-                    let _ = commit_runtime_proxy_profile_selection_with_policy(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Websocket,
-                        promote_committed_profile,
-                    )?;
-                    remember_runtime_prompt_cache_profile(
-                        shared,
-                        profile_name,
-                        request_prompt_cache_key,
-                        RuntimeRouteKind::Websocket,
-                    );
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=websocket committed_binary profile={profile_name}"
-                        ),
-                    );
-                    committed = true;
-                    forward_runtime_proxy_buffered_websocket_text_frames(
+                    commit_runtime_websocket_attempt(RuntimeWebsocketCommitRequest {
+                        request_id,
                         local_socket,
-                        &mut buffered_precommit_text_frames,
-                        RuntimeWebsocketResponseBindingContext {
-                            shared,
-                            profile_name,
-                            request_previous_response_id,
-                            request_session_id,
-                            request_turn_state,
-                            response_turn_state: upstream_turn_state.as_deref(),
-                        },
-                        &mut previous_response_owner_recorded,
-                    )?;
+                        upstream_socket: &mut upstream_socket,
+                        shared,
+                        profile_name,
+                        request_previous_response_id,
+                        request_session_id,
+                        request_turn_state,
+                        response_turn_state: upstream_turn_state.as_deref(),
+                        promote_committed_profile,
+                        request_prompt_cache_key,
+                        buffered_precommit_text_frames: &mut buffered_precommit_text_frames,
+                        previous_response_owner_recorded: &mut previous_response_owner_recorded,
+                        log_event: "committed_binary",
+                    })?;
+                    committed = true;
                 }
                 local_socket
                     .send(WsMessage::Binary(payload))
