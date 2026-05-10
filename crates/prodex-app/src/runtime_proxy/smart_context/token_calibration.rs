@@ -1,12 +1,11 @@
 use super::*;
-use anyhow::{Context, Result};
+use crate::runtime_background::{
+    runtime_load_json_file_or_default, runtime_save_merged_json_file,
+    schedule_runtime_smart_context_token_calibration_save_job,
+};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::thread;
-use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct RuntimeSmartContextTokenCalibrationObservation {
@@ -95,25 +94,6 @@ struct RuntimeSmartContextPersistedTokenCalibrationBucketKey {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     transport: Option<String>,
 }
-
-#[derive(Debug, Clone)]
-struct RuntimeSmartContextTokenCalibrationSaveJob {
-    path: PathBuf,
-    snapshot: RuntimeSmartContextPersistedTokenCalibration,
-    log_path: PathBuf,
-    reason: String,
-    queued_at: Instant,
-    ready_at: Instant,
-}
-
-struct RuntimeSmartContextTokenCalibrationSaveQueue {
-    pending: Mutex<BTreeMap<PathBuf, RuntimeSmartContextTokenCalibrationSaveJob>>,
-    wake: Condvar,
-}
-
-static RUNTIME_SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_QUEUE: OnceLock<
-    Arc<RuntimeSmartContextTokenCalibrationSaveQueue>,
-> = OnceLock::new();
 
 impl From<RuntimeSmartContextPersistedTokenUsage> for RuntimeTokenUsage {
     fn from(value: RuntimeSmartContextPersistedTokenUsage) -> Self {
@@ -239,12 +219,6 @@ impl From<RuntimeSmartContextPersistedStaticSectionFingerprint>
     }
 }
 
-impl prodex_runtime_state::RuntimeScheduledSaveJob for RuntimeSmartContextTokenCalibrationSaveJob {
-    fn ready_at(&self) -> Instant {
-        self.ready_at
-    }
-}
-
 pub(super) fn runtime_smart_context_token_calibration_path(artifact_path: &Path) -> PathBuf {
     let mut path = artifact_path.to_path_buf();
     let file_name = artifact_path
@@ -320,7 +294,7 @@ pub(super) fn schedule_runtime_smart_context_token_calibration_save(
     }
 
     if cfg!(test) {
-        match runtime_smart_context_save_token_calibration_snapshot(&path, &snapshot) {
+        match runtime_smart_context_save_token_calibration_snapshot(&path, snapshot.clone()) {
             Ok(()) => runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
@@ -351,27 +325,16 @@ pub(super) fn schedule_runtime_smart_context_token_calibration_save(
         return;
     }
 
-    let queue = runtime_smart_context_token_calibration_save_queue();
-    let queued_at = Instant::now();
-    let ready_at = queued_at + Duration::from_millis(SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS);
-    let mut pending = queue
-        .pending
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    pending.insert(
+    let sample_count = snapshot.token_calibration_history.len();
+    let save_snapshot = snapshot;
+    let backlog = schedule_runtime_smart_context_token_calibration_save_job(
         path.clone(),
-        RuntimeSmartContextTokenCalibrationSaveJob {
-            path,
-            snapshot,
-            log_path: shared.log_path.clone(),
-            reason: reason.to_string(),
-            queued_at,
-            ready_at,
-        },
+        shared.log_path.clone(),
+        reason.to_string(),
+        sample_count,
+        SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS,
+        move |path| runtime_smart_context_save_token_calibration_snapshot(path, save_snapshot),
     );
-    let backlog = pending.len();
-    drop(pending);
-    queue.wake.notify_one();
 
     runtime_proxy_log(
         shared,
@@ -389,138 +352,29 @@ pub(super) fn schedule_runtime_smart_context_token_calibration_save(
     );
 }
 
-fn runtime_smart_context_token_calibration_save_queue()
--> Arc<RuntimeSmartContextTokenCalibrationSaveQueue> {
-    Arc::clone(
-        RUNTIME_SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_QUEUE.get_or_init(|| {
-            let queue = Arc::new(RuntimeSmartContextTokenCalibrationSaveQueue {
-                pending: Mutex::new(BTreeMap::new()),
-                wake: Condvar::new(),
-            });
-            let worker_queue = Arc::clone(&queue);
-            thread::spawn(move || {
-                runtime_smart_context_token_calibration_save_worker_loop(worker_queue)
-            });
-            queue
-        }),
-    )
-}
-
-fn runtime_smart_context_token_calibration_save_worker_loop(
-    queue: Arc<RuntimeSmartContextTokenCalibrationSaveQueue>,
-) {
-    loop {
-        let job = runtime_smart_context_next_token_calibration_save_job(&queue);
-        let RuntimeSmartContextTokenCalibrationSaveJob {
-            path,
-            snapshot,
-            log_path,
-            reason,
-            queued_at,
-            ready_at: _,
-        } = job;
-        match runtime_smart_context_save_token_calibration_snapshot(&path, &snapshot) {
-            Ok(()) => runtime_proxy_log_to_path(
-                &log_path,
-                &runtime_proxy_structured_log_message(
-                    "smart_context_token_calibration_save_ok",
-                    [
-                        runtime_proxy_log_field("reason", reason.as_str()),
-                        runtime_proxy_log_field(
-                            "lag_ms",
-                            queued_at.elapsed().as_millis().to_string(),
-                        ),
-                        runtime_proxy_log_field(
-                            "samples",
-                            snapshot.token_calibration_history.len().to_string(),
-                        ),
-                    ],
-                ),
-            ),
-            Err(err) => runtime_proxy_log_to_path(
-                &log_path,
-                &runtime_proxy_structured_log_message(
-                    "smart_context_token_calibration_save_error",
-                    [
-                        runtime_proxy_log_field("reason", reason.as_str()),
-                        runtime_proxy_log_field(
-                            "lag_ms",
-                            queued_at.elapsed().as_millis().to_string(),
-                        ),
-                        runtime_proxy_log_field("stage", "write"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
-                    ],
-                ),
-            ),
-        }
-        runtime_allocator_trim_best_effort();
-    }
-}
-
-fn runtime_smart_context_next_token_calibration_save_job(
-    queue: &RuntimeSmartContextTokenCalibrationSaveQueue,
-) -> RuntimeSmartContextTokenCalibrationSaveJob {
-    let mut pending = queue
-        .pending
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    loop {
-        if let Some(path) = pending
-            .iter()
-            .filter(|(_, job)| job.ready_at <= Instant::now())
-            .map(|(path, _)| path.clone())
-            .next()
-        {
-            if let Some(job) = pending.remove(&path) {
-                return job;
-            }
-            continue;
-        }
-        let wait = pending
-            .values()
-            .map(|job| job.ready_at.saturating_duration_since(Instant::now()))
-            .min()
-            .unwrap_or_else(|| Duration::from_secs(60));
-        let (next_pending, _) = queue
-            .wake
-            .wait_timeout(pending, wait)
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        pending = next_pending;
-    }
-}
-
 fn runtime_smart_context_save_token_calibration_snapshot(
     path: &Path,
-    snapshot: &RuntimeSmartContextPersistedTokenCalibration,
+    snapshot: RuntimeSmartContextPersistedTokenCalibration,
 ) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let _lock = crate::runtime_store::acquire_json_file_lock(path)?;
-    let existing = runtime_smart_context_load_token_calibration_path(path);
-    let merged =
-        runtime_smart_context_merge_persisted_token_calibration(existing, snapshot.clone());
-    let bytes = serde_json::to_vec(&merged).context("failed to encode token calibration")?;
-    fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))
+    runtime_save_merged_json_file(
+        path,
+        snapshot,
+        |calibration: &RuntimeSmartContextPersistedTokenCalibration| {
+            calibration.version == SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION
+        },
+        runtime_smart_context_merge_persisted_token_calibration,
+    )
 }
 
 fn runtime_smart_context_load_token_calibration_path(
     path: &Path,
 ) -> RuntimeSmartContextPersistedTokenCalibration {
-    let Ok(bytes) = fs::read(path) else {
-        return RuntimeSmartContextPersistedTokenCalibration::default();
-    };
-    let Ok(calibration) =
-        serde_json::from_slice::<RuntimeSmartContextPersistedTokenCalibration>(&bytes)
-    else {
-        return RuntimeSmartContextPersistedTokenCalibration::default();
-    };
-    if calibration.version == SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION {
-        calibration
-    } else {
-        RuntimeSmartContextPersistedTokenCalibration::default()
-    }
+    runtime_load_json_file_or_default(
+        path,
+        |calibration: &RuntimeSmartContextPersistedTokenCalibration| {
+            calibration.version == SMART_CONTEXT_TOKEN_CALIBRATION_PERSISTENCE_VERSION
+        },
+    )
 }
 
 fn runtime_smart_context_merge_persisted_token_calibration(

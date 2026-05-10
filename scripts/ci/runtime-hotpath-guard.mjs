@@ -68,24 +68,6 @@ const ALLOWLIST = Object.freeze([
       "bounded local rewrite worker pool created during launch, outside request commit path",
   },
   {
-    name: "smart-context-token-calibration-save-worker",
-    file: "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs",
-    id: "blocking-thread-spawn",
-    pattern: /\bthread::spawn\s*\(/,
-    maxHits: 1,
-    reason:
-      "single process-wide token calibration save worker; request path only queues debounced persistence work",
-  },
-  {
-    name: "smart-context-token-calibration-save-io",
-    file: "crates/prodex-app/src/runtime_proxy/smart_context/token_calibration.rs",
-    id: "blocking-disk-io",
-    pattern: /\bfs::(?:create_dir_all|read|write)\s*\(/,
-    maxHits: 3,
-    reason:
-      "debounced token calibration persistence performed by the background save worker, outside request and stream commit paths",
-  },
-  {
     name: "runtime-websocket-tcp-dns-bounded-executor-threads",
     file: "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor.rs",
     id: "blocking-thread-builder-spawn",
