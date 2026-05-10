@@ -145,6 +145,11 @@ async function prepushSteps(args) {
       args: ["scripts/ci/allow-attribute-guard.mjs"],
     },
     {
+      label: "env-mutation-guard",
+      command: "node",
+      args: ["scripts/ci/env-mutation-guard.mjs"],
+    },
+    {
       label: "fmt-check",
       command: "cargo",
       args: ["fmt", "--check"],

@@ -82,6 +82,9 @@ mod git_noisy;
 #[path = "lib/success_summary.rs"]
 mod success_summary;
 
+#[path = "lib/success_summary_tools.rs"]
+mod success_summary_tools;
+
 #[path = "lib/search_log.rs"]
 mod search_log;
 

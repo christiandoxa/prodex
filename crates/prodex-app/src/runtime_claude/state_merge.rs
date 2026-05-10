@@ -17,15 +17,3 @@ pub(crate) fn prepare_runtime_proxy_claude_config_dir(
 ) -> Result<PathBuf> {
     prodex_runtime_claude::prepare_runtime_proxy_claude_config_dir(&paths.root, codex_home, managed)
 }
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn prepare_runtime_proxy_claude_import_target(target_dir: &Path) -> Result<()> {
-    prodex_runtime_claude::prepare_runtime_proxy_claude_import_target(target_dir)
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn maybe_import_runtime_proxy_claude_legacy_home(target_dir: &Path) -> Result<()> {
-    prodex_runtime_claude::maybe_import_runtime_proxy_claude_legacy_home(target_dir)
-}

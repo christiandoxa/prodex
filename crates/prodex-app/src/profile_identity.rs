@@ -171,17 +171,6 @@ fn collect_profile_identities(state: &mut AppState) -> Vec<(String, ProfileIdent
     discovered
 }
 
-#[allow(dead_code)]
-pub(crate) fn find_profile_by_email(state: &mut AppState, email: &str) -> Result<Option<String>> {
-    find_profile_by_identity(
-        state,
-        &ProfileIdentity {
-            email: Some(email.to_string()),
-            account_id: None,
-        },
-    )
-}
-
 pub(crate) fn unique_profile_name_for_email(
     paths: &AppPaths,
     state: &AppState,

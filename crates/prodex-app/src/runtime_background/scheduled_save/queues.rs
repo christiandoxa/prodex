@@ -35,7 +35,7 @@ pub(crate) fn runtime_state_save_queue_backlog() -> usize {
         .len()
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn runtime_state_save_queue_active() -> usize {
     runtime_state_save_queue().active.load(Ordering::SeqCst)
 }
@@ -48,7 +48,7 @@ pub(crate) fn runtime_continuation_journal_queue_backlog() -> usize {
         .len()
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn runtime_continuation_journal_queue_active() -> usize {
     runtime_continuation_journal_save_queue()
         .active

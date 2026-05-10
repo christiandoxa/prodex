@@ -2,14 +2,14 @@ use super::*;
 
 #[cfg(test)]
 pub(crate) use prodex_app_reports::ready_profile_sort_key;
+#[cfg(test)]
+pub(crate) use prodex_app_reports::schedule_ready_profile_candidates_with_view;
 pub(crate) use prodex_app_reports::{
-    ProfileSelectionRead, ProfileSelectionView, ReadyProfileRuntimeSortKey,
-    RuntimeProfileSelectionCatalog, RuntimeProfileSelectionCatalogView,
-    RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry,
-    RuntimeSelectionProfileEntry, active_profile_selection_order_with_view,
-    merge_run_preflight_reports_with_current_first, profile_in_run_selection_cooldown_with_view,
-    profile_rotation_order_with_view, ready_profile_runtime_sort_key_with_view,
-    run_profile_probe_is_ready, schedule_ready_profile_candidates_with_view,
+    ProfileSelectionRead, ProfileSelectionView, RuntimeProfileSelectionCatalog,
+    RuntimeProfileSelectionCatalogView, RuntimeRouteSelectionCatalog,
+    RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry, RuntimeSelectionProfileEntry,
+    active_profile_selection_order_with_view, merge_run_preflight_reports_with_current_first,
+    profile_rotation_order_with_view, run_profile_probe_is_ready,
 };
 
 pub(crate) fn app_state_profile_selection_view(
@@ -138,7 +138,7 @@ pub(crate) fn ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn schedule_ready_profile_candidates(
     candidates: Vec<ReadyProfileCandidate>,
     state: &AppState,
@@ -148,36 +148,6 @@ pub(crate) fn schedule_ready_profile_candidates(
         candidates,
         app_state_profile_selection_view(state),
         preferred_profile,
-    )
-}
-
-#[allow(dead_code)]
-pub(crate) fn ready_profile_runtime_sort_key(
-    candidate: &ReadyProfileCandidate,
-    state: &AppState,
-    best_provider_priority: usize,
-    best_total_pressure: i64,
-    now: i64,
-) -> ReadyProfileRuntimeSortKey {
-    ready_profile_runtime_sort_key_with_view(
-        candidate,
-        app_state_profile_selection_view(state),
-        best_provider_priority,
-        best_total_pressure,
-        now,
-    )
-}
-
-#[allow(dead_code)]
-pub(crate) fn profile_in_run_selection_cooldown(
-    state: &AppState,
-    profile_name: &str,
-    now: i64,
-) -> bool {
-    profile_in_run_selection_cooldown_with_view(
-        app_state_profile_selection_view(state),
-        profile_name,
-        now,
     )
 }
 
@@ -249,15 +219,4 @@ pub(crate) fn find_ready_profiles(
 
 pub(crate) fn profile_rotation_order(state: &AppState, current_profile: &str) -> Vec<String> {
     profile_rotation_order_with_view(app_state_profile_selection_view(state), current_profile)
-}
-
-#[allow(dead_code)]
-fn provider_aware_profile_order<I>(state: &AppState, names: I) -> Vec<String>
-where
-    I: IntoIterator<Item = String>,
-{
-    prodex_app_reports::provider_aware_profile_order_with_view(
-        app_state_profile_selection_view(state),
-        names,
-    )
 }

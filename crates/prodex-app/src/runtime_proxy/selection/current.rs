@@ -1,6 +1,6 @@
 use super::*;
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,

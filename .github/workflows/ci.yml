@@ -125,6 +125,9 @@ jobs:
       - name: Enforce Rust allow attribute guard
         run: npm run ci:allow-guard
 
+      - name: Enforce Rust env mutation guard
+        run: npm run ci:env-mutation-guard
+
       - name: Enforce crate boundaries
         run: npm run ci:crate-boundary
 

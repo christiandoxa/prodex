@@ -33,7 +33,7 @@ pub(super) fn ensure_runtime_mem_prodex_observer_for_home(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn runtime_mem_prodex_claude_wrapper_path(paths: &AppPaths) -> PathBuf {
     prodex_runtime_mem::runtime_mem_prodex_claude_wrapper_path_from_root(&paths.root)
 }

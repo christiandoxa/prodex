@@ -91,27 +91,11 @@ pub(crate) fn runtime_route_kind_label(route_kind: RuntimeRouteKind) -> &'static
     prodex_runtime_store::runtime_route_kind_label(route_kind)
 }
 
-#[allow(dead_code)]
-pub(crate) fn runtime_route_coupled_kinds(
-    route_kind: RuntimeRouteKind,
-) -> &'static [RuntimeRouteKind] {
-    prodex_runtime_store::runtime_route_coupled_kinds(route_kind)
-}
-
 pub(crate) fn runtime_profile_effective_health_score(
     entry: &RuntimeProfileHealth,
     now: i64,
 ) -> u32 {
     prodex_runtime_store::runtime_profile_effective_health_score(entry, now)
-}
-
-#[allow(dead_code)]
-pub(crate) fn runtime_profile_effective_score(
-    entry: &RuntimeProfileHealth,
-    now: i64,
-    decay_seconds: i64,
-) -> u32 {
-    prodex_runtime_store::runtime_profile_effective_score(entry, now, decay_seconds)
 }
 
 pub(crate) fn runtime_profile_effective_health_score_from_map(

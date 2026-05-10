@@ -108,7 +108,7 @@ pub(super) fn prepare_runtime_proxy_claude_caveman_plugin_dir(paths: &AppPaths) 
     prodex_caveman_assets::install_claude_caveman_plugin(&paths.root)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn runtime_proxy_claude_session_id(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_proxy_request_header_value(&request.headers, "x-claude-code-session-id")
         .or_else(|| runtime_proxy_request_header_value(&request.headers, "session_id"))

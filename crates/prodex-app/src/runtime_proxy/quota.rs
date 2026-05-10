@@ -53,16 +53,6 @@ pub(crate) fn update_runtime_profile_probe_cache_with_usage(
     apply_runtime_profile_probe_result(shared, profile_name, auth, Ok(usage))
 }
 
-#[allow(dead_code)]
-pub(crate) fn runtime_quota_window_summary(
-    usage: &UsageResponse,
-    label: &str,
-) -> RuntimeQuotaWindowSummary {
-    prodex_runtime_quota::runtime_quota_window_summary(
-        prodex_runtime_quota::runtime_quota_window_observation(usage, label),
-    )
-}
-
 pub(crate) fn runtime_quota_summary_blocking_reset_at(
     summary: RuntimeQuotaSummary,
     route_kind: RuntimeRouteKind,
@@ -212,46 +202,6 @@ pub(crate) fn runtime_profile_codex_home(
         .profiles
         .get(profile_name)
         .map(|profile| profile.codex_home.clone()))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn runtime_has_alternative_quota_compatible_profile(
-    shared: &RuntimeRotationProxyShared,
-    profile_name: &str,
-) -> Result<bool> {
-    let allow_disk_fallback = !runtime_proxy_sync_probe_pressure_mode_active_for_route(
-        shared,
-        RuntimeRouteKind::Responses,
-    );
-    let fallback_profiles = {
-        let runtime = shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        let mut fallback_profiles = Vec::new();
-        for (name, profile) in &runtime.state.profiles {
-            if name == profile_name {
-                continue;
-            }
-            if runtime_profile_cached_auth_summary_for_selection(
-                runtime.profile_usage_auth.get(name).cloned(),
-                runtime.profile_probe_cache.get(name).cloned(),
-            )
-            .is_some_and(|summary| summary.quota_compatible)
-            {
-                return Ok(true);
-            }
-            fallback_profiles.push((profile.codex_home.clone(), profile.provider.clone()));
-        }
-        fallback_profiles
-    };
-    if !allow_disk_fallback {
-        return Ok(false);
-    }
-    Ok(fallback_profiles
-        .into_iter()
-        .any(|(codex_home, provider)| provider.auth_summary(&codex_home).quota_compatible))
 }
 
 pub(crate) fn runtime_has_route_eligible_quota_fallback(

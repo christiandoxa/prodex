@@ -31,37 +31,6 @@ pub(crate) fn compact_app_state(state: AppState, now: i64) -> AppState {
     prodex_state::compact_app_state_with_policy(state, now, app_state_compaction_policy())
 }
 
-#[allow(dead_code)]
-pub(crate) fn prune_last_run_selection(
-    selections: &mut BTreeMap<String, i64>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-) {
-    prodex_state::prune_last_run_selection_with_retention(
-        selections,
-        profiles,
-        now,
-        APP_STATE_LAST_RUN_RETENTION_SECONDS,
-    );
-}
-
-#[allow(dead_code)]
-pub(crate) fn prune_profile_bindings_for_housekeeping(
-    bindings: &mut BTreeMap<String, ResponseProfileBinding>,
-    profiles: &BTreeMap<String, ProfileEntry>,
-    now: i64,
-    retention_seconds: i64,
-    max_entries: usize,
-) {
-    prodex_state::prune_profile_bindings_for_housekeeping(
-        bindings,
-        profiles,
-        now,
-        retention_seconds,
-        max_entries,
-    );
-}
-
 pub(crate) fn runtime_continuation_status_is_terminal(
     status: &RuntimeContinuationBindingStatus,
 ) -> bool {

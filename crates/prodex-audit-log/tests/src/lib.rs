@@ -1,16 +1,30 @@
 use super::*;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 struct EnvGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
     key: &'static str,
     previous: Option<std::ffi::OsString>,
 }
 
 impl EnvGuard {
     fn set(key: &'static str, value: &str) -> Self {
+        let lock = env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous = env::var_os(key);
         unsafe { env::set_var(key, value) };
-        Self { key, previous }
+        Self {
+            _lock: lock,
+            key,
+            previous,
+        }
     }
 }
 

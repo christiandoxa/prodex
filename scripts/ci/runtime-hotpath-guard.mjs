@@ -6,6 +6,7 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_SCAN_TARGETS = Object.freeze([
   "crates/prodex-app/src/runtime_proxy",
   "crates/prodex-app/src/runtime_launch/proxy_startup.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup",
   "crates/prodex-runtime-proxy/src",
 ]);
 
@@ -53,9 +54,18 @@ const ALLOWLIST = Object.freeze([
     file: "crates/prodex-app/src/runtime_launch/proxy_startup.rs",
     id: "blocking-thread-spawn",
     pattern: /\bthread::spawn\s*\(/,
-    maxHits: 3,
+    maxHits: 2,
     reason:
-      "bounded local rewrite, rotation acceptor, and long-lived proxy worker pools created during launch, outside request commit path",
+      "bounded rotation acceptor and long-lived proxy worker pools created during launch, outside request commit path",
+  },
+  {
+    name: "local-rewrite-launch-worker-pool-threads",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bthread::spawn\s*\(/,
+    maxHits: 1,
+    reason:
+      "bounded local rewrite worker pool created during launch, outside request commit path",
   },
   {
     name: "smart-context-token-calibration-save-worker",

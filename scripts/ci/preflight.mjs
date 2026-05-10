@@ -130,6 +130,11 @@ function preflightSteps(args) {
       args: ["scripts/ci/allow-attribute-guard.mjs"],
     },
     {
+      label: "env-mutation-guard",
+      command: "node",
+      args: ["scripts/ci/env-mutation-guard.mjs"],
+    },
+    {
       label: "crate-boundary-guard",
       command: "node",
       args: ["scripts/ci/crate-boundary-guard.mjs"],

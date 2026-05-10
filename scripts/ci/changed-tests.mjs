@@ -349,6 +349,11 @@ async function buildSteps(paths) {
         command: "node",
         args: ["scripts/ci/allow-attribute-guard.mjs"],
       });
+      addStep(steps, "env-mutation-guard", {
+        label: "env-mutation-guard",
+        command: "node",
+        args: ["scripts/ci/env-mutation-guard.mjs"],
+      });
     }
 
     if (isReleaseGuardFixturesRelevantPath(filePath)) {

@@ -5,7 +5,7 @@ import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
-  dead_code: 54,
+  dead_code: 24,
   "unused_imports": 9,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,

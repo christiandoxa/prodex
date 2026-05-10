@@ -11,19 +11,6 @@ fn runtime_route_kind_to_proxy(
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn runtime_profile_latency_penalty(
-    elapsed_ms: u64,
-    route_kind: RuntimeRouteKind,
-    stage: &str,
-) -> u32 {
-    runtime_proxy_crate::runtime_profile_latency_penalty(
-        elapsed_ms,
-        runtime_route_kind_to_proxy(route_kind),
-        stage,
-    )
-}
-
 pub(crate) fn update_runtime_profile_route_performance(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,

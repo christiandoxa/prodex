@@ -301,7 +301,6 @@ pub(super) fn runtime_proxy_pressure_long_lived_queue_wait_budget_ms() -> u64 {
     )
 }
 
-#[allow(dead_code)]
 pub(super) fn runtime_proxy_sync_probe_pressure_pause_ms() -> u64 {
     timeout_override_ms_with_policy(
         "PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS",
@@ -310,7 +309,6 @@ pub(super) fn runtime_proxy_sync_probe_pressure_pause_ms() -> u64 {
     )
 }
 
-#[allow(dead_code)]
 pub(super) fn runtime_proxy_profile_inflight_soft_limit() -> usize {
     usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT",
@@ -319,7 +317,6 @@ pub(super) fn runtime_proxy_profile_inflight_soft_limit() -> usize {
     )
 }
 
-#[allow(dead_code)]
 pub(super) fn runtime_proxy_profile_inflight_hard_limit() -> usize {
     usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT",

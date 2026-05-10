@@ -35,6 +35,7 @@
     "ci:prepush": "node scripts/ci/prepush.mjs",
     "ci:preflight": "node scripts/ci/preflight.mjs",
     "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",
+    "ci:env-mutation-guard": "node scripts/ci/env-mutation-guard.mjs",
     "ci:size-guard": "node scripts/ci/size-guard.mjs",
     "ci:crate-boundary": "node scripts/ci/crate-boundary-guard.mjs",
     "ci:churn-hygiene-fixtures": "node scripts/ci/churn-hygiene-fixture-tests.mjs",

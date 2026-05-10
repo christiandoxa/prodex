@@ -23,6 +23,7 @@ export const PACKAGE_SCRIPT_ALIASES = Object.freeze({
   "ci:changed": "node scripts/ci/changed-tests.mjs",
   "test:changed": "node scripts/ci/changed-tests.mjs",
   "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",
+  "ci:env-mutation-guard": "node scripts/ci/env-mutation-guard.mjs",
   "ci:size-guard": "node scripts/ci/size-guard.mjs",
   "ci:churn-hygiene-fixtures": "node scripts/ci/churn-hygiene-fixture-tests.mjs",
   "ci:release-hygiene": "node scripts/ci/release-hygiene.mjs",
@@ -48,6 +49,7 @@ export const PATH_GROUPS = Object.freeze({
   runtimeHotPath: {
     exact: ["crates/prodex-app/src/runtime_launch/proxy_startup.rs"],
     prefixes: [
+      "crates/prodex-app/src/runtime_launch/proxy_startup/",
       "crates/prodex-app/src/runtime_proxy/",
       "crates/prodex-runtime-proxy/src/",
     ],
@@ -60,6 +62,7 @@ export const PATH_GROUPS = Object.freeze({
     exact: [
       "package.json",
       "scripts/ci/allow-attribute-guard.mjs",
+      "scripts/ci/env-mutation-guard.mjs",
       "scripts/ci/guard-common.mjs",
       "scripts/ci/size-guard.mjs",
     ],

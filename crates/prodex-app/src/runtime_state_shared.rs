@@ -82,7 +82,6 @@ impl RuntimeRotationProxyShared {
         self.runtime_state_lock_wait_counters.record_wait(wait);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn runtime_state_lock_wait_metrics(&self) -> RuntimeStateLockWaitMetrics {
         self.runtime_state_lock_wait_counters.snapshot()
     }
@@ -115,7 +114,6 @@ static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
     Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
 > = OnceLock::new();
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct RuntimeSmartContextArtifactRepoMap {
     #[serde(default)]
@@ -124,7 +122,6 @@ pub(crate) struct RuntimeSmartContextArtifactRepoMap {
     pub(crate) entries: Vec<RuntimeSmartContextArtifactRepoMapEntry>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct RuntimeSmartContextArtifactRepoMapEntry {
     pub(crate) kind: RuntimeSmartContextArtifactRepoMapEntryKind,
@@ -144,7 +141,6 @@ pub(crate) struct RuntimeSmartContextArtifactRepoMapEntry {
     pub(crate) range_end: usize,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RuntimeSmartContextArtifactRepoMapEntryKind {
@@ -567,7 +563,6 @@ impl RuntimeSmartContextArtifactStore {
             .and_then(|artifact| artifact.line_index.as_ref())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn chunk_index(&self, id: &str) -> Option<&RuntimeSmartContextArtifactChunkIndex> {
         self.artifacts
             .get(id)
