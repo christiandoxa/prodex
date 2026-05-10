@@ -34,6 +34,8 @@ fn recall_capsule(
         symbols: symbols.iter().map(|symbol| symbol.to_string()).collect(),
     }
 }
+#[path = "lib/capsule_dedupe.rs"]
+mod capsule_dedupe;
 #[path = "lib/capsule_selection.rs"]
 mod capsule_selection;
 

@@ -2,6 +2,8 @@ use super::*;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
+#[path = "smart_context/intent.rs"]
+mod intent;
 #[path = "smart_context/tool_outputs.rs"]
 mod tool_outputs;
 
