@@ -8,6 +8,8 @@ mod profile_removal;
 mod paths_usage;
 #[path = "rotation/affinity_persistence.rs"]
 mod affinity_persistence;
+#[path = "rotation/affinity_persistence_requeues.rs"]
+mod affinity_persistence_requeues;
 
 use crate::profile_identity::{parse_email_from_id_token, profile_name_from_email};
 
