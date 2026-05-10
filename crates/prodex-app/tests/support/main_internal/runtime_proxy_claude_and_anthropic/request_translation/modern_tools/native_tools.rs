@@ -375,6 +375,7 @@ fn translate_runtime_anthropic_messages_request_falls_back_for_ambiguous_native_
 
 #[test]
 fn translate_runtime_anthropic_messages_request_normalizes_versioned_client_tool_choice_aliases() {
+    let _env_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS");
     let cases = [
         ("bash_20250124", "bash"),
         ("text_editor_20250124", "str_replace_based_edit_tool"),
@@ -449,4 +450,3 @@ fn translate_runtime_anthropic_messages_request_normalizes_versioned_client_tool
         );
     }
 }
-
