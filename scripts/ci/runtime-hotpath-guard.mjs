@@ -72,9 +72,9 @@ const ALLOWLIST = Object.freeze([
     file: "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor.rs",
     id: "blocking-thread-builder-spawn",
     pattern: /\bthread::Builder::new\(\)\.name\(name\)\.spawn\(job\)\.is_ok\(\)/,
-    maxHits: 2,
+    maxHits: 1,
     reason:
-      "bounded websocket TCP/DNS worker and dispatcher pools; one production spawner plus one spawn-outcome test helper",
+      "bounded websocket TCP/DNS worker and dispatcher pools; spawn-outcome helper is cfg(test)",
   },
 ]);
 

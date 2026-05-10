@@ -10,15 +10,8 @@ pub(crate) use runtime_proxy_crate::{
 };
 
 #[cfg(test)]
-#[allow(unused_imports)]
 pub(crate) use runtime_proxy_crate::{
-    extract_runtime_proxy_overload_message_from_text,
-    extract_runtime_proxy_previous_response_message_from_text,
-    extract_runtime_proxy_quota_message_candidate, extract_runtime_proxy_quota_message_from_text,
-    extract_runtime_response_ids_from_value, extract_runtime_turn_state_from_headers_value,
-    parse_runtime_sse_event, parse_runtime_sse_payload, push_runtime_response_id,
-    runtime_proxy_overload_message, runtime_proxy_tool_context_missing_message,
-    runtime_proxy_usage_limit_message, runtime_sse_trimmed_line_bytes,
+    extract_runtime_response_ids_from_value, parse_runtime_sse_payload,
 };
 
 #[cfg(test)]

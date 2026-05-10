@@ -6,7 +6,7 @@ import { repoRoot } from "../npm/common.mjs";
 
 const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   dead_code: 13,
-  "unused_imports": 9,
+  "unused_imports": 8,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
   "clippy::type_complexity": 1,

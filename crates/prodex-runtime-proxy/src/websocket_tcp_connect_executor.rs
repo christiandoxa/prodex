@@ -371,55 +371,6 @@ impl RuntimeWebsocketTcpConnectExecutor {
         }
     }
 
-    pub fn new_with_spawn_outcome_for_test(
-        worker_count: usize,
-        queue_capacity: usize,
-        overflow_capacity: usize,
-        started_worker_count: usize,
-        dispatcher_started: bool,
-    ) -> Self {
-        Self::new_for_kind_with_spawn_outcome_for_test(
-            RuntimeWebsocketTcpConnectTaskKind::TcpConnect,
-            worker_count,
-            queue_capacity,
-            overflow_capacity,
-            started_worker_count,
-            dispatcher_started,
-        )
-    }
-
-    fn new_for_kind_with_spawn_outcome_for_test(
-        task_kind: RuntimeWebsocketTcpConnectTaskKind,
-        worker_count: usize,
-        queue_capacity: usize,
-        overflow_capacity: usize,
-        started_worker_count: usize,
-        dispatcher_started: bool,
-    ) -> Self {
-        let worker_prefix = task_kind.worker_thread_prefix();
-        let dispatcher_name = task_kind.dispatcher_thread_name();
-        Self::new_for_kind_with_spawner(
-            task_kind,
-            worker_count,
-            queue_capacity,
-            overflow_capacity,
-            |name, job| {
-                let accepted = if name == dispatcher_name {
-                    dispatcher_started
-                } else {
-                    name.strip_prefix(worker_prefix)
-                        .and_then(|suffix| suffix.strip_prefix('-'))
-                        .and_then(|index| index.parse::<usize>().ok())
-                        .is_some_and(|index| index < started_worker_count)
-                };
-                if !accepted {
-                    return false;
-                }
-                thread::Builder::new().name(name).spawn(job).is_ok()
-            },
-        )
-    }
-
     pub fn spawn<F>(&self, job: F) -> bool
     where
         F: FnOnce() + Send + 'static,
@@ -552,25 +503,6 @@ impl RuntimeWebsocketDnsResolveExecutor {
                 worker_count,
                 queue_capacity,
                 overflow_capacity,
-            ),
-        }
-    }
-
-    pub fn new_with_spawn_outcome_for_test(
-        worker_count: usize,
-        queue_capacity: usize,
-        overflow_capacity: usize,
-        started_worker_count: usize,
-        dispatcher_started: bool,
-    ) -> Self {
-        Self {
-            inner: RuntimeWebsocketTcpConnectExecutor::new_for_kind_with_spawn_outcome_for_test(
-                RuntimeWebsocketTcpConnectTaskKind::DnsResolve,
-                worker_count,
-                queue_capacity,
-                overflow_capacity,
-                started_worker_count,
-                dispatcher_started,
             ),
         }
     }
