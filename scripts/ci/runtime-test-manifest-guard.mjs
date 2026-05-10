@@ -290,6 +290,21 @@ function parseRuntimeProxyWorkflowShardFilters(workflowText) {
   }
 
   if (filters.length === 0 && issues.length === 0) {
+    const jobText = lines.slice(jobStartIndex, jobEndIndex).join("\n");
+    const usesGeneratedMatrix =
+      workflowText.includes("runtime-proxy-ci-matrix.mjs --github-matrix") &&
+      jobText.includes("fromJSON(needs.runtime-proxy-shard-matrix.outputs.matrix)");
+
+    if (usesGeneratedMatrix) {
+      return {
+        filters: RUNTIME_CI_BROAD_SHARD_FILTERS.map((shard) => ({
+          label: shard.label,
+          filter: shard.filter,
+        })),
+        issues,
+      };
+    }
+
     issues.push(`${CI_WORKFLOW_PATH}: ${RUNTIME_PROXY_WORKFLOW_JOB} job has no matrix filters blocks`);
   }
 

@@ -135,6 +135,22 @@ pub(crate) fn attempt_runtime_responses_request(
             });
         }
         let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
+        let Some(inflight_guard) = inflight_guard.take() else {
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "responses_inflight_guard_missing",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("profile", profile_name),
+                    ],
+                ),
+            );
+            return Err(anyhow::anyhow!(
+                "responses inflight guard missing before success forwarding"
+            ));
+        };
         let prepared = prepare_runtime_proxy_responses_success(
             RuntimeResponsesSuccessContext {
                 request_id,
@@ -147,9 +163,7 @@ pub(crate) fn attempt_runtime_responses_request(
                 turn_state_override,
                 shared,
                 profile_name,
-                inflight_guard: inflight_guard
-                    .take()
-                    .expect("responses inflight guard should be present"),
+                inflight_guard,
             },
             response,
         )

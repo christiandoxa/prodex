@@ -373,73 +373,38 @@ jobs:
       - name: Run env-sensitive parallel guard
         run: node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 
+  runtime-proxy-shard-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Generate runtime proxy shard matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(node scripts/ci/runtime-proxy-ci-matrix.mjs --github-matrix)"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+
   main-internal-runtime-proxy:
     name: Main internal runtime proxy (${{ matrix.label }})
+    needs: runtime-proxy-shard-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - suite: root
-            label: root proxy helpers
-            filters: |
-              broker|main_internal_tests::info_and_broker::runtime_proxy_broker_
-              log-paths|main_internal_tests::info_and_broker::runtime_proxy_log_paths_
-              worker-count|main_internal_tests::runtime_broker_tuning::runtime_proxy_worker_count_
-              endpoint-child|main_internal_tests::runtime_broker_tuning::runtime_proxy_endpoint_child_
-              claude-launch-root|main_internal_tests::claude_launch::runtime_proxy_claude_launch_
-              claude-caveman-root|main_internal_tests::claude_launch::prepare_runtime_proxy_claude_
-          - suite: selection
-            label: selection and quota
-            filters: |
-              selection|main_internal_tests::runtime_proxy_selection_and_pressure::selection::
-          - suite: rotation
-            label: rotation and affinity
-            filters: |
-              rotation|main_internal_tests::runtime_proxy_selection_and_pressure::rotation::
-          - suite: state
-            label: state persistence
-            filters: |
-              state|main_internal_tests::runtime_proxy_selection_and_pressure::state::
-          - suite: admission
-            label: admission and request paths
-            filters: |
-              admission|main_internal_tests::runtime_proxy_selection_and_pressure::admission::
-          - suite: health
-            label: health and pressure
-            filters: |
-              health|main_internal_tests::runtime_proxy_selection_and_pressure::health::
-              pressure|main_internal_tests::runtime_proxy_selection_and_pressure::pressure::
-          - suite: persistence
-            label: persisted backoff selection
-            filters: |
-              persistence|main_internal_tests::runtime_proxy_selection_and_pressure::persistence::
-          - suite: doctor
-            label: doctor and incidents
-            filters: |
-              doctor|main_internal_tests::runtime_proxy_selection_and_pressure::doctor::
-              incidents|main_internal_tests::runtime_proxy_selection_and_pressure::incidents::
-          - suite: continuations
-            label: continuation behavior
-            filters: |
-              continuations|main_internal_tests::runtime_proxy_continuations::
-          - suite: anthropic-launch
-            label: anthropic launch
-            filters: |
-              lane-and-launch|main_internal_tests::runtime_proxy_claude_and_anthropic::lane_and_launch::
-          - suite: anthropic-request
-            label: anthropic request translation
-            filters: |
-              request-translation|main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::
-          - suite: anthropic-response
-            label: anthropic response translation
-            filters: |
-              response-translation|main_internal_tests::runtime_proxy_claude_and_anthropic::response_translation::
-          - suite: anthropic-runtime
-            label: anthropic runtime behavior
-            filters: |
-              runtime-behavior|main_internal_tests::runtime_proxy_claude_and_anthropic::runtime_proxy_behavior::
+      matrix: ${{ fromJSON(needs.runtime-proxy-shard-matrix.outputs.matrix) }}
     env:
       RUNTIME_PROXY_ARTIFACT_DIR: target/ci/runtime-proxy/${{ matrix.suite }}
       CARGO_TERM_COLOR: always

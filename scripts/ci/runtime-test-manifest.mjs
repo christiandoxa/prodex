@@ -61,108 +61,190 @@ export const RUNTIME_SMOKE_TESTS = [
   },
 ];
 
-export const RUNTIME_CI_BROAD_SHARD_FILTERS = [
+export const RUNTIME_CI_WORKFLOW_SHARDS = [
   {
-    id: "root-broker",
-    filter: "main_internal_tests::info_and_broker::runtime_proxy_broker_",
-    label: "broker",
+    suite: "root",
+    label: "root proxy helpers",
+    filters: [
+      {
+        id: "root-broker",
+        filter: "main_internal_tests::info_and_broker::runtime_proxy_broker_",
+        label: "broker",
+      },
+      {
+        id: "root-log-paths",
+        filter: "main_internal_tests::info_and_broker::runtime_proxy_log_paths_",
+        label: "log-paths",
+      },
+      {
+        id: "root-worker-count",
+        filter: "main_internal_tests::runtime_broker_tuning::runtime_proxy_worker_count_",
+        label: "worker-count",
+      },
+      {
+        id: "root-endpoint-child",
+        filter: "main_internal_tests::runtime_broker_tuning::runtime_proxy_endpoint_child_",
+        label: "endpoint-child",
+      },
+      {
+        id: "root-claude-launch",
+        filter: "main_internal_tests::claude_launch::runtime_proxy_claude_launch_",
+        label: "claude-launch-root",
+      },
+      {
+        id: "root-claude-caveman",
+        filter: "main_internal_tests::claude_launch::prepare_runtime_proxy_claude_",
+        label: "claude-caveman-root",
+      },
+    ],
   },
   {
-    id: "root-log-paths",
-    filter: "main_internal_tests::info_and_broker::runtime_proxy_log_paths_",
-    label: "log-paths",
+    suite: "selection",
+    label: "selection and quota",
+    filters: [
+      {
+        id: "selection",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::selection::",
+        label: "selection",
+      },
+    ],
   },
   {
-    id: "root-worker-count",
-    filter: "main_internal_tests::runtime_broker_tuning::runtime_proxy_worker_count_",
-    label: "worker-count",
+    suite: "rotation",
+    label: "rotation and affinity",
+    filters: [
+      {
+        id: "rotation",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::rotation::",
+        label: "rotation",
+      },
+    ],
   },
   {
-    id: "root-endpoint-child",
-    filter: "main_internal_tests::runtime_broker_tuning::runtime_proxy_endpoint_child_",
-    label: "endpoint-child",
+    suite: "state",
+    label: "state persistence",
+    filters: [
+      {
+        id: "state",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::state::",
+        label: "state",
+      },
+    ],
   },
   {
-    id: "root-claude-launch",
-    filter: "main_internal_tests::claude_launch::runtime_proxy_claude_launch_",
-    label: "claude-launch-root",
+    suite: "admission",
+    label: "admission and request paths",
+    filters: [
+      {
+        id: "admission",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::admission::",
+        label: "admission",
+      },
+    ],
   },
   {
-    id: "root-claude-caveman",
-    filter: "main_internal_tests::claude_launch::prepare_runtime_proxy_claude_",
-    label: "claude-caveman-root",
+    suite: "health",
+    label: "health and pressure",
+    filters: [
+      {
+        id: "health",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::health::",
+        label: "health",
+      },
+      {
+        id: "pressure",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::pressure::",
+        label: "pressure",
+      },
+    ],
   },
   {
-    id: "selection",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::selection::",
-    label: "selection",
+    suite: "persistence",
+    label: "persisted backoff selection",
+    filters: [
+      {
+        id: "persistence",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::persistence::",
+        label: "persistence",
+      },
+    ],
   },
   {
-    id: "rotation",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::rotation::",
-    label: "rotation",
+    suite: "doctor",
+    label: "doctor and incidents",
+    filters: [
+      {
+        id: "doctor",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::",
+        label: "doctor",
+      },
+      {
+        id: "incidents",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::incidents::",
+        label: "incidents",
+      },
+    ],
   },
   {
-    id: "state",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::state::",
-    label: "state",
+    suite: "continuations",
+    label: "continuation behavior",
+    filters: [
+      {
+        id: "continuations",
+        filter: "main_internal_tests::runtime_proxy_continuations::",
+        label: "continuations",
+      },
+    ],
   },
   {
-    id: "admission",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::admission::",
-    label: "admission",
+    suite: "anthropic-launch",
+    label: "anthropic launch",
+    filters: [
+      {
+        id: "anthropic-lane-and-launch",
+        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::lane_and_launch::",
+        label: "lane-and-launch",
+      },
+    ],
   },
   {
-    id: "health",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::health::",
-    label: "health",
+    suite: "anthropic-request",
+    label: "anthropic request translation",
+    filters: [
+      {
+        id: "anthropic-request-translation",
+        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
+        label: "request-translation",
+      },
+    ],
   },
   {
-    id: "pressure",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::pressure::",
-    label: "pressure",
+    suite: "anthropic-response",
+    label: "anthropic response translation",
+    filters: [
+      {
+        id: "anthropic-response-translation",
+        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::response_translation::",
+        label: "response-translation",
+      },
+    ],
   },
   {
-    id: "persistence",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::persistence::",
-    label: "persistence",
-  },
-  {
-    id: "doctor",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::",
-    label: "doctor",
-  },
-  {
-    id: "incidents",
-    filter: "main_internal_tests::runtime_proxy_selection_and_pressure::incidents::",
-    label: "incidents",
-  },
-  {
-    id: "continuations",
-    filter: "main_internal_tests::runtime_proxy_continuations::",
-    label: "continuations",
-  },
-  {
-    id: "anthropic-lane-and-launch",
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::lane_and_launch::",
-    label: "lane-and-launch",
-  },
-  {
-    id: "anthropic-request-translation",
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::request_translation::",
-    label: "request-translation",
-  },
-  {
-    id: "anthropic-response-translation",
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::response_translation::",
-    label: "response-translation",
-  },
-  {
-    id: "anthropic-runtime-behavior",
-    filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::runtime_proxy_behavior::",
-    label: "runtime-behavior",
+    suite: "anthropic-runtime",
+    label: "anthropic runtime behavior",
+    filters: [
+      {
+        id: "anthropic-runtime-behavior",
+        filter: "main_internal_tests::runtime_proxy_claude_and_anthropic::runtime_proxy_behavior::",
+        label: "runtime-behavior",
+      },
+    ],
   },
 ];
+
+export const RUNTIME_CI_BROAD_SHARD_FILTERS = RUNTIME_CI_WORKFLOW_SHARDS.flatMap(
+  (shard) => shard.filters,
+);
 
 export const RUNTIME_CI_TEST_CASES = [
   {

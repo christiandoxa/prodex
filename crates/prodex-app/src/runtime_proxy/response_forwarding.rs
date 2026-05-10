@@ -193,7 +193,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
                 response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
                     status,
                     headers: headers.clone(),
-                    body: Box::new(prefetch.into_reader(prelude)),
+                    body: Box::new(prefetch.into_reader(prelude)?),
                     request_id,
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
@@ -215,7 +215,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
                 response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
                     status,
                     headers: headers.clone(),
-                    body: Box::new(prefetch.into_reader(prelude)),
+                    body: Box::new(prefetch.into_reader(prelude)?),
                     request_id,
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
@@ -252,7 +252,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
         );
     }
 
-    let reader = prefetch.into_reader(prelude.clone());
+    let reader = prefetch.into_reader(prelude.clone())?;
     let reader = RuntimeSseTapReader::new(
         reader,
         RuntimeSseTapReaderInit {

@@ -13,6 +13,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+#[path = "info/runtime_tuning.rs"]
+mod runtime_tuning;
+#[path = "info/token_usage_render.rs"]
+mod token_usage_render;
+pub use runtime_tuning::*;
+pub use token_usage_render::*;
+
 pub type RuntimeProfileUsageSnapshot = RuntimeProfileUsageSnapshotGeneric<RuntimeQuotaWindowStatus>;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -216,90 +223,6 @@ pub fn runtime_profile_usage_snapshot_hold_expired(
             && reset_at != i64::MAX
             && reset_at <= now
     })
-}
-
-pub fn collect_info_token_usage_summary_from_text(text: &str) -> InfoTokenUsageSummary {
-    let mut summary = InfoTokenUsageSummary::default();
-    for line in text.lines() {
-        let Some((profile, usage)) = info_token_usage_from_line(line) else {
-            continue;
-        };
-        summary.event_count += 1;
-        summary.total.add(usage);
-        let profile = summary.by_profile.entry(profile).or_default();
-        profile.event_count += 1;
-        profile.total.add(usage);
-    }
-    summary
-}
-
-pub fn collect_info_token_usage_summary_from_texts<I, S>(
-    log_count: usize,
-    texts: I,
-) -> InfoTokenUsageSummary
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let mut summary = InfoTokenUsageSummary {
-        log_count,
-        ..InfoTokenUsageSummary::default()
-    };
-    for text in texts {
-        summary.merge(collect_info_token_usage_summary_from_text(text.as_ref()));
-    }
-    summary
-}
-
-impl InfoTokenUsageSummary {
-    pub fn merge(&mut self, other: InfoTokenUsageSummary) {
-        self.event_count += other.event_count;
-        self.total.add(other.total);
-        for (name, other_profile) in other.by_profile {
-            let profile = self.by_profile.entry(name).or_default();
-            profile.event_count += other_profile.event_count;
-            profile.total.add(other_profile.total);
-        }
-    }
-}
-
-impl InfoTokenUsageCounts {
-    fn add(&mut self, other: InfoTokenUsageCounts) {
-        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
-        self.cached_input_tokens = self
-            .cached_input_tokens
-            .saturating_add(other.cached_input_tokens);
-        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
-        self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
-    }
-}
-
-pub fn info_token_usage_from_line(line: &str) -> Option<(String, InfoTokenUsageCounts)> {
-    if !line.contains("token_usage") {
-        return None;
-    }
-    let fields = info_runtime_parse_fields(line);
-    Some((
-        fields
-            .get("profile")
-            .cloned()
-            .unwrap_or_else(|| "unknown".to_string()),
-        InfoTokenUsageCounts {
-            input_tokens: fields.get("input_tokens")?.parse::<u64>().ok()?,
-            cached_input_tokens: fields
-                .get("cached_input_tokens")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or_default(),
-            output_tokens: fields
-                .get("output_tokens")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or_default(),
-            reasoning_tokens: fields
-                .get("reasoning_tokens")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or_default(),
-        },
-    ))
 }
 
 pub fn collect_info_runtime_load_summary_from_text(
@@ -823,87 +746,6 @@ pub fn format_info_quota_data_summary(aggregate: &InfoQuotaAggregate) -> String 
         aggregate.live_profiles,
         aggregate.snapshot_profiles,
         aggregate.unavailable_profiles,
-    )
-}
-
-pub fn format_info_token_usage_summary(summary: &InfoTokenUsageSummary) -> String {
-    let by_profile =
-        summary
-            .by_profile
-            .iter()
-            .map(|(profile, data)| terminal_ui::TokenUsageProfileDisplay {
-                profile,
-                total: token_usage_counts(data.total),
-            });
-
-    terminal_ui::format_info_token_usage_summary_display(
-        summary.event_count,
-        summary.log_count,
-        token_usage_counts(summary.total),
-        by_profile,
-    )
-}
-
-fn token_usage_counts(usage: InfoTokenUsageCounts) -> terminal_ui::TokenUsageCounts {
-    terminal_ui::TokenUsageCounts {
-        input_tokens: usage.input_tokens,
-        cached_input_tokens: usage.cached_input_tokens,
-        output_tokens: usage.output_tokens,
-        reasoning_tokens: usage.reasoning_tokens,
-    }
-}
-
-pub fn format_runtime_tuning_workers(snapshot: &RuntimeTuningSnapshot) -> String {
-    terminal_ui::format_runtime_tuning_workers_display(terminal_ui::RuntimeTuningWorkersDisplay {
-        worker_count: snapshot.worker_count,
-        long_lived_worker_count: snapshot.long_lived_worker_count,
-        async_worker_count: snapshot.async_worker_count,
-        probe_refresh_worker_count: snapshot.probe_refresh_worker_count,
-        active_request_limit: snapshot.active_request_limit,
-        long_lived_queue_capacity: snapshot.long_lived_queue_capacity,
-        lane_responses: snapshot.lane_limits.responses,
-        lane_compact: snapshot.lane_limits.compact,
-        lane_websocket: snapshot.lane_limits.websocket,
-        lane_standard: snapshot.lane_limits.standard,
-        websocket_connect_worker_count: snapshot.websocket_connect_worker_count,
-        websocket_connect_queue_capacity: snapshot.websocket_connect_queue_capacity,
-        websocket_connect_overflow_capacity: snapshot.websocket_connect_overflow_capacity,
-        websocket_dns_worker_count: snapshot.websocket_dns_worker_count,
-        websocket_dns_queue_capacity: snapshot.websocket_dns_queue_capacity,
-        websocket_dns_overflow_capacity: snapshot.websocket_dns_overflow_capacity,
-    })
-}
-
-pub fn format_runtime_tuning_budgets(snapshot: &RuntimeTuningSnapshot) -> String {
-    terminal_ui::format_runtime_tuning_budgets_display(terminal_ui::RuntimeTuningBudgetsDisplay {
-        precommit_attempt_limit: snapshot.precommit_attempt_limit,
-        precommit_budget_ms: snapshot.precommit_budget_ms,
-        pressure_precommit_attempt_limit: snapshot.pressure_precommit_attempt_limit,
-        pressure_precommit_budget_ms: snapshot.pressure_precommit_budget_ms,
-        continuation_precommit_attempt_limit: snapshot.continuation_precommit_attempt_limit,
-        continuation_precommit_budget_ms: snapshot.continuation_precommit_budget_ms,
-        admission_wait_budget_ms: snapshot.admission_wait_budget_ms,
-        pressure_admission_wait_budget_ms: snapshot.pressure_admission_wait_budget_ms,
-        long_lived_queue_wait_budget_ms: snapshot.long_lived_queue_wait_budget_ms,
-        pressure_long_lived_queue_wait_budget_ms: snapshot.pressure_long_lived_queue_wait_budget_ms,
-    })
-}
-
-pub fn format_runtime_tuning_transport(snapshot: &RuntimeTuningSnapshot) -> String {
-    terminal_ui::format_runtime_tuning_transport_display(
-        terminal_ui::RuntimeTuningTransportDisplay {
-            http_connect_timeout_ms: snapshot.http_connect_timeout_ms,
-            stream_idle_timeout_ms: snapshot.stream_idle_timeout_ms,
-            sse_lookahead_timeout_ms: snapshot.sse_lookahead_timeout_ms,
-            websocket_connect_timeout_ms: snapshot.websocket_connect_timeout_ms,
-            websocket_precommit_progress_timeout_ms: snapshot
-                .websocket_precommit_progress_timeout_ms,
-            websocket_happy_eyeballs_delay_ms: snapshot.websocket_happy_eyeballs_delay_ms,
-            websocket_previous_response_reuse_stale_ms: snapshot
-                .websocket_previous_response_reuse_stale_ms,
-            profile_inflight_soft_limit: snapshot.profile_inflight_soft_limit,
-            profile_inflight_hard_limit: snapshot.profile_inflight_hard_limit,
-        },
     )
 }
 

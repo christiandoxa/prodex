@@ -47,7 +47,7 @@ pub(crate) fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> Str
     prodex_quota::render_quota_reports(&render_quota_report_inputs(reports), detail)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn render_quota_reports_with_line_limit(
     reports: &[QuotaReport],
     detail: bool,
@@ -60,7 +60,7 @@ pub(crate) fn render_quota_reports_with_line_limit(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn render_quota_reports_with_layout(
     reports: &[QuotaReport],
     detail: bool,
@@ -93,7 +93,7 @@ pub(crate) fn render_quota_reports_window_with_layout(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
     let render_reports = render_quota_report_inputs(reports);
     prodex_quota::sorted_quota_report_indexes(&render_reports)
@@ -106,22 +106,22 @@ pub(crate) fn format_main_windows(usage: &UsageResponse) -> String {
     prodex_quota::format_main_windows(usage)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn format_main_windows_compact(usage: &UsageResponse) -> String {
     prodex_quota::format_main_windows_compact(usage)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn format_main_reset_summary(usage: &UsageResponse) -> String {
     prodex_quota::format_main_reset_summary(usage)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn format_window_status(window: &UsageWindow) -> String {
     prodex_quota::format_window_status(window)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn format_window_status_compact(window: &UsageWindow) -> String {
     prodex_quota::format_window_status_compact(window)
 }
@@ -137,17 +137,12 @@ pub(crate) fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
     prodex_quota::format_blocked_limits(blocked)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn window_label(seconds: Option<i64>) -> String {
     prodex_quota::window_label(seconds)
 }
 
-#[allow(dead_code)]
-pub(crate) fn format_reset_time(epoch: Option<i64>) -> String {
-    prodex_quota::format_reset_time(epoch)
-}
-
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn format_precise_reset_time(epoch: Option<i64>) -> String {
     prodex_quota::format_precise_reset_time(epoch)
 }
@@ -162,11 +157,6 @@ pub(crate) fn format_copilot_main_quota(info: &CopilotUserInfo) -> String {
 
 pub(crate) fn format_copilot_reset_summary(info: &CopilotUserInfo) -> Option<String> {
     prodex_quota::format_copilot_reset_summary(&render_copilot_quota_info(info))
-}
-
-#[allow(dead_code)]
-pub(crate) fn render_profile_quota(profile_name: &str, usage: &UsageResponse) -> String {
-    prodex_quota::render_profile_quota(profile_name, usage)
 }
 
 pub(crate) fn render_profile_quota_snapshot(

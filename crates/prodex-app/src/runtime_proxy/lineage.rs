@@ -12,11 +12,13 @@ pub(crate) use helpers::{
 pub(crate) use lookup::{
     runtime_response_bound_profile, runtime_session_bound_profile, runtime_turn_state_bound_profile,
 };
+#[cfg(test)]
+pub(crate) use release::clear_runtime_stale_previous_response_binding;
 #[allow(unused_imports)]
 pub(crate) use release::{
-    clear_runtime_dead_response_bindings, clear_runtime_stale_previous_response_binding,
-    release_runtime_auth_failed_affinity, release_runtime_compact_lineage,
-    release_runtime_previous_response_affinity, release_runtime_quota_blocked_affinity,
+    clear_runtime_dead_response_bindings, release_runtime_auth_failed_affinity,
+    release_runtime_compact_lineage, release_runtime_previous_response_affinity,
+    release_runtime_quota_blocked_affinity,
 };
 #[cfg(test)]
 pub(crate) use remember::remember_runtime_response_ids;

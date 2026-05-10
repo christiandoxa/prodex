@@ -2,7 +2,7 @@ use super::*;
 
 mod state;
 
-#[allow(unused_imports)]
+#[cfg(test)]
 pub(crate) use prodex_runtime_doctor::RuntimeDoctorRequestTimelineEvent;
 #[cfg(test)]
 pub(crate) use prodex_runtime_doctor::RuntimeDoctorRouteSummary;

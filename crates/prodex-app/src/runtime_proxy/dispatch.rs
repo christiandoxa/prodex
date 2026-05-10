@@ -330,7 +330,27 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
         return;
     };
 
-    let response = build_runtime_proxy_websocket_upgrade_response(&websocket_key);
+    let response = match build_runtime_proxy_websocket_upgrade_response(&websocket_key) {
+        Ok(response) => response,
+        Err(err) => {
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "websocket_upgrade_response_failed",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "websocket"),
+                        runtime_proxy_log_field("error", format!("{err:#}")),
+                    ],
+                ),
+            );
+            let _ = request.respond(build_runtime_proxy_text_response(
+                500,
+                "Failed to build websocket upgrade response.",
+            ));
+            return;
+        }
+    };
     let upgraded = request.upgrade("websocket", response);
     let mut local_socket = WsSocket::from_raw_socket(upgraded, WsRole::Server, None);
     runtime_proxy_log(
@@ -389,15 +409,20 @@ fn runtime_proxy_websocket_key(request: &RuntimeProxyRequest) -> Option<String> 
     })
 }
 
-fn build_runtime_proxy_websocket_upgrade_response(key: &str) -> TinyResponse<std::io::Empty> {
+fn build_runtime_proxy_websocket_upgrade_response(
+    key: &str,
+) -> Result<TinyResponse<std::io::Empty>> {
     let accept = derive_accept_key(key.as_bytes());
-    TinyResponse::new_empty(TinyStatusCode(101))
-        .with_header(TinyHeader::from_bytes("Upgrade", "websocket").expect("upgrade header"))
-        .with_header(TinyHeader::from_bytes("Connection", "Upgrade").expect("connection header"))
-        .with_header(
-            TinyHeader::from_bytes("Sec-WebSocket-Accept", accept.as_bytes())
-                .expect("accept header"),
-        )
+    let upgrade = TinyHeader::from_bytes("Upgrade", "websocket")
+        .map_err(|err| anyhow::anyhow!("invalid websocket Upgrade header: {err:?}"))?;
+    let connection = TinyHeader::from_bytes("Connection", "Upgrade")
+        .map_err(|err| anyhow::anyhow!("invalid websocket Connection header: {err:?}"))?;
+    let accept = TinyHeader::from_bytes("Sec-WebSocket-Accept", accept.as_bytes())
+        .map_err(|err| anyhow::anyhow!("invalid websocket accept header: {err:?}"))?;
+    Ok(TinyResponse::new_empty(TinyStatusCode(101))
+        .with_header(upgrade)
+        .with_header(connection)
+        .with_header(accept))
 }
 
 pub(crate) fn proxy_runtime_anthropic_messages_request(

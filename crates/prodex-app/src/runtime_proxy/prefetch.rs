@@ -31,11 +31,10 @@ impl RuntimePrefetchStream {
         if let Some(chunk) = self.backlog.pop_front() {
             return Ok(chunk);
         }
-        let chunk = self
-            .receiver
-            .as_ref()
-            .expect("runtime prefetch receiver should remain available")
-            .recv_timeout(timeout)?;
+        let Some(receiver) = self.receiver.as_ref() else {
+            return Err(RecvTimeoutError::Disconnected);
+        };
+        let chunk = receiver.recv_timeout(timeout)?;
         if let RuntimePrefetchChunk::Data(bytes) = &chunk {
             runtime_prefetch_release_queued_bytes(&self.shared, bytes.len());
         }
@@ -46,21 +45,23 @@ impl RuntimePrefetchStream {
         self.backlog.push_back(chunk);
     }
 
-    pub(super) fn into_reader(mut self, prelude: Vec<u8>) -> RuntimePrefetchReader {
-        RuntimePrefetchReader {
-            receiver: self
-                .receiver
-                .take()
-                .expect("runtime prefetch receiver should remain available"),
+    pub(super) fn into_reader(mut self, prelude: Vec<u8>) -> Result<RuntimePrefetchReader> {
+        let receiver = self
+            .receiver
+            .take()
+            .context("runtime prefetch receiver missing before stream handoff")?;
+        let worker_abort = self
+            .worker_abort
+            .take()
+            .context("runtime prefetch abort handle missing before stream handoff")?;
+        Ok(RuntimePrefetchReader {
+            receiver,
             shared: Arc::clone(&self.shared),
             backlog: std::mem::take(&mut self.backlog),
             pending: Cursor::new(prelude),
             finished: false,
-            worker_abort: self
-                .worker_abort
-                .take()
-                .expect("runtime prefetch abort handle should remain available"),
-        }
+            worker_abort,
+        })
     }
 }
 

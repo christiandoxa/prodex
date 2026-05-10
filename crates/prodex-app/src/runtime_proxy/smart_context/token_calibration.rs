@@ -471,7 +471,10 @@ fn runtime_smart_context_next_token_calibration_save_job(
             .map(|(path, _)| path.clone())
             .next()
         {
-            return pending.remove(&path).expect("ready job should exist");
+            if let Some(job) = pending.remove(&path) {
+                return job;
+            }
+            continue;
         }
         let wait = pending
             .values()
