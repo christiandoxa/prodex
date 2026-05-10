@@ -2,6 +2,48 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.94.0 - 2026-05-10
+
+### Runtime
+
+- Split runtime maintenance surfaces (`f005d2b`)
+- Extract websocket commit handling (`9200839`)
+- Tighten runtime maintenance guardrails (`f2c5263`)
+- Tighten runtime module boundaries (`51a2465`)
+- Tighten runtime proxy maintenance boundaries (`ea2c75b`)
+- Split runtime maintenance modules (`f7ff79f`)
+- Reduce runtime support module size (`72d7b82`)
+- Split runtime support modules (`21a9448`)
+- Split runtime support modules (`da7b774`)
+- Split large runtime modules (`161b72f`)
+
+### Tests
+
+- Split claude launch config coverage (`f579650`)
+- Split affinity persistence requeue coverage (`2e58b31`)
+- Split smart context and memory tests (`d234de6`)
+- Stabilize claude native tool env guard (`61e1b56`)
+- Stabilize route-specific backoff selection (`135349b`)
+
+### CI
+
+- Ratchet maintenance guardrails (`a507be2`)
+- Clarify churn hygiene guidance (`060b605`)
+- Update runtime manifest filters (`9f8cadd`)
+- Recalibrate runtime proxy bench thresholds (`7d9512a`)
+- Recognize root test extractions (`d50eb26`)
+- Allow structural extraction churn (`a3fefbc`)
+- Harden release hygiene safeguards (`b9826c6`)
+
+### Misc
+
+- Move token calibration persistence off hot path (`7e7d129`)
+- Split smart context body rewriting (`12afad7`)
+- Tighten maintenance guardrails (`5435680`)
+- Ratchet maintenance boundaries (`8e6a9db`)
+- Split smart context support (`de2a14e`)
+- Silence selection helper reexports (`4b952d3`)
+
 ## 0.93.0 - 2026-05-09
 
 ### CI
@@ -147,13 +189,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Ignore changelog-only entries (`9b2746e`)
-
-## 0.82.0 - 2026-05-06
-
-### Runtime
-
-- Harden smart context rewrite fallback (`80f4a87`)
-
-### CI
-
-- Fetch full history for release sync (`3a2c6d8`)
