@@ -14,6 +14,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      heavy: ${{ steps.impact.outputs.heavy }}
+      reason: ${{ steps.impact.outputs.reason }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Classify CI impact
+        id: impact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
+              base="${head}^"
+            fi
+          fi
+
+          if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null ||
+             ! git rev-parse --verify --quiet "${head}^{commit}" >/dev/null; then
+            {
+              echo "heavy=true"
+              echo "reason=missing git base/head; running full CI"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          node scripts/ci/ci-impact.mjs --base "${base}" --head "${head}" --github-output
+
+      - name: Report CI impact
+        run: |
+          echo "heavy=${{ steps.impact.outputs.heavy }}"
+          echo "reason=${{ steps.impact.outputs.reason }}"
+
   fmt:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -131,7 +183,12 @@ jobs:
       - name: Enforce crate boundaries
         run: npm run ci:crate-boundary
 
+      - name: Check CI impact classifier
+        run: npm run ci:impact
+
   supply-chain:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -227,6 +284,8 @@ jobs:
           git diff --exit-code -- Cargo.toml crates npm README.md QUICKSTART.md scripts/npm
 
   npm-package-smoke:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -253,6 +312,8 @@ jobs:
         run: node scripts/ci/npm-package-smoke.mjs --binary-dir target/x86_64-unknown-linux-gnu/release
 
   auto-rotate:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -270,6 +331,8 @@ jobs:
         run: cargo test --test auto_rotate -- --test-threads=1
 
   profile-commands-internal:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -289,6 +352,8 @@ jobs:
 
   main-internal-core:
     name: Main internal core (${{ matrix.label }})
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -360,6 +425,8 @@ jobs:
           done
 
   env-sensitive-parallel-guard:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -377,6 +444,8 @@ jobs:
         run: node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 
   runtime-proxy-shard-matrix:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -402,7 +471,10 @@ jobs:
 
   main-internal-runtime-proxy:
     name: Main internal runtime proxy (${{ matrix.label }})
-    needs: runtime-proxy-shard-matrix
+    needs:
+      - changes
+      - runtime-proxy-shard-matrix
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -456,6 +528,8 @@ jobs:
           if-no-files-found: ignore
 
   runtime-proxy-bench-smoke:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -477,6 +551,8 @@ jobs:
 
   runtime-stress:
     name: Runtime stress (${{ matrix.label }})
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

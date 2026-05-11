@@ -23,6 +23,7 @@ export const UPSTREAM_COMPAT_SCRIPT_PATHS = Object.freeze([
 export const PACKAGE_SCRIPT_ALIASES = Object.freeze({
   "ci:changed": "node scripts/ci/changed-tests.mjs",
   "test:changed": "node scripts/ci/changed-tests.mjs",
+  "ci:impact": "node --test scripts/ci/ci-impact.test.mjs",
   "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",
   "ci:env-mutation-guard": "node scripts/ci/env-mutation-guard.mjs",
   "ci:size-guard": "node scripts/ci/size-guard.mjs",

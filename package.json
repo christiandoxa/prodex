@@ -36,6 +36,7 @@
     "ci:install-hooks": "git config core.hooksPath scripts/git-hooks",
     "ci:prepush": "node scripts/ci/prepush.mjs",
     "ci:preflight": "node scripts/ci/preflight.mjs",
+    "ci:impact": "node --test scripts/ci/ci-impact.test.mjs",
     "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",
     "ci:env-mutation-guard": "node scripts/ci/env-mutation-guard.mjs",
     "ci:size-guard": "node scripts/ci/size-guard.mjs",

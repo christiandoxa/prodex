@@ -14,6 +14,14 @@ Prodex test speed should come from process-level sharding first, not from making
 
 Independent process shards are preferred because each process can own its environment variables, temp homes, runtime log directory, artifacts, and background tasks. Inside risky runtime or global-env shards, keep Rust harness scheduling serial with `--test-threads=1`.
 
+## CI Impact Gating
+
+The CI workflow has a `changes` job that runs `node scripts/ci/ci-impact.mjs --base ... --head ... --github-output` with full git history. Its `heavy` output gates expensive Rust/runtime jobs such as supply-chain checks, npm package smoke, auto-rotate, internal Rust shards, runtime proxy shards, runtime benchmark smoke, and runtime stress.
+
+When the classifier returns `heavy=false`, cheap and broadly relevant checks still run: formatting, docs lint, secret scan, process guards, and release sync. Use this path for docs-only or similarly low-impact changes once the classifier recognizes them.
+
+To force full CI for a change, touch a Rust or workflow path that the classifier marks heavy, or update the classifier rules so the affected path returns `heavy=true`. Pull requests and pushes both use explicit base/head SHAs; first-push events with no usable `before` SHA fall back to the parent of `github.sha`.
+
 ## Parallel Safety
 
 Treat a test as parallel-safe only when it avoids process-global state, fixed shared paths, fixed ports, shared profile homes, shared broker state, and long-lived background work that can outlive the test.
@@ -38,6 +46,7 @@ Current CI building blocks include:
 npm run test:fast
 npm run test:serial
 npm run ci:preflight
+npm run ci:impact
 npm run ci:release-hygiene
 npm run ci:release-metadata-guard
 npm run ci:release-cut-fixtures
