@@ -89,7 +89,7 @@ export const PATH_GROUPS = Object.freeze({
     fileNameIncludesAll: ["release", "guard"],
   },
   releaseRunRelevant: {
-    exact: ["scripts/npm/release-run.mjs", RELEASE_RUN_TEST_PATH],
+    exact: ["scripts/npm/release-run.mjs", "scripts/npm/release-run-lib.mjs", RELEASE_RUN_TEST_PATH],
   },
   upstreamCompatRelevant: {
     exact: ["package.json", ".github/workflows/upstream-compat.yml", TEST_IMPACT_MANIFEST_PATH],
