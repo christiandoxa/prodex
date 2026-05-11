@@ -1,4 +1,5 @@
 export const TEST_IMPACT_MANIFEST_PATH = "scripts/ci/test-impact-manifest.mjs";
+export const RELEASE_RUN_TEST_PATH = "scripts/npm/release-run.test.mjs";
 
 export const VERSION_SYNC_PATHS = Object.freeze([
   "Cargo.toml",
@@ -29,6 +30,7 @@ export const PACKAGE_SCRIPT_ALIASES = Object.freeze({
   "ci:release-hygiene": "node scripts/ci/release-hygiene.mjs",
   "ci:release-cut-fixtures": "node scripts/ci/release-cut-fixture-tests.mjs",
   "release:cut": "node scripts/npm/release-cut.mjs",
+  "release:run": "node scripts/npm/release-run.mjs",
   "compat:check": "node scripts/compat/check-upstream-baseline.mjs",
   "compat:watch": "node scripts/compat/watch-upstream.mjs",
   "compat:watch-fixtures": "node scripts/compat/watch-upstream-fixture-tests.mjs",
@@ -85,6 +87,9 @@ export const PATH_GROUPS = Object.freeze({
     prefixes: ["scripts/ci/"],
     suffixes: [".mjs"],
     fileNameIncludesAll: ["release", "guard"],
+  },
+  releaseRunRelevant: {
+    exact: ["scripts/npm/release-run.mjs", RELEASE_RUN_TEST_PATH],
   },
   upstreamCompatRelevant: {
     exact: ["package.json", ".github/workflows/upstream-compat.yml", TEST_IMPACT_MANIFEST_PATH],

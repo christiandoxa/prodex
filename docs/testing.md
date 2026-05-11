@@ -44,6 +44,7 @@ npm run ci:release-cut-fixtures
 npm run ci:runtime-hotpath-guard
 npm run ci:crate-boundary
 npm run ci:churn-hygiene
+npm run release:run -- --version 0.x.y --dry-run
 npm run release:cut -- --version 0.x.y --dry-run
 npm run release:prepare
 npm run changelog:check
@@ -119,6 +120,8 @@ Use `PRODEX_RUNTIME_PROXY_BENCH_CHECK=1 PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FIL
 Use `npm run ci:churn-hygiene` for a lightweight churn gate. It fails on actionable violations by default and checks `HEAD~1..HEAD` when available. Use `-- --report-only` or `PRODEX_CHURN_HYGIENE_REPORT_ONLY=1 npm run ci:churn-hygiene` only for exploratory local reports, or pass `-- --range main..HEAD`, `-- --staged`, custom `--max-files`, `--max-lines`, `--max-behavior-files`, or `--max-file-lines` values for stricter local review. Historical release/tag ranges may include already-reviewed broad churn; for those local audits, use `-- --range old..HEAD --ignore-before latest-tag` to report the original range while checking only changes after the newest version tag inside the selected range. A pinned reviewed baseline is still accepted when a specific non-release review point is intentional. Do not use baseline options for PR or push guard runs, where the full new range should stay enforced. Release metadata-only sweeps across Cargo manifests, npm package manifests, versioned install snippets, or changelog files may exceed the file-count threshold, but line-count, largest-file, behavior-file, and subject checks still apply.
 
 Use `npm run release:cut -- --version <semver>` to cut a release from a clean worktree. It bumps Cargo/npm/docs metadata, refreshes `Cargo.lock` workspace package versions, renders `CHANGELOG.md` as a final release section, runs release metadata guards, creates `chore(release): release <semver>`, and tags that exact commit with the plain `<semver>` tag. The release tag guard rejects version tags whose commit subject is not exactly `chore(release): release <semver>`. Do not run `npm run changelog` after each small change just to commit updated unreleased notes; push-facing changelog checks intentionally defer unreleased-note drift for non-release commits. Use `-- --dry-run` to inspect the plan without mutating files.
+
+Use `npm run release:run -- --version <semver>` for the idempotent local release runner that can bump/sync/test/commit/push/watch CI/trigger publish/watch publish/verify in order. It stores resume state under `target/release-run/state.json` by default, supports `-- --resume`, `-- --from <step>`, `-- --to <step>`, and `-- --only <steps>`, and never runs `npm publish` locally; publishing is triggered through `.github/workflows/npm-publish.yml`. Use `-- --dry-run` before mutating a real release.
 
 Use `npm run ci:release-cut-fixtures` after changing release automation. It runs `release:cut` against synthetic git repositories and verifies commit/tag idempotence, duplicate tag rejection, dirty worktree rejection before mutation, and ambiguous existing-version rejection.
 

@@ -6,6 +6,7 @@ import { formatCommand, runStep, runStepsSerial } from "./main-internal-test-run
 import {
   PACKAGE_SCRIPT_ALIASES,
   PATH_GROUPS,
+  RELEASE_RUN_TEST_PATH,
   UPSTREAM_COMPAT_SCRIPT_PATHS,
   VERSION_SYNC_PATHS,
   WATCH_UPSTREAM_FIXTURE_TESTS_PATH,
@@ -255,6 +256,10 @@ function isChurnHygieneRelevantPath(filePath) {
   return pathMatchesSpec(filePath, PATH_GROUPS.churnHygieneRelevant);
 }
 
+function isReleaseRunRelevantPath(filePath) {
+  return pathMatchesSpec(filePath, PATH_GROUPS.releaseRunRelevant);
+}
+
 function crateDirForPath(filePath) {
   const parts = filePath.split("/");
   if (parts[0] === "crates" && parts.length >= 2) {
@@ -383,6 +388,14 @@ async function buildSteps(paths) {
         label: "churn-hygiene-fixtures",
         command: "node",
         args: ["scripts/ci/churn-hygiene-fixture-tests.mjs"],
+      });
+    }
+
+    if (isReleaseRunRelevantPath(filePath)) {
+      addStep(steps, "release-run-tests", {
+        label: "release-run-tests",
+        command: "node",
+        args: ["--test", RELEASE_RUN_TEST_PATH],
       });
     }
 

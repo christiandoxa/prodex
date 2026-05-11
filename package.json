@@ -24,6 +24,7 @@
     "load:runtime-proxy": "node tests/load/runtime-proxy-load.mjs",
     "release:prepare": "node scripts/npm/release-prepare.mjs",
     "release:cut": "node scripts/npm/release-cut.mjs",
+    "release:run": "node scripts/npm/release-run.mjs",
     "docs:lint": "node scripts/docs/lint-markdown.mjs && npm run docs:runtime-policy:check",
     "docs:runtime-policy": "node scripts/docs/runtime-policy.mjs --write",
     "docs:runtime-policy:check": "node scripts/docs/runtime-policy.mjs --check",
