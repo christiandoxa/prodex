@@ -130,8 +130,71 @@ export function isDocVersionMetadataChange(change, filePath) {
   return changedLines.some((line) => isDocVersionMetadataLine(line.text));
 }
 
+function changedLinesForPath(change, filePath) {
+  const normalized = normalizeGitPath(filePath);
+  return change.changedLinesByFile?.get?.(normalized) ?? [];
+}
+
+function isCargoManifestPath(filePath) {
+  const normalized = normalizeGitPath(filePath);
+  return normalized === "Cargo.toml" || /^crates\/[^/]+\/Cargo\.toml$/.test(normalized);
+}
+
+function isCargoManifestVersionMetadataChange(change, filePath) {
+  if (!isCargoManifestPath(filePath)) {
+    return false;
+  }
+  return changedLinesForPath(change, filePath).some((line) =>
+    /^[ \t]*version[ \t]*=[ \t]*"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"[ \t]*$/.test(
+      line.text,
+    ),
+  );
+}
+
+function isCargoLockVersionMetadataChange(change, filePath) {
+  if (normalizeGitPath(filePath) !== "Cargo.lock") {
+    return false;
+  }
+  return changedLinesForPath(change, filePath).some((line) => {
+    const packageName = line.hunkContext?.match(/^name = "(prodex(?:-[^"]+)?)"$/)?.[1];
+    return (
+      Boolean(packageName) &&
+      /^[ \t]*version[ \t]*=[ \t]*"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"[ \t]*$/.test(
+        line.text,
+      )
+    );
+  });
+}
+
+function isNpmVersionMetadataChange(change, filePath) {
+  const normalized = normalizeGitPath(filePath);
+  if (
+    ![
+      "package-lock.json",
+      "npm/package-lock.json",
+      "npm/prodex/package.json",
+      "npm/prodex/package-lock.json",
+    ].includes(normalized) &&
+    !/^npm\/platforms\/[^/]+\/package(?:-lock)?\.json$/.test(normalized)
+  ) {
+    return false;
+  }
+  return changedLinesForPath(change, filePath).some((line) =>
+    /^[ \t]*"version"[ \t]*:[ \t]*"v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"[, \t]*$/.test(
+      line.text,
+    ),
+  );
+}
+
 export function isVersionMetadataChangePath(change, filePath) {
-  return isVersionMetadataPath(filePath) || (isDocMetadataPath(filePath) && isDocVersionMetadataChange(change, filePath));
+  const normalized = normalizeGitPath(filePath);
+  return (
+    normalized === "CHANGELOG.md" ||
+    isCargoManifestVersionMetadataChange(change, filePath) ||
+    isCargoLockVersionMetadataChange(change, filePath) ||
+    isNpmVersionMetadataChange(change, filePath) ||
+    (isDocMetadataPath(filePath) && isDocVersionMetadataChange(change, filePath))
+  );
 }
 
 export function isReleaseMetadataChangePath(change, filePath) {
@@ -301,6 +364,7 @@ export function parseChangedLinesByFile(diff) {
   const changedLinesByFile = new Map();
   let currentFile = null;
   let oldFile = null;
+  let currentHunkContext = "";
 
   for (const line of diff.split(/\r?\n/)) {
     if (line.startsWith("--- ")) {
@@ -318,6 +382,11 @@ export function parseChangedLinesByFile(diff) {
       continue;
     }
 
+    if (line.startsWith("@@ ")) {
+      currentHunkContext = line.replace(/^@@[^@]*@@[ \t]?/, "").trim();
+      continue;
+    }
+
     if (!currentFile || line.startsWith("+++") || line.startsWith("---")) {
       continue;
     }
@@ -330,6 +399,7 @@ export function parseChangedLinesByFile(diff) {
     changedLinesByFile.get(currentFile).push({
       type: marker === "+" ? "add" : "delete",
       text: line.slice(1),
+      hunkContext: currentHunkContext,
     });
   }
 

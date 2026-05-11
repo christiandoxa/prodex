@@ -86,7 +86,16 @@ async function setupFixtureRepo() {
   await writeFile(
     fixtureRoot,
     "Cargo.toml",
-    ['[package]', 'name = "prodex-fixture"', 'version = "0.1.0"', 'edition = "2024"', ""].join("\n"),
+    [
+      "[package]",
+      'name = "prodex-fixture"',
+      'version = "0.1.0"',
+      'edition = "2024"',
+      "",
+      "[dependencies]",
+      'tokio = "1.52.2"',
+      "",
+    ].join("\n"),
   );
   await writeFile(
     fixtureRoot,
@@ -122,10 +131,35 @@ async function buildFixtures(fixtureRoot) {
   await writeFile(
     fixtureRoot,
     "Cargo.toml",
-    ['[package]', 'name = "prodex-fixture"', 'version = "0.2.0"', 'edition = "2024"', ""].join("\n"),
+    [
+      "[package]",
+      'name = "prodex-fixture"',
+      'version = "0.2.0"',
+      'edition = "2024"',
+      "",
+      "[dependencies]",
+      'tokio = "1.52.2"',
+      "",
+    ].join("\n"),
   );
   await appendFile(fixtureRoot, "src/lib.rs", "pub fn mixed_release_change() {}\n");
   const mixedRelease = await commit(fixtureRoot, "chore(release): prepare 0.2.0");
+
+  await writeFile(
+    fixtureRoot,
+    "Cargo.toml",
+    [
+      "[package]",
+      'name = "prodex-fixture"',
+      'version = "0.2.0"',
+      'edition = "2024"',
+      "",
+      "[dependencies]",
+      'tokio = "1.52.3"',
+      "",
+    ].join("\n"),
+  );
+  const dependencyBump = await commit(fixtureRoot, "chore(deps): bump tokio from 1.52.2 to 1.52.3");
 
   await appendFile(fixtureRoot, "README.md", "\n## Feature docs\n\nCodex environment setup notes.\n");
   await appendFile(fixtureRoot, "QUICKSTART.md", "\n## Feature docs\n\nCodex environment setup notes.\n");
@@ -204,6 +238,12 @@ async function buildFixtures(fixtureRoot) {
       script: "version-metadata-release-guard.mjs",
       args: ["--commit", docsVersionEdit],
       expectedExit: 1,
+    },
+    {
+      name: "cargo dependency bumps pass version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", dependencyBump],
+      expectedExit: 0,
     },
     {
       name: "empty release commit fails empty commit guard",
