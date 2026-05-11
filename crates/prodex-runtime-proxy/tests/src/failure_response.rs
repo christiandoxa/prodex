@@ -44,3 +44,39 @@ fn websocket_previous_response_detection_matches_text_and_binary() {
         )
     );
 }
+
+#[test]
+fn precommit_budget_scales_to_profile_pool() {
+    let (base_attempt_limit, base_budget) = runtime_proxy_precommit_budget(false, false);
+    let profile_count = base_attempt_limit + 3;
+
+    let (attempt_limit, budget) =
+        runtime_proxy_precommit_budget_for_profile_count(false, false, profile_count);
+
+    assert_eq!(attempt_limit, profile_count);
+    assert!(budget > base_budget);
+    assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
+        Instant::now(),
+        profile_count,
+        false,
+        false,
+        profile_count,
+    ));
+    assert!(!runtime_proxy_precommit_budget_exhausted_for_profile_count(
+        Instant::now(),
+        profile_count - 1,
+        false,
+        false,
+        profile_count,
+    ));
+}
+
+#[test]
+fn precommit_budget_keeps_base_limit_for_small_pool() {
+    let (base_attempt_limit, base_budget) = runtime_proxy_precommit_budget(true, false);
+
+    let (attempt_limit, budget) = runtime_proxy_precommit_budget_for_profile_count(true, false, 1);
+
+    assert_eq!(attempt_limit, base_attempt_limit);
+    assert_eq!(budget, base_budget);
+}
