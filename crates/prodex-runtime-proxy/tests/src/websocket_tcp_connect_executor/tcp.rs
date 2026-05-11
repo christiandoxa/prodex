@@ -287,7 +287,7 @@ fn websocket_tcp_connect_executor_logs_actual_started_worker_count() {
         .parse::<SocketAddr>()
         .expect("socket addr should parse");
 
-    for _ in 0..6 {
+    for index in 0..6 {
         let started = Arc::clone(&started);
         let start_tx = start_tx.clone();
         let done_tx = done_tx.clone();
@@ -317,11 +317,14 @@ fn websocket_tcp_connect_executor_logs_actual_started_worker_count() {
             ),
             "overflow job should be accepted while overflow capacity remains available"
         );
+
+        if index == 0 {
+            start_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("first websocket connect job should start");
+        }
     }
 
-    start_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("first websocket connect job should start");
     assert_eq!(
         started.load(Ordering::SeqCst),
         1,

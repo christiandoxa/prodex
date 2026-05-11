@@ -536,6 +536,42 @@ pub fn runtime_precommit_quota_block_reason(
     )
 }
 
+pub fn runtime_precommit_quota_gate_initial_decision(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+    has_continuation_context: bool,
+    responses_critical_floor_percent: i64,
+) -> runtime_proxy::RuntimeProxyPrecommitQuotaGateInitialDecision {
+    runtime_proxy::runtime_proxy_precommit_quota_gate_initial_decision(
+        runtime_proxy::RuntimeProxyPrecommitQuotaGateInitialInput {
+            summary: runtime_quota_summary_to_proxy(summary),
+            source: runtime_quota_source_option_to_proxy(source),
+            route_kind: runtime_route_kind_to_proxy(route_kind),
+            has_continuation_context,
+            responses_critical_floor_percent,
+        },
+    )
+}
+
+pub fn runtime_precommit_quota_gate_final_decision(
+    summary: RuntimeQuotaSummary,
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+    has_alternative_quota_profile: bool,
+    responses_critical_floor_percent: i64,
+) -> runtime_proxy::RuntimeProxyPrecommitQuotaGateFinalDecision {
+    runtime_proxy::runtime_proxy_precommit_quota_gate_final_decision(
+        runtime_proxy::RuntimeProxyPrecommitQuotaGateFinalInput {
+            summary: runtime_quota_summary_to_proxy(summary),
+            source: runtime_quota_source_option_to_proxy(source),
+            route_kind: runtime_route_kind_to_proxy(route_kind),
+            has_alternative_quota_profile,
+            responses_critical_floor_percent,
+        },
+    )
+}
+
 pub fn runtime_quota_precommit_guard_reason(
     summary: RuntimeQuotaSummary,
     route_kind: RuntimeRouteKind,

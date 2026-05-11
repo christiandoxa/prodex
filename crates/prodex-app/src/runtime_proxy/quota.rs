@@ -337,17 +337,6 @@ pub(crate) enum RuntimePrecommitQuotaGateDecision {
     },
 }
 
-fn runtime_precommit_quota_block_reason(
-    summary: RuntimeQuotaSummary,
-    route_kind: RuntimeRouteKind,
-) -> Option<RuntimePrecommitQuotaBlockReason> {
-    prodex_runtime_quota::runtime_precommit_quota_block_reason(
-        summary,
-        route_kind,
-        runtime_proxy_responses_quota_critical_floor_percent(),
-    )
-}
-
 pub(crate) fn runtime_precommit_quota_gate(
     request: RuntimePrecommitQuotaGateRequest<'_>,
 ) -> Result<RuntimePrecommitQuotaGateDecision> {
@@ -361,19 +350,22 @@ pub(crate) fn runtime_precommit_quota_gate(
 
     let (initial_quota_summary, initial_quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-    if has_continuation_context
-        && matches!(
-            initial_quota_source,
-            Some(RuntimeQuotaSource::PersistedSnapshot)
-        )
-        && let Some(reason) =
-            runtime_precommit_quota_block_reason(initial_quota_summary, route_kind)
-    {
-        return Ok(RuntimePrecommitQuotaGateDecision::Block {
-            reason,
-            summary: initial_quota_summary,
-            source: initial_quota_source,
-        });
+    match prodex_runtime_quota::runtime_precommit_quota_gate_initial_decision(
+        initial_quota_summary,
+        initial_quota_source,
+        route_kind,
+        has_continuation_context,
+        runtime_proxy_responses_quota_critical_floor_percent(),
+    ) {
+        runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::Block { reason } => {
+            return Ok(RuntimePrecommitQuotaGateDecision::Block {
+                reason,
+                summary: initial_quota_summary,
+                source: initial_quota_source,
+            });
+        }
+        runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::Continue
+        | runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::RefreshRequired => {}
     }
 
     let has_alternative_quota_profile = runtime_has_route_eligible_quota_fallback(
@@ -388,25 +380,22 @@ pub(crate) fn runtime_precommit_quota_gate(
         route_kind,
         reprobe_context,
     )?;
-    if runtime_quota_summary_requires_live_source_after_probe(
+
+    match prodex_runtime_quota::runtime_precommit_quota_gate_final_decision(
         quota_summary,
         quota_source,
         route_kind,
-    ) && has_alternative_quota_profile
-    {
-        return Ok(RuntimePrecommitQuotaGateDecision::Block {
-            reason: RuntimePrecommitQuotaBlockReason::WindowsUnavailableAfterReprobe,
-            summary: quota_summary,
-            source: quota_source,
-        });
-    }
-
-    if let Some(reason) = runtime_precommit_quota_block_reason(quota_summary, route_kind) {
-        return Ok(RuntimePrecommitQuotaGateDecision::Block {
-            reason,
-            summary: quota_summary,
-            source: quota_source,
-        });
+        has_alternative_quota_profile,
+        runtime_proxy_responses_quota_critical_floor_percent(),
+    ) {
+        runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed => {}
+        runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateFinalDecision::Block { reason } => {
+            return Ok(RuntimePrecommitQuotaGateDecision::Block {
+                reason,
+                summary: quota_summary,
+                source: quota_source,
+            });
+        }
     }
 
     Ok(RuntimePrecommitQuotaGateDecision::Proceed)

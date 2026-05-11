@@ -233,6 +233,66 @@ pub fn runtime_websocket_previous_response_not_found_requires_stale_continuation
     .requires_stale_continuation()
 }
 
+pub fn runtime_proxy_has_continuation_priority(
+    previous_response_id: Option<&str>,
+    pinned_profile: Option<&str>,
+    request_turn_state: Option<&str>,
+    turn_state_profile: Option<&str>,
+    session_profile: Option<&str>,
+) -> bool {
+    previous_response_id.is_some()
+        || pinned_profile.is_some()
+        || request_turn_state.is_some()
+        || turn_state_profile.is_some()
+        || session_profile.is_some()
+}
+
+pub fn runtime_wait_affinity_owner<'a>(
+    strict_affinity_profile: Option<&'a str>,
+    pinned_profile: Option<&'a str>,
+    turn_state_profile: Option<&'a str>,
+    session_profile: Option<&'a str>,
+    trusted_previous_response_affinity: bool,
+) -> Option<&'a str> {
+    strict_affinity_profile
+        .or(turn_state_profile)
+        .or_else(|| {
+            trusted_previous_response_affinity
+                .then_some(pinned_profile)
+                .flatten()
+        })
+        .or(session_profile)
+}
+
+pub fn runtime_noncompact_session_priority_profile<'a>(
+    session_profile: Option<&'a str>,
+    compact_session_profile: Option<&str>,
+) -> Option<&'a str> {
+    if compact_session_profile.is_some_and(|profile_name| session_profile == Some(profile_name)) {
+        None
+    } else {
+        session_profile
+    }
+}
+
+pub fn runtime_proxy_allows_direct_current_profile_fallback(
+    previous_response_id: Option<&str>,
+    pinned_profile: Option<&str>,
+    request_turn_state: Option<&str>,
+    turn_state_profile: Option<&str>,
+    session_profile: Option<&str>,
+    saw_inflight_saturation: bool,
+    saw_upstream_failure: bool,
+) -> bool {
+    previous_response_id.is_none()
+        && pinned_profile.is_none()
+        && request_turn_state.is_none()
+        && turn_state_profile.is_none()
+        && session_profile.is_none()
+        && !saw_inflight_saturation
+        && !saw_upstream_failure
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeSelectionQuotaWindowStatus {
     Ready,

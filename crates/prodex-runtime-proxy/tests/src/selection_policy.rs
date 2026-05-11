@@ -71,6 +71,80 @@ fn websocket_stale_previous_response_reuse_uses_injected_threshold() {
 }
 
 #[test]
+fn continuation_priority_detects_any_affinity_marker() {
+    assert!(runtime_proxy_has_continuation_priority(
+        None,
+        None,
+        Some("turn"),
+        None,
+        None,
+    ));
+    assert!(!runtime_proxy_has_continuation_priority(
+        None, None, None, None, None,
+    ));
+}
+
+#[test]
+fn wait_affinity_owner_prefers_no_rotate_sources() {
+    assert_eq!(
+        runtime_wait_affinity_owner(
+            Some("strict"),
+            Some("pinned"),
+            Some("turn"),
+            Some("session"),
+            true,
+        ),
+        Some("strict")
+    );
+    assert_eq!(
+        runtime_wait_affinity_owner(None, Some("pinned"), Some("turn"), Some("session"), true,),
+        Some("turn")
+    );
+    assert_eq!(
+        runtime_wait_affinity_owner(None, Some("pinned"), None, Some("session"), true,),
+        Some("pinned")
+    );
+    assert_eq!(
+        runtime_wait_affinity_owner(None, Some("pinned"), None, Some("session"), false,),
+        Some("session")
+    );
+}
+
+#[test]
+fn noncompact_session_priority_ignores_compact_owner() {
+    assert_eq!(
+        runtime_noncompact_session_priority_profile(Some("main"), Some("main")),
+        None
+    );
+    assert_eq!(
+        runtime_noncompact_session_priority_profile(Some("second"), Some("main")),
+        Some("second")
+    );
+}
+
+#[test]
+fn direct_current_profile_fallback_requires_fresh_unfailed_request() {
+    assert!(runtime_proxy_allows_direct_current_profile_fallback(
+        None, None, None, None, None, false, false,
+    ));
+    assert!(!runtime_proxy_allows_direct_current_profile_fallback(
+        Some("resp"),
+        None,
+        None,
+        None,
+        None,
+        false,
+        false,
+    ));
+    assert!(!runtime_proxy_allows_direct_current_profile_fallback(
+        None, None, None, None, None, true, false,
+    ));
+    assert!(!runtime_proxy_allows_direct_current_profile_fallback(
+        None, None, None, None, None, false, true,
+    ));
+}
+
+#[test]
 fn soft_affinity_blocks_response_on_critical_floor() {
     let mut summary = healthy_summary();
     summary.five_hour = RuntimeSelectionQuotaWindowSummary {

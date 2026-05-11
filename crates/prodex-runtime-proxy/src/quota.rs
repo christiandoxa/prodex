@@ -83,6 +83,41 @@ impl RuntimePrecommitQuotaBlockReason {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeProxyPrecommitQuotaGateInitialDecision {
+    Continue,
+    RefreshRequired,
+    Block {
+        reason: RuntimePrecommitQuotaBlockReason,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeProxyPrecommitQuotaGateFinalDecision {
+    Proceed,
+    Block {
+        reason: RuntimePrecommitQuotaBlockReason,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeProxyPrecommitQuotaGateInitialInput {
+    pub summary: RuntimeProxyQuotaSummary,
+    pub source: Option<RuntimeSelectionQuotaSource>,
+    pub route_kind: RuntimeRouteKind,
+    pub has_continuation_context: bool,
+    pub responses_critical_floor_percent: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeProxyPrecommitQuotaGateFinalInput {
+    pub summary: RuntimeProxyQuotaSummary,
+    pub source: Option<RuntimeSelectionQuotaSource>,
+    pub route_kind: RuntimeRouteKind,
+    pub has_alternative_quota_profile: bool,
+    pub responses_critical_floor_percent: i64,
+}
+
 pub fn runtime_proxy_quota_pressure_band_reason(
     band: RuntimeSelectionQuotaPressureBand,
 ) -> &'static str {
@@ -463,6 +498,59 @@ pub fn runtime_proxy_precommit_quota_block_reason(
     }
 
     None
+}
+
+pub fn runtime_proxy_precommit_quota_gate_initial_decision(
+    input: RuntimeProxyPrecommitQuotaGateInitialInput,
+) -> RuntimeProxyPrecommitQuotaGateInitialDecision {
+    if input.has_continuation_context
+        && matches!(
+            input.source,
+            Some(RuntimeSelectionQuotaSource::PersistedSnapshot)
+        )
+        && let Some(reason) = runtime_proxy_precommit_quota_block_reason(
+            input.summary,
+            input.route_kind,
+            input.responses_critical_floor_percent,
+        )
+    {
+        return RuntimeProxyPrecommitQuotaGateInitialDecision::Block { reason };
+    }
+
+    if runtime_proxy_quota_summary_requires_precommit_live_probe(
+        input.summary,
+        input.source,
+        input.route_kind,
+    ) {
+        return RuntimeProxyPrecommitQuotaGateInitialDecision::RefreshRequired;
+    }
+
+    RuntimeProxyPrecommitQuotaGateInitialDecision::Continue
+}
+
+pub fn runtime_proxy_precommit_quota_gate_final_decision(
+    input: RuntimeProxyPrecommitQuotaGateFinalInput,
+) -> RuntimeProxyPrecommitQuotaGateFinalDecision {
+    if runtime_proxy_quota_summary_requires_live_source_after_probe(
+        input.summary,
+        input.source,
+        input.route_kind,
+    ) && input.has_alternative_quota_profile
+    {
+        return RuntimeProxyPrecommitQuotaGateFinalDecision::Block {
+            reason: RuntimePrecommitQuotaBlockReason::WindowsUnavailableAfterReprobe,
+        };
+    }
+
+    if let Some(reason) = runtime_proxy_precommit_quota_block_reason(
+        input.summary,
+        input.route_kind,
+        input.responses_critical_floor_percent,
+    ) {
+        return RuntimeProxyPrecommitQuotaGateFinalDecision::Block { reason };
+    }
+
+    RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed
 }
 
 fn runtime_proxy_quota_window_precommit_guard(

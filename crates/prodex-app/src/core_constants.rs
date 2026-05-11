@@ -51,13 +51,14 @@ pub(crate) const AUTO_RUNTIME_HOUSEKEEPING_LOCK_FILE: &str = "runtime-housekeepi
 pub(crate) const AUTO_RUNTIME_HOUSEKEEPING_STAMP_FILE: &str = "runtime-housekeeping.last-run";
 #[cfg(test)]
 pub(crate) const RUNTIME_PREVIOUS_RESPONSE_RETRY_DELAYS_MS: [u64; 3] = [75, 200, 500];
+#[cfg(test)]
+pub(crate) use runtime_proxy_crate::{
+    RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT, RUNTIME_PROXY_PRECOMMIT_BUDGET_MS,
+    RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
+    RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS, RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
+    RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS,
+};
 
-pub(crate) const RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT: usize = if cfg!(test) { 4 } else { 12 };
-pub(crate) const RUNTIME_PROXY_PRECOMMIT_BUDGET_MS: u64 = if cfg!(test) { 500 } else { 3_000 };
-pub(crate) const RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT: usize =
-    RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT * 2;
-pub(crate) const RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS: u64 =
-    RUNTIME_PROXY_PRECOMMIT_BUDGET_MS * 4;
 pub(crate) const RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 20 };
 pub(crate) const RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 15 };
 pub(crate) const RUNTIME_PROFILE_TRANSPORT_BACKOFF_MAX_SECONDS: i64 =
@@ -71,10 +72,6 @@ pub(crate) const RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS: u64 =
 pub(crate) const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
     if cfg!(test) { 25 } else { 200 };
 pub(crate) const RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER: u64 = 2;
-pub(crate) const RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS: u64 =
-    if cfg!(test) { 150 } else { 800 };
-pub(crate) const RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT: usize =
-    if cfg!(test) { 2 } else { 6 };
 pub(crate) const RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS: u64 = if cfg!(test) { 5 } else { 150 };
 pub(crate) const RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS: u64 = 5;
 pub(crate) const RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT: usize = if cfg!(test) { 1 } else { 4 };

@@ -70,3 +70,109 @@ fn precommit_block_reason_keeps_response_floor_only_for_main_lanes() {
         None
     );
 }
+
+#[test]
+fn precommit_quota_gate_blocks_continuation_snapshot_before_reprobe() {
+    let summary = RuntimeProxyQuotaSummary {
+        five_hour: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Ready,
+            remaining_percent: 80,
+            reset_at: i64::MAX,
+        },
+        weekly: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Exhausted,
+            remaining_percent: 0,
+            reset_at: 300,
+        },
+        route_band: RuntimeSelectionQuotaPressureBand::Exhausted,
+    };
+
+    assert_eq!(
+        runtime_proxy_precommit_quota_gate_initial_decision(
+            RuntimeProxyPrecommitQuotaGateInitialInput {
+                summary,
+                source: Some(RuntimeSelectionQuotaSource::PersistedSnapshot),
+                route_kind: RuntimeRouteKind::Websocket,
+                has_continuation_context: true,
+                responses_critical_floor_percent: 2,
+            },
+        ),
+        RuntimeProxyPrecommitQuotaGateInitialDecision::Block {
+            reason: RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend,
+        }
+    );
+}
+
+#[test]
+fn precommit_quota_gate_requests_refresh_for_unknown_main_lane_quota() {
+    let summary = RuntimeProxyQuotaSummary {
+        five_hour: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Unknown,
+            remaining_percent: 0,
+            reset_at: i64::MAX,
+        },
+        weekly: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Ready,
+            remaining_percent: 80,
+            reset_at: i64::MAX,
+        },
+        route_band: RuntimeSelectionQuotaPressureBand::Unknown,
+    };
+
+    assert_eq!(
+        runtime_proxy_precommit_quota_gate_initial_decision(
+            RuntimeProxyPrecommitQuotaGateInitialInput {
+                summary,
+                source: None,
+                route_kind: RuntimeRouteKind::Responses,
+                has_continuation_context: false,
+                responses_critical_floor_percent: 2,
+            },
+        ),
+        RuntimeProxyPrecommitQuotaGateInitialDecision::RefreshRequired
+    );
+}
+
+#[test]
+fn precommit_quota_gate_final_blocks_unknown_quota_only_when_pool_fallback_exists() {
+    let summary = RuntimeProxyQuotaSummary {
+        five_hour: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Unknown,
+            remaining_percent: 0,
+            reset_at: i64::MAX,
+        },
+        weekly: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Ready,
+            remaining_percent: 80,
+            reset_at: i64::MAX,
+        },
+        route_band: RuntimeSelectionQuotaPressureBand::Unknown,
+    };
+
+    assert_eq!(
+        runtime_proxy_precommit_quota_gate_final_decision(
+            RuntimeProxyPrecommitQuotaGateFinalInput {
+                summary,
+                source: None,
+                route_kind: RuntimeRouteKind::Responses,
+                has_alternative_quota_profile: true,
+                responses_critical_floor_percent: 2,
+            },
+        ),
+        RuntimeProxyPrecommitQuotaGateFinalDecision::Block {
+            reason: RuntimePrecommitQuotaBlockReason::WindowsUnavailableAfterReprobe,
+        }
+    );
+    assert_eq!(
+        runtime_proxy_precommit_quota_gate_final_decision(
+            RuntimeProxyPrecommitQuotaGateFinalInput {
+                summary,
+                source: None,
+                route_kind: RuntimeRouteKind::Responses,
+                has_alternative_quota_profile: false,
+                responses_critical_floor_percent: 2,
+            },
+        ),
+        RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed
+    );
+}

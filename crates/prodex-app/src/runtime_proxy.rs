@@ -72,87 +72,11 @@ use self::websocket_message::{
     RuntimeWebsocketTextMessageInput, proxy_runtime_websocket_text_message,
 };
 
-pub(super) fn runtime_proxy_precommit_budget(
-    continuation: bool,
-    pressure_mode: bool,
-) -> (usize, Duration) {
-    if continuation {
-        (
-            RUNTIME_PROXY_PRECOMMIT_CONTINUATION_ATTEMPT_LIMIT,
-            Duration::from_millis(RUNTIME_PROXY_PRECOMMIT_CONTINUATION_BUDGET_MS),
-        )
-    } else if pressure_mode {
-        (
-            RUNTIME_PROXY_PRESSURE_PRECOMMIT_ATTEMPT_LIMIT,
-            Duration::from_millis(RUNTIME_PROXY_PRESSURE_PRECOMMIT_BUDGET_MS),
-        )
-    } else {
-        (
-            RUNTIME_PROXY_PRECOMMIT_ATTEMPT_LIMIT,
-            Duration::from_millis(RUNTIME_PROXY_PRECOMMIT_BUDGET_MS),
-        )
-    }
-}
-
-pub(super) fn runtime_proxy_has_continuation_priority(
-    previous_response_id: Option<&str>,
-    pinned_profile: Option<&str>,
-    request_turn_state: Option<&str>,
-    turn_state_profile: Option<&str>,
-    session_profile: Option<&str>,
-) -> bool {
-    previous_response_id.is_some()
-        || pinned_profile.is_some()
-        || request_turn_state.is_some()
-        || turn_state_profile.is_some()
-        || session_profile.is_some()
-}
-
-pub(super) fn runtime_wait_affinity_owner<'a>(
-    strict_affinity_profile: Option<&'a str>,
-    pinned_profile: Option<&'a str>,
-    turn_state_profile: Option<&'a str>,
-    session_profile: Option<&'a str>,
-    trusted_previous_response_affinity: bool,
-) -> Option<&'a str> {
-    strict_affinity_profile
-        .or(turn_state_profile)
-        .or_else(|| {
-            trusted_previous_response_affinity
-                .then_some(pinned_profile)
-                .flatten()
-        })
-        .or(session_profile)
-}
-
-pub(super) fn runtime_noncompact_session_priority_profile<'a>(
-    session_profile: Option<&'a str>,
-    compact_session_profile: Option<&str>,
-) -> Option<&'a str> {
-    if compact_session_profile.is_some_and(|profile_name| session_profile == Some(profile_name)) {
-        None
-    } else {
-        session_profile
-    }
-}
-
-pub(super) fn runtime_proxy_allows_direct_current_profile_fallback(
-    previous_response_id: Option<&str>,
-    pinned_profile: Option<&str>,
-    request_turn_state: Option<&str>,
-    turn_state_profile: Option<&str>,
-    session_profile: Option<&str>,
-    saw_inflight_saturation: bool,
-    saw_upstream_failure: bool,
-) -> bool {
-    previous_response_id.is_none()
-        && pinned_profile.is_none()
-        && request_turn_state.is_none()
-        && turn_state_profile.is_none()
-        && session_profile.is_none()
-        && !saw_inflight_saturation
-        && !saw_upstream_failure
-}
+pub(super) use runtime_proxy_crate::{
+    runtime_noncompact_session_priority_profile,
+    runtime_proxy_allows_direct_current_profile_fallback, runtime_proxy_has_continuation_priority,
+    runtime_proxy_precommit_budget, runtime_wait_affinity_owner,
+};
 
 pub(super) fn runtime_proxy_local_selection_failure_message() -> &'static str {
     "Runtime proxy could not secure a healthy upstream profile before the pre-commit retry budget was exhausted. Retry the request."
