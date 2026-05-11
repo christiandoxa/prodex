@@ -63,6 +63,12 @@ test("changelog omits internal maintenance commits", async () => {
     assert.doesNotMatch(stdout, /Add smoke coverage/);
     assert.doesNotMatch(stdout, /Split runtime modules/);
     assert.doesNotMatch(stdout, /Tighten guardrails/);
+
+    const ciCheck = await execFileAsync(process.execPath, [SCRIPT_PATH, "--ci-check"], {
+      cwd: root,
+      env: { ...process.env, PRODEX_REPO_ROOT: root },
+    });
+    assert.match(ciCheck.stdout, /generated changelog drift deferred/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

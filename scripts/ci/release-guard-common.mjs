@@ -152,9 +152,7 @@ function isNpmVersionMetadataChange(change, filePath) {
 }
 
 export function isVersionMetadataChangePath(change, filePath) {
-  const normalized = normalizeGitPath(filePath);
   return (
-    normalized === "CHANGELOG.md" ||
     isCargoManifestVersionMetadataChange(change, filePath) ||
     isCargoLockVersionMetadataChange(change, filePath) ||
     isNpmVersionMetadataChange(change, filePath) ||

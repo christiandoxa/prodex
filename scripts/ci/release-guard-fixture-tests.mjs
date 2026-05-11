@@ -193,6 +193,13 @@ async function buildFixtures(fixtureRoot) {
   await appendFile(fixtureRoot, "scripts/npm/changelog.mjs", "export const fixture = true;\n");
   const changelogScriptFix = await commit(fixtureRoot, "fix(changelog): preserve release rendering");
 
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\nGenerated output drift.\n");
+  await appendFile(fixtureRoot, "scripts/npm/changelog.mjs", "export const filtered = true;\n");
+  const changelogGeneratorDrift = await commit(
+    fixtureRoot,
+    "fix(changelog): omit internal maintenance",
+  );
+
   const duplicateBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
   await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.3.0 - 2026-01-02\n\n- First release marker.\n");
   const duplicateOne = await commit(fixtureRoot, "chore(release): release 0.3.0");
@@ -261,6 +268,12 @@ async function buildFixtures(fixtureRoot) {
       name: "changelog script fix passes noise guard",
       script: "changelog-noise-guard.mjs",
       args: ["--commit", changelogScriptFix],
+      expectedExit: 0,
+    },
+    {
+      name: "changelog generator drift passes version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", changelogGeneratorDrift],
       expectedExit: 0,
     },
     {
