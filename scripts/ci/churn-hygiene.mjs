@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import fs from "node:fs/promises";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileMatchesAnyPattern, git, parseNumstat, parsePositiveInteger } from "./guard-common.mjs";
 import { RELEASE_METADATA_CHURN_PATTERNS } from "./test-impact-manifest.mjs";
@@ -11,10 +13,13 @@ const DEFAULT_THRESHOLDS = Object.freeze({
   maxFileLines: 500,
 });
 const STRUCTURAL_EXTRACTION_INCIDENTAL_LINE_MULTIPLIER = 2;
+const MECHANICAL_ONLY_PATTERN =
+  /(?:^|\n)\s*Mechanical-only:\s*(?:yes|true)\s*(?:\n|$)|\[mechanical-only\]/i;
 
 const BEHAVIOR_PATTERNS = Object.freeze([
   ".github/workflows/**",
   "benches/**",
+  "crates/**",
   "npm/**",
   "scripts/**",
   "src/**",
@@ -59,6 +64,16 @@ function parseArgs(argv) {
     }
     if (value === "--worktree") {
       args.worktree = true;
+      continue;
+    }
+    if (value === "--message") {
+      index += 1;
+      args.message = requiredValue(argv[index], value);
+      continue;
+    }
+    if (value === "--message-file") {
+      index += 1;
+      args.messageFile = requiredValue(argv[index], value);
       continue;
     }
     if (value === "--ignore-before") {
@@ -143,6 +158,8 @@ function printHelp() {
       "  --max-behavior-files <n>  default 25",
       "  --max-lines <n>           default 1200",
       "  --max-file-lines <n>      default 500",
+      "  --message <subject/body>  staged/worktree commit message for Mechanical-only declarations",
+      "  --message-file <path>     read staged/worktree commit message from a file",
       "  --json                    print machine-readable result",
       "",
       "Default selector: HEAD~1..HEAD when available, otherwise HEAD",
@@ -395,20 +412,62 @@ function structuralExtractionApplies(rows, summary, thresholds) {
 
 function thresholdIssues(summary, thresholds, options = {}) {
   const issues = [];
-  if (summary.files > thresholds.maxFiles && !summary.releaseMetadataOnly && !options.structuralExtraction) {
+  const structuralExtractionAccepted =
+    options.structuralExtractionAccepted ?? options.structuralExtraction ?? false;
+  if (summary.files > thresholds.maxFiles && !summary.releaseMetadataOnly && !structuralExtractionAccepted) {
     issues.push(`files changed ${summary.files} > ${thresholds.maxFiles}`);
   }
   if (summary.behaviorFiles > thresholds.maxBehaviorFiles) {
     issues.push(`behavior files ${summary.behaviorFiles} > ${thresholds.maxBehaviorFiles}`);
   }
-  if (summary.changedLines > thresholds.maxLines && !options.structuralExtraction) {
+  if (summary.changedLines > thresholds.maxLines && !structuralExtractionAccepted) {
     issues.push(`changed lines ${summary.changedLines} > ${thresholds.maxLines}`);
   }
   const largest = summary.largestFiles[0];
-  if (largest && largest.lines > thresholds.maxFileLines && !options.structuralExtraction) {
+  if (largest && largest.lines > thresholds.maxFileLines && !structuralExtractionAccepted) {
     issues.push(`largest file ${largest.filePath} changed ${largest.lines} lines > ${thresholds.maxFileLines}`);
   }
   return issues;
+}
+
+function mechanicalOnlyDeclared(message) {
+  return MECHANICAL_ONLY_PATTERN.test(message ?? "");
+}
+
+function structuralExtractionNeedsDeclaration(summary, thresholds, structuralExtraction) {
+  return (
+    structuralExtraction &&
+    thresholdIssues(summary, thresholds, { structuralExtractionAccepted: false }).length > 0
+  );
+}
+
+function structuralExtractionAcceptedByDeclaration(structuralExtraction, summary, thresholds, commits) {
+  if (!structuralExtraction) {
+    return false;
+  }
+  if (!structuralExtractionNeedsDeclaration(summary, thresholds, structuralExtraction)) {
+    return true;
+  }
+  return commits.some((commit) => mechanicalOnlyDeclared(commit.message));
+}
+
+function structuralExtractionDeclarationIssues(
+  summary,
+  thresholds,
+  structuralExtraction,
+  structuralExtractionAccepted,
+  commits,
+) {
+  if (
+    !structuralExtractionNeedsDeclaration(summary, thresholds, structuralExtraction) ||
+    structuralExtractionAccepted
+  ) {
+    return [];
+  }
+  const target = commits.length > 0 ? "commit message" : "staged/worktree commit message";
+  return [
+    `large structural extraction requires Mechanical-only: yes in the ${target}, or a narrower split`,
+  ];
 }
 
 function parseConventionalSubject(subject) {
@@ -427,6 +486,17 @@ function parseConventionalSubject(subject) {
   };
 }
 
+function messageSubject(message) {
+  return message.split(/\r?\n/, 1)[0]?.trim() ?? "";
+}
+
+async function messageOverride(args) {
+  if (args.messageFile) {
+    return fs.readFile(path.resolve(repoRoot, args.messageFile), "utf8");
+  }
+  return args.message;
+}
+
 function genericCommitTitle(title) {
   const normalized = title.toLowerCase().replace(/\s+/g, " ").trim();
   return [
@@ -434,6 +504,13 @@ function genericCommitTitle(title) {
     /^(?:improve|optimize|reduce|trim|tighten)\s+(?:prodex\s+)?super\s+token\s+(?:efficiency|overhead)$/,
     /^(?:improve|optimize|reduce|trim|tighten)\s+(?:embedded|context|smart context|super)\s+token\s+(?:efficiency|overhead|usage)$/,
   ].some((pattern) => pattern.test(normalized));
+}
+
+function mechanicalOnlySubjectAllowed(parsed) {
+  if (!["chore", "ci", "refactor", "test"].includes(parsed.type)) {
+    return false;
+  }
+  return /\b(?:extract|mechanical|move|relocat|rename|reshape|shard|split)\b/i.test(parsed.title);
 }
 
 function broadCommitScope(scope) {
@@ -458,6 +535,11 @@ function commitSubjectIssues(commits) {
         `${commit.hash.slice(0, 7)} generic subject needs narrower scope/title: ${commit.subject}`,
       );
     }
+    if (mechanicalOnlyDeclared(commit.message) && !mechanicalOnlySubjectAllowed(parsed)) {
+      issues.push(
+        `${commit.hash.slice(0, 7)} Mechanical-only declaration needs a mechanical refactor/test/chore subject: ${commit.subject}`,
+      );
+    }
     const normalized = normalizedSubjectTitle(parsed.title);
     if (normalized) {
       const bucket = titles.get(normalized) ?? [];
@@ -479,28 +561,47 @@ function commitSubjectIssues(commits) {
   return issues;
 }
 
-async function commitsForSelector(selector) {
+async function commitsForSelector(selector, options = {}) {
   if (selector === "staged" || selector === "worktree") {
-    return [];
+    const message = await messageOverride(options);
+    return message
+      ? [
+          {
+            hash: selector,
+            subject: messageSubject(message),
+            message,
+          },
+        ]
+      : [];
   }
-  const args =
+  const gitArgs =
     selector === "HEAD"
-      ? ["log", "-1", "--format=%H%x09%s", "HEAD"]
-      : ["log", "--format=%H%x09%s", selector];
-  const { stdout } = await git(args, { cwd: repoRoot });
+      ? ["log", "-1", "--format=%H%x00%s%x00%B%x1e", "HEAD"]
+      : ["log", "--format=%H%x00%s%x00%B%x1e", selector];
+  const { stdout } = await git(gitArgs, { cwd: repoRoot });
   return stdout
-    .split(/\r?\n/)
-    .filter((line) => line.trim())
-    .map((line) => {
-      const [hash, ...subjectParts] = line.split("\t");
+    .split("\x1e")
+    .filter((record) => record.trim())
+    .map((record) => {
+      const [hash, subject, ...messageParts] = record.replace(/^\n|\n$/g, "").split("\0");
       return {
         hash,
-        subject: subjectParts.join("\t"),
+        subject: subject ?? "",
+        message: messageParts.join("\0"),
       };
     });
 }
 
-function printHuman(plan, summary, thresholds, issues, subjectIssues, check, options = {}) {
+function printHuman(
+  plan,
+  summary,
+  thresholds,
+  issues,
+  declarationIssues,
+  subjectIssues,
+  check,
+  options = {},
+) {
   const { selector, command, originalSelector, ignoreBefore, ignoreBeforeInput } = plan;
   process.stdout.write(`churn hygiene: ${selector}\n`);
   if (originalSelector && ignoreBefore) {
@@ -516,7 +617,8 @@ function printHuman(plan, summary, thresholds, issues, subjectIssues, check, opt
     process.stdout.write("  release metadata only: yes\n");
   }
   if (options.structuralExtraction) {
-    process.stdout.write("  structural extraction: yes\n");
+    const suffix = options.structuralExtractionAccepted ? "accepted" : "needs declaration";
+    process.stdout.write(`  structural extraction: yes (${suffix})\n`);
   }
   if (summary.largestFiles.length > 0) {
     process.stdout.write("  largest files:\n");
@@ -529,6 +631,12 @@ function printHuman(plan, summary, thresholds, issues, subjectIssues, check, opt
     process.stdout.write(
       "  guidance: split broad structural work into narrower commits or reduce non-extraction churn\n",
     );
+  }
+  if (declarationIssues.length > 0) {
+    process.stdout.write("  mechanical-only warnings:\n");
+    for (const issue of declarationIssues) {
+      process.stdout.write(`    - ${issue}\n`);
+    }
   }
   if (subjectIssues.length > 0) {
     process.stdout.write("  subject warnings:\n");
@@ -566,10 +674,25 @@ async function main() {
   const rows = parseNumstat(stdout);
   const summary = summarize(rows);
   const structuralExtraction = structuralExtractionApplies(rows, summary, args.thresholds);
-  const issues = thresholdIssues(summary, args.thresholds, { structuralExtraction });
-  const commits = await commitsForSelector(plan.selector);
+  const commits = await commitsForSelector(plan.selector, args);
+  const structuralExtractionAccepted = structuralExtractionAcceptedByDeclaration(
+    structuralExtraction,
+    summary,
+    args.thresholds,
+    commits,
+  );
+  const issues = thresholdIssues(summary, args.thresholds, {
+    structuralExtractionAccepted,
+  });
+  const declarationIssues = structuralExtractionDeclarationIssues(
+    summary,
+    args.thresholds,
+    structuralExtraction,
+    structuralExtractionAccepted,
+    commits,
+  );
   const subjectIssues = commitSubjectIssues(commits);
-  const checkIssues = [...issues, ...subjectIssues];
+  const checkIssues = [...issues, ...declarationIssues, ...subjectIssues];
 
   if (args.json) {
     process.stdout.write(
@@ -583,8 +706,14 @@ async function main() {
           thresholds: args.thresholds,
           summary,
           structuralExtraction,
+          structuralExtractionAccepted,
           issues,
-          commitSubjects: commits,
+          declarationIssues,
+          commitSubjects: commits.map((commit) => ({
+            hash: commit.hash,
+            subject: commit.subject,
+            mechanicalOnly: mechanicalOnlyDeclared(commit.message),
+          })),
           subjectIssues,
           check: args.check,
         },
@@ -593,8 +722,9 @@ async function main() {
       )}\n`,
     );
   } else {
-    printHuman(plan, summary, args.thresholds, issues, subjectIssues, args.check, {
+    printHuman(plan, summary, args.thresholds, issues, declarationIssues, subjectIssues, args.check, {
       structuralExtraction,
+      structuralExtractionAccepted,
     });
   }
 
@@ -605,7 +735,10 @@ async function main() {
 
 export {
   DEFAULT_THRESHOLDS,
+  mechanicalOnlyDeclared,
   structuralExtractionApplies,
+  structuralExtractionAcceptedByDeclaration,
+  structuralExtractionDeclarationIssues,
   structuralExtractionGroups,
   structuralGroup,
   summarize,

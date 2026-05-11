@@ -190,6 +190,10 @@ async function buildFixtures(fixtureRoot) {
   );
   const changelogOnlyNoise = await commit(fixtureRoot, "docs(changelog): refresh budget test split notes");
 
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\n- Non-release mixed changelog drift.\n");
+  await appendFile(fixtureRoot, "src/lib.rs", "pub fn mixed_changelog_noise() {}\n");
+  const mixedChangelogNoise = await commit(fixtureRoot, "test: extract context cases");
+
   await appendFile(fixtureRoot, "scripts/npm/changelog.mjs", "export const fixture = true;\n");
   const changelogScriptFix = await commit(fixtureRoot, "fix(changelog): preserve release rendering");
 
@@ -265,6 +269,12 @@ async function buildFixtures(fixtureRoot) {
       expectedExit: 1,
     },
     {
+      name: "mixed non-release changelog edit fails noise guard",
+      script: "changelog-noise-guard.mjs",
+      args: ["--commit", mixedChangelogNoise],
+      expectedExit: 1,
+    },
+    {
       name: "changelog script fix passes noise guard",
       script: "changelog-noise-guard.mjs",
       args: ["--commit", changelogScriptFix],
@@ -275,6 +285,12 @@ async function buildFixtures(fixtureRoot) {
       script: "version-metadata-release-guard.mjs",
       args: ["--commit", changelogGeneratorDrift],
       expectedExit: 0,
+    },
+    {
+      name: "changelog generator drift fails noise guard outside release",
+      script: "changelog-noise-guard.mjs",
+      args: ["--commit", changelogGeneratorDrift],
+      expectedExit: 1,
     },
     {
       name: "duplicate release range fails duplicate guard",

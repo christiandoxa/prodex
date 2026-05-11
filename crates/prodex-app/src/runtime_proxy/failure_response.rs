@@ -1,8 +1,12 @@
 use super::*;
 
-pub(crate) fn runtime_proxy_stale_continuation_message() -> &'static str {
-    "Upstream no longer recognizes this conversation chain before output started. Retry from the last user message or restart the Codex turn; Prodex will not send a fresh request without the missing context."
-}
+pub(crate) use runtime_proxy_crate::{
+    runtime_proxy_stale_continuation_message,
+    runtime_websocket_error_payload_is_previous_response_not_found,
+};
+
+#[cfg(test)]
+pub(crate) use runtime_proxy_crate::runtime_proxy_precommit_budget_exhausted;
 
 pub(crate) fn runtime_proxy_stale_continuation_http_parts() -> RuntimeBufferedResponseParts {
     build_runtime_proxy_json_error_parts(
@@ -20,18 +24,6 @@ pub(crate) fn runtime_proxy_translate_previous_response_http_parts(
     } else {
         parts
     }
-}
-
-#[cfg(test)]
-pub(crate) fn runtime_proxy_precommit_budget_exhausted(
-    started_at: Instant,
-    attempts: usize,
-    continuation: bool,
-    pressure_mode: bool,
-) -> bool {
-    let (attempt_limit, budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
-
-    attempts >= attempt_limit || started_at.elapsed() >= budget
 }
 
 pub(crate) fn runtime_proxy_precommit_budget_exhausted_for_route(
@@ -154,20 +146,6 @@ pub(crate) fn send_runtime_proxy_final_websocket_failure(
             "service_unavailable",
             runtime_proxy_local_selection_failure_message(),
         ),
-    }
-}
-
-pub(crate) fn runtime_websocket_error_payload_is_previous_response_not_found(
-    payload: &RuntimeWebsocketErrorPayload,
-) -> bool {
-    match payload {
-        RuntimeWebsocketErrorPayload::Text(text) => {
-            extract_runtime_proxy_previous_response_message(text.as_bytes()).is_some()
-        }
-        RuntimeWebsocketErrorPayload::Binary(bytes) => {
-            extract_runtime_proxy_previous_response_message(bytes).is_some()
-        }
-        RuntimeWebsocketErrorPayload::Empty => false,
     }
 }
 

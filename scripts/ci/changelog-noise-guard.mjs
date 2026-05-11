@@ -7,15 +7,12 @@ import {
 } from "./release-guard-common.mjs";
 
 const CHANGELOG_PATH = "CHANGELOG.md";
-const CHANGELOG_REFRESH_ACTION_PATTERN =
-  /\b(?:add|generate|regenerate|refresh|render|sync|update|prepare|reopen|record)\b/i;
-
 function printHelp() {
   process.stdout.write(
     [
       "Usage: node scripts/ci/changelog-noise-guard.mjs [selector]",
       "",
-      "Fails changelog-only refresh commits outside release commits.",
+      "Fails CHANGELOG.md edits outside release commits.",
       "",
       "Selectors:",
       "  --range <rev-range>       inspect each commit in a git range",
@@ -32,48 +29,24 @@ function printHelp() {
   );
 }
 
-function parseConventionalSubject(subject) {
-  const match = subject.match(/^([a-z]+)(?:\(([^)]+)\))?!?:\s*(.+)$/i);
-  if (!match) {
-    return {
-      type: null,
-      scope: null,
-      title: subject.trim(),
-    };
-  }
-  return {
-    type: match[1].toLowerCase(),
-    scope: (match[2] ?? "").trim().toLowerCase() || null,
-    title: match[3].trim(),
-  };
-}
-
-function isChangelogRefreshSubject(subject) {
-  const parsed = parseConventionalSubject(subject);
-  if (parsed.scope !== "changelog" || !["chore", "docs"].includes(parsed.type)) {
-    return false;
-  }
-  return CHANGELOG_REFRESH_ACTION_PATTERN.test(parsed.title);
-}
-
-function isChangelogOnly(files) {
-  return files.length === 1 && files[0] === CHANGELOG_PATH;
+function touchesChangelog(files) {
+  return files.includes(CHANGELOG_PATH);
 }
 
 function issueForChange(change) {
   const subject = messageSubject(change.message);
-  if (!subject || !isChangelogOnly(change.files)) {
+  if (!touchesChangelog(change.files)) {
     return null;
   }
-  if (isReleaseLikeMessage(change.message) || !isChangelogRefreshSubject(subject)) {
+  if (subject && isReleaseLikeMessage(change.message)) {
     return null;
   }
   return {
     label: change.label,
-    subject,
+    subject: subject || "(no message provided)",
     files: change.files,
     message:
-      "changelog-only refresh commits are release noise; let npm run release:run render CHANGELOG.md in the release commit",
+      "CHANGELOG.md is generated release metadata; let npm run release:run render it in the release commit",
   };
 }
 
@@ -83,7 +56,7 @@ function printHuman(selector, issues) {
     return;
   }
 
-  process.stderr.write(`changelog-noise-guard: ${issues.length} changelog-only noise commit(s)\n`);
+  process.stderr.write(`changelog-noise-guard: ${issues.length} non-release changelog edit(s)\n`);
   for (const issue of issues) {
     process.stderr.write(`  - ${issue.label}: ${issue.subject}\n`);
     process.stderr.write(`    ${issue.message}\n`);
