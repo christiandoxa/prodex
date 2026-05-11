@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CI_IMPACT_PATHS, pathMatchesSpec } from "./test-impact-manifest.mjs";
+import { ciImpactCategory } from "./test-impact-manifest.mjs";
 
 export function normalizeChangedPath(filePath) {
   return String(filePath ?? "")
@@ -12,13 +12,7 @@ export function normalizeChangedPath(filePath) {
 }
 
 function pathCategory(filePath) {
-  if (pathMatchesSpec(filePath, CI_IMPACT_PATHS.heavy)) {
-    return "heavy";
-  }
-  if (pathMatchesSpec(filePath, CI_IMPACT_PATHS.light)) {
-    return "light";
-  }
-  return "unknown";
+  return ciImpactCategory(filePath);
 }
 
 export function classifyChangedPaths(changedPaths) {

@@ -54,13 +54,32 @@ export const RELEASE_SUBJECT_PATTERN_SPECS = deepFreeze(
     source: expandSemverPattern(spec.source),
   })),
 );
-export const CI_IMPACT_PATHS = manifestValue("ciImpactPaths");
 export const CHANGELOG_TEST_PATH = "scripts/npm/changelog.test.mjs";
 export const WATCH_UPSTREAM_FIXTURE_TESTS_PATH =
   "scripts/compat/watch-upstream-fixture-tests.mjs";
 export const UPSTREAM_COMPAT_SCRIPT_PATHS = manifestValue("upstreamCompatScriptPaths");
 export const PACKAGE_SCRIPT_ALIASES = manifestValue("packageScriptAliases");
 export const PATH_GROUPS = manifestValue("pathGroups");
+export const PATH_GROUP_NAMES = deepFreeze(
+  Object.fromEntries(Object.keys(PATH_GROUPS).map((name) => [name, name])),
+);
+export const CI_IMPACT_GROUPS = manifestValue("ciImpactGroups");
+export const CI_IMPACT_PATHS = deepFreeze(
+  Object.fromEntries(
+    Object.entries(CI_IMPACT_GROUPS).map(([category, groupName]) => [
+      category,
+      requiredPathGroupSpec(groupName),
+    ]),
+  ),
+);
+
+function requiredPathGroupSpec(groupName) {
+  const spec = PATH_GROUPS[groupName];
+  if (!spec) {
+    throw new Error(`unknown path group: ${groupName}`);
+  }
+  return spec;
+}
 
 export function pathMatchesSpec(filePath, spec) {
   if (spec.exact?.includes(filePath)) {
@@ -76,4 +95,26 @@ export function pathMatchesSpec(filePath, spec) {
     return prefixMatch && suffixMatch && fileNameMatch;
   }
   return false;
+}
+
+export function pathMatchesGroup(filePath, groupName) {
+  return pathMatchesSpec(filePath, requiredPathGroupSpec(groupName));
+}
+
+export function firstMatchingPathGroup(filePath, groupNames) {
+  for (const groupName of groupNames) {
+    if (pathMatchesGroup(filePath, groupName)) {
+      return groupName;
+    }
+  }
+  return null;
+}
+
+export function ciImpactCategory(filePath) {
+  for (const [category, groupName] of Object.entries(CI_IMPACT_GROUPS)) {
+    if (pathMatchesGroup(filePath, groupName)) {
+      return category;
+    }
+  }
+  return "unknown";
 }

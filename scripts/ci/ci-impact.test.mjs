@@ -6,6 +6,14 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { classifyChangedPaths, normalizeChangedPath } from "./ci-impact.mjs";
+import { buildSteps } from "./changed-tests.mjs";
+import {
+  CI_IMPACT_GROUPS,
+  PATH_GROUP_NAMES,
+  ciImpactCategory,
+  pathMatchesGroup,
+} from "./test-impact-manifest.mjs";
+import { workspacePackagesFromCargoMetadata } from "./workspace-metadata.mjs";
 
 const execFileAsync = promisify(execFile);
 const SCRIPT_PATH = new URL("./ci-impact.mjs", import.meta.url).pathname;
@@ -33,6 +41,19 @@ test("classifies docs and npm release tooling as lightweight", () => {
   assert.deepEqual(result.unknownPaths, []);
 });
 
+test("ci-impact uses canonical manifest impact groups", () => {
+  assert.equal(CI_IMPACT_GROUPS.heavy, PATH_GROUP_NAMES.ciImpactHeavy);
+  assert.equal(CI_IMPACT_GROUPS.light, PATH_GROUP_NAMES.ciImpactLight);
+
+  assert.equal(pathMatchesGroup("src/main.rs", CI_IMPACT_GROUPS.heavy), true);
+  assert.equal(ciImpactCategory("src/main.rs"), "heavy");
+  assert.equal(classifyChangedPaths(["src/main.rs"]).heavyPaths[0], "src/main.rs");
+
+  assert.equal(pathMatchesGroup("README.md", CI_IMPACT_GROUPS.light), true);
+  assert.equal(ciImpactCategory("README.md"), "light");
+  assert.equal(classifyChangedPaths(["README.md"]).heavy, false);
+});
+
 test("classifies Rust, workflow, runtime CI, and stress paths as heavy", () => {
   for (const filePath of [
     "src/main.rs",
@@ -57,10 +78,60 @@ test("classifies Rust, workflow, runtime CI, and stress paths as heavy", () => {
 test("defaults empty and unknown path sets to heavy", () => {
   assert.equal(classifyChangedPaths([]).heavy, true);
 
-  const unknown = classifyChangedPaths(["scripts/ci/new-heavy-script.mjs"]);
+  const unknownPath = "scripts/ci/benchmark-calibration.mjs";
+  assert.equal(ciImpactCategory(unknownPath), "unknown");
+
+  const unknown = classifyChangedPaths([unknownPath]);
   assert.equal(unknown.heavy, true);
-  assert.equal(unknown.unknownPaths[0], "scripts/ci/new-heavy-script.mjs");
+  assert.equal(unknown.unknownPaths[0], unknownPath);
   assert.match(unknown.reason, /unknown path/);
+});
+
+test("changed-tests uses canonical manifest groups for focused checks", async () => {
+  const filePath = "scripts/ci/size-guard.mjs";
+  assert.equal(pathMatchesGroup(filePath, PATH_GROUP_NAMES.sizeGuardRelevant), true);
+
+  const labels = (await buildSteps([filePath])).map((step) => step.label);
+  assert.deepEqual(labels, [
+    "node-check:scripts/ci/size-guard.mjs",
+    "size-guard",
+    "size-guard-fixtures",
+    "allow-attribute-guard",
+    "env-mutation-guard",
+  ]);
+});
+
+test("changed-tests keeps uncategorized node scripts conservative", async () => {
+  const filePath = "scripts/ci/benchmark-calibration.mjs";
+  assert.equal(pathMatchesGroup(filePath, PATH_GROUP_NAMES.nodeScript), true);
+  assert.equal(ciImpactCategory(filePath), "unknown");
+
+  const labels = (await buildSteps([filePath])).map((step) => step.label);
+  assert.deepEqual(labels, ["node-check:scripts/ci/benchmark-calibration.mjs"]);
+});
+
+test("workspace metadata helper derives package ownership from cargo metadata", () => {
+  const packages = workspacePackagesFromCargoMetadata({
+    workspace_root: "/repo",
+    workspace_members: ["path+file:///repo#prodex-runtime-proxy@0.0.0"],
+    packages: [
+      {
+        id: "path+file:///repo#prodex-runtime-proxy@0.0.0",
+        manifest_path: "/repo/crates/prodex-runtime-proxy/Cargo.toml",
+        name: "prodex-runtime-proxy",
+        targets: [
+          {
+            kind: ["lib"],
+            name: "runtime_proxy",
+            src_path: "/repo/crates/prodex-runtime-proxy/src/lib.rs",
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(packages[0].name, "prodex-runtime-proxy");
+  assert.equal(packages[0].crateDir, "crates/prodex-runtime-proxy");
+  assert.equal(packages[0].targets[0].srcPath, "crates/prodex-runtime-proxy/src/lib.rs");
 });
 
 test("heavy path wins over lightweight paths", () => {

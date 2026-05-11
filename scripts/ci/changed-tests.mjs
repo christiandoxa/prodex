@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { git, normalizeGitPath } from "./guard-common.mjs";
 import { formatCommand, runStep, runStepsSerial } from "./main-internal-test-runner.mjs";
 import {
   CHANGELOG_TEST_PATH,
   PACKAGE_SCRIPT_ALIASES,
-  PATH_GROUPS,
+  PATH_GROUP_NAMES,
   RELEASE_RUN_TEST_PATH,
   UPSTREAM_COMPAT_SCRIPT_PATHS,
   VERSION_SYNC_PATHS,
   WATCH_UPSTREAM_FIXTURE_TESTS_PATH,
-  pathMatchesSpec,
+  pathMatchesGroup,
 } from "./test-impact-manifest.mjs";
+import { workspacePackageNameForCrateDir } from "./workspace-metadata.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 function parseArgs(argv) {
@@ -178,13 +180,7 @@ async function pathExists(relativePath) {
 }
 
 async function packageNameForCrateDir(crateDir) {
-  const manifestPath = path.join(repoRoot, crateDir, "Cargo.toml");
-  const contents = await fs.readFile(manifestPath, "utf8");
-  const match = contents.match(/^\s*name\s*=\s*"([^"]+)"/m);
-  if (!match) {
-    throw new Error(`missing package.name in ${crateDir}/Cargo.toml`);
-  }
-  return match[1];
+  return await workspacePackageNameForCrateDir(crateDir);
 }
 
 function addStep(steps, key, step) {
@@ -223,46 +219,43 @@ async function addUpstreamCompatSteps(steps) {
 }
 
 function isSmartContextPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.smartContext);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.smartContext);
 }
 
 function isRuntimeHotPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.runtimeHotPath);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.runtimeHotPath);
 }
 
 function isVersionManagedPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.versionManaged);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.versionManaged);
 }
 
 function isNodeScriptPath(filePath) {
-  return (
-    (filePath.startsWith("scripts/") || filePath.startsWith("tests/")) &&
-    (filePath.endsWith(".mjs") || filePath.endsWith(".cjs") || filePath.endsWith(".js"))
-  );
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.nodeScript);
 }
 
 function isSizeGuardRelevantPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.sizeGuardRelevant);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.sizeGuardRelevant);
 }
 
 function isReleaseGuardFixturesRelevantPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.releaseGuardRelevant);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.releaseGuardRelevant);
 }
 
 function isUpstreamCompatRelevantPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.upstreamCompatRelevant);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.upstreamCompatRelevant);
 }
 
 function isChurnHygieneRelevantPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.churnHygieneRelevant);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.churnHygieneRelevant);
 }
 
 function isReleaseRunRelevantPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.releaseRunRelevant);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.releaseRunRelevant);
 }
 
 function isChangelogRelevantPath(filePath) {
-  return pathMatchesSpec(filePath, PATH_GROUPS.changelogRelevant);
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.changelogRelevant);
 }
 
 function crateDirForPath(filePath) {
@@ -274,7 +267,7 @@ function crateDirForPath(filePath) {
 }
 
 function rootRustTouched(filePath) {
-  return filePath === "Cargo.toml" || filePath === "Cargo.lock" || filePath.startsWith("src/");
+  return pathMatchesGroup(filePath, PATH_GROUP_NAMES.rootRust);
 }
 
 async function addCargoSteps(steps, paths) {
@@ -327,7 +320,7 @@ async function addCargoSteps(steps, paths) {
   }
 }
 
-async function buildSteps(paths) {
+export async function buildSteps(paths) {
   const steps = new Map();
 
   const markdownPaths = [];
@@ -452,9 +445,7 @@ async function buildSteps(paths) {
       });
     }
 
-    if (
-      pathMatchesSpec(filePath, PATH_GROUPS.runtimeManifestRelevant)
-    ) {
+    if (pathMatchesGroup(filePath, PATH_GROUP_NAMES.runtimeManifestRelevant)) {
       addStep(steps, "runtime-test-manifest-guard", {
         label: "runtime-test-manifest-guard",
         command: "node",
@@ -462,9 +453,7 @@ async function buildSteps(paths) {
       });
     }
 
-    if (
-      pathMatchesSpec(filePath, PATH_GROUPS.runtimePolicyDocsRelevant)
-    ) {
+    if (pathMatchesGroup(filePath, PATH_GROUP_NAMES.runtimePolicyDocsRelevant)) {
       addStep(steps, "docs-runtime-policy-check", {
         label: "docs-runtime-policy-check",
         command: "node",
@@ -576,10 +565,12 @@ async function main() {
   await runSelectedSteps(steps, args.dryRun);
 }
 
-try {
-  await main();
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`changed-tests: ${message}\n`);
-  process.exitCode = 1;
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`changed-tests: ${message}\n`);
+    process.exitCode = 1;
+  }
 }

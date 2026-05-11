@@ -100,55 +100,9 @@
       "source": "^bump(?:\\([^)]*\\))?!?:\\s*${SEMVER_SOURCE}\\s*$"
     }
   ],
-  "ciImpactPaths": {
-    "light": {
-      "exact": [
-        "README.md",
-        "QUICKSTART.md",
-        "package.json",
-        "package-lock.json",
-        "scripts/ci/ci-impact.mjs",
-        "scripts/ci/ci-impact.test.mjs",
-        "scripts/ci/release-duplicate-version-guard.mjs",
-        "scripts/ci/release-empty-commit-guard.mjs",
-        "scripts/ci/generated-metadata-clean.mjs",
-        "scripts/ci/release-hygiene.test.mjs",
-        "scripts/ci/release-metadata-only-guard.mjs",
-        "scripts/ci/release-tag-changelog-guard.mjs",
-        "scripts/ci/size-guard.test.mjs",
-        "scripts/ci/test-impact-manifest.json",
-        "scripts/ci/test-impact-manifest.mjs",
-        "scripts/ci/version-metadata-release-guard.mjs"
-      ],
-      "prefixes": [
-        "docs/",
-        "npm/",
-        "scripts/npm/"
-      ]
-    },
-    "heavy": {
-      "exact": [
-        "Cargo.lock",
-        "Cargo.toml",
-        "scripts/ci/runtime-env-parallel.mjs",
-        "scripts/ci/runtime-hotpath-guard.mjs",
-        "scripts/ci/runtime-proxy-bench-thresholds.json",
-        "scripts/ci/runtime-proxy-ci-matrix.mjs",
-        "scripts/ci/runtime-proxy-shard.mjs",
-        "scripts/ci/runtime-stress.mjs",
-        "scripts/ci/runtime-test-manifest-guard.mjs",
-        "scripts/ci/runtime-test-manifest.mjs"
-      ],
-      "prefixes": [
-        ".cargo/",
-        ".github/workflows/",
-        "benches/",
-        "crates/",
-        "src/",
-        "tests/",
-        "rust-toolchain"
-      ]
-    }
+  "ciImpactGroups": {
+    "heavy": "ciImpactHeavy",
+    "light": "ciImpactLight"
   },
   "upstreamCompatScriptPaths": [
     "scripts/compat/check-upstream-baseline.mjs",
@@ -179,6 +133,74 @@
     "changelog:test": "node --test scripts/npm/changelog.test.mjs"
   },
   "pathGroups": {
+    "ciImpactLight": {
+      "exact": [
+        "README.md",
+        "QUICKSTART.md",
+        "package.json",
+        "package-lock.json",
+        "scripts/ci/ci-impact.mjs",
+        "scripts/ci/ci-impact.test.mjs",
+        "scripts/ci/release-duplicate-version-guard.mjs",
+        "scripts/ci/release-empty-commit-guard.mjs",
+        "scripts/ci/generated-metadata-clean.mjs",
+        "scripts/ci/release-hygiene.test.mjs",
+        "scripts/ci/release-metadata-only-guard.mjs",
+        "scripts/ci/release-tag-changelog-guard.mjs",
+        "scripts/ci/size-guard.test.mjs",
+        "scripts/ci/test-impact-manifest.json",
+        "scripts/ci/test-impact-manifest.mjs",
+        "scripts/ci/version-metadata-release-guard.mjs"
+      ],
+      "prefixes": [
+        "docs/",
+        "npm/",
+        "scripts/npm/"
+      ]
+    },
+    "ciImpactHeavy": {
+      "exact": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "scripts/ci/runtime-env-parallel.mjs",
+        "scripts/ci/runtime-hotpath-guard.mjs",
+        "scripts/ci/runtime-proxy-bench-thresholds.json",
+        "scripts/ci/runtime-proxy-ci-matrix.mjs",
+        "scripts/ci/runtime-proxy-shard.mjs",
+        "scripts/ci/runtime-stress.mjs",
+        "scripts/ci/runtime-test-manifest-guard.mjs",
+        "scripts/ci/runtime-test-manifest.mjs"
+      ],
+      "prefixes": [
+        ".cargo/",
+        ".github/workflows/",
+        "benches/",
+        "crates/",
+        "src/",
+        "tests/",
+        "rust-toolchain"
+      ]
+    },
+    "nodeScript": {
+      "prefixes": [
+        "scripts/",
+        "tests/"
+      ],
+      "suffixes": [
+        ".mjs",
+        ".cjs",
+        ".js"
+      ]
+    },
+    "rootRust": {
+      "exact": [
+        "Cargo.toml",
+        "Cargo.lock"
+      ],
+      "prefixes": [
+        "src/"
+      ]
+    },
     "smartContext": {
       "exact": [
         "crates/prodex-app/src/runtime_proxy/smart_context.rs",
