@@ -46,6 +46,7 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlyLargeCompactResponse,
     HttpOnlyUsageLimitMessage,
     HttpOnlyUsageLimitMessageLateReadyFifth,
+    HttpOnlyUsageLimitUntilThird,
     HttpOnlyDelayedQuotaAfterOutputItemAdded,
     HttpOnlyQuotaThenToolOutputFreshFallbackError,
     HttpOnlyPreviousResponseToolContextMissing,
@@ -140,6 +141,10 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_http_usage_limit_message_late_ready_fifth() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth)
+    }
+
+    pub(super) fn start_http_usage_limit_until_third() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitUntilThird)
     }
 
     pub(super) fn start_http_delayed_quota_after_output_item_added() -> Self {
@@ -391,4 +396,3 @@ impl Drop for RuntimeProxyBackend {
         }
     }
 }
-

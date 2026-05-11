@@ -22,6 +22,7 @@ pub(crate) fn runtime_proxy_translate_previous_response_http_parts(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_proxy_precommit_budget_exhausted(
     started_at: Instant,
     attempts: usize,
@@ -31,6 +32,34 @@ pub(crate) fn runtime_proxy_precommit_budget_exhausted(
     let (attempt_limit, budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
 
     attempts >= attempt_limit || started_at.elapsed() >= budget
+}
+
+pub(crate) fn runtime_proxy_precommit_budget_exhausted_for_route(
+    shared: &RuntimeRotationProxyShared,
+    started_at: Instant,
+    attempts: usize,
+    continuation: bool,
+    pressure_mode: bool,
+) -> Result<bool> {
+    let profile_count = {
+        let runtime = shared
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+        runtime.state.profiles.len().max(1)
+    };
+    let (base_attempt_limit, base_budget) =
+        runtime_proxy_precommit_budget(continuation, pressure_mode);
+    let attempt_limit = base_attempt_limit.max(profile_count);
+    let base_attempt_limit = base_attempt_limit.max(1);
+    let base_budget_ms = base_budget.as_millis();
+    let scaled_budget_ms = base_budget_ms
+        .saturating_mul(attempt_limit as u128)
+        .saturating_add((base_attempt_limit - 1) as u128)
+        / base_attempt_limit as u128;
+    let budget = Duration::from_millis(scaled_budget_ms.min(u128::from(u64::MAX)) as u64);
+
+    Ok(attempts >= attempt_limit || started_at.elapsed() >= budget)
 }
 
 pub(crate) fn runtime_proxy_final_retryable_http_failure_response(

@@ -102,7 +102,8 @@ pub(crate) fn proxy_runtime_responses_request(
     loop {
         let pressure_mode =
             runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Responses);
-        if runtime_proxy_precommit_budget_exhausted(
+        if runtime_proxy_precommit_budget_exhausted_for_route(
+            shared,
             selection_started_at,
             selection_attempts,
             affinity_state.has_continuation_priority(
@@ -110,7 +111,7 @@ pub(crate) fn proxy_runtime_responses_request(
                 request_turn_state.as_deref(),
             ),
             pressure_mode,
-        ) {
+        )? {
             runtime_proxy_log(
                 shared,
                 format!(

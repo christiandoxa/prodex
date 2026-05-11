@@ -361,6 +361,11 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
                 matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
                     .then_some(Duration::from_millis(750)),
             ),
+            "second-account"
+                if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitUntilThird) =>
+            {
+                usage_limit_sse_response(mode)
+            }
             "second-account" => initial_account_response("second-account", mode),
             "third-account"
                 if matches!(mode, RuntimeProxyBackendMode::HttpOnlyBufferedJson)
@@ -401,6 +406,11 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
                     .then_some(Duration::from_millis(750)),
             ),
             "third-account" => initial_account_response("third-account", mode),
+            "fourth-account" | "fifth-account"
+                if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitUntilThird) =>
+            {
+                usage_limit_sse_response(mode)
+            }
             "fourth-account" | "fifth-account" => initial_account_response(account_id, mode),
             _ => (
                 "HTTP/1.1 200 OK",
@@ -429,6 +439,37 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
         response_turn_state,
         initial_body_stall,
         chunk_delay,
+    )
+}
+
+fn usage_limit_sse_response(
+    mode: RuntimeProxyBackendMode,
+) -> (
+    &'static str,
+    &'static str,
+    String,
+    Option<String>,
+    Option<Duration>,
+    Option<Duration>,
+) {
+    (
+        "HTTP/1.1 200 OK",
+        "text/event-stream",
+        concat!(
+            "event: response.failed\r\n",
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
+            "\r\n"
+        )
+        .to_string(),
+        None,
+        matches!(mode, RuntimeProxyBackendMode::HttpOnlyInitialBodyStall)
+            .then_some(Duration::from_millis(750)),
+        matches!(
+            mode,
+            RuntimeProxyBackendMode::HttpOnlySlowStream
+                | RuntimeProxyBackendMode::HttpOnlyStallAfterSeveralChunks
+        )
+        .then_some(Duration::from_millis(100)),
     )
 }
 

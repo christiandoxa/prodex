@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chain() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_usage_limit_until_third(),
+        "fifth",
+        &["fifth", "fourth", "main", "second", "third"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "continue on the next healthy account",
+                }],
+            }],
+        }),
+    );
+
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "fresh requests should rotate past usage-limit accounts"
+    );
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        body.contains("\"id\":\"resp-third\""),
+        "healthy later profile should complete the request: {body}"
+    );
+    assert!(
+        !body.contains("usage limit") && !body.contains("service_unavailable"),
+        "retryable usage-limit failures must not leak once a later profile succeeds: {body}"
+    );
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec![
+            "fifth-account".to_string(),
+            "fourth-account".to_string(),
+            "main-account".to_string(),
+            "second-account".to_string(),
+            "third-account".to_string(),
+        ],
+        "runtime proxy should keep rotating until the later healthy profile is tried"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_resume_continuation_preserves_metadata_headers_and_affinity() {
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_http_previous_response_needs_turn_state(),

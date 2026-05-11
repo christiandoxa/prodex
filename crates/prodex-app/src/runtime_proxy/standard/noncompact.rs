@@ -135,12 +135,13 @@ pub(super) fn proxy_runtime_noncompact_request(
     }
 
     loop {
-        if runtime_proxy_precommit_budget_exhausted(
+        if runtime_proxy_precommit_budget_exhausted_for_route(
+            shared,
             selection_started_at,
             selection_attempts,
             session_profile.is_some(),
             pressure_mode,
-        ) {
+        )? {
             runtime_proxy_log(
                 shared,
                 format!(
