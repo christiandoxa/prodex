@@ -56,7 +56,7 @@ function printHelp() {
       "  - churn hygiene over upstream merge-base..HEAD when available",
       "  - Rust source file size and allow attribute guards",
       "  - cargo fmt --check",
-      "  - npm/docs version sync idempotence",
+      "  - npm/docs version sync idempotence via manifest-owned path set",
       "",
       "Options:",
       "  --base <rev>  explicit release/churn hygiene base",
@@ -166,17 +166,8 @@ async function prepushSteps(args) {
     },
     {
       label: "version-sync-idempotence",
-      command: "git",
-      args: [
-        "diff",
-        "--exit-code",
-        "--",
-        "Cargo.toml",
-        "npm",
-        "README.md",
-        "QUICKSTART.md",
-        "scripts/npm",
-      ],
+      command: "node",
+      args: ["scripts/ci/generated-metadata-clean.mjs"],
     },
   ];
 }

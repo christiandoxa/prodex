@@ -73,7 +73,7 @@ function issueForChange(change) {
     subject,
     files: change.files,
     message:
-      "changelog-only refresh commits are release noise; let npm run release:cut render CHANGELOG.md in the release commit",
+      "changelog-only refresh commits are release noise; let npm run release:run render CHANGELOG.md in the release commit",
   };
 }
 

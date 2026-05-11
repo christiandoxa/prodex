@@ -13,6 +13,7 @@ import {
   readJsonFile,
   repoRoot,
 } from "./common.mjs";
+import { DOC_METADATA_PATHS, KNOWN_NPM_LOCKFILE_PATHS } from "../ci/test-impact-manifest.mjs";
 
 const DOC_VERSION_PATTERNS = [
   {
@@ -23,14 +24,6 @@ const DOC_VERSION_PATTERNS = [
     label: "npm versioned install",
     pattern: /(npm install -g @christiandoxa\/prodex@)([^\s`]+)/g,
   },
-];
-
-const DOC_FILES = ["README.md", "QUICKSTART.md"];
-const KNOWN_NPM_LOCKFILES = [
-  "package-lock.json",
-  "npm/package-lock.json",
-  "npm/prodex/package-lock.json",
-  ...platformPackages.map((spec) => `npm/platforms/${platformRepoDir(spec)}/package-lock.json`),
 ];
 
 function platformRepoDir(spec) {
@@ -166,7 +159,7 @@ async function checkPackageManifests(version, errors) {
 }
 
 async function checkDocs(version, errors) {
-  for (const relativePath of DOC_FILES) {
+  for (const relativePath of DOC_METADATA_PATHS) {
     const contents = await fs.readFile(path.join(repoRoot, relativePath), "utf8");
     for (const { label, pattern } of DOC_VERSION_PATTERNS) {
       pattern.lastIndex = 0;
@@ -269,7 +262,7 @@ function validateNpmLock(lock, relativePath, version, errors) {
 
 async function checkNpmLockfiles(version, errors) {
   const present = [];
-  for (const relativePath of KNOWN_NPM_LOCKFILES) {
+  for (const relativePath of KNOWN_NPM_LOCKFILE_PATHS) {
     if (await fileExists(relativePath)) {
       present.push(relativePath);
     }

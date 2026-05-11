@@ -40,6 +40,12 @@ function parseAllow(value) {
 function parseArgs(argv) {
   const args = {
     allowlist: [],
+    cohesionLineLimit:
+      process.env.PRODEX_SIZE_GUARD_COHESION_LINES === undefined ||
+      process.env.PRODEX_SIZE_GUARD_COHESION_LINES === ""
+        ? null
+        : envPositiveInteger("PRODEX_SIZE_GUARD_COHESION_LINES", DEFAULT_PRODUCTION_LINE_LIMIT),
+    maxNearLimitSiblings: envPositiveInteger("PRODEX_SIZE_GUARD_MAX_NEAR_LIMIT_SIBLINGS", 2),
     json: false,
     productionLineLimit: envPositiveInteger(
       "PRODEX_SIZE_GUARD_PRODUCTION_LINES",
@@ -67,6 +73,16 @@ function parseArgs(argv) {
       args.allowlist.push(parseAllow(requiredValue(argv[index], value)));
       continue;
     }
+    if (value === "--cohesion-lines") {
+      index += 1;
+      args.cohesionLineLimit = parsePositiveInteger(requiredValue(argv[index], value), value);
+      continue;
+    }
+    if (value === "--max-near-limit-siblings") {
+      index += 1;
+      args.maxNearLimitSiblings = parsePositiveInteger(requiredValue(argv[index], value), value);
+      continue;
+    }
     if (value === "--no-default-allowlist") {
       args.useDefaultAllowlist = false;
       continue;
@@ -89,6 +105,10 @@ function parseArgs(argv) {
   if (args.testLineLimit <= args.productionLineLimit) {
     throw new Error("--test-lines must be higher than --production-lines");
   }
+  args.cohesionLineLimit ??= Math.floor(args.productionLineLimit * 0.9);
+  if (args.cohesionLineLimit >= args.productionLineLimit) {
+    throw new Error("--cohesion-lines must be lower than --production-lines");
+  }
 
   return args;
 }
@@ -107,6 +127,8 @@ function printHelp() {
       "  --prod-lines <n>        alias for --production-lines",
       "  --test-lines <n>        test/benchmark Rust line limit; must exceed production limit",
       "  --allow <path>:<n>      allow one file up to an exact current cap; may be repeated",
+      "  --cohesion-lines <n>    production file size that counts as near-limit for sibling cohesion",
+      "  --max-near-limit-siblings <n> fail when a production directory has more than this many near-limit siblings",
       "  --no-default-allowlist  ignore built-in caps for current hot spots",
       "  --warn-only             print violations but exit successfully",
       "  --json                  print machine-readable results",
@@ -114,6 +136,8 @@ function printHelp() {
       "Environment:",
       "  PRODEX_SIZE_GUARD_PRODUCTION_LINES",
       "  PRODEX_SIZE_GUARD_TEST_LINES",
+      "  PRODEX_SIZE_GUARD_COHESION_LINES",
+      "  PRODEX_SIZE_GUARD_MAX_NEAR_LIMIT_SIBLINGS",
     ].join("\n") + "\n",
   );
 }
@@ -174,6 +198,35 @@ function allowlistMap(entries) {
     map.set(file, { ...entry, file });
   }
   return map;
+}
+
+function directoryForFile(filePath) {
+  const separator = filePath.lastIndexOf("/");
+  return separator < 0 ? "." : filePath.slice(0, separator);
+}
+
+function cohesionViolationsForFiles(files, args) {
+  const nearLimitByDirectory = new Map();
+  for (const file of files) {
+    if (file.kind !== "production" || file.lineCount < args.cohesionLineLimit) {
+      continue;
+    }
+    const directory = directoryForFile(file.filePath);
+    const entries = nearLimitByDirectory.get(directory) ?? [];
+    entries.push(file);
+    nearLimitByDirectory.set(directory, entries);
+  }
+
+  return [...nearLimitByDirectory.entries()]
+    .filter(([, entries]) => entries.length > args.maxNearLimitSiblings)
+    .map(([directory, entries]) => ({
+      directory,
+      nearLimitFiles: entries.sort((left, right) => right.lineCount - left.lineCount),
+      lineLimit: args.cohesionLineLimit,
+      maxNearLimitSiblings: args.maxNearLimitSiblings,
+      type: "near-limit-sibling-cluster",
+    }))
+    .sort((left, right) => right.nearLimitFiles.length - left.nearLimitFiles.length);
 }
 
 async function scan(args) {
@@ -256,17 +309,20 @@ async function scan(args) {
     });
   }
 
-  return { allowlistHits, files, staleAllowlistEntries, violations };
+  const cohesionViolations = cohesionViolationsForFiles(files, args);
+  return { allowlistHits, cohesionViolations, files, staleAllowlistEntries, violations };
 }
 
 function printHuman(args, result) {
-  const findingCount = result.violations.length + result.staleAllowlistEntries.length;
+  const findingCount =
+    result.violations.length + result.staleAllowlistEntries.length + result.cohesionViolations.length;
   if (findingCount === 0) {
     process.stdout.write(
       [
         `size guard: ok (${result.files.length} Rust file(s), ${result.allowlistHits.length} allowlist hit(s))`,
         `  production limit: ${args.productionLineLimit} lines`,
         `  test/benchmark limit: ${args.testLineLimit} lines`,
+        `  cohesion: <= ${args.maxNearLimitSiblings} production sibling(s) at ${args.cohesionLineLimit}+ lines`,
       ].join("\n") + "\n",
     );
     return;
@@ -284,6 +340,14 @@ function printHuman(args, result) {
     process.stderr.write(
       `${violation.filePath}: ${violation.lineCount} ${violation.kind} line(s), limit ${violation.limit}\n`,
     );
+  }
+  for (const violation of result.cohesionViolations) {
+    process.stderr.write(
+      `${violation.directory}: ${violation.nearLimitFiles.length} production sibling file(s) at ${violation.lineLimit}+ lines, max ${violation.maxNearLimitSiblings}\n`,
+    );
+    for (const file of violation.nearLimitFiles) {
+      process.stderr.write(`  - ${file.filePath}: ${file.lineCount} line(s)\n`);
+    }
   }
   for (const entry of result.staleAllowlistEntries) {
     if (entry.type === "allowlist-missing") {
@@ -303,7 +367,7 @@ function printHuman(args, result) {
     );
   }
   process.stderr.write(
-    "\nSplit large files, raise the configured limit deliberately, add a narrow allowlist cap with rationale, ratchet stale caps, or remove stale allowlist entries.\n",
+    "\nSplit large files by domain ownership, avoid clusters of near-limit sibling modules, raise the configured limit deliberately, add a narrow allowlist cap with rationale, ratchet stale caps, or remove stale allowlist entries.\n",
   );
 }
 
@@ -322,6 +386,8 @@ async function main() {
           limits: {
             production: args.productionLineLimit,
             test: args.testLineLimit,
+            cohesion: args.cohesionLineLimit,
+            maxNearLimitSiblings: args.maxNearLimitSiblings,
           },
           ...result,
         },
@@ -333,7 +399,12 @@ async function main() {
     printHuman(args, result);
   }
 
-  if ((result.violations.length > 0 || result.staleAllowlistEntries.length > 0) && !args.warnOnly) {
+  if (
+    (result.violations.length > 0 ||
+      result.staleAllowlistEntries.length > 0 ||
+      result.cohesionViolations.length > 0) &&
+    !args.warnOnly
+  ) {
     process.exitCode = 1;
   }
 }

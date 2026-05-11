@@ -2,8 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { repoRoot, readCargoVersion, packageVersionPattern } from "./common.mjs";
-
-const docs = ["README.md", "QUICKSTART.md"];
+import { DOC_METADATA_PATHS } from "../ci/test-impact-manifest.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -58,7 +57,7 @@ async function main() {
   }
 
   let changedCount = 0;
-  for (const relativePath of docs) {
+  for (const relativePath of DOC_METADATA_PATHS) {
     const filePath = path.join(repoRoot, relativePath);
     const current = await fs.readFile(filePath, "utf8");
     const next = syncDocVersion(current, version);

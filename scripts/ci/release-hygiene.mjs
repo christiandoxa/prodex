@@ -139,6 +139,11 @@ export function releaseHygieneSteps(args = {}) {
 
   if (args.fixtures !== false) {
     steps.push({
+      label: "release-run-tests",
+      command: "node",
+      args: ["--test", "scripts/npm/release-run.test.mjs"],
+    });
+    steps.push({
       label: "release-guard-fixtures",
       command: "node",
       args: ["scripts/ci/release-guard-fixture-tests.mjs"],

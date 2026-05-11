@@ -1,73 +1,38 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileMatchesAnyPattern, git, normalizeGitPath } from "./guard-common.mjs";
+import {
+  DOC_METADATA_PATHS,
+  DOC_VERSION_METADATA_LINE_SOURCES,
+  RELEASE_MESSAGE_PATTERN_SOURCES,
+  RELEASE_METADATA_PATTERNS,
+  RELEASE_SUBJECT_PATTERN_SPECS,
+  SEMVER_SOURCE,
+  VERSION_METADATA_PATTERNS,
+} from "./test-impact-manifest.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
-export const VERSION_METADATA_PATTERNS = Object.freeze([
-  "Cargo.toml",
-  "Cargo.lock",
-  "crates/*/Cargo.toml",
-  "npm/prodex/package.json",
-  "npm/platforms/*/package.json",
-  "package-lock.json",
-  "npm/package-lock.json",
-  "npm/prodex/package-lock.json",
-  "npm/platforms/*/package-lock.json",
-  "CHANGELOG.md",
-]);
+export {
+  DOC_METADATA_PATHS,
+  RELEASE_METADATA_PATTERNS,
+  SEMVER_SOURCE,
+  VERSION_METADATA_PATTERNS,
+};
 
-export const RELEASE_METADATA_PATTERNS = Object.freeze([
-  "Cargo.toml",
-  "Cargo.lock",
-  "CHANGELOG.md",
-  "crates/*/Cargo.toml",
-  "package-lock.json",
-  "npm/package-lock.json",
-  "npm/prodex/package.json",
-  "npm/prodex/package-lock.json",
-  "npm/platforms/*/package.json",
-  "npm/platforms/*/package-lock.json",
-]);
+export const DOC_VERSION_METADATA_LINE_PATTERNS = Object.freeze(
+  DOC_VERSION_METADATA_LINE_SOURCES.map((source) => new RegExp(source)),
+);
 
-export const DOC_METADATA_PATHS = Object.freeze(["README.md", "QUICKSTART.md"]);
+export const RELEASE_MESSAGE_PATTERNS = Object.freeze(
+  RELEASE_MESSAGE_PATTERN_SOURCES.map((source) => new RegExp(source, "i")),
+);
 
-export const DOC_VERSION_METADATA_LINE_PATTERNS = Object.freeze([
-  /\bThe current local version in this repo is\b/,
-  /\bnpm install -g @christiandoxa\/prodex@v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\b/,
-]);
-
-export const RELEASE_MESSAGE_PATTERNS = Object.freeze([
-  /^release(?:\([^)]*\))?!?:/i,
-  /^release\s+v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/i,
-  /^chore(?:\([^)]*\))?!?:\s*release\b/i,
-  /^chore\(release\)!?:/i,
-  /^bump(?:\([^)]*\))?!?:\s*(?:prodex\s+)?v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/i,
-]);
-
-export const SEMVER_SOURCE = String.raw`v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)`;
-
-export const RELEASE_SUBJECT_PATTERNS = Object.freeze([
-  {
-    action: "release",
-    pattern: new RegExp(String.raw`^chore\(release\)!?:\s*release\s+${SEMVER_SOURCE}\s*$`, "i"),
-  },
-  {
-    action: "prepare",
-    pattern: new RegExp(String.raw`^chore\(release\)!?:\s*prepare\s+${SEMVER_SOURCE}\s*$`, "i"),
-  },
-  {
-    action: "release",
-    pattern: new RegExp(String.raw`^release(?:\([^)]*\))?!?:\s*${SEMVER_SOURCE}\s*$`, "i"),
-  },
-  {
-    action: "release",
-    pattern: new RegExp(String.raw`^release\s+${SEMVER_SOURCE}\s*$`, "i"),
-  },
-  {
-    action: "bump",
-    pattern: new RegExp(String.raw`^bump(?:\([^)]*\))?!?:\s*${SEMVER_SOURCE}\s*$`, "i"),
-  },
-]);
+export const RELEASE_SUBJECT_PATTERNS = Object.freeze(
+  RELEASE_SUBJECT_PATTERN_SPECS.map(({ action, source }) => ({
+    action,
+    pattern: new RegExp(source, "i"),
+  })),
+);
 
 export const VERSION_TAG_PATTERN = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/;
 

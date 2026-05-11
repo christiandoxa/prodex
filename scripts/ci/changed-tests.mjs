@@ -349,6 +349,11 @@ async function buildSteps(paths) {
         command: "node",
         args: ["scripts/ci/size-guard.mjs"],
       });
+      addStep(steps, "size-guard-fixtures", {
+        label: "size-guard-fixtures",
+        command: "node",
+        args: ["--test", "scripts/ci/size-guard.test.mjs"],
+      });
       addStep(steps, "allow-attribute-guard", {
         label: "allow-attribute-guard",
         command: "node",
@@ -404,10 +409,10 @@ async function buildSteps(paths) {
     }
 
     if (filePath === "CHANGELOG.md") {
-      addStep(steps, "changelog-check", {
-        label: "changelog-check",
+      addStep(steps, "changelog-ci-check", {
+        label: "changelog-ci-check",
         command: "node",
-        args: ["scripts/npm/changelog.mjs", "--check"],
+        args: ["scripts/npm/changelog.mjs", "--ci-check"],
       });
     }
 

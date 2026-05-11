@@ -10,6 +10,7 @@ import {
   readCargoVersion,
   repoRoot,
 } from "./common.mjs";
+import { RELEASE_COMMIT_PATHS } from "../ci/test-impact-manifest.mjs";
 
 const defaultStateFile = path.join(repoRoot, "target", "release-run", "state.json");
 const defaultBranch = "main";
@@ -28,23 +29,6 @@ export const releaseSteps = [
   "trigger-publish",
   "watch-publish",
   "verify",
-];
-
-const releaseMetadataPaths = [
-  "Cargo.toml",
-  "Cargo.lock",
-  "CHANGELOG.md",
-  "README.md",
-  "QUICKSTART.md",
-  "package.json",
-  "package-lock.json",
-  "npm/prodex/package.json",
-  "npm/platforms/linux-x64/package.json",
-  "npm/platforms/linux-arm64/package.json",
-  "npm/platforms/darwin-x64/package.json",
-  "npm/platforms/darwin-arm64/package.json",
-  "npm/platforms/win32-x64/package.json",
-  "npm/platforms/win32-arm64/package.json",
 ];
 
 function usage() {
@@ -453,7 +437,7 @@ async function commitRelease(version, args) {
   }
 
   const pathsToAdd = [];
-  for (const relativePath of releaseMetadataPaths) {
+  for (const relativePath of RELEASE_COMMIT_PATHS) {
     if (await pathExists(path.join(repoRoot, relativePath))) {
       pathsToAdd.push(relativePath);
     }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import { fileMatchesAnyPattern, git, parseNumstat, parsePositiveInteger } from "./guard-common.mjs";
+import { RELEASE_METADATA_CHURN_PATTERNS } from "./test-impact-manifest.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_THRESHOLDS = Object.freeze({
@@ -23,16 +24,6 @@ const BEHAVIOR_PATTERNS = Object.freeze([
   "package.json",
 ]);
 
-const RELEASE_METADATA_FILE_PATTERNS = Object.freeze([
-  "Cargo.toml",
-  "Cargo.lock",
-  "crates/*/Cargo.toml",
-  "npm/prodex/package.json",
-  "npm/platforms/*/package.json",
-  "README.md",
-  "QUICKSTART.md",
-  "CHANGELOG.md",
-]);
 const VERSION_TAG_PATTERN = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const LATEST_TAG_BASELINE_ALIASES = new Set(["latest-tag", "latest-version-tag", "latest-release-tag"]);
 
@@ -296,7 +287,7 @@ function summarize(rows) {
   const behaviorRows = rows.filter((row) => fileMatchesAnyPattern(row.filePath, BEHAVIOR_PATTERNS));
   const releaseMetadataOnly =
     rows.length > 0 &&
-    rows.every((row) => fileMatchesAnyPattern(row.filePath, RELEASE_METADATA_FILE_PATTERNS));
+    rows.every((row) => fileMatchesAnyPattern(row.filePath, RELEASE_METADATA_CHURN_PATTERNS));
   const insertions = rows.reduce((sum, row) => sum + row.insertions, 0);
   const deletions = rows.reduce((sum, row) => sum + row.deletions, 0);
   const changedLines = insertions + deletions;

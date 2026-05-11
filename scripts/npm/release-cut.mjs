@@ -9,6 +9,7 @@ import {
   readCargoVersion,
   repoRoot,
 } from "./common.mjs";
+import { RELEASE_COMMIT_PATHS } from "../ci/test-impact-manifest.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,7 +76,7 @@ function printHelp() {
     [
       "Usage: npm run release:cut -- --version <semver> [--dry-run] [--no-commit] [--no-tag] [--no-verify]",
       "",
-      "Cuts a deterministic release in one command.",
+      "Cuts a deterministic release in one command. Prefer npm run release:run for normal releases.",
       "",
       "Pipeline:",
       "  - require a clean worktree",
@@ -179,6 +180,25 @@ async function tagTarget(tag) {
   } catch {
     return null;
   }
+}
+
+async function pathExists(relativePath) {
+  try {
+    await fs.access(path.join(repoRoot, relativePath));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function existingReleaseCommitPaths() {
+  const paths = [];
+  for (const relativePath of RELEASE_COMMIT_PATHS) {
+    if (await pathExists(relativePath)) {
+      paths.push(relativePath);
+    }
+  }
+  return paths;
 }
 
 async function headRev() {
@@ -323,7 +343,7 @@ async function releaseCut(args) {
     ]);
   }
 
-  await git(["add", "Cargo.toml", "Cargo.lock", "CHANGELOG.md", "README.md", "QUICKSTART.md", "npm"]);
+  await git(["add", "--", ...(await existingReleaseCommitPaths())]);
   if (!(await hasStagedDiff())) {
     if (args.tag) {
       await tagRelease(version, args.dryRun);

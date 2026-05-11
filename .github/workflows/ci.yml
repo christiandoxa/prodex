@@ -174,6 +174,9 @@ jobs:
       - name: Enforce Rust file size guard
         run: npm run ci:size-guard
 
+      - name: Check Rust file size guard fixtures
+        run: npm run ci:size-guard-fixtures
+
       - name: Enforce Rust allow attribute guard
         run: npm run ci:allow-guard
 
@@ -281,7 +284,7 @@ jobs:
           set -euo pipefail
           npm run changelog:ci-check
           npm run npm:sync-version
-          git diff --exit-code -- Cargo.toml crates npm README.md QUICKSTART.md scripts/npm
+          npm run ci:generated-metadata-clean
 
   npm-package-smoke:
     needs: changes

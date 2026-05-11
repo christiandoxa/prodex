@@ -2,47 +2,7 @@
 import fs from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-
-const LIGHT_EXACT_PATHS = Object.freeze([
-  "README.md",
-  "QUICKSTART.md",
-  "package.json",
-  "package-lock.json",
-  "scripts/ci/ci-impact.mjs",
-  "scripts/ci/ci-impact.test.mjs",
-  "scripts/ci/release-duplicate-version-guard.mjs",
-  "scripts/ci/release-empty-commit-guard.mjs",
-  "scripts/ci/release-metadata-only-guard.mjs",
-  "scripts/ci/release-tag-changelog-guard.mjs",
-  "scripts/ci/test-impact-manifest.mjs",
-  "scripts/ci/version-metadata-release-guard.mjs",
-]);
-
-const LIGHT_PREFIXES = Object.freeze(["docs/", "npm/", "scripts/npm/"]);
-
-const HEAVY_EXACT_PATHS = Object.freeze([
-  "Cargo.lock",
-  "Cargo.toml",
-  "scripts/ci/runtime-env-parallel.mjs",
-  "scripts/ci/runtime-hotpath-guard.mjs",
-  "scripts/ci/runtime-proxy-bench-thresholds.json",
-  "scripts/ci/runtime-proxy-ci-matrix.mjs",
-  "scripts/ci/runtime-proxy-shard.mjs",
-  "scripts/ci/runtime-stress.mjs",
-  "scripts/ci/runtime-test-manifest-guard.mjs",
-  "scripts/ci/runtime-test-manifest.mjs",
-]);
-
-const HEAVY_PREFIXES = Object.freeze([
-  ".cargo/",
-  ".github/workflows/",
-  "benches/",
-  "crates/",
-  "src/",
-  "tests/",
-]);
-
-const HEAVY_PREFIX_PATTERNS = Object.freeze(["rust-toolchain"]);
+import { CI_IMPACT_PATHS, pathMatchesSpec } from "./test-impact-manifest.mjs";
 
 export function normalizeChangedPath(filePath) {
   return String(filePath ?? "")
@@ -52,19 +12,10 @@ export function normalizeChangedPath(filePath) {
 }
 
 function pathCategory(filePath) {
-  if (HEAVY_EXACT_PATHS.includes(filePath)) {
+  if (pathMatchesSpec(filePath, CI_IMPACT_PATHS.heavy)) {
     return "heavy";
   }
-  if (HEAVY_PREFIXES.some((prefix) => filePath.startsWith(prefix))) {
-    return "heavy";
-  }
-  if (HEAVY_PREFIX_PATTERNS.some((prefix) => filePath.startsWith(prefix))) {
-    return "heavy";
-  }
-  if (LIGHT_EXACT_PATHS.includes(filePath)) {
-    return "light";
-  }
-  if (LIGHT_PREFIXES.some((prefix) => filePath.startsWith(prefix))) {
+  if (pathMatchesSpec(filePath, CI_IMPACT_PATHS.light)) {
     return "light";
   }
   return "unknown";
