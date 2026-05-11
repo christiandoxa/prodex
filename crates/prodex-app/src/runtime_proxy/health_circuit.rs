@@ -6,28 +6,11 @@ pub(crate) use prodex_runtime_store::{
 };
 
 pub(crate) const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
-pub(crate) const RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS: i64 = 20;
-pub(crate) const RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS: i64 = if cfg!(test) { 320 } else { 600 };
 pub(crate) const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS: i64 = 5;
 pub(crate) const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS: i64 =
     if cfg!(test) { 20 } else { 60 };
 pub(crate) const RUNTIME_PROFILE_CIRCUIT_REOPEN_DECAY_SECONDS: i64 =
     if cfg!(test) { 12 } else { 1_800 };
-pub(crate) const RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE: u32 = 4;
-
-pub(crate) fn runtime_profile_circuit_open_seconds(score: u32, reopen_stage: u32) -> i64 {
-    let multiplier = 1_i64
-        .checked_shl(
-            score
-                .saturating_sub(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD)
-                .min(3)
-                .saturating_add(reopen_stage.min(RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE)),
-        )
-        .unwrap_or(i64::MAX);
-    RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS
-        .saturating_mul(multiplier)
-        .min(RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS)
-}
 
 pub(crate) fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
     let multiplier = 1_i64

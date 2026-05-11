@@ -7,11 +7,13 @@ use chrono::TimeZone;
 use dirs::home_dir;
 use reqwest::blocking::Client;
 use serde::Serialize;
+#[cfg(test)]
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+#[cfg(test)]
 use std::hash::{Hash, Hasher};
 use std::io::{self, Cursor, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};

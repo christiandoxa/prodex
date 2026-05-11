@@ -20,33 +20,6 @@ pub(crate) fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared)
         .clone())
 }
 
-pub(crate) fn runtime_profile_in_retry_backoff(
-    runtime: &RuntimeRotationState,
-    profile_name: &str,
-    now: i64,
-) -> bool {
-    runtime
-        .profile_retry_backoff_until
-        .get(profile_name)
-        .copied()
-        .is_some_and(|until| until > now)
-}
-
-pub(crate) fn runtime_profile_in_transport_backoff(
-    runtime: &RuntimeRotationState,
-    profile_name: &str,
-    route_kind: RuntimeRouteKind,
-    now: i64,
-) -> bool {
-    runtime_profile_transport_backoff_until_from_map(
-        &runtime.profile_transport_backoff_until,
-        profile_name,
-        route_kind,
-        now,
-    )
-    .is_some()
-}
-
 pub(crate) fn runtime_profile_inflight_count(
     runtime: &RuntimeRotationState,
     profile_name: &str,
@@ -83,8 +56,13 @@ pub(crate) fn runtime_profile_in_selection_backoff(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
-    runtime_profile_in_retry_backoff(runtime, profile_name, now)
-        || runtime_profile_in_transport_backoff(runtime, profile_name, route_kind, now)
+    runtime_proxy_crate::runtime_profile_name_in_retry_or_transport_backoff(
+        profile_name,
+        &runtime.profile_retry_backoff_until,
+        &runtime.profile_transport_backoff_until,
+        runtime_route_kind_to_proxy(route_kind),
+        now,
+    )
 }
 
 pub(crate) fn runtime_route_kind_label(route_kind: RuntimeRouteKind) -> &'static str {
@@ -195,14 +173,11 @@ pub(crate) fn runtime_profile_selection_jitter(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    shared
-        .request_sequence
-        .load(Ordering::Relaxed)
-        .hash(&mut hasher);
-    profile_name.hash(&mut hasher);
-    runtime_route_kind_label(route_kind).hash(&mut hasher);
-    hasher.finish()
+    runtime_proxy_crate::runtime_profile_selection_jitter(
+        shared.request_sequence.load(Ordering::Relaxed),
+        profile_name,
+        runtime_route_kind_to_proxy(route_kind),
+    )
 }
 
 pub(crate) fn runtime_profile_health_sort_key(

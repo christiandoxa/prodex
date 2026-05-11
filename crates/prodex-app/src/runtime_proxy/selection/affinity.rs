@@ -73,7 +73,7 @@ pub(super) fn runtime_affinity_selection_decision(
     selection: RuntimeResponseCandidateSelection<'_>,
     affinity_kind: RuntimeAffinitySelectionKind,
 ) -> Result<RuntimeAffinitySelectionDecision> {
-    let Some(profile_name) = affinity_kind.profile(selection) else {
+    let Some(profile_name) = runtime_affinity_selection_profile(affinity_kind, selection) else {
         return Ok(RuntimeAffinitySelectionDecision::Continue);
     };
     if selection.excluded_profiles.contains(profile_name) {

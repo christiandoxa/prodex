@@ -100,6 +100,108 @@ fn latency_penalty_uses_route_stage_thresholds() {
 }
 
 #[test]
+fn selection_jitter_uses_sequence_profile_and_route() {
+    let first = runtime_profile_selection_jitter(42, "alpha", RuntimeRouteKind::Responses);
+
+    assert_eq!(
+        first,
+        runtime_profile_selection_jitter(42, "alpha", RuntimeRouteKind::Responses)
+    );
+    assert_ne!(
+        first,
+        runtime_profile_selection_jitter(43, "alpha", RuntimeRouteKind::Responses)
+    );
+    assert_ne!(
+        first,
+        runtime_profile_selection_jitter(42, "beta", RuntimeRouteKind::Responses)
+    );
+    assert_ne!(
+        first,
+        runtime_profile_selection_jitter(42, "alpha", RuntimeRouteKind::Websocket)
+    );
+}
+
+#[test]
+fn health_bump_opens_circuit_and_tracks_reopen_stage() {
+    assert_eq!(
+        runtime_profile_health_bump_decision(1, 2, false, 3),
+        RuntimeProfileHealthBumpDecision {
+            next_score: 3,
+            circuit_reopen_stage: None,
+            circuit_open_seconds: None,
+        }
+    );
+    assert_eq!(
+        runtime_profile_health_bump_decision(3, 1, false, 3),
+        RuntimeProfileHealthBumpDecision {
+            next_score: 4,
+            circuit_reopen_stage: Some(0),
+            circuit_open_seconds: Some(RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS),
+        }
+    );
+    assert_eq!(
+        runtime_profile_health_bump_decision(4, 1, true, 1),
+        RuntimeProfileHealthBumpDecision {
+            next_score: 5,
+            circuit_reopen_stage: Some(2),
+            circuit_open_seconds: Some(runtime_profile_circuit_open_seconds(5, 2)),
+        }
+    );
+}
+
+#[test]
+fn success_recovery_accelerates_after_first_streak() {
+    assert_eq!(
+        runtime_profile_health_recovery_decision(None, 2),
+        RuntimeProfileHealthRecoveryDecision {
+            next_score: None,
+            next_success_streak: None,
+        }
+    );
+    assert_eq!(
+        runtime_profile_health_recovery_decision(Some(5), 0),
+        RuntimeProfileHealthRecoveryDecision {
+            next_score: Some(3),
+            next_success_streak: Some(1),
+        }
+    );
+    assert_eq!(
+        runtime_profile_health_recovery_decision(Some(3), 1),
+        RuntimeProfileHealthRecoveryDecision {
+            next_score: None,
+            next_success_streak: None,
+        }
+    );
+}
+
+#[test]
+fn retry_or_transport_backoff_ignores_expired_entries() {
+    let now = 10;
+    let mut retry = BTreeMap::new();
+    let mut transport = BTreeMap::new();
+    retry.insert("alpha".to_string(), now - 1);
+    transport.insert(
+        runtime_profile_transport_backoff_key("alpha", RuntimeRouteKind::Responses),
+        now + 1,
+    );
+
+    assert!(!runtime_profile_name_in_retry_backoff("alpha", &retry, now));
+    assert!(runtime_profile_name_in_transport_backoff(
+        "alpha",
+        &transport,
+        RuntimeRouteKind::Responses,
+        now,
+    ));
+    assert!(runtime_profile_name_in_retry_or_transport_backoff(
+        "alpha",
+        &retry,
+        &transport,
+        RuntimeRouteKind::Responses,
+        now,
+    ));
+}
+
+#[test]
 fn startup_softening_clamps_future_backoffs() {
     let now = 100;
     let mut backoffs = RuntimeProfileBackoffs::default();

@@ -104,10 +104,10 @@ pub(crate) const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 =
 pub(crate) const RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
 pub(crate) const RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY: u32 = 2;
 pub(crate) const RUNTIME_PROFILE_LATENCY_PENALTY_MAX: u32 = 12;
-pub(crate) const RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE: u32 = 2;
+#[cfg(test)]
+pub(crate) use runtime_proxy_crate::RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE;
 pub(crate) const RUNTIME_PROFILE_BAD_PAIRING_PENALTY: u32 = 2;
 pub(crate) const RUNTIME_PROFILE_HEALTH_MAX_SCORE: u32 = 16;
-pub(crate) const RUNTIME_PROFILE_SUCCESS_STREAK_MAX: u32 = 3;
 pub(crate) const QUOTA_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 pub(crate) const QUOTA_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 500 } else { 10_000 };
 // Match Codex's default Responses stream idle timeout so the local proxy stays transport-transparent.

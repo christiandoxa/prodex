@@ -268,15 +268,19 @@ pub(crate) fn clear_runtime_prompt_cache_profile_bindings() {
 
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::runtime_previous_response_fresh_fallback_shape_label;
+#[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
     RuntimePreviousResponseFreshFallbackPolicy, RuntimePreviousResponseFreshFallbackPolicyInput,
-    RuntimePreviousResponseFreshFallbackShape, runtime_previous_response_fresh_fallback_policy,
-    runtime_previous_response_fresh_fallback_shape_with_session,
+    runtime_previous_response_fresh_fallback_policy,
 };
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
     RuntimePreviousResponseFreshFallbackPolicyShape,
     runtime_previous_response_fresh_fallback_shape_allows_recovery,
+};
+pub(crate) use runtime_proxy_crate::{
+    RuntimePreviousResponseFreshFallbackShape,
+    runtime_previous_response_fresh_fallback_shape_with_session,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

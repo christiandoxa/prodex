@@ -2,15 +2,27 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{RuntimeRouteKind, runtime_route_kind_from_label, runtime_route_kind_label};
 
+mod health_decisions;
+
+pub use health_decisions::*;
+
 pub const RUNTIME_PROFILE_HEALTH_DECAY_SECONDS: i64 = if cfg!(test) { 2 } else { 60 };
 pub const RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS: i64 = if cfg!(test) { 4 } else { 180 };
 pub const RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
 pub const RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS: i64 = if cfg!(test) { 2 } else { 15 };
+pub const RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS: i64 = if cfg!(test) { 8 } else { 300 };
+pub const RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS: i64 = 20;
+pub const RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS: i64 = if cfg!(test) { 320 } else { 600 };
 pub const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS: i64 = 5;
 pub const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS: i64 =
     if cfg!(test) { 20 } else { 60 };
+pub const RUNTIME_PROFILE_CIRCUIT_REOPEN_DECAY_SECONDS: i64 = if cfg!(test) { 12 } else { 1_800 };
+pub const RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE: u32 = 4;
 pub const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
 pub const RUNTIME_PROFILE_LATENCY_PENALTY_MAX: u32 = 12;
+pub const RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE: u32 = 2;
+pub const RUNTIME_PROFILE_HEALTH_MAX_SCORE: u32 = 16;
+pub const RUNTIME_PROFILE_SUCCESS_STREAK_MAX: u32 = 3;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeProfileBackoffs {
@@ -524,6 +536,48 @@ pub fn runtime_profile_latency_failure_next_score(current_score: u32) -> u32 {
         .min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX)
 }
 
+pub fn runtime_profile_name_in_retry_backoff(
+    profile_name: &str,
+    retry_backoff_until: &BTreeMap<String, i64>,
+    now: i64,
+) -> bool {
+    retry_backoff_until
+        .get(profile_name)
+        .copied()
+        .is_some_and(|until| until > now)
+}
+
+pub fn runtime_profile_name_in_transport_backoff(
+    profile_name: &str,
+    transport_backoff_until: &BTreeMap<String, i64>,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> bool {
+    runtime_profile_transport_backoff_until_from_map(
+        transport_backoff_until,
+        profile_name,
+        route_kind,
+        now,
+    )
+    .is_some()
+}
+
+pub fn runtime_profile_name_in_retry_or_transport_backoff(
+    profile_name: &str,
+    retry_backoff_until: &BTreeMap<String, i64>,
+    transport_backoff_until: &BTreeMap<String, i64>,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> bool {
+    runtime_profile_name_in_retry_backoff(profile_name, retry_backoff_until, now)
+        || runtime_profile_name_in_transport_backoff(
+            profile_name,
+            transport_backoff_until,
+            route_kind,
+            now,
+        )
+}
+
 pub fn runtime_profile_name_in_selection_backoff(
     profile_name: &str,
     retry_backoff_until: &BTreeMap<String, i64>,
@@ -532,21 +586,16 @@ pub fn runtime_profile_name_in_selection_backoff(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
-    retry_backoff_until
-        .get(profile_name)
+    runtime_profile_name_in_retry_or_transport_backoff(
+        profile_name,
+        retry_backoff_until,
+        transport_backoff_until,
+        route_kind,
+        now,
+    ) || route_circuit_open_until
+        .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
         .copied()
         .is_some_and(|until| until > now)
-        || runtime_profile_transport_backoff_until_from_map(
-            transport_backoff_until,
-            profile_name,
-            route_kind,
-            now,
-        )
-        .is_some()
-        || route_circuit_open_until
-            .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-            .copied()
-            .is_some_and(|until| until > now)
 }
 
 pub fn runtime_profile_backoff_sort_key(
@@ -637,6 +686,20 @@ pub fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
     RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS
         .saturating_mul(multiplier)
         .min(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS)
+}
+
+pub fn runtime_profile_circuit_open_seconds(score: u32, reopen_stage: u32) -> i64 {
+    let multiplier = 1_i64
+        .checked_shl(
+            score
+                .saturating_sub(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD)
+                .min(3)
+                .saturating_add(reopen_stage.min(RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE)),
+        )
+        .unwrap_or(i64::MAX);
+    RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS
+        .saturating_mul(multiplier)
+        .min(RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS)
 }
 
 pub fn runtime_profile_route_circuit_probe_seconds<T: RuntimeProfileHealthEntry>(

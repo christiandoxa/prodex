@@ -11,7 +11,8 @@ mod policy;
 mod previous_response;
 
 use self::policy::{
-    RuntimeAffinitySelectionKind, RuntimeSoftAffinityPolicyInput, runtime_soft_affinity_allowed,
+    RuntimeAffinitySelectionKind, RuntimeSoftAffinityPolicyInput,
+    runtime_affinity_selection_profile, runtime_soft_affinity_allowed,
     runtime_soft_affinity_rejection_reason,
 };
 #[allow(unused_imports)]

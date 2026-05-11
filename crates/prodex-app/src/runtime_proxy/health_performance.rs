@@ -148,14 +148,14 @@ pub(crate) fn bump_runtime_profile_bad_pairing_score(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
     let key = runtime_profile_route_bad_pairing_key(profile_name, route_kind);
-    let next_score = runtime_profile_effective_score_from_map(
+    let current_score = runtime_profile_effective_score_from_map(
         &runtime.profile_health,
         &key,
         now,
         RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-    )
-    .saturating_add(delta)
-    .min(RUNTIME_PROFILE_HEALTH_MAX_SCORE);
+    );
+    let next_score =
+        runtime_proxy_crate::runtime_profile_bad_pairing_next_score(current_score, delta);
     reset_runtime_profile_success_streak(&mut runtime, profile_name, route_kind);
     runtime.profile_health.insert(
         key,
@@ -202,13 +202,27 @@ pub(crate) fn bump_runtime_profile_health_score(
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     let now = Local::now().timestamp();
     let key = runtime_profile_route_health_key(profile_name, route_kind);
-    let next_score = runtime
+    let current_score = runtime
         .profile_health
         .get(&key)
         .map(|entry| runtime_profile_effective_health_score(entry, now))
-        .unwrap_or(0)
-        .saturating_add(delta)
-        .min(RUNTIME_PROFILE_HEALTH_MAX_SCORE);
+        .unwrap_or(0);
+    let circuit_key = runtime_profile_route_circuit_key(profile_name, route_kind);
+    let current_reopen_stage = runtime_profile_effective_score_from_map(
+        &runtime.profile_health,
+        &runtime_profile_route_circuit_reopen_key(profile_name, route_kind),
+        now,
+        RUNTIME_PROFILE_CIRCUIT_REOPEN_DECAY_SECONDS,
+    );
+    let bump_decision = runtime_proxy_crate::runtime_profile_health_bump_decision(
+        current_score,
+        delta,
+        runtime
+            .profile_route_circuit_open_until
+            .contains_key(&circuit_key),
+        current_reopen_stage,
+    );
+    let next_score = bump_decision.next_score;
     reset_runtime_profile_success_streak(&mut runtime, profile_name, route_kind);
     runtime.profile_health.insert(
         key,
@@ -217,24 +231,9 @@ pub(crate) fn bump_runtime_profile_health_score(
             updated_at: now,
         },
     );
-    let circuit_until = if next_score >= RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD {
-        let circuit_key = runtime_profile_route_circuit_key(profile_name, route_kind);
-        let reopen_stage = if runtime
-            .profile_route_circuit_open_until
-            .contains_key(&circuit_key)
-        {
-            runtime_profile_effective_score_from_map(
-                &runtime.profile_health,
-                &runtime_profile_route_circuit_reopen_key(profile_name, route_kind),
-                now,
-                RUNTIME_PROFILE_CIRCUIT_REOPEN_DECAY_SECONDS,
-            )
-            .saturating_add(1)
-            .min(RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE)
-        } else {
-            0
-        };
-        if reopen_stage == 0 {
+    let circuit_until = if let Some(circuit_open_seconds) = bump_decision.circuit_open_seconds {
+        let reopen_stage = bump_decision.circuit_reopen_stage.unwrap_or(0);
+        if bump_decision.circuit_reopen_stage == Some(0) {
             runtime
                 .profile_health
                 .remove(&runtime_profile_route_circuit_reopen_key(
@@ -250,10 +249,7 @@ pub(crate) fn bump_runtime_profile_health_score(
                 },
             );
         }
-        let until = now.saturating_add(runtime_profile_circuit_open_seconds(
-            next_score,
-            reopen_stage,
-        ));
+        let until = now.saturating_add(circuit_open_seconds);
         runtime
             .profile_route_circuit_open_until
             .entry(circuit_key)
@@ -312,30 +308,24 @@ pub(crate) fn recover_runtime_profile_health_for_route(
 ) {
     let key = runtime_profile_route_health_key(profile_name, route_kind);
     let streak_key = runtime_profile_route_success_streak_key(profile_name, route_kind);
-    let Some(current_score) = runtime
+    let current_score = runtime
         .profile_health
         .get(&key)
-        .map(|entry| runtime_profile_effective_health_score(entry, now))
-    else {
-        runtime.profile_health.remove(&streak_key);
-        return;
-    };
-
-    let next_streak = runtime_profile_effective_score_from_map(
+        .map(|entry| runtime_profile_effective_health_score(entry, now));
+    let current_streak = runtime_profile_effective_score_from_map(
         &runtime.profile_health,
         &streak_key,
         now,
         RUNTIME_PROFILE_SUCCESS_STREAK_DECAY_SECONDS,
-    )
-    .saturating_add(1)
-    .min(RUNTIME_PROFILE_SUCCESS_STREAK_MAX);
-    let recovery = RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE
-        .saturating_add(next_streak.saturating_sub(1).min(1));
-    let next_score = current_score.saturating_sub(recovery);
-    if next_score == 0 {
-        runtime.profile_health.remove(&key);
-        runtime.profile_health.remove(&streak_key);
-    } else {
+    );
+    let decision = runtime_proxy_crate::runtime_profile_health_recovery_decision(
+        current_score,
+        current_streak,
+    );
+
+    if let (Some(next_score), Some(next_success_streak)) =
+        (decision.next_score, decision.next_success_streak)
+    {
         runtime.profile_health.insert(
             key,
             RuntimeProfileHealth {
@@ -346,10 +336,13 @@ pub(crate) fn recover_runtime_profile_health_for_route(
         runtime.profile_health.insert(
             streak_key,
             RuntimeProfileHealth {
-                score: next_streak,
+                score: next_success_streak,
                 updated_at: now,
             },
         );
+    } else {
+        runtime.profile_health.remove(&key);
+        runtime.profile_health.remove(&streak_key);
     }
 }
 

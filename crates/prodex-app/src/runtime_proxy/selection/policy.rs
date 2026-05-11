@@ -1,11 +1,12 @@
 use super::*;
 
 pub(crate) use runtime_proxy_crate::{
-    RuntimeNoRotateAffinity, RuntimePreviousResponseNotFoundFallbackPolicy,
-    RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
-    RuntimeQuotaBlockedAffinityReleasePolicy,
+    RuntimeAffinitySelectionKind, RuntimeNoRotateAffinity,
+    RuntimePreviousResponseNotFoundFallbackPolicy, RuntimePreviousResponseNotFoundFallbackRequest,
+    RuntimePreviousResponseStaleContinuationPolicy, RuntimeQuotaBlockedAffinityReleasePolicy,
     RuntimeWebsocketReuseWatchdogPreviousResponseFallback,
     runtime_previous_response_not_found_fallback_policy,
+    runtime_quota_blocked_previous_response_fresh_fallback_allowed,
     runtime_websocket_previous_response_not_found_requires_stale_continuation,
     runtime_websocket_previous_response_reuse_is_nonreplayable,
     runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed,
@@ -104,26 +105,6 @@ pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn runtime_quota_blocked_previous_response_fresh_fallback_allowed(
-    previous_response_id: Option<&str>,
-    trusted_previous_response_affinity: bool,
-    previous_response_fresh_fallback_used: bool,
-    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-) -> bool {
-    let policy: RuntimePreviousResponseFreshFallbackPolicy =
-        runtime_previous_response_fresh_fallback_policy(
-            RuntimePreviousResponseFreshFallbackPolicyInput {
-                has_previous_response_context: previous_response_id.is_some()
-                    || trusted_previous_response_affinity
-                    || previous_response_fresh_fallback_used,
-                request_requires_locked_previous_response_affinity: false,
-                fresh_fallback_shape,
-            },
-        );
-    policy.allows_fresh_fallback()
-}
-
 pub(crate) fn runtime_websocket_previous_response_reuse_is_stale(
     nonreplayable_previous_response_reuse: bool,
     reuse_terminal_idle: Option<Duration>,
@@ -178,42 +159,15 @@ impl<'a> RuntimeResponseCandidateSelection<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RuntimeAffinitySelectionKind {
-    Strict,
-    Pinned,
-    TurnState,
-    Session,
-}
-
-impl RuntimeAffinitySelectionKind {
-    pub(super) fn profile<'a>(
-        self,
-        selection: RuntimeResponseCandidateSelection<'a>,
-    ) -> Option<&'a str> {
-        match self {
-            Self::Strict => selection.strict_affinity_profile,
-            Self::Pinned => selection.pinned_profile,
-            Self::TurnState => selection.turn_state_profile,
-            Self::Session => selection.session_profile,
-        }
-    }
-
-    pub(super) fn skip_label(self) -> &'static str {
-        self.to_proxy().skip_label()
-    }
-
-    pub(super) fn excluded_is_terminal(self) -> bool {
-        self.to_proxy().excluded_is_terminal()
-    }
-
-    fn to_proxy(self) -> runtime_proxy_crate::RuntimeAffinitySelectionKind {
-        match self {
-            Self::Strict => runtime_proxy_crate::RuntimeAffinitySelectionKind::Strict,
-            Self::Pinned => runtime_proxy_crate::RuntimeAffinitySelectionKind::Pinned,
-            Self::TurnState => runtime_proxy_crate::RuntimeAffinitySelectionKind::TurnState,
-            Self::Session => runtime_proxy_crate::RuntimeAffinitySelectionKind::Session,
-        }
+pub(super) fn runtime_affinity_selection_profile<'a>(
+    affinity_kind: RuntimeAffinitySelectionKind,
+    selection: RuntimeResponseCandidateSelection<'a>,
+) -> Option<&'a str> {
+    match affinity_kind {
+        RuntimeAffinitySelectionKind::Strict => selection.strict_affinity_profile,
+        RuntimeAffinitySelectionKind::Pinned => selection.pinned_profile,
+        RuntimeAffinitySelectionKind::TurnState => selection.turn_state_profile,
+        RuntimeAffinitySelectionKind::Session => selection.session_profile,
     }
 }
 
@@ -231,7 +185,7 @@ fn runtime_soft_affinity_input_to_proxy(
     input: RuntimeSoftAffinityPolicyInput,
 ) -> runtime_proxy_crate::RuntimeSoftAffinityPolicyInput {
     runtime_proxy_crate::RuntimeSoftAffinityPolicyInput {
-        affinity_kind: input.affinity_kind.to_proxy(),
+        affinity_kind: input.affinity_kind,
         route_kind: prodex_runtime_quota::runtime_route_kind_to_proxy(input.route_kind),
         quota_summary: prodex_runtime_quota::runtime_selection_quota_summary_to_proxy(
             input.quota_summary,
