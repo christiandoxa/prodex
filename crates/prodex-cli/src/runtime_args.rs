@@ -1,0 +1,319 @@
+use clap::Args;
+use std::ffi::OsString;
+
+#[derive(Args, Debug)]
+pub struct RunArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching codex.
+    #[arg(long)]
+    pub skip_quota_check: bool,
+    /// Start Codex with launch-time full access by passing Codex's sandbox-bypass launch flag.
+    #[arg(long)]
+    pub full_access: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
+    #[arg(long)]
+    pub no_proxy: bool,
+    /// Print resolved launch diagnostics without starting Codex.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    pub codex_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub struct ClaudeArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching Claude Code.
+    #[arg(long)]
+    pub skip_quota_check: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
+    #[arg(long)]
+    pub no_proxy: bool,
+    /// Arguments passed through to `claude` unchanged.
+    #[arg(value_name = "CLAUDE_ARG", allow_hyphen_values = true)]
+    pub claude_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub struct CavemanArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching codex.
+    #[arg(long)]
+    pub skip_quota_check: bool,
+    /// Start Codex with launch-time full access by passing Codex's sandbox-bypass launch flag.
+    #[arg(long)]
+    pub full_access: bool,
+    /// Print resolved launch diagnostics without starting Codex.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
+    #[arg(long)]
+    pub no_proxy: bool,
+    /// Enable Prodex Smart Context Autopilot in the runtime proxy.
+    #[arg(skip)]
+    pub smart_context: bool,
+    /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    pub codex_args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub struct SuperArgs {
+    /// Starting profile for the run. If omitted, prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub profile: Option<String>,
+    /// Explicitly enable auto-rotate. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub no_auto_rotate: bool,
+    /// Skip the preflight quota gate before launching codex.
+    #[arg(long)]
+    pub skip_quota_check: bool,
+    /// Print resolved launch diagnostics without starting Codex.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Override the upstream ChatGPT base URL used for quota preflight and the runtime proxy.
+    #[arg(long, value_name = "URL", conflicts_with = "url")]
+    pub base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
+    #[arg(long)]
+    pub no_proxy: bool,
+    /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
+    #[arg(long, value_name = "URL", value_parser = parse_super_local_url)]
+    pub url: Option<String>,
+    /// Model id to use with --url.
+    #[arg(
+        long = "model",
+        visible_alias = "local-model",
+        value_name = "MODEL",
+        requires = "url"
+    )]
+    pub local_model: Option<String>,
+    /// Context window advertised to Codex when using --url.
+    #[arg(
+        long = "context-window",
+        visible_alias = "local-context-window",
+        value_name = "TOKENS",
+        requires = "url"
+    )]
+    pub local_context_window: Option<usize>,
+    /// Auto-compact threshold advertised to Codex when using --url.
+    #[arg(
+        long = "auto-compact-token-limit",
+        visible_alias = "local-auto-compact-token-limit",
+        value_name = "TOKENS",
+        requires = "url"
+    )]
+    pub local_auto_compact_token_limit: Option<usize>,
+    /// Use the full Claude-Mem Codex transcript schema instead of Prodex's slim default.
+    #[arg(long, conflicts_with = "mem_super_slim")]
+    pub mem_full: bool,
+    /// Use Prodex's super-slim mem schema that stores prompt summaries/references instead of full prompts.
+    #[arg(long, conflicts_with = "mem_full")]
+    pub mem_super_slim: bool,
+    /// Arguments passed through to `codex` after the implied `mem` prefix.
+    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    pub codex_args: Vec<OsString>,
+}
+
+impl SuperArgs {
+    pub fn into_caveman_args(self) -> CavemanArgs {
+        let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
+        let local_provider_args = self
+            .url
+            .as_deref()
+            .map(|url| {
+                super_local_provider_codex_args(
+                    url,
+                    self.local_model.as_deref(),
+                    self.local_context_window,
+                    self.local_auto_compact_token_limit,
+                )
+            })
+            .unwrap_or_default();
+        let local_mode = self.url.is_some();
+        let skip_quota_check = self.skip_quota_check || local_mode;
+
+        let mut codex_args =
+            Vec::with_capacity(self.codex_args.len() + 2 + local_provider_args.len());
+        codex_args.push(OsString::from(if self.mem_super_slim {
+            "mem-super-slim"
+        } else if self.mem_full {
+            "mem-full"
+        } else {
+            "mem"
+        }));
+        codex_args.push(OsString::from("rtk"));
+        codex_args.extend(local_provider_args);
+        codex_args.extend(self.codex_args);
+        CavemanArgs {
+            profile: self.profile,
+            auto_rotate: self.auto_rotate,
+            no_auto_rotate: self.no_auto_rotate,
+            skip_quota_check,
+            full_access: true,
+            dry_run: self.dry_run,
+            base_url: self.base_url.or(local_upstream_base_url),
+            no_proxy: self.no_proxy,
+            smart_context: true,
+            codex_args,
+        }
+    }
+}
+
+pub const SUPER_LOCAL_PROVIDER_ID: &str = "prodex-local";
+const SUPER_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
+const SUPER_DEFAULT_LOCAL_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
+const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 16_384;
+const SUPER_DEFAULT_AUTO_COMPACT_LIMIT: usize = 14_000;
+
+fn super_local_provider_codex_args(
+    url: &str,
+    model: Option<&str>,
+    context_window: Option<usize>,
+    auto_compact_token_limit: Option<usize>,
+) -> Vec<OsString> {
+    let base_url = super_local_provider_base_url(url);
+    let model = model
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or(SUPER_DEFAULT_LOCAL_MODEL);
+    let context_window = context_window
+        .filter(|value| *value > 1)
+        .unwrap_or(SUPER_DEFAULT_CONTEXT_WINDOW);
+    let auto_compact_token_limit = auto_compact_token_limit
+        .filter(|value| *value > 0)
+        .unwrap_or(SUPER_DEFAULT_AUTO_COMPACT_LIMIT)
+        .min(context_window.saturating_sub(1));
+    let overrides = [
+        format!(
+            "model_provider={}",
+            toml_string_literal(SUPER_LOCAL_PROVIDER_ID)
+        ),
+        format!("model={}", toml_string_literal(model)),
+        format!(
+            "model_providers.{SUPER_LOCAL_PROVIDER_ID}.name={}",
+            toml_string_literal(SUPER_LOCAL_PROVIDER_NAME)
+        ),
+        format!(
+            "model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url={}",
+            toml_string_literal(&base_url)
+        ),
+        format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.wire_api=\"responses\""),
+        format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.supports_websockets=false"),
+        format!("model_context_window={context_window}"),
+        format!("model_auto_compact_token_limit={auto_compact_token_limit}"),
+        "model_reasoning_summary=\"none\"".to_string(),
+        "model_supports_reasoning_summaries=false".to_string(),
+        "web_search=\"disabled\"".to_string(),
+        "features.js_repl=false".to_string(),
+        "features.image_generation=false".to_string(),
+    ];
+
+    let mut args = Vec::with_capacity(overrides.len() * 2);
+    for override_entry in overrides {
+        args.push(OsString::from("-c"));
+        args.push(OsString::from(override_entry));
+    }
+    args
+}
+
+fn super_local_provider_base_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if let Ok(mut parsed) = reqwest::Url::parse(trimmed) {
+        let path = parsed.path().trim_end_matches('/');
+        if path.is_empty() || path == "/" {
+            parsed.set_path("/v1");
+            return parsed.as_str().trim_end_matches('/').to_string();
+        }
+    }
+    trimmed.trim_end_matches('/').to_string()
+}
+
+fn parse_super_local_url(url: &str) -> std::result::Result<String, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("invalid --url: value cannot be empty".to_string());
+    }
+    if trimmed.starts_with("http:///") || trimmed.starts_with("https:///") {
+        return Err("invalid --url: expected a URL host".to_string());
+    }
+    let parsed = reqwest::Url::parse(trimmed).map_err(|err| {
+        format!(
+            "invalid --url: expected an absolute http(s) URL such as http://127.0.0.1:11434 ({err})"
+        )
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "invalid --url: expected http or https scheme, got {}",
+            parsed.scheme()
+        ));
+    }
+    if parsed.host_str().is_none() {
+        return Err("invalid --url: expected a URL host".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn toml_string_literal(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[derive(Args, Debug)]
+pub struct RuntimeBrokerArgs {
+    #[arg(long)]
+    pub current_profile: String,
+    #[arg(long)]
+    pub upstream_base_url: String,
+    #[arg(long, default_value_t = false)]
+    pub include_code_review: bool,
+    #[arg(long = "upstream-no-proxy", default_value_t = false)]
+    pub upstream_no_proxy: bool,
+    #[arg(long = "smart-context", default_value_t = false)]
+    pub smart_context_enabled: bool,
+    #[arg(long = "model-context-window-tokens", hide = true)]
+    pub model_context_window_tokens: Option<u64>,
+    #[arg(long)]
+    pub broker_key: String,
+    #[arg(long)]
+    pub instance_token: String,
+    #[arg(long)]
+    pub admin_token: String,
+    #[arg(long)]
+    pub listen_addr: Option<String>,
+}

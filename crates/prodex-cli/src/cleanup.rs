@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use super::*;
+use clap::Args;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CleanupOlderThan {
