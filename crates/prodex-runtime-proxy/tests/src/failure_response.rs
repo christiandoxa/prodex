@@ -72,6 +72,56 @@ fn precommit_budget_scales_to_profile_pool() {
 }
 
 #[test]
+fn precommit_budget_attempt_limit_covers_profile_pool_matrix() {
+    for continuation in [false, true] {
+        for pressure_mode in [false, true] {
+            let (base_attempt_limit, base_budget) =
+                runtime_proxy_precommit_budget(continuation, pressure_mode);
+
+            for profile_count in 0..=base_attempt_limit + 8 {
+                let (attempt_limit, budget) = runtime_proxy_precommit_budget_for_profile_count(
+                    continuation,
+                    pressure_mode,
+                    profile_count,
+                );
+                let effective_profile_count = profile_count.max(1);
+
+                assert!(
+                    attempt_limit >= effective_profile_count,
+                    "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
+                );
+                assert!(
+                    !runtime_proxy_precommit_budget_exhausted_for_profile_count(
+                        Instant::now(),
+                        effective_profile_count - 1,
+                        continuation,
+                        pressure_mode,
+                        profile_count,
+                    ),
+                    "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
+                );
+                assert!(
+                    runtime_proxy_precommit_budget_exhausted_for_profile_count(
+                        Instant::now(),
+                        attempt_limit,
+                        continuation,
+                        pressure_mode,
+                        profile_count,
+                    ),
+                    "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
+                );
+                if profile_count > base_attempt_limit {
+                    assert!(
+                        budget >= base_budget,
+                        "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn precommit_budget_keeps_base_limit_for_small_pool() {
     let (base_attempt_limit, base_budget) = runtime_proxy_precommit_budget(true, false);
 

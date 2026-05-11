@@ -3,12 +3,73 @@ import { pathToFileURL } from "node:url";
 import { runStepsSerial } from "./main-internal-test-runner.mjs";
 import { requiredValue } from "./release-guard-common.mjs";
 
-const RANGE_GUARDS = Object.freeze([
-  "changelog-noise-guard.mjs",
-  "release-metadata-only-guard.mjs",
-  "version-metadata-release-guard.mjs",
-  "release-empty-commit-guard.mjs",
-  "release-duplicate-version-guard.mjs",
+export const RELEASE_HYGIENE_POLICY = Object.freeze([
+  {
+    label: "changelog-noise-guard",
+    command: "node",
+    script: "scripts/ci/changelog-noise-guard.mjs",
+    selector: "range",
+  },
+  {
+    label: "release-metadata-only-guard",
+    command: "node",
+    script: "scripts/ci/release-metadata-only-guard.mjs",
+    selector: "range",
+  },
+  {
+    label: "version-metadata-release-guard",
+    command: "node",
+    script: "scripts/ci/version-metadata-release-guard.mjs",
+    selector: "range",
+  },
+  {
+    label: "release-empty-commit-guard",
+    command: "node",
+    script: "scripts/ci/release-empty-commit-guard.mjs",
+    selector: "range",
+  },
+  {
+    label: "release-duplicate-version-guard",
+    command: "node",
+    script: "scripts/ci/release-duplicate-version-guard.mjs",
+    selector: "range",
+  },
+  {
+    label: "release-tag-changelog-guard",
+    command: "node",
+    script: "scripts/ci/release-tag-changelog-guard.mjs",
+    selector: "tag",
+  },
+  {
+    label: "release-hygiene-tests",
+    command: "node",
+    args: ["--test", "scripts/ci/release-hygiene.test.mjs"],
+    fixture: true,
+  },
+  {
+    label: "release-run-tests",
+    command: "node",
+    args: ["--test", "scripts/npm/release-run.test.mjs"],
+    fixture: true,
+  },
+  {
+    label: "changelog-tests",
+    command: "node",
+    args: ["--test", "scripts/npm/changelog.test.mjs"],
+    fixture: true,
+  },
+  {
+    label: "release-guard-fixtures",
+    command: "node",
+    args: ["scripts/ci/release-guard-fixture-tests.mjs"],
+    fixture: true,
+  },
+  {
+    label: "release-cut-fixtures",
+    command: "node",
+    args: ["scripts/ci/release-cut-fixture-tests.mjs"],
+    fixture: true,
+  },
 ]);
 
 function parseArgs(argv) {
@@ -125,42 +186,18 @@ function tagGuardSelectorArgs(args) {
 
 export function releaseHygieneSteps(args = {}) {
   const selectorArgs = rangeGuardSelectorArgs(args);
-  const steps = RANGE_GUARDS.map((script) => ({
-    label: script.replace(/\.mjs$/, ""),
-    command: "node",
-    args: [`scripts/ci/${script}`, ...selectorArgs],
-  }));
-
-  steps.push({
-    label: "release-tag-changelog-guard",
-    command: "node",
-    args: ["scripts/ci/release-tag-changelog-guard.mjs", ...tagGuardSelectorArgs(args)],
+  const tagSelectorArgs = tagGuardSelectorArgs(args);
+  return RELEASE_HYGIENE_POLICY.filter((entry) => args.fixtures !== false || !entry.fixture).map((entry) => {
+    const entryArgs = entry.args ?? [
+      entry.script,
+      ...(entry.selector === "tag" ? tagSelectorArgs : selectorArgs),
+    ];
+    return {
+      label: entry.label,
+      command: entry.command,
+      args: entryArgs,
+    };
   });
-
-  if (args.fixtures !== false) {
-    steps.push({
-      label: "release-run-tests",
-      command: "node",
-      args: ["--test", "scripts/npm/release-run.test.mjs"],
-    });
-    steps.push({
-      label: "changelog-tests",
-      command: "node",
-      args: ["--test", "scripts/npm/changelog.test.mjs"],
-    });
-    steps.push({
-      label: "release-guard-fixtures",
-      command: "node",
-      args: ["scripts/ci/release-guard-fixture-tests.mjs"],
-    });
-    steps.push({
-      label: "release-cut-fixtures",
-      command: "node",
-      args: ["scripts/ci/release-cut-fixture-tests.mjs"],
-    });
-  }
-
-  return steps;
 }
 
 async function main() {

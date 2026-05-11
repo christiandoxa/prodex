@@ -35,8 +35,9 @@ function usage() {
   return [
     "Usage: npm run release:run -- [options]",
     "",
-    "Idempotent local release runner. It can bump/sync/test/commit/push/watch CI/dispatch the npm publish workflow/verify.",
+    "Mandatory idempotent release runner. It owns version bump, generated metadata, final changelog rendering, validation, commit, push, CI watch, publish dispatch, and verify.",
     "It never runs npm publish locally; publishing is only triggered through .github/workflows/npm-publish.yml.",
+    "Do not manually refresh CHANGELOG.md for release commits; release:run renders it with --release-version and validates it through release:prepare.",
     "",
     "Options:",
     "  --version <x.y.z>          bump Cargo.toml to this version before sync",
@@ -414,6 +415,7 @@ async function bumpVersion(version, dryRun) {
 async function syncReleaseMetadata(version, args) {
   await runCommand("npm", ["run", "npm:sync-version"], args);
   await runCommand("npm", ["run", "changelog", "--", "--release-version", version], args);
+  await runCommand("node", ["scripts/npm/changelog.mjs", "--check", "--release-version", version], args);
   await runCommand("cargo", ["update", "--workspace"], args);
 }
 

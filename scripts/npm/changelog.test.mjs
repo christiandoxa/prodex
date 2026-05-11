@@ -73,3 +73,40 @@ test("changelog omits internal maintenance commits", async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("changelog release-version renders pending version as final release section", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-changelog-"));
+  try {
+    await git(root, ["init", "-q"]);
+    await git(root, ["config", "user.name", "Prodex Fixture"]);
+    await git(root, ["config", "user.email", "fixtures@example.invalid"]);
+    await writeFile(root, "Cargo.toml", '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2024"\n');
+    await writeFile(root, "CHANGELOG.md", "# Changelog\n");
+    await writeFile(root, "src/lib.rs", "pub fn fixture() {}\n");
+    await commit(root, "chore(release): release 0.1.0");
+    await git(root, ["tag", "0.1.0"]);
+
+    await writeFile(root, "Cargo.toml", '[package]\nname = "fixture"\nversion = "0.2.0"\nedition = "2024"\n');
+    await writeFile(root, "src/lib.rs", "pub fn fixture() {}\npub fn launch_dry_run() {}\n");
+    await commit(root, "feat(cli): add launch dry run");
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      SCRIPT_PATH,
+      "--print",
+      "--release-version",
+      "0.2.0",
+      "--releases",
+      "1",
+    ], {
+      cwd: root,
+      env: { ...process.env, PRODEX_REPO_ROOT: root },
+    });
+
+    assert.match(stdout, /^## 0\.2\.0 - \d{4}-\d{2}-\d{2}$/m);
+    assert.doesNotMatch(stdout, /## 0\.2\.0 - Unreleased/);
+    assert.match(stdout, /Add launch dry run/);
+    assert.doesNotMatch(stdout, /## 0\.1\.0 - /);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

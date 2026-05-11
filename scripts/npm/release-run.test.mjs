@@ -1,5 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import {
   isGhTimeoutError,
   parseArgs,
@@ -10,6 +15,58 @@ import {
   shouldRequireCleanWorktree,
   shouldResolveGithubRepo,
 } from "./release-run.mjs";
+
+const execFileAsync = promisify(execFile);
+const SCRIPT_PATH = new URL("./release-run.mjs", import.meta.url).pathname;
+
+async function git(root, args) {
+  return execFileAsync("git", args, { cwd: root });
+}
+
+async function writeFile(root, relativePath, contents) {
+  const filePath = path.join(root, relativePath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, contents);
+}
+
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function createReleaseRunFixture() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-release-run-"));
+  await git(root, ["init", "-q"]);
+  await git(root, ["config", "user.name", "Prodex Fixture"]);
+  await git(root, ["config", "user.email", "fixtures@example.invalid"]);
+  await git(root, ["remote", "add", "origin", "https://github.com/example/prodex.git"]);
+  await writeFile(root, "Cargo.toml", '[package]\nname = "prodex-fixture"\nversion = "0.1.0"\nedition = "2024"\n');
+  await fs.mkdir(path.join(root, "crates"), { recursive: true });
+  await git(root, ["add", "."]);
+  await git(root, ["commit", "-m", "chore: seed fixture"]);
+  return root;
+}
+
+async function runReleaseRun(root, args) {
+  return execFileAsync(process.execPath, [SCRIPT_PATH, ...args], {
+    cwd: root,
+    env: { ...process.env, PRODEX_REPO_ROOT: root },
+    maxBuffer: 4 * 1024 * 1024,
+  });
+}
+
+function assertIncludesInOrder(contents, expected) {
+  let cursor = -1;
+  for (const needle of expected) {
+    const index = contents.indexOf(needle, cursor + 1);
+    assert.notEqual(index, -1, `missing after index ${cursor}: ${needle}`);
+    cursor = index;
+  }
+}
 
 test("parseArgs defaults to the full release flow", () => {
   const args = parseArgs(["node", "release-run.mjs"]);
@@ -122,4 +179,102 @@ test("gh timeout classifier matches transient API failures only", () => {
   assert.equal(isGhTimeoutError("HTTP 504 gateway timeout"), true);
   assert.equal(isGhTimeoutError("HTTP 401 bad credentials"), false);
   assert.equal(isGhTimeoutError("validation failed: ref is required"), false);
+});
+
+test("release-run dry-run covers mandatory release order without mutation or network", async () => {
+  const root = await createReleaseRunFixture();
+  const stateFile = path.join(root, "state.json");
+  try {
+    const { stdout, stderr } = await runReleaseRun(root, [
+      "--dry-run",
+      "--version",
+      "0.2.0",
+      "--state-file",
+      stateFile,
+      "--poll-seconds",
+      "1",
+      "--ci-timeout-minutes",
+      "1",
+      "--publish-timeout-minutes",
+      "1",
+    ]);
+
+    assert.equal(stderr, "");
+    assertIncludesInOrder(stdout, [
+      "release-run: bump (0.2.0)",
+      "dry-run: bump Cargo.toml 0.1.0 -> 0.2.0",
+      "release-run: sync (0.2.0)",
+      "dry-run: npm run npm:sync-version",
+      "dry-run: npm run changelog -- --release-version 0.2.0",
+      "dry-run: node scripts/npm/changelog.mjs --check --release-version 0.2.0",
+      "dry-run: cargo update --workspace",
+      "release-run: test (0.2.0)",
+      "dry-run: npm run release:prepare -- --release-version 0.2.0",
+      "release-run: commit (0.2.0)",
+      "dry-run: git add -- Cargo.toml",
+      "dry-run: git diff --cached --name-only",
+      "dry-run: git commit -m chore(release): release 0.2.0",
+      "dry-run: node scripts/ci/release-hygiene.mjs --commit HEAD --no-fixtures",
+      "dry-run: node scripts/npm/changelog.mjs --check",
+      "release-run: push (0.2.0)",
+      "dry-run: git push origin HEAD:main",
+      "release-run: watch-ci (0.2.0)",
+      "dry-run: watch ci.yml for ",
+      "release-run: trigger-publish (0.2.0)",
+      "dry-run: gh api --method GET /repos/example/prodex/actions/workflows/npm-publish.yml/runs?branch=main&per_page=20",
+      "dry-run: gh api --method POST /repos/example/prodex/actions/workflows/npm-publish.yml/dispatches -f ref=main",
+      "trigger-publish: would dispatch npm-publish.yml for main (0.2.0)",
+      "release-run: watch-publish (0.2.0)",
+      "dry-run: watch npm-publish.yml for ",
+      "release-run: verify (0.2.0)",
+      "dry-run: npm view @christiandoxa/prodex@0.2.0 version",
+      "dry-run: gh api --method GET /repos/example/prodex/releases/tags/0.2.0",
+    ]);
+
+    assert.equal(await pathExists(stateFile), false);
+    assert.match(await fs.readFile(path.join(root, "Cargo.toml"), "utf8"), /version = "0\.1\.0"/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("release-run dry-run resume skips completed steps without changing state", async () => {
+  const root = await createReleaseRunFixture();
+  const stateFile = path.join(root, "state.json");
+  const state = {
+    version: "0.2.0",
+    completed: {
+      bump: "2026-05-11T00:00:00.000Z",
+      sync: "2026-05-11T00:00:01.000Z",
+      test: "2026-05-11T00:00:02.000Z",
+    },
+  };
+  try {
+    await fs.writeFile(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    const beforeState = await fs.readFile(stateFile, "utf8");
+    const { stdout, stderr } = await runReleaseRun(root, [
+      "--dry-run",
+      "--resume",
+      "--state-file",
+      stateFile,
+    ]);
+
+    assert.equal(stderr, "");
+    assertIncludesInOrder(stdout, [
+      "bump: already complete; skipping",
+      "sync: already complete; skipping",
+      "test: already complete; skipping",
+      "release-run: commit (0.2.0)",
+      "release-run: push (0.2.0)",
+      "release-run: watch-ci (0.2.0)",
+      "release-run: trigger-publish (0.2.0)",
+      "release-run: watch-publish (0.2.0)",
+      "release-run: verify (0.2.0)",
+    ]);
+    assert.doesNotMatch(stdout, /release-run: bump \(0\.2\.0\)/);
+    assert.doesNotMatch(stdout, /dry-run: npm run changelog/);
+    assert.equal(await fs.readFile(stateFile, "utf8"), beforeState);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

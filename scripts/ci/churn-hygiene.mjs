@@ -151,14 +151,14 @@ function printHelp() {
       "Options:",
       "  --check                   fail when thresholds are exceeded; default unless report-only env is set",
       "  --report-only             report violations without failing",
-      "  --ignore-before <rev>     for historical ranges, enforce only changes after this reviewed baseline",
+      "  --ignore-before <rev>     for explicit historical --range audits, enforce only changes after this reviewed baseline",
       "                            use latest-tag to select the newest version tag inside the range",
       "  --dry-run                 print selected diff command and thresholds only",
       "  --max-files <n>           default 35",
       "  --max-behavior-files <n>  default 25",
       "  --max-lines <n>           default 1200",
       "  --max-file-lines <n>      default 500",
-      "  --message <subject/body>  staged/worktree commit message for Mechanical-only declarations",
+      "  --message <subject/body>  staged/worktree commit message for structural extraction review",
       "  --message-file <path>     read staged/worktree commit message from a file",
       "  --json                    print machine-readable result",
       "",
@@ -180,6 +180,21 @@ function assertSingleSelector(args) {
   if ((args.base || args.head) && !(args.base && args.head)) {
     throw new Error("--base and --head must be used together");
   }
+}
+
+function validateIgnoreBeforeSelector(args) {
+  if (!args.ignoreBefore) {
+    return;
+  }
+  if (args.range) {
+    return;
+  }
+  if (args.base || args.head) {
+    throw new Error(
+      "--ignore-before is only supported with --range; --base/--head checks must enforce the full PR/push range",
+    );
+  }
+  throw new Error("--ignore-before requires --range");
 }
 
 function parseSimpleRange(range) {
@@ -207,6 +222,7 @@ async function defaultRangeAvailable() {
 
 async function diffPlan(args) {
   assertSingleSelector(args);
+  validateIgnoreBeforeSelector(args);
   let originalSelector = null;
   let effectiveSelector = null;
   let effectiveBase = null;
@@ -233,9 +249,6 @@ async function diffPlan(args) {
       ignoreBeforeInput: args.ignoreBefore,
       command: ["diff", "--numstat", "--diff-filter=ACMR", effectiveSelector ?? range],
     };
-  }
-  if (args.ignoreBefore) {
-    throw new Error("--ignore-before requires --range or --base/--head");
   }
   if (args.staged) {
     return {
@@ -384,15 +397,13 @@ function structuralExtractionGroups(rows, thresholds) {
 }
 
 function structuralExtractionApplies(rows, summary, thresholds) {
-  if (summary.behaviorFiles > thresholds.maxBehaviorFiles) {
-    return false;
-  }
   const groups = new Set(structuralExtractionGroups(rows, thresholds));
   if (groups.size === 0) {
     return false;
   }
 
   const nonExtractionRows = rows.filter((row) => !groups.has(structuralGroup(row.filePath)));
+  const nonExtractionSummary = summarize(nonExtractionRows);
   const nonExtractionLines = nonExtractionRows
     .reduce((sum, row) => sum + row.insertions + row.deletions, 0);
   const nonExtractionLineLimit =
@@ -402,7 +413,8 @@ function structuralExtractionApplies(rows, summary, thresholds) {
     .reduce((max, row) => Math.max(max, row.insertions + row.deletions), 0);
   const largest = summary.largestFiles[0];
   return (
-    nonExtractionRows.length <= thresholds.maxFiles &&
+    nonExtractionSummary.files <= thresholds.maxFiles &&
+    nonExtractionSummary.behaviorFiles <= thresholds.maxBehaviorFiles &&
     nonExtractionLines <= nonExtractionLineLimit &&
     nonExtractionLargest <= thresholds.maxFileLines &&
     largest &&
@@ -417,7 +429,7 @@ function thresholdIssues(summary, thresholds, options = {}) {
   if (summary.files > thresholds.maxFiles && !summary.releaseMetadataOnly && !structuralExtractionAccepted) {
     issues.push(`files changed ${summary.files} > ${thresholds.maxFiles}`);
   }
-  if (summary.behaviorFiles > thresholds.maxBehaviorFiles) {
+  if (summary.behaviorFiles > thresholds.maxBehaviorFiles && !structuralExtractionAccepted) {
     issues.push(`behavior files ${summary.behaviorFiles} > ${thresholds.maxBehaviorFiles}`);
   }
   if (summary.changedLines > thresholds.maxLines && !structuralExtractionAccepted) {
@@ -448,7 +460,10 @@ function structuralExtractionAcceptedByDeclaration(structuralExtraction, summary
   if (!structuralExtractionNeedsDeclaration(summary, thresholds, structuralExtraction)) {
     return true;
   }
-  return commits.some((commit) => mechanicalOnlyDeclared(commit.message));
+  return commits.some((commit) => {
+    const parsed = parseConventionalSubject(commit.subject ?? messageSubject(commit.message ?? ""));
+    return mechanicalOnlyDeclared(commit.message) || mechanicalOnlySubjectAllowed(parsed);
+  });
 }
 
 function structuralExtractionDeclarationIssues(
@@ -466,7 +481,7 @@ function structuralExtractionDeclarationIssues(
   }
   const target = commits.length > 0 ? "commit message" : "staged/worktree commit message";
   return [
-    `large structural extraction requires Mechanical-only: yes in the ${target}, or a narrower split`,
+    `large structural extraction requires a mechanical extract/split/move subject or Mechanical-only: yes in the ${target}`,
   ];
 }
 

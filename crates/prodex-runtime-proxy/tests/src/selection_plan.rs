@@ -126,6 +126,84 @@ fn candidate_plan_separates_ready_and_fallback_attempts() {
 }
 
 #[test]
+fn candidate_plan_fallback_keeps_full_non_excluded_pool_despite_fresh_penalties() {
+    let excluded_profiles = BTreeSet::from(["visited".to_string()]);
+    let plan = build_runtime_response_candidate_execution_plan(
+        vec![
+            candidate(
+                "backoff",
+                CandidateFixture {
+                    order_index: 0,
+                    in_selection_backoff: true,
+                    backoff_sort_key: (0, 0, 0, 0),
+                    ..CandidateFixture::default()
+                },
+            ),
+            candidate(
+                "healthy",
+                CandidateFixture {
+                    order_index: 1,
+                    backoff_sort_key: (1, 0, 0, 0),
+                    ..CandidateFixture::default()
+                },
+            ),
+            candidate(
+                "unhealthy",
+                CandidateFixture {
+                    order_index: 2,
+                    health_sort_key: 10,
+                    backoff_sort_key: (2, 0, 0, 0),
+                    ..CandidateFixture::default()
+                },
+            ),
+            candidate(
+                "busy",
+                CandidateFixture {
+                    order_index: 3,
+                    inflight_count: 3,
+                    backoff_sort_key: (3, 0, 0, 0),
+                    ..CandidateFixture::default()
+                },
+            ),
+            candidate(
+                "visited",
+                CandidateFixture {
+                    order_index: 4,
+                    backoff_sort_key: (4, 0, 0, 0),
+                    ..CandidateFixture::default()
+                },
+            ),
+        ],
+        &excluded_profiles,
+        runtime_response_candidate_plan_options(RuntimeRouteKind::Responses, 3, None, None, 2),
+    );
+
+    assert_eq!(
+        plan.ready_candidates
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["healthy", "unhealthy", "busy"]
+    );
+    assert_eq!(
+        plan.ready_candidates[2].ready_skip_reason(),
+        Some("profile_inflight_soft_limit")
+    );
+    assert_eq!(
+        plan.fallback_candidates
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["backoff", "healthy", "unhealthy", "busy"]
+    );
+    assert!(
+        plan.fallback_candidates
+            .iter()
+            .all(|candidate| candidate.fallback_skip_reason().is_none())
+    );
+}
+
+#[test]
 fn candidate_plan_orders_ready_candidates_by_execution_priority() {
     let healthy_quota = healthy_quota_sort_key();
     let plan = build_runtime_response_candidate_execution_plan(
@@ -374,6 +452,7 @@ fn candidate_plan_orders_fallback_candidates_and_reports_skip_reasons() {
 
 #[derive(Clone, Copy)]
 struct CandidateFixture {
+    order_index: usize,
     inflight_count: usize,
     health_sort_key: u32,
     backoff_sort_key: RuntimeResponseBackoffSortKey,
@@ -389,6 +468,7 @@ struct CandidateFixture {
 impl Default for CandidateFixture {
     fn default() -> Self {
         Self {
+            order_index: 0,
             inflight_count: 0,
             health_sort_key: 0,
             backoff_sort_key: (0, 0, 0, 0),
@@ -469,7 +549,7 @@ fn optimistic_current_input(
 fn candidate(name: &str, fixture: CandidateFixture) -> RuntimeResponseCandidatePlanInput {
     RuntimeResponseCandidatePlanInput {
         name: name.to_string(),
-        order_index: 0,
+        order_index: fixture.order_index,
         inflight_count: fixture.inflight_count,
         health_sort_key: fixture.health_sort_key,
         backoff_sort_key: fixture.backoff_sort_key,
