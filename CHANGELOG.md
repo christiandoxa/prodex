@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.95.0 - 2026-05-11
+
+### Runtime
+
+- Rotate through full profile pool (`3930e27`)
+
+### Deps
+
+- Bump tokio to 1.52.3 (`af1a739`)
+
 ## 0.94.0 - 2026-05-10
 
 ### Runtime
@@ -173,19 +183,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Preserve websocket after smart context panic (`0f7e77f`)
-
-## 0.83.0 - 2026-05-06
-
-### Runtime
-
-- Close residual release gaps (`227d927`)
-- Close residual release guard gaps (`51ba501`)
-- Close runtime and release guard gaps (`8f9f61c`)
-
-### CI
-
-- Harden release guard calibration (`db3e2d6`)
-
-### Misc
-
-- Ignore changelog-only entries (`9b2746e`)
