@@ -144,6 +144,11 @@ export function releaseHygieneSteps(args = {}) {
       args: ["--test", "scripts/npm/release-run.test.mjs"],
     });
     steps.push({
+      label: "changelog-tests",
+      command: "node",
+      args: ["--test", "scripts/npm/changelog.test.mjs"],
+    });
+    steps.push({
       label: "release-guard-fixtures",
       command: "node",
       args: ["scripts/ci/release-guard-fixture-tests.mjs"],

@@ -4,6 +4,7 @@ import path from "node:path";
 import { git, normalizeGitPath } from "./guard-common.mjs";
 import { formatCommand, runStep, runStepsSerial } from "./main-internal-test-runner.mjs";
 import {
+  CHANGELOG_TEST_PATH,
   PACKAGE_SCRIPT_ALIASES,
   PATH_GROUPS,
   RELEASE_RUN_TEST_PATH,
@@ -260,6 +261,10 @@ function isReleaseRunRelevantPath(filePath) {
   return pathMatchesSpec(filePath, PATH_GROUPS.releaseRunRelevant);
 }
 
+function isChangelogRelevantPath(filePath) {
+  return pathMatchesSpec(filePath, PATH_GROUPS.changelogRelevant);
+}
+
 function crateDirForPath(filePath) {
   const parts = filePath.split("/");
   if (parts[0] === "crates" && parts.length >= 2) {
@@ -401,6 +406,14 @@ async function buildSteps(paths) {
         label: "release-run-tests",
         command: "node",
         args: ["--test", RELEASE_RUN_TEST_PATH],
+      });
+    }
+
+    if (isChangelogRelevantPath(filePath)) {
+      addStep(steps, "changelog-tests", {
+        label: "changelog-tests",
+        command: "node",
+        args: ["--test", CHANGELOG_TEST_PATH],
       });
     }
 

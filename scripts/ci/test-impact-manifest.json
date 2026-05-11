@@ -174,7 +174,8 @@
     "compat:check": "node scripts/compat/check-upstream-baseline.mjs",
     "compat:watch": "node scripts/compat/watch-upstream.mjs",
     "compat:watch-fixtures": "node scripts/compat/watch-upstream-fixture-tests.mjs",
-    "compat:watch-ci": "node scripts/compat/watch-upstream-ci.mjs"
+    "compat:watch-ci": "node scripts/compat/watch-upstream-ci.mjs",
+    "changelog:test": "node --test scripts/npm/changelog.test.mjs"
   },
   "pathGroups": {
     "smartContext": {
@@ -253,6 +254,12 @@
         "scripts/npm/release-run.mjs",
         "scripts/npm/release-run-lib.mjs",
         "scripts/npm/release-run.test.mjs"
+      ]
+    },
+    "changelogRelevant": {
+      "exact": [
+        "scripts/npm/changelog.mjs",
+        "scripts/npm/changelog.test.mjs"
       ]
     },
     "upstreamCompatRelevant": {

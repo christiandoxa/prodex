@@ -6,6 +6,7 @@ import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_PRODUCTION_LINE_LIMIT = 856;
 const DEFAULT_TEST_LINE_LIMIT = 865;
+const DEFAULT_NEAR_LIMIT_FILE_BUDGET = 32;
 
 const DEFAULT_ALLOWLIST = Object.freeze([]);
 
@@ -46,6 +47,10 @@ function parseArgs(argv) {
         ? null
         : envPositiveInteger("PRODEX_SIZE_GUARD_COHESION_LINES", DEFAULT_PRODUCTION_LINE_LIMIT),
     maxNearLimitSiblings: envPositiveInteger("PRODEX_SIZE_GUARD_MAX_NEAR_LIMIT_SIBLINGS", 2),
+    nearLimitFileBudget: envPositiveInteger(
+      "PRODEX_SIZE_GUARD_NEAR_LIMIT_FILES",
+      DEFAULT_NEAR_LIMIT_FILE_BUDGET,
+    ),
     json: false,
     productionLineLimit: envPositiveInteger(
       "PRODEX_SIZE_GUARD_PRODUCTION_LINES",
@@ -81,6 +86,11 @@ function parseArgs(argv) {
     if (value === "--max-near-limit-siblings") {
       index += 1;
       args.maxNearLimitSiblings = parsePositiveInteger(requiredValue(argv[index], value), value);
+      continue;
+    }
+    if (value === "--near-limit-files") {
+      index += 1;
+      args.nearLimitFileBudget = parsePositiveInteger(requiredValue(argv[index], value), value);
       continue;
     }
     if (value === "--no-default-allowlist") {
@@ -129,6 +139,7 @@ function printHelp() {
       "  --allow <path>:<n>      allow one file up to an exact current cap; may be repeated",
       "  --cohesion-lines <n>    production file size that counts as near-limit for sibling cohesion",
       "  --max-near-limit-siblings <n> fail when a production directory has more than this many near-limit siblings",
+      "  --near-limit-files <n> global Rust near-limit file budget; ratchet this downward after splits",
       "  --no-default-allowlist  ignore built-in caps for current hot spots",
       "  --warn-only             print violations but exit successfully",
       "  --json                  print machine-readable results",
@@ -138,6 +149,7 @@ function printHelp() {
       "  PRODEX_SIZE_GUARD_TEST_LINES",
       "  PRODEX_SIZE_GUARD_COHESION_LINES",
       "  PRODEX_SIZE_GUARD_MAX_NEAR_LIMIT_SIBLINGS",
+      "  PRODEX_SIZE_GUARD_NEAR_LIMIT_FILES",
     ].join("\n") + "\n",
   );
 }
@@ -229,6 +241,38 @@ function cohesionViolationsForFiles(files, args) {
     .sort((left, right) => right.nearLimitFiles.length - left.nearLimitFiles.length);
 }
 
+function nearLimitThreshold(kind, args) {
+  if (kind === "test") {
+    return Math.floor(args.testLineLimit * 0.9);
+  }
+  return args.cohesionLineLimit;
+}
+
+function nearLimitFilesForFiles(files, args) {
+  return files
+    .filter((file) => file.lineCount >= nearLimitThreshold(file.kind, args))
+    .map((file) => ({
+      ...file,
+      nearLimit: nearLimitThreshold(file.kind, args),
+    }))
+    .sort((left, right) => right.lineCount - left.lineCount || left.filePath.localeCompare(right.filePath));
+}
+
+function nearLimitBudgetViolationsForFiles(files, args) {
+  const nearLimitFiles = nearLimitFilesForFiles(files, args);
+  if (nearLimitFiles.length <= args.nearLimitFileBudget) {
+    return [];
+  }
+
+  return [
+    {
+      type: "near-limit-file-budget",
+      nearLimitFiles,
+      maxNearLimitFiles: args.nearLimitFileBudget,
+    },
+  ];
+}
+
 async function scan(args) {
   const entries = args.useDefaultAllowlist ? [...DEFAULT_ALLOWLIST, ...args.allowlist] : [...args.allowlist];
   const allowed = allowlistMap(entries);
@@ -310,19 +354,32 @@ async function scan(args) {
   }
 
   const cohesionViolations = cohesionViolationsForFiles(files, args);
-  return { allowlistHits, cohesionViolations, files, staleAllowlistEntries, violations };
+  const nearLimitBudgetViolations = nearLimitBudgetViolationsForFiles(files, args);
+  return {
+    allowlistHits,
+    cohesionViolations,
+    files,
+    nearLimitBudgetViolations,
+    staleAllowlistEntries,
+    violations,
+  };
 }
 
 function printHuman(args, result) {
   const findingCount =
-    result.violations.length + result.staleAllowlistEntries.length + result.cohesionViolations.length;
+    result.violations.length +
+    result.staleAllowlistEntries.length +
+    result.cohesionViolations.length +
+    result.nearLimitBudgetViolations.length;
   if (findingCount === 0) {
+    const nearLimitFileCount = nearLimitFilesForFiles(result.files, args).length;
     process.stdout.write(
       [
         `size guard: ok (${result.files.length} Rust file(s), ${result.allowlistHits.length} allowlist hit(s))`,
         `  production limit: ${args.productionLineLimit} lines`,
         `  test/benchmark limit: ${args.testLineLimit} lines`,
         `  cohesion: <= ${args.maxNearLimitSiblings} production sibling(s) at ${args.cohesionLineLimit}+ lines`,
+        `  near-limit budget: ${nearLimitFileCount}/${args.nearLimitFileBudget} Rust file(s)`,
       ].join("\n") + "\n",
     );
     return;
@@ -347,6 +404,16 @@ function printHuman(args, result) {
     );
     for (const file of violation.nearLimitFiles) {
       process.stderr.write(`  - ${file.filePath}: ${file.lineCount} line(s)\n`);
+    }
+  }
+  for (const violation of result.nearLimitBudgetViolations) {
+    process.stderr.write(
+      `near-limit budget: ${violation.nearLimitFiles.length} Rust file(s), max ${violation.maxNearLimitFiles}\n`,
+    );
+    for (const file of violation.nearLimitFiles) {
+      process.stderr.write(
+        `  - ${file.filePath}: ${file.lineCount} ${file.kind} line(s), near-limit ${file.nearLimit}\n`,
+      );
     }
   }
   for (const entry of result.staleAllowlistEntries) {
@@ -388,6 +455,7 @@ async function main() {
             test: args.testLineLimit,
             cohesion: args.cohesionLineLimit,
             maxNearLimitSiblings: args.maxNearLimitSiblings,
+            nearLimitFiles: args.nearLimitFileBudget,
           },
           ...result,
         },
@@ -402,7 +470,8 @@ async function main() {
   if (
     (result.violations.length > 0 ||
       result.staleAllowlistEntries.length > 0 ||
-      result.cohesionViolations.length > 0) &&
+      result.cohesionViolations.length > 0 ||
+      result.nearLimitBudgetViolations.length > 0) &&
     !args.warnOnly
   ) {
     process.exitCode = 1;

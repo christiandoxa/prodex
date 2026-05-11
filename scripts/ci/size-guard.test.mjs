@@ -99,3 +99,42 @@ test("cohesion guard allows clusters at configured sibling cap", async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("near-limit budget fails when global ratchet is exceeded", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-size-guard-"));
+  try {
+    await execFileAsync("git", ["init", "-q"], { cwd: root });
+    await writeLines(root, "src/alpha.rs", 8);
+    await writeLines(root, "src/beta.rs", 8);
+    await writeLines(root, "src/gamma.rs", 8);
+
+    const result = await runNode(
+      [
+        SCRIPT_PATH,
+        "--production-lines",
+        "10",
+        "--test-lines",
+        "12",
+        "--cohesion-lines",
+        "8",
+        "--max-near-limit-siblings",
+        "3",
+        "--near-limit-files",
+        "2",
+        "--json",
+      ],
+      { env: { ...process.env, PRODEX_REPO_ROOT: root } },
+    );
+
+    assert.equal(result.code, 1);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.nearLimitBudgetViolations.length, 1);
+    assert.equal(payload.nearLimitBudgetViolations[0].maxNearLimitFiles, 2);
+    assert.deepEqual(
+      payload.nearLimitBudgetViolations[0].nearLimitFiles.map((file) => file.filePath).sort(),
+      ["src/alpha.rs", "src/beta.rs", "src/gamma.rs"],
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

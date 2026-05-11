@@ -15,6 +15,7 @@
     "changelog": "node scripts/npm/changelog.mjs",
     "changelog:check": "node scripts/npm/changelog.mjs --check",
     "changelog:ci-check": "node scripts/npm/changelog.mjs --ci-check",
+    "changelog:test": "node --test scripts/npm/changelog.test.mjs",
     "compat:capture": "node scripts/compat/capture-replay.mjs",
     "compat:check": "node scripts/compat/check-upstream-baseline.mjs",
     "compat:watch": "node scripts/compat/watch-upstream.mjs",

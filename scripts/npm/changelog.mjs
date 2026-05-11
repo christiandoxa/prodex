@@ -15,8 +15,6 @@ const categories = [
   ["cli", "CLI"],
   ["claude", "Claude"],
   ["docs", "Docs"],
-  ["tests", "Tests"],
-  ["ci", "CI"],
   ["deps", "Deps"],
   ["misc", "Misc"],
 ];
@@ -76,7 +74,8 @@ function printHelp() {
       "",
       "Generates CHANGELOG.md from recent conventional commits.",
       "",
-      "Groups commits into runtime, CLI, Claude, docs, tests, ci, deps, and misc.",
+      "Groups user-facing commits into runtime, CLI, Claude, docs, deps, and misc.",
+      "Internal test, CI, refactor, and chore-only commits are omitted.",
       "Default mode writes CHANGELOG.md. --check verifies the checked-in file.",
       "--ci-check verifies release history, but requires fresh unreleased notes only on release commits.",
       "--release-version <version> renders the pending current version as a final release section.",
@@ -177,6 +176,26 @@ function isReleaseNoise(commit) {
   );
 }
 
+function isInternalMaintenance(commit) {
+  if (commit.breaking) {
+    return false;
+  }
+
+  const type = commit.type ?? "";
+  const scope = commit.scope ?? "";
+  if (["test", "ci", "refactor", "style", "build"].includes(type)) {
+    return true;
+  }
+  if (type === "chore" && !["deps", "dependency", "dependencies"].includes(scope)) {
+    return true;
+  }
+  if (["ci", "test", "tests", "workflow", "workflows", "github", "changelog"].includes(scope)) {
+    return true;
+  }
+
+  return false;
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -214,18 +233,12 @@ function categorize(commit) {
   const scope = commit.scope ?? "";
   const haystack = `${type} ${scope} ${commit.title} ${commit.subject}`.toLowerCase();
 
-  if (type === "test" || includesAny(scope, ["test", "tests"])) {
-    return "tests";
-  }
   if (
     type === "docs" ||
     includesAny(scope, ["docs", "readme", "quickstart"]) ||
     /\breadme\b/.test(haystack)
   ) {
     return "docs";
-  }
-  if (type === "ci" || includesAny(scope, ["ci", "compat", "workflow", "workflows", "github"])) {
-    return "ci";
   }
   if (type === "deps" || includesAny(scope, ["deps", "dependency", "dependencies"])) {
     return "deps";
@@ -264,7 +277,7 @@ function groupedEntries(commits) {
   const groups = Object.fromEntries(categories.map(([key]) => [key, []]));
 
   for (const commit of commits) {
-    if (isReleaseNoise(commit)) {
+    if (isReleaseNoise(commit) || isInternalMaintenance(commit)) {
       continue;
     }
     groups[categorize(commit)].push(commit);
