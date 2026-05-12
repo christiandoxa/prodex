@@ -463,3 +463,198 @@ pub(crate) async fn inspect_runtime_sse_lookahead_async(
     let inspection = inspect_runtime_sse_lookahead(&mut prefetch, &log_path, request_id).await?;
     Ok((inspection, prefetch))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_log_path(name: &str) -> PathBuf {
+        env::temp_dir().join(format!(
+            "prodex-prefetch-{name}-{}-{}.log",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock should be after unix epoch")
+                .as_nanos()
+        ))
+    }
+
+    fn test_prefetch_stream(chunks: Vec<RuntimePrefetchChunk>) -> RuntimePrefetchStream {
+        let (sender, receiver) =
+            mpsc::sync_channel::<RuntimePrefetchChunk>(RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY);
+        let shared = Arc::new(RuntimePrefetchSharedState::default());
+        for chunk in chunks {
+            if let RuntimePrefetchChunk::Data(bytes) = &chunk {
+                shared.queued_bytes.fetch_add(bytes.len(), Ordering::SeqCst);
+            }
+            sender.send(chunk).expect("test prefetch chunk should send");
+        }
+        drop(sender);
+        RuntimePrefetchStream {
+            receiver: Some(receiver),
+            shared,
+            backlog: VecDeque::new(),
+            worker_abort: None,
+        }
+    }
+
+    fn block_on_lookahead(
+        chunks: Vec<RuntimePrefetchChunk>,
+        name: &str,
+    ) -> Result<(RuntimeSseInspection, RuntimePrefetchStream)> {
+        let prefetch = test_prefetch_stream(chunks);
+        let log_path = test_log_path(name);
+        TokioRuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+            .block_on(inspect_runtime_sse_lookahead_async(prefetch, log_path, 7))
+    }
+
+    #[test]
+    fn prefetch_lookahead_commits_response_ids_and_turn_state() {
+        let (inspection, prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                concat!(
+                    ": keep-alive\r\n",
+                    "data: {\"type\":\"response.completed\",\"response_id\":\"resp-1\",\"turn_state\":\"ts-1\"}\r\n",
+                    "\r\n"
+                )
+                .as_bytes()
+                .to_vec(),
+            )],
+            "commit",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::Commit {
+                prelude,
+                response_ids,
+                turn_state,
+            } => {
+                assert!(String::from_utf8_lossy(&prelude).contains("response.completed"));
+                assert_eq!(response_ids, vec!["resp-1".to_string()]);
+                assert_eq!(turn_state.as_deref(), Some("ts-1"));
+            }
+            other => panic!("expected commit, got {other:?}"),
+        }
+        assert_eq!(prefetch.shared.queued_bytes.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn prefetch_lookahead_detects_quota_blocked_before_commit() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\",\"message\":\"quota exhausted\"}}}\r\n\r\n".to_vec(),
+            )],
+            "quota",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::QuotaBlocked(prelude) => {
+                assert!(String::from_utf8_lossy(&prelude).contains("insufficient_quota"));
+            }
+            other => panic!("expected quota blocked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefetch_lookahead_detects_previous_response_not_found_before_commit() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"missing\"}}}".to_vec(),
+            )],
+            "previous-response-not-found",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::PreviousResponseNotFound(prelude) => {
+                assert!(String::from_utf8_lossy(&prelude).contains("previous_response_not_found"));
+            }
+            other => panic!("expected previous response not found, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefetch_lookahead_timeout_with_partial_hold_commits_buffered_prelude() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-partial\"}"
+                    .to_vec(),
+            )],
+            "partial-timeout",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::Commit {
+                prelude,
+                response_ids,
+                turn_state,
+            } => {
+                assert!(String::from_utf8_lossy(&prelude).contains("resp-partial"));
+                assert_eq!(response_ids, vec!["resp-partial".to_string()]);
+                assert_eq!(turn_state, None);
+            }
+            other => panic!("expected commit after hold timeout, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefetch_lookahead_error_before_bytes_returns_error() {
+        let err = match block_on_lookahead(
+            vec![RuntimePrefetchChunk::Error(
+                io::ErrorKind::TimedOut,
+                "upstream timed out".to_string(),
+            )],
+            "error-before-bytes",
+        ) {
+            Ok(_) => panic!("lookahead should fail before any prelude bytes"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string()
+                .contains("failed to inspect runtime auto-rotate SSE stream")
+        );
+    }
+
+    #[test]
+    fn prefetch_lookahead_error_after_prelude_preserves_error_backlog() {
+        let (inspection, prefetch) = block_on_lookahead(
+            vec![
+                RuntimePrefetchChunk::Data(
+                    b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-before-error\"}"
+                        .to_vec(),
+                ),
+                RuntimePrefetchChunk::Error(
+                    io::ErrorKind::ConnectionReset,
+                    "connection reset".to_string(),
+                ),
+            ],
+            "error-after-prelude",
+        )
+        .expect("lookahead should keep partial prelude");
+
+        match inspection {
+            RuntimeSseInspection::Commit {
+                prelude,
+                response_ids,
+                turn_state,
+            } => {
+                assert!(String::from_utf8_lossy(&prelude).contains("resp-before-error"));
+                assert_eq!(response_ids, vec!["resp-before-error".to_string()]);
+                assert_eq!(turn_state, None);
+            }
+            other => panic!("expected partial commit, got {other:?}"),
+        }
+        assert!(matches!(
+            prefetch.backlog.front(),
+            Some(RuntimePrefetchChunk::Error(io::ErrorKind::ConnectionReset, message))
+                if message == "connection reset"
+        ));
+    }
+}
