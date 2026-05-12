@@ -57,9 +57,9 @@ fn runtime_proxy_default_active_limit_scales_with_long_lived_streams() {
 }
 
 #[test]
-fn runtime_buffered_response_parts_drop_requests_heap_trim_after_large_release() {
+fn runtime_heap_trimmed_buffered_response_parts_drop_requests_heap_trim_after_large_release() {
     reset_runtime_heap_trim_request_count();
-    drop(RuntimeBufferedResponseParts {
+    drop(RuntimeHeapTrimmedBufferedResponseParts {
         status: 200,
         headers: Vec::new(),
         body: vec![0_u8; RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES].into(),
@@ -67,7 +67,7 @@ fn runtime_buffered_response_parts_drop_requests_heap_trim_after_large_release()
     assert_eq!(runtime_heap_trim_request_count(), 1);
 
     reset_runtime_heap_trim_request_count();
-    drop(RuntimeBufferedResponseParts {
+    drop(RuntimeHeapTrimmedBufferedResponseParts {
         status: 200,
         headers: Vec::new(),
         body: vec![0_u8; RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES / 2].into(),
@@ -78,7 +78,7 @@ fn runtime_buffered_response_parts_drop_requests_heap_trim_after_large_release()
 #[test]
 fn buffered_runtime_proxy_response_drop_requests_heap_trim_after_large_release() {
     reset_runtime_heap_trim_request_count();
-    let response = build_runtime_proxy_response_from_parts(RuntimeBufferedResponseParts {
+    let response = build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
         status: 200,
         headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
         body: vec![0_u8; RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES].into(),

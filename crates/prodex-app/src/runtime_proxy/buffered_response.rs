@@ -3,8 +3,8 @@ use super::*;
 pub(crate) fn build_runtime_proxy_text_response_parts(
     status: u16,
     message: &str,
-) -> RuntimeBufferedResponseParts {
-    RuntimeBufferedResponseParts::from_crate_parts(
+) -> RuntimeHeapTrimmedBufferedResponseParts {
+    RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
         runtime_proxy_crate::build_runtime_proxy_text_response_parts(status, message),
     )
 }
@@ -22,8 +22,8 @@ pub(crate) fn build_runtime_proxy_json_error_parts(
     status: u16,
     code: &str,
     message: &str,
-) -> RuntimeBufferedResponseParts {
-    RuntimeBufferedResponseParts::from_crate_parts(
+) -> RuntimeHeapTrimmedBufferedResponseParts {
+    RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
         runtime_proxy_crate::build_runtime_proxy_json_error_parts(status, code, message),
     )
 }
@@ -39,23 +39,23 @@ pub(crate) fn build_runtime_proxy_json_error_response(
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct RuntimeManagedResponseBody {
+pub(crate) struct RuntimeHeapTrimmedResponseBody {
     bytes: Vec<u8>,
 }
 
-impl RuntimeManagedResponseBody {
+impl RuntimeHeapTrimmedResponseBody {
     pub(crate) fn into_vec(mut self) -> Vec<u8> {
         std::mem::take(&mut self.bytes)
     }
 }
 
-impl From<Vec<u8>> for RuntimeManagedResponseBody {
+impl From<Vec<u8>> for RuntimeHeapTrimmedResponseBody {
     fn from(bytes: Vec<u8>) -> Self {
         Self { bytes }
     }
 }
 
-impl std::ops::Deref for RuntimeManagedResponseBody {
+impl std::ops::Deref for RuntimeHeapTrimmedResponseBody {
     type Target = Vec<u8>;
 
     fn deref(&self) -> &Self::Target {
@@ -63,7 +63,7 @@ impl std::ops::Deref for RuntimeManagedResponseBody {
     }
 }
 
-impl<'a> IntoIterator for &'a RuntimeManagedResponseBody {
+impl<'a> IntoIterator for &'a RuntimeHeapTrimmedResponseBody {
     type Item = &'a u8;
     type IntoIter = std::slice::Iter<'a, u8>;
 
@@ -72,20 +72,20 @@ impl<'a> IntoIterator for &'a RuntimeManagedResponseBody {
     }
 }
 
-impl Drop for RuntimeManagedResponseBody {
+impl Drop for RuntimeHeapTrimmedResponseBody {
     fn drop(&mut self) {
         let released_bytes = std::mem::take(&mut self.bytes).capacity();
         let _ = runtime_maybe_trim_process_heap(released_bytes);
     }
 }
 
-pub(crate) struct RuntimeBufferedResponseParts {
+pub(crate) struct RuntimeHeapTrimmedBufferedResponseParts {
     pub(crate) status: u16,
     pub(crate) headers: Vec<(String, Vec<u8>)>,
-    pub(crate) body: RuntimeManagedResponseBody,
+    pub(crate) body: RuntimeHeapTrimmedResponseBody,
 }
 
-impl RuntimeBufferedResponseParts {
+impl RuntimeHeapTrimmedBufferedResponseParts {
     pub(crate) fn from_crate_parts(
         parts: runtime_proxy_crate::RuntimeBufferedResponseParts,
     ) -> Self {
@@ -126,7 +126,7 @@ impl Drop for RuntimeBufferedResponseBodyReader {
 pub(crate) async fn buffer_runtime_proxy_async_response_parts(
     response: reqwest::Response,
     prelude: Vec<u8>,
-) -> Result<RuntimeBufferedResponseParts> {
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     buffer_runtime_proxy_async_response_parts_with_limit(
         response,
         prelude,
@@ -139,7 +139,7 @@ pub(crate) async fn buffer_runtime_proxy_async_response_parts_with_limit(
     mut response: reqwest::Response,
     prelude: Vec<u8>,
     max_bytes: usize,
-) -> Result<RuntimeBufferedResponseParts> {
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let status = response.status().as_u16();
     let mut headers = Vec::new();
     for (name, value) in response.headers() {
@@ -168,7 +168,7 @@ pub(crate) async fn buffer_runtime_proxy_async_response_parts_with_limit(
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(RuntimeBufferedResponseParts {
+    Ok(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers,
         body: body.into(),
@@ -176,7 +176,7 @@ pub(crate) async fn buffer_runtime_proxy_async_response_parts_with_limit(
 }
 
 pub(crate) fn build_runtime_proxy_response_from_parts(
-    parts: RuntimeBufferedResponseParts,
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
 ) -> tiny_http::ResponseBox {
     let status = TinyStatusCode(parts.status);
     let headers = parts
@@ -198,7 +198,7 @@ pub(crate) fn build_runtime_proxy_response_from_parts(
 }
 
 pub(crate) fn runtime_buffered_response_content_type(
-    parts: &RuntimeBufferedResponseParts,
+    parts: &RuntimeHeapTrimmedBufferedResponseParts,
 ) -> Option<&str> {
     runtime_proxy_crate::runtime_response_content_type_from_binary_headers(
         parts

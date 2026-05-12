@@ -9,10 +9,10 @@ pub(crate) use runtime_proxy_crate::{
 pub(crate) use runtime_proxy_crate::runtime_proxy_precommit_budget_exhausted;
 
 pub(crate) fn runtime_proxy_translate_previous_response_http_parts(
-    parts: RuntimeBufferedResponseParts,
-) -> RuntimeBufferedResponseParts {
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
+) -> RuntimeHeapTrimmedBufferedResponseParts {
     if extract_runtime_proxy_previous_response_message(&parts.body).is_some() {
-        RuntimeBufferedResponseParts::from_crate_parts(
+        RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
             runtime_proxy_crate::runtime_proxy_stale_continuation_http_parts(),
         )
     } else {

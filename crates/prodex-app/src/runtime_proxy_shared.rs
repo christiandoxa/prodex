@@ -67,7 +67,7 @@ pub(super) type RuntimeTokenUsage = runtime_proxy_crate::RuntimeTokenUsage;
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum RuntimeResponsesReply {
-    Buffered(RuntimeBufferedResponseParts),
+    Buffered(RuntimeHeapTrimmedBufferedResponseParts),
     Streaming(RuntimeStreamingResponse),
 }
 

@@ -136,7 +136,7 @@ fn runtime_request_from_anthropic(request: anthropic::RuntimeProxyRequest) -> Ru
 }
 
 fn buffered_parts_to_anthropic(
-    parts: RuntimeBufferedResponseParts,
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
 ) -> anthropic::RuntimeBufferedResponseParts {
     anthropic::RuntimeBufferedResponseParts::from_parts(
         parts.status,
@@ -146,7 +146,7 @@ fn buffered_parts_to_anthropic(
 }
 
 fn buffered_parts_ref_to_anthropic(
-    parts: &RuntimeBufferedResponseParts,
+    parts: &RuntimeHeapTrimmedBufferedResponseParts,
 ) -> anthropic::RuntimeBufferedResponseParts {
     anthropic::RuntimeBufferedResponseParts::from_body_slice(
         parts.status,
@@ -157,9 +157,9 @@ fn buffered_parts_ref_to_anthropic(
 
 fn buffered_parts_from_anthropic(
     parts: anthropic::RuntimeBufferedResponseParts,
-) -> RuntimeBufferedResponseParts {
+) -> RuntimeHeapTrimmedBufferedResponseParts {
     let (status, headers, body) = parts.into_parts();
-    RuntimeBufferedResponseParts {
+    RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers,
         body: body.into(),
@@ -212,7 +212,7 @@ pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
     want_thinking: bool,
     carried_usage: RuntimeAnthropicServerToolUsage,
     server_tools: &RuntimeAnthropicServerTools,
-) -> Result<RuntimeBufferedResponseParts> {
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     anthropic::runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
         body,
         requested_model,
@@ -226,7 +226,7 @@ pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn runtime_anthropic_sse_response_parts_from_message_value(
     value: serde_json::Value,
-) -> RuntimeBufferedResponseParts {
+) -> RuntimeHeapTrimmedBufferedResponseParts {
     buffered_parts_from_anthropic(
         anthropic::runtime_anthropic_sse_response_parts_from_message_value(value),
     )
@@ -246,7 +246,7 @@ pub(super) fn runtime_request_for_anthropic_server_tool_followup(
 
 #[allow(dead_code)]
 pub(super) fn runtime_anthropic_error_message_from_parts(
-    parts: &RuntimeBufferedResponseParts,
+    parts: &RuntimeHeapTrimmedBufferedResponseParts,
 ) -> String {
     anthropic::runtime_anthropic_error_message_from_parts(&buffered_parts_ref_to_anthropic(parts))
 }
@@ -255,7 +255,7 @@ pub(super) fn build_runtime_anthropic_error_parts(
     status: u16,
     error_type: &str,
     message: &str,
-) -> RuntimeBufferedResponseParts {
+) -> RuntimeHeapTrimmedBufferedResponseParts {
     buffered_parts_from_anthropic(anthropic::build_runtime_anthropic_error_parts(
         status, error_type, message,
     ))
@@ -263,7 +263,7 @@ pub(super) fn build_runtime_anthropic_error_parts(
 
 pub(super) fn buffer_runtime_streaming_response_parts(
     response: RuntimeStreamingResponse,
-) -> Result<RuntimeBufferedResponseParts> {
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let RuntimeStreamingResponse {
         status,
         headers,
@@ -273,7 +273,7 @@ pub(super) fn buffer_runtime_streaming_response_parts(
     let mut buffered_body = Vec::new();
     body.read_to_end(&mut buffered_body)
         .context("failed to buffer streaming runtime response")?;
-    Ok(RuntimeBufferedResponseParts {
+    Ok(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers: headers
             .into_iter()
@@ -284,7 +284,7 @@ pub(super) fn buffer_runtime_streaming_response_parts(
 }
 
 pub(super) fn translate_runtime_buffered_responses_reply_to_anthropic(
-    parts: RuntimeBufferedResponseParts,
+    parts: RuntimeHeapTrimmedBufferedResponseParts,
     request: &RuntimeAnthropicMessagesRequest,
 ) -> Result<RuntimeResponsesReply> {
     let reply = anthropic::translate_runtime_buffered_responses_reply_to_anthropic(

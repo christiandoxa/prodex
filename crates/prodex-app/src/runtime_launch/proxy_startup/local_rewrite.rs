@@ -344,12 +344,12 @@ fn runtime_local_rewrite_buffered_response_parts(
     status: u16,
     headers: Vec<(String, Vec<u8>)>,
     mut response: reqwest::blocking::Response,
-) -> Result<RuntimeBufferedResponseParts> {
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let mut body = Vec::new();
     response
         .read_to_end(&mut body)
         .context("failed to read local provider response body")?;
-    Ok(RuntimeBufferedResponseParts {
+    Ok(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers,
         body: body.into(),
