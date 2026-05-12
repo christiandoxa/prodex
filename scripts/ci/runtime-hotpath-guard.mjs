@@ -53,7 +53,7 @@ const ALLOWLIST = Object.freeze([
     name: "launch-worker-pool-threads",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup.rs",
     id: "blocking-thread-spawn",
-    pattern: /\bthread::spawn\s*\(/,
+    pattern: /\bworker_threads\.push\(thread::spawn\s*\(/,
     maxHits: 2,
     reason:
       "bounded rotation acceptor and long-lived proxy worker pools created during launch, outside request commit path",
@@ -62,7 +62,7 @@ const ALLOWLIST = Object.freeze([
     name: "local-rewrite-launch-worker-pool-threads",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
     id: "blocking-thread-spawn",
-    pattern: /\bthread::spawn\s*\(/,
+    pattern: /\bworker_threads\.push\(thread::spawn\s*\(/,
     maxHits: 1,
     reason:
       "bounded local rewrite worker pool created during launch, outside request commit path",

@@ -62,6 +62,79 @@ pub(crate) fn forward_runtime_proxy_buffered_websocket_text_frames(
     Ok(())
 }
 
+pub(super) struct RuntimeWebsocketPrecommitHoldRequest<'a> {
+    pub(super) request_id: u64,
+    pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) profile_name: &'a str,
+    pub(super) reuse_existing_session: bool,
+    pub(super) precommit_hold_promotion_allowed: bool,
+    pub(super) inspected: &'a runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
+    pub(super) text: &'a str,
+    pub(super) buffered_precommit_text_frames: &'a mut Vec<RuntimeBufferedWebsocketTextFrame>,
+    pub(super) precommit_hold_count: &'a mut usize,
+    pub(super) precommit_hold_promotion_event_seen: &'a mut bool,
+}
+
+pub(super) fn runtime_websocket_buffer_precommit_hold(
+    request: RuntimeWebsocketPrecommitHoldRequest<'_>,
+) -> bool {
+    let RuntimeWebsocketPrecommitHoldRequest {
+        request_id,
+        shared,
+        profile_name,
+        reuse_existing_session,
+        precommit_hold_promotion_allowed,
+        inspected,
+        text,
+        buffered_precommit_text_frames,
+        precommit_hold_count,
+        precommit_hold_promotion_event_seen,
+    } = request;
+
+    if *precommit_hold_count == 0 {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "precommit_hold",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field(
+                        "event_type",
+                        inspected.event_type.as_deref().unwrap_or("-"),
+                    ),
+                ],
+            ),
+        );
+    }
+    *precommit_hold_count = (*precommit_hold_count).saturating_add(1);
+    *precommit_hold_promotion_event_seen |=
+        runtime_websocket_precommit_hold_promotion_event_seen(inspected);
+    buffered_precommit_text_frames.push(RuntimeBufferedWebsocketTextFrame {
+        text: text.to_string(),
+        response_ids: inspected.response_ids.clone(),
+    });
+    if precommit_hold_promotion_allowed && *precommit_hold_promotion_event_seen {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "websocket_precommit_hold_promoted",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("profile", profile_name),
+                    runtime_proxy_log_field("event", "response_created"),
+                    runtime_proxy_log_field("reuse", reuse_existing_session.to_string()),
+                    runtime_proxy_log_field("hold_count", (*precommit_hold_count).to_string()),
+                ],
+            ),
+        );
+        true
+    } else {
+        false
+    }
+}
+
 pub(crate) struct RuntimeWebsocketAttemptRequest<'a> {
     pub(in crate::runtime_proxy) request_id: u64,
     pub(in crate::runtime_proxy) local_socket: &'a mut RuntimeLocalWebSocket,

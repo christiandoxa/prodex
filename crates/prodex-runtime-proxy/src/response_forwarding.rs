@@ -101,6 +101,27 @@ pub fn runtime_response_content_type_is_sse(content_type: Option<&str>) -> bool 
     runtime_response_forwarding_body_kind(content_type).is_sse()
 }
 
+pub fn runtime_response_header_value<'a>(
+    headers: impl IntoIterator<Item = (&'a str, &'a str)>,
+    name: &str,
+) -> Option<String> {
+    headers
+        .into_iter()
+        .find(|(candidate_name, _)| candidate_name.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub fn runtime_stream_response_should_flush_each_chunk<'a>(
+    headers: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> bool {
+    headers.into_iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("content-type")
+            && value.to_ascii_lowercase().contains("text/event-stream")
+    })
+}
+
 pub fn runtime_buffered_response_metadata<'a>(
     status: u16,
     headers: impl IntoIterator<Item = (&'a str, &'a [u8])>,

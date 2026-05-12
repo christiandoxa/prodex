@@ -1,5 +1,6 @@
 use super::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 pub(super) fn runtime_smart_context_artifact_line_index(
     text: &str,

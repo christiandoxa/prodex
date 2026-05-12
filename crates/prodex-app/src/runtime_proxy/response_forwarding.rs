@@ -4,7 +4,8 @@ pub(crate) use runtime_proxy_crate::runtime_token_usage_event_is_loggable;
 pub(super) use runtime_proxy_crate::should_skip_runtime_response_header;
 use runtime_proxy_crate::{
     runtime_buffered_response_metadata, runtime_forward_text_response_headers,
-    runtime_response_content_type_is_sse, runtime_sse_forwarding_commit_detail,
+    runtime_response_content_type_is_sse, runtime_response_header_value,
+    runtime_sse_forwarding_commit_detail, runtime_stream_response_should_flush_each_chunk,
 };
 
 pub(super) async fn forward_runtime_proxy_response(
@@ -505,10 +506,12 @@ pub(crate) fn write_runtime_streaming_response(
     mut response: RuntimeStreamingResponse,
 ) -> io::Result<()> {
     let mut writer = writer;
-    let flush_each_chunk = response.headers.iter().any(|(name, value)| {
-        name.eq_ignore_ascii_case("content-type")
-            && value.to_ascii_lowercase().contains("text/event-stream")
-    });
+    let flush_each_chunk = runtime_stream_response_should_flush_each_chunk(
+        response
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    );
     let started_at = Instant::now();
     let log_writer_error = |stage: &str,
                             chunk_count: usize,
@@ -758,24 +761,30 @@ pub(super) fn runtime_proxy_header_value(
     headers: &reqwest::header::HeaderMap,
     name: &str,
 ) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    runtime_response_header_value(
+        headers.iter().filter_map(|(candidate_name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (candidate_name.as_str(), value))
+        }),
+        name,
+    )
 }
 
 pub(super) fn runtime_proxy_tungstenite_header_value(
     headers: &tungstenite::http::HeaderMap,
     name: &str,
 ) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    runtime_response_header_value(
+        headers.iter().filter_map(|(candidate_name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (candidate_name.as_str(), value))
+        }),
+        name,
+    )
 }
 
 #[cfg(test)]

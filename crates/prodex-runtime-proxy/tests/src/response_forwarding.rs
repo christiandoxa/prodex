@@ -75,6 +75,36 @@ fn classifies_sse_content_type_with_existing_case_sensitive_match() {
 }
 
 #[test]
+fn extracts_response_header_values_case_insensitively_and_trims() {
+    let value = runtime_response_header_value(
+        [
+            ("x-empty", "   "),
+            ("X-Codex-Turn-State", " ts-1 "),
+            ("x-codex-turn-state", "ts-2"),
+        ],
+        "x-codex-turn-state",
+    );
+
+    assert_eq!(value.as_deref(), Some("ts-1"));
+    assert_eq!(
+        runtime_response_header_value([("x-empty", "   ")], "x-empty"),
+        None
+    );
+}
+
+#[test]
+fn detects_sse_stream_headers_for_chunk_flush_policy() {
+    assert!(runtime_stream_response_should_flush_each_chunk([(
+        "Content-Type",
+        "TEXT/EVENT-STREAM; charset=utf-8"
+    ),]));
+    assert!(!runtime_stream_response_should_flush_each_chunk([(
+        "Content-Type",
+        "application/json"
+    ),]));
+}
+
+#[test]
 fn builds_sse_commit_detail_for_logs() {
     assert_eq!(
         runtime_sse_forwarding_commit_detail(17, 2),

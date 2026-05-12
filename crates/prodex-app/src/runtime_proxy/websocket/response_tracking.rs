@@ -1,8 +1,22 @@
 use super::*;
 mod commit;
+mod failure;
+mod frame;
 mod precommit;
-pub(crate) use commit::*;
+mod previous_response;
+mod quota_gate;
+mod session;
+mod terminal;
+mod upstream_send;
+use commit::*;
+use failure::*;
+use frame::*;
 pub(crate) use precommit::*;
+use previous_response::*;
+use quota_gate::*;
+use session::*;
+use terminal::*;
+use upstream_send::*;
 
 pub(crate) fn attempt_runtime_websocket_request(
     attempt: RuntimeWebsocketAttemptRequest<'_>,
@@ -25,228 +39,61 @@ pub(crate) fn attempt_runtime_websocket_request(
     let request_model_name = runtime_smart_context_model_name_from_body(request_text.as_bytes());
 
     let realtime_websocket = is_runtime_realtime_websocket_path(&handshake_request.path_and_query);
-    let quota_gate = runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
-        shared,
-        profile_name,
-        route_kind: RuntimeRouteKind::Websocket,
-        has_continuation_context: request_previous_response_id.is_some()
-            || request_session_id.is_some()
-            || request_turn_state.is_some(),
-        reprobe_context: "websocket_precommit_reprobe",
-    })?;
-    if let RuntimePrecommitQuotaGateDecision::Block {
-        reason,
-        summary,
-        source,
-    } = quota_gate
-    {
-        websocket_session.close();
-        let reason_label = reason.as_str();
-        let mut log_fields = vec![
-            runtime_proxy_log_field("request", request_id.to_string()),
-            runtime_proxy_log_field("transport", "websocket"),
-            runtime_proxy_log_field("profile", profile_name),
-            runtime_proxy_log_field("reason", reason_label),
-            runtime_proxy_log_field(
-                "quota_source",
-                source.map(runtime_quota_source_label).unwrap_or("unknown"),
-            ),
-        ];
-        log_fields.extend([
-            runtime_proxy_log_field(
-                "quota_band",
-                runtime_quota_pressure_band_reason(summary.route_band),
-            ),
-            runtime_proxy_log_field(
-                "five_hour_status",
-                runtime_quota_window_status_reason(summary.five_hour.status),
-            ),
-            runtime_proxy_log_field(
-                "five_hour_remaining",
-                summary.five_hour.remaining_percent.to_string(),
-            ),
-            runtime_proxy_log_field("five_hour_reset_at", summary.five_hour.reset_at.to_string()),
-            runtime_proxy_log_field(
-                "weekly_status",
-                runtime_quota_window_status_reason(summary.weekly.status),
-            ),
-            runtime_proxy_log_field(
-                "weekly_remaining",
-                summary.weekly.remaining_percent.to_string(),
-            ),
-            runtime_proxy_log_field("weekly_reset_at", summary.weekly.reset_at.to_string()),
-        ]);
-        runtime_proxy_log(
+    if let Some(attempt) =
+        runtime_websocket_pre_send_quota_gate(RuntimeWebsocketPreSendQuotaGateRequest {
+            request_id,
             shared,
-            runtime_proxy_structured_log_message("websocket_pre_send_skip", log_fields),
-        );
-        return Ok(RuntimeWebsocketAttempt::LocalSelectionBlocked {
-            profile_name: profile_name.to_string(),
-            reason: reason_label,
-        });
+            websocket_session,
+            profile_name,
+            request_previous_response_id,
+            request_session_id,
+            request_turn_state,
+        })?
+    {
+        return Ok(attempt);
     }
 
-    let reuse_existing_session = websocket_session.can_reuse(profile_name, turn_state_override);
-    let precommit_hold_promotion_allowed = runtime_websocket_precommit_hold_promotion_allowed(
-        reuse_existing_session,
-        request_previous_response_id,
-        request_session_id,
-        request_turn_state,
-        turn_state_override,
-        promote_committed_profile,
-    );
-    let precommit_transport_retry_allowed = runtime_websocket_precommit_transport_retry_allowed(
-        reuse_existing_session,
-        request_previous_response_id,
-        request_turn_state,
-        turn_state_override,
-        promote_committed_profile,
-    );
-    let reuse_started_at = reuse_existing_session.then(Instant::now);
-    let precommit_started_at = Instant::now();
-    let (mut upstream_socket, mut upstream_turn_state, mut inflight_guard) =
-        if reuse_existing_session {
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "websocket_reuse_start",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "websocket"),
-                        runtime_proxy_log_field("profile", profile_name),
-                        runtime_proxy_log_field(
-                            "turn_state_override",
-                            format!("{turn_state_override:?}"),
-                        ),
-                    ],
-                ),
-            );
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=websocket upstream_session=reuse profile={profile_name} turn_state_override={:?}",
-                    turn_state_override
-                ),
-            );
-            let Some(socket) = websocket_session.take_socket() else {
-                websocket_session.reset();
-                runtime_proxy_log(
-                    shared,
-                    runtime_proxy_structured_log_message(
-                        "websocket_reuse_missing_socket",
-                        [
-                            runtime_proxy_log_field("request", request_id.to_string()),
-                            runtime_proxy_log_field("transport", "websocket"),
-                            runtime_proxy_log_field("profile", profile_name),
-                        ],
-                    ),
-                );
-                return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                    profile_name: profile_name.to_string(),
-                    event: "reuse_missing_socket",
-                });
-            };
-            (socket, websocket_session.turn_state.clone(), None)
-        } else {
-            websocket_session.close();
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=websocket upstream_session=connect profile={profile_name} turn_state_override={:?}",
-                    turn_state_override
-                ),
-            );
-            match connect_runtime_proxy_upstream_websocket(
-                request_id,
-                handshake_request,
-                shared,
-                profile_name,
-                turn_state_override,
-            ) {
-                Ok(RuntimeWebsocketConnectResult::Connected { socket, turn_state }) => (
-                    socket,
-                    turn_state,
-                    Some(acquire_runtime_profile_inflight_guard(
-                        shared,
-                        profile_name,
-                        "websocket_session",
-                    )?),
-                ),
-                Ok(RuntimeWebsocketConnectResult::QuotaBlocked(payload)) => {
-                    return Ok(RuntimeWebsocketAttempt::QuotaBlocked {
-                        profile_name: profile_name.to_string(),
-                        payload,
-                    });
-                }
-                Ok(RuntimeWebsocketConnectResult::Overloaded(payload)) => {
-                    return Ok(RuntimeWebsocketAttempt::Overloaded {
-                        profile_name: profile_name.to_string(),
-                        payload,
-                    });
-                }
-                Err(_err) if precommit_transport_retry_allowed => {
-                    return Ok(RuntimeWebsocketAttempt::TransportFailed {
-                        profile_name: profile_name.to_string(),
-                        stage: "connect",
-                    });
-                }
-                Err(err) => return Err(err),
-            }
-        };
-    runtime_set_upstream_websocket_io_timeout(
-        &mut upstream_socket,
-        Some(Duration::from_millis(
-            runtime_proxy_websocket_precommit_progress_timeout_ms(),
-        )),
-    )
-    .context("failed to configure runtime websocket pre-commit timeout")?;
-
-    let upstream_request_text = prepare_runtime_smart_context_websocket_text(
-        request_id,
-        request_text,
-        handshake_request,
-        shared,
-        profile_name,
-    );
-    if let Err(err) =
-        upstream_socket.send(WsMessage::Text(upstream_request_text.into_owned().into()))
-    {
-        let _ = upstream_socket.close(None);
-        websocket_session.reset();
-        let transport_error =
-            anyhow::anyhow!("failed to send runtime websocket request upstream: {err}");
-        note_runtime_profile_transport_failure(
+    let session_start =
+        start_runtime_websocket_upstream_session(RuntimeWebsocketSessionStartRequest {
+            request_id,
+            handshake_request,
+            request_previous_response_id,
+            request_session_id,
+            request_turn_state,
             shared,
+            websocket_session,
             profile_name,
-            RuntimeRouteKind::Websocket,
-            "websocket_upstream_send",
-            &transport_error,
-        );
-        runtime_proxy_log(
+            turn_state_override,
+            promote_committed_profile,
+        })?;
+    let RuntimeWebsocketSessionStart {
+        mut upstream_socket,
+        mut upstream_turn_state,
+        mut inflight_guard,
+        reuse_existing_session,
+        precommit_hold_promotion_allowed,
+        precommit_transport_retry_allowed,
+        reuse_started_at,
+        precommit_started_at,
+    } = match session_start {
+        RuntimeWebsocketSessionStartDecision::Started(start) => start,
+        RuntimeWebsocketSessionStartDecision::Attempt(attempt) => return Ok(attempt),
+    };
+
+    if let Some(attempt) =
+        send_runtime_websocket_upstream_request(RuntimeWebsocketUpstreamSendRequest {
+            request_id,
+            request_text,
+            handshake_request,
             shared,
-            runtime_proxy_structured_log_message(
-                "upstream_send_error",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("profile", profile_name),
-                    runtime_proxy_log_field("error", err.to_string()),
-                ],
-            ),
-        );
-        if reuse_existing_session {
-            return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                profile_name: profile_name.to_string(),
-                event: "upstream_send_error",
-            });
-        }
-        if precommit_transport_retry_allowed {
-            return Ok(RuntimeWebsocketAttempt::TransportFailed {
-                profile_name: profile_name.to_string(),
-                stage: "send",
-            });
-        }
-        return Err(transport_error);
+            websocket_session,
+            profile_name,
+            reuse_existing_session,
+            precommit_transport_retry_allowed,
+            upstream_socket: &mut upstream_socket,
+        })?
+    {
+        return Ok(attempt);
     }
 
     let mut committed = false;
@@ -317,52 +164,22 @@ pub(crate) fn attempt_runtime_websocket_request(
                 }
 
                 if !committed && inspected.precommit_hold {
-                    if precommit_hold_count == 0 {
-                        runtime_proxy_log(
+                    promoted_precommit_hold = runtime_websocket_buffer_precommit_hold(
+                        RuntimeWebsocketPrecommitHoldRequest {
+                            request_id,
                             shared,
-                            runtime_proxy_structured_log_message(
-                                "precommit_hold",
-                                [
-                                    runtime_proxy_log_field("request", request_id.to_string()),
-                                    runtime_proxy_log_field("transport", "websocket"),
-                                    runtime_proxy_log_field("profile", profile_name),
-                                    runtime_proxy_log_field(
-                                        "event_type",
-                                        inspected.event_type.as_deref().unwrap_or("-"),
-                                    ),
-                                ],
-                            ),
-                        );
-                    }
-                    precommit_hold_count = precommit_hold_count.saturating_add(1);
-                    precommit_hold_promotion_event_seen |=
-                        runtime_websocket_precommit_hold_promotion_event_seen(&inspected);
-                    buffered_precommit_text_frames.push(RuntimeBufferedWebsocketTextFrame {
-                        text: text.clone(),
-                        response_ids: inspected.response_ids.clone(),
-                    });
-                    if precommit_hold_promotion_allowed && precommit_hold_promotion_event_seen {
-                        runtime_proxy_log(
-                            shared,
-                            runtime_proxy_structured_log_message(
-                                "websocket_precommit_hold_promoted",
-                                [
-                                    runtime_proxy_log_field("request", request_id.to_string()),
-                                    runtime_proxy_log_field("profile", profile_name),
-                                    runtime_proxy_log_field("event", "response_created"),
-                                    runtime_proxy_log_field(
-                                        "reuse",
-                                        reuse_existing_session.to_string(),
-                                    ),
-                                    runtime_proxy_log_field(
-                                        "hold_count",
-                                        precommit_hold_count.to_string(),
-                                    ),
-                                ],
-                            ),
-                        );
-                        promoted_precommit_hold = true;
-                    } else {
+                            profile_name,
+                            reuse_existing_session,
+                            precommit_hold_promotion_allowed,
+                            inspected: &inspected,
+                            text: &text,
+                            buffered_precommit_text_frames: &mut buffered_precommit_text_frames,
+                            precommit_hold_count: &mut precommit_hold_count,
+                            precommit_hold_promotion_event_seen:
+                                &mut precommit_hold_promotion_event_seen,
+                        },
+                    );
+                    if !promoted_precommit_hold {
                         continue;
                     }
                 }
@@ -428,41 +245,14 @@ pub(crate) fn attempt_runtime_websocket_request(
                         Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
                     );
                 if committed_previous_response_not_found {
-                    let mut dead_response_ids =
-                        committed_response_ids.iter().cloned().collect::<Vec<_>>();
-                    if let Some(previous_response_id) = request_previous_response_id {
-                        dead_response_ids.push(previous_response_id.to_string());
-                    }
-                    let _ = clear_runtime_dead_response_bindings(
-                        shared,
-                        profile_name,
-                        &dead_response_ids,
-                        "previous_response_not_found_after_commit",
-                    );
-                    runtime_proxy_log_previous_response_stale_continuation(
-                        shared,
-                        RuntimePreviousResponseLogContext {
+                    record_runtime_websocket_committed_previous_response_not_found(
+                        RuntimeWebsocketCommittedPreviousResponseNotFoundRequest {
                             request_id,
-                            transport: "websocket",
-                            route: "websocket",
-                            websocket_session: None,
-                            via: None,
-                        },
-                        profile_name,
-                    );
-                    runtime_proxy_log_chain_dead_upstream_confirmed(
-                        shared,
-                        RuntimeProxyChainLog {
-                            request_id,
-                            transport: "websocket",
-                            route: "websocket",
-                            websocket_session: None,
+                            shared,
                             profile_name,
-                            previous_response_id: request_previous_response_id,
-                            reason: "previous_response_not_found_locked_affinity",
-                            via: None,
+                            request_previous_response_id,
+                            committed_response_ids: &committed_response_ids,
                         },
-                        Some("post_commit"),
                     );
                 }
                 let text = if committed_previous_response_not_found {
@@ -477,25 +267,20 @@ pub(crate) fn attempt_runtime_websocket_request(
                         "failed to forward runtime websocket text frame"
                     })?;
                 if inspected.terminal_event {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=websocket terminal_event profile={profile_name} event_type={} precommit_hold_count={precommit_hold_count}",
-                            inspected.event_type.as_deref().unwrap_or("-"),
-                        ),
-                    );
-                    if committed_previous_response_not_found {
-                        let _ = upstream_socket.close(None);
-                        websocket_session.reset();
-                    } else {
-                        websocket_session.store(
-                            upstream_socket,
+                    return Ok(finish_runtime_websocket_terminal_event(
+                        RuntimeWebsocketTerminalEventRequest {
+                            request_id,
+                            shared,
+                            websocket_session,
                             profile_name,
+                            event_type: inspected.event_type.as_deref(),
+                            precommit_hold_count,
+                            committed_previous_response_not_found,
+                            upstream_socket,
                             upstream_turn_state,
-                            inflight_guard.take(),
-                        );
-                    }
-                    return Ok(RuntimeWebsocketAttempt::Delivered);
+                            inflight_guard: inflight_guard.take(),
+                        },
+                    ));
                 }
             }
             Ok(WsMessage::Binary(payload)) => {
@@ -545,278 +330,54 @@ pub(crate) fn attempt_runtime_websocket_request(
                 )?;
             }
             Ok(WsMessage::Close(frame)) => {
-                websocket_session.reset();
-                if let Some(started_at) = reuse_started_at {
-                    runtime_proxy_log(
-                        shared,
-                        runtime_proxy_structured_log_message(
-                            "websocket_reuse_watchdog",
-                            [
-                                runtime_proxy_log_field("profile", profile_name),
-                                runtime_proxy_log_field("event", "upstream_close_before_terminal"),
-                                runtime_proxy_log_field(
-                                    "elapsed_ms",
-                                    started_at.elapsed().as_millis().to_string(),
-                                ),
-                                runtime_proxy_log_field("committed", committed.to_string()),
-                            ],
-                        ),
-                    );
-                }
-                runtime_proxy_log(
-                    shared,
-                    runtime_proxy_structured_log_message(
-                        "upstream_close_before_completed",
-                        [
-                            runtime_proxy_log_field("request", request_id.to_string()),
-                            runtime_proxy_log_field("transport", "websocket"),
-                            runtime_proxy_log_field("profile", profile_name),
-                        ],
-                    ),
-                );
                 let _ = frame;
-                let transport_error =
-                    anyhow::anyhow!("runtime websocket upstream closed before response.completed");
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Websocket,
-                    "websocket_upstream_close",
-                    &transport_error,
+                return handle_runtime_websocket_upstream_close(
+                    RuntimeWebsocketUpstreamFailureRequest {
+                        request_id,
+                        shared,
+                        websocket_session,
+                        profile_name,
+                        reuse_started_at,
+                        reuse_existing_session,
+                        committed,
+                        precommit_transport_retry_allowed,
+                    },
                 );
-                if reuse_existing_session && !committed {
-                    return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                        profile_name: profile_name.to_string(),
-                        event: "upstream_close_before_commit",
-                    });
-                }
-                if !committed && precommit_transport_retry_allowed {
-                    return Ok(RuntimeWebsocketAttempt::TransportFailed {
-                        profile_name: profile_name.to_string(),
-                        stage: "upstream_close_before_commit",
-                    });
-                }
-                return Err(transport_error);
             }
             Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
-                websocket_session.reset();
-                if let Some(started_at) = reuse_started_at {
-                    runtime_proxy_log(
+                return handle_runtime_websocket_connection_closed(
+                    RuntimeWebsocketUpstreamFailureRequest {
+                        request_id,
                         shared,
-                        runtime_proxy_structured_log_message(
-                            "websocket_reuse_watchdog",
-                            [
-                                runtime_proxy_log_field("profile", profile_name),
-                                runtime_proxy_log_field("event", "connection_closed"),
-                                runtime_proxy_log_field(
-                                    "elapsed_ms",
-                                    started_at.elapsed().as_millis().to_string(),
-                                ),
-                                runtime_proxy_log_field("committed", committed.to_string()),
-                            ],
-                        ),
-                    );
-                }
-                runtime_proxy_log(
-                    shared,
-                    runtime_proxy_structured_log_message(
-                        "upstream_connection_closed",
-                        [
-                            runtime_proxy_log_field("request", request_id.to_string()),
-                            runtime_proxy_log_field("transport", "websocket"),
-                            runtime_proxy_log_field("profile", profile_name),
-                        ],
-                    ),
+                        websocket_session,
+                        profile_name,
+                        reuse_started_at,
+                        reuse_existing_session,
+                        committed,
+                        precommit_transport_retry_allowed,
+                    },
                 );
-                let transport_error =
-                    anyhow::anyhow!("runtime websocket upstream closed before response.completed");
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Websocket,
-                    "websocket_upstream_connection_closed",
-                    &transport_error,
-                );
-                if reuse_existing_session && !committed {
-                    return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                        profile_name: profile_name.to_string(),
-                        event: "connection_closed_before_commit",
-                    });
-                }
-                if !committed && precommit_transport_retry_allowed {
-                    return Ok(RuntimeWebsocketAttempt::TransportFailed {
-                        profile_name: profile_name.to_string(),
-                        stage: "connection_closed_before_commit",
-                    });
-                }
-                return Err(transport_error);
             }
             Err(err) => {
-                if !committed && precommit_hold_count > 0 && runtime_websocket_timeout_error(&err) {
-                    let elapsed_ms = precommit_started_at.elapsed().as_millis();
-                    let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
-                    runtime_proxy_log(
-                        shared,
-                        runtime_proxy_structured_log_message(
-                            "websocket_precommit_hold_timeout",
-                            [
-                                runtime_proxy_log_field("request", request_id.to_string()),
-                                runtime_proxy_log_field("profile", profile_name),
-                                runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
-                                runtime_proxy_log_field("threshold_ms", timeout_ms.to_string()),
-                                runtime_proxy_log_field(
-                                    "reuse",
-                                    reuse_existing_session.to_string(),
-                                ),
-                                runtime_proxy_log_field(
-                                    "hold_count",
-                                    precommit_hold_count.to_string(),
-                                ),
-                                runtime_proxy_log_field(
-                                    "promotion_allowed",
-                                    precommit_hold_promotion_allowed.to_string(),
-                                ),
-                                runtime_proxy_log_field(
-                                    "promotion_event_seen",
-                                    precommit_hold_promotion_event_seen.to_string(),
-                                ),
-                            ],
-                        ),
-                    );
-                }
-                websocket_session.reset();
-                if !committed && !first_upstream_frame_seen && runtime_websocket_timeout_error(&err)
-                {
-                    let elapsed_ms = precommit_started_at.elapsed().as_millis();
-                    runtime_proxy_log(
-                        shared,
-                        runtime_proxy_structured_log_message(
-                            "websocket_precommit_frame_timeout",
-                            [
-                                runtime_proxy_log_field("profile", profile_name),
-                                runtime_proxy_log_field(
-                                    "event",
-                                    "no_first_upstream_frame_before_deadline",
-                                ),
-                                runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
-                                runtime_proxy_log_field(
-                                    "reuse",
-                                    reuse_existing_session.to_string(),
-                                ),
-                            ],
-                        ),
-                    );
-                    let transport_error = anyhow::anyhow!(
-                        "runtime websocket upstream produced no first frame before the pre-commit deadline: {err}"
-                    );
-                    note_runtime_profile_transport_failure(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Websocket,
-                        "websocket_first_frame_timeout",
-                        &transport_error,
-                    );
-                    if reuse_existing_session {
-                        runtime_proxy_log(
-                            shared,
-                            runtime_proxy_structured_log_message(
-                                "websocket_reuse_watchdog",
-                                [
-                                    runtime_proxy_log_field("profile", profile_name),
-                                    runtime_proxy_log_field(
-                                        "event",
-                                        "no_first_upstream_frame_before_deadline",
-                                    ),
-                                    runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
-                                    runtime_proxy_log_field("committed", committed.to_string()),
-                                ],
-                            ),
-                        );
-                        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                            profile_name: profile_name.to_string(),
-                            event: "no_first_upstream_frame_before_deadline",
-                        });
-                    }
-                    if precommit_transport_retry_allowed {
-                        return Ok(RuntimeWebsocketAttempt::TransportFailed {
-                            profile_name: profile_name.to_string(),
-                            stage: "first_frame_timeout",
-                        });
-                    }
-                    return Err(transport_error);
-                }
-                if let Some(started_at) = reuse_started_at {
-                    runtime_proxy_log(
-                        shared,
-                        runtime_proxy_structured_log_message(
-                            "websocket_reuse_watchdog",
-                            [
-                                runtime_proxy_log_field("profile", profile_name),
-                                runtime_proxy_log_field("event", "read_error"),
-                                runtime_proxy_log_field(
-                                    "elapsed_ms",
-                                    started_at.elapsed().as_millis().to_string(),
-                                ),
-                                runtime_proxy_log_field("committed", committed.to_string()),
-                            ],
-                        ),
-                    );
-                }
-                runtime_proxy_log(
+                return handle_runtime_websocket_read_error(RuntimeWebsocketReadErrorRequest {
+                    request_id,
                     shared,
-                    runtime_proxy_structured_log_message(
-                        "upstream_read_error",
-                        [
-                            runtime_proxy_log_field("request", request_id.to_string()),
-                            runtime_proxy_log_field("transport", "websocket"),
-                            runtime_proxy_log_field("profile", profile_name),
-                            runtime_proxy_log_field("error", err.to_string()),
-                        ],
-                    ),
-                );
-                let transport_error = anyhow::anyhow!(
-                    "runtime websocket upstream failed before response.completed: {err}"
-                );
-                note_runtime_profile_transport_failure(
-                    shared,
+                    websocket_session,
                     profile_name,
-                    RuntimeRouteKind::Websocket,
-                    "websocket_upstream_read",
-                    &transport_error,
-                );
-                if reuse_existing_session && !committed {
-                    return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                        profile_name: profile_name.to_string(),
-                        event: "upstream_read_error",
-                    });
-                }
-                if !committed && precommit_transport_retry_allowed {
-                    return Ok(RuntimeWebsocketAttempt::TransportFailed {
-                        profile_name: profile_name.to_string(),
-                        stage: "read_error",
-                    });
-                }
-                return Err(transport_error);
+                    reuse_started_at,
+                    reuse_existing_session,
+                    committed,
+                    precommit_transport_retry_allowed,
+                    precommit_started_at,
+                    first_upstream_frame_seen,
+                    precommit_hold_count,
+                    precommit_hold_promotion_allowed,
+                    precommit_hold_promotion_event_seen,
+                    err,
+                });
             }
         }
     }
-}
-
-fn mark_runtime_websocket_upstream_frame_seen(
-    upstream_socket: &mut RuntimeUpstreamWebSocket,
-    first_upstream_frame_seen: &mut bool,
-) -> Result<()> {
-    if *first_upstream_frame_seen {
-        return Ok(());
-    }
-    *first_upstream_frame_seen = true;
-    runtime_set_upstream_websocket_io_timeout(
-        upstream_socket,
-        Some(Duration::from_millis(
-            runtime_proxy_websocket_precommit_progress_timeout_ms(),
-        )),
-    )
-    .context("failed to restore runtime websocket upstream timeout")
 }
 
 #[cfg(test)]
