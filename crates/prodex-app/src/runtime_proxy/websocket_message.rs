@@ -1,4 +1,37 @@
-use super::*;
+use super::{
+    AuthSummary, RuntimeExplicitSessionId, RuntimeLocalWebSocket,
+    RuntimePreviousResponseFreshFallbackShape, RuntimePreviousResponseLogContext,
+    RuntimePreviousResponseNotFoundAction, RuntimePreviousResponseNotFoundContext,
+    RuntimePreviousResponseNotFoundPolicy, RuntimePreviousResponseNotFoundRoute,
+    RuntimePreviousResponseNotFoundState, RuntimeProfileProbeCacheEntry,
+    RuntimeProfileUsageAuthCacheEntry, RuntimeProxyChainLog, RuntimeProxyRequest,
+    RuntimeRotationProxyShared, RuntimeRouteKind, RuntimeUpstreamFailureResponse,
+    RuntimeWebsocketAttempt, RuntimeWebsocketErrorPayload, RuntimeWebsocketRequestMetadata,
+    RuntimeWebsocketSessionState, extract_runtime_proxy_overload_message_from_websocket_payload,
+    extract_runtime_proxy_quota_message_from_websocket_payload,
+    forward_runtime_proxy_websocket_error, handle_runtime_previous_response_not_found,
+    mark_runtime_profile_quota_quarantine, mark_runtime_profile_retry_backoff,
+    note_runtime_profile_transport_failure, read_auth_summary,
+    runtime_has_route_eligible_quota_fallback,
+    runtime_profile_cached_auth_summary_from_maps_for_selection,
+    runtime_proxy_local_selection_failure_message, runtime_proxy_log,
+    runtime_proxy_log_chain_dead_upstream_confirmed, runtime_proxy_log_chain_retried_owner,
+    runtime_proxy_log_field, runtime_proxy_record_continuity_failure_reason,
+    runtime_proxy_structured_log_message, runtime_proxy_websocket_precommit_progress_timeout_ms,
+    runtime_proxy_websocket_previous_response_reuse_stale_ms,
+    runtime_set_upstream_websocket_io_timeout,
+    runtime_websocket_previous_response_reuse_is_nonreplayable,
+    runtime_websocket_previous_response_reuse_is_stale,
+    send_runtime_proxy_stale_continuation_websocket_error, send_runtime_proxy_websocket_error,
+};
+use anyhow::{Context, Result};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+use std::time::Duration;
+use tungstenite::Message as WsMessage;
+
+#[cfg(test)]
+use super::acquire_test_runtime_lock;
 
 mod auth;
 mod continuation_handling;
@@ -227,8 +260,21 @@ impl RuntimeWebsocketDirectCurrentFallbackReason {
 
 #[cfg(test)]
 pub(super) mod test_support {
-    use super::*;
+    use super::{
+        BTreeMap, BTreeSet, RuntimeWebsocketSessionState, RuntimeWebsocketTextMessageFlow,
+    };
+    use crate::{
+        AppPaths, AppState, RuntimeContinuationStatuses, RuntimeLocalWebSocket,
+        RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits, RuntimeProxyRequest,
+        RuntimeRotationProxyShared, RuntimeRotationState, RuntimeUpstreamWebSocket,
+    };
     use std::net::TcpListener;
+    use std::sync::atomic::{AtomicU64, AtomicUsize};
+    use std::sync::{Arc, Mutex};
+    use std::{env, thread};
+    use tiny_http::ReadWrite as TinyReadWrite;
+    use tokio::runtime::Builder as TokioRuntimeBuilder;
+    use tungstenite::Message as WsMessage;
     use tungstenite::connect;
 
     pub(super) fn test_runtime_shared(name: &str) -> RuntimeRotationProxyShared {

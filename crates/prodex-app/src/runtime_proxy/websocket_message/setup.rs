@@ -1,4 +1,40 @@
-use super::*;
+use super::super::{
+    RUNTIME_PROFILE_BAD_PAIRING_PENALTY, RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+    RuntimeCandidateAffinity, RuntimeResponseCandidateSelection,
+    RuntimeResponseProfileAffinityClear, RuntimeResponseRouteAffinityLogContext,
+    RuntimeResponseRouteAffinityRefreshSlots, RuntimeResponseRouteAffinityRequest,
+    RuntimeRouteKind, RuntimeUpstreamFailureResponse, RuntimeWebsocketAttempt,
+    RuntimeWebsocketAttemptRequest, attempt_runtime_websocket_request,
+    bump_runtime_profile_bad_pairing_score, bump_runtime_profile_health_score,
+    clear_runtime_response_profile_affinity, mark_runtime_profile_retry_backoff,
+    refresh_and_log_runtime_response_route_affinity_for_request,
+    release_runtime_quota_blocked_affinity, runtime_noncompact_session_priority_profile,
+    runtime_previous_response_affinity_is_trusted,
+    runtime_previous_response_fresh_fallback_shape_with_session,
+    runtime_previous_response_turn_state, runtime_profile_inflight_hard_limited_for_context,
+    runtime_proxy_has_continuation_priority, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_profile_inflight_hard_limit, runtime_proxy_structured_log_message,
+    runtime_quota_blocked_affinity_is_releasable, runtime_request_explicit_session_id,
+    runtime_request_turn_state, runtime_response_bound_profile,
+    runtime_smart_context_effective_websocket_prompt_cache_key, runtime_turn_state_bound_profile,
+    runtime_websocket_request_requires_locked_previous_response_affinity,
+    select_runtime_response_candidate_for_route, send_runtime_proxy_final_websocket_failure,
+};
+use super::{
+    RuntimeWebsocketTextMessageFlow, RuntimeWebsocketTextMessageInput,
+    runtime_websocket_should_promote_committed_profile,
+};
+use anyhow::Result;
+use std::collections::BTreeSet;
+
+#[cfg(test)]
+use super::super::{
+    RuntimeProxyRequest, RuntimeWebsocketRequestMetadata, RuntimeWebsocketSessionState,
+};
+#[cfg(test)]
+use super::proxy_runtime_websocket_text_message;
+#[cfg(test)]
+use crate::acquire_test_runtime_lock;
 
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn new(input: RuntimeWebsocketTextMessageInput<'a>) -> Result<Self> {

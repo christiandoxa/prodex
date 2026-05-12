@@ -18,3 +18,6 @@ mod static_context;
 
 #[path = "smart_context/adaptive_rewrite.rs"]
 mod adaptive_rewrite;
+
+#[path = "smart_context/safety.rs"]
+mod safety;

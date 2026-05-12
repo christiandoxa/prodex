@@ -154,3 +154,36 @@ fn structured_log_round_trips_quoted_values() {
     assert!(!fields.contains_key("bad key"));
     assert_eq!(runtime_proxy_log_event(&message), Some("event"));
 }
+
+#[test]
+fn typed_log_event_preserves_order_and_quoted_fields() {
+    let message = runtime_proxy_structured_log_message(
+        "stream_read_error",
+        [
+            runtime_proxy_log_field("profile", "alpha beta"),
+            runtime_proxy_log_field("empty", ""),
+            runtime_proxy_log_field("error", r#"bad "quote" \ slash"#),
+        ],
+    );
+
+    assert_eq!(
+        message,
+        r#"stream_read_error profile="alpha beta" empty="" error="bad \"quote\" \\ slash""#
+    );
+
+    let parsed = runtime_proxy_parse_log_event(&message).unwrap();
+    assert_eq!(parsed.event(), "stream_read_error");
+    assert_eq!(
+        parsed
+            .fields()
+            .iter()
+            .map(|field| (field.key(), field.value()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("profile", "alpha beta"),
+            ("empty", ""),
+            ("error", r#"bad "quote" \ slash"#),
+        ]
+    );
+    assert_eq!(parsed.render_message(), message);
+}

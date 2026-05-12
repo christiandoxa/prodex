@@ -4,6 +4,7 @@ mod core;
 mod normalization;
 mod regression;
 mod rewrite_policy;
+mod safety;
 mod static_context;
 mod token_accounting;
 
@@ -16,6 +17,7 @@ pub use core::*;
 pub use normalization::*;
 pub use regression::*;
 pub use rewrite_policy::*;
+pub use safety::*;
 pub use static_context::*;
 pub use token_accounting::*;
 #[cfg(test)]

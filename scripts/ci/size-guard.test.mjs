@@ -32,6 +32,35 @@ async function writeLines(root, relativePath, lineCount) {
   await fs.writeFile(filePath, Array.from({ length: lineCount }, (_, index) => `// ${index}`).join("\n") + "\n");
 }
 
+test("default ratchets match checked-in size thresholds", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-size-guard-"));
+  try {
+    await execFileAsync("git", ["init", "-q"], { cwd: root });
+    const env = { ...process.env, PRODEX_REPO_ROOT: root };
+    for (const name of Object.keys(env)) {
+      if (name.startsWith("PRODEX_SIZE_GUARD_")) {
+        delete env[name];
+      }
+    }
+
+    const result = await runNode([SCRIPT_PATH, "--json"], {
+      env,
+    });
+
+    assert.equal(result.code, 0);
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.limits, {
+      production: 850,
+      test: 860,
+      cohesion: 770,
+      maxNearLimitSiblings: 2,
+      nearLimitFiles: 28,
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("cohesion guard fails on near-limit sibling clusters", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-size-guard-"));
   try {

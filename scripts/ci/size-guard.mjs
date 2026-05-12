@@ -4,9 +4,10 @@ import path from "node:path";
 import { git, normalizeGitPath, parsePositiveInteger } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
-const DEFAULT_PRODUCTION_LINE_LIMIT = 856;
-const DEFAULT_TEST_LINE_LIMIT = 865;
-const DEFAULT_NEAR_LIMIT_FILE_BUDGET = 32;
+const DEFAULT_PRODUCTION_LINE_LIMIT = 850;
+const DEFAULT_TEST_LINE_LIMIT = 860;
+const DEFAULT_COHESION_LINE_LIMIT = 770;
+const DEFAULT_NEAR_LIMIT_FILE_BUDGET = 28;
 
 const DEFAULT_ALLOWLIST = Object.freeze([]);
 
@@ -16,6 +17,10 @@ function envPositiveInteger(name, fallback) {
     return fallback;
   }
   return parsePositiveInteger(value, name);
+}
+
+function envHasValue(name) {
+  return process.env[name] !== undefined && process.env[name] !== "";
 }
 
 function requiredValue(value, name) {
@@ -39,13 +44,12 @@ function parseAllow(value) {
 }
 
 function parseArgs(argv) {
+  let productionLineLimitExplicit = envHasValue("PRODEX_SIZE_GUARD_PRODUCTION_LINES");
   const args = {
     allowlist: [],
-    cohesionLineLimit:
-      process.env.PRODEX_SIZE_GUARD_COHESION_LINES === undefined ||
-      process.env.PRODEX_SIZE_GUARD_COHESION_LINES === ""
-        ? null
-        : envPositiveInteger("PRODEX_SIZE_GUARD_COHESION_LINES", DEFAULT_PRODUCTION_LINE_LIMIT),
+    cohesionLineLimit: envHasValue("PRODEX_SIZE_GUARD_COHESION_LINES")
+      ? envPositiveInteger("PRODEX_SIZE_GUARD_COHESION_LINES", DEFAULT_COHESION_LINE_LIMIT)
+      : null,
     maxNearLimitSiblings: envPositiveInteger("PRODEX_SIZE_GUARD_MAX_NEAR_LIMIT_SIBLINGS", 2),
     nearLimitFileBudget: envPositiveInteger(
       "PRODEX_SIZE_GUARD_NEAR_LIMIT_FILES",
@@ -66,6 +70,7 @@ function parseArgs(argv) {
     if (value === "--production-lines" || value === "--prod-lines") {
       index += 1;
       args.productionLineLimit = parsePositiveInteger(requiredValue(argv[index], value), value);
+      productionLineLimitExplicit = true;
       continue;
     }
     if (value === "--test-lines") {
@@ -115,7 +120,9 @@ function parseArgs(argv) {
   if (args.testLineLimit <= args.productionLineLimit) {
     throw new Error("--test-lines must be higher than --production-lines");
   }
-  args.cohesionLineLimit ??= Math.floor(args.productionLineLimit * 0.9);
+  args.cohesionLineLimit ??= productionLineLimitExplicit
+    ? Math.floor(args.productionLineLimit * 0.9)
+    : DEFAULT_COHESION_LINE_LIMIT;
   if (args.cohesionLineLimit >= args.productionLineLimit) {
     throw new Error("--cohesion-lines must be lower than --production-lines");
   }

@@ -45,13 +45,14 @@ pub fn runtime_format_log_line(
                 "message".to_string(),
                 serde_json::Value::String(sanitized.clone()),
             );
-            if let Some(event) = runtime_proxy::runtime_proxy_log_event(&sanitized) {
+            let parsed = runtime_proxy::runtime_proxy_parse_log_message(&sanitized);
+            if let Some(event) = parsed.event() {
                 value.insert(
                     "event".to_string(),
                     serde_json::Value::String(event.to_string()),
                 );
             }
-            let fields = runtime_proxy::runtime_proxy_log_fields(&sanitized);
+            let fields = parsed.fields_map();
             if !fields.is_empty() {
                 value.insert(
                     "fields".to_string(),
@@ -381,4 +382,27 @@ fn runtime_write_log_line(log_path: &Path, line: &str) {
 #[doc(hidden)]
 pub fn runtime_async_logger_writes_are_paused_for_test() -> bool {
     runtime_async_logger_pause_writes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_log_format_uses_typed_event_fields() {
+        let line = runtime_format_log_line(
+            r#"stream_read_error request=7 error="failed with spaces" empty="""#,
+            RuntimeLogFormat::Json,
+            "2026-05-12T00:00:00Z",
+            42,
+        );
+        let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+
+        assert_eq!(value["timestamp"], "2026-05-12T00:00:00Z");
+        assert_eq!(value["pid"], 42);
+        assert_eq!(value["event"], "stream_read_error");
+        assert_eq!(value["fields"]["request"], "7");
+        assert_eq!(value["fields"]["error"], "failed with spaces");
+        assert_eq!(value["fields"]["empty"], "");
+    }
 }
