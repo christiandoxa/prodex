@@ -432,11 +432,13 @@ where
         return RuntimeDueJobs::Due(BTreeMap::new());
     }
 
-    let next_ready_at = pending
+    let Some(next_ready_at) = pending
         .values()
         .map(RuntimeScheduledSaveJob::ready_at)
         .min()
-        .expect("pending scheduled save jobs should be non-empty after guard");
+    else {
+        return RuntimeDueJobs::Due(BTreeMap::new());
+    };
     if next_ready_at > now {
         return RuntimeDueJobs::Wait(next_ready_at.saturating_duration_since(now));
     }

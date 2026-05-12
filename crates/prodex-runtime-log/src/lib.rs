@@ -396,7 +396,10 @@ mod tests {
             "2026-05-12T00:00:00Z",
             42,
         );
-        let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        let value: serde_json::Value = match serde_json::from_str(line.trim()) {
+            Ok(value) => value,
+            Err(err) => panic!("failed to parse json log line: {err}; line={line:?}"),
+        };
 
         assert_eq!(value["timestamp"], "2026-05-12T00:00:00Z");
         assert_eq!(value["pid"], 42);

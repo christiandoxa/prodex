@@ -20,9 +20,12 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         prodex_profile_identity::AddProfileSourceKind::CopyCurrent => {
             Some(default_codex_home(&paths)?)
         }
-        prodex_profile_identity::AddProfileSourceKind::CopyFrom => Some(absolutize(
-            args.copy_from.expect("copy-from path should be present"),
-        )?),
+        prodex_profile_identity::AddProfileSourceKind::CopyFrom => {
+            let copy_from = args.copy_from.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("internal error: copy-from path missing after validation")
+            })?;
+            Some(absolutize(copy_from.clone())?)
+        }
         prodex_profile_identity::AddProfileSourceKind::ExternalHome
         | prodex_profile_identity::AddProfileSourceKind::EmptyManaged => None,
     };

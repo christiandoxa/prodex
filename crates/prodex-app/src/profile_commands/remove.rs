@@ -57,10 +57,9 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
         return Ok(());
     }
 
-    let removed_profile = removed_profiles
-        .into_iter()
-        .next()
-        .expect("single-profile removal should record the removed profile");
+    let Some(removed_profile) = removed_profiles.into_iter().next() else {
+        bail!("internal error: single-profile removal did not remove a profile");
+    };
     print_single_profile_removal_result(&state, removed_profile);
 
     Ok(())

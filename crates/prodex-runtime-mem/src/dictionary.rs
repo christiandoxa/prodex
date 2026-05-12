@@ -9,285 +9,20 @@ use crate::{
     RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX,
     RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX_LEGACY,
     RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD, RUNTIME_MEM_SUPER_SLIM_V2_MIN_PREFIX_CHARS,
-    RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD, RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD,
-    RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER,
-    RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE,
+    RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD, RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE,
     RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE, RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE,
     runtime_mem_lookup_json_path,
 };
 use serde_json::Value;
 use std::collections::HashMap;
 
+mod artifact_ref_dedupe;
+mod intern;
 mod terms;
 
 use self::terms::runtime_mem_super_slim_v2_inline_dictionary_terms;
-
-#[derive(Debug, Default)]
-pub(crate) struct RuntimeMemSuperSlimV2ArtifactRefDedupeState {
-    previous_emitted_ref: Option<String>,
-}
-
-impl RuntimeMemSuperSlimV2ArtifactRefDedupeState {
-    pub(crate) fn dedupe_consecutive_event_ref(&mut self, mut event: Value) -> Value {
-        let Some(artifact_ref) = runtime_mem_super_slim_v2_emitted_artifact_ref(&event) else {
-            self.previous_emitted_ref = None;
-            return event;
-        };
-
-        if self.previous_emitted_ref.as_deref() == Some(artifact_ref.as_str()) {
-            if let Some(object) = event.as_object_mut() {
-                object.remove("r");
-                object.insert(
-                    RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_FIELD.to_string(),
-                    Value::String(RUNTIME_MEM_SUPER_SLIM_V2_PREVIOUS_REF_MARKER.to_string()),
-                );
-            }
-        } else {
-            self.previous_emitted_ref = Some(artifact_ref);
-        }
-
-        event
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct RuntimeMemSuperSlimV2InternState {
-    exact_values: HashMap<String, Vec<String>>,
-    prefix_values: HashMap<String, Vec<String>>,
-    previous_full_values: HashMap<String, Vec<String>>,
-    dictionary_values: HashMap<String, HashMap<usize, RuntimeMemSuperSlimV2DictionaryEntry>>,
-}
-
-impl RuntimeMemSuperSlimV2InternState {
-    pub(crate) fn expand_event(&mut self, mut event: Value) -> Option<Value> {
-        let Some(event_type) = runtime_mem_lookup_json_path(&event, "t").and_then(Value::as_str)
-        else {
-            return Some(event);
-        };
-
-        if event_type == RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE {
-            self.remember_dictionary_event(&event);
-            return None;
-        }
-
-        let fields: &[&str] = match event_type {
-            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_USE_EVENT_TYPE => &["i", "n", "c"],
-            RUNTIME_MEM_SUPER_SLIM_V2_TOOL_RESULT_EVENT_TYPE => &["i", "s", "r"],
-            RUNTIME_MEM_SUPER_SLIM_V2_USER_EVENT_TYPE => &["s", "r"],
-            RUNTIME_MEM_SUPER_SLIM_V2_ASSISTANT_EVENT_TYPE => &["s"],
-            _ => &[],
-        };
-        for field in fields {
-            self.expand_field(&mut event, field);
-        }
-        Some(event)
-    }
-
-    fn expand_field(&mut self, event: &mut Value, field: &str) {
-        let Some(raw_value) = event.get(field).cloned() else {
-            return;
-        };
-        if let Some(value) = raw_value.as_str() {
-            if let Some(resolved) = self.resolve_dictionary_ref(field, value) {
-                if let Some(object) = event.as_object_mut() {
-                    object.insert(field.to_string(), Value::String(resolved.clone()));
-                }
-                self.remember_resolved(field, &resolved);
-            } else if let Some(resolved) = self.resolve_inline_dictionary_refs(field, value) {
-                if let Some(object) = event.as_object_mut() {
-                    object.insert(field.to_string(), Value::String(resolved.clone()));
-                }
-                self.remember_resolved(field, &resolved);
-            } else if runtime_mem_super_slim_v2_parse_dictionary_ref(value).is_none() {
-                self.remember_resolved(field, value);
-            }
-            return;
-        }
-
-        let Some(value) = self.resolve_marker(field, &raw_value) else {
-            return;
-        };
-
-        if let Some(object) = event.as_object_mut() {
-            object.insert(field.to_string(), Value::String(value.clone()));
-        }
-        self.remember_resolved(field, &value);
-    }
-
-    fn resolve_marker(&self, field: &str, value: &Value) -> Option<String> {
-        if let Some(index) = value
-            .get(RUNTIME_MEM_SUPER_SLIM_V2_INTERN_REF_FIELD)
-            .and_then(Value::as_u64)
-            .and_then(|index| usize::try_from(index).ok())
-        {
-            return self
-                .exact_values
-                .get(field)
-                .and_then(|values| values.get(index))
-                .cloned();
-        }
-
-        let marker = value
-            .get(RUNTIME_MEM_SUPER_SLIM_V2_PREFIX_REF_FIELD)
-            .and_then(Value::as_array)?;
-        let index = marker
-            .first()
-            .and_then(Value::as_u64)
-            .and_then(|index| usize::try_from(index).ok())?;
-        let suffix = marker.get(1).and_then(Value::as_str)?;
-        self.prefix_values
-            .get(field)
-            .and_then(|prefixes| prefixes.get(index))
-            .map(|prefix| format!("{prefix}{suffix}"))
-    }
-
-    fn remember_dictionary_event(&mut self, event: &Value) {
-        let Some(field) = runtime_mem_lookup_json_path(event, "k")
-            .and_then(Value::as_str)
-            .filter(|field| !field.is_empty())
-        else {
-            return;
-        };
-        let Some(index) = runtime_mem_lookup_json_path(event, "i")
-            .and_then(runtime_mem_super_slim_v2_dictionary_index)
-        else {
-            return;
-        };
-        let Some(mode) = runtime_mem_lookup_json_path(event, "m")
-            .and_then(Value::as_str)
-            .and_then(RuntimeMemSuperSlimV2DictionaryMode::from_str)
-        else {
-            return;
-        };
-        let Some(value) = runtime_mem_lookup_json_path(event, "v")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-        else {
-            return;
-        };
-        self.dictionary_values
-            .entry(field.to_string())
-            .or_default()
-            .insert(
-                index,
-                RuntimeMemSuperSlimV2DictionaryEntry {
-                    mode,
-                    value: value.to_string(),
-                },
-            );
-    }
-
-    fn resolve_dictionary_ref(&self, field: &str, value: &str) -> Option<String> {
-        let reference = runtime_mem_super_slim_v2_parse_dictionary_ref(value)?;
-        if reference.field != field {
-            return None;
-        }
-        let entry = self
-            .dictionary_values
-            .get(field)
-            .and_then(|entries| entries.get(&reference.index))?;
-        match (entry.mode, reference.suffix) {
-            (RuntimeMemSuperSlimV2DictionaryMode::Exact, None) => Some(entry.value.clone()),
-            (RuntimeMemSuperSlimV2DictionaryMode::Prefix, Some(suffix)) => {
-                Some(format!("{}{suffix}", entry.value))
-            }
-            (RuntimeMemSuperSlimV2DictionaryMode::Prefix, None) => Some(entry.value.clone()),
-            (RuntimeMemSuperSlimV2DictionaryMode::Exact, Some(_)) => None,
-        }
-    }
-
-    fn resolve_inline_dictionary_refs(&self, field: &str, value: &str) -> Option<String> {
-        let marker_prefixes = [
-            format!("{{{RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX}{field}#"),
-            format!("{{{RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX_LEGACY}{field}#"),
-        ];
-        let mut output = String::new();
-        let mut cursor = 0usize;
-        let mut changed = false;
-        while let Some((start, marker_len)) = marker_prefixes
-            .iter()
-            .filter_map(|marker_prefix| {
-                value[cursor..]
-                    .find(marker_prefix)
-                    .map(|relative_start| (cursor + relative_start, marker_prefix.len()))
-            })
-            .min_by_key(|(start, _)| *start)
-        {
-            output.push_str(&value[cursor..start]);
-            let digits_start = start + marker_len;
-            let mut digits_end = digits_start;
-            for (offset, ch) in value[digits_start..].char_indices() {
-                if !ch.is_ascii_digit() {
-                    break;
-                }
-                digits_end = digits_start + offset + ch.len_utf8();
-            }
-            if digits_end == digits_start || !value[digits_end..].starts_with('}') {
-                output.push_str(&value[start..digits_end]);
-                cursor = digits_end;
-                continue;
-            }
-            let Some(index) = value[digits_start..digits_end].parse::<usize>().ok() else {
-                output.push_str(&value[start..digits_end]);
-                cursor = digits_end;
-                continue;
-            };
-            let Some(entry) = self
-                .dictionary_values
-                .get(field)
-                .and_then(|entries| entries.get(&index))
-                .filter(|entry| entry.mode == RuntimeMemSuperSlimV2DictionaryMode::Exact)
-            else {
-                output.push_str(&value[start..digits_end]);
-                cursor = digits_end;
-                continue;
-            };
-            output.push_str(&entry.value);
-            cursor = digits_end + 1;
-            changed = true;
-        }
-        if !changed {
-            return None;
-        }
-        output.push_str(&value[cursor..]);
-        Some(output)
-    }
-
-    fn remember_resolved(&mut self, field: &str, value: &str) {
-        self.remember_exact(field, value);
-        self.remember_prefixes(field, value);
-        self.previous_full_values
-            .entry(field.to_string())
-            .or_default()
-            .push(value.to_string());
-    }
-
-    fn remember_exact(&mut self, field: &str, value: &str) {
-        let values = self.exact_values.entry(field.to_string()).or_default();
-        if !values.iter().any(|candidate| candidate == value) {
-            values.push(value.to_string());
-        }
-    }
-
-    fn remember_prefixes(&mut self, field: &str, value: &str) {
-        let Some(previous_values) = self.previous_full_values.get(field) else {
-            return;
-        };
-        let learned = previous_values
-            .iter()
-            .filter_map(|previous| runtime_mem_common_char_prefix(previous, value))
-            .collect::<Vec<_>>();
-        if learned.is_empty() {
-            return;
-        }
-        let prefixes = self.prefix_values.entry(field.to_string()).or_default();
-        for prefix in learned {
-            if !prefixes.iter().any(|candidate| candidate == &prefix) {
-                prefixes.push(prefix);
-            }
-        }
-    }
-}
+pub(crate) use artifact_ref_dedupe::RuntimeMemSuperSlimV2ArtifactRefDedupeState;
+pub(crate) use intern::RuntimeMemSuperSlimV2InternState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeMemSuperSlimV2DictionaryMode {
@@ -303,7 +38,7 @@ impl RuntimeMemSuperSlimV2DictionaryMode {
         }
     }
 
-    fn from_str(value: &str) -> Option<Self> {
+    pub(super) fn from_str(value: &str) -> Option<Self> {
         match value {
             RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT
             | RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_MODE_EXACT_LEGACY => Some(Self::Exact),
@@ -315,9 +50,9 @@ impl RuntimeMemSuperSlimV2DictionaryMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeMemSuperSlimV2DictionaryEntry {
-    mode: RuntimeMemSuperSlimV2DictionaryMode,
-    value: String,
+pub(super) struct RuntimeMemSuperSlimV2DictionaryEntry {
+    pub(super) mode: RuntimeMemSuperSlimV2DictionaryMode,
+    pub(super) value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -349,10 +84,10 @@ enum RuntimeMemSuperSlimV2DictionaryPlacement {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RuntimeMemSuperSlimV2DictionaryRef<'a> {
-    field: &'a str,
-    index: usize,
-    suffix: Option<&'a str>,
+pub(super) struct RuntimeMemSuperSlimV2DictionaryRef<'a> {
+    pub(super) field: &'a str,
+    pub(super) index: usize,
+    pub(super) suffix: Option<&'a str>,
 }
 
 pub(crate) fn runtime_mem_super_slim_v2_compact_dictionary_events(
@@ -723,7 +458,7 @@ fn runtime_mem_super_slim_v2_dictionary_ref(field: &str, dictionary_index: usize
     format!("{RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX}{field}#{dictionary_index}")
 }
 
-fn runtime_mem_super_slim_v2_parse_dictionary_ref(
+pub(super) fn runtime_mem_super_slim_v2_parse_dictionary_ref(
     value: &str,
 ) -> Option<RuntimeMemSuperSlimV2DictionaryRef<'_>> {
     let rest = value
@@ -751,7 +486,7 @@ fn runtime_mem_super_slim_v2_contains_dictionary_ref_marker(value: &str) -> bool
         || value.contains(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_REF_PREFIX_LEGACY)
 }
 
-fn runtime_mem_super_slim_v2_dictionary_index(value: &Value) -> Option<usize> {
+pub(super) fn runtime_mem_super_slim_v2_dictionary_index(value: &Value) -> Option<usize> {
     value
         .as_str()
         .and_then(|value| value.parse::<usize>().ok())
@@ -765,7 +500,7 @@ pub(crate) fn runtime_mem_jsonl_events_len(events: &[Value]) -> usize {
         .sum()
 }
 
-fn runtime_mem_super_slim_v2_emitted_artifact_ref(event: &Value) -> Option<String> {
+pub(super) fn runtime_mem_super_slim_v2_emitted_artifact_ref(event: &Value) -> Option<String> {
     let event_type = runtime_mem_lookup_json_path(event, "t")?.as_str()?;
     if !matches!(
         event_type,
@@ -781,7 +516,7 @@ fn runtime_mem_super_slim_v2_emitted_artifact_ref(event: &Value) -> Option<Strin
         .map(str::to_string)
 }
 
-fn runtime_mem_common_char_prefix(left: &str, right: &str) -> Option<String> {
+pub(super) fn runtime_mem_common_char_prefix(left: &str, right: &str) -> Option<String> {
     let mut prefix_len = 0usize;
     for ((left_index, left_char), (right_index, right_char)) in
         left.char_indices().zip(right.char_indices())

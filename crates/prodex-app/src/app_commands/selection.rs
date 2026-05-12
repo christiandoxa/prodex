@@ -188,7 +188,10 @@ where
 
         handles
             .into_iter()
-            .map(|handle| handle.join().expect("parallel worker panicked"))
+            .map(|handle| match handle.join() {
+                Ok(output) => output,
+                Err(payload) => std::panic::resume_unwind(payload),
+            })
             .collect()
     })
 }
