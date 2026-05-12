@@ -297,7 +297,7 @@ async function addCargoSteps(steps, paths) {
       addStep(steps, "cargo:prodex-root", {
         label: "cargo:prodex-root",
         command: "cargo",
-        args: ["test", "-q", "-p", "prodex", "--lib", "--", "--test-threads=1"],
+        args: ["check", "-q", "-p", "prodex", "--all-targets", "--all-features"],
       });
     }
   }

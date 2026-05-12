@@ -1,4 +1,40 @@
 use super::*;
+use proptest::prelude::*;
+use proptest::test_runner::Config as ProptestConfig;
+
+#[derive(Debug, Clone)]
+struct GeneratedRuntimeSseEvent {
+    response_id: String,
+    turn_state: Option<String>,
+    shape: u8,
+}
+
+impl GeneratedRuntimeSseEvent {
+    fn event_type(&self) -> &'static str {
+        match self.shape % 3 {
+            0 => "response.created",
+            1 => "response.in_progress",
+            _ => "response.completed",
+        }
+    }
+}
+
+fn runtime_ascii_token() -> impl Strategy<Value = String> {
+    "[A-Za-z0-9_]{1,16}"
+}
+
+fn generated_runtime_sse_event() -> impl Strategy<Value = GeneratedRuntimeSseEvent> {
+    (
+        runtime_ascii_token(),
+        prop::option::of(runtime_ascii_token()),
+        0u8..6,
+    )
+        .prop_map(|(id, turn_state, shape)| GeneratedRuntimeSseEvent {
+            response_id: format!("resp-{id}"),
+            turn_state: turn_state.map(|state| format!("turn-{state}")),
+            shape,
+        })
+}
 
 fn collect_runtime_sse_events(chunks: &[&[u8]]) -> Vec<RuntimeParsedSseEvent> {
     let mut line = Vec::new();
@@ -7,6 +43,39 @@ fn collect_runtime_sse_events(chunks: &[&[u8]]) -> Vec<RuntimeParsedSseEvent> {
 
     for chunk in chunks {
         runtime_sse_consume_chunk(&mut line, &mut data_lines, chunk, |event| {
+            events.push(event)
+        });
+    }
+    runtime_sse_finish_pending(&mut line, &mut data_lines, |event| events.push(event));
+
+    events
+}
+
+fn collect_runtime_sse_events_for_chunk_sizes(
+    body: &[u8],
+    chunk_sizes: &[usize],
+) -> Vec<RuntimeParsedSseEvent> {
+    let mut line = Vec::new();
+    let mut data_lines = Vec::new();
+    let mut events = Vec::new();
+    let mut offset = 0usize;
+
+    for size in chunk_sizes {
+        if offset >= body.len() {
+            break;
+        }
+        let chunk_len = (1 + (size % 31)).min(body.len() - offset);
+        runtime_sse_consume_chunk(
+            &mut line,
+            &mut data_lines,
+            &body[offset..offset + chunk_len],
+            |event| events.push(event),
+        );
+        offset += chunk_len;
+    }
+
+    if offset < body.len() {
+        runtime_sse_consume_chunk(&mut line, &mut data_lines, &body[offset..], |event| {
             events.push(event)
         });
     }
@@ -30,6 +99,69 @@ fn runtime_sse_event_signatures(events: &[RuntimeParsedSseEvent]) -> Vec<Runtime
             )
         })
         .collect()
+}
+
+fn build_runtime_sse_body(events: &[GeneratedRuntimeSseEvent], crlf: bool) -> Vec<u8> {
+    let line_end = if crlf { "\r\n" } else { "\n" };
+    let mut body = String::new();
+
+    for event in events {
+        body.push_str(": keep-alive");
+        body.push_str(line_end);
+        body.push_str("event: ");
+        body.push_str(event.event_type());
+        body.push_str(line_end);
+
+        let payload = match event.shape % 3 {
+            0 => serde_json::json!({
+                "type": event.event_type(),
+                "response_id": event.response_id,
+                "turn_state": event.turn_state,
+            }),
+            1 => serde_json::json!({
+                "type": event.event_type(),
+                "response": {
+                    "id": event.response_id,
+                    "headers": {
+                        "x-codex-turn-state": event.turn_state,
+                    },
+                },
+            }),
+            _ => serde_json::json!({
+                "type": event.event_type(),
+                "response": {
+                    "id": event.response_id,
+                    "turnState": event.turn_state,
+                },
+            }),
+        };
+
+        body.push_str("data: ");
+        body.push_str(&payload.to_string());
+        body.push_str(line_end);
+        body.push_str(line_end);
+    }
+
+    body.into_bytes()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    #[test]
+    fn runtime_sse_helpers_chunking_matches_single_pass(
+        events in prop::collection::vec(generated_runtime_sse_event(), 1..5),
+        chunk_sizes in prop::collection::vec(0usize..128, 0..64),
+        crlf in any::<bool>(),
+    ) {
+        let body = build_runtime_sse_body(&events, crlf);
+        let expected = runtime_sse_event_signatures(&collect_runtime_sse_events(&[&body]));
+        let actual = runtime_sse_event_signatures(
+            &collect_runtime_sse_events_for_chunk_sizes(&body, &chunk_sizes),
+        );
+
+        prop_assert_eq!(actual, expected);
+    }
 }
 
 #[test]

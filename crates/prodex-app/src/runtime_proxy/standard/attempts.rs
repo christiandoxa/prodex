@@ -47,22 +47,33 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "standard_http")?;
+    let async_runtime = Arc::clone(&shared.async_runtime);
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
-        let response =
-            send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
-                .inspect_err(|err| {
-                    note_runtime_profile_transport_failure(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Standard,
-                        "standard_upstream_request",
-                        err,
-                    );
-                })?;
+        let response = async_runtime
+            .block_on(send_runtime_proxy_upstream_request(
+                request_id,
+                request,
+                shared,
+                profile_name,
+                None,
+            ))
+            .inspect_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Standard,
+                    "standard_upstream_request",
+                    err,
+                );
+            })?;
         if request.path_and_query.ends_with("/backend-api/wham/usage") {
             let status = response.status().as_u16();
-            let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+            let parts = async_runtime
+                .block_on(buffer_runtime_proxy_async_response_parts(
+                    response,
+                    Vec::new(),
+                ))
                 .inspect_err(|err| {
                     note_runtime_profile_transport_failure(
                         shared,
@@ -124,7 +135,8 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
                 request_session_id.as_deref(),
                 RuntimeRouteKind::Standard,
             )?;
-            let response = forward_runtime_proxy_response(shared, response, Vec::new())
+            let response = async_runtime
+                .block_on(forward_runtime_proxy_response(response, Vec::new()))
                 .inspect_err(|err| {
                     note_runtime_profile_transport_failure(
                         shared,
@@ -141,7 +153,11 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
         }
 
         let status = response.status().as_u16();
-        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+        let parts = async_runtime
+            .block_on(buffer_runtime_proxy_async_response_parts(
+                response,
+                Vec::new(),
+            ))
             .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
@@ -277,33 +293,39 @@ pub(super) fn attempt_runtime_standard_request(
     }
     let _inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "compact_http")?;
+    let async_runtime = Arc::clone(&shared.async_runtime);
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
-        let response =
-            send_runtime_proxy_upstream_request(request_id, request, shared, profile_name, None)
-                .inspect_err(|err| {
-                    note_runtime_profile_transport_failure(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Compact,
-                        "compact_upstream_request",
-                        err,
-                    );
-                })?;
+        let response = async_runtime
+            .block_on(send_runtime_proxy_upstream_request(
+                request_id,
+                request,
+                shared,
+                profile_name,
+                None,
+            ))
+            .inspect_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Compact,
+                    "compact_upstream_request",
+                    err,
+                );
+            })?;
         let compact_request = is_runtime_compact_path(&request.path_and_query);
         if !compact_request || response.status().is_success() {
             let response_turn_state = compact_request
                 .then(|| runtime_proxy_header_value(response.headers(), "x-codex-turn-state"))
                 .flatten();
             let response = if compact_request {
-                forward_runtime_proxy_response_with_limit(
-                    shared,
+                async_runtime.block_on(forward_runtime_proxy_response_with_limit(
                     response,
                     Vec::new(),
                     RUNTIME_PROXY_COMPACT_BUFFERED_RESPONSE_MAX_BYTES,
-                )
+                ))
             } else {
-                forward_runtime_proxy_response(shared, response, Vec::new())
+                async_runtime.block_on(forward_runtime_proxy_response(response, Vec::new()))
             }
             .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
@@ -348,7 +370,11 @@ pub(super) fn attempt_runtime_standard_request(
         }
 
         let status = response.status().as_u16();
-        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+        let parts = async_runtime
+            .block_on(buffer_runtime_proxy_async_response_parts(
+                response,
+                Vec::new(),
+            ))
             .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,

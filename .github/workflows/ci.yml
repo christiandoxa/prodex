@@ -419,7 +419,7 @@ jobs:
 
       - name: Run profile command internal tests
         run: |
-          cargo test --lib profile_commands_internal_tests:: -- --test-threads=1
+          cargo test -p prodex-app --lib profile_commands_internal_tests:: -- --test-threads=1
 
   main-internal-core:
     name: Main internal core (${{ matrix.label }})

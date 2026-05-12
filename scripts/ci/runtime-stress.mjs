@@ -179,6 +179,8 @@ function skipArgs(testNames) {
 function baseStressArgs(extraSkipTests = []) {
   return [
     "test",
+    "-p",
+    "prodex-app",
     "--lib",
     "main_internal_tests::runtime_proxy_",
     "--",
@@ -210,7 +212,7 @@ function assertShardSkipSafety(selectedTests, nonSelectedTests) {
 async function listRuntimeStressTests() {
   const output = await capture(
     "cargo",
-    ["test", "--lib", "main_internal_tests::runtime_proxy_", "--", "--list"],
+    ["test", "-p", "prodex-app", "--lib", "main_internal_tests::runtime_proxy_", "--", "--list"],
     "runtime-stress:list",
   );
   const tests = parseListedTests(output);
@@ -257,7 +259,7 @@ async function runSerializedSuite({ dryRun: dryRunMode }) {
   await retry("serialized runtime stress", 2, async (attempt) => {
     process.stdout.write(`serialized runtime stress attempt ${attempt}\n`);
     for (const testName of RUNTIME_STRESS_SERIALIZED_TESTS) {
-      const args = ["test", "--lib", testName, "--", "--test-threads=1"];
+      const args = ["test", "-p", "prodex-app", "--lib", testName, "--", "--test-threads=1"];
       if (dryRunMode) {
         dryRun("cargo", args, testName);
       } else {
@@ -278,7 +280,7 @@ async function runContinuationSuite({ shardIndex, shardCount, dryRun: dryRunMode
   for (let iteration = 1; iteration <= 2; iteration += 1) {
     process.stdout.write(`continuation-heavy iteration ${iteration}\n`);
     for (const testName of continuationTests) {
-      const args = ["test", "--lib", testName, "--", "--test-threads=1"];
+      const args = ["test", "-p", "prodex-app", "--lib", testName, "--", "--test-threads=1"];
       if (dryRunMode) {
         dryRun("cargo", args, testName);
       } else {

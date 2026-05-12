@@ -24,7 +24,7 @@ export function cargoTestStep(label, filter, extraArgs = []) {
   return {
     label,
     command: "cargo",
-    args: ["test", "--lib", filter, "--", "--test-threads=1", ...extraArgs],
+    args: ["test", "-p", "prodex-app", "--lib", filter, "--", "--test-threads=1", ...extraArgs],
     failOnZeroTests: true,
   };
 }

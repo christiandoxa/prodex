@@ -115,7 +115,7 @@ async function main() {
   for (let iteration = 1; iteration <= args.runs; iteration += 1) {
     process.stdout.write(`env-sensitive parallel guard iteration ${iteration}/${args.runs}\n`);
     for (const testCase of RUNTIME_ENV_PARALLEL_CASES) {
-      await run("cargo", ["test", "--lib", testCase.filter, "--", threadArg], testCase.label);
+      await run("cargo", ["test", "-p", "prodex-app", "--lib", testCase.filter, "--", threadArg], testCase.label);
     }
   }
 }

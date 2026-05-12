@@ -208,6 +208,8 @@ async function runShard(args) {
 
   const cargoArgs = [
     "test",
+    "-p",
+    "prodex-app",
     "--lib",
     args.filter,
     "--",

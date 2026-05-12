@@ -7,7 +7,7 @@ import {
   RUNTIME_TEST_TAGS,
 } from "./runtime-test-manifest.mjs";
 
-const CARGO_LIST_ARGS = ["test", "--lib", "main_internal_tests::", "--", "--list"];
+const CARGO_LIST_ARGS = ["test", "-p", "prodex-app", "--lib", "main_internal_tests::", "--", "--list"];
 const CI_WORKFLOW_PATH = ".github/workflows/ci.yml";
 const MAIN_INTERNAL_RUNTIME_PROXY_PREFIX = "main_internal_tests::runtime_proxy_";
 const MAIN_INTERNAL_RUNTIME_CI_PREFIXES = Object.freeze([

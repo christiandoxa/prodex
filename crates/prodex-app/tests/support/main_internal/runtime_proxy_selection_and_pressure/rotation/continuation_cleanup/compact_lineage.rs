@@ -205,25 +205,31 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
             .expect("responses inflight guard should be acquired");
-    let response =
-        send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
-            .expect("responses follow-up should reach upstream");
-    match prepare_runtime_proxy_responses_success(
-        RuntimeResponsesSuccessContext {
-            request_id: 1,
-            request_model_name: None,
-            request_previous_response_id: Some("resp-second"),
-            request_prompt_cache_key: None,
-            request_session_id: Some("sess-compact"),
-            request_turn_state: None,
-            turn_state_override: None,
-            shared: &shared,
-            profile_name: "second",
-            inflight_guard,
-        },
-        response,
-    )
-    .expect("responses follow-up should prepare successfully")
+    match shared
+        .async_runtime
+        .block_on(async {
+            let response =
+                send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
+                    .await
+                    .expect("responses follow-up should reach upstream");
+            prepare_runtime_proxy_responses_success(
+                RuntimeResponsesSuccessContext {
+                    request_id: 1,
+                    request_model_name: None,
+                    request_previous_response_id: Some("resp-second"),
+                    request_prompt_cache_key: None,
+                    request_session_id: Some("sess-compact"),
+                    request_turn_state: None,
+                    turn_state_override: None,
+                    shared: &shared,
+                    profile_name: "second",
+                    inflight_guard,
+                },
+                response,
+            )
+            .await
+            .expect("responses follow-up should prepare successfully")
+        })
     {
         RuntimeResponsesAttempt::Success { .. } => {}
         _ => panic!("unexpected non-success responses attempt"),
@@ -447,25 +453,31 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
             .expect("responses inflight guard should be acquired");
-    let response =
-        send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
-            .expect("responses request should reach upstream");
-    match prepare_runtime_proxy_responses_success(
-        RuntimeResponsesSuccessContext {
-            request_id: 1,
-            request_model_name: None,
-            request_previous_response_id: None,
-            request_prompt_cache_key: None,
-            request_session_id: Some("sess-compact"),
-            request_turn_state: None,
-            turn_state_override: None,
-            shared: &shared,
-            profile_name: "second",
-            inflight_guard,
-        },
-        response,
-    )
-    .expect("responses request should prepare successfully")
+    match shared
+        .async_runtime
+        .block_on(async {
+            let response =
+                send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
+                    .await
+                    .expect("responses request should reach upstream");
+            prepare_runtime_proxy_responses_success(
+                RuntimeResponsesSuccessContext {
+                    request_id: 1,
+                    request_model_name: None,
+                    request_previous_response_id: None,
+                    request_prompt_cache_key: None,
+                    request_session_id: Some("sess-compact"),
+                    request_turn_state: None,
+                    turn_state_override: None,
+                    shared: &shared,
+                    profile_name: "second",
+                    inflight_guard,
+                },
+                response,
+            )
+            .await
+            .expect("responses request should prepare successfully")
+        })
     {
         RuntimeResponsesAttempt::Success { .. } => {}
         _ => panic!("unexpected non-success responses attempt"),

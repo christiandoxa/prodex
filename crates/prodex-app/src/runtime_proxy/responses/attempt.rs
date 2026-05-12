@@ -45,30 +45,37 @@ pub(crate) fn attempt_runtime_responses_request(
     }
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
+
+    let async_runtime = Arc::clone(&shared.async_runtime);
     let mut inflight_guard = Some(inflight_guard);
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
-        let response = send_runtime_proxy_upstream_responses_request(
-            request_id,
-            request,
-            shared,
-            profile_name,
-            turn_state_override,
-        )
-        .inspect_err(|err| {
-            note_runtime_profile_transport_failure(
+        let response = async_runtime
+            .block_on(send_runtime_proxy_upstream_responses_request(
+                request_id,
+                request,
                 shared,
                 profile_name,
-                RuntimeRouteKind::Responses,
-                "responses_upstream_request",
-                err,
-            );
-        })?;
+                turn_state_override,
+            ))
+            .inspect_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    "responses_upstream_request",
+                    err,
+                );
+            })?;
         let response_turn_state =
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())
+            let parts = async_runtime
+                .block_on(buffer_runtime_proxy_async_response_parts(
+                    response,
+                    Vec::new(),
+                ))
                 .inspect_err(|err| {
                     note_runtime_profile_transport_failure(
                         shared,
@@ -151,31 +158,31 @@ pub(crate) fn attempt_runtime_responses_request(
                 "responses inflight guard missing before success forwarding"
             ));
         };
-        let prepared = prepare_runtime_proxy_responses_success(
-            RuntimeResponsesSuccessContext {
-                request_id,
-                request_model_name: request_model_name.as_deref(),
-                request_previous_response_id: runtime_request_previous_response_id(request)
-                    .as_deref(),
-                request_prompt_cache_key: request_prompt_cache_key.as_deref(),
-                request_session_id: request_session_id.as_deref(),
-                request_turn_state: runtime_request_turn_state(request).as_deref(),
-                turn_state_override,
-                shared,
-                profile_name,
-                inflight_guard,
-            },
-            response,
-        )
-        .inspect_err(|err| {
-            note_runtime_profile_transport_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Responses,
-                "responses_prepare_success",
-                err,
-            );
-        });
+        let prepared = async_runtime
+            .block_on(prepare_runtime_proxy_responses_success(
+                RuntimeResponsesSuccessContext {
+                    request_id,
+                    request_model_name: request_model_name.as_deref(),
+                    request_previous_response_id: request_previous_response_id.as_deref(),
+                    request_prompt_cache_key: request_prompt_cache_key.as_deref(),
+                    request_session_id: request_session_id.as_deref(),
+                    request_turn_state: request_turn_state.as_deref(),
+                    turn_state_override,
+                    shared,
+                    profile_name,
+                    inflight_guard,
+                },
+                response,
+            ))
+            .inspect_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    "responses_prepare_success",
+                    err,
+                );
+            });
         if let Ok(RuntimeResponsesAttempt::Success { profile_name, .. }) = &prepared {
             remember_runtime_prompt_cache_profile(
                 shared,

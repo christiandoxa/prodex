@@ -125,21 +125,19 @@ impl Drop for RuntimeBufferedResponseBodyReader {
     }
 }
 
-pub(crate) fn buffer_runtime_proxy_async_response_parts(
-    shared: &RuntimeRotationProxyShared,
+pub(crate) async fn buffer_runtime_proxy_async_response_parts(
     response: reqwest::Response,
     prelude: Vec<u8>,
 ) -> Result<RuntimeBufferedResponseParts> {
     buffer_runtime_proxy_async_response_parts_with_limit(
-        shared,
         response,
         prelude,
         RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
     )
+    .await
 }
 
-pub(crate) fn buffer_runtime_proxy_async_response_parts_with_limit(
-    shared: &RuntimeRotationProxyShared,
+pub(crate) async fn buffer_runtime_proxy_async_response_parts_with_limit(
     mut response: reqwest::Response,
     prelude: Vec<u8>,
     max_bytes: usize,
@@ -152,29 +150,26 @@ pub(crate) fn buffer_runtime_proxy_async_response_parts_with_limit(
         }
         headers.push((name.as_str().to_string(), value.as_bytes().to_vec()));
     }
-    let body = shared.async_runtime.block_on(async move {
-        let mut body = prelude;
-        loop {
-            let next = response
-                .chunk()
-                .await
-                .context("failed to read upstream runtime response body chunk")?;
-            let Some(chunk) = next else {
-                break;
-            };
-            if body.len().saturating_add(chunk.len()) > max_bytes {
-                return Err(anyhow::Error::new(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "runtime buffered response exceeded safe size limit ({})",
-                        max_bytes
-                    ),
-                )));
-            }
-            body.extend_from_slice(&chunk);
+    let mut body = prelude;
+    loop {
+        let next = response
+            .chunk()
+            .await
+            .context("failed to read upstream runtime response body chunk")?;
+        let Some(chunk) = next else {
+            break;
+        };
+        if body.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(anyhow::Error::new(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "runtime buffered response exceeded safe size limit ({})",
+                    max_bytes
+                ),
+            )));
         }
-        Ok::<Vec<u8>, anyhow::Error>(body)
-    })?;
+        body.extend_from_slice(&chunk);
+    }
     Ok(RuntimeBufferedResponseParts {
         status,
         headers,

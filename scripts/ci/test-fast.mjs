@@ -31,7 +31,7 @@ const PREBUILD_STEPS = [
   {
     label: "prebuild:lib-tests",
     command: "cargo",
-    args: ["test", "--lib", "--no-run"],
+    args: ["test", "-p", "prodex-app", "--lib", "--no-run"],
   },
   {
     label: "prebuild:test:auto-rotate",

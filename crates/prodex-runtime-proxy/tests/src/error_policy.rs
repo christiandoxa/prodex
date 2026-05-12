@@ -1,7 +1,106 @@
 use super::*;
+use proptest::prelude::*;
+use proptest::test_runner::Config as ProptestConfig;
 
 fn json_body(value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("test json should serialize")
+}
+
+fn non_explicit_quota_text() -> impl Strategy<Value = String> {
+    "[A-Za-z0-9 .,!?/-]{0,64}"
+}
+
+fn explicit_quota_code() -> impl Strategy<Value = String> {
+    prop_oneof![
+        Just("insufficient_quota".to_string()),
+        Just(" rate_limit_exceeded ".to_string()),
+        Just("USAGE_LIMIT_REACHED".to_string()),
+    ]
+}
+
+fn explicit_quota_payload(code: &str, message: &str, shape: u8) -> serde_json::Value {
+    match shape % 3 {
+        0 => serde_json::json!({
+            "error": {
+                "code": code,
+                "message": message,
+            },
+        }),
+        1 => serde_json::json!({
+            "error": {
+                "type": code,
+                "detail": message,
+            },
+        }),
+        _ => serde_json::json!({
+            "outer": [
+                {
+                    "inner": {
+                        "code": code,
+                        "message": message,
+                    },
+                },
+            ],
+        }),
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn generic_429_payloads_never_rotate_without_explicit_quota_code(
+        message in non_explicit_quota_text(),
+        code in prop::option::of(non_explicit_quota_text()),
+        error_type in prop::option::of(non_explicit_quota_text()),
+        detail in non_explicit_quota_text(),
+    ) {
+        let body = json_body(serde_json::json!({
+            "error": {
+                "code": code,
+                "type": error_type,
+                "message": message,
+                "detail": detail,
+            },
+        }));
+
+        for phase in [
+            RuntimeHttpErrorPhase::PreCommit,
+            RuntimeHttpErrorPhase::Committed,
+        ] {
+            let policy = runtime_http_error_policy(429, &body, phase);
+
+            prop_assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
+            prop_assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
+            prop_assert_eq!(policy.rule, None);
+            prop_assert_eq!(policy.message, None);
+        }
+    }
+
+    #[test]
+    fn explicit_quota_payloads_rotate_only_before_commit_for_supported_statuses(
+        code in explicit_quota_code(),
+        message in "[A-Za-z0-9 .,!?/-]{1,64}",
+        shape in 0u8..9,
+    ) {
+        let body = json_body(explicit_quota_payload(&code, &message, shape));
+
+        for status in [403, 429] {
+            let precommit =
+                runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::PreCommit);
+            prop_assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota);
+            prop_assert_eq!(precommit.action, RuntimeHttpErrorAction::RotateProfile);
+            prop_assert_eq!(precommit.rule, Some("explicit_quota"));
+            prop_assert_eq!(precommit.message.as_deref(), Some(message.as_str()));
+
+            let committed =
+                runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::Committed);
+            prop_assert_eq!(committed.class, RuntimeHttpErrorClass::Quota);
+            prop_assert_eq!(committed.action, RuntimeHttpErrorAction::PassThrough);
+            prop_assert_eq!(committed.rule, Some("explicit_quota"));
+            prop_assert_eq!(committed.message.as_deref(), Some(message.as_str()));
+        }
+    }
 }
 
 #[test]

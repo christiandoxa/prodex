@@ -1,1 +1,1 @@
-include!("../crates/prodex-app/src/lib.rs");
+pub use prodex_app::*;

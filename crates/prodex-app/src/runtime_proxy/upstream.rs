@@ -6,7 +6,7 @@ struct RuntimeProxyUpstreamRequestEvents {
     response: &'static str,
 }
 
-pub(super) fn send_runtime_proxy_upstream_request(
+pub(super) async fn send_runtime_proxy_upstream_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
@@ -25,9 +25,10 @@ pub(super) fn send_runtime_proxy_upstream_request(
             response: "upstream_response",
         },
     )
+    .await
 }
 
-pub(crate) fn send_runtime_proxy_upstream_responses_request(
+pub(crate) async fn send_runtime_proxy_upstream_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
@@ -46,9 +47,10 @@ pub(crate) fn send_runtime_proxy_upstream_responses_request(
             response: "upstream_async_response",
         },
     )
+    .await
 }
 
-fn send_runtime_proxy_upstream_request_with_events(
+async fn send_runtime_proxy_upstream_request_with_events(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
@@ -142,10 +144,7 @@ fn send_runtime_proxy_upstream_request_with_events(
     if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
         bail!("injected runtime upstream connect failure");
     }
-    let response = match shared
-        .async_runtime
-        .block_on(async move { upstream_request.send().await })
-    {
+    let response = match upstream_request.send().await {
         Ok(response) => response,
         Err(err) => {
             log_runtime_upstream_connect_failure(

@@ -7,23 +7,21 @@ use runtime_proxy_crate::{
     runtime_response_content_type_is_sse, runtime_sse_forwarding_commit_detail,
 };
 
-pub(super) fn forward_runtime_proxy_response(
-    shared: &RuntimeRotationProxyShared,
+pub(super) async fn forward_runtime_proxy_response(
     response: reqwest::Response,
     prelude: Vec<u8>,
 ) -> Result<tiny_http::ResponseBox> {
-    let parts = buffer_runtime_proxy_async_response_parts(shared, response, prelude)?;
+    let parts = buffer_runtime_proxy_async_response_parts(response, prelude).await?;
     Ok(build_runtime_proxy_response_from_parts(parts))
 }
 
-pub(super) fn forward_runtime_proxy_response_with_limit(
-    shared: &RuntimeRotationProxyShared,
+pub(super) async fn forward_runtime_proxy_response_with_limit(
     response: reqwest::Response,
     prelude: Vec<u8>,
     max_bytes: usize,
 ) -> Result<tiny_http::ResponseBox> {
     let parts =
-        buffer_runtime_proxy_async_response_parts_with_limit(shared, response, prelude, max_bytes)?;
+        buffer_runtime_proxy_async_response_parts_with_limit(response, prelude, max_bytes).await?;
     Ok(build_runtime_proxy_response_from_parts(parts))
 }
 
@@ -40,7 +38,7 @@ pub(crate) struct RuntimeResponsesSuccessContext<'a> {
     pub(crate) inflight_guard: RuntimeProfileInFlightGuard,
 }
 
-pub(crate) fn prepare_runtime_proxy_responses_success(
+pub(crate) async fn prepare_runtime_proxy_responses_success(
     context: RuntimeResponsesSuccessContext<'_>,
     response: reqwest::Response,
 ) -> Result<RuntimeResponsesAttempt> {
@@ -85,7 +83,7 @@ pub(crate) fn prepare_runtime_proxy_responses_success(
     );
     if !is_sse {
         let buffered_started_at = Instant::now();
-        let parts = buffer_runtime_proxy_async_response_parts(shared, response, Vec::new())?;
+        let parts = buffer_runtime_proxy_async_response_parts(response, Vec::new()).await?;
         let response_turn_state = response_header_turn_state
             .or_else(|| turn_state_override.map(str::to_string))
             .or_else(|| extract_runtime_turn_state_from_body_bytes(&parts.body));
