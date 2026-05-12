@@ -76,7 +76,7 @@ pub(crate) fn attempt_runtime_websocket_request(
         reuse_started_at,
         precommit_started_at,
     } = match session_start {
-        RuntimeWebsocketSessionStartDecision::Started(start) => start,
+        RuntimeWebsocketSessionStartDecision::Started(start) => *start,
         RuntimeWebsocketSessionStartDecision::Attempt(attempt) => return Ok(attempt),
     };
 

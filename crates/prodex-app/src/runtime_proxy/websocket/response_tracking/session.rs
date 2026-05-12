@@ -25,7 +25,7 @@ pub(super) struct RuntimeWebsocketSessionStart {
 }
 
 pub(super) enum RuntimeWebsocketSessionStartDecision {
-    Started(RuntimeWebsocketSessionStart),
+    Started(Box<RuntimeWebsocketSessionStart>),
     Attempt(RuntimeWebsocketAttempt),
 }
 
@@ -167,7 +167,7 @@ pub(super) fn start_runtime_websocket_upstream_session(
     )
     .context("failed to configure runtime websocket pre-commit timeout")?;
 
-    Ok(RuntimeWebsocketSessionStartDecision::Started(
+    Ok(RuntimeWebsocketSessionStartDecision::Started(Box::new(
         RuntimeWebsocketSessionStart {
             upstream_socket,
             upstream_turn_state,
@@ -178,5 +178,5 @@ pub(super) fn start_runtime_websocket_upstream_session(
             reuse_started_at,
             precommit_started_at,
         },
-    ))
+    )))
 }
