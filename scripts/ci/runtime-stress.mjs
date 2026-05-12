@@ -267,10 +267,17 @@ async function runSerializedSuite({ dryRun: dryRunMode }) {
   });
 }
 
-async function runContinuationSuite({ dryRun: dryRunMode }) {
+async function runContinuationSuite({ shardIndex, shardCount, dryRun: dryRunMode }) {
+  const continuationTests = RUNTIME_STRESS_CONTINUATION_TESTS.filter((_, index) => index % shardCount === shardIndex);
+  if (continuationTests.length === 0) {
+    throw new Error(`runtime-stress continuation shard ${shardIndex + 1}/${shardCount} selected no tests`);
+  }
+  process.stdout.write(
+    `continuation-heavy shard ${shardIndex + 1}/${shardCount} selected ${continuationTests.length}/${RUNTIME_STRESS_CONTINUATION_TESTS.length} test(s)\n`,
+  );
   for (let iteration = 1; iteration <= 2; iteration += 1) {
     process.stdout.write(`continuation-heavy iteration ${iteration}\n`);
-    for (const testName of RUNTIME_STRESS_CONTINUATION_TESTS) {
+    for (const testName of continuationTests) {
       const args = ["test", "--lib", testName, "--", "--test-threads=1"];
       if (dryRunMode) {
         dryRun("cargo", args, testName);
@@ -289,7 +296,7 @@ async function main() {
         "Usage: node scripts/ci/runtime-stress.mjs [--suite stress|serialized|continuation|all] [--shard-index <n> --shard-count <n>] [--dry-run]",
         "",
         "Runs runtime proxy stress shards from the shared runtime CI manifest.",
-        "Sharding only splits the broad stress suite; serialized and continuation-heavy suites remain serial.",
+        "Sharding splits the broad stress suite and continuation-heavy suite; serialized tests remain serial.",
       ].join("\n") + "\n",
     );
     return;

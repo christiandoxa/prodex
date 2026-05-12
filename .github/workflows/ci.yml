@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_CACHE_SIZE: 2G
+  SCCACHE_GHA_ENABLED: "true"
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -69,6 +74,8 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -78,6 +85,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -194,6 +204,8 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -203,6 +215,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -291,6 +306,8 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -298,6 +315,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -320,18 +340,47 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: run
-            filter: "run::"
+          - label: run blocked current
+            filters: |
+              run::run_auto_rotates_active_profile_when_current_is_blocked
+              run::run_auto_rotate_flag_rotates_active_profile_when_current_is_blocked
+          - label: run profile selection
+            filters: |
+              run::explicit_profile_auto_rotates_by_default
+              run::run_without_profile_keeps_the_active_ready_account
+          - label: run broker recovery
+            filters: |
+              run::run_recovers_when_runtime_broker_registry_points_to_a_dead_pid
+          - label: run passthrough
+            filters: |
+              run::update_passthrough_uses_inherited_codex_home_without_quota_or_runtime
+              run::run_exec_preserves_prompt_and_piped_stdin
+              run::explicit_profile_can_disable_auto_rotate
+              run::run_preflight_checks_fallback_profiles_in_parallel
           - label: login
-            filter: "login::"
+            filters: |
+              login::
           - label: quota doctor
-            filter: "quota_doctor::"
-          - label: shared state
-            filter: "shared_state::"
+            filters: |
+              quota_doctor::
+          - label: shared state resume history
+            filters: |
+              shared_state::run_shares_resume_history_across_managed_profiles
+          - label: shared state memories
+            filters: |
+              shared_state::run_shares_housekeeping_memories_across_managed_profiles
+          - label: shared state behavior
+            filters: |
+              shared_state::run_shares_native_codex_behavior_state_across_managed_profiles
+          - label: shared state plugins
+            filters: |
+              shared_state::run_shares_codex_plugin_and_memory_extension_state_across_managed_profiles
 
     steps:
       - name: Check out repository
@@ -340,17 +389,30 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
       - name: Run auto-rotate integration tests ${{ matrix.label }}
-        run: cargo test --test auto_rotate "${{ matrix.filter }}" -- --test-threads=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r filter; do
+            if [ -z "${filter}" ]; then
+              continue
+            fi
+            cargo test --test auto_rotate "${filter}" -- --test-threads=1
+          done <<< "${{ matrix.filters }}"
 
   profile-commands-internal:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -358,6 +420,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -372,6 +437,8 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
       matrix:
@@ -399,6 +466,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
@@ -418,6 +488,8 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -425,6 +497,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -473,6 +548,7 @@ jobs:
       RUNTIME_PROXY_ARTIFACT_DIR: target/ci/runtime-proxy/${{ matrix.suite }}
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -480,6 +556,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -521,6 +600,8 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -528,6 +609,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -550,34 +634,45 @@ jobs:
         include:
           - suite: stress
             id: stress-1
-            label: broad shard 1 of 3
+            label: broad shard 1 of 4
             shard: 0
-            shard_count: 3
+            shard_count: 4
           - suite: stress
             id: stress-2
-            label: broad shard 2 of 3
+            label: broad shard 2 of 4
             shard: 1
-            shard_count: 3
+            shard_count: 4
           - suite: stress
             id: stress-3
-            label: broad shard 3 of 3
+            label: broad shard 3 of 4
             shard: 2
-            shard_count: 3
+            shard_count: 4
+          - suite: stress
+            id: stress-4
+            label: broad shard 4 of 4
+            shard: 3
+            shard_count: 4
           - suite: serialized
             id: serialized
             label: serialized shard
             shard: 0
             shard_count: 1
           - suite: continuation
-            id: continuation
-            label: continuation shard
+            id: continuation-1
+            label: continuation shard 1 of 2
             shard: 0
-            shard_count: 1
+            shard_count: 2
+          - suite: continuation
+            id: continuation-2
+            label: continuation shard 2 of 2
+            shard: 1
+            shard_count: 2
     env:
       RUNTIME_STRESS_ARTIFACT_DIR: target/ci/runtime-stress/${{ matrix.id }}
       PRODEX_RUNTIME_LOG_DIR: target/ci/runtime-stress/${{ matrix.id }}/runtime-logs
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -585,6 +680,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2

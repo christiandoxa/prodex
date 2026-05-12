@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_CACHE_SIZE: 2G
+  SCCACHE_GHA_ENABLED: "true"
+
 concurrency:
   group: full-test-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -17,6 +22,8 @@ jobs:
     name: Full serial all-features tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -24,6 +31,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2

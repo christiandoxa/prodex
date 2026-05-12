@@ -170,13 +170,72 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     ],
   },
   {
-    suite: "doctor",
-    label: "doctor",
+    suite: "doctor-summary-guidance",
+    label: "doctor summary and guidance",
     filters: [
       {
-        id: "doctor",
-        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::",
-        label: "doctor",
+        id: "doctor-summary-fields",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::summary_fields::",
+        label: "summary-fields",
+      },
+      {
+        id: "doctor-finalize-guidance",
+        filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::finalize_guidance::",
+        label: "finalize-guidance",
+      },
+    ],
+  },
+  {
+    suite: "doctor-state-broker-binary",
+    label: "doctor state broker binary",
+    filters: [
+      {
+        id: "doctor-state-broker-binary",
+        filter:
+          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch",
+        label: "state-broker-binary",
+      },
+    ],
+  },
+  {
+    suite: "doctor-state-dead-registry",
+    label: "doctor state dead registry",
+    filters: [
+      {
+        id: "doctor-state-dead-registry",
+        filter:
+          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_surfaces_dead_broker_registry_and_stale_leases",
+        label: "state-dead-registry",
+      },
+    ],
+  },
+  {
+    suite: "doctor-state-unreachable-health",
+    label: "doctor state unreachable health",
+    filters: [
+      {
+        id: "doctor-state-unreachable-health",
+        filter:
+          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_surfaces_unreachable_live_broker_health",
+        label: "state-unreachable-health",
+      },
+    ],
+  },
+  {
+    suite: "doctor-state-persisted",
+    label: "doctor state persisted",
+    filters: [
+      {
+        id: "doctor-state-orphans",
+        filter:
+          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::collect_orphan_managed_profile_dirs_ignores_tracked_and_fresh_dirs",
+        label: "state-orphans",
+      },
+      {
+        id: "doctor-state-persisted",
+        filter:
+          "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_state_collects_persisted_degradation_and_orphans",
+        label: "state-persisted",
       },
     ],
   },
