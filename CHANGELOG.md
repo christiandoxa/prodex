@@ -2,6 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.97.0 - 2026-05-13
+
+### Runtime
+
+- Remove blocking SSE lookahead (`fa08c43`)
+- Avoid SSE lookahead starving prefetch (`c84c053`)
+
 ## 0.96.0 - 2026-05-12
 
 - No grouped changes.
@@ -66,9 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Recover auth and websocket precommit failures (`7fb8890`)
-
-## 0.85.0 - 2026-05-06
-
-### Runtime
-
-- Close smart context release gaps (`c978eb7`)
