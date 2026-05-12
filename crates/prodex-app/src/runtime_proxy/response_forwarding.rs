@@ -161,8 +161,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
         request_id,
     );
     let (lookahead, prefetch) =
-        inspect_runtime_sse_lookahead_blocking(prefetch, shared.log_path.clone(), request_id)
-            .await?;
+        inspect_runtime_sse_lookahead_async(prefetch, shared.log_path.clone(), request_id).await?;
 
     let (prelude, response_ids, lookahead_turn_state) = match lookahead {
         RuntimeSseInspection::Commit {

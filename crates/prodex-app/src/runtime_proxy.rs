@@ -2,7 +2,6 @@ use super::*;
 
 mod admission;
 mod affinity;
-mod attempt_outcome;
 mod buffered_response;
 mod chain_log;
 mod classification;
@@ -13,7 +12,6 @@ mod failure_response;
 mod health;
 mod lifecycle;
 mod lineage;
-mod path;
 mod payload_detection;
 mod prefetch;
 mod previous_response_log;
@@ -33,7 +31,6 @@ mod websocket_message;
 
 pub(crate) use self::admission::*;
 pub(crate) use self::affinity::*;
-pub(crate) use self::attempt_outcome::*;
 pub(super) use self::buffered_response::*;
 pub(crate) use self::chain_log::*;
 pub(crate) use self::classification::*;
@@ -44,7 +41,6 @@ pub(crate) use self::failure_response::*;
 pub(super) use self::health::*;
 pub(crate) use self::lifecycle::*;
 pub(super) use self::lineage::*;
-pub(super) use self::path::*;
 pub(super) use self::payload_detection::*;
 pub(super) use self::prefetch::*;
 pub(crate) use self::previous_response_log::*;
@@ -72,10 +68,18 @@ use self::websocket_message::{
     RuntimeWebsocketTextMessageInput, proxy_runtime_websocket_text_message,
 };
 
+#[cfg(test)]
+pub(crate) use runtime_proxy_crate::{
+    RuntimePreviousResponseNotFoundDecisionInput, runtime_previous_response_not_found_decision,
+    runtime_previous_response_not_found_observability_outcome,
+};
 pub(super) use runtime_proxy_crate::{
+    RuntimePreviousResponseNotFoundRoute, is_runtime_anthropic_messages_path,
+    is_runtime_compact_path, is_runtime_responses_path, path_without_query,
     runtime_noncompact_session_priority_profile,
     runtime_proxy_allows_direct_current_profile_fallback, runtime_proxy_has_continuation_priority,
-    runtime_proxy_precommit_budget, runtime_wait_affinity_owner,
+    runtime_proxy_precommit_budget, runtime_record_previous_response_not_found_retry_state,
+    runtime_wait_affinity_owner,
 };
 
 pub(super) fn runtime_proxy_local_selection_failure_message() -> &'static str {

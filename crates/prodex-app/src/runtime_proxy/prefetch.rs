@@ -24,21 +24,42 @@ impl RuntimePrefetchStream {
         }
     }
 
-    fn recv_timeout(
+    async fn recv_timeout_async(
         &mut self,
         timeout: Duration,
     ) -> std::result::Result<RuntimePrefetchChunk, RecvTimeoutError> {
-        if let Some(chunk) = self.backlog.pop_front() {
-            return Ok(chunk);
+        let started_at = Instant::now();
+        let retry_delay =
+            Duration::from_millis(runtime_proxy_prefetch_backpressure_retry_ms().max(1));
+
+        loop {
+            if let Some(chunk) = self.backlog.pop_front() {
+                return Ok(chunk);
+            }
+            let Some(receiver) = self.receiver.as_ref() else {
+                return Err(RecvTimeoutError::Disconnected);
+            };
+            match receiver.try_recv() {
+                Ok(chunk) => {
+                    if let RuntimePrefetchChunk::Data(bytes) = &chunk {
+                        runtime_prefetch_release_queued_bytes(&self.shared, bytes.len());
+                    }
+                    return Ok(chunk);
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err(RecvTimeoutError::Disconnected);
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+            let elapsed = started_at.elapsed();
+            if elapsed >= timeout {
+                return Err(RecvTimeoutError::Timeout);
+            }
+            let sleep_for = retry_delay.min(timeout.saturating_sub(elapsed));
+            if !sleep_for.is_zero() {
+                tokio::time::sleep(sleep_for).await;
+            }
         }
-        let Some(receiver) = self.receiver.as_ref() else {
-            return Err(RecvTimeoutError::Disconnected);
-        };
-        let chunk = receiver.recv_timeout(timeout)?;
-        if let RuntimePrefetchChunk::Data(bytes) = &chunk {
-            runtime_prefetch_release_queued_bytes(&self.shared, bytes.len());
-        }
-        Ok(chunk)
     }
 
     fn push_backlog(&mut self, chunk: RuntimePrefetchChunk) {
@@ -300,7 +321,7 @@ pub(crate) async fn runtime_prefetch_response_chunks(
     }
 }
 
-pub(crate) fn inspect_runtime_sse_lookahead(
+pub(crate) async fn inspect_runtime_sse_lookahead(
     prefetch: &mut RuntimePrefetchStream,
     log_path: &Path,
     request_id: u64,
@@ -317,7 +338,7 @@ pub(crate) fn inspect_runtime_sse_lookahead(
             break;
         }
         let remaining = deadline.saturating_duration_since(now);
-        match prefetch.recv_timeout(remaining) {
+        match prefetch.recv_timeout_async(remaining).await {
             Ok(RuntimePrefetchChunk::Data(chunk)) => {
                 buffered.extend_from_slice(&chunk);
                 match inspect_runtime_sse_buffer(&buffered) {
@@ -434,16 +455,11 @@ pub(crate) fn inspect_runtime_sse_lookahead(
     }
 }
 
-pub(crate) async fn inspect_runtime_sse_lookahead_blocking(
+pub(crate) async fn inspect_runtime_sse_lookahead_async(
     mut prefetch: RuntimePrefetchStream,
     log_path: PathBuf,
     request_id: u64,
 ) -> Result<(RuntimeSseInspection, RuntimePrefetchStream)> {
-    let (inspection, prefetch) = tokio::task::spawn_blocking(move || {
-        let inspection = inspect_runtime_sse_lookahead(&mut prefetch, &log_path, request_id);
-        (inspection, prefetch)
-    })
-    .await
-    .context("runtime SSE lookahead blocking task failed")?;
-    Ok((inspection?, prefetch))
+    let inspection = inspect_runtime_sse_lookahead(&mut prefetch, &log_path, request_id).await?;
+    Ok((inspection, prefetch))
 }
