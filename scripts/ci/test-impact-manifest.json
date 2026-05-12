@@ -162,6 +162,7 @@
       "exact": [
         "Cargo.lock",
         "Cargo.toml",
+        "scripts/ci/main-internal-core-shard.mjs",
         "scripts/ci/runtime-env-parallel.mjs",
         "scripts/ci/runtime-hotpath-guard.mjs",
         "scripts/ci/runtime-proxy-bench-thresholds.json",

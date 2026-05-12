@@ -315,10 +315,23 @@ jobs:
         run: node scripts/ci/npm-package-smoke.mjs --binary-dir target/x86_64-unknown-linux-gnu/release
 
   auto-rotate:
+    name: Auto rotate (${{ matrix.label }})
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: run
+            filter: "run::"
+          - label: login
+            filter: "login::"
+          - label: quota doctor
+            filter: "quota_doctor::"
+          - label: shared state
+            filter: "shared_state::"
 
     steps:
       - name: Check out repository
@@ -330,8 +343,8 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run auto-rotate integration tests
-        run: cargo test --test auto_rotate -- --test-threads=1
+      - name: Run auto-rotate integration tests ${{ matrix.label }}
+        run: cargo test --test auto_rotate "${{ matrix.filter }}" -- --test-threads=1
 
   profile-commands-internal:
     needs: changes
@@ -364,17 +377,20 @@ jobs:
       matrix:
         include:
           - shard: 0
-            shard_count: 4
-            label: shard 1 of 4
+            shard_count: 5
+            label: weighted shard 1 of 5
           - shard: 1
-            shard_count: 4
-            label: shard 2 of 4
+            shard_count: 5
+            label: weighted shard 2 of 5
           - shard: 2
-            shard_count: 4
-            label: shard 3 of 4
+            shard_count: 5
+            label: weighted shard 3 of 5
           - shard: 3
-            shard_count: 4
-            label: shard 4 of 4
+            shard_count: 5
+            label: weighted shard 4 of 5
+          - shard: 4
+            shard_count: 5
+            label: weighted shard 5 of 5
 
     steps:
       - name: Check out repository
@@ -389,67 +405,13 @@ jobs:
       - name: Run main internal core tests ${{ matrix.label }}
         shell: bash
         env:
-          SHARD_INDEX: ${{ matrix.shard }}
-          SHARD_COUNT: ${{ matrix.shard_count }}
           RUST_BACKTRACE: "1"
           CARGO_TERM_COLOR: always
         run: |
           set -euo pipefail
-          mapfile -t core_tests < <(
-            cargo test --lib main_internal_tests:: -- --list \
-              | awk '/^main_internal_tests::.*: test$/ { sub(/: test$/, ""); if ($0 !~ /runtime_proxy_/) print }'
-          )
-
-          if [ "${#core_tests[@]}" -eq 0 ]; then
-            echo "No main internal core tests found"
-            exit 1
-          fi
-
-          selected_tests=()
-          for index in "${!core_tests[@]}"; do
-            if [ "$((index % SHARD_COUNT))" -eq "${SHARD_INDEX}" ]; then
-              selected_tests+=("${core_tests[$index]}")
-            fi
-          done
-
-          if [ "${#selected_tests[@]}" -eq 0 ]; then
-            echo "No tests selected for main internal core ${SHARD_INDEX}/${SHARD_COUNT}"
-            exit 1
-          fi
-
-          printf 'Running %s of %s main internal core tests in shard %s/%s\n' \
-            "${#selected_tests[@]}" \
-            "${#core_tests[@]}" \
-            "${SHARD_INDEX}" \
-            "${SHARD_COUNT}"
-
-          non_selected_tests=()
-          for index in "${!core_tests[@]}"; do
-            if [ "$((index % SHARD_COUNT))" -ne "${SHARD_INDEX}" ]; then
-              non_selected_tests+=("${core_tests[$index]}")
-            fi
-          done
-
-          for skip_test in "${non_selected_tests[@]}"; do
-            for selected_test in "${selected_tests[@]}"; do
-              if [[ "${selected_test}" == *"${skip_test}"* ]]; then
-                echo "Shard skip filter would also skip selected test: ${skip_test} -> ${selected_test}"
-                exit 1
-              fi
-            done
-          done
-
-          skip_args=("--skip" "runtime_proxy_")
-          for test_name in "${non_selected_tests[@]}"; do
-            skip_args+=("--skip" "${test_name}")
-          done
-
-          printf 'Skipping %s main internal core tests outside shard %s/%s\n' \
-            "${#non_selected_tests[@]}" \
-            "${SHARD_INDEX}" \
-            "${SHARD_COUNT}"
-
-          cargo test --lib main_internal_tests:: -- --test-threads=1 "${skip_args[@]}"
+          node scripts/ci/main-internal-core-shard.mjs \
+            --shard-index "${{ matrix.shard }}" \
+            --shard-count "${{ matrix.shard_count }}"
 
   env-sensitive-parallel-guard:
     needs: changes
@@ -588,14 +550,19 @@ jobs:
         include:
           - suite: stress
             id: stress-1
-            label: broad shard 1 of 2
+            label: broad shard 1 of 3
             shard: 0
-            shard_count: 2
+            shard_count: 3
           - suite: stress
             id: stress-2
-            label: broad shard 2 of 2
+            label: broad shard 2 of 3
             shard: 1
-            shard_count: 2
+            shard_count: 3
+          - suite: stress
+            id: stress-3
+            label: broad shard 3 of 3
+            shard: 2
+            shard_count: 3
           - suite: serialized
             id: serialized
             label: serialized shard

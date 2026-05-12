@@ -171,13 +171,19 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
   },
   {
     suite: "doctor",
-    label: "doctor and incidents",
+    label: "doctor",
     filters: [
       {
         id: "doctor",
         filter: "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::",
         label: "doctor",
       },
+    ],
+  },
+  {
+    suite: "incidents",
+    label: "incidents",
+    filters: [
       {
         id: "incidents",
         filter: "main_internal_tests::runtime_proxy_selection_and_pressure::incidents::",
@@ -186,13 +192,46 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     ],
   },
   {
-    suite: "continuations",
-    label: "continuation behavior",
+    suite: "continuation-http-followups",
+    label: "continuation http followups",
     filters: [
       {
-        id: "continuations",
-        filter: "main_internal_tests::runtime_proxy_continuations::",
-        label: "continuations",
+        id: "continuation-http-followups",
+        filter: "main_internal_tests::runtime_proxy_continuations::http_followups::",
+        label: "http-followups",
+      },
+    ],
+  },
+  {
+    suite: "continuation-http-tool-compact",
+    label: "continuation http tool and compact",
+    filters: [
+      {
+        id: "continuation-http-tool-compact",
+        filter: "main_internal_tests::runtime_proxy_continuations::http_tool_and_compact::",
+        label: "http-tool-and-compact",
+      },
+    ],
+  },
+  {
+    suite: "continuation-websocket-precommit",
+    label: "continuation websocket precommit",
+    filters: [
+      {
+        id: "continuation-websocket-precommit",
+        filter: "main_internal_tests::runtime_proxy_continuations::websocket_precommit::",
+        label: "websocket-precommit",
+      },
+    ],
+  },
+  {
+    suite: "continuation-post-commit",
+    label: "continuation post commit",
+    filters: [
+      {
+        id: "continuation-post-commit",
+        filter: "main_internal_tests::runtime_proxy_continuations::post_commit::",
+        label: "post-commit",
       },
     ],
   },
