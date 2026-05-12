@@ -4,36 +4,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-fn capsule(
-    id: &str,
-    token_cost: usize,
-    required: bool,
-    project_path: Option<&str>,
-    updated_at_seconds: Option<i64>,
-    relevance: f32,
-) -> RuntimeMemCapsuleMetadata {
-    RuntimeMemCapsuleMetadata {
-        id: id.to_string(),
-        token_cost,
-        required,
-        project_path: project_path.map(PathBuf::from),
-        updated_at_seconds,
-        relevance,
-    }
-}
-
-fn recall_capsule(
-    capsule: RuntimeMemCapsuleMetadata,
-    paths: &[&str],
-    symbols: &[&str],
-) -> RuntimeMemRecallCapsuleMetadata {
-    RuntimeMemRecallCapsuleMetadata {
-        capsule,
-        paths: paths.iter().map(PathBuf::from).collect(),
-        symbols: symbols.iter().map(|symbol| symbol.to_string()).collect(),
-    }
-}
 #[path = "lib/capsule_dedupe.rs"]
 mod capsule_dedupe;
 #[path = "lib/capsule_selection.rs"]

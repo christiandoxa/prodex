@@ -7,7 +7,7 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_PRODUCTION_LINE_LIMIT = 850;
 const DEFAULT_TEST_LINE_LIMIT = 860;
 const DEFAULT_COHESION_LINE_LIMIT = 770;
-const DEFAULT_NEAR_LIMIT_FILE_BUDGET = 15;
+const DEFAULT_NEAR_LIMIT_FILE_BUDGET = 4;
 
 const DEFAULT_ALLOWLIST = Object.freeze([]);
 

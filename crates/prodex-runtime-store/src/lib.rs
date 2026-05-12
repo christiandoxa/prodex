@@ -15,8 +15,6 @@ use prodex_state::{
     prune_profile_bindings_for_housekeeping_without_retention,
 };
 use std::collections::BTreeMap;
-#[cfg(test)]
-use std::collections::BTreeSet;
 
 mod continuations;
 mod profile_backoff;

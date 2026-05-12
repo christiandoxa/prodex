@@ -69,7 +69,7 @@ const ALLOWLIST = Object.freeze([
   },
   {
     name: "runtime-websocket-tcp-dns-bounded-executor-threads",
-    file: "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor.rs",
+    file: "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor/executor.rs",
     id: "blocking-thread-builder-spawn",
     pattern: /\bthread::Builder::new\(\)\.name\(name\)\.spawn\(job\)\.is_ok\(\)/,
     maxHits: 1,

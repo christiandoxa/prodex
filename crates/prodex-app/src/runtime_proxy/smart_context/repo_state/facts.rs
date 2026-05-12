@@ -1,4 +1,21 @@
 use super::*;
+use std::collections::BTreeSet;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(in crate::runtime_proxy::smart_context) struct RuntimeSmartContextRepoStateFacts {
+    pub(in crate::runtime_proxy::smart_context) branch: Option<String>,
+    pub(in crate::runtime_proxy::smart_context) dirty_files: Option<BTreeSet<String>>,
+    pub(in crate::runtime_proxy::smart_context) recent_changed_files: Option<BTreeSet<String>>,
+    pub(in crate::runtime_proxy::smart_context) package_managers: Option<BTreeSet<String>>,
+    pub(in crate::runtime_proxy::smart_context) main_test_commands: Option<BTreeSet<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RuntimeSmartContextRepoStateFactRelation {
+    New,
+    Repeated,
+    Changed,
+}
 
 pub(super) fn runtime_smart_context_repo_state_compact_commands(
     commands: &BTreeSet<String>,
@@ -19,6 +36,16 @@ pub(super) fn runtime_smart_context_repo_state_facts_short_hash(
     facts: &RuntimeSmartContextRepoStateFacts,
 ) -> String {
     runtime_smart_context_short_hash(&facts.canonical_text(), SMART_CONTEXT_REPO_STATE_HASH_CHARS)
+}
+
+pub(super) fn runtime_smart_context_repo_state_insert_fact(
+    target: &mut Option<BTreeSet<String>>,
+    value: String,
+) {
+    let values = target.get_or_insert_with(BTreeSet::new);
+    if values.len() < SMART_CONTEXT_REPO_STATE_MAX_FACTS_PER_SET {
+        values.insert(value);
+    }
 }
 
 fn runtime_smart_context_short_hash(text: &str, chars: usize) -> String {

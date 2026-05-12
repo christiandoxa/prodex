@@ -9,7 +9,7 @@ This file applies to the entire repository.
 The codebase is now a Cargo workspace split across focused crates and modules:
 
 - `src/main.rs`: binary entrypoint
-- `src/lib.rs`: compatibility shim that includes `crates/prodex-app/src/lib.rs`
+- `src/lib.rs`: compatibility shim that re-exports `prodex_app`
 - `crates/prodex-app/`: application orchestration, command routing, Prodex-owned command handlers, profile flows, and runtime integration glue
 - `crates/prodex-app-reports/`: reusable application report rendering helpers
 - `crates/prodex-audit-log/`: audit log append, query, and rendering helpers

@@ -1,6 +1,6 @@
 # Prodex Architecture Map
 
-This repository is a Rust workspace with 39 focused crates under `crates/` plus the root `prodex` package. The root binary is intentionally thin: `src/main.rs` calls `prodex::main_entry()`, and `src/lib.rs` includes `crates/prodex-app/src/lib.rs` as a compatibility shim.
+This repository is a Rust workspace with 39 focused crates under `crates/` plus the root `prodex` package. The root binary is intentionally thin: `src/main.rs` calls `prodex::main_entry()`, and `src/lib.rs` re-exports `prodex_app` as a compatibility shim.
 
 ## Command Path
 
