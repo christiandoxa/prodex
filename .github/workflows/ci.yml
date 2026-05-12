@@ -423,9 +423,33 @@ jobs:
             "${SHARD_INDEX}" \
             "${SHARD_COUNT}"
 
-          for test_name in "${selected_tests[@]}"; do
-            cargo test --lib "${test_name}" -- --exact --test-threads=1
+          non_selected_tests=()
+          for index in "${!core_tests[@]}"; do
+            if [ "$((index % SHARD_COUNT))" -ne "${SHARD_INDEX}" ]; then
+              non_selected_tests+=("${core_tests[$index]}")
+            fi
           done
+
+          for skip_test in "${non_selected_tests[@]}"; do
+            for selected_test in "${selected_tests[@]}"; do
+              if [[ "${selected_test}" == *"${skip_test}"* ]]; then
+                echo "Shard skip filter would also skip selected test: ${skip_test} -> ${selected_test}"
+                exit 1
+              fi
+            done
+          done
+
+          skip_args=("--skip" "runtime_proxy_")
+          for test_name in "${non_selected_tests[@]}"; do
+            skip_args+=("--skip" "${test_name}")
+          done
+
+          printf 'Skipping %s main internal core tests outside shard %s/%s\n' \
+            "${#non_selected_tests[@]}" \
+            "${SHARD_INDEX}" \
+            "${SHARD_COUNT}"
+
+          cargo test --lib main_internal_tests:: -- --test-threads=1 "${skip_args[@]}"
 
   env-sensitive-parallel-guard:
     needs: changes
@@ -563,14 +587,28 @@ jobs:
       matrix:
         include:
           - suite: stress
-            label: broad shard
+            id: stress-1
+            label: broad shard 1 of 2
+            shard: 0
+            shard_count: 2
+          - suite: stress
+            id: stress-2
+            label: broad shard 2 of 2
+            shard: 1
+            shard_count: 2
           - suite: serialized
+            id: serialized
             label: serialized shard
+            shard: 0
+            shard_count: 1
           - suite: continuation
+            id: continuation
             label: continuation shard
+            shard: 0
+            shard_count: 1
     env:
-      RUNTIME_STRESS_ARTIFACT_DIR: target/ci/runtime-stress/${{ matrix.suite }}
-      PRODEX_RUNTIME_LOG_DIR: target/ci/runtime-stress/${{ matrix.suite }}/runtime-logs
+      RUNTIME_STRESS_ARTIFACT_DIR: target/ci/runtime-stress/${{ matrix.id }}
+      PRODEX_RUNTIME_LOG_DIR: target/ci/runtime-stress/${{ matrix.id }}/runtime-logs
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
 
@@ -596,14 +634,18 @@ jobs:
             echo "artifact_dir=${RUNTIME_STRESS_ARTIFACT_DIR}"
             echo "runtime_log_dir=${PRODEX_RUNTIME_LOG_DIR}"
             echo "started_at=$(date -u +%FT%TZ)"
-            echo "command=npm run ci:runtime-stress -- --suite ${{ matrix.suite }}"
+            echo "command=npm run ci:runtime-stress -- --suite ${{ matrix.suite }} --shard-index ${{ matrix.shard }} --shard-count ${{ matrix.shard_count }}"
           } > "${RUNTIME_STRESS_ARTIFACT_DIR}/metadata.txt"
 
       - name: Run runtime stress ${{ matrix.label }}
         shell: bash
         run: |
           set -euo pipefail
-          npm run ci:runtime-stress -- --suite "${{ matrix.suite }}" 2>&1 | tee "${RUNTIME_STRESS_ARTIFACT_DIR}/runtime-stress.log"
+          npm run ci:runtime-stress -- \
+            --suite "${{ matrix.suite }}" \
+            --shard-index "${{ matrix.shard }}" \
+            --shard-count "${{ matrix.shard_count }}" \
+            2>&1 | tee "${RUNTIME_STRESS_ARTIFACT_DIR}/runtime-stress.log"
 
       - name: Collect runtime stress diagnostics
         if: failure()
@@ -617,6 +659,8 @@ jobs:
           {
             echo "suite=${{ matrix.suite }}"
             echo "label=${{ matrix.label }}"
+            echo "shard=${{ matrix.shard }}"
+            echo "shard_count=${{ matrix.shard_count }}"
             echo "artifact_dir=${RUNTIME_STRESS_ARTIFACT_DIR}"
             echo "runtime_log_dir=${PRODEX_RUNTIME_LOG_DIR}"
             echo "finished_at=$(date -u +%FT%TZ)"
@@ -651,6 +695,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: runtime-stress-${{ matrix.suite }}-diagnostics
+          name: runtime-stress-${{ matrix.id }}-diagnostics
           path: ${{ env.RUNTIME_STRESS_ARTIFACT_DIR }}
           if-no-files-found: ignore
