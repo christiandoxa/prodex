@@ -346,40 +346,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: run blocked current
+          - label: run blocked and selection
             filters: |
               run::run_auto_rotates_active_profile_when_current_is_blocked
               run::run_auto_rotate_flag_rotates_active_profile_when_current_is_blocked
-          - label: run profile selection
-            filters: |
               run::explicit_profile_auto_rotates_by_default
               run::run_without_profile_keeps_the_active_ready_account
-          - label: run broker recovery
+          - label: run broker and passthrough
             filters: |
               run::run_recovers_when_runtime_broker_registry_points_to_a_dead_pid
-          - label: run passthrough
-            filters: |
               run::update_passthrough_uses_inherited_codex_home_without_quota_or_runtime
               run::run_exec_preserves_prompt_and_piped_stdin
               run::explicit_profile_can_disable_auto_rotate
               run::run_preflight_checks_fallback_profiles_in_parallel
-          - label: login
+          - label: login and quota doctor
             filters: |
               login::
-          - label: quota doctor
-            filters: |
               quota_doctor::
-          - label: shared state resume history
+          - label: shared state history and memories
             filters: |
               shared_state::run_shares_resume_history_across_managed_profiles
-          - label: shared state memories
-            filters: |
               shared_state::run_shares_housekeeping_memories_across_managed_profiles
-          - label: shared state behavior
+          - label: shared state behavior and plugins
             filters: |
               shared_state::run_shares_native_codex_behavior_state_across_managed_profiles
-          - label: shared state plugins
-            filters: |
               shared_state::run_shares_codex_plugin_and_memory_extension_state_across_managed_profiles
 
     steps:
@@ -763,3 +753,63 @@ jobs:
           name: runtime-stress-${{ matrix.id }}-diagnostics
           path: ${{ env.RUNTIME_STRESS_ARTIFACT_DIR }}
           if-no-files-found: ignore
+
+  ci-duration-telemetry:
+    name: CI duration telemetry
+    needs:
+      - changes
+      - fmt
+      - docs-lint
+      - secret-scan
+      - process-guard
+      - supply-chain
+      - release-sync
+      - npm-package-smoke
+      - auto-rotate
+      - profile-commands-internal
+      - main-internal-core
+      - env-sensitive-parallel-guard
+      - runtime-proxy-shard-matrix
+      - main-internal-runtime-proxy
+      - runtime-proxy-bench-smoke
+      - runtime-stress
+    if: ${{ always() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Summarize CI job durations
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary_path="${RUNNER_TEMP}/ci-job-durations.txt"
+          npm run ci:job-durations -- \
+            --run-id "${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --attempt "${{ github.run_attempt }}" \
+            --exclude-name "CI duration telemetry" \
+            --limit 12 \
+            | tee "${summary_path}"
+          {
+            echo "### CI job durations"
+            echo
+            echo '```text'
+            cat "${summary_path}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

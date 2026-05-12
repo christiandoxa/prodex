@@ -11,7 +11,7 @@ name = "prodex_context"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 terminal_ui = { workspace = true }

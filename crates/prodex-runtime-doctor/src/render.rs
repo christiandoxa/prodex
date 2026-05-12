@@ -17,6 +17,59 @@ use incident_rows::runtime_doctor_push_incident_explainer_rows;
 use marker_details::runtime_doctor_push_marker_detail_rows;
 use summary_tail::runtime_doctor_push_summary_tail_rows;
 
+fn runtime_doctor_push_actionable_route_rows(
+    fields: &mut FieldRowsBuilder,
+    summary: &RuntimeDoctorSummary,
+) {
+    let selection = &summary.selection_summary;
+    let total_selection = selection
+        .picked
+        .saturating_add(selection.kept)
+        .saturating_add(selection.skipped)
+        .saturating_add(selection.blocked);
+    if total_selection > 0 {
+        fields.push(
+            "Selection decisions",
+            format!(
+                "picked={} kept={} skipped={} blocked={}",
+                selection.picked, selection.kept, selection.skipped, selection.blocked
+            ),
+        );
+        if !selection.selected_profiles.is_empty() {
+            fields.push(
+                "Selection selected",
+                diagnosis::runtime_doctor_count_breakdown(&selection.selected_profiles),
+            );
+        }
+        if !selection.rejection_reasons.is_empty() {
+            fields.push(
+                "Selection rejection reasons",
+                diagnosis::runtime_doctor_count_breakdown(&selection.rejection_reasons),
+            );
+        }
+    }
+
+    if let Some(route) = summary.route_health.first() {
+        let score = route
+            .health_score
+            .map(|score| score.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let marker = route.latest_marker.as_deref().unwrap_or("-");
+        let reason = route
+            .latest_reason
+            .as_deref()
+            .or(route.health_reason.as_deref())
+            .unwrap_or("-");
+        fields.push(
+            "Route health focus",
+            format!(
+                "{}/{} events={} health={} latest={} reason={}",
+                route.profile, route.route, route.event_count, score, marker, reason
+            ),
+        );
+    }
+}
+
 pub fn runtime_doctor_fields_for_summary(
     summary: &RuntimeDoctorSummary,
     pointer_path: &Path,
@@ -63,6 +116,7 @@ pub fn runtime_doctor_fields_for_summary(
         .push("Latest log", latest_log)
         .push("Log sample", format!("{} lines", summary.line_count));
     runtime_doctor_push_incident_explainer_rows(&mut fields, summary);
+    runtime_doctor_push_actionable_route_rows(&mut fields, summary);
     for (label, marker) in RUNTIME_DOCTOR_COUNT_FIELD_ROWS {
         fields.push(
             *label,

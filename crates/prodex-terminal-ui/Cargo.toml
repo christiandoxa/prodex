@@ -11,4 +11,4 @@ name = "terminal_ui"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = { workspace = true }

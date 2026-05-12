@@ -8,6 +8,7 @@ use std::path::Path;
 use super::*;
 
 const RUNTIME_DOCTOR_REQUEST_TIMELINE_MAX_EVENTS: usize = 12;
+const RUNTIME_DOCTOR_ROUTE_PROFILE_MAX_EVENTS: usize = 20;
 
 #[derive(Debug, Clone, Default)]
 struct RuntimeDoctorRequestTimelineBuilder {
@@ -133,6 +134,13 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
             if !fields.is_empty() {
                 summary.marker_last_fields.insert(marker, fields);
             }
+            runtime_doctor_record_selection_summary(&mut summary, marker, &timeline_fields);
+            runtime_doctor_record_route_profile_event(
+                &mut summary,
+                line_timestamp.as_deref(),
+                marker,
+                &timeline_fields,
+            );
             runtime_doctor_record_request_timeline_event(
                 &mut request_timelines,
                 line_index,
@@ -145,6 +153,169 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
     runtime_doctor_set_latest_request_timeline(&mut summary, request_timelines);
     diagnosis::runtime_doctor_finalize_log_summary(&mut summary);
     summary
+}
+
+fn runtime_doctor_selection_bucket(marker: &str) -> Option<&'static str> {
+    match marker {
+        "selection_pick" => Some("picked"),
+        "selection_keep_affinity" | "selection_keep_current" => Some("kept"),
+        "selection_skip_current" | "selection_skip_affinity" | "selection_skip_sync_probe" => {
+            Some("skipped")
+        }
+        "local_selection_blocked"
+        | "responses_pre_send_skip"
+        | "websocket_pre_send_skip"
+        | "quota_critical_floor_before_send"
+        | "precommit_budget_exhausted"
+        | "compact_precommit_budget_exhausted"
+        | "compact_candidate_exhausted" => Some("blocked"),
+        _ => None,
+    }
+}
+
+fn runtime_doctor_record_selection_summary(
+    summary: &mut RuntimeDoctorSummary,
+    marker: &'static str,
+    fields: &BTreeMap<String, String>,
+) {
+    let Some(bucket) = runtime_doctor_selection_bucket(marker) else {
+        return;
+    };
+    match bucket {
+        "picked" => summary.selection_summary.picked += 1,
+        "kept" => summary.selection_summary.kept += 1,
+        "skipped" => summary.selection_summary.skipped += 1,
+        "blocked" => summary.selection_summary.blocked += 1,
+        _ => {}
+    }
+
+    let profile = fields.get("profile").filter(|value| !value.is_empty());
+    let route = fields.get("route").filter(|value| !value.is_empty());
+    if matches!(bucket, "picked" | "kept") {
+        if let Some(profile) = profile {
+            *summary
+                .selection_summary
+                .selected_profiles
+                .entry(profile.clone())
+                .or_insert(0) += 1;
+        }
+        if let Some(route) = route {
+            *summary
+                .selection_summary
+                .selected_routes
+                .entry(route.clone())
+                .or_insert(0) += 1;
+        }
+    } else {
+        if let Some(profile) = profile {
+            *summary
+                .selection_summary
+                .rejected_profiles
+                .entry(profile.clone())
+                .or_insert(0) += 1;
+        }
+        if let Some(route) = route {
+            *summary
+                .selection_summary
+                .rejected_routes
+                .entry(route.clone())
+                .or_insert(0) += 1;
+        }
+    }
+
+    if matches!(bucket, "skipped" | "blocked") {
+        let reason = fields
+            .get("reason")
+            .or_else(|| fields.get("outcome"))
+            .or_else(|| fields.get("event"))
+            .or_else(|| fields.get("status"))
+            .map(String::as_str)
+            .unwrap_or(marker);
+        *summary
+            .selection_summary
+            .rejection_reasons
+            .entry(reason.to_string())
+            .or_insert(0) += 1;
+    }
+
+    let detail = runtime_doctor_request_timeline_detail(fields);
+    summary.selection_summary.latest_decision = Some(if detail.is_empty() {
+        marker.to_string()
+    } else {
+        format!("{marker} {detail}")
+    });
+}
+
+fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
+    match marker {
+        "selection_keep_affinity" | "selection_keep_current" | "selection_pick" => Some("selected"),
+        "selection_skip_current" | "selection_skip_affinity" | "selection_skip_sync_probe" => {
+            Some("selection_skip")
+        }
+        "local_selection_blocked"
+        | "responses_pre_send_skip"
+        | "websocket_pre_send_skip"
+        | "quota_critical_floor_before_send" => Some("blocked"),
+        "profile_health" | "profile_latency" | "profile_bad_pairing" => Some("health"),
+        "profile_transport_backoff"
+        | "profile_transport_failure"
+        | "profile_circuit_open"
+        | "profile_circuit_half_open_probe" => Some("transport_health"),
+        "stream_read_error"
+        | "upstream_connect_timeout"
+        | "upstream_connect_dns_error"
+        | "upstream_tls_handshake_error"
+        | "upstream_connect_error"
+        | "upstream_connect_http"
+        | "upstream_close_before_completed"
+        | "upstream_connection_closed"
+        | "upstream_read_error"
+        | "upstream_send_error"
+        | "upstream_stream_error"
+        | "websocket_precommit_frame_timeout"
+        | "websocket_precommit_hold_timeout" => Some("transport_failure"),
+        "quota_blocked"
+        | "profile_retry_backoff"
+        | "profile_quota_quarantine"
+        | "compact_retryable_failure"
+        | "compact_quota_unclassified" => Some("quota"),
+        _ => None,
+    }
+}
+
+fn runtime_doctor_record_route_profile_event(
+    summary: &mut RuntimeDoctorSummary,
+    timestamp: Option<&str>,
+    marker: &'static str,
+    fields: &BTreeMap<String, String>,
+) {
+    let Some(action) = runtime_doctor_route_profile_action(marker) else {
+        return;
+    };
+    let profile = fields
+        .get("profile")
+        .filter(|value| !value.is_empty())
+        .cloned();
+    let route = fields
+        .get("route")
+        .filter(|value| !value.is_empty())
+        .cloned();
+    if profile.is_none() && route.is_none() {
+        return;
+    }
+    summary
+        .route_profile_events
+        .push(RuntimeDoctorRouteProfileEvent {
+            timestamp: timestamp.map(ToString::to_string),
+            marker: marker.to_string(),
+            action: action.to_string(),
+            profile,
+            route,
+            detail: runtime_doctor_request_timeline_detail(fields),
+        });
+    if summary.route_profile_events.len() > RUNTIME_DOCTOR_ROUTE_PROFILE_MAX_EVENTS {
+        summary.route_profile_events.remove(0);
+    }
 }
 
 fn runtime_doctor_line_timestamp(line: &str) -> Option<String> {

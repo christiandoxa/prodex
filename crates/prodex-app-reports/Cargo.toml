@@ -11,12 +11,12 @@ name = "prodex_app_reports"
 path = "src/lib.rs"
 
 [dependencies]
-chrono = { version = "0.4.44", features = ["clock"] }
+chrono = { workspace = true }
 prodex_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
 prodex_runtime_tuning = { workspace = true }
 prodex_shared_types = { workspace = true }
 prodex_state = { workspace = true }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde = { workspace = true }
+serde_json = { workspace = true }
 terminal_ui = { workspace = true }

@@ -260,16 +260,10 @@ pub(crate) fn attempt_runtime_websocket_request(
         match upstream_socket.read() {
             Ok(WsMessage::Text(text)) => {
                 let text = text.to_string();
-                if !first_upstream_frame_seen {
-                    first_upstream_frame_seen = true;
-                    runtime_set_upstream_websocket_io_timeout(
-                        &mut upstream_socket,
-                        Some(Duration::from_millis(
-                            runtime_proxy_websocket_precommit_progress_timeout_ms(),
-                        )),
-                    )
-                    .context("failed to restore runtime websocket upstream timeout")?;
-                }
+                mark_runtime_websocket_upstream_frame_seen(
+                    &mut upstream_socket,
+                    &mut first_upstream_frame_seen,
+                )?;
 
                 let mut inspected = inspect_runtime_websocket_text_frame(text.as_str());
                 if realtime_websocket
@@ -505,16 +499,10 @@ pub(crate) fn attempt_runtime_websocket_request(
                 }
             }
             Ok(WsMessage::Binary(payload)) => {
-                if !first_upstream_frame_seen {
-                    first_upstream_frame_seen = true;
-                    runtime_set_upstream_websocket_io_timeout(
-                        &mut upstream_socket,
-                        Some(Duration::from_millis(
-                            runtime_proxy_websocket_precommit_progress_timeout_ms(),
-                        )),
-                    )
-                    .context("failed to restore runtime websocket upstream timeout")?;
-                }
+                mark_runtime_websocket_upstream_frame_seen(
+                    &mut upstream_socket,
+                    &mut first_upstream_frame_seen,
+                )?;
                 if !committed {
                     commit_runtime_websocket_attempt(RuntimeWebsocketCommitRequest {
                         request_id,
@@ -542,31 +530,19 @@ pub(crate) fn attempt_runtime_websocket_request(
                     })?;
             }
             Ok(WsMessage::Ping(payload)) => {
-                if !first_upstream_frame_seen {
-                    first_upstream_frame_seen = true;
-                    runtime_set_upstream_websocket_io_timeout(
-                        &mut upstream_socket,
-                        Some(Duration::from_millis(
-                            runtime_proxy_websocket_precommit_progress_timeout_ms(),
-                        )),
-                    )
-                    .context("failed to restore runtime websocket upstream timeout")?;
-                }
+                mark_runtime_websocket_upstream_frame_seen(
+                    &mut upstream_socket,
+                    &mut first_upstream_frame_seen,
+                )?;
                 upstream_socket
                     .send(WsMessage::Pong(payload))
                     .context("failed to respond to upstream websocket ping")?;
             }
             Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {
-                if !first_upstream_frame_seen {
-                    first_upstream_frame_seen = true;
-                    runtime_set_upstream_websocket_io_timeout(
-                        &mut upstream_socket,
-                        Some(Duration::from_millis(
-                            runtime_proxy_websocket_precommit_progress_timeout_ms(),
-                        )),
-                    )
-                    .context("failed to restore runtime websocket upstream timeout")?;
-                }
+                mark_runtime_websocket_upstream_frame_seen(
+                    &mut upstream_socket,
+                    &mut first_upstream_frame_seen,
+                )?;
             }
             Ok(WsMessage::Close(frame)) => {
                 websocket_session.reset();
@@ -824,6 +800,23 @@ pub(crate) fn attempt_runtime_websocket_request(
             }
         }
     }
+}
+
+fn mark_runtime_websocket_upstream_frame_seen(
+    upstream_socket: &mut RuntimeUpstreamWebSocket,
+    first_upstream_frame_seen: &mut bool,
+) -> Result<()> {
+    if *first_upstream_frame_seen {
+        return Ok(());
+    }
+    *first_upstream_frame_seen = true;
+    runtime_set_upstream_websocket_io_timeout(
+        upstream_socket,
+        Some(Duration::from_millis(
+            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+        )),
+    )
+    .context("failed to restore runtime websocket upstream timeout")
 }
 
 #[cfg(test)]

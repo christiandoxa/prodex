@@ -59,6 +59,9 @@ pub struct RuntimeDoctorSummary {
     pub latest_stale_continuation_reason: Option<String>,
     pub latest_request_id: Option<String>,
     pub latest_request_timeline: Vec<RuntimeDoctorRequestTimelineEvent>,
+    pub selection_summary: RuntimeDoctorSelectionSummary,
+    pub route_profile_events: Vec<RuntimeDoctorRouteProfileEvent>,
+    pub route_health: Vec<RuntimeDoctorRouteHealthSummary>,
     pub first_timestamp: Option<String>,
     pub last_timestamp: Option<String>,
     pub compat_warning_count: usize,
@@ -131,6 +134,51 @@ pub struct RuntimeDoctorRequestTimelineEvent {
     pub phase: String,
     pub marker: String,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RuntimeDoctorSelectionSummary {
+    pub picked: usize,
+    pub kept: usize,
+    pub skipped: usize,
+    pub blocked: usize,
+    pub selected_profiles: BTreeMap<String, usize>,
+    pub selected_routes: BTreeMap<String, usize>,
+    pub rejected_profiles: BTreeMap<String, usize>,
+    pub rejected_routes: BTreeMap<String, usize>,
+    pub rejection_reasons: BTreeMap<String, usize>,
+    pub latest_decision: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RuntimeDoctorRouteProfileEvent {
+    pub timestamp: Option<String>,
+    pub marker: String,
+    pub action: String,
+    pub profile: Option<String>,
+    pub route: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RuntimeDoctorRouteHealthSummary {
+    pub profile: String,
+    pub route: String,
+    pub event_count: usize,
+    pub latest_timestamp: Option<String>,
+    pub latest_marker: Option<String>,
+    pub latest_reason: Option<String>,
+    pub health_score: Option<u32>,
+    pub health_reason: Option<String>,
+    pub bad_pairing_score: Option<u32>,
+    pub bad_pairing_reason: Option<String>,
+    pub latency_score: Option<u32>,
+    pub latency_reason: Option<String>,
+    pub circuit_state: Option<String>,
+    pub circuit_until: Option<i64>,
+    pub circuit_reason: Option<String>,
+    pub transport_backoff_until: Option<i64>,
+    pub transport_backoff_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

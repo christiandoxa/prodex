@@ -8,7 +8,10 @@ mod shared;
 mod websocket;
 #[path = "runtime_proxy_backend/http.rs"]
 mod http;
+#[path = "runtime_proxy_backend/fault_script.rs"]
+mod fault_script;
 
+pub(crate) use self::fault_script::*;
 pub(super) use self::http::*;
 pub(super) use self::request_parsing::*;
 pub(super) use self::shared::*;
@@ -239,7 +242,21 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketRealtimeSideband)
     }
 
+    pub(crate) fn start_with_fault_script(script: RuntimeProxyBackendFaultScript) -> Self {
+        Self::start_with_mode_and_fault_script(
+            RuntimeProxyBackendMode::HttpOnly,
+            Some(Arc::new(Mutex::new(script))),
+        )
+    }
+
     fn start_with_mode(mode: RuntimeProxyBackendMode) -> Self {
+        Self::start_with_mode_and_fault_script(mode, None)
+    }
+
+    fn start_with_mode_and_fault_script(
+        mode: RuntimeProxyBackendMode,
+        fault_script: Option<Arc<Mutex<RuntimeProxyBackendFaultScript>>>,
+    ) -> Self {
         let listener =
             TcpListener::bind("127.0.0.1:0").expect("failed to bind runtime proxy backend");
         let addr = listener
@@ -263,6 +280,7 @@ impl RuntimeProxyBackend {
         let websocket_requests_flag = Arc::clone(&websocket_requests);
         let usage_accounts_flag = Arc::clone(&usage_accounts);
         let connection_threads_flag = Arc::clone(&connection_threads);
+        let fault_script_flag = fault_script.as_ref().map(Arc::clone);
         let thread = thread::spawn(move || {
             while !shutdown_flag.load(Ordering::SeqCst) {
                 match listener.accept() {
@@ -272,6 +290,7 @@ impl RuntimeProxyBackend {
                         let responses_bodies_flag = Arc::clone(&responses_bodies_flag);
                         let websocket_requests_flag = Arc::clone(&websocket_requests_flag);
                         let usage_accounts_flag = Arc::clone(&usage_accounts_flag);
+                        let fault_script_flag = fault_script_flag.as_ref().map(Arc::clone);
                         let websocket_enabled = matches!(
                             mode,
                             RuntimeProxyBackendMode::Websocket
@@ -310,6 +329,7 @@ impl RuntimeProxyBackend {
                                     &responses_headers_flag,
                                     &responses_bodies_flag,
                                     &usage_accounts_flag,
+                                    fault_script_flag.as_ref(),
                                     mode,
                                 );
                             }

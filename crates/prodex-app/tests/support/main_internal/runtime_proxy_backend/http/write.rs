@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) struct RuntimeProxyBackendHttpResponse {
+pub(crate) struct RuntimeProxyBackendHttpResponse {
     pub(super) status_line: &'static str,
     pub(super) content_type: &'static str,
     pub(super) body: String,
@@ -10,7 +10,7 @@ pub(super) struct RuntimeProxyBackendHttpResponse {
 }
 
 impl RuntimeProxyBackendHttpResponse {
-    pub(super) fn new(
+    pub(crate) fn new(
         status_line: &'static str,
         content_type: &'static str,
         body: String,

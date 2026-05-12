@@ -9,7 +9,7 @@ mod write;
 
 use compact::*;
 use responses::*;
-use write::*;
+pub(crate) use write::*;
 
 pub(super) fn handle_runtime_proxy_backend_request(
     mut stream: TcpStream,
@@ -17,6 +17,7 @@ pub(super) fn handle_runtime_proxy_backend_request(
     responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
     responses_bodies: &Arc<Mutex<Vec<String>>>,
     usage_accounts: &Arc<Mutex<Vec<String>>>,
+    fault_script: Option<&Arc<Mutex<RuntimeProxyBackendFaultScript>>>,
     mode: RuntimeProxyBackendMode,
 ) {
     let request = match read_http_request(&mut stream) {
@@ -36,6 +37,36 @@ pub(super) fn handle_runtime_proxy_backend_request(
     let account_id = request_header(&request, "ChatGPT-Account-Id").unwrap_or_default();
     let turn_state = request_header(&request, "x-codex-turn-state");
     let captured_headers = request_headers_map(&request);
+
+    if let Some(route) = runtime_proxy_backend_fault_route_for_path(path)
+        && let Some(script) = fault_script
+        && let Some(response) = script
+            .lock()
+            .expect("runtime proxy backend fault script poisoned")
+            .next_response(route, &account_id)
+    {
+        if route == RuntimeProxyBackendFaultRoute::Usage {
+            usage_accounts
+                .lock()
+                .expect("usage_accounts poisoned")
+                .push(account_id.clone());
+        } else {
+            responses_accounts
+                .lock()
+                .expect("responses_accounts poisoned")
+                .push(account_id.clone());
+            responses_headers
+                .lock()
+                .expect("responses_headers poisoned")
+                .push(captured_headers);
+            responses_bodies
+                .lock()
+                .expect("responses_bodies poisoned")
+                .push(request_body);
+        }
+        write_runtime_proxy_backend_http_response(stream, response, &account_id, mode);
+        return;
+    }
 
     if path.ends_with("/backend-api/codex/responses")
         && account_id == "main-account"

@@ -11,6 +11,6 @@ name = "prodex_shared_codex_fs"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = { workspace = true }
 prodex_core = { workspace = true }
-serde_json = "1.0.149"
+serde_json = { workspace = true }

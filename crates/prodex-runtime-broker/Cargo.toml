@@ -12,5 +12,5 @@ path = "src/lib.rs"
 
 [dependencies]
 prodex_runtime_state = { workspace = true }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde = { workspace = true }
+serde_json = { workspace = true }

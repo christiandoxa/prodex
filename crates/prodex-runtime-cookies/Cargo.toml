@@ -11,6 +11,6 @@ name = "prodex_runtime_cookies"
 path = "src/lib.rs"
 
 [dependencies]
-chrono = { version = "0.4.44", features = ["clock"] }
-reqwest = { version = "0.13.2", default-features = false }
-tungstenite = { version = "0.29.0", default-features = false, features = ["handshake"] }
+chrono = { workspace = true }
+reqwest = { workspace = true }
+tungstenite = { workspace = true }

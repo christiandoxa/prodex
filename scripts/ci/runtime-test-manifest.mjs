@@ -186,8 +186,8 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     ],
   },
   {
-    suite: "doctor-state-broker-binary",
-    label: "doctor state broker binary",
+    suite: "doctor-state-collect",
+    label: "doctor state collect",
     filters: [
       {
         id: "doctor-state-broker-binary",
@@ -195,36 +195,18 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
           "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch",
         label: "state-broker-binary",
       },
-    ],
-  },
-  {
-    suite: "doctor-state-dead-registry",
-    label: "doctor state dead registry",
-    filters: [
       {
         id: "doctor-state-dead-registry",
         filter:
           "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_surfaces_dead_broker_registry_and_stale_leases",
         label: "state-dead-registry",
       },
-    ],
-  },
-  {
-    suite: "doctor-state-unreachable-health",
-    label: "doctor state unreachable health",
-    filters: [
       {
         id: "doctor-state-unreachable-health",
         filter:
           "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_surfaces_unreachable_live_broker_health",
         label: "state-unreachable-health",
       },
-    ],
-  },
-  {
-    suite: "doctor-state-persisted",
-    label: "doctor state persisted",
-    filters: [
       {
         id: "doctor-state-orphans",
         filter:

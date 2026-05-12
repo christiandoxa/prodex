@@ -11,6 +11,6 @@ name = "prodex_runtime_mem"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
-dirs = "6.0.0"
-serde_json = "1.0.149"
+anyhow = { workspace = true }
+dirs = { workspace = true }
+serde_json = { workspace = true }

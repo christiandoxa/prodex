@@ -247,6 +247,15 @@ fn runtime_doctor_fixture_route_health_stays_profile_route_scoped() {
         "responses"
     );
     assert_eq!(value["marker_last_fields"]["profile_health"]["score"], "43");
+    assert_eq!(value["route_profile_events"].as_array().unwrap().len(), 2);
+    assert_eq!(value["route_health"][0]["profile"], "alpha");
+    assert_eq!(value["route_health"][0]["route"], "responses");
+    assert_eq!(value["route_health"][0]["event_count"], 2);
+    assert_eq!(value["route_health"][0]["health_score"], 43);
+    assert_eq!(
+        value["route_health"][0]["health_reason"],
+        "stream_read_error"
+    );
     assert_eq!(value["transport_pressure"], "elevated");
     assert!(runtime_doctor_json_string(&value, "diagnosis").contains("alpha/responses"));
     assert!(
@@ -254,6 +263,12 @@ fn runtime_doctor_fixture_route_health_stays_profile_route_scoped() {
             .get("Health next step")
             .expect("health next step should be rendered")
             .contains("for alpha/responses")
+    );
+    assert!(
+        fields
+            .get("Route health focus")
+            .expect("route health focus should be rendered")
+            .contains("alpha/responses events=2 health=43")
     );
 }
 
@@ -417,6 +432,15 @@ fn runtime_doctor_fixture_request_timeline_surfaces_latest_request() {
     assert_eq!(summary.latest_request_id.as_deref(), Some("42"));
     assert_eq!(summary.latest_request_timeline.len(), 4);
     assert_eq!(value["latest_request_id"], "42");
+    assert_eq!(value["selection_summary"]["picked"], 1);
+    assert_eq!(value["selection_summary"]["kept"], 1);
+    assert_eq!(value["selection_summary"]["blocked"], 1);
+    assert_eq!(value["selection_summary"]["selected_profiles"]["alpha"], 1);
+    assert_eq!(value["selection_summary"]["rejected_profiles"]["beta"], 1);
+    assert_eq!(
+        value["selection_summary"]["rejection_reasons"]["quota_critical_floor_before_send"],
+        1
+    );
     assert_eq!(value["latest_request_timeline"][0]["phase"], "selection");
     assert_eq!(
         value["latest_request_timeline"][0]["marker"],
@@ -444,6 +468,12 @@ fn runtime_doctor_fixture_request_timeline_surfaces_latest_request() {
             .get("Latest request timeline")
             .expect("latest request timeline should be rendered"),
         "request=42 selection:selection_keep_affinity profile=beta route=responses affinity=previous_response_id -> pre_send:responses_pre_send_skip profile=beta route=responses reason=quota_critical_floor_before_send -> upstream:upstream_connect_http profile=beta route=responses transport=http status=429 -> fail:previous_response_fresh_fallback_blocked profile=beta route=responses reason=previous_response_not_found outcome=blocked_nonreplayable_without_affinity request_shape=continuation_only"
+    );
+    assert_eq!(
+        fields
+            .get("Selection decisions")
+            .expect("selection decisions should be rendered"),
+        "picked=1 kept=1 skipped=0 blocked=1"
     );
 }
 
@@ -502,6 +532,9 @@ fn runtime_doctor_json_value_keeps_stable_top_level_shape() {
         "latest_stale_continuation_reason",
         "latest_request_id",
         "latest_request_timeline",
+        "selection_summary",
+        "route_profile_events",
+        "route_health",
         "last_marker_line",
         "selection_pressure",
         "transport_pressure",

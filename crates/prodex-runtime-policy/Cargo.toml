@@ -11,8 +11,8 @@ name = "prodex_runtime_policy"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = { workspace = true }
 prodex_core = { workspace = true }
 secret_store = { workspace = true }
-serde = { version = "1.0.228", features = ["derive"] }
-toml = "1.1.2"
+serde = { workspace = true }
+toml = { workspace = true }

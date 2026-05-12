@@ -59,6 +59,7 @@
     "ci:runtime-manifest": "node scripts/ci/runtime-test-manifest-guard.mjs",
     "ci:runtime-stress": "node scripts/ci/runtime-stress.mjs",
     "ci:npm-smoke": "node scripts/ci/npm-package-smoke.mjs",
-    "ci:failed-jobs": "node scripts/ci/github-failure-summary.mjs"
+    "ci:failed-jobs": "node scripts/ci/github-failure-summary.mjs",
+    "ci:job-durations": "node scripts/ci/github-job-durations.mjs"
   }
 }

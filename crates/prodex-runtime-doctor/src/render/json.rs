@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     RuntimeDoctorBindingStateSummary, RuntimeDoctorIncidentExplanation,
-    RuntimeDoctorProfileSummary, RuntimeDoctorRequestTimelineEvent, RuntimeDoctorSummary,
-    RuntimeDoctorTuningSnapshot,
+    RuntimeDoctorProfileSummary, RuntimeDoctorRequestTimelineEvent,
+    RuntimeDoctorRouteHealthSummary, RuntimeDoctorRouteProfileEvent, RuntimeDoctorSelectionSummary,
+    RuntimeDoctorSummary, RuntimeDoctorTuningSnapshot,
 };
 
 use super::broker::{
@@ -36,6 +37,9 @@ struct RuntimeDoctorJsonView {
     latest_stale_continuation_reason: Option<String>,
     latest_request_id: Option<String>,
     latest_request_timeline: Vec<RuntimeDoctorRequestTimelineEvent>,
+    selection_summary: RuntimeDoctorSelectionSummary,
+    route_profile_events: Vec<RuntimeDoctorRouteProfileEvent>,
+    route_health: Vec<RuntimeDoctorRouteHealthSummary>,
     last_marker_line: Option<String>,
     selection_pressure: String,
     transport_pressure: String,
@@ -132,6 +136,9 @@ impl From<&RuntimeDoctorSummary> for RuntimeDoctorJsonView {
             latest_stale_continuation_reason: summary.latest_stale_continuation_reason.clone(),
             latest_request_id: summary.latest_request_id.clone(),
             latest_request_timeline: summary.latest_request_timeline.clone(),
+            selection_summary: summary.selection_summary.clone(),
+            route_profile_events: summary.route_profile_events.clone(),
+            route_health: summary.route_health.clone(),
             last_marker_line: summary.last_marker_line.clone(),
             selection_pressure: summary.selection_pressure.clone(),
             transport_pressure: summary.transport_pressure.clone(),

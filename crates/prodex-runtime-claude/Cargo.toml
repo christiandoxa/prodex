@@ -11,11 +11,11 @@ name = "prodex_runtime_claude"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = { workspace = true }
 codex_config = { workspace = true }
-dirs = "6.0.0"
+dirs = { workspace = true }
 prodex_core = { workspace = true }
 prodex_runtime_launch = { workspace = true }
 prodex_shared_codex_fs = { workspace = true }
 runtime_anthropic_crate = { workspace = true }
-serde_json = "1.0.149"
+serde_json = { workspace = true }

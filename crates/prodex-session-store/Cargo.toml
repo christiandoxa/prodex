@@ -11,8 +11,8 @@ name = "prodex_session_store"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = { workspace = true }
 prodex_app_reports = { workspace = true }
 prodex_core = { workspace = true }
 prodex_state = { workspace = true }
-serde_json = "1.0.149"
+serde_json = { workspace = true }

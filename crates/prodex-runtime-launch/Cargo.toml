@@ -11,13 +11,13 @@ name = "prodex_runtime_launch"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = { workspace = true }
 codex_config = { workspace = true }
 prodex_quota = { workspace = true }
 prodex_shared_types = { workspace = true }
 prodex_state = { workspace = true }
 prodex_core = { workspace = true }
 redaction = { workspace = true }
-reqwest = { version = "0.13.2", default-features = false }
+reqwest = { workspace = true }
 runtime_proxy = { workspace = true }
 terminal_ui = { workspace = true }

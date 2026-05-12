@@ -11,6 +11,6 @@ name = "runtime_anthropic"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
-base64 = "0.22.1"
-serde_json = "1.0.149"
+anyhow = { workspace = true }
+base64 = { workspace = true }
+serde_json = { workspace = true }

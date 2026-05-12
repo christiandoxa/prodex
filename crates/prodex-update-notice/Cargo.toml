@@ -11,11 +11,11 @@ name = "prodex_update_notice"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow = "1.0.102"
-chrono = { version = "0.4.44", features = ["clock"] }
+anyhow = { workspace = true }
+chrono = { workspace = true }
 prodex_cli = { workspace = true }
 prodex_core = { workspace = true }
-reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
 terminal_ui = { workspace = true }
