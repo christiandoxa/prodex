@@ -5,6 +5,7 @@ mod final_summary;
 mod incident_explainer;
 mod marker_accessors;
 mod next_steps;
+mod route_health;
 
 pub use final_summary::{
     runtime_doctor_append_pointer_note, runtime_doctor_finalize_log_summary,
