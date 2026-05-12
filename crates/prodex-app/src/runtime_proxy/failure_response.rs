@@ -8,19 +8,13 @@ pub(crate) use runtime_proxy_crate::{
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::runtime_proxy_precommit_budget_exhausted;
 
-pub(crate) fn runtime_proxy_stale_continuation_http_parts() -> RuntimeBufferedResponseParts {
-    build_runtime_proxy_json_error_parts(
-        409,
-        "stale_continuation",
-        runtime_proxy_stale_continuation_message(),
-    )
-}
-
 pub(crate) fn runtime_proxy_translate_previous_response_http_parts(
     parts: RuntimeBufferedResponseParts,
 ) -> RuntimeBufferedResponseParts {
     if extract_runtime_proxy_previous_response_message(&parts.body).is_some() {
-        runtime_proxy_stale_continuation_http_parts()
+        RuntimeBufferedResponseParts::from_crate_parts(
+            runtime_proxy_crate::runtime_proxy_stale_continuation_http_parts(),
+        )
     } else {
         parts
     }
@@ -64,15 +58,20 @@ pub(crate) fn runtime_proxy_final_retryable_http_failure_response(
     };
     match last_failure {
         Some((response, false)) => Some(response),
-        Some((_response, true)) if saw_inflight_saturation => Some(service_unavailable(
-            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-        )),
-        Some((_response, true)) => Some(service_unavailable(
-            runtime_proxy_local_selection_failure_message(),
-        )),
-        None if saw_inflight_saturation => Some(service_unavailable(
-            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-        )),
+        Some((_, true)) => {
+            let message = runtime_proxy_crate::runtime_proxy_final_retryable_failure_message(
+                saw_inflight_saturation,
+                runtime_proxy_local_selection_failure_message(),
+            );
+            Some(service_unavailable(message))
+        }
+        None if saw_inflight_saturation => {
+            let message = runtime_proxy_crate::runtime_proxy_final_retryable_failure_message(
+                saw_inflight_saturation,
+                runtime_proxy_local_selection_failure_message(),
+            );
+            Some(service_unavailable(message))
+        }
         None => None,
     }
 }
@@ -97,17 +96,13 @@ pub(crate) fn runtime_proxy_final_responses_failure_reply(
                 ))
             }
         },
-        _ if saw_inflight_saturation => {
-            RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                503,
-                "service_unavailable",
-                "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-            ))
-        }
         _ => RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
             503,
             "service_unavailable",
-            runtime_proxy_local_selection_failure_message(),
+            runtime_proxy_crate::runtime_proxy_final_retryable_failure_message(
+                saw_inflight_saturation,
+                runtime_proxy_local_selection_failure_message(),
+            ),
         )),
     }
 }
@@ -134,17 +129,14 @@ pub(crate) fn send_runtime_proxy_final_websocket_failure(
                 runtime_proxy_local_selection_failure_message(),
             ),
         },
-        _ if saw_inflight_saturation => send_runtime_proxy_websocket_error(
-            local_socket,
-            503,
-            "service_unavailable",
-            "All runtime auto-rotate candidates are temporarily saturated. Retry the request.",
-        ),
         _ => send_runtime_proxy_websocket_error(
             local_socket,
             503,
             "service_unavailable",
-            runtime_proxy_local_selection_failure_message(),
+            runtime_proxy_crate::runtime_proxy_final_retryable_failure_message(
+                saw_inflight_saturation,
+                runtime_proxy_local_selection_failure_message(),
+            ),
         ),
     }
 }

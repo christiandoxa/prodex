@@ -10,7 +10,15 @@ fn stale_continuation_parts_are_json_409() {
         runtime_buffered_response_content_type(&parts),
         Some("application/json")
     );
-    assert!(String::from_utf8_lossy(&parts.body).contains("stale_continuation"));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&parts.body).unwrap(),
+        serde_json::json!({
+            "error": {
+                "code": "stale_continuation",
+                "message": runtime_proxy_stale_continuation_message()
+            }
+        })
+    );
 }
 
 #[test]
@@ -26,7 +34,49 @@ fn translates_previous_response_not_found_payload_to_stale_continuation() {
     let translated = runtime_proxy_translate_previous_response_http_parts(parts);
 
     assert_eq!(translated.status, 409);
-    assert!(String::from_utf8_lossy(&translated.body).contains("stale_continuation"));
+    assert_eq!(
+        runtime_buffered_response_content_type(&translated),
+        Some("application/json")
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&translated.body).unwrap(),
+        serde_json::json!({
+            "error": {
+                "code": "stale_continuation",
+                "message": runtime_proxy_stale_continuation_message()
+            }
+        })
+    );
+}
+
+#[test]
+fn translates_previous_response_not_found_text_to_stale_continuation() {
+    let parts = RuntimeBufferedResponseParts {
+        status: 404,
+        headers: vec![("Content-Type".to_string(), b"text/plain".to_vec())],
+        body: b"previous_response_not_found: missing".to_vec().into(),
+    };
+
+    let translated = runtime_proxy_translate_previous_response_http_parts(parts);
+
+    assert_eq!(translated.status, 409);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&translated.body).unwrap()["error"]["code"],
+        "stale_continuation"
+    );
+}
+
+#[test]
+fn leaves_non_previous_response_failure_parts_unchanged() {
+    let parts = RuntimeBufferedResponseParts {
+        status: 500,
+        headers: vec![("Content-Type".to_string(), b"text/plain".to_vec())],
+        body: b"upstream failed".to_vec().into(),
+    };
+
+    let translated = runtime_proxy_translate_previous_response_http_parts(parts.clone());
+
+    assert_eq!(translated, parts);
 }
 
 #[test]

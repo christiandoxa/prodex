@@ -4,14 +4,9 @@ pub(crate) fn build_runtime_proxy_text_response_parts(
     status: u16,
     message: &str,
 ) -> RuntimeBufferedResponseParts {
-    RuntimeBufferedResponseParts {
-        status,
-        headers: vec![(
-            "Content-Type".to_string(),
-            b"text/plain; charset=utf-8".to_vec(),
-        )],
-        body: message.as_bytes().to_vec().into(),
-    }
+    RuntimeBufferedResponseParts::from_crate_parts(
+        runtime_proxy_crate::build_runtime_proxy_text_response_parts(status, message),
+    )
 }
 
 pub(crate) fn build_runtime_proxy_text_response(
@@ -28,18 +23,9 @@ pub(crate) fn build_runtime_proxy_json_error_parts(
     code: &str,
     message: &str,
 ) -> RuntimeBufferedResponseParts {
-    let body = serde_json::json!({
-        "error": {
-            "code": code,
-            "message": message,
-        }
-    })
-    .to_string();
-    RuntimeBufferedResponseParts {
-        status,
-        headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
-        body: body.into_bytes().into(),
-    }
+    RuntimeBufferedResponseParts::from_crate_parts(
+        runtime_proxy_crate::build_runtime_proxy_json_error_parts(status, code, message),
+    )
 }
 
 pub(crate) fn build_runtime_proxy_json_error_response(
@@ -97,6 +83,18 @@ pub(crate) struct RuntimeBufferedResponseParts {
     pub(crate) status: u16,
     pub(crate) headers: Vec<(String, Vec<u8>)>,
     pub(crate) body: RuntimeManagedResponseBody,
+}
+
+impl RuntimeBufferedResponseParts {
+    pub(crate) fn from_crate_parts(
+        parts: runtime_proxy_crate::RuntimeBufferedResponseParts,
+    ) -> Self {
+        Self {
+            status: parts.status,
+            headers: parts.headers,
+            body: parts.body.into_vec().into(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -202,11 +200,10 @@ pub(crate) fn build_runtime_proxy_response_from_parts(
 pub(crate) fn runtime_buffered_response_content_type(
     parts: &RuntimeBufferedResponseParts,
 ) -> Option<&str> {
-    parts.headers.iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("content-type")
-            .then(|| std::str::from_utf8(value).ok())
-            .flatten()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-    })
+    runtime_proxy_crate::runtime_response_content_type_from_binary_headers(
+        parts
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_slice())),
+    )
 }
