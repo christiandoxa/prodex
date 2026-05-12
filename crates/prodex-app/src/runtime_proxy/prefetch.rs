@@ -433,3 +433,17 @@ pub(crate) fn inspect_runtime_sse_lookahead(
         }
     }
 }
+
+pub(crate) async fn inspect_runtime_sse_lookahead_blocking(
+    mut prefetch: RuntimePrefetchStream,
+    log_path: PathBuf,
+    request_id: u64,
+) -> Result<(RuntimeSseInspection, RuntimePrefetchStream)> {
+    let (inspection, prefetch) = tokio::task::spawn_blocking(move || {
+        let inspection = inspect_runtime_sse_lookahead(&mut prefetch, &log_path, request_id);
+        (inspection, prefetch)
+    })
+    .await
+    .context("runtime SSE lookahead blocking task failed")?;
+    Ok((inspection?, prefetch))
+}

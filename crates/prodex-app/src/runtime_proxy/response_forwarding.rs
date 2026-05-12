@@ -154,13 +154,15 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
             .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str(), value))),
     );
 
-    let mut prefetch = RuntimePrefetchStream::spawn(
+    let prefetch = RuntimePrefetchStream::spawn(
         response,
         Arc::clone(&shared.async_runtime),
         shared.log_path.clone(),
         request_id,
     );
-    let lookahead = inspect_runtime_sse_lookahead(&mut prefetch, &shared.log_path, request_id)?;
+    let (lookahead, prefetch) =
+        inspect_runtime_sse_lookahead_blocking(prefetch, shared.log_path.clone(), request_id)
+            .await?;
 
     let (prelude, response_ids, lookahead_turn_state) = match lookahead {
         RuntimeSseInspection::Commit {
