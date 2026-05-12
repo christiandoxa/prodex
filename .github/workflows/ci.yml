@@ -64,7 +64,12 @@ jobs:
             exit 0
           fi
 
-          node scripts/ci/ci-impact.mjs --base "${base}" --head "${head}" --github-output
+          node scripts/ci/ci-impact.mjs \
+            --base "${base}" \
+            --head "${head}" \
+            --event-name "${{ github.event_name }}" \
+            --ref "${{ github.ref }}" \
+            --github-output
 
       - name: Report CI impact
         run: |

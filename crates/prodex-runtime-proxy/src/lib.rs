@@ -27,6 +27,7 @@ mod transport_failure;
 mod upstream;
 mod websocket_message;
 mod websocket_proxy;
+mod websocket_response_tracking;
 mod websocket_tcp_connect_executor;
 
 pub use self::admission::*;
@@ -50,6 +51,7 @@ pub use self::transport_failure::*;
 pub use self::upstream::*;
 pub use self::websocket_message::*;
 pub use self::websocket_proxy::*;
+pub use self::websocket_response_tracking::*;
 pub use self::websocket_tcp_connect_executor::*;
 
 pub const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";

@@ -86,6 +86,25 @@ export function classifyChangedPaths(changedPaths) {
   };
 }
 
+export function forceHeavyForCiEvent({ eventName, ref } = {}) {
+  const normalizedEventName = String(eventName ?? "").trim();
+  const normalizedRef = String(ref ?? "").trim();
+  if (normalizedEventName !== "push") {
+    return null;
+  }
+  if (normalizedRef === "main" || normalizedRef === "refs/heads/main") {
+    return {
+      heavy: true,
+      reason: "push to main requires full CI",
+      paths: [],
+      heavyPaths: [],
+      lightPaths: [],
+      unknownPaths: [],
+    };
+  }
+  return null;
+}
+
 function parseArgs(argv) {
   const args = {
     head: "HEAD",
@@ -104,6 +123,16 @@ function parseArgs(argv) {
     if (value === "--head") {
       index += 1;
       args.head = requiredValue(argv[index], value);
+      continue;
+    }
+    if (value === "--event-name") {
+      index += 1;
+      args.eventName = requiredValue(argv[index], value);
+      continue;
+    }
+    if (value === "--ref") {
+      index += 1;
+      args.ref = requiredValue(argv[index], value);
       continue;
     }
     if (value === "--json") {
@@ -146,6 +175,8 @@ function printHelp() {
       "Inputs:",
       "  --base <rev>       Git diff base revision. Required unless --path is used.",
       "  --head <rev>       Git diff head revision. Defaults to HEAD.",
+      "  --event-name <name> GitHub event name. Pushes to main always require full CI.",
+      "  --ref <ref>         GitHub ref or ref name for event-specific classification.",
       "  --path <path>      Add an explicit changed path. Repeatable, mainly for tests.",
       "  --json             Print a JSON result.",
       "  --github-output    Append heavy and reason outputs to $GITHUB_OUTPUT.",
@@ -197,8 +228,15 @@ async function main() {
     return;
   }
 
-  const paths = args.paths.length > 0 ? args.paths : args.base ? await gitDiffNameOnly(args.base, args.head) : [];
-  const result = classifyChangedPaths(paths);
+  const forcedResult = forceHeavyForCiEvent({ eventName: args.eventName, ref: args.ref });
+  const paths = forcedResult
+    ? []
+    : args.paths.length > 0
+      ? args.paths
+      : args.base
+        ? await gitDiffNameOnly(args.base, args.head)
+        : [];
+  const result = forcedResult ?? classifyChangedPaths(paths);
 
   if (args.githubOutput) {
     await appendGithubOutput(result);

@@ -12,6 +12,7 @@ pub(super) async fn send_runtime_proxy_upstream_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    auth: UsageAuth,
 ) -> Result<reqwest::Response> {
     send_runtime_proxy_upstream_request_with_events(
         request_id,
@@ -19,6 +20,7 @@ pub(super) async fn send_runtime_proxy_upstream_request(
         shared,
         profile_name,
         turn_state_override,
+        auth,
         RuntimeProxyUpstreamRequestEvents {
             route_kind: runtime_proxy_request_lane(&request.path_and_query, false),
             start: "upstream_start",
@@ -34,6 +36,7 @@ pub(crate) async fn send_runtime_proxy_upstream_responses_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    auth: UsageAuth,
 ) -> Result<reqwest::Response> {
     send_runtime_proxy_upstream_request_with_events(
         request_id,
@@ -41,6 +44,7 @@ pub(crate) async fn send_runtime_proxy_upstream_responses_request(
         shared,
         profile_name,
         turn_state_override,
+        auth,
         RuntimeProxyUpstreamRequestEvents {
             route_kind: RuntimeRouteKind::Responses,
             start: "upstream_async_start",
@@ -56,6 +60,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     turn_state_override: Option<&str>,
+    auth: UsageAuth,
     events: RuntimeProxyUpstreamRequestEvents,
 ) -> Result<reqwest::Response> {
     let started_at = Instant::now();
@@ -64,7 +69,6 @@ async fn send_runtime_proxy_upstream_request_with_events(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
         .clone();
-    let auth = runtime_profile_usage_auth(shared, profile_name)?;
     let upstream_url =
         runtime_proxy_upstream_url(&runtime.upstream_base_url, &request.path_and_query);
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {

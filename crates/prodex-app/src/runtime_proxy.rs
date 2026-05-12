@@ -81,3 +81,30 @@ pub(super) use runtime_proxy_crate::{
 pub(super) fn runtime_proxy_local_selection_failure_message() -> &'static str {
     "Runtime proxy could not secure a healthy upstream profile before the pre-commit retry budget was exhausted. Retry the request."
 }
+
+pub(super) fn await_runtime_proxy_async_task<T, F>(
+    shared: &RuntimeRotationProxyShared,
+    task_name: &'static str,
+    future: F,
+) -> Result<T>
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = Result<T>> + Send + 'static,
+{
+    if tokio::runtime::Handle::try_current().is_ok() {
+        bail!(
+            "refusing to synchronously wait for runtime proxy async task '{task_name}' from inside a Tokio runtime"
+        );
+    }
+
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let task = shared.async_runtime.spawn(async move {
+        let result = future.await;
+        let _ = sender.send(result);
+    });
+    drop(task);
+
+    receiver
+        .recv()
+        .with_context(|| format!("runtime proxy async task '{task_name}' did not return"))?
+}

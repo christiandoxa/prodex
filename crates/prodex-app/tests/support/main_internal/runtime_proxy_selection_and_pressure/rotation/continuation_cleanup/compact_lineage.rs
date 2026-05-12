@@ -205,13 +205,17 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
             .expect("responses inflight guard should be acquired");
+    let auth = runtime_profile_usage_auth(&shared, "second")
+        .expect("responses follow-up auth should resolve");
     match shared
         .async_runtime
         .block_on(async {
             let response =
-                send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
-                    .await
-                    .expect("responses follow-up should reach upstream");
+                send_runtime_proxy_upstream_responses_request(
+                    1, &request, &shared, "second", None, auth,
+                )
+                .await
+                .expect("responses follow-up should reach upstream");
             prepare_runtime_proxy_responses_success(
                 RuntimeResponsesSuccessContext {
                     request_id: 1,
@@ -453,13 +457,17 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(&shared, "second", "responses_http")
             .expect("responses inflight guard should be acquired");
+    let auth =
+        runtime_profile_usage_auth(&shared, "second").expect("responses request auth should resolve");
     match shared
         .async_runtime
         .block_on(async {
             let response =
-                send_runtime_proxy_upstream_responses_request(1, &request, &shared, "second", None)
-                    .await
-                    .expect("responses request should reach upstream");
+                send_runtime_proxy_upstream_responses_request(
+                    1, &request, &shared, "second", None, auth,
+                )
+                .await
+                .expect("responses request should reach upstream");
             prepare_runtime_proxy_responses_success(
                 RuntimeResponsesSuccessContext {
                     request_id: 1,

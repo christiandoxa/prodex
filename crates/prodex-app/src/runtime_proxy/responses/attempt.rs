@@ -46,18 +46,35 @@ pub(crate) fn attempt_runtime_responses_request(
     let inflight_guard =
         acquire_runtime_profile_inflight_guard(shared, profile_name, "responses_http")?;
 
-    let async_runtime = Arc::clone(&shared.async_runtime);
     let mut inflight_guard = Some(inflight_guard);
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
-        let response = async_runtime
-            .block_on(send_runtime_proxy_upstream_responses_request(
-                request_id,
-                request,
-                shared,
-                profile_name,
-                turn_state_override,
-            ))
+        let upstream_auth =
+            runtime_profile_usage_auth(shared, profile_name).inspect_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    "responses_auth_lookup",
+                    err,
+                );
+            })?;
+        let upstream_request = request.clone();
+        let upstream_shared = shared.clone();
+        let upstream_profile_name = profile_name.to_string();
+        let upstream_turn_state_override = turn_state_override.map(str::to_string);
+        let response =
+            await_runtime_proxy_async_task(shared, "responses_upstream_request", async move {
+                send_runtime_proxy_upstream_responses_request(
+                    request_id,
+                    &upstream_request,
+                    &upstream_shared,
+                    &upstream_profile_name,
+                    upstream_turn_state_override.as_deref(),
+                    upstream_auth,
+                )
+                .await
+            })
             .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,
@@ -71,20 +88,20 @@ pub(crate) fn attempt_runtime_responses_request(
             runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let parts = async_runtime
-                .block_on(buffer_runtime_proxy_async_response_parts(
-                    response,
-                    Vec::new(),
-                ))
-                .inspect_err(|err| {
-                    note_runtime_profile_transport_failure(
-                        shared,
-                        profile_name,
-                        RuntimeRouteKind::Responses,
-                        "responses_buffer_response",
-                        err,
-                    );
-                })?;
+            let parts = await_runtime_proxy_async_task(
+                shared,
+                "responses_buffer_response",
+                buffer_runtime_proxy_async_response_parts(response, Vec::new()),
+            )
+            .inspect_err(|err| {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    "responses_buffer_response",
+                    err,
+                );
+            })?;
             if status == 401
                 && runtime_try_recover_profile_auth_from_unauthorized_steps(
                     request_id,
@@ -158,22 +175,33 @@ pub(crate) fn attempt_runtime_responses_request(
                 "responses inflight guard missing before success forwarding"
             ));
         };
-        let prepared = async_runtime
-            .block_on(prepare_runtime_proxy_responses_success(
-                RuntimeResponsesSuccessContext {
-                    request_id,
-                    request_model_name: request_model_name.as_deref(),
-                    request_previous_response_id: request_previous_response_id.as_deref(),
-                    request_prompt_cache_key: request_prompt_cache_key.as_deref(),
-                    request_session_id: request_session_id.as_deref(),
-                    request_turn_state: request_turn_state.as_deref(),
-                    turn_state_override,
-                    shared,
-                    profile_name,
-                    inflight_guard,
-                },
-                response,
-            ))
+        let success_shared = shared.clone();
+        let success_profile_name = profile_name.to_string();
+        let success_request_model_name = request_model_name;
+        let success_previous_response_id = request_previous_response_id.clone();
+        let success_prompt_cache_key = request_prompt_cache_key.clone();
+        let success_session_id = request_session_id.clone();
+        let success_turn_state = request_turn_state.clone();
+        let success_turn_state_override = turn_state_override.map(str::to_string);
+        let prepared =
+            await_runtime_proxy_async_task(shared, "responses_prepare_success", async move {
+                prepare_runtime_proxy_responses_success(
+                    RuntimeResponsesSuccessContext {
+                        request_id,
+                        request_model_name: success_request_model_name.as_deref(),
+                        request_previous_response_id: success_previous_response_id.as_deref(),
+                        request_prompt_cache_key: success_prompt_cache_key.as_deref(),
+                        request_session_id: success_session_id.as_deref(),
+                        request_turn_state: success_turn_state.as_deref(),
+                        turn_state_override: success_turn_state_override.as_deref(),
+                        shared: &success_shared,
+                        profile_name: &success_profile_name,
+                        inflight_guard,
+                    },
+                    response,
+                )
+                .await
+            })
             .inspect_err(|err| {
                 note_runtime_profile_transport_failure(
                     shared,

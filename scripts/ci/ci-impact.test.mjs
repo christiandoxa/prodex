@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { classifyChangedPaths, normalizeChangedPath } from "./ci-impact.mjs";
+import { classifyChangedPaths, forceHeavyForCiEvent, normalizeChangedPath } from "./ci-impact.mjs";
 import { buildSteps } from "./changed-tests.mjs";
 import {
   CI_IMPACT_GROUPS,
@@ -140,8 +140,61 @@ test("heavy path wins over lightweight paths", () => {
   assert.equal(result.heavyPaths[0], "crates/prodex-core/src/lib.rs");
 });
 
+test("pushes to main force full CI regardless of changed paths", () => {
+  assert.deepEqual(forceHeavyForCiEvent({ eventName: "push", ref: "main" }), {
+    heavy: true,
+    reason: "push to main requires full CI",
+    paths: [],
+    heavyPaths: [],
+    lightPaths: [],
+    unknownPaths: [],
+  });
+  assert.equal(forceHeavyForCiEvent({ eventName: "push", ref: "refs/heads/main" }).heavy, true);
+});
+
+test("non-main pushes and pull requests keep path-based CI impact", () => {
+  assert.equal(forceHeavyForCiEvent({ eventName: "push", ref: "refs/heads/feature" }), null);
+  assert.equal(forceHeavyForCiEvent({ eventName: "pull_request", ref: "refs/pull/1/merge" }), null);
+});
+
 test("CLI emits JSON for explicit paths", async () => {
   const { stdout } = await execFileAsync(process.execPath, [SCRIPT_PATH, "--path", "README.md", "--json"]);
+  const result = JSON.parse(stdout);
+
+  assert.equal(result.heavy, false);
+  assert.equal(result.reason, "only lightweight docs/npm/release metadata paths changed");
+  assert.deepEqual(result.paths, ["README.md"]);
+});
+
+test("CLI forces heavy for push events to main before reading changed paths", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    SCRIPT_PATH,
+    "--event-name",
+    "push",
+    "--ref",
+    "refs/heads/main",
+    "--path",
+    "README.md",
+    "--json",
+  ]);
+  const result = JSON.parse(stdout);
+
+  assert.equal(result.heavy, true);
+  assert.equal(result.reason, "push to main requires full CI");
+  assert.deepEqual(result.paths, []);
+});
+
+test("CLI keeps lightweight classification for pull requests", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    SCRIPT_PATH,
+    "--event-name",
+    "pull_request",
+    "--ref",
+    "refs/pull/1/merge",
+    "--path",
+    "README.md",
+    "--json",
+  ]);
   const result = JSON.parse(stdout);
 
   assert.equal(result.heavy, false);
