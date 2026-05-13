@@ -161,6 +161,19 @@ async function checkBuiltInScrubSelfTest() {
   assert.match(result.stdout, /compat capture scrub self-test passed/);
 }
 
+async function checkOfflineReplayGateWiring() {
+  const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
+  assert.equal(
+    packageJson.scripts?.["compat:offline-gate"],
+    "npm run compat:check && npm run compat:replay-fixtures",
+  );
+
+  const workflow = await fs.readFile(path.join(repoRoot, ".github/workflows/ci.yml"), "utf8");
+  assert.match(workflow, /^\s{2}compat-replay-gate:\n/m);
+  assert.match(workflow, /Run offline upstream compat replay gate/);
+  assert.match(workflow, /\bnpm run compat:offline-gate\b/);
+}
+
 async function checkFixture(spec) {
   const inputPath = path.join(FIXTURE_DIR, spec.input);
   const expectedPath = path.join(FIXTURE_DIR, spec.expected);
@@ -190,6 +203,14 @@ try {
   process.stderr.write(`not ok - capture replay scrub self-test\n  ${error.stack ?? error.message}\n`);
 }
 
+try {
+  await checkOfflineReplayGateWiring();
+  process.stdout.write("ok - offline replay gate wiring\n");
+} catch (error) {
+  failures += 1;
+  process.stderr.write(`not ok - offline replay gate wiring\n  ${error.stack ?? error.message}\n`);
+}
+
 for (const fixture of FIXTURES) {
   try {
     await checkFixture(fixture);
@@ -204,5 +225,5 @@ if (failures > 0) {
   process.stderr.write(`capture replay fixtures: ${failures} failed\n`);
   process.exitCode = 1;
 } else {
-  process.stdout.write(`capture replay fixtures: ${FIXTURES.length + 1} passed\n`);
+  process.stdout.write(`capture replay fixtures: ${FIXTURES.length + 2} passed\n`);
 }

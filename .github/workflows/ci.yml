@@ -5,6 +5,9 @@ on:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -218,6 +221,23 @@ jobs:
 
       - name: Check CI duration telemetry
         run: node --test scripts/ci/github-job-durations.test.mjs
+
+  compat-replay-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Run offline upstream compat replay gate
+        run: npm run compat:offline-gate
 
   supply-chain:
     needs: changes
@@ -632,6 +652,25 @@ jobs:
           PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE: scripts/ci/runtime-proxy-bench-thresholds.json
         run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 
+  runtime-load-smoke:
+    needs: changes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Run lightweight runtime load smoke
+        run: npm run ci:runtime-load-smoke
+
   runtime-stress:
     name: Runtime stress (${{ matrix.label }})
     needs: changes
@@ -792,6 +831,7 @@ jobs:
       - docs-lint
       - secret-scan
       - process-guard
+      - compat-replay-gate
       - supply-chain
       - release-sync
       - npm-package-smoke
@@ -802,6 +842,7 @@ jobs:
       - runtime-proxy-shard-matrix
       - main-internal-runtime-proxy
       - runtime-proxy-bench-smoke
+      - runtime-load-smoke
       - runtime-stress
     if: ${{ always() && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest

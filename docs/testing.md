@@ -65,6 +65,7 @@ npm run changelog:check
 npm run docs:lint
 npm run ci:runtime-manifest
 npm run test:runtime-smoke
+npm run compat:offline-gate
 npm run compat:check
 npm run compat:watch
 npm run compat:watch-fixtures
@@ -74,6 +75,7 @@ node scripts/ci/runtime-proxy-shard.mjs
 npm run ci:runtime-stress -- --suite stress
 npm run ci:runtime-stress -- --suite serialized
 npm run ci:runtime-stress -- --suite continuation
+npm run ci:runtime-load-smoke
 node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 cargo test -q --workspace --all-features -- --test-threads=1
 ```
@@ -84,7 +86,18 @@ Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as indepen
 
 Use `npm run test:fast:timings` or `npm run test:serial:timings -- --suite runtime` when tuning local or CI shard balance. The timing mode preserves the existing process split and `--test-threads=1` safety, then prints the slowest completed steps at the end of each runner phase. Add `-- --timings-json` to either runner when you need a single-line JSON payload that can be pasted into notes or compared across CI runs. Use `-- --timings-limit <n>` to show more or fewer slow steps.
 
+Use `npm run test:timing-balance` to summarize one or more saved `timings-json` lines or raw timing JSON arrays:
+
+```bash
+npm run test:serial:timings -- --suite stress --timings-json | npm run test:timing-balance
+npm run test:timing-balance -- --file /tmp/fast.log --file /tmp/serial.log --limit 20
+```
+
+The default output ranks labels by average runtime and includes suggested integer second weights. Use `-- --weights-json` for generic rebalance input shaped as `[{ label, weightSeconds, ... }]`. Use `-- --runtime-stress-hints` when the input labels come from `serial:stress:<test>` or `serial:continuation:<iteration>:<test>`; it emits a `RUNTIME_STRESS_WEIGHT_HINTS` snippet compatible with the weighted runtime stress shard planner in `scripts/ci/runtime-stress.mjs`.
+
 Use `npm run test:runtime-smoke` for a small local runtime invariant suite before broad runtime work. It runs curated log JSON/marker, header preservation, selection affinity, stale continuation, websocket local pressure, and tuning snapshot checks from the shared runtime manifest without changing the broad runtime or stress suites.
+
+Use `npm run ci:runtime-load-smoke` for the bounded CI/scheduled load smoke. It reuses the load harness in mock-only baseline mode with low request count, zero tolerated request errors, zero admission pressure, and a strict p95 TTFT threshold. For local end-to-end proxy coverage after `cargo build`, run `npm run ci:runtime-load-smoke -- --mode proxy --prodex ./target/debug/prodex`; proxy mode relaxes the TTFT threshold enough to avoid machine-specific flakes while still checking error and admission gates.
 
 ## Manual Runtime Load
 
@@ -155,6 +168,8 @@ When changing `prodex-context` audit, prose compression, or command-output conte
 When changing `prodex info` runtime tuning output, run the focused `cargo test -q runtime_tuning_snapshot_reports_effective_policy_and_env_values -- --test-threads=1` check so env, policy, and default-derived values stay aligned.
 
 Use `npm run compat:check` before changing runtime proxy assumptions. It is offline and verifies that `scripts/compat/upstream-baseline.json` still records the critical upstream Codex files, Responses/compact routes, SSE/websocket stream events, and headers that Prodex preserves or replaces. Baseline format version 2 also records semantic check groups that tie route, header, event, and co-occurrence expectations back to specific upstream files instead of relying only on flat `required_contains` tokens.
+
+Use `npm run compat:offline-gate` before changing runtime proxy transport, preserved/replaced headers, SSE handling, websocket handling, Responses route handling, compact route handling, or replay fixture tooling. It runs the offline upstream baseline guard plus the scrubbed replay fixture checks, and `.github/workflows/ci.yml` requires the same gate in the `compat-replay-gate` job without network access.
 
 Use `npm run compat:watch` when network access is available. It fetches current upstream Codex critical files from the latest release tag, falls back to `main` only when the tag raw file is unavailable, and reports missing required tokens or semantic groups as upstream drift.
 
