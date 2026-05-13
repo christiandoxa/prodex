@@ -13,6 +13,11 @@ import {
   ciImpactCategory,
   pathMatchesGroup,
 } from "./test-impact-manifest.mjs";
+import {
+  formatRuntimeStressShardPlan,
+  moduloRuntimeStressShards,
+  weightedRuntimeStressShards,
+} from "./runtime-stress.mjs";
 import { workspacePackagesFromCargoMetadata } from "./workspace-metadata.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -65,14 +70,51 @@ test("classifies Rust, workflow, runtime CI, and stress paths as heavy", () => {
     "rust-toolchain.toml",
     ".cargo/config.toml",
     ".github/workflows/ci.yml",
+    "scripts/ci/runtime-proxy-ci-matrix.mjs",
     "scripts/ci/runtime-stress.mjs",
     "scripts/ci/runtime-proxy-shard.mjs",
+    "scripts/ci/runtime-test-manifest-guard.mjs",
     "scripts/ci/runtime-test-manifest.mjs",
   ]) {
     const result = classifyChangedPaths([filePath]);
     assert.equal(result.heavy, true, filePath);
     assert.equal(result.heavyPaths[0], filePath);
   }
+});
+
+test("runtime-stress weighted sharding balances duration hints", () => {
+  const testNames = [
+    "main_internal_tests::runtime_proxy_demo::slow_a",
+    "main_internal_tests::runtime_proxy_demo::slow_b",
+    "main_internal_tests::runtime_proxy_demo::slow_c",
+    "main_internal_tests::runtime_proxy_demo::tiny_a",
+    "main_internal_tests::runtime_proxy_demo::tiny_b",
+    "main_internal_tests::runtime_proxy_demo::tiny_c",
+  ];
+  const weightHints = [
+    { name: "slow_a", weightSeconds: 9 },
+    { name: "slow_b", weightSeconds: 8 },
+    { name: "slow_c", weightSeconds: 7 },
+  ];
+  const spread = (shards) => {
+    const weights = shards.map((shard) => shard.weightSeconds);
+    return Math.max(...weights) - Math.min(...weights);
+  };
+
+  const weighted = weightedRuntimeStressShards(testNames, 2, weightHints, 1);
+  const modulo = moduloRuntimeStressShards(testNames, 2, weightHints, 1);
+
+  assert.equal(spread(weighted), 3);
+  assert.equal(spread(modulo), 7);
+  assert.ok(spread(weighted) < spread(modulo));
+  assert.deepEqual(
+    weighted.flatMap((shard) => shard.tests.map((test) => test.testName)).sort(),
+    [...testNames].sort(),
+  );
+  assert.match(
+    formatRuntimeStressShardPlan(weighted, 0, "weighted", testNames.length, 2),
+    /runtime-stress: selected weighted shard 1\/2 with 4\/6 test\(s\), estimated 12\/27s; manifest skipped 2/,
+  );
 });
 
 test("defaults empty and unknown path sets to heavy", () => {

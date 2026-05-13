@@ -1,12 +1,24 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import {
+  RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
   RUNTIME_STRESS_CONTINUATION_TESTS,
   RUNTIME_STRESS_SERIALIZED_TESTS,
   RUNTIME_STRESS_SKIP_TESTS,
+  RUNTIME_STRESS_WEIGHT_HINTS,
 } from "./runtime-test-manifest.mjs";
 
 const VALID_SUITES = new Set(["stress", "serialized", "continuation", "all"]);
+const SHARD_STRATEGY_ALIASES = new Map([
+  ["duration", "weighted"],
+  ["durations", "weighted"],
+  ["weight", "weighted"],
+  ["weighted", "weighted"],
+  ["index", "modulo"],
+  ["legacy", "modulo"],
+  ["modulo", "modulo"],
+]);
 const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/;
 
 function parsePositiveInteger(value, name) {
@@ -25,11 +37,22 @@ function parseShardIndex(value, shardCount) {
   return parsed;
 }
 
+function parseShardStrategy(value) {
+  const strategy = SHARD_STRATEGY_ALIASES.get(value);
+  if (!strategy) {
+    throw new Error(
+      `--shard-strategy must be one of: ${Array.from(SHARD_STRATEGY_ALIASES.keys()).join(", ")}`,
+    );
+  }
+  return strategy;
+}
+
 function parseArgs(argv) {
   const args = {
     suite: "all",
     shardCount: 1,
     shardIndex: 0,
+    shardStrategy: "weighted",
     dryRun: false,
   };
   for (let index = 2; index < argv.length; index += 1) {
@@ -56,6 +79,14 @@ function parseArgs(argv) {
         throw new Error("--shard-index requires a value");
       }
       args.shardIndexRaw = argv[index];
+      continue;
+    }
+    if (value === "--shard-strategy" || value === "--shard-mode") {
+      index += 1;
+      if (!argv[index]) {
+        throw new Error(`${value} requires a value`);
+      }
+      args.shardStrategy = parseShardStrategy(argv[index]);
       continue;
     }
     if (value === "--dry-run") {
@@ -200,6 +231,133 @@ function skippedByManifest(testName) {
   return RUNTIME_STRESS_SKIP_TESTS.some((skipName) => testName.includes(skipName));
 }
 
+function testLeafName(testName) {
+  return testName.split("::").at(-1);
+}
+
+function weightHintMatches(hint, testName) {
+  if (typeof hint.name === "string") {
+    return testLeafName(testName) === hint.name;
+  }
+  return typeof hint.filter === "string" && testName.includes(hint.filter);
+}
+
+export function runtimeStressWeightSeconds(
+  testName,
+  weightHints = RUNTIME_STRESS_WEIGHT_HINTS,
+  defaultWeightSeconds = RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
+) {
+  return weightHints.reduce((weightSeconds, hint) => {
+    if (!weightHintMatches(hint, testName)) {
+      return weightSeconds;
+    }
+    return Math.max(weightSeconds, hint.weightSeconds);
+  }, defaultWeightSeconds);
+}
+
+function compareShardLoad(left, right) {
+  if (left.weightSeconds !== right.weightSeconds) {
+    return left.weightSeconds - right.weightSeconds;
+  }
+  if (left.tests.length !== right.tests.length) {
+    return left.tests.length - right.tests.length;
+  }
+  return left.index - right.index;
+}
+
+function weightedTestRecords(testNames, weightHints, defaultWeightSeconds) {
+  return testNames.map((testName, index) => ({
+    index,
+    testName,
+    weightSeconds: runtimeStressWeightSeconds(testName, weightHints, defaultWeightSeconds),
+  }));
+}
+
+function emptyShards(shardCount) {
+  return Array.from({ length: shardCount }, (_, index) => ({
+    index,
+    tests: [],
+    weightSeconds: 0,
+  }));
+}
+
+export function weightedRuntimeStressShards(
+  testNames,
+  shardCount,
+  weightHints = RUNTIME_STRESS_WEIGHT_HINTS,
+  defaultWeightSeconds = RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
+) {
+  const shards = emptyShards(shardCount);
+  const tests = weightedTestRecords(testNames, weightHints, defaultWeightSeconds);
+
+  for (const test of tests.toSorted((left, right) => {
+    if (left.weightSeconds !== right.weightSeconds) {
+      return right.weightSeconds - left.weightSeconds;
+    }
+    return left.index - right.index;
+  })) {
+    const target = shards.toSorted(compareShardLoad)[0];
+    target.tests.push(test);
+    target.weightSeconds += test.weightSeconds;
+  }
+
+  for (const shard of shards) {
+    shard.tests.sort((left, right) => left.index - right.index);
+  }
+  return shards;
+}
+
+export function moduloRuntimeStressShards(
+  testNames,
+  shardCount,
+  weightHints = RUNTIME_STRESS_WEIGHT_HINTS,
+  defaultWeightSeconds = RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
+) {
+  const shards = emptyShards(shardCount);
+  for (const test of weightedTestRecords(testNames, weightHints, defaultWeightSeconds)) {
+    const target = shards[test.index % shardCount];
+    target.tests.push(test);
+    target.weightSeconds += test.weightSeconds;
+  }
+  return shards;
+}
+
+function runtimeStressShardPlan(testNames, shardCount, shardStrategy) {
+  if (shardStrategy === "modulo") {
+    return moduloRuntimeStressShards(testNames, shardCount);
+  }
+  return weightedRuntimeStressShards(testNames, shardCount);
+}
+
+function formatWeight(value) {
+  return value.toFixed(1).replace(/\.0$/, "");
+}
+
+export function formatRuntimeStressShardPlan(
+  shards,
+  shardIndex,
+  shardStrategy,
+  runnableTestCount,
+  skippedTestCount,
+) {
+  const totalWeightSeconds = shards.reduce((total, shard) => total + shard.weightSeconds, 0);
+  const lines = shards.map(
+    (shard) =>
+      `runtime-stress: ${shardStrategy} shard ${shard.index + 1}/${shards.length} has ${shard.tests.length} test(s), estimated ${formatWeight(shard.weightSeconds)}s`,
+  );
+  const selectedShard = shards[shardIndex];
+  lines.push(
+    `runtime-stress: selected ${shardStrategy} shard ${shardIndex + 1}/${shards.length} with ${selectedShard.tests.length}/${runnableTestCount} test(s), estimated ${formatWeight(selectedShard.weightSeconds)}/${formatWeight(totalWeightSeconds)}s; manifest skipped ${skippedTestCount}`,
+  );
+  return lines.join("\n");
+}
+
+function printRuntimeStressShardPlan(shards, shardIndex, shardStrategy, runnableTestCount, skippedTestCount) {
+  process.stdout.write(
+    `${formatRuntimeStressShardPlan(shards, shardIndex, shardStrategy, runnableTestCount, skippedTestCount)}\n`,
+  );
+}
+
 function assertShardSkipSafety(selectedTests, nonSelectedTests) {
   for (const skipName of nonSelectedTests) {
     const selectedMatch = selectedTests.find((testName) => testName.includes(skipName));
@@ -222,7 +380,7 @@ async function listRuntimeStressTests() {
   return tests;
 }
 
-async function runStressSuite({ shardIndex, shardCount, dryRun: dryRunMode }) {
+async function runStressSuite({ shardIndex, shardCount, shardStrategy, dryRun: dryRunMode }) {
   if (shardCount === 1) {
     const args = baseStressArgs();
     if (dryRunMode) {
@@ -235,15 +393,21 @@ async function runStressSuite({ shardIndex, shardCount, dryRun: dryRunMode }) {
 
   const listedTests = await listRuntimeStressTests();
   const runnableTests = listedTests.filter((testName) => !skippedByManifest(testName));
-  const selectedTests = runnableTests.filter((_, index) => index % shardCount === shardIndex);
+  const shards = runtimeStressShardPlan(runnableTests, shardCount, shardStrategy);
+  const selectedShard = shards[shardIndex];
+  const selectedTests = selectedShard.tests.map((test) => test.testName);
   if (selectedTests.length === 0) {
     throw new Error(`runtime-stress shard ${shardIndex + 1}/${shardCount} selected no tests`);
   }
   const selected = new Set(selectedTests);
   const nonSelectedTests = runnableTests.filter((testName) => !selected.has(testName));
   assertShardSkipSafety(selectedTests, nonSelectedTests);
-  process.stdout.write(
-    `runtime-stress: shard ${shardIndex + 1}/${shardCount} selected ${selectedTests.length}/${runnableTests.length} test(s); manifest skipped ${listedTests.length - runnableTests.length}\n`,
+  printRuntimeStressShardPlan(
+    shards,
+    shardIndex,
+    shardStrategy,
+    runnableTests.length,
+    listedTests.length - runnableTests.length,
   );
 
   const args = baseStressArgs(nonSelectedTests);
@@ -311,10 +475,11 @@ async function main() {
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: node scripts/ci/runtime-stress.mjs [--suite stress|serialized|continuation|all] [--shard-index <n> --shard-count <n>] [--dry-run]",
+        "Usage: node scripts/ci/runtime-stress.mjs [--suite stress|serialized|continuation|all] [--shard-index <n> --shard-count <n>] [--shard-strategy weighted|modulo] [--dry-run]",
         "",
         "Runs runtime proxy stress shards from the shared runtime CI manifest.",
-        "Sharding splits the broad stress suite, serialized suite, and continuation-heavy suite.",
+        "Broad stress sharding defaults to duration-weighted assignment; --shard-strategy modulo keeps the legacy listed-test index split.",
+        "Serialized and continuation-heavy suites keep their manifest order modulo split.",
       ].join("\n") + "\n",
     );
     return;
@@ -337,10 +502,12 @@ async function main() {
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`runtime-stress: ${message}\n`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`runtime-stress: ${message}\n`);
+    process.exitCode = 1;
+  }
 }

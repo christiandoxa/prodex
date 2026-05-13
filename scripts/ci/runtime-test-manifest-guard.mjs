@@ -4,6 +4,9 @@ import { spawn } from "node:child_process";
 import {
   RUNTIME_CI_BROAD_SHARD_FILTERS,
   RUNTIME_CI_TEST_CASES,
+  RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
+  RUNTIME_STRESS_SKIP_TESTS,
+  RUNTIME_STRESS_WEIGHT_HINTS,
   RUNTIME_TEST_TAGS,
 } from "./runtime-test-manifest.mjs";
 
@@ -52,6 +55,11 @@ function formatCase(testCase, index) {
 function formatBroadShard(shard, index) {
   const identity = shard?.id ?? shard?.filter ?? shard?.label;
   return identity ? `broadShard[${index}] ${identity}` : `broadShard[${index}]`;
+}
+
+function formatRuntimeStressWeightHint(hint, index) {
+  const identity = hint?.name ?? hint?.filter;
+  return identity ? `runtimeStressWeight[${index}] ${identity}` : `runtimeStressWeight[${index}]`;
 }
 
 function formatWorkflowShard(shard) {
@@ -455,6 +463,75 @@ function validateBroadShardFilters(broadShardFilters, cargoTestNames, issues) {
   return validShards;
 }
 
+function runtimeStressWeightHintMatches(hint, testName) {
+  if (typeof hint.name === "string") {
+    return testLeafName(testName) === hint.name;
+  }
+  return typeof hint.filter === "string" && testName.includes(hint.filter);
+}
+
+function validateRuntimeStressWeights(defaultWeightSeconds, weightHints, cargoTestNames, issues) {
+  if (typeof defaultWeightSeconds !== "number" || !Number.isFinite(defaultWeightSeconds) || defaultWeightSeconds <= 0) {
+    issues.push("RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS must be a positive finite number");
+  }
+
+  if (!Array.isArray(weightHints)) {
+    issues.push("RUNTIME_STRESS_WEIGHT_HINTS must be an array");
+    return;
+  }
+
+  const runtimeStressTests = cargoTestNames
+    .filter(isMainInternalRuntimeProxyTest)
+    .filter((testName) => !RUNTIME_STRESS_SKIP_TESTS.some((skipName) => testName.includes(skipName)));
+  const selectors = [];
+
+  weightHints.forEach((hint, index) => {
+    const label = formatRuntimeStressWeightHint(hint, index);
+    if (!hint || typeof hint !== "object" || Array.isArray(hint)) {
+      issues.push(`${label}: expected object with name or filter and weightSeconds`);
+      return;
+    }
+
+    const hasName = Object.hasOwn(hint, "name");
+    const hasFilter = Object.hasOwn(hint, "filter");
+    if (hasName === hasFilter) {
+      issues.push(`${label}: expected exactly one of name or filter`);
+      return;
+    }
+
+    if (hasName && !isNonEmptyString(hint.name)) {
+      issues.push(`${label}: name must be a non-empty trimmed string`);
+      return;
+    }
+    if (hasFilter && !isNonEmptyString(hint.filter)) {
+      issues.push(`${label}: filter must be a non-empty trimmed string`);
+      return;
+    }
+
+    const selectorValue = hasName ? `name:${hint.name}` : `filter:${hint.filter}`;
+    selectors.push({ value: selectorValue, index });
+
+    if (typeof hint.weightSeconds !== "number" || !Number.isFinite(hint.weightSeconds) || hint.weightSeconds <= 0) {
+      issues.push(`${label}: weightSeconds must be a positive finite number`);
+      return;
+    }
+
+    const matches = runtimeStressTests.filter((testName) => runtimeStressWeightHintMatches(hint, testName));
+    if (matches.length === 0) {
+      issues.push(
+        `${label}: selector matched zero broad runtime-stress tests after manifest skips; remove stale hint or update selector`,
+      );
+    }
+    if (hasName && matches.length > 1) {
+      issues.push(`${label}: name matched multiple tests: ${matches.join(", ")}`);
+    }
+  });
+
+  for (const duplicate of collectDuplicates(selectors)) {
+    issues.push(`duplicate runtime stress weight selector "${duplicate.value}" in indexes ${duplicate.indexes.join(", ")}`);
+  }
+}
+
 function validateRuntimeProxyCoverage(testCases, broadShardFilters, cargoTestNames, issues) {
   const runtimeProxyTests = cargoTestNames.filter(isMainInternalRuntimeProxyTest);
   const uncovered = runtimeProxyTests.filter(
@@ -551,6 +628,12 @@ function validateManifest(testCases, broadShardFilters, workflowShardFilters, ca
 
   const validBroadShardFilters = validateBroadShardFilters(broadShardFilters, cargoTestNames, issues);
   validateWorkflowBroadShardFilters(broadShardFilters, workflowShardFilters, issues);
+  validateRuntimeStressWeights(
+    RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
+    RUNTIME_STRESS_WEIGHT_HINTS,
+    cargoTestNames,
+    issues,
+  );
   const coverage = validateRuntimeProxyCoverage(testCases, validBroadShardFilters, cargoTestNames, issues);
 
   return { coverage, issues };
@@ -574,6 +657,7 @@ function printHelp() {
       "    or by an intentional RUNTIME_CI_BROAD_SHARD_FILTERS entry",
       "  - broad CI shard filters resolve and do not match tests outside runtime CI ownership",
       "  - broad CI shard filter labels and filters exactly match the runtime proxy workflow matrix",
+      "  - duration weight hints resolve to broad runtime-stress tests",
       "",
       "This catches renamed tests, filter typos, workflow drift, and unclassified runtime proxy tests that would otherwise drift out of manifest-owned CI coverage.",
     ].join("\n") + "\n",
@@ -618,6 +702,7 @@ async function main() {
     [
       `runtime manifest guard: validated ${RUNTIME_CI_TEST_CASES.length} manifest cases`,
       `${RUNTIME_CI_BROAD_SHARD_FILTERS.length} broad shard filters`,
+      `${RUNTIME_STRESS_WEIGHT_HINTS.length} runtime stress weight hints`,
       `${parsedWorkflowFilters.filters.length} workflow shard filters`,
       `against ${cargoTestNames.length} cargo tests`,
       `(${coverage.runtimeProxyTestCount} main_internal_tests::runtime_proxy_ tests;`,
