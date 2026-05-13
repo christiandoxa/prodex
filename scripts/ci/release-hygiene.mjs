@@ -23,6 +23,12 @@ export const RELEASE_HYGIENE_POLICY = Object.freeze([
     selector: "range",
   },
   {
+    label: "release-changelog-coupling-guard",
+    command: "node",
+    script: "scripts/ci/release-changelog-coupling-guard.mjs",
+    selector: "range",
+  },
+  {
     label: "release-empty-commit-guard",
     command: "node",
     script: "scripts/ci/release-empty-commit-guard.mjs",

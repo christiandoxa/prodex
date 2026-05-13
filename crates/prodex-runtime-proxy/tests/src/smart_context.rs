@@ -7,6 +7,9 @@ mod golden;
 #[path = "smart_context/core_artifacts.rs"]
 mod core_artifacts;
 
+#[path = "smart_context/path_aliases.rs"]
+mod path_aliases;
+
 #[path = "smart_context/memory_budget.rs"]
 mod memory_budget;
 

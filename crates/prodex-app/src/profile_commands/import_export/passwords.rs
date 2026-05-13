@@ -16,9 +16,15 @@ pub(super) fn resolve_export_password_mode(args: &ExportProfileArgs) -> Result<b
         return Ok(false);
     }
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
-        return Ok(false);
+        bail!(
+            "non-interactive profile export requires --password-protect with {} set, or --no-password to write an unencrypted bundle",
+            PROFILE_EXPORT_PASSWORD_ENV
+        );
     }
-    prompt_yes_no("Password-protect export file? [y/N]: ", false)
+    prompt_yes_no(
+        "Password-protect export file containing profile tokens? [Y/n]: ",
+        true,
+    )
 }
 
 pub(super) fn resolve_export_password() -> Result<String> {

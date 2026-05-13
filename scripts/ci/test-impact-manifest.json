@@ -141,6 +141,7 @@
         "package-lock.json",
         "scripts/ci/ci-impact.mjs",
         "scripts/ci/ci-impact.test.mjs",
+        "scripts/ci/release-changelog-coupling-guard.mjs",
         "scripts/ci/release-duplicate-version-guard.mjs",
         "scripts/ci/release-empty-commit-guard.mjs",
         "scripts/ci/generated-metadata-clean.mjs",

@@ -4,6 +4,7 @@ mod probe_refresh;
 mod registry;
 mod scheduled_save;
 mod token_calibration_save;
+mod worker_spawn;
 
 pub(super) use probe_refresh::*;
 pub(super) use registry::*;

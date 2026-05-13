@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::{
@@ -11,6 +10,7 @@ use crate::{
     runtime_proxy_persistence_enabled, runtime_proxy_structured_log_message,
 };
 
+use super::super::worker_spawn::spawn_runtime_background_worker_or_panic;
 use super::{
     RUNTIME_SMART_CONTEXT_ARTIFACT_SAVE_DELAY_MS, RuntimeSmartContextArtifactSaveJob,
     RuntimeSmartContextArtifactSaveQueue, runtime_smart_context_artifact_save_worker_loop,
@@ -113,7 +113,11 @@ pub(crate) fn runtime_smart_context_artifact_save_queue()
             active: Arc::new(AtomicUsize::new(0)),
         });
         let worker_queue = Arc::clone(&queue);
-        thread::spawn(move || runtime_smart_context_artifact_save_worker_loop(worker_queue));
+        spawn_runtime_background_worker_or_panic(
+            "prodex-runtime-smart-context-artifact-save",
+            None,
+            move || runtime_smart_context_artifact_save_worker_loop(worker_queue),
+        );
         queue
     }))
 }

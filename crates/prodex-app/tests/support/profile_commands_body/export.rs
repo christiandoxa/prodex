@@ -218,6 +218,86 @@ fn profile_export_round_trip_encrypted_requires_matching_password() {
     );
 }
 
+#[test]
+fn profile_export_non_tty_without_flags_requires_explicit_password_mode() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-export-non-tty-default");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let _password_guard = TestEnvVarGuard::unset("PRODEX_PROFILE_EXPORT_PASSWORD");
+    seed_profile_export_state();
+    let output_path = sandbox_dir.path.join("bundle.json");
+
+    let err = handle_export_profiles(ExportProfileArgs {
+        profile: Vec::new(),
+        output: Some(output_path.clone()),
+        password_protect: false,
+        no_password: false,
+    })
+    .expect_err("non-interactive export without explicit mode should fail");
+
+    assert!(
+        err.to_string().contains(
+            "non-interactive profile export requires --password-protect with PRODEX_PROFILE_EXPORT_PASSWORD set, or --no-password"
+        ),
+        "unexpected error: {err:#}"
+    );
+    assert!(!output_path.exists());
+}
+
+#[test]
+fn profile_export_no_password_explicitly_writes_plain_bundle() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-export-no-password");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let _password_guard = TestEnvVarGuard::unset("PRODEX_PROFILE_EXPORT_PASSWORD");
+    seed_profile_export_state();
+    let output_path = sandbox_dir.path.join("bundle.json");
+
+    handle_export_profiles(ExportProfileArgs {
+        profile: Vec::new(),
+        output: Some(output_path.clone()),
+        password_protect: false,
+        no_password: true,
+    })
+    .expect("explicit plaintext export should succeed");
+
+    let envelope = read_profile_export_envelope_for_test(&output_path);
+    assert!(matches!(&envelope, ProfileExportEnvelope::Plain { .. }));
+    let decoded = prodex_profile_export::decode_profile_export_envelope(envelope, || {
+        unreachable!("plain export should not request a password")
+    })
+    .expect("plain export should decode");
+    assert_eq!(decoded.profiles.len(), 1);
+    assert_eq!(decoded.profiles[0].name, "main");
+}
+
+#[test]
+fn profile_export_password_protect_uses_env_password_in_non_tty() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-export-env-password");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let _password_guard = TestEnvVarGuard::set("PRODEX_PROFILE_EXPORT_PASSWORD", "secret-password");
+    seed_profile_export_state();
+    let output_path = sandbox_dir.path.join("bundle.json");
+
+    handle_export_profiles(ExportProfileArgs {
+        profile: Vec::new(),
+        output: Some(output_path.clone()),
+        password_protect: true,
+        no_password: false,
+    })
+    .expect("password-protected export should succeed with env password");
+
+    let envelope = read_profile_export_envelope_for_test(&output_path);
+    assert!(matches!(
+        &envelope,
+        ProfileExportEnvelope::Encrypted { .. }
+    ));
+    let decoded = prodex_profile_export::decode_profile_export_envelope(envelope, || {
+        Ok("secret-password".to_string())
+    })
+    .expect("encrypted export should decode with env password");
+    assert_eq!(decoded.profiles.len(), 1);
+    assert_eq!(decoded.profiles[0].name, "main");
+}
+
 #[cfg(unix)]
 #[test]
 fn profile_export_bundle_is_written_with_private_permissions() {
@@ -305,6 +385,34 @@ fn profile_import_copilot_reads_provider_metadata_from_logged_in_cli_state() {
         }
         other => panic!("expected copilot provider, got {other:?}"),
     }
+}
+
+fn seed_profile_export_state() {
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let main_home = paths.managed_profiles_root.join("main");
+    profile_commands_write_profile_auth(&main_home, "main");
+    AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("state should save");
+}
+
+fn read_profile_export_envelope_for_test(path: &Path) -> ProfileExportEnvelope {
+    serde_json::from_slice(
+        &fs::read(path).expect("profile export bundle should be readable"),
+    )
+    .expect("profile export bundle should parse")
 }
 
 #[test]

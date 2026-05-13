@@ -3,7 +3,6 @@ use std::sync::atomic::AtomicUsize;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
 
 use crate::{
     RUNTIME_CONTINUATION_JOURNAL_QUEUE_PRESSURE_THRESHOLD, RUNTIME_CONTINUATION_JOURNAL_SAVE_QUEUE,
@@ -11,6 +10,7 @@ use crate::{
     RUNTIME_STATE_SAVE_QUEUE_PRESSURE_THRESHOLD,
 };
 
+use super::super::worker_spawn::spawn_runtime_background_worker_or_panic;
 use super::{
     RuntimeContinuationJournalSaveQueue, RuntimeStateSaveQueue,
     runtime_continuation_journal_save_worker_loop, runtime_state_save_worker_loop,
@@ -24,7 +24,9 @@ pub(crate) fn runtime_state_save_queue() -> Arc<RuntimeStateSaveQueue> {
             active: Arc::new(AtomicUsize::new(0)),
         });
         let worker_queue = Arc::clone(&queue);
-        thread::spawn(move || runtime_state_save_worker_loop(worker_queue));
+        spawn_runtime_background_worker_or_panic("prodex-runtime-state-save", None, move || {
+            runtime_state_save_worker_loop(worker_queue)
+        });
         queue
     }))
 }
@@ -38,7 +40,11 @@ pub(crate) fn runtime_continuation_journal_save_queue() -> Arc<RuntimeContinuati
             active: Arc::new(AtomicUsize::new(0)),
         });
         let worker_queue = Arc::clone(&queue);
-        thread::spawn(move || runtime_continuation_journal_save_worker_loop(worker_queue));
+        spawn_runtime_background_worker_or_panic(
+            "prodex-runtime-continuation-journal-save",
+            None,
+            move || runtime_continuation_journal_save_worker_loop(worker_queue),
+        );
         queue
     }))
 }

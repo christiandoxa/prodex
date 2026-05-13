@@ -207,6 +207,9 @@ jobs:
       - name: Check CI impact classifier
         run: npm run ci:impact
 
+      - name: Check CI duration telemetry
+        run: node --test scripts/ci/github-job-durations.test.mjs
+
   supply-chain:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
@@ -816,14 +819,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          jobs_json="${RUNNER_TEMP}/ci-jobs.json"
           summary_path="${RUNNER_TEMP}/ci-job-durations.txt"
-          npm run ci:job-durations -- \
-            --run-id "${{ github.run_id }}" \
+          json_path="${RUNNER_TEMP}/ci-job-durations.json"
+          gh run view "${{ github.run_id }}" \
             --repo "${{ github.repository }}" \
             --attempt "${{ github.run_attempt }}" \
+            --json jobs > "${jobs_json}"
+          set +e
+          node scripts/ci/github-job-durations.mjs \
+            --max-wall-minutes 6 \
+            --max-runner-minutes 60 \
+            --run-id "${{ github.run_id }}" \
+            --exclude-name "CI duration telemetry" \
+            --limit 12 < "${jobs_json}" \
+            | tee "${summary_path}"
+          text_status="${PIPESTATUS[0]}"
+          node scripts/ci/github-job-durations.mjs \
+            --max-wall-minutes 6 \
+            --max-runner-minutes 60 \
+            --run-id "${{ github.run_id }}" \
             --exclude-name "CI duration telemetry" \
             --limit 12 \
-            | tee "${summary_path}"
+            --json < "${jobs_json}" > "${json_path}"
+          json_status="$?"
+          set -e
           {
             echo "### CI job durations"
             echo
@@ -831,3 +851,18 @@ jobs:
             cat "${summary_path}"
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${text_status}" -ne 0 ]; then
+            exit "${text_status}"
+          fi
+          exit "${json_status}"
+
+      - name: Upload CI duration telemetry
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-duration-telemetry
+          path: |
+            ${{ runner.temp }}/ci-job-durations.txt
+            ${{ runner.temp }}/ci-job-durations.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -69,6 +69,8 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
         suggest_policy: false,
         json: true,
+        bundle: None,
+        redacted: false,
     })));
     assert!(!should_emit_update_notice(&Commands::Audit(AuditArgs {
         tail: 20,
@@ -110,6 +112,8 @@ fn doctor_tail_bytes_cli_defaults_and_overrides() {
     assert_eq!(args.tail_bytes, RUNTIME_PROXY_DOCTOR_TAIL_BYTES);
     assert!(!args.repair_import_auth_journals);
     assert!(!args.suggest_policy);
+    assert!(args.bundle.is_none());
+    assert!(!args.redacted);
 
     let command = parse_cli_command_from([
         "prodex",
@@ -131,6 +135,17 @@ fn doctor_tail_bytes_cli_defaults_and_overrides() {
         parse_cli_command_from(["prodex", "doctor", "--suggest-policy"]).is_err(),
         "policy suggestions require --runtime"
     );
+    assert!(
+        parse_cli_command_from(["prodex", "doctor", "--bundle"]).is_err(),
+        "doctor bundle requires --redacted"
+    );
+    let command = parse_cli_command_from(["prodex", "doctor", "--bundle", "--redacted"])
+        .expect("redacted doctor bundle should parse");
+    let Commands::Doctor(args) = command else {
+        panic!("expected doctor command");
+    };
+    assert_eq!(args.bundle.as_deref(), Some(std::path::Path::new("-")));
+    assert!(args.redacted);
 }
 
 #[test]

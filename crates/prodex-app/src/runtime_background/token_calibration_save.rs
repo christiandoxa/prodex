@@ -1,4 +1,7 @@
-use super::{runtime_allocator_trim_best_effort, runtime_proxy_log_to_path};
+use super::{
+    runtime_allocator_trim_best_effort, runtime_proxy_log_to_path,
+    worker_spawn::spawn_runtime_background_worker_or_panic,
+};
 use anyhow::{Context, Result};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde::Serialize;
@@ -7,7 +10,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::thread;
 use std::time::{Duration, Instant};
 
 type RuntimeSmartContextTokenCalibrationSave =
@@ -80,9 +82,11 @@ fn runtime_smart_context_token_calibration_save_queue()
                 wake: Condvar::new(),
             });
             let worker_queue = Arc::clone(&queue);
-            thread::spawn(move || {
-                runtime_smart_context_token_calibration_save_worker_loop(worker_queue)
-            });
+            spawn_runtime_background_worker_or_panic(
+                "prodex-runtime-smart-context-token-calibration-save",
+                None,
+                move || runtime_smart_context_token_calibration_save_worker_loop(worker_queue),
+            );
             queue
         }),
     )

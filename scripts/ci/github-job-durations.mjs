@@ -2,9 +2,9 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_LIMIT = 10;
+export const DEFAULT_LIMIT = 10;
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
     excludeNames: [],
     json: false,
@@ -38,6 +38,16 @@ function parseArgs(argv) {
       args.excludeNames.push(requiredValue(argv[index], value));
       continue;
     }
+    if (value === "--max-wall-minutes") {
+      index += 1;
+      args.maxWallMs = parsePositiveMinutes(requiredValue(argv[index], value), value);
+      continue;
+    }
+    if (value === "--max-runner-minutes") {
+      index += 1;
+      args.maxRunnerMs = parsePositiveMinutes(requiredValue(argv[index], value), value);
+      continue;
+    }
     if (value === "--json") {
       args.json = true;
       continue;
@@ -67,6 +77,14 @@ function parsePositiveInt(value, name) {
   return result;
 }
 
+function parsePositiveMinutes(value, name) {
+  const result = Number(value);
+  if (!Number.isFinite(result) || result <= 0) {
+    throw new Error(`${name} must be a positive minute value`);
+  }
+  return Math.round(result * 60 * 1000);
+}
+
 function printHelp() {
   process.stdout.write(
     [
@@ -81,6 +99,8 @@ function printHelp() {
       "  --attempt <n>      Workflow run attempt. Defaults to GITHUB_RUN_ATTEMPT.",
       "  --limit <n>        Number of longest jobs to print. Defaults to 10.",
       "  --exclude-name <n> Exact job name to omit. Repeatable.",
+      "  --max-wall-minutes <n>   Fail when run wall time exceeds this budget.",
+      "  --max-runner-minutes <n> Fail when summed job runner time exceeds this budget.",
       "  --json             Print machine-readable summary.",
     ].join("\n") + "\n",
   );
@@ -134,7 +154,7 @@ function runGhView(args) {
   };
 }
 
-function parsePayload(input) {
+export function parsePayload(input) {
   const payload = JSON.parse(input);
   if (Array.isArray(payload)) {
     return { jobs: payload };
@@ -192,9 +212,58 @@ function stateCounts(jobs) {
   return Object.fromEntries([...counts.entries()].sort((left, right) => left[0].localeCompare(right[0])));
 }
 
-function summarize(payload, args) {
+function budgetCheck(metric, actualMs, limitMs) {
+  if (limitMs === undefined) {
+    return null;
+  }
+  if (actualMs === null) {
+    return {
+      metric,
+      status: "unavailable",
+      actualMs: null,
+      limitMs,
+      overMs: null,
+    };
+  }
+  const overMs = actualMs - limitMs;
+  return {
+    metric,
+    status: overMs > 0 ? "exceeded" : "ok",
+    actualMs,
+    limitMs,
+    overMs: Math.max(0, overMs),
+  };
+}
+
+export function evaluateBudget(summary, args) {
+  const checks = [
+    budgetCheck("wall", summary.wall ? summary.wall.durationMs : null, args.maxWallMs),
+    budgetCheck("runner", summary.runnerMs, args.maxRunnerMs),
+  ].filter(Boolean);
+
+  if (checks.length === 0) {
+    return null;
+  }
+
+  let status = "ok";
+  if (checks.some((check) => check.status === "exceeded")) {
+    status = "exceeded";
+  } else if (checks.some((check) => check.status === "unavailable")) {
+    status = "unavailable";
+  }
+
+  return {
+    status,
+    checks,
+  };
+}
+
+export function budgetExceeded(summary) {
+  return summary.budget?.status === "exceeded";
+}
+
+export function summarize(payload, args, now = new Date()) {
   const excluded = new Set(args.excludeNames);
-  const now = new Date();
   const jobs = payload.jobs
     .map((job, index) => normalizeJob(job, index, now))
     .filter((job) => !excluded.has(job.name));
@@ -210,7 +279,7 @@ function summarize(payload, args) {
   const wallMs = wallStartMs !== null && wallEndMs !== null ? Math.max(0, wallEndMs - wallStartMs) : null;
   const runnerMs = timedJobs.reduce((total, job) => total + job.durationMs, 0);
 
-  return {
+  const summary = {
     generatedAt: formatIso(now),
     totalJobs: jobs.length,
     timedJobs: timedJobs.length,
@@ -227,9 +296,12 @@ function summarize(payload, args) {
     states: stateCounts(jobs),
     longestJobs,
   };
+
+  summary.budget = evaluateBudget(summary, args);
+  return summary;
 }
 
-function formatDuration(durationMs) {
+export function formatDuration(durationMs) {
   const totalSeconds = Math.round(durationMs / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -250,6 +322,16 @@ function formatStateCounts(states) {
     .join(", ");
 }
 
+function formatBudgetCheck(check) {
+  if (check.status === "unavailable") {
+    return `- ${check.metric}: unavailable (budget ${formatDuration(check.limitMs)})`;
+  }
+  if (check.status === "exceeded") {
+    return `- ${check.metric}: ${formatDuration(check.actualMs)} exceeds budget ${formatDuration(check.limitMs)} by ${formatDuration(check.overMs)}`;
+  }
+  return `- ${check.metric}: ${formatDuration(check.actualMs)} within budget ${formatDuration(check.limitMs)}`;
+}
+
 function printSummary(summary, runId) {
   const label = runId ? `run ${runId}` : "run";
   process.stdout.write(`${label}: ${summary.timedJobs}/${summary.totalJobs} timed job(s)\n`);
@@ -266,6 +348,12 @@ function printSummary(summary, runId) {
   process.stdout.write(`states: ${formatStateCounts(summary.states) || "none"}\n`);
   if (summary.untimedJobs > 0 || summary.runningJobs > 0) {
     process.stdout.write(`untimed jobs: ${summary.untimedJobs}; running jobs sampled: ${summary.runningJobs}\n`);
+  }
+  if (summary.budget) {
+    process.stdout.write(`budget: ${summary.budget.status}\n`);
+    for (const check of summary.budget.checks) {
+      process.stdout.write(`${formatBudgetCheck(check)}\n`);
+    }
   }
 
   process.stdout.write(`longest jobs (${summary.longestJobs.length}):\n`);
@@ -295,10 +383,16 @@ async function main() {
 
   if (args.json) {
     process.stdout.write(`${JSON.stringify({ runId, ...summary }, null, 2)}\n`);
+    if (budgetExceeded(summary)) {
+      process.exitCode = 1;
+    }
     return;
   }
 
   printSummary(summary, runId);
+  if (budgetExceeded(summary)) {
+    process.exitCode = 1;
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

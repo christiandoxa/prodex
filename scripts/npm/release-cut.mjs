@@ -265,6 +265,11 @@ async function runReleaseMetadataGuards(version) {
     "--message",
     subject,
   ]);
+  await runNodeScript("release-changelog-coupling-staged", "scripts/ci/release-changelog-coupling-guard.mjs", [
+    "--staged",
+    "--message",
+    subject,
+  ]);
   await runNodeScript("release-empty-commit-staged", "scripts/ci/release-empty-commit-guard.mjs", [
     "--staged",
     "--message",

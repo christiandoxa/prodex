@@ -9,6 +9,7 @@ test("release hygiene policy keeps ordered mandatory guards and fixtures", () =>
       "changelog-noise-guard",
       "release-metadata-only-guard",
       "version-metadata-release-guard",
+      "release-changelog-coupling-guard",
       "release-empty-commit-guard",
       "release-duplicate-version-guard",
       "release-tag-changelog-guard",
@@ -45,6 +46,17 @@ test("release hygiene selector args are mapped by guard type", () => {
       args: ["scripts/ci/version-metadata-release-guard.mjs", "--base", "base-sha", "--head", "head-sha"],
     },
     {
+      label: "release-changelog-coupling-guard",
+      command: "node",
+      args: [
+        "scripts/ci/release-changelog-coupling-guard.mjs",
+        "--base",
+        "base-sha",
+        "--head",
+        "head-sha",
+      ],
+    },
+    {
       label: "release-empty-commit-guard",
       command: "node",
       args: ["scripts/ci/release-empty-commit-guard.mjs", "--base", "base-sha", "--head", "head-sha"],
@@ -61,4 +73,3 @@ test("release hygiene selector args are mapped by guard type", () => {
     },
   ]);
 });
-

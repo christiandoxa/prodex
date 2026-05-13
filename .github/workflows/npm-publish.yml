@@ -369,3 +369,83 @@ jobs:
               --notes-file "${notes_file}" \
               --latest
           fi
+
+  publish-duration-telemetry:
+    name: Publish duration telemetry
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - publish-npm
+      - sync-release-docs
+      - publish-github-release
+    if: ${{ always() }}
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Summarize publish job durations
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jobs_json="${RUNNER_TEMP}/publish-jobs.json"
+          summary_path="${RUNNER_TEMP}/publish-job-durations.txt"
+          json_path="${RUNNER_TEMP}/publish-job-durations.json"
+          gh run view "${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --attempt "${{ github.run_attempt }}" \
+            --json jobs > "${jobs_json}"
+          set +e
+          node scripts/ci/github-job-durations.mjs \
+            --max-wall-minutes 12 \
+            --max-runner-minutes 40 \
+            --run-id "${{ github.run_id }}" \
+            --exclude-name "Publish duration telemetry" \
+            --limit 12 < "${jobs_json}" \
+            | tee "${summary_path}"
+          text_status="${PIPESTATUS[0]}"
+          node scripts/ci/github-job-durations.mjs \
+            --max-wall-minutes 12 \
+            --max-runner-minutes 40 \
+            --run-id "${{ github.run_id }}" \
+            --exclude-name "Publish duration telemetry" \
+            --limit 12 \
+            --json < "${jobs_json}" > "${json_path}"
+          json_status="$?"
+          set -e
+          {
+            echo "### Publish job durations"
+            echo
+            echo '```text'
+            cat "${summary_path}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${text_status}" -ne 0 ]; then
+            exit "${text_status}"
+          fi
+          exit "${json_status}"
+
+      - name: Upload publish duration telemetry
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: publish-duration-telemetry
+          path: |
+            ${{ runner.temp }}/publish-job-durations.txt
+            ${{ runner.temp }}/publish-job-durations.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -99,6 +99,95 @@ fn doctor_warns_and_repairs_orphan_profile_import_auth_journals() {
 }
 
 #[test]
+fn doctor_bundle_writes_redacted_json_without_auth_secret_leakage() {
+    let fixture = setup_fixture();
+    let runtime_log_dir = fixture._temp_dir.path.join("runtime-logs");
+    fs::create_dir_all(&runtime_log_dir).expect("runtime log dir should be created");
+
+    let access_token = "fixture_bundle_access_token_notreal_12345";
+    let refresh_token = "fixture_bundle_refresh_token_notreal_12345";
+    let bearer_token = "fixture_bundle_bearer_token_notreal_12345";
+    let account_id = "acct_fixture_bundle_secret_12345";
+    let api_key = "sk-proj-fixture-bundle-notreal-123456789";
+    write_json(
+        &fixture.main_home.join("auth.json"),
+        &json!({
+            "tokens": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "account_id": account_id
+            }
+        }),
+    );
+
+    let runtime_log_path = runtime_log_dir.join("prodex-runtime-bundle-test.log");
+    fs::write(
+        &runtime_log_path,
+        format!(
+            "[2026-05-13T00:00:00Z] runtime_proxy_queue_overloaded lane=responses access_token={access_token} authorization=\"Bearer {bearer_token}\" account_id={account_id} api_key={api_key}\n"
+        ),
+    )
+    .expect("runtime log should be written");
+    fs::write(
+        runtime_log_dir.join("prodex-runtime-latest.path"),
+        format!("{}\n", runtime_log_path.display()),
+    )
+    .expect("runtime log pointer should be written");
+
+    let bundle_path = fixture._temp_dir.path.join("prodex-doctor.json");
+    let bundle_path_arg = bundle_path.display().to_string();
+    let runtime_log_dir_arg = runtime_log_dir.display().to_string();
+    let output = run_prodex_with_env(
+        &fixture,
+        &["doctor", "--bundle", bundle_path_arg.as_str(), "--redacted"],
+        &[("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str())],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let bundle_text = fs::read_to_string(&bundle_path).expect("doctor bundle should be written");
+    let bundle: Value =
+        serde_json::from_str(&bundle_text).expect("doctor bundle should parse as JSON");
+
+    assert_eq!(bundle["bundle"]["redacted"].as_bool(), Some(true));
+    assert_eq!(
+        bundle["runtime"]["marker_counts"]["runtime_proxy_queue_overloaded"].as_u64(),
+        Some(1)
+    );
+    assert!(
+        bundle["prodex"]["version"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
+        "bundle should include prodex version"
+    );
+    assert!(
+        bundle["profiles"]["items"]
+            .as_array()
+            .is_some_and(|profiles| profiles.iter().any(|profile| profile["name"] == "main")),
+        "bundle should include profile summaries"
+    );
+    assert!(
+        bundle_text.contains("<redacted>"),
+        "bundle should contain redaction markers: {bundle_text}"
+    );
+    for secret in [
+        access_token,
+        refresh_token,
+        bearer_token,
+        account_id,
+        api_key,
+    ] {
+        assert!(
+            !bundle_text.contains(secret),
+            "doctor bundle leaked secret {secret}: {bundle_text}"
+        );
+    }
+}
+
+#[test]
 fn quota_raw_uses_builtin_usage_client() {
     let fixture = setup_fixture();
 

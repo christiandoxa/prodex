@@ -135,7 +135,7 @@ prodex profile import backup.json
 prodex profile remove --all
 ```
 
-`prodex profile export` exports all configured profiles by default and asks whether the bundle should use optional password protection.
+`prodex profile export` exports all configured profiles by default and asks whether to password-protect the bundle, defaulting to protected. In non-interactive use, pass `--password-protect` with `PRODEX_PROFILE_EXPORT_PASSWORD` set, or pass `--no-password` to explicitly write an unencrypted bundle.
 
 `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow. `prodex run`, `prodex login`, and `prodex logout` still target OpenAI/Codex profiles only, while `prodex quota` can inspect Copilot provider quota data through the Copilot CLI account API. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not quota-compatible in Prodex.
 
@@ -244,6 +244,7 @@ prodex context compress ~/.codex/AGENTS.md --dry-run
 prodex doctor --quota
 prodex doctor --runtime
 prodex doctor --runtime --json
+prodex doctor --bundle ./prodex-doctor.json --redacted
 ```
 
 If you see `409 stale_continuation`, Prodex found continuation state for the request but could not safely replay it as a fresh turn on a different profile. That is deliberate: the missing or stale binding may still belong to a specific profile, session, or tool-output chain, and replaying it elsewhere can break the conversation. Start a new prompt, or return to the same session/profile if the original continuation is still available.
@@ -258,6 +259,7 @@ tail -n 200 "$(prodex doctor --runtime --json | jq -r '.log_path')"
 
 The default runtime log directory is the OS temp directory, usually `/tmp` on Linux, but `PRODEX_RUNTIME_LOG_DIR` or `runtime.log_dir` in `policy.toml` can override it.
 Use `prodex doctor --runtime --json` to find the active `log_path`, resolved `runtime_logs.directory`, and live broker metrics before tailing files.
+Use `prodex doctor --bundle ./prodex-doctor.json --redacted` when sharing diagnostics; the bundle includes version, policy/config, profile, and runtime-log summaries without auth tokens or headers.
 
 Prodex also schedules non-blocking automatic housekeeping for stale runtime logs, temp login homes, stale root temp files, and dead broker artifacts. Use `prodex cleanup` when you want a manual cleanup that also clears transient runtime cache files, collapses duplicate profiles that point at the same OpenAI workspace identity into one surviving profile, and removes old orphaned managed profile homes that are no longer tracked. Orphaned managed profile homes use a conservative 7-day threshold by default; override that explicitly with `prodex cleanup --older-than 1d` or `prodex cleanup --aggressive` when you want faster reclaim. Codex and Claude chat histories are left to the upstream runtimes.
 
@@ -298,6 +300,7 @@ Current hardening includes:
 - a stable broker metrics JSON endpoint at `/__prodex/runtime/metrics`
 - a Prometheus broker metrics endpoint at `/__prodex/runtime/metrics/prometheus`
 - `prodex info` and `prodex doctor --runtime --json` surfacing live metrics targets and the selected secret backend
+- `prodex doctor --bundle PATH --redacted` for shareable local diagnostics without stored auth tokens
 - enterprise audit logging for profile, rotation, and admin events, separate from runtime session output and discoverable through `prodex info` or `prodex doctor --runtime --json`
 - `prodex audit` for browsing the local append-only audit log without touching runtime proxy behavior
 

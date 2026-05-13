@@ -47,9 +47,11 @@ pub struct ExportProfileArgs {
     #[arg(value_name = "PATH")]
     pub output: Option<PathBuf>,
     /// Protect the export bundle with a password.
+    ///
+    /// In non-interactive use, set PRODEX_PROFILE_EXPORT_PASSWORD.
     #[arg(long, conflicts_with = "no_password")]
     pub password_protect: bool,
-    /// Export without password protection and skip the interactive prompt.
+    /// Explicitly export without password protection and skip the interactive prompt.
     #[arg(long)]
     pub no_password: bool,
 }

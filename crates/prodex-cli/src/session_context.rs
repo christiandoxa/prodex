@@ -100,6 +100,18 @@ pub struct DoctorArgs {
     /// Emit machine-readable JSON output. Supported together with --runtime.
     #[arg(long)]
     pub json: bool,
+    /// Emit a redacted diagnostic bundle as JSON. Omit PATH or use '-' for stdout.
+    #[arg(
+        long,
+        value_name = "PATH",
+        num_args = 0..=1,
+        default_missing_value = "-",
+        requires = "redacted"
+    )]
+    pub bundle: Option<PathBuf>,
+    /// Required for --bundle; secret values are never emitted.
+    #[arg(long, requires = "bundle")]
+    pub redacted: bool,
 }
 
 #[derive(Args, Debug)]

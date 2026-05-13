@@ -116,7 +116,8 @@ Examples:
   prodex doctor
   prodex doctor --quota
   prodex doctor --runtime
-  prodex doctor --runtime --json";
+  prodex doctor --runtime --json
+  prodex doctor --bundle ./prodex-doctor.json --redacted";
 pub const CLI_AUDIT_AFTER_HELP: &str = "\
 Examples:
   prodex audit

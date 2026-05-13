@@ -204,6 +204,42 @@ async function buildFixtures(fixtureRoot) {
     "fix(changelog): omit internal maintenance",
   );
 
+  const splitChangelogBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
+  await writeFile(
+    fixtureRoot,
+    "Cargo.toml",
+    [
+      "[package]",
+      'name = "prodex-fixture"',
+      'version = "0.2.1"',
+      'edition = "2024"',
+      "",
+      "[dependencies]",
+      'tokio = "1.52.3"',
+      "",
+    ].join("\n"),
+  );
+  const splitVersionRelease = await commit(fixtureRoot, "chore(release): release 0.2.1");
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.2.1 - 2026-01-02\n\n- Split release marker.\n");
+  const splitChangelogRelease = await commit(fixtureRoot, "chore(release): release 0.2.1");
+
+  await writeFile(
+    fixtureRoot,
+    "Cargo.toml",
+    [
+      "[package]",
+      'name = "prodex-fixture"',
+      'version = "0.2.2"',
+      'edition = "2024"',
+      "",
+      "[dependencies]",
+      'tokio = "1.52.3"',
+      "",
+    ].join("\n"),
+  );
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.2.2 - 2026-01-02\n\n- Coupled release marker.\n");
+  const coupledRelease = await commit(fixtureRoot, "chore(release): release 0.2.2");
+
   const duplicateBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
   await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.3.0 - 2026-01-02\n\n- First release marker.\n");
   const duplicateOne = await commit(fixtureRoot, "chore(release): release 0.3.0");
@@ -291,6 +327,25 @@ async function buildFixtures(fixtureRoot) {
       script: "changelog-noise-guard.mjs",
       args: ["--commit", changelogGeneratorDrift],
       expectedExit: 1,
+    },
+    {
+      name: "split release version metadata fails changelog coupling guard",
+      script: "release-changelog-coupling-guard.mjs",
+      args: ["--commit", splitVersionRelease],
+      expectedExit: 1,
+    },
+    {
+      name: "split release range fails changelog coupling guard",
+      script: "release-changelog-coupling-guard.mjs",
+      args: ["--range", `${splitChangelogBase}..${splitChangelogRelease}`],
+      expectedExit: 1,
+      dependsOn: [splitVersionRelease],
+    },
+    {
+      name: "coupled release version and changelog passes changelog coupling guard",
+      script: "release-changelog-coupling-guard.mjs",
+      args: ["--commit", coupledRelease],
+      expectedExit: 0,
     },
     {
       name: "duplicate release range fails duplicate guard",
