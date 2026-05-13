@@ -137,12 +137,6 @@ pub(super) struct RuntimeSmartContextScoredExactAppendixRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RuntimeSmartContextSeenExactAppendixBody {
-    pub(super) body: String,
-    pub(super) refs: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RuntimeSmartContextArtifactAlias {
     pub(super) id: String,
     pub(super) alias: String,

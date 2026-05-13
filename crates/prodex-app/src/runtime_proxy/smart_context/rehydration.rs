@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub(super) fn runtime_smart_context_try_surgical_rehydrate_critical_ranges(
     value: &serde_json::Value,
@@ -296,25 +296,22 @@ pub(super) fn runtime_smart_context_render_exact_appendix(
     label: &str,
     ranges: Vec<RuntimeSmartContextExactAppendixRange>,
 ) -> Option<(String, usize)> {
-    let range_count = ranges
-        .iter()
-        .filter(|range| !range.body.trim().is_empty())
-        .count();
-    if range_count == 0 {
-        return None;
-    }
-    let mut rendered = vec![label.to_string()];
-    let mut seen =
-        BTreeMap::<(String, usize), Vec<RuntimeSmartContextSeenExactAppendixBody>>::new();
-    for range in runtime_smart_context_merge_exact_appendix_ranges(ranges) {
-        if range.body.trim().is_empty() {
-            continue;
-        }
-        rendered.push(runtime_smart_context_render_exact_appendix_range(
-            &range, &mut seen,
-        ));
-    }
-    Some((rendered.join("\n"), range_count))
+    runtime_proxy_crate::smart_context_render_exact_appendix(
+        label,
+        ranges
+            .into_iter()
+            .map(
+                |range| runtime_proxy_crate::SmartContextExactAppendixRange {
+                    reference: range.reference,
+                    body: range.body,
+                },
+            )
+            .collect(),
+    )
+}
+
+pub(super) fn runtime_smart_context_compact_line_refs_if_shorter(refs: &[String]) -> String {
+    runtime_proxy_crate::smart_context_compact_line_refs_if_shorter(refs)
 }
 
 pub(super) fn runtime_smart_context_render_scored_exact_appendix(
@@ -463,151 +460,6 @@ pub(super) fn runtime_smart_context_consume_rehydrate_budget(
     if *remaining_tokens != usize::MAX {
         *remaining_tokens = remaining_tokens.saturating_sub(used_tokens);
     }
-}
-
-fn runtime_smart_context_merge_exact_appendix_ranges(
-    ranges: Vec<RuntimeSmartContextExactAppendixRange>,
-) -> Vec<RuntimeSmartContextExactAppendixRange> {
-    let mut merged = Vec::<RuntimeSmartContextExactAppendixRange>::new();
-    for range in ranges {
-        let Some((range_base, range_lines)) =
-            runtime_smart_context_parse_artifact_line_ref(&range.reference)
-        else {
-            merged.push(range);
-            continue;
-        };
-        let Some(last) = merged.last_mut() else {
-            merged.push(range);
-            continue;
-        };
-        let Some((last_base, last_lines)) =
-            runtime_smart_context_parse_artifact_line_ref(&last.reference)
-        else {
-            merged.push(range);
-            continue;
-        };
-        if last_base != range_base
-            || range_lines.start > last_lines.end.saturating_add(1)
-            || range_lines.end < last_lines.start
-        {
-            merged.push(range);
-            continue;
-        }
-
-        let overlap = if range_lines.start <= last_lines.end {
-            last_lines
-                .end
-                .saturating_sub(range_lines.start)
-                .saturating_add(1)
-        } else {
-            0
-        };
-        let next_line_count = range.body.lines().count();
-        if overlap >= next_line_count && range_lines.end > last_lines.end {
-            merged.push(range);
-            continue;
-        }
-        let next_lines = range.body.lines().collect::<Vec<_>>();
-        if overlap < next_lines.len() {
-            if !last.body.is_empty() {
-                last.body.push('\n');
-            }
-            last.body.push_str(&next_lines[overlap..].join("\n"));
-        }
-        let end = last_lines.end.max(range_lines.end);
-        last.reference = format!("{last_base}#L{}-L{end}", last_lines.start);
-    }
-    merged
-}
-
-fn runtime_smart_context_parse_artifact_line_ref(
-    reference: &str,
-) -> Option<(String, RuntimeSmartContextLineRange)> {
-    let (base, range) = reference.rsplit_once("#L")?;
-    let (start, end) = range.split_once("-L")?;
-    Some((
-        base.to_string(),
-        RuntimeSmartContextLineRange {
-            start: start.parse().ok()?,
-            end: end.parse().ok()?,
-        },
-    ))
-}
-
-pub(super) fn runtime_smart_context_compact_line_refs_if_shorter(refs: &[String]) -> String {
-    let joined = refs.join(",");
-    let Some((base, ranges)) = runtime_smart_context_line_refs_same_base(refs) else {
-        return joined;
-    };
-    if ranges.len() < 2 {
-        return joined;
-    }
-    let compact = format!(
-        "{base}#{}",
-        ranges
-            .iter()
-            .map(|range| format!("L{}-L{}", range.start, range.end))
-            .collect::<Vec<_>>()
-            .join(",")
-    );
-    if compact.len() < joined.len()
-        && runtime_smart_context_parse_non_alias_artifact_reference(&compact)
-            .is_some_and(|reference| reference.line_ranges.len() == ranges.len())
-    {
-        compact
-    } else {
-        joined
-    }
-}
-
-fn runtime_smart_context_line_refs_same_base(
-    refs: &[String],
-) -> Option<(String, Vec<RuntimeSmartContextLineRange>)> {
-    let mut base: Option<String> = None;
-    let mut ranges = Vec::new();
-    for reference in refs {
-        let (next_base, range) = runtime_smart_context_parse_artifact_line_ref(reference)?;
-        if let Some(base) = base.as_ref() {
-            if base != &next_base {
-                return None;
-            }
-        } else {
-            base = Some(next_base);
-        }
-        ranges.push(range);
-    }
-    Some((base?, ranges))
-}
-
-fn runtime_smart_context_render_exact_appendix_range(
-    range: &RuntimeSmartContextExactAppendixRange,
-    seen: &mut BTreeMap<(String, usize), Vec<RuntimeSmartContextSeenExactAppendixBody>>,
-) -> String {
-    let content_hash = runtime_proxy_crate::smart_context_hash_text(&range.body);
-    let byte_len = range.body.len();
-    let key = (content_hash.clone(), byte_len);
-    if let Some(entries) = seen.get_mut(&key)
-        && let Some(existing) = entries.iter_mut().find(|entry| entry.body == range.body)
-    {
-        let marker = format!(
-            "[psc exdup h={content_hash} b={byte_len} refs={}]",
-            runtime_smart_context_compact_line_refs_if_shorter(&existing.refs)
-        );
-        let candidate = format!("{}\n{marker}", range.reference);
-        let original = format!("{}\n{}", range.reference, range.body);
-        existing.refs.push(range.reference.clone());
-        if candidate.len() < original.len() {
-            return candidate;
-        }
-        return original;
-    }
-    seen.entry(key)
-        .or_default()
-        .push(RuntimeSmartContextSeenExactAppendixBody {
-            body: range.body.clone(),
-            refs: vec![range.reference.clone()],
-        });
-    format!("{}\n{}", range.reference, range.body)
 }
 
 pub(super) fn runtime_smart_context_labeled_section_body<'a>(

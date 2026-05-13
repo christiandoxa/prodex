@@ -10,6 +10,9 @@ mod core_artifacts;
 #[path = "smart_context/memory_budget.rs"]
 mod memory_budget;
 
+#[path = "smart_context/rehydration.rs"]
+mod rehydration;
+
 #[path = "smart_context/token_accounting.rs"]
 mod token_accounting;
 
