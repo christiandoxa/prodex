@@ -150,6 +150,9 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Enforce churn hygiene
         shell: bash
         run: |
@@ -203,6 +206,12 @@ jobs:
 
       - name: Enforce crate boundaries
         run: npm run ci:crate-boundary
+
+      - name: Enforce dependency duplicate budget
+        run: npm run ci:dependency-duplicates
+
+      - name: Check dependency duplicate budget fixtures
+        run: npm run ci:dependency-duplicates-fixtures
 
       - name: Check CI impact classifier
         run: npm run ci:impact
