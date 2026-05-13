@@ -161,7 +161,227 @@ function printHelp() {
   );
 }
 
-function rustFileKind(filePath) {
+function isSourceRustPath(filePath) {
+  return filePath.startsWith("src/") || filePath.includes("/src/");
+}
+
+function skipWhitespaceAndComments(contents, startIndex) {
+  let index = startIndex;
+  while (index < contents.length) {
+    const character = contents[index];
+    if (
+      character === " " ||
+      character === "\t" ||
+      character === "\n" ||
+      character === "\r" ||
+      character === "\f"
+    ) {
+      index += 1;
+      continue;
+    }
+
+    if (contents.startsWith("//", index)) {
+      const lineEnd = contents.indexOf("\n", index + 2);
+      index = lineEnd < 0 ? contents.length : lineEnd + 1;
+      continue;
+    }
+
+    if (contents.startsWith("/*", index)) {
+      const end = blockCommentEnd(contents, index);
+      index = end ?? contents.length;
+      continue;
+    }
+
+    break;
+  }
+  return index;
+}
+
+function blockCommentEnd(contents, startIndex) {
+  let depth = 1;
+  let index = startIndex + 2;
+  while (index < contents.length) {
+    if (contents.startsWith("/*", index)) {
+      depth += 1;
+      index += 2;
+      continue;
+    }
+    if (contents.startsWith("*/", index)) {
+      depth -= 1;
+      index += 2;
+      if (depth === 0) {
+        return index;
+      }
+      continue;
+    }
+    index += 1;
+  }
+  return null;
+}
+
+function rustAttributeEnd(contents, startIndex) {
+  if (contents[startIndex] !== "#") {
+    return null;
+  }
+  let index = startIndex + 1;
+  if (contents[index] === "!") {
+    index += 1;
+  }
+  if (contents[index] !== "[") {
+    return null;
+  }
+
+  let depth = 1;
+  index += 1;
+  while (index < contents.length) {
+    if (contents[index] === "[") {
+      depth += 1;
+    } else if (contents[index] === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+    }
+    index += 1;
+  }
+  return null;
+}
+
+function rawStringLiteralEnd(contents, startIndex) {
+  let index = startIndex;
+  if (contents.startsWith("br", index)) {
+    index += 2;
+  } else if (contents[index] === "r") {
+    index += 1;
+  } else {
+    return null;
+  }
+
+  let hashCount = 0;
+  while (contents[index] === "#") {
+    hashCount += 1;
+    index += 1;
+  }
+  if (contents[index] !== '"') {
+    return null;
+  }
+
+  const terminator = '"' + "#".repeat(hashCount);
+  const end = contents.indexOf(terminator, index + 1);
+  return end < 0 ? contents.length : end + terminator.length;
+}
+
+function stringLiteralEnd(contents, startIndex) {
+  let index = contents.startsWith('b"', startIndex) ? startIndex + 2 : startIndex + 1;
+  while (index < contents.length) {
+    if (contents[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (contents[index] === '"') {
+      return index + 1;
+    }
+    index += 1;
+  }
+  return contents.length;
+}
+
+function charLiteralEnd(contents, startIndex) {
+  let index = contents.startsWith("b'", startIndex) ? startIndex + 2 : startIndex + 1;
+  while (index < contents.length && index <= startIndex + 12) {
+    if (contents[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (contents[index] === "'") {
+      return index + 1;
+    }
+    if (contents[index] === "\n" || contents[index] === "\r") {
+      return null;
+    }
+    index += 1;
+  }
+  return null;
+}
+
+function matchingBraceEnd(contents, openBraceIndex) {
+  let depth = 0;
+  let index = openBraceIndex;
+  while (index < contents.length) {
+    if (contents.startsWith("//", index)) {
+      const lineEnd = contents.indexOf("\n", index + 2);
+      index = lineEnd < 0 ? contents.length : lineEnd + 1;
+      continue;
+    }
+
+    if (contents.startsWith("/*", index)) {
+      const end = blockCommentEnd(contents, index);
+      index = end ?? contents.length;
+      continue;
+    }
+
+    const rawStringEnd = rawStringLiteralEnd(contents, index);
+    if (rawStringEnd !== null) {
+      index = rawStringEnd;
+      continue;
+    }
+
+    if (contents[index] === '"' || contents.startsWith('b"', index)) {
+      index = stringLiteralEnd(contents, index);
+      continue;
+    }
+
+    if (contents[index] === "'" || contents.startsWith("b'", index)) {
+      const end = charLiteralEnd(contents, index);
+      if (end !== null) {
+        index = end;
+        continue;
+      }
+    }
+
+    if (contents[index] === "{") {
+      depth += 1;
+    } else if (contents[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+    }
+    index += 1;
+  }
+  return null;
+}
+
+function isFullFileCfgTestModule(contents) {
+  let index = skipWhitespaceAndComments(contents, 0);
+  const cfgTestMatch = /^#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/.exec(contents.slice(index));
+  if (!cfgTestMatch) {
+    return false;
+  }
+
+  index += cfgTestMatch[0].length;
+  index = skipWhitespaceAndComments(contents, index);
+  while (contents[index] === "#") {
+    const attributeEnd = rustAttributeEnd(contents, index);
+    if (attributeEnd === null) {
+      return false;
+    }
+    index = skipWhitespaceAndComments(contents, attributeEnd);
+  }
+
+  const moduleMatch = /^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{/.exec(
+    contents.slice(index),
+  );
+  if (!moduleMatch) {
+    return false;
+  }
+
+  const openBraceIndex = index + moduleMatch[0].lastIndexOf("{");
+  const moduleEnd = matchingBraceEnd(contents, openBraceIndex);
+  return moduleEnd !== null && skipWhitespaceAndComments(contents, moduleEnd) === contents.length;
+}
+
+function rustFileKind(filePath, contents = "") {
   const normalized = normalizeGitPath(filePath);
   if (
     normalized.startsWith("tests/") ||
@@ -169,6 +389,9 @@ function rustFileKind(filePath) {
     normalized.startsWith("benches/") ||
     normalized.includes("/benches/")
   ) {
+    return "test";
+  }
+  if (isSourceRustPath(normalized) && isFullFileCfgTestModule(contents)) {
     return "test";
   }
   return "production";
@@ -295,7 +518,7 @@ async function scan(args) {
       continue;
     }
 
-    const kind = rustFileKind(filePath);
+    const kind = rustFileKind(filePath, contents);
     const lineCount = countLines(contents);
     const limit = kind === "test" ? args.testLineLimit : args.productionLineLimit;
     const file = { filePath, kind, lineCount, limit };

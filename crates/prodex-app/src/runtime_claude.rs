@@ -1,11 +1,12 @@
 use super::*;
 
 mod config;
+#[cfg(test)]
 mod models;
 mod state_merge;
 
 pub(super) use self::config::*;
-#[allow(unused_imports)]
+#[cfg(test)]
 pub(super) use self::models::*;
 pub(super) use self::state_merge::*;
 

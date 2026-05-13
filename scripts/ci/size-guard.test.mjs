@@ -32,6 +32,12 @@ async function writeLines(root, relativePath, lineCount) {
   await fs.writeFile(filePath, Array.from({ length: lineCount }, (_, index) => `// ${index}`).join("\n") + "\n");
 }
 
+async function writeText(root, relativePath, contents) {
+  const filePath = path.join(root, relativePath);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, contents);
+}
+
 test("default ratchets match checked-in size thresholds", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-size-guard-"));
   try {
@@ -56,6 +62,153 @@ test("default ratchets match checked-in size thresholds", async () => {
       maxNearLimitSiblings: 2,
       nearLimitFiles: 4,
     });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("full-file cfg(test) modules under src use the test line limit", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-size-guard-"));
+  try {
+    await execFileAsync("git", ["init", "-q"], { cwd: root });
+    await writeText(
+      root,
+      "src/full_file_tests.rs",
+      [
+        "// test-only source module",
+        "#[cfg(test)]",
+        "mod tests {",
+        "    #[test]",
+        "    fn ignores_braces_in_strings() {",
+        '        assert_eq!("{", "{");',
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runNode(
+      [
+        SCRIPT_PATH,
+        "--production-lines",
+        "5",
+        "--test-lines",
+        "10",
+        "--cohesion-lines",
+        "4",
+        "--near-limit-files",
+        "10",
+        "--json",
+      ],
+      { env: { ...process.env, PRODEX_REPO_ROOT: root } },
+    );
+
+    assert.equal(result.code, 0);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.files.length, 1);
+    assert.equal(payload.files[0].filePath, "src/full_file_tests.rs");
+    assert.equal(payload.files[0].kind, "test");
+    assert.equal(payload.files[0].limit, 10);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("production files with cfg(test) blocks under src keep the production line limit", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-size-guard-"));
+  try {
+    await execFileAsync("git", ["init", "-q"], { cwd: root });
+    await writeText(
+      root,
+      "src/mixed.rs",
+      [
+        "pub fn production() -> bool {",
+        "    true",
+        "}",
+        "",
+        "#[cfg(test)]",
+        "mod tests {",
+        "    #[test]",
+        "    fn uses_production_code() {",
+        "        assert!(super::production());",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runNode(
+      [
+        SCRIPT_PATH,
+        "--production-lines",
+        "8",
+        "--test-lines",
+        "20",
+        "--cohesion-lines",
+        "7",
+        "--near-limit-files",
+        "10",
+        "--json",
+      ],
+      { env: { ...process.env, PRODEX_REPO_ROOT: root } },
+    );
+
+    assert.equal(result.code, 1);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.violations.length, 1);
+    assert.equal(payload.violations[0].filePath, "src/mixed.rs");
+    assert.equal(payload.violations[0].kind, "production");
+    assert.equal(payload.violations[0].limit, 8);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cfg(test) modules followed by production items under src stay production files", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-size-guard-"));
+  try {
+    await execFileAsync("git", ["init", "-q"], { cwd: root });
+    await writeText(
+      root,
+      "src/test_module_then_production.rs",
+      [
+        "#[cfg(test)]",
+        "mod tests {",
+        "    #[test]",
+        "    fn works() {",
+        "        assert_eq!(1, 1);",
+        "    }",
+        "}",
+        "",
+        "pub fn production() -> bool {",
+        "    true",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runNode(
+      [
+        SCRIPT_PATH,
+        "--production-lines",
+        "8",
+        "--test-lines",
+        "20",
+        "--cohesion-lines",
+        "7",
+        "--near-limit-files",
+        "10",
+        "--json",
+      ],
+      { env: { ...process.env, PRODEX_REPO_ROOT: root } },
+    );
+
+    assert.equal(result.code, 1);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.violations.length, 1);
+    assert.equal(payload.violations[0].filePath, "src/test_module_then_production.rs");
+    assert.equal(payload.violations[0].kind, "production");
+    assert.equal(payload.violations[0].limit, 8);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
