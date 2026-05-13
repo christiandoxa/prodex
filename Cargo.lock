@@ -1398,7 +1398,6 @@ dependencies = [
 name = "prodex"
 version = "0.97.0"
 dependencies = [
- "aes-gcm-siv",
  "base64",
  "criterion",
  "prodex-app",

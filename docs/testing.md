@@ -43,6 +43,7 @@ If a runtime test needs parallel coverage, prefer a separate process with isolat
 Current CI building blocks include:
 
 ```bash
+npm test
 npm run test:fast
 npm run test:serial
 npm run ci:preflight
@@ -75,6 +76,8 @@ cargo test -q --workspace --all-features -- --test-threads=1
 ```
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
+
+`npm test` is a convenience alias for `npm run test:fast`. It runs the fast lane, not full serial coverage.
 
 Use `npm run test:runtime-smoke` for a small local runtime invariant suite before broad runtime work. It runs curated log JSON/marker, header preservation, selection affinity, stale continuation, websocket local pressure, and tuning snapshot checks from the shared runtime manifest without changing the broad runtime or stress suites.
 

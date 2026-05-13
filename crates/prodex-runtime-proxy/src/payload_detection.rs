@@ -480,7 +480,6 @@ pub fn runtime_proxy_tool_context_missing_message(message: &str) -> bool {
     lower.contains("no tool call found") || lower.contains("no function call found")
 }
 
-#[cfg(test)]
 pub fn extract_runtime_response_ids_from_payload(payload: &str) -> Vec<String> {
     serde_json::from_str::<serde_json::Value>(payload)
         .ok()

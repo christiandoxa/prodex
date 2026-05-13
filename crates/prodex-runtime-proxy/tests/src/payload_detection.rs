@@ -474,4 +474,32 @@ fn body_snippet_normalizes_whitespace_and_truncates() {
         "one two..."
     );
     assert_eq!(runtime_proxy_body_snippet(b"  \n\t  ", 7), "-");
+    assert_eq!(
+        runtime_proxy_body_snippet(b"bad-\xff bytes", 64),
+        "bad-\u{fffd} bytes"
+    );
+}
+
+#[test]
+fn response_ids_from_payload_matches_body_bytes_and_ignores_invalid_json() {
+    let payload = r#"{
+        "response": {"id": "resp-a"},
+        "response_id": "resp-b",
+        "object": "response",
+        "id": "resp-c"
+    }"#;
+
+    assert_eq!(
+        extract_runtime_response_ids_from_payload(payload),
+        extract_runtime_response_ids_from_body_bytes(payload.as_bytes())
+    );
+    assert_eq!(
+        extract_runtime_response_ids_from_payload(payload),
+        vec![
+            "resp-a".to_string(),
+            "resp-b".to_string(),
+            "resp-c".to_string()
+        ]
+    );
+    assert!(extract_runtime_response_ids_from_payload("{").is_empty());
 }

@@ -29,6 +29,7 @@
     "docs:lint": "node scripts/docs/lint-markdown.mjs && npm run docs:runtime-policy:check",
     "docs:runtime-policy": "node scripts/docs/runtime-policy.mjs --write",
     "docs:runtime-policy:check": "node scripts/docs/runtime-policy.mjs --check",
+    "test": "npm run test:fast --",
     "test:changed": "node scripts/ci/changed-tests.mjs",
     "test:fast": "node scripts/ci/test-fast.mjs",
     "test:runtime-smoke": "node scripts/ci/test-serial.mjs --suite runtime-smoke",

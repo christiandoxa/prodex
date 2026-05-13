@@ -1,4 +1,14 @@
-use super::*;
+use super::{
+    RuntimeResponsesReply, observe_runtime_prompt_cache_profile_hit,
+    observe_runtime_smart_context_token_usage_for_bucket, runtime_route_kind_label,
+    runtime_smart_context_normalized_model_name,
+};
+use crate::{RuntimeRotationProxyShared, runtime_proxy_log};
+use prodex_runtime_state::RuntimeRouteKind;
+use redaction::{redaction_redacted_body_snippet, redaction_redacted_headers_debug};
+use runtime_proxy_crate::{
+    RuntimeTokenUsage, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+};
 
 pub(crate) use runtime_proxy_crate::{
     extract_runtime_proxy_overload_message,
@@ -7,20 +17,14 @@ pub(crate) use runtime_proxy_crate::{
     extract_runtime_proxy_quota_message_from_websocket_payload,
     extract_runtime_response_ids_from_body_bytes, extract_runtime_token_usage_from_body_bytes,
     extract_runtime_turn_state_from_body_bytes, inspect_runtime_sse_buffer,
+    runtime_proxy_body_snippet,
 };
 
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
-    extract_runtime_response_ids_from_value, parse_runtime_sse_payload,
+    extract_runtime_response_ids_from_payload, extract_runtime_response_ids_from_value,
+    parse_runtime_sse_payload,
 };
-
-#[cfg(test)]
-pub(crate) fn extract_runtime_response_ids_from_payload(payload: &str) -> Vec<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()
-        .map(|value| extract_runtime_response_ids_from_value(&value))
-        .unwrap_or_default()
-}
 
 pub(crate) fn extract_runtime_proxy_quota_message_from_response_reply(
     response: &RuntimeResponsesReply,
@@ -29,10 +33,6 @@ pub(crate) fn extract_runtime_proxy_quota_message_from_response_reply(
         RuntimeResponsesReply::Buffered(parts) => extract_runtime_proxy_quota_message(&parts.body),
         RuntimeResponsesReply::Streaming(_) => None,
     }
-}
-
-pub(crate) fn runtime_proxy_body_snippet(body: &[u8], max_chars: usize) -> String {
-    redaction_text_snippet(String::from_utf8_lossy(body).as_ref(), max_chars)
 }
 
 pub(crate) fn runtime_proxy_redacted_body_snippet(body: &[u8], max_chars: usize) -> String {
