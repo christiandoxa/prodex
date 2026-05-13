@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.98.0 - 2026-05-13
+
+### Runtime
+
+- Remove unused runtime payload re-export (`9a8eb22`)
+
 ## 0.97.0 - 2026-05-13
 
 ### Runtime
@@ -67,9 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.87.0 - 2026-05-07
 
 - No grouped changes.
-
-## 0.86.0 - 2026-05-07
-
-### Runtime
-
-- Recover auth and websocket precommit failures (`7fb8890`)
