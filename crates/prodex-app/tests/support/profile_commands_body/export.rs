@@ -85,6 +85,77 @@ fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
 }
 
 #[test]
+fn profile_export_round_trip_preserves_refresh_token() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let source_dir = ProfileCommandsTestDir::new("export-refresh-source");
+    let source_paths = profile_commands_test_paths(&source_dir.path);
+    let main_home = source_paths.managed_profiles_root.join("main");
+    create_codex_home_if_missing(&main_home).expect("main home should exist");
+    write_secret_text_file(
+        &main_home.join("auth.json"),
+        &profile_commands_auth_json_with_email_and_refresh(
+            "main@example.com",
+            "fresh-access-token",
+            "main-account",
+            Some("fresh-refresh-token"),
+        ),
+    )
+    .expect("source auth should be written");
+
+    let source_state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: main_home,
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+
+    let payload = build_profile_export_payload(&source_state, &["main".to_string()])
+        .expect("payload with refresh token should build");
+    let exported_auth = serde_json::from_str::<serde_json::Value>(&payload.profiles[0].auth_json)
+        .expect("exported auth should parse");
+    assert_eq!(
+        exported_auth["tokens"]["refresh_token"].as_str(),
+        Some("fresh-refresh-token")
+    );
+
+    let encoded =
+        serialize_profile_export_payload(&payload, None).expect("plain export should encode");
+    let decoded = prodex_profile_export::decode_profile_export_envelope(
+        serde_json::from_slice(&encoded).expect("encoded bundle should parse"),
+        || unreachable!("plain export should not request a password"),
+    )
+    .expect("plain export should decode");
+
+    let target_dir = ProfileCommandsTestDir::new("export-refresh-target");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let mut target_state = AppState::default();
+    import_profile_export_payload(&target_paths, &mut target_state, &decoded)
+        .expect("import should preserve refresh token");
+
+    let imported_home = &target_state
+        .profiles
+        .get("main")
+        .expect("main profile should exist")
+        .codex_home;
+    assert_eq!(
+        profile_commands_read_access_token(imported_home),
+        "fresh-access-token"
+    );
+    assert_eq!(
+        profile_commands_read_refresh_token(imported_home),
+        "fresh-refresh-token"
+    );
+}
+
+#[test]
 fn profile_export_round_trip_encrypted_requires_matching_password() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);

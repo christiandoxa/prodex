@@ -72,6 +72,69 @@ fn profile_import_updates_existing_profile_when_name_matches() {
 }
 
 #[test]
+fn profile_import_updates_existing_profile_refresh_token() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-refresh-existing");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let existing_home = target_paths.managed_profiles_root.join("main");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email_and_refresh(
+            "main@example.com",
+            "old-access-token",
+            "main-account",
+            Some("old-refresh-token"),
+        ),
+    )
+    .expect("existing auth should be written");
+
+    let mut existing_state = AppState {
+        active_profile: None,
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: Some("main@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: profile_commands_auth_json_with_email_and_refresh(
+                "main@example.com",
+                "fresh-access-token",
+                "main-account",
+                Some("fresh-refresh-token"),
+            ),
+        }],
+    };
+
+    import_profile_export_payload(&target_paths, &mut existing_state, &payload)
+        .expect("import should update existing auth with refresh token");
+
+    assert_eq!(
+        profile_commands_read_access_token(&existing_home),
+        "fresh-access-token"
+    );
+    assert_eq!(
+        profile_commands_read_refresh_token(&existing_home),
+        "fresh-refresh-token"
+    );
+}
+
+#[test]
 fn profile_import_auth_update_journal_is_removed_after_successful_state_save() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
