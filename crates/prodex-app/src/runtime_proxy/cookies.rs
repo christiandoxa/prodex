@@ -1,4 +1,4 @@
-use super::*;
+use crate::RuntimeRotationProxyShared;
 
 fn runtime_proxy_cookie_namespace(shared: &RuntimeRotationProxyShared) -> String {
     shared.log_path.display().to_string()

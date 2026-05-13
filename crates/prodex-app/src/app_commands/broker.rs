@@ -1,4 +1,21 @@
-use super::*;
+use anyhow::Result;
+use chrono::Local;
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use crate::{
+    AppPaths, AppState, AppStateIoExt, RUNTIME_BROKER_IDLE_GRACE_SECONDS,
+    RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS, RUNTIME_BROKER_POLL_INTERVAL_MS,
+    RUNTIME_PROXY_OPENAI_MOUNT_PATH, RuntimeBrokerArgs, RuntimeBrokerMetadata,
+    RuntimeBrokerRegistry, RuntimeRotationProxy, RuntimeRotationProxyStartOptions,
+    audit_log_event_best_effort, cleanup_runtime_broker_stale_leases,
+    register_runtime_broker_metadata, register_runtime_proxy_persistence_mode,
+    remove_runtime_broker_registry_if_token_matches, runtime_broker_startup_grace_seconds,
+    runtime_current_prodex_version_identity, runtime_proxy_log_to_path,
+    runtime_upstream_proxy_mode_label, save_runtime_broker_registry,
+    start_runtime_rotation_proxy_with_options, try_acquire_runtime_owner_lock,
+};
 
 pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     let paths = AppPaths::discover()?;

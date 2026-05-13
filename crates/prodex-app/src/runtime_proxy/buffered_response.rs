@@ -1,4 +1,11 @@
-use super::*;
+use anyhow::{Context, Result};
+use std::io::{self, Cursor, Read};
+
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, TinyHeader, TinyResponse, TinyStatusCode,
+    runtime_maybe_trim_process_heap,
+};
+use runtime_proxy_crate::should_skip_runtime_response_header;
 
 pub(crate) fn build_runtime_proxy_text_response_parts(
     status: u16,

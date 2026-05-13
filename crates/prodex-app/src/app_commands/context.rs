@@ -1,5 +1,13 @@
-use super::*;
+use anyhow::{Context, Result, bail};
+use std::fs;
 use std::io::IsTerminal;
+use std::io::{self, Read};
+use std::path::PathBuf;
+
+use crate::{
+    AppPaths, ContextAuditArgs, ContextCompactOutputArgs, ContextCompactOutputKind,
+    ContextCompressArgs, DEFAULT_CODEX_DIR, absolutize, current_cli_width, print_stdout_line,
+};
 
 pub(crate) use prodex_context::{
     CommandOutputCompactLimits, CommandOutputCompactOptions, CommandOutputKind,

@@ -1,4 +1,4 @@
-use super::*;
+use super::runtime_proxy_anthropic_compat_json_response;
 
 #[test]
 fn anthropic_compat_json_response_plans_static_routes() {

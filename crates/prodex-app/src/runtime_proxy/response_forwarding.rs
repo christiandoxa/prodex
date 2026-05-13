@@ -1,7 +1,6 @@
 use super::*;
 
 pub(crate) use runtime_proxy_crate::runtime_token_usage_event_is_loggable;
-pub(super) use runtime_proxy_crate::should_skip_runtime_response_header;
 use runtime_proxy_crate::{
     runtime_buffered_response_metadata, runtime_forward_text_response_headers,
     runtime_response_content_type_is_sse, runtime_response_header_value,

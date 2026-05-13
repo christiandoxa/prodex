@@ -1,4 +1,4 @@
-use super::*;
+use crate::{RuntimeRotationProxyShared, runtime_proxy_log};
 
 pub(crate) use prodex_runtime_broker_log::{
     clear_runtime_proxy_continuity_failure_reason_metrics,

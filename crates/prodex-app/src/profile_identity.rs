@@ -1,4 +1,4 @@
-pub(crate) use super::shared_codex_fs::{persist_login_home, remove_dir_if_exists};
+pub(crate) use super::shared_codex_fs::remove_dir_if_exists;
 use super::*;
 
 pub(crate) use prodex_profile_identity::{ProfileIdentity, parse_identity_from_auth_json};

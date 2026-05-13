@@ -1,4 +1,5 @@
-use super::*;
+use crate::RuntimeDoctorSummary;
+use crate::diagnosis::runtime_doctor_finalize_summary;
 
 #[test]
 fn runtime_doctor_finalize_summary_uses_broker_artifact_diagnosis() {

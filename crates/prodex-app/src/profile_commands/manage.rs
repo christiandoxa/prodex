@@ -1,4 +1,13 @@
-use super::*;
+use anyhow::{Context, Result, bail};
+
+use crate::{
+    AddProfileArgs, AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider,
+    ProfileProviderExt, ProfileSelector, absolutize, audit_log_event_best_effort,
+    collect_profile_summaries, copy_codex_home, create_codex_home_if_missing, default_codex_home,
+    ensure_path_is_unique, fetch_profile_identity, find_profile_by_identity,
+    managed_profile_home_path, prepare_managed_codex_home, print_blank_line, print_panel,
+    read_auth_json_text, resolve_profile_name, update_existing_profile_auth,
+};
 
 pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     prodex_profile_identity::validate_profile_name(&args.name)?;

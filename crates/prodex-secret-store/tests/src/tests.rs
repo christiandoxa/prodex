@@ -1,4 +1,8 @@
-use super::*;
+use crate::{
+    FileSecretBackend, KeyringSecretBackend, SecretBackendKind, SecretBackendSelection,
+    SecretError, SecretLocation, SecretManager, SecretRevision, SecretValue, auth_json_location,
+    auth_json_location_for_backend, auth_json_path, describe_secret_location,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

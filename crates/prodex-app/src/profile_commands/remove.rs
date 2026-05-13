@@ -1,4 +1,16 @@
-use super::*;
+use anyhow::{Context, Result, bail};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+
+use crate::{
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, RemoveProfileArgs,
+    audit_log_event_best_effort, load_runtime_continuation_journal_with_recovery,
+    load_runtime_continuations_with_recovery, print_panel, runtime_continuation_journal_file_path,
+    runtime_continuation_journal_last_good_file_path, runtime_continuations_file_path,
+    runtime_continuations_last_good_file_path, save_runtime_continuation_journal_for_profiles,
+    save_runtime_continuations_for_profiles,
+};
 
 #[derive(Debug)]
 struct RemovedProfileRecord {

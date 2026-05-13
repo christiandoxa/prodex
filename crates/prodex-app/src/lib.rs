@@ -4,7 +4,6 @@ use base64::Engine;
 use chrono::Local;
 #[cfg(test)]
 use chrono::TimeZone;
-use dirs::home_dir;
 use reqwest::blocking::Client;
 use serde::Serialize;
 #[cfg(test)]

@@ -1,11 +1,7 @@
 use super::profile_identity::{
-    ProfileIdentity, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
-    parse_identity_from_auth_json, persist_login_home, remove_dir_if_exists,
-    unique_profile_name_for_email,
+    ProfileIdentity, find_profile_by_identity, parse_identity_from_auth_json,
 };
-use super::shared_codex_fs::{
-    copy_codex_home, create_codex_home_if_missing, prepare_managed_codex_home,
-};
+use super::shared_codex_fs::{create_codex_home_if_missing, prepare_managed_codex_home};
 use super::*;
 
 mod copilot;
