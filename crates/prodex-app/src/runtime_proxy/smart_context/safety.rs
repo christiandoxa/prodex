@@ -1,4 +1,4 @@
-use super::*;
+use super::RuntimeSmartContextBudget;
 
 #[cfg(test)]
 pub(super) const RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH: usize =

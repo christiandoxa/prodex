@@ -1,4 +1,10 @@
-use super::*;
+use crate::audit_log::{
+    AuditLogQuery, audit_logs_json_value, read_recent_audit_events_with_scope,
+    render_audit_events_human_with_scope,
+};
+use crate::cli_args::AuditArgs;
+use anyhow::{Context, Result};
+use terminal_ui::print_stdout_line;
 
 pub(crate) fn handle_audit(args: AuditArgs) -> Result<()> {
     let query = AuditLogQuery {

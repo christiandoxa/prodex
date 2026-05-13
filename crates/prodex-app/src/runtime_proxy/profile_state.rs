@@ -1,4 +1,5 @@
-use super::*;
+use crate::runtime_persistence::compact_runtime_continuation_store;
+use crate::runtime_state_shared::{RuntimeContinuationStore, RuntimeRotationState};
 
 pub(crate) fn compact_runtime_continuation_state_in_place(runtime: &mut RuntimeRotationState) {
     let continuations = RuntimeContinuationStore {

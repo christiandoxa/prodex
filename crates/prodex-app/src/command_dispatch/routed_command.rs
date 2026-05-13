@@ -1,4 +1,4 @@
-use super::*;
+use anyhow::Result;
 
 pub(super) trait CommandAction {
     fn run(self: Box<Self>) -> Result<()>;

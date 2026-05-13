@@ -1,4 +1,4 @@
-use super::*;
+use crate::audit_log::append_audit_event;
 
 pub(crate) use prodex_core::{absolutize, default_codex_home};
 #[cfg(test)]

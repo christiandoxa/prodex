@@ -1,4 +1,11 @@
-use super::*;
+use crate::runtime_proxy::{
+    RuntimePreviousResponseNotFoundContext, RuntimePreviousResponseNotFoundPolicy,
+};
+use crate::runtime_state_shared::{RuntimeRotationProxyShared, RuntimeRouteKind};
+use runtime_proxy_crate::{
+    RuntimePreviousResponseFreshFallbackShape, RuntimePreviousResponseLogContext,
+    RuntimePreviousResponseNotFoundRoute,
+};
 
 pub(super) struct RuntimeResponsesPreviousResponseNotFoundContextInput<'a> {
     pub(super) shared: &'a RuntimeRotationProxyShared,
