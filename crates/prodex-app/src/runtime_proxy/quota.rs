@@ -19,10 +19,7 @@ use crate::{
 };
 use anyhow::Result;
 use chrono::Local;
-use prodex_quota::{
-    RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
-    RuntimeQuotaWindowSummary,
-};
+use prodex_quota::{RuntimeQuotaSummary, RuntimeQuotaWindowStatus};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -31,8 +28,8 @@ pub(crate) use prodex_runtime_quota::{
     runtime_profile_usage_snapshot_from_usage, runtime_quota_pressure_band_reason,
     runtime_quota_pressure_sort_key_for_route,
     runtime_quota_pressure_sort_key_for_route_from_summary, runtime_quota_source_label,
-    runtime_quota_summary_for_route, runtime_quota_summary_from_usage_snapshot,
-    runtime_quota_summary_from_usage_snapshot_at,
+    runtime_quota_summary_for_route, runtime_quota_summary_from_cached_sources,
+    runtime_quota_summary_from_usage_snapshot, runtime_quota_summary_from_usage_snapshot_at,
     runtime_quota_summary_requires_live_source_after_probe,
     runtime_quota_summary_requires_precommit_live_probe, runtime_quota_window_status_reason,
 };
@@ -582,45 +579,18 @@ pub(crate) fn runtime_profile_quota_summary_for_route_from_state(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
-    runtime
+    let live_probe_usage = runtime
         .profile_probe_cache
         .get(profile_name)
         .filter(|entry| runtime_profile_usage_cache_is_fresh(entry, now))
-        .and_then(|entry| entry.result.as_ref().ok())
-        .map(|usage| {
-            (
-                runtime_quota_summary_for_route(usage, route_kind),
-                Some(RuntimeQuotaSource::LiveProbe),
-            )
-        })
-        .or_else(|| {
-            runtime
-                .profile_usage_snapshots
-                .get(profile_name)
-                .filter(|snapshot| runtime_usage_snapshot_is_usable(snapshot, now))
-                .map(|snapshot| {
-                    (
-                        runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now),
-                        Some(RuntimeQuotaSource::PersistedSnapshot),
-                    )
-                })
-        })
-        .unwrap_or((
-            RuntimeQuotaSummary {
-                five_hour: RuntimeQuotaWindowSummary {
-                    status: RuntimeQuotaWindowStatus::Unknown,
-                    remaining_percent: 0,
-                    reset_at: i64::MAX,
-                },
-                weekly: RuntimeQuotaWindowSummary {
-                    status: RuntimeQuotaWindowStatus::Unknown,
-                    remaining_percent: 0,
-                    reset_at: i64::MAX,
-                },
-                route_band: RuntimeQuotaPressureBand::Unknown,
-            },
-            None,
-        ))
+        .and_then(|entry| entry.result.as_ref().ok());
+    runtime_quota_summary_from_cached_sources(
+        live_probe_usage,
+        runtime.profile_usage_snapshots.get(profile_name),
+        route_kind,
+        now,
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+    )
 }
 
 pub(crate) fn runtime_profile_cached_auth_summary_for_selection(

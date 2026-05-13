@@ -416,6 +416,47 @@ pub fn runtime_quota_summary_from_usage_snapshot_at(
     )
 }
 
+pub fn runtime_quota_summary_from_cached_sources(
+    live_probe_usage: Option<&UsageResponse>,
+    persisted_snapshot: Option<&RuntimeProfileUsageSnapshot>,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+    stale_grace_seconds: i64,
+) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
+    if let Some(usage) = live_probe_usage {
+        return (
+            runtime_quota_summary_for_route(usage, route_kind),
+            Some(RuntimeQuotaSource::LiveProbe),
+        );
+    }
+
+    if let Some(snapshot) = persisted_snapshot
+        && runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
+    {
+        return (
+            runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now),
+            Some(RuntimeQuotaSource::PersistedSnapshot),
+        );
+    }
+
+    (
+        RuntimeQuotaSummary {
+            five_hour: RuntimeQuotaWindowSummary {
+                status: RuntimeQuotaWindowStatus::Unknown,
+                remaining_percent: 0,
+                reset_at: i64::MAX,
+            },
+            weekly: RuntimeQuotaWindowSummary {
+                status: RuntimeQuotaWindowStatus::Unknown,
+                remaining_percent: 0,
+                reset_at: i64::MAX,
+            },
+            route_band: RuntimeQuotaPressureBand::Unknown,
+        },
+        None,
+    )
+}
+
 pub fn runtime_quota_window_summary_from_usage_snapshot_at(
     status: RuntimeQuotaWindowStatus,
     remaining_percent: i64,
