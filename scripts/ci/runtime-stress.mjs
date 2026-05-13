@@ -255,10 +255,27 @@ async function runStressSuite({ shardIndex, shardCount, dryRun: dryRunMode }) {
   await run("cargo", args, "runtime-stress");
 }
 
-async function runSerializedSuite({ dryRun: dryRunMode }) {
+function testsForShard(testNames, shardIndex, shardCount, label) {
+  const selectedTests = testNames.filter((_, index) => index % shardCount === shardIndex);
+  if (selectedTests.length === 0) {
+    throw new Error(`runtime-stress ${label} shard ${shardIndex + 1}/${shardCount} selected no tests`);
+  }
+  process.stdout.write(
+    `${label} shard ${shardIndex + 1}/${shardCount} selected ${selectedTests.length}/${testNames.length} test(s)\n`,
+  );
+  return selectedTests;
+}
+
+async function runSerializedSuite({ shardIndex, shardCount, dryRun: dryRunMode }) {
+  const serializedTests = testsForShard(
+    RUNTIME_STRESS_SERIALIZED_TESTS,
+    shardIndex,
+    shardCount,
+    "serialized runtime stress",
+  );
   await retry("serialized runtime stress", 2, async (attempt) => {
     process.stdout.write(`serialized runtime stress attempt ${attempt}\n`);
-    for (const testName of RUNTIME_STRESS_SERIALIZED_TESTS) {
+    for (const testName of serializedTests) {
       const args = ["test", "-p", "prodex-app", "--lib", testName, "--", "--test-threads=1"];
       if (dryRunMode) {
         dryRun("cargo", args, testName);
@@ -270,12 +287,11 @@ async function runSerializedSuite({ dryRun: dryRunMode }) {
 }
 
 async function runContinuationSuite({ shardIndex, shardCount, dryRun: dryRunMode }) {
-  const continuationTests = RUNTIME_STRESS_CONTINUATION_TESTS.filter((_, index) => index % shardCount === shardIndex);
-  if (continuationTests.length === 0) {
-    throw new Error(`runtime-stress continuation shard ${shardIndex + 1}/${shardCount} selected no tests`);
-  }
-  process.stdout.write(
-    `continuation-heavy shard ${shardIndex + 1}/${shardCount} selected ${continuationTests.length}/${RUNTIME_STRESS_CONTINUATION_TESTS.length} test(s)\n`,
+  const continuationTests = testsForShard(
+    RUNTIME_STRESS_CONTINUATION_TESTS,
+    shardIndex,
+    shardCount,
+    "continuation-heavy",
   );
   for (let iteration = 1; iteration <= 2; iteration += 1) {
     process.stdout.write(`continuation-heavy iteration ${iteration}\n`);
@@ -298,7 +314,7 @@ async function main() {
         "Usage: node scripts/ci/runtime-stress.mjs [--suite stress|serialized|continuation|all] [--shard-index <n> --shard-count <n>] [--dry-run]",
         "",
         "Runs runtime proxy stress shards from the shared runtime CI manifest.",
-        "Sharding splits the broad stress suite and continuation-heavy suite; serialized tests remain serial.",
+        "Sharding splits the broad stress suite, serialized suite, and continuation-heavy suite.",
       ].join("\n") + "\n",
     );
     return;
