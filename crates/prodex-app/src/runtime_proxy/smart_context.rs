@@ -37,7 +37,7 @@ use runtime_rehydrate::*;
 use safety::*;
 use static_context::*;
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use token_calibration::*;
 use tool_outputs::*;
 use types::*;

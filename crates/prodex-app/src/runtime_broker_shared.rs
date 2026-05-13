@@ -4,12 +4,13 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 
+#[cfg(test)]
+pub(super) use prodex_runtime_broker::RuntimeBrokerMetrics;
 pub(super) use prodex_runtime_broker::{
-    RuntimeBrokerHealth, RuntimeBrokerMetadata, RuntimeBrokerMetrics, RuntimeBrokerObservation,
-    RuntimeBrokerRegistry, RuntimeBrokerVersionGuardOutcome, RuntimeProdexBinaryIdentity,
-    parse_prodex_version_output, runtime_health_prodex_binary_identity,
-    runtime_prodex_binary_identity_key, runtime_prodex_binary_identity_matches,
-    runtime_registry_prodex_binary_identity,
+    RuntimeBrokerHealth, RuntimeBrokerMetadata, RuntimeBrokerRegistry,
+    RuntimeBrokerVersionGuardOutcome, RuntimeProdexBinaryIdentity, parse_prodex_version_output,
+    runtime_health_prodex_binary_identity, runtime_prodex_binary_identity_key,
+    runtime_prodex_binary_identity_matches, runtime_registry_prodex_binary_identity,
 };
 
 #[derive(Debug)]

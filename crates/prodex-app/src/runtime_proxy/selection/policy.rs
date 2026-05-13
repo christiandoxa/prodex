@@ -2,8 +2,8 @@ use super::*;
 
 pub(crate) use runtime_proxy_crate::{
     RuntimeAffinitySelectionKind, RuntimeNoRotateAffinity,
-    RuntimePreviousResponseNotFoundFallbackPolicy, RuntimePreviousResponseNotFoundFallbackRequest,
-    RuntimePreviousResponseStaleContinuationPolicy, RuntimeQuotaBlockedAffinityReleasePolicy,
+    RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
+    RuntimeQuotaBlockedAffinityReleasePolicy,
     RuntimeWebsocketReuseWatchdogPreviousResponseFallback,
     runtime_previous_response_not_found_fallback_policy,
     runtime_quota_blocked_previous_response_fresh_fallback_allowed,

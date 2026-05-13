@@ -14,7 +14,6 @@ pub(crate) use lookup::{
 };
 #[cfg(test)]
 pub(crate) use release::clear_runtime_stale_previous_response_binding;
-#[allow(unused_imports)]
 pub(crate) use release::{
     clear_runtime_dead_response_bindings, release_runtime_auth_failed_affinity,
     release_runtime_compact_lineage, release_runtime_previous_response_affinity,

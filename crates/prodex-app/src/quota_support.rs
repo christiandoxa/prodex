@@ -8,10 +8,7 @@ pub(super) use self::auth::*;
 pub(super) use self::render::*;
 pub(super) use self::watch::*;
 pub(crate) use prodex_core::format_binary_resolution;
-pub(crate) use prodex_quota::{
-    AuthSummary, BlockedLimit, QuotaAuthFilter, UsageAuth, UsageAuthSyncOutcome,
-    UsageAuthSyncSource,
-};
+pub(crate) use prodex_quota::{AuthSummary, BlockedLimit, QuotaAuthFilter, UsageAuth};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProviderQuotaSnapshot {

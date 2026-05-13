@@ -1,4 +1,5 @@
 use super::*;
+use serde::Serialize;
 
 pub(super) fn running_in_ci() -> bool {
     std::env::var_os("GITHUB_ACTIONS").is_some() || std::env::var_os("CI").is_some()
