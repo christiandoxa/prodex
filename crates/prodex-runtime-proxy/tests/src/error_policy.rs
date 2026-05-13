@@ -92,7 +92,7 @@ fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_status
         ("USAGE_LIMIT_REACHED", "Usage limit reached"),
     ] {
         for shape in 0u8..9 {
-            let body = json_body(explicit_quota_payload(&code, &message, shape));
+            let body = json_body(explicit_quota_payload(code, message, shape));
 
             for status in [403, 429] {
                 let precommit =
