@@ -17,7 +17,6 @@ pub(crate) fn runtime_proxy_backend_is_websocket_upgrade(stream: &TcpStream) -> 
     request.contains("upgrade: websocket")
 }
 
-#[allow(clippy::result_large_err)]
 pub(crate) fn handle_runtime_proxy_backend_websocket(
     stream: TcpStream,
     responses_accounts: &Arc<Mutex<Vec<String>>>,
