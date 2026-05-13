@@ -632,24 +632,29 @@ jobs:
         include:
           - suite: stress
             id: stress-1
-            label: broad shard 1 of 4
+            label: broad shard 1 of 5
             shard: 0
-            shard_count: 4
+            shard_count: 5
           - suite: stress
             id: stress-2
-            label: broad shard 2 of 4
+            label: broad shard 2 of 5
             shard: 1
-            shard_count: 4
+            shard_count: 5
           - suite: stress
             id: stress-3
-            label: broad shard 3 of 4
+            label: broad shard 3 of 5
             shard: 2
-            shard_count: 4
+            shard_count: 5
           - suite: stress
             id: stress-4
-            label: broad shard 4 of 4
+            label: broad shard 4 of 5
             shard: 3
-            shard_count: 4
+            shard_count: 5
+          - suite: stress
+            id: stress-5
+            label: broad shard 5 of 5
+            shard: 4
+            shard_count: 5
           - suite: serialized
             id: serialized-1
             label: serialized shard 1 of 2

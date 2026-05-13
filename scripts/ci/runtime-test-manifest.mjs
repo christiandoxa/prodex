@@ -186,8 +186,8 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     ],
   },
   {
-    suite: "doctor-state-collect",
-    label: "doctor state collect",
+    suite: "doctor-state-runtime",
+    label: "doctor state runtime",
     filters: [
       {
         id: "doctor-state-broker-binary",
@@ -195,6 +195,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
           "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch",
         label: "state-broker-binary",
       },
+    ],
+  },
+  {
+    suite: "doctor-state-registry",
+    label: "doctor state registry",
+    filters: [
       {
         id: "doctor-state-dead-registry",
         filter:
@@ -207,6 +213,12 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
           "main_internal_tests::runtime_proxy_selection_and_pressure::doctor::state_collect::runtime_doctor_collect_state_surfaces_unreachable_live_broker_health",
         label: "state-unreachable-health",
       },
+    ],
+  },
+  {
+    suite: "doctor-state-persistence",
+    label: "doctor state persistence",
+    filters: [
       {
         id: "doctor-state-orphans",
         filter:
@@ -233,13 +245,62 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     ],
   },
   {
-    suite: "continuation-http-followups",
-    label: "continuation http followups",
+    suite: "continuation-http-followups-affinity",
+    label: "continuation http followups affinity",
     filters: [
       {
-        id: "continuation-http-followups",
-        filter: "main_internal_tests::runtime_proxy_continuations::http_followups::",
-        label: "http-followups",
+        id: "continuation-http-empty-session",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_empty_session_previous_response_does_not_fresh_fallback",
+        label: "empty-session",
+      },
+      {
+        id: "continuation-http-previous-response",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_message_followup_previous_response_does_not_fresh_fallback",
+        label: "previous-response",
+      },
+      {
+        id: "continuation-http-session-header",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_message_followup_with_session_header_does_not_fresh_fallback",
+        label: "session-header",
+      },
+    ],
+  },
+  {
+    suite: "continuation-http-followups-rotation",
+    label: "continuation http followups rotation",
+    filters: [
+      {
+        id: "continuation-http-fresh-after-usage",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chain",
+        label: "fresh-after-usage",
+      },
+      {
+        id: "continuation-http-session-quota",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fresh_fallback",
+        label: "session-quota",
+      },
+    ],
+  },
+  {
+    suite: "continuation-http-followups-metadata",
+    label: "continuation http followups metadata",
+    filters: [
+      {
+        id: "continuation-http-turn-metadata",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_message_followup_with_turn_metadata_session_does_not_fresh_fallback",
+        label: "turn-metadata",
+      },
+      {
+        id: "continuation-http-resume-metadata",
+        filter:
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_resume_continuation_preserves_metadata_headers_and_affinity",
+        label: "resume-metadata",
       },
     ],
   },
