@@ -1,0 +1,244 @@
+use crate::RuntimeProxyCodexEndpoint;
+use std::ffi::OsString;
+use std::net::SocketAddr;
+
+const PRODEX_CODEX_FULL_ACCESS_ARG: &str = "--full-access";
+const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
+const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
+
+pub fn runtime_proxy_codex_passthrough_args(
+    runtime_proxy: Option<RuntimeProxyCodexEndpoint<'_>>,
+    user_args: &[OsString],
+) -> Vec<OsString> {
+    runtime_proxy
+        .map(|proxy| {
+            if let Some(local_provider_id) = proxy.local_model_provider_id {
+                runtime_proxy_local_model_provider_codex_args(
+                    proxy.listen_addr,
+                    proxy.openai_mount_path,
+                    local_provider_id,
+                    user_args,
+                )
+            } else if proxy.openai_mount_path == runtime_proxy::RUNTIME_PROXY_OPENAI_MOUNT_PATH {
+                runtime_proxy_codex_args(proxy.listen_addr, user_args)
+            } else {
+                runtime_proxy_codex_args_with_mount_path(
+                    proxy.listen_addr,
+                    proxy.openai_mount_path,
+                    user_args,
+                )
+            }
+        })
+        .unwrap_or_else(|| user_args.to_vec())
+}
+
+pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
+    let Some(first) = codex_args.first().and_then(|arg| arg.to_str()) else {
+        return codex_args.to_vec();
+    };
+    if !looks_like_codex_session_id(first) {
+        return codex_args.to_vec();
+    }
+
+    let mut normalized = Vec::with_capacity(codex_args.len() + 1);
+    normalized.push(OsString::from("resume"));
+    normalized.extend(codex_args.iter().cloned());
+    normalized
+}
+
+fn looks_like_codex_session_id(value: &str) -> bool {
+    let parts = value.split('-').collect::<Vec<_>>();
+    if parts.len() != 5 {
+        return false;
+    }
+    let expected_lengths = [8usize, 4, 4, 4, 12];
+    parts.iter().zip(expected_lengths).all(|(part, expected)| {
+        part.len() == expected && part.chars().all(|ch| ch.is_ascii_hexdigit())
+    })
+}
+
+pub fn runtime_proxy_codex_args(listen_addr: SocketAddr, user_args: &[OsString]) -> Vec<OsString> {
+    runtime_proxy_codex_args_with_mount_path(
+        listen_addr,
+        runtime_proxy::RUNTIME_PROXY_OPENAI_MOUNT_PATH,
+        user_args,
+    )
+}
+
+pub fn runtime_proxy_codex_args_with_mount_path(
+    listen_addr: SocketAddr,
+    openai_mount_path: &str,
+    user_args: &[OsString],
+) -> Vec<OsString> {
+    let proxy_chatgpt_base = format!("http://{listen_addr}/backend-api");
+    let proxy_openai_base = format!("http://{listen_addr}{openai_mount_path}");
+    let overrides = [
+        format!(
+            "chatgpt_base_url={}",
+            toml_string_literal(&proxy_chatgpt_base)
+        ),
+        format!(
+            "openai_base_url={}",
+            toml_string_literal(&proxy_openai_base),
+        ),
+    ];
+
+    let mut args = Vec::with_capacity((overrides.len() * 2) + user_args.len());
+    for override_entry in overrides {
+        args.push(OsString::from("-c"));
+        args.push(OsString::from(override_entry));
+    }
+    args.extend(user_args.iter().cloned());
+    args
+}
+
+pub fn runtime_proxy_local_model_provider_codex_args(
+    listen_addr: SocketAddr,
+    mount_path: &str,
+    local_provider_id: &str,
+    user_args: &[OsString],
+) -> Vec<OsString> {
+    let proxy_base = format!("http://{listen_addr}{}", normalize_mount_path(mount_path));
+    let provider_base_key = format!("model_providers.{local_provider_id}.base_url");
+    let provider_base_override =
+        format!("{}={}", provider_base_key, toml_string_literal(&proxy_base));
+    let mut args = Vec::with_capacity(user_args.len() + 2);
+    let mut replaced = false;
+    let mut index = 0;
+    while index < user_args.len() {
+        let Some(arg) = user_args[index].to_str() else {
+            args.push(user_args[index].clone());
+            index += 1;
+            continue;
+        };
+
+        if matches!(arg, "-c" | "--config") {
+            args.push(user_args[index].clone());
+            index += 1;
+            if index < user_args.len() {
+                if config_assignment_key(user_args[index].to_str())
+                    == Some(provider_base_key.as_str())
+                {
+                    args.push(OsString::from(provider_base_override.clone()));
+                    replaced = true;
+                } else {
+                    args.push(user_args[index].clone());
+                }
+            }
+            index += 1;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("--config=") {
+            if config_assignment_key(Some(value)) == Some(provider_base_key.as_str()) {
+                args.push(OsString::from(format!("--config={provider_base_override}")));
+                replaced = true;
+            } else {
+                args.push(user_args[index].clone());
+            }
+            index += 1;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("-c")
+            && !value.is_empty()
+            && value.contains('=')
+        {
+            if config_assignment_key(Some(value)) == Some(provider_base_key.as_str()) {
+                args.push(OsString::from(format!("-c{provider_base_override}")));
+                replaced = true;
+            } else {
+                args.push(user_args[index].clone());
+            }
+            index += 1;
+            continue;
+        }
+
+        args.push(user_args[index].clone());
+        index += 1;
+    }
+
+    if !replaced {
+        args.push(OsString::from("-c"));
+        args.push(OsString::from(provider_base_override));
+    }
+    args
+}
+
+fn normalize_mount_path(mount_path: &str) -> String {
+    let trimmed = mount_path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return String::new();
+    }
+    format!("/{}", trimmed.trim_matches('/'))
+}
+
+fn config_assignment_key(assignment: Option<&str>) -> Option<&str> {
+    assignment
+        .and_then(|assignment| assignment.split_once('='))
+        .map(|(key, _)| key.trim())
+        .filter(|key| !key.is_empty())
+}
+
+pub fn prepare_codex_launch_args(
+    codex_args: &[OsString],
+    full_access_requested: bool,
+) -> (Vec<OsString>, bool) {
+    let (passthrough_full_access, codex_args) = extract_prodex_full_access_flag(codex_args);
+    let codex_args = normalize_run_codex_args(&codex_args);
+    let include_code_review = is_review_invocation(&codex_args);
+    let codex_args = codex_launch_args_with_full_access(
+        &codex_args,
+        full_access_requested || passthrough_full_access,
+    );
+    (codex_args, include_code_review)
+}
+
+pub fn extract_prodex_dry_run_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
+    let mut dry_run = false;
+    let mut filtered = Vec::with_capacity(codex_args.len());
+    for arg in codex_args {
+        if arg == PRODEX_DRY_RUN_ARG {
+            dry_run = true;
+            continue;
+        }
+        filtered.push(arg.clone());
+    }
+    (dry_run, filtered)
+}
+
+pub fn prodex_dry_run_requested(codex_args: &[OsString]) -> bool {
+    codex_args.iter().any(|arg| arg == PRODEX_DRY_RUN_ARG)
+}
+
+pub fn is_review_invocation(args: &[OsString]) -> bool {
+    args.iter().any(|arg| arg == "review")
+}
+
+fn extract_prodex_full_access_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
+    let mut full_access = false;
+    let mut filtered = Vec::with_capacity(codex_args.len());
+    for arg in codex_args {
+        if arg == PRODEX_CODEX_FULL_ACCESS_ARG {
+            full_access = true;
+            continue;
+        }
+        filtered.push(arg.clone());
+    }
+    (full_access, filtered)
+}
+
+fn codex_launch_args_with_full_access(codex_args: &[OsString], full_access: bool) -> Vec<OsString> {
+    if !full_access {
+        return codex_args.to_vec();
+    }
+
+    let mut args = Vec::with_capacity(codex_args.len() + 1);
+    args.push(OsString::from(CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG));
+    args.extend(codex_args.iter().cloned());
+    args
+}
+
+fn toml_string_literal(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
