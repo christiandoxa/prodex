@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    SMART_CONTEXT_TOOL_COMMAND_HINT_MAX_CHARS, SMART_CONTEXT_TOOL_METADATA_SCAN_MAX_DEPTH,
+    runtime_smart_context_artifact_marker_line,
+};
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_tool_command_hint(
     object: &serde_json::Map<String, serde_json::Value>,

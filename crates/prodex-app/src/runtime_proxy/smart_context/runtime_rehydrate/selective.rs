@@ -1,4 +1,17 @@
-use super::*;
+use super::super::{
+    RuntimeSmartContextArtifactStore, RuntimeSmartContextSelectiveRehydrateTerms,
+    RuntimeSmartContextTransformStats, runtime_smart_context_collect_artifact_refs,
+    runtime_smart_context_consume_rehydrate_budget, runtime_smart_context_static_prompt_field_key,
+    runtime_smart_context_value_is_static_context_item,
+};
+#[cfg(test)]
+use super::runtime_smart_context_selective_rehydrate_terms_empty;
+use super::{
+    runtime_smart_context_deferred_read_plan_appendix,
+    runtime_smart_context_matching_semantic_range_appendix_with_budget,
+    runtime_smart_context_selective_rehydrate_terms_strong,
+};
+use std::collections::BTreeSet;
 
 #[cfg(test)]
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_selective_rehydrate_semantic_ranges(

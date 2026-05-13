@@ -1,4 +1,11 @@
 use super::*;
+use crate::{AppState, ProfileEntry, ProfileProvider};
+use base64::Engine;
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn fetch_profile_email_uses_auth_email_for_non_openai_model_provider() {

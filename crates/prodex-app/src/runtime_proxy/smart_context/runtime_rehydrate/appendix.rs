@@ -1,4 +1,21 @@
-use super::*;
+use super::super::{
+    RuntimeSmartContextArtifactLineIndex, RuntimeSmartContextArtifactStore,
+    RuntimeSmartContextExactAppendixRange, RuntimeSmartContextScoredExactAppendixRange,
+    RuntimeSmartContextSelectiveRehydrateTerms, SMART_CONTEXT_BUDGET_AWARE_IMPORT_MAX_RANGES,
+    SMART_CONTEXT_BUDGET_AWARE_IMPORT_SCAN_MAX_LINES,
+    SMART_CONTEXT_BUDGET_AWARE_REHYDRATE_MAX_RANGES, SMART_CONTEXT_LABEL_REHYDRATE_PLAN_EXACT,
+    SMART_CONTEXT_LABEL_SEMANTIC_EXACT, runtime_smart_context_artifact_line_index_range_valid,
+    runtime_smart_context_artifact_line_ref, runtime_smart_context_critical_exact_appendix_score,
+    runtime_smart_context_line_excerpt,
+    runtime_smart_context_render_budgeted_scored_exact_appendix,
+};
+use super::{
+    runtime_smart_context_artifact_semantic_range_valid,
+    runtime_smart_context_matching_semantic_ranges,
+    runtime_smart_context_semantic_range_matches_terms,
+    runtime_smart_context_semantic_range_score_with_command,
+    runtime_smart_context_semantic_rehydrate_range_cap,
+};
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_deferred_read_plan_appendix(
     artifact_id: &str,

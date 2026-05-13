@@ -1,4 +1,11 @@
-use super::*;
+use super::super::{
+    RuntimeSmartContextArtifactLineIndex, RuntimeSmartContextArtifactSemanticLineRange,
+    RuntimeSmartContextSelectiveDiffHunkTerm, RuntimeSmartContextSelectiveRehydrateTerms,
+    SMART_CONTEXT_SEMANTIC_REHYDRATE_GLOBAL_MAX_RANGES,
+    SMART_CONTEXT_SEMANTIC_REHYDRATE_NARROW_MAX_RANGES, runtime_smart_context_artifact_line_ref,
+};
+use std::cmp::Reverse;
+use std::collections::BTreeSet;
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_matching_semantic_ranges<
     'a,
@@ -39,7 +46,7 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_matching_se
     }
     ranges.sort_by_key(|range| {
         (
-            std::cmp::Reverse(runtime_smart_context_semantic_range_score_with_command(
+            Reverse(runtime_smart_context_semantic_range_score_with_command(
                 range,
                 terms,
                 line_index.command_kind.as_deref(),

@@ -1,5 +1,3 @@
-use super::*;
-
 mod appendix;
 mod basic;
 mod scoring;

@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    SMART_CONTEXT_REPO_STATE_HASH_CHARS, SMART_CONTEXT_REPO_STATE_MAX_FACTS_PER_SET,
+    SMART_CONTEXT_REPO_STATE_TEST_COMMAND_MAX_CHARS,
+};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
