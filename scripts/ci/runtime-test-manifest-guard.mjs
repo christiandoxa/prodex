@@ -511,8 +511,13 @@ function validateRuntimeStressWeights(defaultWeightSeconds, weightHints, cargoTe
     const selectorValue = hasName ? `name:${hint.name}` : `filter:${hint.filter}`;
     selectors.push({ value: selectorValue, index });
 
-    if (typeof hint.weightSeconds !== "number" || !Number.isFinite(hint.weightSeconds) || hint.weightSeconds <= 0) {
-      issues.push(`${label}: weightSeconds must be a positive finite number`);
+    if (
+      typeof hint.weightSeconds !== "number" ||
+      !Number.isFinite(hint.weightSeconds) ||
+      !Number.isInteger(hint.weightSeconds) ||
+      hint.weightSeconds <= 0
+    ) {
+      issues.push(`${label}: weightSeconds must be a positive finite integer`);
       return;
     }
 

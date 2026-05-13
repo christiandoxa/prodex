@@ -1,8 +1,28 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import {
+  RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
+  RUNTIME_STRESS_SKIP_TESTS,
+  RUNTIME_STRESS_WEIGHT_HINTS,
+} from "./runtime-test-manifest.mjs";
+import {
+  runtimeStressWeightSeconds,
+  weightedRuntimeStressShards,
+} from "./runtime-stress.mjs";
 
 export const DEFAULT_LIMIT = 10;
+export const DEFAULT_RUNTIME_STRESS_MANIFEST_PATH = "scripts/ci/runtime-test-manifest.mjs";
+const RUNTIME_STRESS_CARGO_LIST_ARGS = [
+  "test",
+  "-p",
+  "prodex-app",
+  "--lib",
+  "main_internal_tests::runtime_proxy_",
+  "--",
+  "--list",
+];
 
 export function parseArgs(argv) {
   const args = {
@@ -50,6 +70,24 @@ export function parseArgs(argv) {
     }
     if (value === "--json") {
       args.json = true;
+      continue;
+    }
+    if (value === "--runtime-stress-calibration") {
+      args.runtimeStressCalibration = true;
+      continue;
+    }
+    if (value === "--runtime-stress-test-list") {
+      index += 1;
+      args.runtimeStressTestList = requiredValue(argv[index], value);
+      continue;
+    }
+    if (value === "--runtime-stress-manifest") {
+      index += 1;
+      args.runtimeStressManifest = requiredValue(argv[index], value);
+      continue;
+    }
+    if (value === "--write-runtime-stress-hints") {
+      args.writeRuntimeStressHints = true;
       continue;
     }
     if (value === "--help" || value === "-h") {
@@ -102,6 +140,14 @@ function printHelp() {
       "  --max-wall-minutes <n>   Fail when run wall time exceeds this budget.",
       "  --max-runner-minutes <n> Fail when summed job runner time exceeds this budget.",
       "  --json             Print machine-readable summary.",
+      "  --runtime-stress-calibration",
+      "                     Suggest RUNTIME_STRESS_WEIGHT_HINTS from successful runtime-stress weighted broad shard jobs.",
+      "  --runtime-stress-test-list <path>",
+      "                     Cargo --list output or JSON string array. Avoids running cargo during calibration.",
+      "  --runtime-stress-manifest <path>",
+      "                     Manifest path to update with --write-runtime-stress-hints.",
+      "  --write-runtime-stress-hints",
+      "                     Rewrite scripts/ci/runtime-test-manifest.mjs with suggested weights. Requires calibration.",
     ].join("\n") + "\n",
   );
 }
@@ -176,10 +222,11 @@ function parseDate(value) {
 function jobState(job) {
   const conclusion = typeof job.conclusion === "string" && job.conclusion ? job.conclusion : null;
   const status = typeof job.status === "string" && job.status ? job.status : null;
+  const state = typeof job.state === "string" && job.state ? job.state : null;
   if (conclusion && status && status !== "completed") {
     return `${status}/${conclusion}`;
   }
-  return conclusion ?? status ?? "unknown";
+  return conclusion ?? status ?? state ?? "unknown";
 }
 
 function formatIso(date) {
@@ -187,6 +234,19 @@ function formatIso(date) {
 }
 
 function normalizeJob(job, index, now) {
+  if (typeof job.durationMs === "number" && Number.isFinite(job.durationMs)) {
+    const name = typeof job.name === "string" && job.name.length > 0 ? job.name : `job ${index + 1}`;
+    return {
+      id: job.databaseId ?? job.id ?? null,
+      name,
+      state: jobState(job),
+      startedAt: typeof job.startedAt === "string" ? job.startedAt : null,
+      completedAt: typeof job.completedAt === "string" ? job.completedAt : null,
+      durationMs: Math.max(0, job.durationMs),
+      running: Boolean(job.running),
+    };
+  }
+
   const name = typeof job.name === "string" && job.name.length > 0 ? job.name : `job ${index + 1}`;
   const startedAt = parseDate(job.startedAt ?? job.started_at);
   const completedAt = parseDate(job.completedAt ?? job.completed_at);
@@ -285,6 +345,7 @@ export function summarize(payload, args, now = new Date()) {
     timedJobs: timedJobs.length,
     untimedJobs: jobs.length - timedJobs.length,
     runningJobs: timedJobs.filter((job) => job.running).length,
+    jobs,
     wall: wallMs === null
       ? null
       : {
@@ -299,6 +360,378 @@ export function summarize(payload, args, now = new Date()) {
 
   summary.budget = evaluateBudget(summary, args);
   return summary;
+}
+
+export function parseRuntimeStressBroadShardName(name) {
+  const match = String(name).match(/\bweighted broad shard\s+(\d+)\s+of\s+(\d+)\b/i);
+  if (!match) {
+    return null;
+  }
+
+  const oneBasedIndex = Number(match[1]);
+  const shardCount = Number(match[2]);
+  if (
+    !Number.isSafeInteger(oneBasedIndex) ||
+    !Number.isSafeInteger(shardCount) ||
+    oneBasedIndex < 1 ||
+    shardCount < 1 ||
+    oneBasedIndex > shardCount
+  ) {
+    return null;
+  }
+
+  return {
+    index: oneBasedIndex - 1,
+    shardCount,
+  };
+}
+
+function normalizeCalibrationJobs(jobs, now = new Date()) {
+  return jobs.map((job, index) => normalizeJob(job, index, now));
+}
+
+export function extractRuntimeStressBroadShardTelemetry(jobs, now = new Date()) {
+  const normalizedJobs = normalizeCalibrationJobs(jobs, now);
+  const matchedJobs = [];
+  const successfulByIndex = new Map();
+  const shardCounts = new Set();
+
+  for (const job of normalizedJobs) {
+    const parsed = parseRuntimeStressBroadShardName(job.name);
+    if (!parsed) {
+      continue;
+    }
+
+    matchedJobs.push(job);
+    shardCounts.add(parsed.shardCount);
+    if (job.state !== "success" || job.running || job.durationMs === null) {
+      continue;
+    }
+
+    if (successfulByIndex.has(parsed.index)) {
+      throw new Error(`duplicate successful runtime-stress weighted broad shard ${parsed.index + 1}`);
+    }
+
+    successfulByIndex.set(parsed.index, {
+      index: parsed.index,
+      name: job.name,
+      durationMs: job.durationMs,
+    });
+  }
+
+  if (matchedJobs.length === 0) {
+    throw new Error("found no runtime-stress weighted broad shard jobs in duration telemetry");
+  }
+  if (shardCounts.size !== 1) {
+    throw new Error(
+      `runtime-stress weighted broad shard jobs disagree on shard count: ${[...shardCounts].sort().join(", ")}`,
+    );
+  }
+
+  const shardCount = [...shardCounts][0];
+  const missing = [];
+  for (let index = 0; index < shardCount; index += 1) {
+    if (!successfulByIndex.has(index)) {
+      missing.push(`${index + 1}/${shardCount}`);
+    }
+  }
+
+  if (missing.length > 0) {
+    const nonSuccess = matchedJobs
+      .filter((job) => job.state !== "success" || job.running || job.durationMs === null)
+      .map((job) => `${job.name}=${job.running ? "running" : job.state}`)
+      .sort();
+    throw new Error(
+      [
+        `runtime stress calibration requires successful completed telemetry for all weighted broad shards; missing ${missing.join(", ")}`,
+        nonSuccess.length > 0 ? `ignored non-success shard jobs: ${nonSuccess.join(", ")}` : null,
+      ]
+        .filter(Boolean)
+        .join("; "),
+    );
+  }
+
+  return {
+    shardCount,
+    shards: [...successfulByIndex.values()].sort((left, right) => left.index - right.index),
+  };
+}
+
+function testLeafName(testName) {
+  return testName.split("::").at(-1);
+}
+
+function weightHintMatches(hint, testName) {
+  if (typeof hint.name === "string") {
+    return testLeafName(testName) === hint.name;
+  }
+  return typeof hint.filter === "string" && testName.includes(hint.filter);
+}
+
+function skippedRuntimeStressTest(testName, skipTests) {
+  return skipTests.some((skipName) => testName.includes(skipName));
+}
+
+function roundCalibrationValue(value, digits = 3) {
+  const multiplier = 10 ** digits;
+  return Math.round(value * multiplier) / multiplier;
+}
+
+function selectorForHint(hint) {
+  if (typeof hint.name === "string") {
+    return {
+      selectorType: "name",
+      selector: hint.name,
+    };
+  }
+  return {
+    selectorType: "filter",
+    selector: hint.filter,
+  };
+}
+
+function suggestedHintWeight(currentWeightSeconds, ratio, defaultWeightSeconds) {
+  const rounded = Math.round(currentWeightSeconds * ratio);
+  return Math.max(defaultWeightSeconds, rounded);
+}
+
+export function calibrateRuntimeStressWeightHints({
+  jobs,
+  testNames,
+  weightHints = RUNTIME_STRESS_WEIGHT_HINTS,
+  defaultWeightSeconds = RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS,
+  skipTests = RUNTIME_STRESS_SKIP_TESTS,
+  now = new Date(),
+}) {
+  if (!Array.isArray(testNames) || testNames.length === 0) {
+    throw new Error("runtime stress calibration requires a non-empty runtime test list");
+  }
+
+  const telemetry = extractRuntimeStressBroadShardTelemetry(jobs, now);
+  const runnableTests = testNames
+    .filter((testName) => typeof testName === "string" && testName.length > 0)
+    .filter((testName) => !skippedRuntimeStressTest(testName, skipTests));
+  if (runnableTests.length === 0) {
+    throw new Error("runtime stress calibration matched zero runnable runtime stress tests after skips");
+  }
+
+  const shards = weightedRuntimeStressShards(
+    runnableTests,
+    telemetry.shardCount,
+    weightHints,
+    defaultWeightSeconds,
+  );
+  const observedSecondsByShard = new Map(
+    telemetry.shards.map((shard) => [shard.index, shard.durationMs / 1000]),
+  );
+  const totalObservedSeconds = telemetry.shards.reduce((total, shard) => total + shard.durationMs / 1000, 0);
+  const totalEstimatedWeightSeconds = shards.reduce((total, shard) => total + shard.weightSeconds, 0);
+  if (totalObservedSeconds <= 0 || totalEstimatedWeightSeconds <= 0) {
+    throw new Error("runtime stress calibration requires positive observed and estimated shard durations");
+  }
+
+  const observedToWeightScale = totalEstimatedWeightSeconds / totalObservedSeconds;
+  const ratioByShard = new Map();
+  const shardSummaries = shards.map((shard) => {
+    const observedSeconds = observedSecondsByShard.get(shard.index);
+    if (observedSeconds === undefined) {
+      throw new Error(`runtime stress calibration is missing observed duration for shard ${shard.index + 1}`);
+    }
+
+    const targetWeightSeconds = observedSeconds * observedToWeightScale;
+    const ratio = targetWeightSeconds / shard.weightSeconds;
+    ratioByShard.set(shard.index, ratio);
+    return {
+      estimatedWeightSeconds: roundCalibrationValue(shard.weightSeconds),
+      index: shard.index,
+      observedSeconds: roundCalibrationValue(observedSeconds),
+      ratio: roundCalibrationValue(ratio),
+      targetWeightSeconds: roundCalibrationValue(targetWeightSeconds),
+      testCount: shard.tests.length,
+    };
+  });
+
+  const testShardIndex = new Map();
+  for (const shard of shards) {
+    for (const test of shard.tests) {
+      testShardIndex.set(test.testName, shard.index);
+    }
+  }
+
+  const suggestions = weightHints.map((hint) => {
+    const matches = runnableTests.filter((testName) => weightHintMatches(hint, testName));
+    const weightedRatio = matches.reduce(
+      (accumulator, testName) => {
+        const currentWeight = runtimeStressWeightSeconds(testName, weightHints, defaultWeightSeconds);
+        const shardRatio = ratioByShard.get(testShardIndex.get(testName)) ?? 1;
+        return {
+          denominator: accumulator.denominator + currentWeight,
+          numerator: accumulator.numerator + currentWeight * shardRatio,
+        };
+      },
+      { denominator: 0, numerator: 0 },
+    );
+    const ratio = weightedRatio.denominator > 0 ? weightedRatio.numerator / weightedRatio.denominator : 1;
+    const suggestedWeightSeconds = suggestedHintWeight(
+      hint.weightSeconds,
+      ratio,
+      defaultWeightSeconds,
+    );
+    const action =
+      suggestedWeightSeconds > hint.weightSeconds
+        ? "raise"
+        : suggestedWeightSeconds < hint.weightSeconds
+          ? "lower"
+          : "keep";
+
+    return {
+      ...selectorForHint(hint),
+      action,
+      currentWeightSeconds: hint.weightSeconds,
+      matchCount: matches.length,
+      ratio: roundCalibrationValue(ratio),
+      suggestedWeightSeconds,
+    };
+  });
+  const suggestedHints = weightHints.map((hint, index) => ({
+    ...hint,
+    weightSeconds: suggestions[index].suggestedWeightSeconds,
+  }));
+
+  return {
+    changedHints: suggestions.filter((suggestion) => suggestion.action !== "keep").length,
+    defaultWeightSeconds,
+    runnableTestCount: runnableTests.length,
+    shardCount: telemetry.shardCount,
+    shards: shardSummaries,
+    suggestedHints,
+    suggestions,
+    totalEstimatedWeightSeconds: roundCalibrationValue(totalEstimatedWeightSeconds),
+    totalObservedSeconds: roundCalibrationValue(totalObservedSeconds),
+  };
+}
+
+export function parseRuntimeStressTestListText(text) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed) && parsed.every((value) => typeof value === "string")) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to cargo --list text parsing.
+  }
+
+  return trimmed
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s*(main_internal_tests::.*): test$/)?.[1])
+    .filter(Boolean);
+}
+
+function loadRuntimeStressTestNames(args) {
+  if (args.runtimeStressTestList) {
+    return parseRuntimeStressTestListText(readFileSync(args.runtimeStressTestList, "utf8"));
+  }
+
+  const result = spawnSync("cargo", RUNTIME_STRESS_CARGO_LIST_ARGS, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error((result.stderr || result.stdout || "cargo test --list failed").trim());
+  }
+  const testNames = parseRuntimeStressTestListText(result.stdout);
+  if (testNames.length === 0) {
+    throw new Error("cargo test --list returned zero runtime stress tests");
+  }
+  return testNames;
+}
+
+function formatHintSelectorLine(hint) {
+  if (typeof hint.name === "string") {
+    return `    name: ${JSON.stringify(hint.name)},`;
+  }
+  return `    filter: ${JSON.stringify(hint.filter)},`;
+}
+
+export function formatRuntimeStressWeightHints(hints) {
+  return [
+    "export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([",
+    ...hints.flatMap((hint) => [
+      "  {",
+      formatHintSelectorLine(hint),
+      `    weightSeconds: ${hint.weightSeconds},`,
+      "  },",
+    ]),
+    "]);",
+  ].join("\n");
+}
+
+export function replaceRuntimeStressWeightHintsBlock(text, hints) {
+  const replacement = formatRuntimeStressWeightHints(hints);
+  const pattern =
+    /export const RUNTIME_STRESS_WEIGHT_HINTS = Object\.freeze\(\[\n[\s\S]*?\n\]\);/;
+  if (!pattern.test(text)) {
+    throw new Error("could not locate RUNTIME_STRESS_WEIGHT_HINTS block");
+  }
+  return text.replace(pattern, replacement);
+}
+
+function writeRuntimeStressWeightHints(manifestPath, hints) {
+  const current = readFileSync(manifestPath, "utf8");
+  const next = replaceRuntimeStressWeightHintsBlock(current, hints);
+  if (next !== current) {
+    writeFileSync(manifestPath, next);
+    return true;
+  }
+  return false;
+}
+
+function assertRuntimeStressCalibrationWritable(calibration) {
+  const unmatched = calibration.suggestions
+    .filter((suggestion) => suggestion.matchCount === 0)
+    .map(formatCalibrationSelector);
+  if (unmatched.length > 0) {
+    throw new Error(
+      `refusing to write runtime stress hints because test list did not match ${unmatched.length} selector(s): ${unmatched.join(", ")}`,
+    );
+  }
+}
+
+function formatCalibrationSelector(suggestion) {
+  return `${suggestion.selectorType}:${suggestion.selector}`;
+}
+
+function printRuntimeStressCalibration(calibration, writeResult) {
+  process.stdout.write("\nruntime stress calibration:\n");
+  process.stdout.write(
+    `successful weighted broad shards: ${calibration.shardCount}; runnable tests: ${calibration.runnableTestCount}\n`,
+  );
+  for (const shard of calibration.shards) {
+    process.stdout.write(
+      `- shard ${shard.index + 1}/${calibration.shardCount}: observed ${formatDuration(shard.observedSeconds * 1000)}, estimated ${shard.estimatedWeightSeconds}s, ratio ${shard.ratio}, tests ${shard.testCount}\n`,
+    );
+  }
+
+  const changed = calibration.suggestions.filter((suggestion) => suggestion.action !== "keep");
+  process.stdout.write(`suggested hint changes: ${changed.length}/${calibration.suggestions.length}\n`);
+  for (const suggestion of changed) {
+    process.stdout.write(
+      `- ${formatCalibrationSelector(suggestion)}: ${suggestion.currentWeightSeconds}s -> ${suggestion.suggestedWeightSeconds}s (${suggestion.action}, matches ${suggestion.matchCount}, ratio ${suggestion.ratio})\n`,
+    );
+  }
+  if (writeResult) {
+    process.stdout.write(`updated ${writeResult.path}: ${writeResult.changed ? "changed" : "already current"}\n`);
+  }
+  process.stdout.write("\nsuggested RUNTIME_STRESS_WEIGHT_HINTS:\n");
+  process.stdout.write(`${formatRuntimeStressWeightHints(calibration.suggestedHints)}\n`);
 }
 
 export function formatDuration(durationMs) {
@@ -369,10 +802,16 @@ async function main() {
     printHelp();
     return;
   }
+  if (args.writeRuntimeStressHints && !args.runtimeStressCalibration) {
+    throw new Error("--write-runtime-stress-hints requires --runtime-stress-calibration");
+  }
 
   let runId = args.runId ?? process.env.GITHUB_RUN_ID ?? null;
   let input = await readStdin();
   if (!input) {
+    if (args.runtimeStressCalibration) {
+      throw new Error("runtime stress calibration requires job duration JSON on stdin; refusing live GitHub fetch");
+    }
     const fetched = runGhView(args);
     input = fetched.input;
     runId = fetched.runId;
@@ -380,9 +819,29 @@ async function main() {
 
   const payload = parsePayload(input);
   const summary = summarize(payload, args);
+  let runtimeStressCalibration = null;
+  let writeResult = null;
+  if (args.runtimeStressCalibration) {
+    runtimeStressCalibration = calibrateRuntimeStressWeightHints({
+      jobs: summary.jobs,
+      testNames: loadRuntimeStressTestNames(args),
+    });
+    if (args.writeRuntimeStressHints) {
+      assertRuntimeStressCalibrationWritable(runtimeStressCalibration);
+      const path = args.runtimeStressManifest ?? DEFAULT_RUNTIME_STRESS_MANIFEST_PATH;
+      writeResult = {
+        changed: writeRuntimeStressWeightHints(path, runtimeStressCalibration.suggestedHints),
+        path,
+      };
+    }
+  }
 
   if (args.json) {
-    process.stdout.write(`${JSON.stringify({ runId, ...summary }, null, 2)}\n`);
+    const output = { runId, ...summary };
+    if (runtimeStressCalibration) {
+      output.runtimeStressCalibration = runtimeStressCalibration;
+    }
+    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     if (budgetExceeded(summary)) {
       process.exitCode = 1;
     }
@@ -390,6 +849,9 @@ async function main() {
   }
 
   printSummary(summary, runId);
+  if (runtimeStressCalibration) {
+    printRuntimeStressCalibration(runtimeStressCalibration, writeResult);
+  }
   if (budgetExceeded(summary)) {
     process.exitCode = 1;
   }

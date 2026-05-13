@@ -391,6 +391,8 @@ export const RUNTIME_STRESS_DEFAULT_WEIGHT_SECONDS = 1;
 
 // Static duration hints keep broad runtime-stress shards balanced without
 // depending on external CI telemetry at run time. Unknown tests use the default.
+// Update from saved CI duration telemetry with:
+// node scripts/ci/github-job-durations.mjs --runtime-stress-calibration --write-runtime-stress-hints < ci-job-durations.json
 export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   {
     filter: "main_internal_tests::runtime_proxy_continuations::",
