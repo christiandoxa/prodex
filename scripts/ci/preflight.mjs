@@ -84,7 +84,7 @@ function printHelp() {
       "Runs the practical local preflight gate before pushing.",
       "",
       "Default checks:",
-      "  - release hygiene, Rust size/allow guards, crate boundaries, runtime hot-path, churn hygiene, manifest-owned version sync",
+      "  - release hygiene, Rust size/allow/super-wildcard guards, crate boundaries, runtime hot-path, churn hygiene, manifest-owned version sync",
       "  - docs lint, upstream baseline, runtime manifest, fmt, cargo check",
       "  - cargo clippy --locked --all-targets --all-features -- -D warnings",
       "  - npm run test:fast -- --tests-only --no-prebuild",
@@ -128,6 +128,11 @@ function preflightSteps(args) {
       label: "allow-attribute-guard",
       command: "node",
       args: ["scripts/ci/allow-attribute-guard.mjs"],
+    },
+    {
+      label: "super-wildcard-guard",
+      command: "node",
+      args: ["scripts/ci/super-wildcard-guard.mjs"],
     },
     {
       label: "env-mutation-guard",

@@ -1,6 +1,14 @@
 use super::*;
 use std::collections::BTreeSet;
 
+const SMART_CONTEXT_STATIC_CONTEXT_SECTION_MIN_BYTES: usize = 512;
+const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX: &str = "psc static ";
+const SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY: &str =
+    "prodex static context unchanged ";
+const SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX: &str = "psc static dup ";
+const SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX: &str = "psc static chunk dup ";
+const SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX: &str = "psc static section dup ";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmartContextArtifactLineRangeRef {
     pub artifact_id: String,
@@ -110,6 +118,14 @@ pub struct SmartContextStaticContextPromptCacheFingerprint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextStaticHeadingSection {
+    pub heading: String,
+    pub start: usize,
+    pub end: usize,
+    pub ordinal: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SmartContextFingerprintChange {
     Added {
         fingerprint: SmartContextFingerprint,
@@ -196,6 +212,86 @@ pub fn smart_context_static_context_prompt_cache_fingerprint(
         content_hash: format!("scpc:{:016x}", smart_context_fnv1a64(payload.as_bytes())),
         items,
     }
+}
+
+pub fn smart_context_static_heading_section_body<'a>(
+    text: &'a str,
+    section: &SmartContextStaticHeadingSection,
+) -> Option<&'a str> {
+    if section.start >= section.end
+        || section.end > text.len()
+        || !text.is_char_boundary(section.start)
+        || !text.is_char_boundary(section.end)
+    {
+        return None;
+    }
+    text.get(section.start..section.end)
+}
+
+pub fn smart_context_static_context_heading_sections(
+    text: &str,
+) -> Vec<SmartContextStaticHeadingSection> {
+    let mut headings = Vec::<(String, usize)>::new();
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches('\n').trim_end_matches('\r');
+        if let Some(heading) = smart_context_static_context_heading(line_without_newline) {
+            headings.push((heading, offset));
+        }
+        offset = offset.saturating_add(line.len());
+    }
+    if !text.ends_with('\n')
+        && let Some(last_line) = text.rsplit('\n').next()
+        && let Some(heading) = smart_context_static_context_heading(last_line)
+    {
+        let start = text.len().saturating_sub(last_line.len());
+        if !headings
+            .iter()
+            .any(|(_, existing_start)| *existing_start == start)
+        {
+            headings.push((heading, start));
+        }
+    }
+    let mut sections = Vec::new();
+    for (index, (heading, start)) in headings.iter().enumerate() {
+        let end = headings
+            .get(index + 1)
+            .map(|(_, next_start)| *next_start)
+            .unwrap_or(text.len());
+        if end.saturating_sub(*start) < SMART_CONTEXT_STATIC_CONTEXT_SECTION_MIN_BYTES {
+            continue;
+        }
+        let Some(body) = text.get(*start..end).map(str::trim) else {
+            continue;
+        };
+        if body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
+            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY)
+            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX)
+            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX)
+            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX)
+        {
+            continue;
+        }
+        sections.push(SmartContextStaticHeadingSection {
+            heading: heading.clone(),
+            start: *start,
+            end,
+            ordinal: index,
+        });
+    }
+    sections
+}
+
+fn smart_context_static_context_heading(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('#') {
+        return None;
+    }
+    let level = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if level == 0 || level > 6 || !trimmed.chars().nth(level).is_some_and(char::is_whitespace) {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 pub fn smart_context_fingerprint_delta(

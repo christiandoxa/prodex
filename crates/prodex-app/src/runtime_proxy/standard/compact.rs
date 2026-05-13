@@ -1,6 +1,37 @@
-use super::*;
+use super::super::{
+    RuntimeCandidateAffinity, RuntimeResponseCandidateSelection,
+    build_runtime_proxy_json_error_response, bump_runtime_profile_bad_pairing_score,
+    bump_runtime_profile_health_score, commit_runtime_proxy_profile_selection_with_notice,
+    mark_runtime_profile_retry_backoff, release_runtime_auth_failed_affinity,
+    release_runtime_compact_lineage, release_runtime_quota_blocked_affinity,
+    runtime_candidate_has_hard_affinity, runtime_compact_route_followup_bound_profile,
+    runtime_has_route_eligible_quota_fallback, runtime_profile_inflight_hard_limited_for_context,
+    runtime_proxy_current_profile, runtime_proxy_final_retryable_http_failure_response,
+    runtime_proxy_local_selection_failure_message, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_precommit_budget_exhausted_for_route,
+    runtime_proxy_pressure_mode_active_for_route, runtime_proxy_profile_inflight_hard_limit,
+    runtime_proxy_should_shed_fresh_compact_request, runtime_proxy_structured_log_message,
+    runtime_proxy_sync_probe_pressure_pause,
+    runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_request_session_id,
+    runtime_request_turn_state, runtime_session_bound_profile,
+    select_runtime_response_candidate_for_route,
+};
+use super::attempt_runtime_standard_request;
+use crate::core_constants::{
+    RUNTIME_PROFILE_BAD_PAIRING_PENALTY, RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+    RUNTIME_PROXY_COMPACT_OWNER_RETRY_DELAY_MS,
+};
+use crate::runtime_proxy_shared::RuntimeStandardAttempt;
+use crate::runtime_state_shared::{RuntimeRotationProxyShared, RuntimeRouteKind};
+use crate::shared_types::RuntimeProxyRequest;
+use anyhow::Result;
+use std::collections::BTreeSet;
+use std::time::Instant;
 mod logging;
-use logging::*;
+use logging::{
+    RuntimeProxyCompactFinalFailureLog, log_runtime_proxy_compact_final_failure,
+    runtime_proxy_compact_final_failure_reason, runtime_proxy_compact_last_failure_kind,
+};
 
 pub(super) fn proxy_runtime_compact_request(
     request_id: u64,
@@ -232,7 +263,6 @@ pub(super) fn proxy_runtime_compact_request(
             };
         }
         selection_attempts = selection_attempts.saturating_add(1);
-
         let Some(candidate_name) = select_runtime_response_candidate_for_route(
             shared,
             RuntimeResponseCandidateSelection {
@@ -417,11 +447,9 @@ pub(super) fn proxy_runtime_compact_request(
                 }
             };
         };
-
         if excluded_profiles.contains(&candidate_name) {
             continue;
         }
-
         runtime_proxy_log(
             shared,
             format!(
@@ -684,7 +712,6 @@ pub(super) fn proxy_runtime_compact_request(
                     );
                     return Ok(response);
                 }
-
                 let released_affinity = release_runtime_auth_failed_affinity(
                     shared,
                     &profile_name,

@@ -432,92 +432,20 @@ fn runtime_smart_context_static_section_key(
     format!("{item_id}\n{}\n{ordinal}", heading.to_ascii_lowercase())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RuntimeSmartContextStaticHeadingSection {
-    pub(super) heading: String,
-    pub(super) start: usize,
-    pub(super) end: usize,
-    pub(super) ordinal: usize,
-}
+pub(super) type RuntimeSmartContextStaticHeadingSection =
+    runtime_proxy_crate::SmartContextStaticHeadingSection;
 
 pub(super) fn runtime_smart_context_static_heading_section_body<'a>(
     text: &'a str,
     section: &RuntimeSmartContextStaticHeadingSection,
 ) -> Option<&'a str> {
-    if section.start >= section.end
-        || section.end > text.len()
-        || !text.is_char_boundary(section.start)
-        || !text.is_char_boundary(section.end)
-    {
-        return None;
-    }
-    text.get(section.start..section.end)
+    runtime_proxy_crate::smart_context_static_heading_section_body(text, section)
 }
 
 pub(super) fn runtime_smart_context_static_context_heading_sections(
     text: &str,
 ) -> Vec<RuntimeSmartContextStaticHeadingSection> {
-    let mut headings = Vec::<(String, usize)>::new();
-    let mut offset = 0usize;
-    for line in text.split_inclusive('\n') {
-        let line_without_newline = line.trim_end_matches('\n').trim_end_matches('\r');
-        if let Some(heading) = runtime_smart_context_static_context_heading(line_without_newline) {
-            headings.push((heading, offset));
-        }
-        offset = offset.saturating_add(line.len());
-    }
-    if !text.ends_with('\n')
-        && let Some(last_line) = text.rsplit('\n').next()
-        && let Some(heading) = runtime_smart_context_static_context_heading(last_line)
-    {
-        let start = text.len().saturating_sub(last_line.len());
-        if !headings
-            .iter()
-            .any(|(_, existing_start)| *existing_start == start)
-        {
-            headings.push((heading, start));
-        }
-    }
-    let mut sections = Vec::new();
-    for (index, (heading, start)) in headings.iter().enumerate() {
-        let end = headings
-            .get(index + 1)
-            .map(|(_, next_start)| *next_start)
-            .unwrap_or(text.len());
-        if end.saturating_sub(*start) < SMART_CONTEXT_STATIC_CONTEXT_CHUNK_MIN_BYTES {
-            continue;
-        }
-        let Some(body) = text.get(*start..end).map(str::trim) else {
-            continue;
-        };
-        if body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX)
-            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DELTA_MARKER_PREFIX_LEGACY)
-            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_DUP_MARKER_PREFIX)
-            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_CHUNK_DUP_MARKER_PREFIX)
-            || body.starts_with(SMART_CONTEXT_STATIC_CONTEXT_SECTION_DUP_MARKER_PREFIX)
-        {
-            continue;
-        }
-        sections.push(RuntimeSmartContextStaticHeadingSection {
-            heading: heading.clone(),
-            start: *start,
-            end,
-            ordinal: index,
-        });
-    }
-    sections
-}
-
-fn runtime_smart_context_static_context_heading(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with('#') {
-        return None;
-    }
-    let level = trimmed.chars().take_while(|ch| *ch == '#').count();
-    if level == 0 || level > 6 || !trimmed.chars().nth(level).is_some_and(char::is_whitespace) {
-        return None;
-    }
-    Some(trimmed.to_string())
+    runtime_proxy_crate::smart_context_static_context_heading_sections(text)
 }
 
 pub(super) fn runtime_smart_context_apply_static_context_cross_field_dedupe(

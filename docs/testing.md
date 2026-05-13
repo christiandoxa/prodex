@@ -52,6 +52,7 @@ npm run ci:release-hygiene
 npm run ci:release-metadata-guard
 npm run ci:generated-metadata-clean
 npm run ci:size-guard-fixtures
+npm run ci:super-wildcard-guard
 npm run ci:release-cut-fixtures
 npm run ci:runtime-hotpath-guard
 npm run ci:crate-boundary
@@ -118,7 +119,7 @@ To exercise an already-running proxy, pass the Codex-facing base URL:
 npm run load:runtime-proxy -- --scenario spike --target http://127.0.0.1:9901/backend-api --runtime-log-dir /tmp/prodex-runtime
 ```
 
-Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release hygiene, size, crate-boundary, runtime hot-path, churn hygiene, manifest-owned generated metadata sync, runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Churn hygiene fails on actionable violations by default; use `npm run ci:preflight -- --churn-report-only` or `PRODEX_PREFLIGHT_CHURN_REPORT_ONLY=1 npm run ci:preflight` only for exploratory local runs. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan. For local historical audits only, `-- --churn-range old..HEAD --churn-ignore-before latest-tag` keeps churn enforcement focused on commits after the newest version tag inside the selected range.
+Use `npm run ci:preflight` before pushing broad runtime or release-adjacent changes. It runs release hygiene, size, allow/super-wildcard, crate-boundary, runtime hot-path, churn hygiene, manifest-owned generated metadata sync, runtime-manifest/fmt/cargo-check guards, clippy with warnings denied, and the fast test lane. Churn hygiene fails on actionable violations by default; use `npm run ci:preflight -- --churn-report-only` or `PRODEX_PREFLIGHT_CHURN_REPORT_ONLY=1 npm run ci:preflight` only for exploratory local runs. Add `-- --serial` when a change needs the serialized runtime/global-state lane too, or `-- --dry-run` to inspect the command plan. For local historical audits only, `-- --churn-range old..HEAD --churn-ignore-before latest-tag` keeps churn enforcement focused on commits after the newest version tag inside the selected range.
 
 Use `npm run ci:release-hygiene` for the full release gate. By default it checks `HEAD`; use `-- --range main..HEAD` or `-- --base origin/main --head HEAD` for branch ranges. The runner executes changelog-noise, metadata-only, version metadata, empty release commit, duplicate release version, tag/changelog, release-run/changelog tests, release guard fixtures, and release-cut backcompat fixtures as one serial gate. Changelog generation is user-facing: internal `test`, `ci`, `refactor`, and chore-only commits are omitted. Any `CHANGELOG.md` edit outside a release-like commit is rejected, even when mixed with code or changelog tooling changes; let `npm run release:run -- --version <semver>` render the final `CHANGELOG.md` section in the release commit instead. Real fixes to changelog tooling, for example `fix(changelog): ...` commits that change `scripts/npm/changelog.mjs`, remain valid when they do not edit generated changelog output.
 

@@ -276,3 +276,73 @@ fn static_context_prompt_cache_fingerprint_changes_on_substantive_text() {
     assert_ne!(before.content_hash, after.content_hash);
     assert_ne!(before.items[0].content_hash, after.items[0].content_hash);
 }
+
+#[test]
+fn static_context_heading_sections_preserve_offsets_and_ordinals() {
+    let intro = "intro\n";
+    let first_body = "alpha ".repeat(90);
+    let second_body = "beta ".repeat(110);
+    let text = format!("{intro}# First\r\n{first_body}\n## Second\n{second_body}");
+
+    let sections = smart_context_static_context_heading_sections(&text);
+
+    assert_eq!(sections.len(), 2);
+    assert_eq!(sections[0].heading, "# First");
+    assert_eq!(sections[0].start, intro.len());
+    assert_eq!(sections[0].ordinal, 0);
+    assert_eq!(
+        smart_context_static_heading_section_body(&text, &sections[0]),
+        Some(&text[sections[0].start..sections[0].end])
+    );
+    assert_eq!(sections[1].heading, "## Second");
+    assert_eq!(sections[1].ordinal, 1);
+    assert_eq!(sections[0].end, sections[1].start);
+}
+
+#[test]
+fn static_context_heading_sections_ignore_short_and_invalid_sections() {
+    let short_body = "short";
+    let valid_body = "rule ".repeat(110);
+    let text = format!("# Too Short\n{short_body}\nnot a heading\n# Valid\n{valid_body}");
+
+    let sections = smart_context_static_context_heading_sections(&text);
+
+    assert_eq!(sections.len(), 1);
+    assert_eq!(sections[0].heading, "# Valid");
+    assert_eq!(sections[0].ordinal, 1);
+    assert!(
+        smart_context_static_heading_section_body(&text, &sections[0])
+            .unwrap()
+            .contains(&valid_body)
+    );
+}
+
+#[test]
+fn static_context_heading_section_body_rejects_invalid_ranges() {
+    let text = "é\n# Heading\n".to_string() + &"body ".repeat(110);
+
+    assert!(
+        smart_context_static_heading_section_body(
+            &text,
+            &SmartContextStaticHeadingSection {
+                heading: "# Heading".to_string(),
+                start: 1,
+                end: 2,
+                ordinal: 0,
+            },
+        )
+        .is_none()
+    );
+    assert!(
+        smart_context_static_heading_section_body(
+            &text,
+            &SmartContextStaticHeadingSection {
+                heading: "# Heading".to_string(),
+                start: text.len(),
+                end: text.len(),
+                ordinal: 0,
+            },
+        )
+        .is_none()
+    );
+}

@@ -195,6 +195,9 @@ jobs:
       - name: Enforce Rust allow attribute guard
         run: npm run ci:allow-guard
 
+      - name: Enforce Rust super wildcard guard
+        run: npm run ci:super-wildcard-guard
+
       - name: Enforce Rust env mutation guard
         run: npm run ci:env-mutation-guard
 
