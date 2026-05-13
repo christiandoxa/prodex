@@ -1,4 +1,11 @@
-use super::*;
+use std::io;
+
+use tungstenite::Error as WsError;
+
+use super::{
+    RuntimeRotationProxyShared, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_structured_log_message,
+};
 
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY;

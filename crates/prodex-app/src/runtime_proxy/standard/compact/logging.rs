@@ -1,4 +1,6 @@
-use super::*;
+use std::time::Instant;
+
+use super::{RuntimeRotationProxyShared, runtime_proxy_log};
 
 pub(super) fn runtime_proxy_compact_last_failure_kind(
     last_failure: Option<&(tiny_http::ResponseBox, bool)>,
