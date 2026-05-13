@@ -6,6 +6,7 @@ import { git, normalizeGitPath } from "./guard-common.mjs";
 import { formatCommand, runStep, runStepsSerial } from "./main-internal-test-runner.mjs";
 import {
   CHANGELOG_TEST_PATH,
+  CAPTURE_REPLAY_FIXTURE_TESTS_PATH,
   PACKAGE_SCRIPT_ALIASES,
   PATH_GROUP_NAMES,
   RELEASE_RUN_TEST_PATH,
@@ -209,6 +210,13 @@ async function addUpstreamCompatSteps(steps) {
     command: "node",
     args: ["scripts/compat/check-upstream-baseline.mjs"],
   });
+  if (await pathExists(CAPTURE_REPLAY_FIXTURE_TESTS_PATH)) {
+    addStep(steps, "capture-replay-fixtures", {
+      label: "capture-replay-fixtures",
+      command: "node",
+      args: [CAPTURE_REPLAY_FIXTURE_TESTS_PATH],
+    });
+  }
   if (await pathExists(WATCH_UPSTREAM_FIXTURE_TESTS_PATH)) {
     addStep(steps, "watch-upstream-fixtures", {
       label: "watch-upstream-fixtures",

@@ -55,6 +55,8 @@ export const RELEASE_SUBJECT_PATTERN_SPECS = deepFreeze(
   })),
 );
 export const CHANGELOG_TEST_PATH = "scripts/npm/changelog.test.mjs";
+export const CAPTURE_REPLAY_FIXTURE_TESTS_PATH =
+  "scripts/compat/capture-replay-fixture-tests.mjs";
 export const WATCH_UPSTREAM_FIXTURE_TESTS_PATH =
   "scripts/compat/watch-upstream-fixture-tests.mjs";
 export const UPSTREAM_COMPAT_SCRIPT_PATHS = manifestValue("upstreamCompatScriptPaths");

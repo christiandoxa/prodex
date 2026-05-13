@@ -105,6 +105,8 @@
     "light": "ciImpactLight"
   },
   "upstreamCompatScriptPaths": [
+    "scripts/compat/capture-replay.mjs",
+    "scripts/compat/capture-replay-fixture-tests.mjs",
     "scripts/compat/check-upstream-baseline.mjs",
     "scripts/compat/upstream-compat-common.mjs",
     "scripts/compat/upstream-compat-summary.mjs",
@@ -127,6 +129,7 @@
     "release:cut": "node scripts/npm/release-cut.mjs",
     "release:run": "node scripts/npm/release-run.mjs",
     "compat:check": "node scripts/compat/check-upstream-baseline.mjs",
+    "compat:replay-fixtures": "node scripts/compat/capture-replay-fixture-tests.mjs",
     "compat:watch": "node scripts/compat/watch-upstream.mjs",
     "compat:watch-fixtures": "node scripts/compat/watch-upstream-fixture-tests.mjs",
     "compat:watch-ci": "node scripts/compat/watch-upstream-ci.mjs",
@@ -141,6 +144,7 @@
         "package-lock.json",
         "scripts/ci/ci-impact.mjs",
         "scripts/ci/ci-impact.test.mjs",
+        "scripts/ci/allow-attribute-guard.test.mjs",
         "scripts/ci/release-changelog-coupling-guard.mjs",
         "scripts/ci/release-duplicate-version-guard.mjs",
         "scripts/ci/release-empty-commit-guard.mjs",
@@ -238,6 +242,7 @@
       "exact": [
         "package.json",
         "scripts/ci/allow-attribute-guard.mjs",
+        "scripts/ci/allow-attribute-guard.test.mjs",
         "scripts/ci/env-mutation-guard.mjs",
         "scripts/ci/guard-common.mjs",
         "scripts/ci/size-guard.mjs",

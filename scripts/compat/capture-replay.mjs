@@ -42,6 +42,8 @@ const VOLATILE_KEY_PLACEHOLDERS = new Map([
   ["user_id", "<user_id>"],
   ["call_id", "<call_id>"],
   ["approval_request_id", "<approval_request_id>"],
+  ["sec-websocket-key", "<websocket_key>"],
+  ["sec-websocket-accept", "<websocket_accept>"],
   ["created", "<created>"],
   ["created_at", "<created_at>"],
   ["updated_at", "<updated_at>"],
