@@ -1,7 +1,7 @@
 use crate::{
     RUNTIME_DOCTOR_ACTIVE_PERSISTENCE_MARKERS, RUNTIME_DOCTOR_ACTIVE_QUOTA_REFRESH_MARKERS,
     RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS, RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS,
-    RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS, RuntimeDoctorSummary,
+    RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS, RuntimeDoctorMarker, RuntimeDoctorSummary,
 };
 
 use super::super::marker_accessors::*;
@@ -56,9 +56,12 @@ pub(super) fn runtime_doctor_startup_audit_pressure(summary: &RuntimeDoctorSumma
 
 pub(super) fn runtime_doctor_quota_freshness_pressure(summary: &RuntimeDoctorSummary) -> String {
     if summary.stale_persisted_usage_snapshots > 0
-        || runtime_doctor_marker_count(summary, "profile_probe_refresh_error") > 0
-        || runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure") > 0
-        || runtime_doctor_marker_count(summary, "selection_skip_sync_probe") > 0
+        || runtime_doctor_marker_count(summary, RuntimeDoctorMarker::ProfileProbeRefreshError) > 0
+        || runtime_doctor_marker_count(
+            summary,
+            RuntimeDoctorMarker::ProfileProbeRefreshBackpressure,
+        ) > 0
+        || runtime_doctor_marker_count(summary, RuntimeDoctorMarker::SelectionSkipSyncProbe) > 0
         || runtime_doctor_top_facet(summary, "quota_source")
             .is_some_and(|value| value.starts_with("persisted_snapshot "))
     {

@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use crate::RUNTIME_DOCTOR_MARKERS;
+use crate::{RUNTIME_DOCTOR_MARKERS, RuntimeDoctorMarker};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct RuntimeDoctorParsedLogMessage {
@@ -88,10 +88,7 @@ pub(super) fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
 }
 
 fn runtime_doctor_known_marker(event: &str) -> Option<&'static str> {
-    RUNTIME_DOCTOR_MARKERS
-        .iter()
-        .copied()
-        .find(|marker| *marker == event)
+    RuntimeDoctorMarker::from_name(event).map(RuntimeDoctorMarker::as_str)
 }
 
 fn runtime_doctor_json_fields_map(

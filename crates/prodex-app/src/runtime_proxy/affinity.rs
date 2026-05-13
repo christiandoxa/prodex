@@ -336,13 +336,12 @@ pub(crate) struct RuntimeResponseRouteAffinityLogContext<'a> {
     pub(crate) reason: &'a str,
 }
 
-impl RuntimeResponseRouteAffinityLogContext<'_> {
-    fn route_prefix(self) -> String {
-        match self.websocket_session_id {
-            Some(session_id) => {
-                format!("request={} websocket_session={session_id}", self.request_id)
-            }
-            None => format!("request={} transport=http", self.request_id),
+impl<'a> RuntimeResponseRouteAffinityLogContext<'a> {
+    fn to_proxy(self) -> runtime_proxy_crate::RuntimeResponseRouteAffinityLogContext<'a> {
+        runtime_proxy_crate::RuntimeResponseRouteAffinityLogContext {
+            request_id: self.request_id,
+            websocket_session_id: self.websocket_session_id,
+            reason: self.reason,
         }
     }
 }
@@ -468,40 +467,21 @@ pub(crate) fn log_runtime_response_route_affinity_for_context(
     presence: RuntimeResponseRouteAffinityPresence,
     affinity: &RuntimeResponseRouteAffinity,
 ) {
-    let prefix = context.route_prefix();
     runtime_proxy_log(
         context.shared,
-        format!(
-            "{prefix} route_affinity_recompute_result reason={} previous_response_id_present={} request_turn_state_present={} request_session_id_present={} explicit_session_id_present={} bound_session_profile={:?} compact_followup_profile={:?} compact_session_profile={:?} session_profile={:?} pinned_profile={:?}",
-            context.reason,
-            presence.previous_response_id_present,
-            presence.request_turn_state_present,
-            presence.request_session_id_present,
-            presence.explicit_request_session_id_present,
-            affinity.bound_session_profile,
-            affinity.compact_followup_profile,
-            affinity.compact_session_profile,
-            affinity.session_profile,
-            affinity.pinned_profile,
+        runtime_proxy_crate::runtime_response_route_affinity_recompute_result_log_message(
+            context.to_proxy(),
+            runtime_response_route_affinity_presence_to_proxy(presence),
+            runtime_response_route_affinity_log_state(affinity),
         ),
     );
-    if let Some((profile_name, source)) = affinity.compact_followup_profile.as_ref() {
-        runtime_proxy_log(
-            context.shared,
-            format!(
-                "{} compact_followup_owner profile={profile_name} source={source}",
-                context.route_prefix()
-            ),
-        );
-    }
-    if let Some(profile_name) = affinity.compact_session_profile.as_deref() {
-        runtime_proxy_log(
-            context.shared,
-            format!(
-                "{} compact_followup_owner profile={profile_name} source=session_id",
-                context.route_prefix()
-            ),
-        );
+    for message in
+        runtime_proxy_crate::runtime_response_route_affinity_compact_followup_owner_log_messages(
+            context.to_proxy(),
+            runtime_response_route_affinity_log_state(affinity),
+        )
+    {
+        runtime_proxy_log(context.shared, message);
     }
 }
 
@@ -511,16 +491,37 @@ pub(crate) fn log_runtime_response_route_affinity_recompute_for_context(
 ) {
     runtime_proxy_log(
         context.shared,
-        format!(
-            "{} route_affinity_recompute reason={} previous_response_id_present={} request_turn_state_present={} request_session_id_present={} explicit_session_id_present={}",
-            context.route_prefix(),
-            context.reason,
-            presence.previous_response_id_present,
-            presence.request_turn_state_present,
-            presence.request_session_id_present,
-            presence.explicit_request_session_id_present,
+        runtime_proxy_crate::runtime_response_route_affinity_recompute_log_message(
+            context.to_proxy(),
+            runtime_response_route_affinity_presence_to_proxy(presence),
         ),
     );
+}
+
+fn runtime_response_route_affinity_presence_to_proxy(
+    presence: RuntimeResponseRouteAffinityPresence,
+) -> runtime_proxy_crate::RuntimeResponseRouteAffinityPresence {
+    runtime_proxy_crate::RuntimeResponseRouteAffinityPresence {
+        previous_response_id_present: presence.previous_response_id_present,
+        request_turn_state_present: presence.request_turn_state_present,
+        request_session_id_present: presence.request_session_id_present,
+        explicit_request_session_id_present: presence.explicit_request_session_id_present,
+    }
+}
+
+fn runtime_response_route_affinity_log_state(
+    affinity: &RuntimeResponseRouteAffinity,
+) -> runtime_proxy_crate::RuntimeResponseRouteAffinityLogState<'_> {
+    runtime_proxy_crate::RuntimeResponseRouteAffinityLogState {
+        bound_session_profile: affinity.bound_session_profile.as_deref(),
+        compact_followup_profile: affinity
+            .compact_followup_profile
+            .as_ref()
+            .map(|(profile_name, source)| (profile_name.as_str(), *source)),
+        compact_session_profile: affinity.compact_session_profile.as_deref(),
+        session_profile: affinity.session_profile.as_deref(),
+        pinned_profile: affinity.pinned_profile.as_deref(),
+    }
 }
 
 pub(crate) fn refresh_and_log_runtime_response_route_affinity_for_request(

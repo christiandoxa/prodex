@@ -50,6 +50,58 @@ const RUNTIME_DOCTOR_MARKER_GUARD_ALLOWLIST: &[&str] = &[
 ];
 
 #[test]
+fn runtime_doctor_typed_marker_facade_matches_string_registry() {
+    let typed_markers = RuntimeDoctorMarker::ALL
+        .iter()
+        .copied()
+        .map(RuntimeDoctorMarker::as_str)
+        .collect::<Vec<_>>();
+
+    assert_eq!(typed_markers, RUNTIME_DOCTOR_MARKERS);
+    assert_eq!(
+        typed_markers.iter().copied().collect::<BTreeSet<_>>().len(),
+        typed_markers.len(),
+        "typed runtime marker registry contains duplicate names"
+    );
+    for marker in RuntimeDoctorMarker::ALL.iter().copied() {
+        assert_eq!(
+            RuntimeDoctorMarker::from_name(marker.as_str()),
+            Some(marker),
+            "typed runtime marker round trip failed for {}",
+            marker.as_str()
+        );
+        let descriptor = runtime_doctor_marker_descriptor(marker.as_str())
+            .expect("known marker should have descriptor");
+        assert_eq!(descriptor.marker, marker);
+        assert_eq!(descriptor.name, marker.as_str());
+    }
+}
+
+#[test]
+fn runtime_doctor_typed_facet_facade_matches_string_registry() {
+    let typed_facets = RuntimeDoctorLogFacet::ALL
+        .iter()
+        .copied()
+        .map(RuntimeDoctorLogFacet::as_str)
+        .collect::<Vec<_>>();
+
+    assert_eq!(typed_facets, RUNTIME_DOCTOR_FACETS);
+    assert_eq!(
+        typed_facets.iter().copied().collect::<BTreeSet<_>>().len(),
+        typed_facets.len(),
+        "typed runtime facet registry contains duplicate names"
+    );
+    for facet in RuntimeDoctorLogFacet::ALL.iter().copied() {
+        assert_eq!(
+            RuntimeDoctorLogFacet::from_name(facet.as_str()),
+            Some(facet),
+            "typed runtime facet round trip failed for {}",
+            facet.as_str()
+        );
+    }
+}
+
+#[test]
 fn runtime_doctor_marker_registry_covers_runtime_log_markers() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut source_files = Vec::new();

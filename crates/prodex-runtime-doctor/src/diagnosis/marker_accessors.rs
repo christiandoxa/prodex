@@ -1,7 +1,11 @@
 use super::*;
 use std::collections::BTreeMap;
 
-pub fn runtime_doctor_marker_count(summary: &RuntimeDoctorSummary, marker: &'static str) -> usize {
+pub fn runtime_doctor_marker_count(
+    summary: &RuntimeDoctorSummary,
+    marker: impl AsRef<str>,
+) -> usize {
+    let marker = marker.as_ref();
     summary.marker_counts.get(marker).copied().unwrap_or(0)
 }
 
@@ -29,9 +33,10 @@ pub(super) fn runtime_doctor_facet_count(
 
 pub(super) fn runtime_doctor_marker_last_field<'a>(
     summary: &'a RuntimeDoctorSummary,
-    marker: &str,
+    marker: impl AsRef<str>,
     field: &str,
 ) -> Option<&'a str> {
+    let marker = marker.as_ref();
     summary
         .marker_last_fields
         .get(marker)
@@ -41,7 +46,7 @@ pub(super) fn runtime_doctor_marker_last_field<'a>(
 
 pub(super) fn runtime_doctor_marker_last_usize_field(
     summary: &RuntimeDoctorSummary,
-    marker: &str,
+    marker: impl AsRef<str>,
     field: &str,
 ) -> Option<usize> {
     runtime_doctor_marker_last_field(summary, marker, field)?
@@ -51,7 +56,7 @@ pub(super) fn runtime_doctor_marker_last_usize_field(
 
 pub(super) fn runtime_doctor_marker_last_u64_field(
     summary: &RuntimeDoctorSummary,
-    marker: &str,
+    marker: impl AsRef<str>,
     field: &str,
 ) -> Option<u64> {
     runtime_doctor_marker_last_field(summary, marker, field)?
@@ -61,10 +66,11 @@ pub(super) fn runtime_doctor_marker_last_u64_field(
 
 pub(super) fn runtime_doctor_marker_scope(
     summary: &RuntimeDoctorSummary,
-    marker: &str,
+    marker: impl AsRef<str>,
     profile_field: &str,
     route_field: &str,
 ) -> Option<String> {
+    let marker = marker.as_ref();
     let profile = runtime_doctor_marker_last_field(summary, marker, profile_field);
     let route = runtime_doctor_marker_last_field(summary, marker, route_field);
     match (profile, route) {
