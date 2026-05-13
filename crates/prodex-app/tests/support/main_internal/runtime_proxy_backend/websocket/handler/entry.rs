@@ -23,10 +23,7 @@ pub(super) fn handle_runtime_proxy_backend_websocket(
         accepted::runtime_proxy_backend_response_turn_state(mode, &account_id);
     let mut request_count = 0usize;
 
-    loop {
-        let Some(request) = request::read_backend_websocket_text_request(&mut websocket) else {
-            break;
-        };
+    while let Some(request) = request::read_backend_websocket_text_request(&mut websocket) {
         websocket_requests
             .lock()
             .expect("websocket_requests poisoned")
