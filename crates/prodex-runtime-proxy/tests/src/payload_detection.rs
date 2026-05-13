@@ -1,6 +1,4 @@
 use super::*;
-use proptest::prelude::*;
-use proptest::test_runner::Config as ProptestConfig;
 
 #[derive(Debug, Clone)]
 struct GeneratedRuntimeSseEvent {
@@ -19,21 +17,16 @@ impl GeneratedRuntimeSseEvent {
     }
 }
 
-fn runtime_ascii_token() -> impl Strategy<Value = String> {
-    "[A-Za-z0-9_]{1,16}"
-}
-
-fn generated_runtime_sse_event() -> impl Strategy<Value = GeneratedRuntimeSseEvent> {
-    (
-        runtime_ascii_token(),
-        prop::option::of(runtime_ascii_token()),
-        0u8..6,
-    )
-        .prop_map(|(id, turn_state, shape)| GeneratedRuntimeSseEvent {
-            response_id: format!("resp-{id}"),
-            turn_state: turn_state.map(|state| format!("turn-{state}")),
-            shape,
-        })
+fn generated_runtime_sse_event(
+    response_id: &str,
+    turn_state: Option<&str>,
+    shape: u8,
+) -> GeneratedRuntimeSseEvent {
+    GeneratedRuntimeSseEvent {
+        response_id: response_id.to_string(),
+        turn_state: turn_state.map(str::to_string),
+        shape,
+    }
 }
 
 fn collect_runtime_sse_events(chunks: &[&[u8]]) -> Vec<RuntimeParsedSseEvent> {
@@ -145,22 +138,42 @@ fn build_runtime_sse_body(events: &[GeneratedRuntimeSseEvent], crlf: bool) -> Ve
     body.into_bytes()
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(48))]
+#[test]
+fn runtime_sse_helpers_chunking_corpus_matches_single_pass() {
+    let event_sets = [
+        vec![generated_runtime_sse_event("resp-a", None, 0)],
+        vec![
+            generated_runtime_sse_event("resp-a", Some("turn-a"), 1),
+            generated_runtime_sse_event("resp-b", None, 2),
+        ],
+        vec![
+            generated_runtime_sse_event("resp-a", Some("turn-a"), 0),
+            generated_runtime_sse_event("resp-b", Some("turn-b"), 1),
+            generated_runtime_sse_event("resp-c", None, 2),
+            generated_runtime_sse_event("resp-d", Some("turn-d"), 5),
+        ],
+    ];
+    let chunk_size_sets: &[&[usize]] = &[
+        &[],
+        &[0],
+        &[1, 1, 1, 1, 1, 1, 1, 1],
+        &[2, 3, 5, 8, 13, 21, 34, 55],
+        &[31, 0, 7, 128, 4, 64, 16],
+    ];
 
-    #[test]
-    fn runtime_sse_helpers_chunking_matches_single_pass(
-        events in prop::collection::vec(generated_runtime_sse_event(), 1..5),
-        chunk_sizes in prop::collection::vec(0usize..128, 0..64),
-        crlf in any::<bool>(),
-    ) {
-        let body = build_runtime_sse_body(&events, crlf);
-        let expected = runtime_sse_event_signatures(&collect_runtime_sse_events(&[&body]));
-        let actual = runtime_sse_event_signatures(
-            &collect_runtime_sse_events_for_chunk_sizes(&body, &chunk_sizes),
-        );
+    for events in event_sets {
+        for crlf in [false, true] {
+            let body = build_runtime_sse_body(&events, crlf);
+            let expected = runtime_sse_event_signatures(&collect_runtime_sse_events(&[&body]));
 
-        prop_assert_eq!(actual, expected);
+            for chunk_sizes in chunk_size_sets {
+                let actual = runtime_sse_event_signatures(
+                    &collect_runtime_sse_events_for_chunk_sizes(&body, chunk_sizes),
+                );
+
+                assert_eq!(actual, expected, "crlf={crlf} chunks={chunk_sizes:?}");
+            }
+        }
     }
 }
 

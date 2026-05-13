@@ -74,6 +74,12 @@ fn runtime_doctor_fixture_lane_pressure_surfaces_doctor_json_and_fields() {
         2
     );
     assert_eq!(
+        value["marker_context_summary"][0]["marker"],
+        "runtime_proxy_lane_limit_reached"
+    );
+    assert_eq!(value["marker_context_summary"][0]["total"], 2);
+    assert_eq!(value["marker_context_summary"][0]["lanes"]["compact"], 2);
+    assert_eq!(
         value["marker_last_fields"]["runtime_proxy_lane_limit_reached"]["lane"],
         "compact"
     );
@@ -93,6 +99,14 @@ fn runtime_doctor_fixture_lane_pressure_surfaces_doctor_json_and_fields() {
             .as_str()
             .expect("incident cause should be a string")
             .contains("compact lane")
+    );
+    assert!(
+        fields
+            .get("Marker context hotspots")
+            .expect("marker context hotspots should be rendered")
+            .contains(
+                "runtime_proxy_lane_limit_reached total=2 route:/responses/compact=2 lane:compact=2"
+            )
     );
     assert!(
         fields
@@ -521,6 +535,7 @@ fn runtime_doctor_json_value_keeps_stable_top_level_shape() {
         "top_tool_surface",
         "top_compat_warning",
         "marker_counts",
+        "marker_context_summary",
         "marker_last_fields",
         "facet_counts",
         "previous_response_not_found_by_route",

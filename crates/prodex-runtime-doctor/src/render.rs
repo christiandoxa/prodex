@@ -21,6 +21,17 @@ fn runtime_doctor_push_actionable_route_rows(
     fields: &mut FieldRowsBuilder,
     summary: &RuntimeDoctorSummary,
 ) {
+    if !summary.marker_context_summary.is_empty() {
+        let contexts = summary
+            .marker_context_summary
+            .iter()
+            .take(5)
+            .map(runtime_doctor_marker_context_line)
+            .collect::<Vec<_>>()
+            .join("; ");
+        fields.push("Marker context hotspots", contexts);
+    }
+
     let selection = &summary.selection_summary;
     let total_selection = selection
         .picked
@@ -68,6 +79,34 @@ fn runtime_doctor_push_actionable_route_rows(
             ),
         );
     }
+}
+
+fn runtime_doctor_marker_context_part(
+    label: &str,
+    counts: &std::collections::BTreeMap<String, usize>,
+) -> Option<String> {
+    if counts.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{label}:{}",
+        diagnosis::runtime_doctor_count_breakdown(counts)
+    ))
+}
+
+fn runtime_doctor_marker_context_line(entry: &RuntimeDoctorMarkerContextSummary) -> String {
+    let mut parts = vec![format!("{} total={}", entry.marker, entry.total)];
+    for part in [
+        runtime_doctor_marker_context_part("route", &entry.routes),
+        runtime_doctor_marker_context_part("lane", &entry.lanes),
+        runtime_doctor_marker_context_part("profile", &entry.profiles),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        parts.push(part);
+    }
+    parts.join(" ")
 }
 
 pub fn runtime_doctor_fields_for_summary(

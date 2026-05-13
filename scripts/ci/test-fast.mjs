@@ -109,6 +109,9 @@ function parseArgs(argv) {
     prebuild: !isCiEnv(),
     tests: true,
     dryRun: false,
+    timings: false,
+    timingsJson: false,
+    timingsLimit: 10,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -146,6 +149,23 @@ function parseArgs(argv) {
       args.dryRun = true;
       continue;
     }
+    if (value === "--timings") {
+      args.timings = true;
+      continue;
+    }
+    if (value === "--timings-json") {
+      args.timings = true;
+      args.timingsJson = true;
+      continue;
+    }
+    if (value === "--timings-limit") {
+      index += 1;
+      if (!argv[index]) {
+        throw new Error("--timings-limit requires a value");
+      }
+      args.timingsLimit = parsePositiveInteger(argv[index], "--timings-limit");
+      continue;
+    }
     if (value === "--help" || value === "-h") {
       args.help = true;
       continue;
@@ -159,7 +179,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/test-fast.mjs [--jobs <n>] [--checks-only|--tests-only] [--no-cargo-check] [--prebuild|--no-prebuild] [--dry-run]",
+      "Usage: node scripts/ci/test-fast.mjs [--jobs <n>] [--checks-only|--tests-only] [--no-cargo-check] [--prebuild|--no-prebuild] [--timings] [--timings-json] [--timings-limit <n>] [--dry-run]",
       "",
       "Runs local fast checks plus independent safe cargo test shards.",
       "Prebuild is enabled by default outside CI to warm cargo test binaries once before parallel shards.",
@@ -174,6 +194,8 @@ function printHelp() {
       "Options:",
       "  --prebuild     force prebuild even when CI=true",
       "  --no-prebuild  skip prebuild when measuring cold parallel behavior",
+      "  --timings      print a slowest-step duration summary after each runner phase",
+      "  --timings-json include a single-line JSON timing payload in each summary",
       "",
       "Quarantined runtime, profile, env-sensitive, continuation-heavy, and global-state shards stay in test:serial.",
     ].join("\n") + "\n",
@@ -187,18 +209,26 @@ async function main() {
     return;
   }
 
+  const timingSummary = args.timings
+    ? { label: "test-fast", limit: args.timingsLimit, json: args.timingsJson }
+    : null;
+
   if (args.checks) {
-    await runStepsParallel(CHECK_STEPS, { jobs: Math.min(args.jobs, CHECK_STEPS.length), dryRun: args.dryRun });
+    await runStepsParallel(CHECK_STEPS, {
+      jobs: Math.min(args.jobs, CHECK_STEPS.length),
+      dryRun: args.dryRun,
+      timingSummary,
+    });
   }
   if (args.cargoCheck) {
-    await runStepsSerial([CARGO_CHECK_STEP], { dryRun: args.dryRun });
+    await runStepsSerial([CARGO_CHECK_STEP], { dryRun: args.dryRun, timingSummary });
   }
   if (args.tests && args.prebuild) {
     process.stdout.write("test-fast: prebuilding cargo test binaries before parallel shards\n");
-    await runStepsSerial(PREBUILD_STEPS, { dryRun: args.dryRun });
+    await runStepsSerial(PREBUILD_STEPS, { dryRun: args.dryRun, timingSummary });
   }
   if (args.tests) {
-    await runStepsParallel(SAFE_CARGO_TEST_STEPS, { jobs: args.jobs, dryRun: args.dryRun });
+    await runStepsParallel(SAFE_CARGO_TEST_STEPS, { jobs: args.jobs, dryRun: args.dryRun, timingSummary });
   }
 }
 

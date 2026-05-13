@@ -79,3 +79,36 @@ fn runtime_doctor_falls_back_to_typed_text_parser() {
         Some("failed with spaces")
     );
 }
+
+#[test]
+fn runtime_doctor_summarizes_marker_context_by_route_lane_and_profile() {
+    let log = br#"[2026-05-12 00:00:00.000 +00:00] runtime_proxy_lane_limit_reached lane=compact route=/responses/compact profile=alpha active=4
+[2026-05-12 00:00:01.000 +00:00] runtime_proxy_lane_limit_reached lane=compact route=/responses/compact profile=beta active=5
+[2026-05-12 00:00:02.000 +00:00] profile_inflight_saturated route=responses profile=alpha active=8
+"#;
+
+    let summary = summarize_runtime_log_tail(log);
+
+    let lane_limit = summary
+        .marker_context_summary
+        .iter()
+        .find(|entry| entry.marker == "runtime_proxy_lane_limit_reached")
+        .expect("lane limit marker context should be summarized");
+    assert_eq!(lane_limit.total, 2);
+    assert_eq!(lane_limit.lanes.get("compact").copied(), Some(2));
+    assert_eq!(
+        lane_limit.routes.get("/responses/compact").copied(),
+        Some(2)
+    );
+    assert_eq!(lane_limit.profiles.get("alpha").copied(), Some(1));
+    assert_eq!(lane_limit.profiles.get("beta").copied(), Some(1));
+
+    let inflight = summary
+        .marker_context_summary
+        .iter()
+        .find(|entry| entry.marker == "profile_inflight_saturated")
+        .expect("profile inflight marker context should be summarized");
+    assert_eq!(inflight.total, 1);
+    assert_eq!(inflight.routes.get("responses").copied(), Some(1));
+    assert_eq!(inflight.profiles.get("alpha").copied(), Some(1));
+}

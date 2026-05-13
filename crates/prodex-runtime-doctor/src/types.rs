@@ -46,6 +46,7 @@ pub struct RuntimeDoctorSummary {
     pub log_exists: bool,
     pub line_count: usize,
     pub marker_counts: BTreeMap<&'static str, usize>,
+    pub marker_context_summary: Vec<RuntimeDoctorMarkerContextSummary>,
     pub last_marker_line: Option<String>,
     pub marker_last_fields: BTreeMap<&'static str, BTreeMap<String, String>>,
     pub facet_counts: BTreeMap<String, BTreeMap<String, usize>>,
@@ -117,6 +118,15 @@ pub struct RuntimeDoctorSummary {
     pub runtime_broker_mismatch: bool,
     pub profiles: Vec<RuntimeDoctorProfileSummary>,
     pub diagnosis: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RuntimeDoctorMarkerContextSummary {
+    pub marker: String,
+    pub total: usize,
+    pub routes: BTreeMap<String, usize>,
+    pub lanes: BTreeMap<String, usize>,
+    pub profiles: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]

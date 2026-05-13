@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::{
     RuntimeDoctorBindingStateSummary, RuntimeDoctorIncidentExplanation,
-    RuntimeDoctorProfileSummary, RuntimeDoctorRequestTimelineEvent,
-    RuntimeDoctorRouteHealthSummary, RuntimeDoctorRouteProfileEvent, RuntimeDoctorSelectionSummary,
-    RuntimeDoctorSummary, RuntimeDoctorTuningSnapshot,
+    RuntimeDoctorMarkerContextSummary, RuntimeDoctorProfileSummary,
+    RuntimeDoctorRequestTimelineEvent, RuntimeDoctorRouteHealthSummary,
+    RuntimeDoctorRouteProfileEvent, RuntimeDoctorSelectionSummary, RuntimeDoctorSummary,
+    RuntimeDoctorTuningSnapshot,
 };
 
 use super::broker::{
@@ -26,6 +27,7 @@ struct RuntimeDoctorJsonView {
     top_tool_surface: Option<String>,
     top_compat_warning: Option<String>,
     marker_counts: BTreeMap<String, usize>,
+    marker_context_summary: Vec<RuntimeDoctorMarkerContextSummary>,
     marker_last_fields: BTreeMap<String, BTreeMap<String, String>>,
     facet_counts: BTreeMap<String, BTreeMap<String, usize>>,
     previous_response_not_found_by_route: BTreeMap<String, usize>,
@@ -115,6 +117,7 @@ impl From<&RuntimeDoctorSummary> for RuntimeDoctorJsonView {
                 .iter()
                 .map(|(marker, count)| ((*marker).to_string(), *count))
                 .collect(),
+            marker_context_summary: summary.marker_context_summary.clone(),
             marker_last_fields: summary
                 .marker_last_fields
                 .iter()

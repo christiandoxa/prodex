@@ -65,6 +65,57 @@ function formatStep(step) {
   return formatCommand(step.command, step.args);
 }
 
+export function formatDurationMs(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return "unknown";
+  }
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+export function sortedStepTimings(timings) {
+  return [...timings].sort((left, right) => right.elapsedMs - left.elapsedMs || left.label.localeCompare(right.label));
+}
+
+export function formatStepTimingSummary(timings, { label = "test-runner", limit = 10, json = false } = {}) {
+  if (timings.length === 0) {
+    return `${label}: no completed step timings\n`;
+  }
+
+  const slowest = sortedStepTimings(timings).slice(0, Math.max(1, limit));
+  const totalMs = timings.reduce((total, timing) => total + timing.elapsedMs, 0);
+  const lines = [
+    `${label}: ${timings.length} completed step(s), summed runtime ${formatDurationMs(totalMs)}, slowest ${slowest.length}:`,
+    ...slowest.map(
+      (timing, index) =>
+        `  ${index + 1}. ${timing.label}: ${formatDurationMs(timing.elapsedMs)} (${timing.elapsedMs} ms)`,
+    ),
+  ];
+
+  if (json) {
+    lines.push(
+      `${label}: timings-json ${JSON.stringify(
+        sortedStepTimings(timings).map((timing) => ({
+          label: timing.label,
+          elapsedMs: timing.elapsedMs,
+          attempts: timing.attempts,
+        })),
+      )}`,
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 function createPrefixForwarder(label, writer) {
   let tail = "";
   return {
@@ -141,7 +192,10 @@ async function runStepOnce(step) {
         return;
       }
       process.stdout.write(`${step.label}: passed in ${elapsedMs} ms\n`);
-      resolve();
+      resolve({
+        label: step.label,
+        elapsedMs,
+      });
     });
   });
 }
@@ -153,8 +207,11 @@ export async function runStep(step) {
       if (attempt > 1) {
         process.stdout.write(`${step.label}: retry attempt ${attempt}/${attempts}\n`);
       }
-      await runStepOnce(step);
-      return;
+      const timing = await runStepOnce(step);
+      return {
+        ...timing,
+        attempts: attempt,
+      };
     } catch (error) {
       if (attempt === attempts) {
         throw error;
@@ -165,39 +222,45 @@ export async function runStep(step) {
   }
 }
 
-export async function runStepsSerial(steps, { dryRun = false } = {}) {
+export async function runStepsSerial(steps, { dryRun = false, timingSummary = null } = {}) {
   if (dryRun) {
     process.stdout.write(`dry-run: ${steps.length} serial step(s)\n`);
     for (const step of steps) {
       process.stdout.write(`  ${step.label}: ${formatStep(step)}\n`);
     }
-    return;
+    return [];
   }
 
+  const timings = [];
   for (const step of steps) {
-    await runStep(step);
+    timings.push(await runStep(step));
   }
+  if (timingSummary) {
+    process.stdout.write(formatStepTimingSummary(timings, timingSummary));
+  }
+  return timings;
 }
 
-export async function runStepsParallel(steps, { jobs, dryRun = false } = {}) {
+export async function runStepsParallel(steps, { jobs, dryRun = false, timingSummary = null } = {}) {
   const requestedJobs = jobs ?? defaultJobCount();
   if (dryRun) {
     process.stdout.write(`dry-run: ${steps.length} parallel step(s), jobs=${requestedJobs}\n`);
     for (const step of steps) {
       process.stdout.write(`  ${step.label}: ${formatStep(step)}\n`);
     }
-    return;
+    return [];
   }
 
   const queue = [...steps];
   const failures = [];
+  const timings = [];
   const workerCount = Math.max(1, Math.min(requestedJobs, steps.length || 1));
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
       while (queue.length > 0) {
         const step = queue.shift();
         try {
-          await runStep(step);
+          timings.push(await runStep(step));
         } catch (error) {
           failures.push(error);
         }
@@ -213,4 +276,8 @@ export async function runStepsParallel(steps, { jobs, dryRun = false } = {}) {
       ].join("\n"),
     );
   }
+  if (timingSummary) {
+    process.stdout.write(formatStepTimingSummary(timings, timingSummary));
+  }
+  return timings;
 }

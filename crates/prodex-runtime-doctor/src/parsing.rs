@@ -24,6 +24,55 @@ use request_timeline::{
 use route_profile::runtime_doctor_record_route_profile_event;
 use selection::runtime_doctor_record_selection_summary;
 
+fn runtime_doctor_count_context_value(
+    counts: &mut BTreeMap<String, usize>,
+    fields: &BTreeMap<String, String>,
+    key: &str,
+) {
+    let Some(value) = fields.get(key) else {
+        return;
+    };
+    if value.is_empty() || value == "-" {
+        return;
+    }
+    *counts.entry(value.clone()).or_insert(0) += 1;
+}
+
+fn runtime_doctor_record_marker_context(
+    context: &mut BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary>,
+    marker: &'static str,
+    fields: &BTreeMap<String, String>,
+) {
+    let entry = context
+        .entry(marker)
+        .or_insert_with(|| RuntimeDoctorMarkerContextSummary {
+            marker: marker.to_string(),
+            ..RuntimeDoctorMarkerContextSummary::default()
+        });
+    entry.total += 1;
+    runtime_doctor_count_context_value(&mut entry.routes, fields, "route");
+    runtime_doctor_count_context_value(&mut entry.lanes, fields, "lane");
+    runtime_doctor_count_context_value(&mut entry.profiles, fields, "profile");
+}
+
+fn runtime_doctor_marker_context_summary(
+    context: BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary>,
+) -> Vec<RuntimeDoctorMarkerContextSummary> {
+    let mut summary = context
+        .into_values()
+        .filter(|entry| {
+            !entry.routes.is_empty() || !entry.lanes.is_empty() || !entry.profiles.is_empty()
+        })
+        .collect::<Vec<_>>();
+    summary.sort_by(|left, right| {
+        right
+            .total
+            .cmp(&left.total)
+            .then_with(|| left.marker.cmp(&right.marker))
+    });
+    summary
+}
+
 pub fn read_runtime_log_tail(path: &Path, max_bytes: usize) -> Result<Vec<u8>> {
     let mut file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
@@ -49,6 +98,8 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
     let text = String::from_utf8_lossy(tail);
     let mut summary = RuntimeDoctorSummary::default();
     let mut request_timelines: BTreeMap<String, RuntimeDoctorRequestTimelineBuilder> =
+        BTreeMap::new();
+    let mut marker_context: BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary> =
         BTreeMap::new();
     for (line_index, line) in text.lines().enumerate() {
         summary.line_count += 1;
@@ -117,6 +168,7 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
                     .or_insert(0) += 1;
             }
             let timeline_fields = fields.clone();
+            runtime_doctor_record_marker_context(&mut marker_context, marker, &timeline_fields);
             for facet in RUNTIME_DOCTOR_FACETS {
                 if let Some(value) = fields.get(*facet).cloned() {
                     *summary
@@ -146,6 +198,7 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
             );
         }
     }
+    summary.marker_context_summary = runtime_doctor_marker_context_summary(marker_context);
     runtime_doctor_set_latest_request_timeline(&mut summary, request_timelines);
     diagnosis::runtime_doctor_finalize_log_summary(&mut summary);
     summary

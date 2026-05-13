@@ -3,6 +3,7 @@ import {
   cargoTestStep,
   loadRuntimeManifest,
   manifestArray,
+  parsePositiveInteger,
   runStepsSerial,
   skipArgs,
 } from "./main-internal-test-runner.mjs";
@@ -13,6 +14,9 @@ function parseArgs(argv) {
   const args = {
     suite: "all",
     dryRun: false,
+    timings: false,
+    timingsJson: false,
+    timingsLimit: 10,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -27,6 +31,23 @@ function parseArgs(argv) {
     }
     if (value === "--dry-run") {
       args.dryRun = true;
+      continue;
+    }
+    if (value === "--timings") {
+      args.timings = true;
+      continue;
+    }
+    if (value === "--timings-json") {
+      args.timings = true;
+      args.timingsJson = true;
+      continue;
+    }
+    if (value === "--timings-limit") {
+      index += 1;
+      if (!argv[index]) {
+        throw new Error("--timings-limit requires a value");
+      }
+      args.timingsLimit = parsePositiveInteger(argv[index], "--timings-limit");
       continue;
     }
     if (value === "--help" || value === "-h") {
@@ -46,7 +67,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/test-serial.mjs [--suite core|runtime|runtime-smoke|stress|all] [--dry-run]",
+      "Usage: node scripts/ci/test-serial.mjs [--suite core|runtime|runtime-smoke|stress|all] [--timings] [--timings-json] [--timings-limit <n>] [--dry-run]",
       "",
       "Runs local serial/quarantine cargo shards with --test-threads=1.",
       "",
@@ -56,6 +77,10 @@ function printHelp() {
       "  runtime-smoke curated local runtime invariant checks",
       "  stress  manifest-driven serialized and continuation-heavy runtime shards",
       "  all     core, runtime, and stress",
+      "",
+      "Options:",
+      "  --timings      print a slowest-step duration summary after the selected suite",
+      "  --timings-json include a single-line JSON timing payload in the summary",
       "",
       "The runtime manifest is imported when available. Missing exports degrade to broader serial coverage or skipped stress re-runs with warnings.",
     ].join("\n") + "\n",
@@ -169,7 +194,12 @@ async function main() {
     return;
   }
 
-  await runStepsSerial(steps, { dryRun: args.dryRun });
+  await runStepsSerial(steps, {
+    dryRun: args.dryRun,
+    timingSummary: args.timings
+      ? { label: `test-serial:${args.suite}`, limit: args.timingsLimit, json: args.timingsJson }
+      : null,
+  });
 }
 
 try {

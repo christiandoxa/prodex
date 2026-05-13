@@ -45,7 +45,9 @@ Current CI building blocks include:
 ```bash
 npm test
 npm run test:fast
+npm run test:fast:timings
 npm run test:serial
+npm run test:serial:timings
 npm run ci:preflight
 npm run ci:impact
 npm run ci:release-hygiene
@@ -79,6 +81,8 @@ cargo test -q --workspace --all-features -- --test-threads=1
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
 
 `npm test` is a convenience alias for `npm run test:fast`. It runs the fast lane, not full serial coverage.
+
+Use `npm run test:fast:timings` or `npm run test:serial:timings -- --suite runtime` when tuning local or CI shard balance. The timing mode preserves the existing process split and `--test-threads=1` safety, then prints the slowest completed steps at the end of each runner phase. Add `-- --timings-json` to either runner when you need a single-line JSON payload that can be pasted into notes or compared across CI runs. Use `-- --timings-limit <n>` to show more or fewer slow steps.
 
 Use `npm run test:runtime-smoke` for a small local runtime invariant suite before broad runtime work. It runs curated log JSON/marker, header preservation, selection affinity, stale continuation, websocket local pressure, and tuning snapshot checks from the shared runtime manifest without changing the broad runtime or stress suites.
 
