@@ -25,7 +25,6 @@ enum BackendWebsocketAction {
     Break,
 }
 
-#[allow(clippy::result_large_err)]
 pub(super) fn handle_runtime_proxy_backend_websocket(
     stream: TcpStream,
     responses_accounts: &Arc<Mutex<Vec<String>>>,
