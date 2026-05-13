@@ -238,15 +238,6 @@ pub(crate) fn runtime_proxy_pressure_mode_active(shared: &RuntimeRotationProxySh
         || runtime_proxy_background_queue_pressure_active()
 }
 
-#[allow(dead_code)]
-pub(crate) fn runtime_proxy_background_queue_pressure_affects_route(
-    route_kind: RuntimeRouteKind,
-) -> bool {
-    runtime_proxy_crate::runtime_proxy_background_queue_pressure_affects_route(
-        runtime_route_kind_to_proxy(route_kind),
-    )
-}
-
 pub(crate) fn runtime_proxy_pressure_mode_for_route(
     route_kind: RuntimeRouteKind,
     local_overload_pressure: bool,

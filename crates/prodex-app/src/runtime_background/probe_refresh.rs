@@ -41,7 +41,7 @@ pub(crate) fn note_runtime_probe_refresh_progress() {
     condvar.notify_all();
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn runtime_probe_refresh_queue_active() -> usize {
     runtime_probe_refresh_queue().active.load(Ordering::SeqCst)
 }

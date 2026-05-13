@@ -110,7 +110,7 @@ pub(crate) fn render_profile_quota_watch_output(
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn render_all_quota_watch_output(
     updated: &str,
     state_result: std::result::Result<AppState, String>,

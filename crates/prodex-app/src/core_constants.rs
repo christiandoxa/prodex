@@ -13,8 +13,6 @@ pub(crate) const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-a
 pub(crate) const RUNTIME_PROXY_OPENAI_MOUNT_PATH: &str = "/backend-api/prodex";
 pub(crate) const RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH: &str = "/v1/messages";
 pub(crate) const LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX: &str = "/backend-api/prodex/v";
-#[allow(dead_code)]
-pub(crate) const RUNTIME_PROXY_ANTHROPIC_MODEL_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 pub(crate) const DEFAULT_WATCH_INTERVAL_SECONDS: u64 = 5;
 pub(crate) const CHATGPT_AUTH_REFRESH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub(crate) const CHATGPT_AUTH_REFRESH_URL: &str = "https://auth.openai.com/oauth/token";
