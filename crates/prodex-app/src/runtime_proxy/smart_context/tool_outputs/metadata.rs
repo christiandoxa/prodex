@@ -332,42 +332,10 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_artifact_su
     format!("{marker}\n{compacted}")
 }
 
-pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_artifact_reference_summary(
-    artifact: &runtime_proxy_crate::SmartContextArtifactRef,
-) -> String {
-    runtime_smart_context_artifact_ref(&artifact.id)
-}
-
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_repeat_tool_output_reference_summary(
     artifact: &runtime_proxy_crate::SmartContextArtifactRef,
     text: &str,
     call_id: Option<&str>,
 ) -> String {
-    let reference = runtime_smart_context_artifact_reference_summary(artifact);
-    if runtime_proxy_crate::smart_context_command_output_critical_signals(text).count == 0 {
-        return reference;
-    }
-
-    let previous_record =
-        runtime_proxy_crate::smart_context_command_output_cache_record(reference.clone(), text);
-    let rewrite = runtime_proxy_crate::smart_context_command_output_cache_rewrite(
-        runtime_proxy_crate::SmartContextCommandOutputCacheInput {
-            id: call_id.unwrap_or(&artifact.id).to_string(),
-            text: text.to_string(),
-            previous_records: vec![previous_record],
-            min_replacement_bytes:
-                runtime_proxy_crate::SMART_CONTEXT_COMMAND_OUTPUT_CACHE_MIN_BYTES,
-        },
-    );
-    match rewrite.action {
-        runtime_proxy_crate::SmartContextCommandOutputCacheAction::ReplaceWithUnchangedSummary {
-            ..
-        } => {
-            let mut output = rewrite.output;
-            output.push_str("\nref ");
-            output.push_str(&reference);
-            output
-        }
-        runtime_proxy_crate::SmartContextCommandOutputCacheAction::KeepExact { .. } => reference,
-    }
+    runtime_proxy_crate::smart_context_repeat_tool_output_reference_summary(artifact, text, call_id)
 }

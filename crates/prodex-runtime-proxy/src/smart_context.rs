@@ -8,6 +8,7 @@ mod rewrite_policy;
 mod safety;
 mod static_context;
 mod token_accounting;
+mod tool_outputs;
 
 #[cfg(test)]
 use crate::RuntimeTokenUsage;
@@ -22,6 +23,7 @@ pub use rewrite_policy::*;
 pub use safety::*;
 pub use static_context::*;
 pub use token_accounting::*;
+pub use tool_outputs::*;
 #[cfg(test)]
 #[path = "../tests/src/smart_context.rs"]
 mod tests;

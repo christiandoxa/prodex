@@ -24,3 +24,6 @@ mod adaptive_rewrite;
 
 #[path = "smart_context/safety.rs"]
 mod safety;
+
+#[path = "smart_context/tool_outputs.rs"]
+mod tool_outputs;
