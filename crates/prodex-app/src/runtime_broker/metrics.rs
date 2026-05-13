@@ -1,5 +1,38 @@
-use super::*;
-use prodex_runtime_broker::runtime_broker_continuity_failure_reason_metrics_with_live;
+use anyhow::Result;
+use chrono::Local;
+use prodex_runtime_broker::{
+    RuntimeBrokerContinuityFailureReasonMetrics, RuntimeBrokerLaneMetrics, RuntimeBrokerMetadata,
+    RuntimeBrokerMetrics, RuntimeBrokerTrafficMetrics,
+    runtime_broker_continuity_failure_reason_metrics_with_live,
+};
+#[cfg(test)]
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::fs;
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, AtomicUsize};
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
+
+use crate::{
+    RUNTIME_CONTINUATION_VERIFIED_STALE_SECONDS, RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS,
+    RUNTIME_PROFILE_HEALTH_DECAY_SECONDS, RuntimeRotationProxyShared, RuntimeRouteKind,
+    runtime_proxy_continuity_failure_reason_metrics_snapshot, runtime_proxy_persistence_enabled,
+};
+
+#[cfg(test)]
+use crate::{
+    AppPaths, AppState, ProfileEntry, ProfileProvider, RuntimeContinuationStatuses,
+    RuntimeProxyLaneAdmission, RuntimeRotationState, acquire_test_runtime_lock,
+    clear_all_runtime_proxy_continuity_failure_reason_metrics,
+    clear_runtime_proxy_continuity_failure_reason_metrics,
+    runtime_proxy_continuity_failure_reason_metrics_store_entry_count, runtime_proxy_lane_limits,
+    runtime_proxy_record_continuity_failure_reason,
+};
 
 fn runtime_broker_continuity_failure_reason_metrics(
     log_path: &Path,
