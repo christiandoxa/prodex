@@ -6,6 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
+  cargoPublishCommandArgs,
+  cargoPublishOrderFromMetadata,
+  cargoPublishPlanLines,
   isGhTimeoutError,
   parseArgs,
   pendingStepsForRun,
@@ -68,6 +71,22 @@ function assertIncludesInOrder(contents, expected) {
   }
 }
 
+function fakeCargoPackage(name, relativeDir, dependencyDirs = [], extra = {}) {
+  const root = "/fixture";
+  const manifestPath = relativeDir === "." ? path.join(root, "Cargo.toml") : path.join(root, relativeDir, "Cargo.toml");
+  return {
+    name,
+    version: "0.2.0",
+    id: `path+file://${path.join(root, relativeDir)}#0.2.0`,
+    manifest_path: manifestPath,
+    dependencies: dependencyDirs.map((dependencyDir) => ({
+      path: path.join(root, dependencyDir),
+    })),
+    publish: null,
+    ...extra,
+  };
+}
+
 test("parseArgs defaults to the full release flow", () => {
   const args = parseArgs(["node", "release-run.mjs"]);
   assert.equal(args.branch, "main");
@@ -107,6 +126,68 @@ test("selectSteps keeps --only steps in canonical order", () => {
 
 test("releaseSubject matches release guard subject exactly", () => {
   assert.equal(releaseSubject("0.93.0"), "chore(release): release 0.93.0");
+});
+
+test("cargoPublishOrderFromMetadata publishes internal crates before dependents and root last", () => {
+  const packages = [
+    fakeCargoPackage("prodex", ".", ["crates/prodex-app"]),
+    fakeCargoPackage("prodex-app", "crates/prodex-app", ["crates/prodex-core", "crates/prodex-state"]),
+    fakeCargoPackage("prodex-core", "crates/prodex-core"),
+    fakeCargoPackage("prodex-state", "crates/prodex-state"),
+    fakeCargoPackage("prodex-app-reports", "crates/prodex-app-reports", ["crates/prodex-state"]),
+  ];
+  const metadata = {
+    workspace_root: "/fixture",
+    workspace_members: packages.map((packageMetadata) => packageMetadata.id),
+    packages,
+  };
+
+  assert.deepEqual(
+    cargoPublishOrderFromMetadata(metadata).map((packageMetadata) => packageMetadata.name),
+    ["prodex-core", "prodex-state", "prodex-app", "prodex-app-reports", "prodex"],
+  );
+});
+
+test("cargoPublishOrderFromMetadata rejects publishable crates depending on private workspace crates", () => {
+  const packages = [
+    fakeCargoPackage("prodex", ".", ["crates/prodex-app"]),
+    fakeCargoPackage("prodex-app", "crates/prodex-app", ["crates/prodex-private"]),
+    fakeCargoPackage("prodex-private", "crates/prodex-private", [], { publish: false }),
+  ];
+  const metadata = {
+    workspace_root: "/fixture",
+    workspace_members: packages.map((packageMetadata) => packageMetadata.id),
+    packages,
+  };
+
+  assert.throws(
+    () => cargoPublishOrderFromMetadata(metadata),
+    /prodex-app depends on non-publishable workspace package prodex-private/,
+  );
+});
+
+test("cargo publish helper plans dry-run before publish without leaking token values", () => {
+  assert.deepEqual(cargoPublishCommandArgs("prodex-core", { dryRun: true }), [
+    "publish",
+    "--locked",
+    "-p",
+    "prodex-core",
+    "--dry-run",
+  ]);
+
+  assert.deepEqual(
+    cargoPublishPlanLines([{ name: "prodex-core" }, { name: "prodex" }], "publish"),
+    [
+      "Cargo publish order (2 package(s)):",
+      "1. prodex-core",
+      "2. prodex",
+      "Cargo publish commands:",
+      "cargo publish --locked -p prodex-core --dry-run",
+      "cargo publish --locked -p prodex-core",
+      "cargo publish --locked -p prodex --dry-run",
+      "cargo publish --locked -p prodex",
+    ],
+  );
 });
 
 test("pendingStepsForRun skips completed resume steps only", () => {
@@ -170,6 +251,10 @@ test("parseArgs rejects invalid versions and unknown steps", () => {
   assert.throws(
     () => parseArgs(["node", "release-run.mjs", "--from", "publish"]),
     /unknown --from step/,
+  );
+  assert.throws(
+    () => parseArgs(["node", "release-run.mjs", "--cargo-publish", "maybe"]),
+    /--cargo-publish expects one of/,
   );
 });
 

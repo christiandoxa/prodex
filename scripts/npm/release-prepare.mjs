@@ -13,6 +13,7 @@ import {
   readJsonFile,
   repoRoot,
 } from "./common.mjs";
+import { cargoPublishOrderFromMetadata, readCargoMetadata } from "./release-run-lib.mjs";
 import { DOC_METADATA_PATHS, KNOWN_NPM_LOCKFILE_PATHS } from "../ci/test-impact-manifest.mjs";
 
 const DOC_VERSION_PATTERNS = [
@@ -76,6 +77,7 @@ function printHelp() {
       "  - docs markdown lint",
       "  - upstream Codex compatibility baseline",
       "  - runtime test manifest",
+      "  - Cargo workspace publish order",
       "  - cargo fmt plus full cargo test all-target compile",
       "",
       "--no-cargo-test skips test binary compilation and runs cargo check instead.",
@@ -302,6 +304,18 @@ async function checkReleaseMetadata() {
   process.stdout.write(`release metadata: ok (${version})\n`);
 }
 
+async function checkCargoPublishOrder(args) {
+  if (args.dryRun) {
+    process.stdout.write("dry-run: cargo-publish-order: cargo metadata --locked --no-deps --format-version 1\n");
+    return;
+  }
+
+  const order = cargoPublishOrderFromMetadata(await readCargoMetadata());
+  const first = order[0]?.name ?? "<none>";
+  const last = order.at(-1)?.name ?? "<none>";
+  process.stdout.write(`cargo publish order: ok (${order.length} package(s), first ${first}, last ${last})\n`);
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
@@ -310,6 +324,7 @@ async function main() {
   }
 
   await checkReleaseMetadata();
+  await checkCargoPublishOrder(args);
   const changelogArgs = [
     "scripts/npm/changelog.mjs",
     args.changelogMode === "ci" ? "--ci-check" : "--check",

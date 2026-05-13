@@ -18,6 +18,7 @@ const defaultCiWorkflow = "ci.yml";
 const defaultPublishWorkflow = "npm-publish.yml";
 const mutatingMetadataSteps = new Set(["bump", "sync"]);
 const githubRepoSteps = new Set(["watch-ci", "trigger-publish", "watch-publish"]);
+const cargoPublishModes = new Set(["plan", "dry-run", "publish"]);
 
 export const releaseSteps = [
   "bump",
@@ -36,7 +37,7 @@ function usage() {
     "Usage: npm run release:run -- [options]",
     "",
     "Mandatory idempotent release runner. It owns version bump, generated metadata, final changelog rendering, validation, commit, push, CI watch, publish dispatch, and verify.",
-    "It never runs npm publish locally; publishing is only triggered through .github/workflows/npm-publish.yml.",
+    "It never runs npm publish locally; registry publishing is only triggered through explicit Cargo helper mode or .github/workflows/npm-publish.yml.",
     "Do not manually refresh CHANGELOG.md for release commits; release:run renders it with --release-version and validates it through release:prepare.",
     "",
     "Options:",
@@ -58,6 +59,7 @@ function usage() {
     "  --no-cargo-test            pass --no-cargo-test to release:prepare",
     "  --skip-verify-npm          skip npm registry verification",
     "  --skip-verify-github       skip GitHub release verification",
+    "  --cargo-publish <mode>     CI helper: plan, dry-run, or publish Cargo workspace crates, then exit",
     "",
     "Steps:",
     `  ${releaseSteps.join(", ")}`,
@@ -66,6 +68,7 @@ function usage() {
     "  npm run release:run -- --dry-run --version 0.93.0",
     "  npm run release:run -- --resume --from watch-ci",
     "  npm run release:run -- --only trigger-publish,watch-publish,verify --resume",
+    "  npm run release:cargo-plan",
   ].join("\n");
 }
 
@@ -84,6 +87,7 @@ export function parseArgs(argv) {
     cargoTest: true,
     skipVerifyNpm: false,
     skipVerifyGithub: false,
+    cargoPublishMode: null,
     stateFile: defaultStateFile,
     steps: [...releaseSteps],
   };
@@ -116,6 +120,15 @@ export function parseArgs(argv) {
     }
     if (value === "--skip-verify-github") {
       args.skipVerifyGithub = true;
+      continue;
+    }
+    if (value === "--cargo-publish") {
+      index += 1;
+      const mode = argv[index];
+      if (!cargoPublishModes.has(mode)) {
+        throw new Error("--cargo-publish expects one of: plan, dry-run, publish");
+      }
+      args.cargoPublishMode = mode;
       continue;
     }
 
@@ -319,6 +332,186 @@ function runCommand(command, args, { dryRun = false, capture = false, env = {} }
       resolve(capture ? stdout : undefined);
     });
   });
+}
+
+function packageDirectory(packageMetadata) {
+  return path.dirname(packageMetadata.manifest_path);
+}
+
+function isPublishableCargoPackage(packageMetadata) {
+  return packageMetadata.publish !== false;
+}
+
+function cargoRootPackageId(metadata) {
+  const rootManifestPath = path.join(metadata.workspace_root, "Cargo.toml");
+  return metadata.packages.find((packageMetadata) => packageMetadata.manifest_path === rootManifestPath)?.id ?? null;
+}
+
+function compareCargoPublishPackages(left, right, workspaceIndex, rootPackageId) {
+  const leftIsRoot = left.id === rootPackageId;
+  const rightIsRoot = right.id === rootPackageId;
+  if (leftIsRoot !== rightIsRoot) {
+    return leftIsRoot ? 1 : -1;
+  }
+  const leftIndex = workspaceIndex.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+  const rightIndex = workspaceIndex.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+  if (leftIndex !== rightIndex) {
+    return leftIndex - rightIndex;
+  }
+  return left.name.localeCompare(right.name);
+}
+
+export function cargoPublishOrderFromMetadata(metadata) {
+  const workspaceMembers = new Set(metadata.workspace_members ?? []);
+  const workspaceIndex = new Map((metadata.workspace_members ?? []).map((id, index) => [id, index]));
+  const workspacePackages = (metadata.packages ?? []).filter((packageMetadata) => workspaceMembers.has(packageMetadata.id));
+  const publishablePackages = workspacePackages.filter(isPublishableCargoPackage);
+  const publishableById = new Map(publishablePackages.map((packageMetadata) => [packageMetadata.id, packageMetadata]));
+  const workspaceByDirectory = new Map(
+    workspacePackages.map((packageMetadata) => [packageDirectory(packageMetadata), packageMetadata]),
+  );
+  const rootPackageId = cargoRootPackageId(metadata);
+  const dependenciesById = new Map();
+  const errors = [];
+
+  for (const packageMetadata of publishablePackages) {
+    const dependencyIds = new Set();
+    for (const dependency of packageMetadata.dependencies ?? []) {
+      if (!dependency.path) {
+        continue;
+      }
+      const dependencyPackage = workspaceByDirectory.get(path.resolve(dependency.path));
+      if (!dependencyPackage || dependencyPackage.id === packageMetadata.id) {
+        continue;
+      }
+      if (!publishableById.has(dependencyPackage.id)) {
+        errors.push(`${packageMetadata.name} depends on non-publishable workspace package ${dependencyPackage.name}`);
+        continue;
+      }
+      dependencyIds.add(dependencyPackage.id);
+    }
+    dependenciesById.set(packageMetadata.id, dependencyIds);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(["Cargo publish order is invalid:", ...errors.map((error) => `  - ${error}`)].join("\n"));
+  }
+
+  const pending = new Map(publishablePackages.map((packageMetadata) => [packageMetadata.id, packageMetadata]));
+  const published = new Set();
+  const ordered = [];
+
+  while (pending.size > 0) {
+    const ready = [...pending.values()]
+      .filter((packageMetadata) => {
+        const dependencyIds = dependenciesById.get(packageMetadata.id) ?? new Set();
+        return [...dependencyIds].every((dependencyId) => published.has(dependencyId));
+      })
+      .sort((left, right) => compareCargoPublishPackages(left, right, workspaceIndex, rootPackageId));
+
+    if (ready.length === 0) {
+      const cyclePackages = [...pending.values()].map((packageMetadata) => packageMetadata.name).sort();
+      throw new Error(`Cargo publish order has a dependency cycle involving: ${cyclePackages.join(", ")}`);
+    }
+
+    const next = ready[0];
+    pending.delete(next.id);
+    published.add(next.id);
+    ordered.push(next);
+  }
+
+  return ordered;
+}
+
+export async function readCargoMetadata() {
+  const stdout = await runCommand("cargo", ["metadata", "--locked", "--no-deps", "--format-version", "1"], {
+    capture: true,
+  });
+  return JSON.parse(stdout);
+}
+
+export function cargoPublishCommandArgs(packageName, { dryRun = false } = {}) {
+  const args = ["publish", "--locked", "-p", packageName];
+  if (dryRun) {
+    args.push("--dry-run");
+  }
+  return args;
+}
+
+export function cargoPublishPlanLines(packages, mode) {
+  if (!cargoPublishModes.has(mode)) {
+    throw new Error(`unknown Cargo publish mode: ${mode}`);
+  }
+
+  const packageNames = packages.map((packageMetadata) => packageMetadata.name);
+  const lines = [
+    `Cargo publish order (${packageNames.length} package(s)):`,
+    ...packageNames.map((packageName, index) => `${index + 1}. ${packageName}`),
+  ];
+
+  if (mode === "plan") {
+    lines.push("Cargo publish commands:");
+    for (const packageName of packageNames) {
+      lines.push(`cargo ${cargoPublishCommandArgs(packageName).join(" ")}`);
+    }
+    return lines;
+  }
+
+  if (mode === "dry-run") {
+    lines.push("Cargo publish dry-run commands:");
+    for (const packageName of packageNames) {
+      lines.push(`cargo ${cargoPublishCommandArgs(packageName, { dryRun: true }).join(" ")}`);
+    }
+    return lines;
+  }
+
+  lines.push("Cargo publish commands:");
+  for (const packageName of packageNames) {
+    lines.push(`cargo ${cargoPublishCommandArgs(packageName, { dryRun: true }).join(" ")}`);
+    lines.push(`cargo ${cargoPublishCommandArgs(packageName).join(" ")}`);
+  }
+  return lines;
+}
+
+function requireCargoRegistryToken() {
+  if (!process.env.CARGO_REGISTRY_TOKEN) {
+    throw new Error(
+      "CARGO_REGISTRY_TOKEN is required for Cargo publish. Cargo plan and dry-run modes do not require it.",
+    );
+  }
+}
+
+export async function runCargoPublishMode(mode) {
+  if (!cargoPublishModes.has(mode)) {
+    throw new Error(`unknown Cargo publish mode: ${mode}`);
+  }
+
+  const metadata = await readCargoMetadata();
+  const packages = cargoPublishOrderFromMetadata(metadata);
+
+  if (mode === "plan") {
+    process.stdout.write(`${cargoPublishPlanLines(packages, mode).join("\n")}\n`);
+    return;
+  }
+
+  let tokenChecked = false;
+  process.stdout.write(`${cargoPublishPlanLines(packages, mode).join("\n")}\n`);
+  for (const packageMetadata of packages) {
+    process.stdout.write(`cargo publish dry-run ${packageMetadata.name}@${packageMetadata.version}\n`);
+    await runCommand("cargo", cargoPublishCommandArgs(packageMetadata.name, { dryRun: true }));
+
+    if (mode === "dry-run") {
+      continue;
+    }
+
+    if (!tokenChecked) {
+      requireCargoRegistryToken();
+      tokenChecked = true;
+    }
+
+    process.stdout.write(`cargo publish ${packageMetadata.name}@${packageMetadata.version}\n`);
+    await runCommand("cargo", cargoPublishCommandArgs(packageMetadata.name));
+  }
 }
 
 async function ghApi(endpoint, { method = "GET", fields = {}, retries = 5, dryRun = false } = {}) {
@@ -626,6 +819,10 @@ export async function main(argv = process.argv) {
   const args = parseArgs(argv);
   if (args.help) {
     process.stdout.write(`${usage()}\n`);
+    return;
+  }
+  if (args.cargoPublishMode) {
+    await runCargoPublishMode(args.cargoPublishMode);
     return;
   }
 

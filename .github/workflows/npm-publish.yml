@@ -129,11 +129,39 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  publish-cargo:
+    name: Publish Cargo crates
+    runs-on: ubuntu-latest
+    needs:
+      - build
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Show Cargo publish plan
+        run: npm run release:cargo-plan
+
+      - name: Publish Cargo crates
+        run: npm run release:cargo-publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   publish-npm:
     name: Stage and publish npm packages
     runs-on: ubuntu-latest
     needs:
       - build
+      - publish-cargo
 
     steps:
       - name: Check out repository
@@ -375,6 +403,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
+      - publish-cargo
       - publish-npm
       - sync-release-docs
       - publish-github-release
