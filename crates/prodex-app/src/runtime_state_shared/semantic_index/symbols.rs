@@ -1,4 +1,11 @@
-use super::*;
+use super::{
+    RuntimeSmartContextParsedSymbolLine, RuntimeSmartContextSymbolRangeStyle,
+    runtime_smart_context_bounded_string,
+};
+use crate::runtime_state_shared::{
+    RUNTIME_SMART_CONTEXT_MAX_SYMBOL_PREFIX_LINES, RUNTIME_SMART_CONTEXT_MAX_SYMBOL_RANGE_LINES,
+    RUNTIME_SMART_CONTEXT_MAX_SYMBOL_SIGNATURE_LINES,
+};
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_symbol_line(
     lines: &[&str],

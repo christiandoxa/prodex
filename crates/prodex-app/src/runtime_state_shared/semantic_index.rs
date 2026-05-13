@@ -1,4 +1,4 @@
-use super::*;
+use super::RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES;
 
 #[path = "semantic_index/markers.rs"]
 mod markers;

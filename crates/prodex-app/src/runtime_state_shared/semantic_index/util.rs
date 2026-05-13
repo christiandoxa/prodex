@@ -1,4 +1,4 @@
-use super::*;
+use crate::runtime_state_shared::RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_FIELD_BYTES;
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_bounded_string(
     value: &str,

@@ -1,4 +1,5 @@
-use super::*;
+use anyhow::{Context, Result};
+use std::path::Path;
 
 pub(in crate::profile_commands) fn write_secret_text_file(
     path: &Path,

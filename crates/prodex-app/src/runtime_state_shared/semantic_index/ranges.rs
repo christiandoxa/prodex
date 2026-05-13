@@ -1,4 +1,8 @@
-use super::*;
+use super::RuntimeSmartContextSemanticRangeMetadata;
+use crate::runtime_state_shared::{
+    RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES,
+    RuntimeSmartContextArtifactSemanticLineRange,
+};
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_push_semantic_range(
     target: &mut Vec<RuntimeSmartContextArtifactSemanticLineRange>,

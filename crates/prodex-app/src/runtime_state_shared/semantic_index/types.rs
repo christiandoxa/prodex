@@ -1,4 +1,4 @@
-use super::*;
+use crate::runtime_state_shared::RuntimeSmartContextArtifactSemanticLineRange;
 
 #[derive(Default)]
 pub(in crate::runtime_state_shared) struct RuntimeSmartContextArtifactSemanticLineIndexParts {

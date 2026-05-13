@@ -1,8 +1,12 @@
-use super::*;
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::runtime_state_shared::{
+        RUNTIME_SMART_CONTEXT_CHUNK_WINDOW_LINES, RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS,
+        RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES,
+        RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES, RuntimeSmartContextArtifactLineIndex,
+        RuntimeSmartContextArtifactRepoMapEntryKind, RuntimeSmartContextArtifactStore,
+        runtime_smart_context_line_excerpt,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Barrier};
