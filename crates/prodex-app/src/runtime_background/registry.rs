@@ -57,7 +57,6 @@ pub(crate) fn unregister_runtime_broker_metadata(log_path: &Path) {
     metadata_by_path.remove(log_path);
 }
 
-#[allow(dead_code)]
 pub(crate) fn runtime_broker_metadata_for_log_path(
     log_path: &Path,
 ) -> Option<RuntimeBrokerMetadata> {
