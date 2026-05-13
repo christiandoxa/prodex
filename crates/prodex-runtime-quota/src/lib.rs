@@ -1,3 +1,4 @@
+mod cache;
 mod pressure;
 mod route;
 mod snapshot;
@@ -5,6 +6,7 @@ mod source;
 mod summary;
 mod window;
 
+pub use cache::{runtime_profile_probe_cache_freshness, runtime_profile_usage_cache_is_fresh};
 pub use pressure::{
     RuntimeQuotaPressureSortKey, runtime_quota_pressure_band_for_route,
     runtime_quota_pressure_band_from_proxy, runtime_quota_pressure_band_rank,
@@ -31,7 +33,7 @@ pub use summary::{
     runtime_quota_soft_affinity_rejection_reason, runtime_quota_summary_allows_soft_affinity,
     runtime_quota_summary_blocking_reset_at, runtime_quota_summary_for_route,
     runtime_quota_summary_from_cached_sources, runtime_quota_summary_from_proxy,
-    runtime_quota_summary_requires_live_source_after_probe,
+    runtime_quota_summary_log_fields, runtime_quota_summary_requires_live_source_after_probe,
     runtime_quota_summary_requires_precommit_live_probe, runtime_quota_summary_to_proxy,
     runtime_selection_quota_summary_from_proxy, runtime_selection_quota_summary_to_proxy,
 };

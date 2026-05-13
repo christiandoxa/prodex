@@ -10,8 +10,9 @@ use crate::snapshot::{
 use crate::source::runtime_quota_source_option_to_proxy;
 use crate::window::{
     runtime_quota_window_observation, runtime_quota_window_status_from_proxy,
-    runtime_quota_window_status_to_proxy, runtime_quota_window_summary_from_proxy,
-    runtime_quota_window_summary_to_proxy, runtime_quota_window_usable_for_auto_rotate,
+    runtime_quota_window_status_reason, runtime_quota_window_status_to_proxy,
+    runtime_quota_window_summary_from_proxy, runtime_quota_window_summary_to_proxy,
+    runtime_quota_window_usable_for_auto_rotate,
 };
 use prodex_quota::{
     RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
@@ -260,4 +261,17 @@ pub fn runtime_quota_soft_affinity_rejection_reason(
     } else {
         runtime_quota_pressure_band_reason(summary.route_band)
     }
+}
+
+pub fn runtime_quota_summary_log_fields(summary: RuntimeQuotaSummary) -> String {
+    format!(
+        "quota_band={} five_hour_status={} five_hour_remaining={} five_hour_reset_at={} weekly_status={} weekly_remaining={} weekly_reset_at={}",
+        runtime_quota_pressure_band_reason(summary.route_band),
+        runtime_quota_window_status_reason(summary.five_hour.status),
+        summary.five_hour.remaining_percent,
+        summary.five_hour.reset_at,
+        runtime_quota_window_status_reason(summary.weekly.status),
+        summary.weekly.remaining_percent,
+        summary.weekly.reset_at,
+    )
 }

@@ -30,7 +30,7 @@ pub(crate) use prodex_runtime_quota::{
     runtime_quota_pressure_sort_key_for_route_from_summary, runtime_quota_source_label,
     runtime_quota_summary_for_route, runtime_quota_summary_from_cached_sources,
     runtime_quota_summary_from_usage_snapshot, runtime_quota_summary_from_usage_snapshot_at,
-    runtime_quota_summary_requires_live_source_after_probe,
+    runtime_quota_summary_log_fields, runtime_quota_summary_requires_live_source_after_probe,
     runtime_quota_summary_requires_precommit_live_probe, runtime_quota_window_status_reason,
 };
 pub(crate) use runtime_proxy_crate::RuntimePrecommitQuotaBlockReason;
@@ -39,21 +39,23 @@ pub(crate) fn runtime_profile_usage_cache_is_fresh(
     entry: &RuntimeProfileProbeCacheEntry,
     now: i64,
 ) -> bool {
-    now.saturating_sub(entry.checked_at) <= RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS
+    prodex_runtime_quota::runtime_profile_usage_cache_is_fresh(
+        entry,
+        now,
+        RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS,
+    )
 }
 
 pub(crate) fn runtime_profile_probe_cache_freshness(
     entry: &RuntimeProfileProbeCacheEntry,
     now: i64,
 ) -> RuntimeProbeCacheFreshness {
-    let age = now.saturating_sub(entry.checked_at);
-    if age <= RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS {
-        RuntimeProbeCacheFreshness::Fresh
-    } else if age <= RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS {
-        RuntimeProbeCacheFreshness::StaleUsable
-    } else {
-        RuntimeProbeCacheFreshness::Expired
-    }
+    prodex_runtime_quota::runtime_profile_probe_cache_freshness(
+        entry,
+        now,
+        RUNTIME_PROFILE_USAGE_CACHE_FRESH_SECONDS,
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+    )
 }
 
 pub(crate) fn update_runtime_profile_probe_cache_with_usage(
@@ -196,19 +198,6 @@ pub(crate) fn runtime_usage_snapshot_is_usable(
         snapshot,
         now,
         RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
-    )
-}
-
-pub(crate) fn runtime_quota_summary_log_fields(summary: RuntimeQuotaSummary) -> String {
-    format!(
-        "quota_band={} five_hour_status={} five_hour_remaining={} five_hour_reset_at={} weekly_status={} weekly_remaining={} weekly_reset_at={}",
-        runtime_quota_pressure_band_reason(summary.route_band),
-        runtime_quota_window_status_reason(summary.five_hour.status),
-        summary.five_hour.remaining_percent,
-        summary.five_hour.reset_at,
-        runtime_quota_window_status_reason(summary.weekly.status),
-        summary.weekly.remaining_percent,
-        summary.weekly.reset_at,
     )
 }
 

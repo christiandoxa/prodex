@@ -1,10 +1,11 @@
 use super::*;
 use chrono::Local;
 use prodex_quota::{
-    RuntimeQuotaPressureBand, RuntimeQuotaWindowStatus, UsageResponse, UsageWindow, WindowPair,
+    AuthSummary, RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
+    RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
 };
-use prodex_runtime_state::RuntimeRouteKind;
-use prodex_shared_types::RuntimeQuotaSource;
+use prodex_runtime_state::{RuntimeProbeCacheFreshness, RuntimeRouteKind};
+use prodex_shared_types::{RuntimeProfileProbeCacheEntry, RuntimeQuotaSource};
 
 fn usage_response(
     five_hour_used_percent: i64,
@@ -28,6 +29,17 @@ fn usage_response(
         }),
         code_review_rate_limit: None,
         additional_rate_limits: Vec::new(),
+    }
+}
+
+fn probe_cache_entry(checked_at: i64) -> RuntimeProfileProbeCacheEntry {
+    RuntimeProfileProbeCacheEntry {
+        checked_at,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Ok(usage_response(10, 20, checked_at)),
     }
 }
 
@@ -155,4 +167,49 @@ fn cached_source_summary_ignores_stale_non_hold_snapshot() {
     assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown);
     assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown);
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Unknown);
+}
+
+#[test]
+fn probe_cache_entry_freshness_uses_configured_windows() {
+    let now = 10_000;
+    let fresh = probe_cache_entry(now - 60);
+    let stale = probe_cache_entry(now - 61);
+    let expired = probe_cache_entry(now - 301);
+
+    assert!(runtime_profile_usage_cache_is_fresh(&fresh, now, 60));
+    assert!(!runtime_profile_usage_cache_is_fresh(&stale, now, 60));
+    assert_eq!(
+        runtime_profile_probe_cache_freshness(&fresh, now, 60, 300),
+        RuntimeProbeCacheFreshness::Fresh
+    );
+    assert_eq!(
+        runtime_profile_probe_cache_freshness(&stale, now, 60, 300),
+        RuntimeProbeCacheFreshness::StaleUsable
+    );
+    assert_eq!(
+        runtime_profile_probe_cache_freshness(&expired, now, 60, 300),
+        RuntimeProbeCacheFreshness::Expired
+    );
+}
+
+#[test]
+fn quota_summary_log_fields_use_existing_reason_labels() {
+    let summary = RuntimeQuotaSummary {
+        five_hour: RuntimeQuotaWindowSummary {
+            status: RuntimeQuotaWindowStatus::Critical,
+            remaining_percent: 2,
+            reset_at: 12_345,
+        },
+        weekly: RuntimeQuotaWindowSummary {
+            status: RuntimeQuotaWindowStatus::Ready,
+            remaining_percent: 80,
+            reset_at: 67_890,
+        },
+        route_band: RuntimeQuotaPressureBand::Critical,
+    };
+
+    assert_eq!(
+        runtime_quota_summary_log_fields(summary),
+        "quota_band=quota_critical five_hour_status=critical five_hour_remaining=2 five_hour_reset_at=12345 weekly_status=ready weekly_remaining=80 weekly_reset_at=67890",
+    );
 }
