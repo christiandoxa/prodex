@@ -348,6 +348,12 @@ async function buildFixtures(fixtureRoot) {
       expectedExit: 0,
     },
     {
+      name: "coupled release version and changelog passes version metadata guard",
+      script: "version-metadata-release-guard.mjs",
+      args: ["--commit", coupledRelease],
+      expectedExit: 0,
+    },
+    {
       name: "duplicate release range fails duplicate guard",
       script: "release-duplicate-version-guard.mjs",
       args: ["--range", `${duplicateBase}..${duplicateTwo}`],
