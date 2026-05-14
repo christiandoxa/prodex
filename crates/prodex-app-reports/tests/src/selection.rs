@@ -1,5 +1,6 @@
 use super::*;
 use prodex_quota::AuthSummary;
+use prodex_quota::UsageResponse;
 use prodex_quota::{UsageWindow, WindowPair};
 use prodex_state::ProfileProvider;
 use std::path::PathBuf;
