@@ -119,6 +119,16 @@ assert.equal(
   "crate Rust files count as behavior files",
 );
 
+{
+  const summary = summarize([row("README.md", thresholds.maxFileLines + 68, 0)]);
+  assert.equal(summary.releaseMetadataOnly, true, "README-only churn is metadata/docs-only");
+  assert.deepEqual(
+    thresholdIssues(summary, thresholds),
+    [],
+    "metadata/docs-only churn is exempt from generic size thresholds",
+  );
+}
+
 assertStructuralExtraction("root src module split", [
   row("src/foo.rs", 2, thresholds.maxFileLines + 20),
   row("src/foo/parser.rs", thresholds.maxFileLines + 20, 1),

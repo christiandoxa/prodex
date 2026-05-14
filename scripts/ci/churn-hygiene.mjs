@@ -426,17 +426,18 @@ function thresholdIssues(summary, thresholds, options = {}) {
   const issues = [];
   const structuralExtractionAccepted =
     options.structuralExtractionAccepted ?? options.structuralExtraction ?? false;
-  if (summary.files > thresholds.maxFiles && !summary.releaseMetadataOnly && !structuralExtractionAccepted) {
+  const thresholdExempt = summary.releaseMetadataOnly || structuralExtractionAccepted;
+  if (summary.files > thresholds.maxFiles && !thresholdExempt) {
     issues.push(`files changed ${summary.files} > ${thresholds.maxFiles}`);
   }
-  if (summary.behaviorFiles > thresholds.maxBehaviorFiles && !structuralExtractionAccepted) {
+  if (summary.behaviorFiles > thresholds.maxBehaviorFiles && !thresholdExempt) {
     issues.push(`behavior files ${summary.behaviorFiles} > ${thresholds.maxBehaviorFiles}`);
   }
-  if (summary.changedLines > thresholds.maxLines && !structuralExtractionAccepted) {
+  if (summary.changedLines > thresholds.maxLines && !thresholdExempt) {
     issues.push(`changed lines ${summary.changedLines} > ${thresholds.maxLines}`);
   }
   const largest = summary.largestFiles[0];
-  if (largest && largest.lines > thresholds.maxFileLines && !structuralExtractionAccepted) {
+  if (largest && largest.lines > thresholds.maxFileLines && !thresholdExempt) {
     issues.push(`largest file ${largest.filePath} changed ${largest.lines} lines > ${thresholds.maxFileLines}`);
   }
   return issues;
