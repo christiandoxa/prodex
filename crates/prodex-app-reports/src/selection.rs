@@ -380,6 +380,17 @@ pub struct ProfileSelectionExplanation {
     pub profiles: Vec<ProfileSelectionProfileExplanation>,
 }
 
+pub struct ReadyProfileCandidatesExplanationRequest<'a, S> {
+    pub reports: &'a [RunProfileProbeReport],
+    pub scheduled_candidates: &'a [ReadyProfileCandidate],
+    pub include_code_review: bool,
+    pub current_profile: Option<&'a str>,
+    pub preferred_profile: Option<&'a str>,
+    pub selection: S,
+    pub persisted_usage_snapshots: Option<&'a BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+    pub stale_grace_seconds: i64,
+}
+
 pub fn explain_ready_profile_selection_with_view<S: ProfileSelectionRead>(
     reports: &[RunProfileProbeReport],
     include_code_review: bool,
@@ -397,28 +408,31 @@ pub fn explain_ready_profile_selection_with_view<S: ProfileSelectionRead>(
         persisted_usage_snapshots,
         stale_grace_seconds,
     );
-    explain_ready_profile_candidates_with_view(
+    explain_ready_profile_candidates_with_view(ReadyProfileCandidatesExplanationRequest {
         reports,
-        &candidates,
+        scheduled_candidates: &candidates,
         include_code_review,
         current_profile,
         preferred_profile,
         selection,
         persisted_usage_snapshots,
         stale_grace_seconds,
-    )
+    })
 }
 
 pub fn explain_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
-    reports: &[RunProfileProbeReport],
-    scheduled_candidates: &[ReadyProfileCandidate],
-    include_code_review: bool,
-    current_profile: Option<&str>,
-    preferred_profile: Option<&str>,
-    selection: S,
-    persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
-    stale_grace_seconds: i64,
+    request: ReadyProfileCandidatesExplanationRequest<'_, S>,
 ) -> ProfileSelectionExplanation {
+    let ReadyProfileCandidatesExplanationRequest {
+        reports,
+        scheduled_candidates,
+        include_code_review,
+        current_profile,
+        preferred_profile,
+        selection,
+        persisted_usage_snapshots,
+        stale_grace_seconds,
+    } = request;
     let now = Local::now().timestamp();
     let selected_profile = scheduled_candidates
         .first()
@@ -442,10 +456,7 @@ pub fn explain_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     let profiles = names
         .into_iter()
         .map(|name| {
-            explain_profile_selection_entry(
-                &name,
-                report_by_name.get(name.as_str()).copied(),
-                candidate_ranks.get(name.as_str()).copied(),
+            let context = ProfileSelectionEntryExplanationContext {
                 include_code_review,
                 current_profile,
                 preferred_profile,
@@ -453,7 +464,13 @@ pub fn explain_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
                 persisted_usage_snapshots,
                 stale_grace_seconds,
                 now,
-                selected_profile.as_deref(),
+                selected_profile: selected_profile.as_deref(),
+            };
+            explain_profile_selection_entry(
+                &name,
+                report_by_name.get(name.as_str()).copied(),
+                candidate_ranks.get(name.as_str()).copied(),
+                context,
             )
         })
         .collect();
@@ -471,18 +488,18 @@ pub fn explain_runtime_profile_selection_catalog(
     current_profile: Option<&str>,
     preferred_profile: Option<&str>,
 ) -> ProfileSelectionExplanation {
-    explain_ready_profile_candidates_with_view(
-        &[],
-        &[],
-        false,
+    explain_ready_profile_candidates_with_view(ReadyProfileCandidatesExplanationRequest {
+        reports: &[],
+        scheduled_candidates: &[],
+        include_code_review: false,
         current_profile,
         preferred_profile,
-        RuntimeProfileSelectionCatalogView {
+        selection: RuntimeProfileSelectionCatalogView {
             entries: &catalog.entries,
         },
-        None,
-        0,
-    )
+        persisted_usage_snapshots: None,
+        stale_grace_seconds: 0,
+    })
 }
 
 pub fn explain_runtime_route_selection_catalog(
@@ -566,19 +583,34 @@ pub fn explain_runtime_route_selection_catalog(
     explanation
 }
 
+#[derive(Clone, Copy)]
+struct ProfileSelectionEntryExplanationContext<'a, S> {
+    include_code_review: bool,
+    current_profile: Option<&'a str>,
+    preferred_profile: Option<&'a str>,
+    selection: S,
+    persisted_usage_snapshots: Option<&'a BTreeMap<String, RuntimeProfileUsageSnapshot>>,
+    stale_grace_seconds: i64,
+    now: i64,
+    selected_profile: Option<&'a str>,
+}
+
 fn explain_profile_selection_entry<S: ProfileSelectionRead>(
     name: &str,
     report: Option<&RunProfileProbeReport>,
     ranked_candidate: Option<(usize, &ReadyProfileCandidate)>,
-    include_code_review: bool,
-    current_profile: Option<&str>,
-    preferred_profile: Option<&str>,
-    selection: S,
-    persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
-    stale_grace_seconds: i64,
-    now: i64,
-    selected_profile: Option<&str>,
+    context: ProfileSelectionEntryExplanationContext<'_, S>,
 ) -> ProfileSelectionProfileExplanation {
+    let ProfileSelectionEntryExplanationContext {
+        include_code_review,
+        current_profile,
+        preferred_profile,
+        selection,
+        persisted_usage_snapshots,
+        stale_grace_seconds,
+        now,
+        selected_profile,
+    } = context;
     let selected = selected_profile == Some(name);
     let last_run_selected_at = selection.last_run_selected_at(name);
     let mut reasons = Vec::new();

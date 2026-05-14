@@ -372,7 +372,3 @@ fn sha256(input: &[u8]) -> [u8; 32] {
     }
     output
 }
-
-#[cfg(test)]
-#[path = "../tests/src/local_bridge.rs"]
-mod tests;

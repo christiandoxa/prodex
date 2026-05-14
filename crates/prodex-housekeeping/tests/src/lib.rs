@@ -70,9 +70,11 @@ fn repair_plan_for_healthy_state_is_empty() {
 
     let mut profiles = BTreeMap::new();
     profiles.insert("main".to_string(), profile(profile_home, true));
-    let mut state = AppState::default();
-    state.active_profile = Some("main".to_string());
-    state.profiles = profiles;
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles,
+        ..Default::default()
+    };
 
     let actions = plan_prodex_state_repairs_at(
         &paths,
@@ -189,9 +191,11 @@ fn repair_plan_detects_missing_profile_home() {
     let missing_home = paths.managed_profiles_root.join("main");
     let mut profiles = BTreeMap::new();
     profiles.insert("main".to_string(), profile(missing_home.clone(), true));
-    let mut state = AppState::default();
-    state.active_profile = Some("main".to_string());
-    state.profiles = profiles;
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles,
+        ..Default::default()
+    };
 
     let actions = plan_prodex_state_repairs_at(
         &paths,
