@@ -16,6 +16,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const LAST_GOOD_FILE_SUFFIX: &str = ".last-good";
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ProdexCleanupSummary {
     pub duplicate_profiles_removed: usize,
@@ -57,6 +59,293 @@ impl ProdexCleanupSummary {
         self.dead_runtime_broker_leases_removed += other.dead_runtime_broker_leases_removed;
         self.dead_runtime_broker_registries_removed += other.dead_runtime_broker_registries_removed;
         self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProdexRepairSeverity {
+    Info,
+    Warning,
+    Critical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProdexRepairActionKind {
+    MissingStateFile,
+    UnreadableStateFile,
+    RestoreLastGoodState,
+    RemoveStaleRootTempFile,
+    CreateMissingProfileHome,
+    RemoveOrphanManagedProfileHome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProdexRepairPlanAction {
+    pub kind: ProdexRepairActionKind,
+    pub severity: ProdexRepairSeverity,
+    pub path: PathBuf,
+    pub secondary_path: Option<PathBuf>,
+    pub profile_name: Option<String>,
+    pub dry_run_text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProdexRepairPlanOptions {
+    pub stale_root_temp_retention_seconds: i64,
+    pub orphan_managed_profile_retention_seconds: i64,
+    pub redact_paths: bool,
+}
+
+impl Default for ProdexRepairPlanOptions {
+    fn default() -> Self {
+        Self {
+            stale_root_temp_retention_seconds: 24 * 60 * 60,
+            orphan_managed_profile_retention_seconds: 7 * 24 * 60 * 60,
+            redact_paths: false,
+        }
+    }
+}
+
+fn last_good_file_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("snapshot.json");
+    path.with_file_name(format!("{file_name}{LAST_GOOD_FILE_SUFFIX}"))
+}
+
+fn path_label(paths: &AppPaths, path: &Path, redact_paths: bool) -> String {
+    if !redact_paths {
+        return path.display().to_string();
+    }
+    if let Ok(suffix) = path.strip_prefix(&paths.root) {
+        let suffix = suffix.display().to_string();
+        return if suffix.is_empty() {
+            "<prodex-home>".to_string()
+        } else {
+            format!("<prodex-home>/{suffix}")
+        };
+    }
+    "<path>".to_string()
+}
+
+fn state_file_recoverable(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .map(|content| !content.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn push_state_issue(
+    actions: &mut Vec<ProdexRepairPlanAction>,
+    paths: &AppPaths,
+    kind: ProdexRepairActionKind,
+    redact_paths: bool,
+) {
+    let last_good = last_good_file_path(&paths.state_file);
+    if state_file_recoverable(&last_good) {
+        let prefix = if kind == ProdexRepairActionKind::UnreadableStateFile {
+            "would restore unreadable"
+        } else {
+            "would restore"
+        };
+        actions.push(ProdexRepairPlanAction {
+            kind: ProdexRepairActionKind::RestoreLastGoodState,
+            severity: ProdexRepairSeverity::Warning,
+            path: paths.state_file.clone(),
+            secondary_path: Some(last_good.clone()),
+            profile_name: None,
+            dry_run_text: format!(
+                "{prefix} {} from {}",
+                path_label(paths, &paths.state_file, redact_paths),
+                path_label(paths, &last_good, redact_paths)
+            ),
+        });
+        return;
+    }
+
+    let label = match kind {
+        ProdexRepairActionKind::MissingStateFile => "missing",
+        ProdexRepairActionKind::UnreadableStateFile => "unreadable",
+        _ => "invalid",
+    };
+    actions.push(ProdexRepairPlanAction {
+        kind,
+        severity: ProdexRepairSeverity::Critical,
+        path: paths.state_file.clone(),
+        secondary_path: None,
+        profile_name: None,
+        dry_run_text: format!(
+            "would report {label} prodex state file {}",
+            path_label(paths, &paths.state_file, redact_paths)
+        ),
+    });
+}
+
+fn plan_state_file_repair(
+    actions: &mut Vec<ProdexRepairPlanAction>,
+    paths: &AppPaths,
+    redact_paths: bool,
+) {
+    match fs::read_to_string(&paths.state_file) {
+        Ok(_) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => push_state_issue(
+            actions,
+            paths,
+            ProdexRepairActionKind::MissingStateFile,
+            redact_paths,
+        ),
+        Err(_) => push_state_issue(
+            actions,
+            paths,
+            ProdexRepairActionKind::UnreadableStateFile,
+            redact_paths,
+        ),
+    }
+}
+
+fn plan_stale_root_temp_repairs(
+    actions: &mut Vec<ProdexRepairPlanAction>,
+    paths: &AppPaths,
+    now: SystemTime,
+    retention_seconds: i64,
+    pid_alive: &impl Fn(u32) -> bool,
+    redact_paths: bool,
+) {
+    let Ok(entries) = fs::read_dir(&paths.root) else {
+        return;
+    };
+    let oldest_allowed = system_time_to_unix_seconds(now).unwrap_or_default() - retention_seconds;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.ends_with(".tmp") || !owned_root_temp_file_name(name) {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .and_then(system_time_to_unix_seconds)
+            .unwrap_or(i64::MIN);
+        let pid_alive = root_temp_file_pid(name).is_some_and(pid_alive);
+        if should_remove_stale_root_temp_file(name, modified, oldest_allowed, pid_alive) {
+            actions.push(ProdexRepairPlanAction {
+                kind: ProdexRepairActionKind::RemoveStaleRootTempFile,
+                severity: ProdexRepairSeverity::Info,
+                path: path.clone(),
+                secondary_path: None,
+                profile_name: None,
+                dry_run_text: format!(
+                    "would remove stale prodex temp file {}",
+                    path_label(paths, &path, redact_paths)
+                ),
+            });
+        }
+    }
+}
+
+fn plan_missing_profile_home_repairs(
+    actions: &mut Vec<ProdexRepairPlanAction>,
+    paths: &AppPaths,
+    state: &AppState,
+    redact_paths: bool,
+) {
+    for (profile_name, profile) in &state.profiles {
+        if profile.codex_home.exists() {
+            continue;
+        }
+        actions.push(ProdexRepairPlanAction {
+            kind: ProdexRepairActionKind::CreateMissingProfileHome,
+            severity: ProdexRepairSeverity::Warning,
+            path: profile.codex_home.clone(),
+            secondary_path: None,
+            profile_name: Some(profile_name.clone()),
+            dry_run_text: format!(
+                "would create missing Codex home for profile {profile_name}: {}",
+                path_label(paths, &profile.codex_home, redact_paths)
+            ),
+        });
+    }
+}
+
+fn plan_orphan_managed_profile_home_repairs(
+    actions: &mut Vec<ProdexRepairPlanAction>,
+    paths: &AppPaths,
+    state: &AppState,
+    now: SystemTime,
+    retention_seconds: i64,
+    redact_paths: bool,
+) {
+    for name in collect_orphan_managed_profile_dirs_at(paths, state, now, retention_seconds) {
+        let path = paths.managed_profiles_root.join(&name);
+        actions.push(ProdexRepairPlanAction {
+            kind: ProdexRepairActionKind::RemoveOrphanManagedProfileHome,
+            severity: ProdexRepairSeverity::Info,
+            path: path.clone(),
+            secondary_path: None,
+            profile_name: Some(name),
+            dry_run_text: format!(
+                "would remove orphaned managed Codex home {}",
+                path_label(paths, &path, redact_paths)
+            ),
+        });
+    }
+}
+
+pub fn plan_prodex_state_repairs_at(
+    paths: &AppPaths,
+    state: Option<&AppState>,
+    now: SystemTime,
+    options: ProdexRepairPlanOptions,
+    pid_alive: impl Fn(u32) -> bool,
+) -> Vec<ProdexRepairPlanAction> {
+    let mut actions = Vec::new();
+
+    plan_state_file_repair(&mut actions, paths, options.redact_paths);
+    plan_stale_root_temp_repairs(
+        &mut actions,
+        paths,
+        now,
+        options.stale_root_temp_retention_seconds,
+        &pid_alive,
+        options.redact_paths,
+    );
+    if let Some(state) = state {
+        plan_missing_profile_home_repairs(&mut actions, paths, state, options.redact_paths);
+        plan_orphan_managed_profile_home_repairs(
+            &mut actions,
+            paths,
+            state,
+            now,
+            options.orphan_managed_profile_retention_seconds,
+            options.redact_paths,
+        );
+    }
+
+    actions.sort_by(|left, right| {
+        right
+            .severity
+            .cmp(&left.severity)
+            .then_with(|| left.kind_label().cmp(right.kind_label()))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    actions
+}
+
+impl ProdexRepairPlanAction {
+    fn kind_label(&self) -> &'static str {
+        match self.kind {
+            ProdexRepairActionKind::MissingStateFile => "missing_state_file",
+            ProdexRepairActionKind::UnreadableStateFile => "unreadable_state_file",
+            ProdexRepairActionKind::RestoreLastGoodState => "restore_last_good_state",
+            ProdexRepairActionKind::RemoveStaleRootTempFile => "remove_stale_root_temp_file",
+            ProdexRepairActionKind::CreateMissingProfileHome => "create_missing_profile_home",
+            ProdexRepairActionKind::RemoveOrphanManagedProfileHome => {
+                "remove_orphan_managed_profile_home"
+            }
+        }
     }
 }
 

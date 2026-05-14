@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Write;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -307,4 +308,103 @@ fn render_audit_events_human_shows_filters_and_details() {
     assert!(output.contains("Filter: component=profile outcome=success"));
     assert!(output.contains("profile add success"));
     assert!(output.contains("\"profile_name\":\"main\""));
+}
+
+fn usage_row(epoch: i64, tokens: u64, cost_micros: u64) -> UsageLedgerRow {
+    UsageLedgerRow {
+        recorded_at_epoch: epoch,
+        source: "runtime-proxy".to_string(),
+        operation: "responses".to_string(),
+        outcome: "success".to_string(),
+        model: Some("gpt-5.3-codex".to_string()),
+        request_id: Some("request-1".to_string()),
+        metadata: UsageLedgerMetadata::redacted(
+            Some("main"),
+            Some("acct-sensitive-1234"),
+            Some("User@Example.COM"),
+        ),
+        input_tokens: tokens / 2,
+        output_tokens: tokens / 2,
+        cached_input_tokens: 3,
+        reasoning_tokens: 0,
+        total_tokens: tokens,
+        cost_micros,
+    }
+}
+
+#[test]
+fn usage_ledger_row_serialization_redacts_account_metadata() {
+    let row = usage_row(100, 10, 5);
+    let line = usage_ledger_row_to_json_line(&row).unwrap();
+
+    assert!(line.contains("\"profile_name\":\"main\""));
+    assert!(line.contains("\"account_hint\":\"...1234\""));
+    assert!(line.contains("\"email_domain\":\"example.com\""));
+    assert!(!line.contains("acct-sensitive"));
+    assert!(!line.contains("User@Example"));
+
+    let parsed = parse_usage_ledger_line(&line).expect("usage row parsed");
+    assert_eq!(parsed.metadata.account_hint.as_deref(), Some("...1234"));
+    assert_eq!(parsed.metadata.email_domain.as_deref(), Some("example.com"));
+}
+
+#[test]
+fn usage_ledger_append_and_read_skip_malformed_lines() {
+    let dir = temp_dir("usage-ledger");
+    let path = dir.join(USAGE_LEDGER_FILE_NAME);
+
+    append_usage_ledger_row(&path, &usage_row(100, 10, 5)).unwrap();
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(b"not-json\n\n")
+        .unwrap();
+    append_usage_ledger_row(&path, &usage_row(200, 20, 10)).unwrap();
+
+    let rows = read_usage_ledger_rows(&path).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].total_tokens, 10);
+    assert_eq!(rows[1].total_tokens, 20);
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn usage_budget_evaluation_blocks_when_limits_are_reached() {
+    let rows = vec![usage_row(3_600, 10, 5), usage_row(3_700, 20, 10)];
+    let limit = BudgetLimit {
+        key: "Project A".to_string(),
+        window: BudgetWindow::Hour,
+        max_requests: Some(2),
+        max_tokens: Some(100),
+        max_cost_micros: None,
+    };
+
+    let evaluation = evaluate_budget_limit(&limit, &rows, 3_800);
+
+    assert_eq!(evaluation.key, "project-a");
+    assert!(!evaluation.allowed);
+    assert_eq!(evaluation.summary.requests, 2);
+    assert_eq!(evaluation.summary.total_tokens, 30);
+    assert_eq!(
+        evaluation.reasons,
+        vec!["request limit reached (2/2)".to_string()]
+    );
+}
+
+#[test]
+fn usage_summary_uses_selected_window() {
+    let rows = vec![
+        usage_row(3_500, 10, 5),
+        usage_row(3_600, 20, 10),
+        usage_row(3_700, 30, 20),
+    ];
+
+    let summary = summarize_usage_for_window(&rows, BudgetWindow::Hour, 3_800);
+
+    assert_eq!(summary.since_epoch, 3_600);
+    assert_eq!(summary.requests, 2);
+    assert_eq!(summary.total_tokens, 50);
+    assert_eq!(summary.cost_micros, 30);
 }

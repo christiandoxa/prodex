@@ -1,11 +1,12 @@
 use crate::{
-    FileSecretBackend, KeyringSecretBackend, SecretBackendKind, SecretBackendSelection,
-    SecretError, SecretLocation, SecretManager, SecretRevision, SecretValue, auth_json_location,
+    FileSecretBackend, KeyringSecretBackend, RefreshLeaseBypassReason, RefreshLeaseCoordinator,
+    RefreshLeaseDecision, RefreshLeaseRole, SecretBackendKind, SecretBackendSelection, SecretError,
+    SecretLocation, SecretManager, SecretRevision, SecretValue, auth_json_location,
     auth_json_location_for_backend, auth_json_path, describe_secret_location,
 };
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn temp_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -195,4 +196,127 @@ fn auth_json_location_for_keyring_backend_uses_deterministic_account() {
         describe_secret_location(&location),
         "keyring://prodex/auth-json:/tmp/codex-home"
     );
+}
+
+#[test]
+fn refresh_lease_acquires_owner_and_creates_hashed_lock() {
+    let root = temp_dir("refresh-lease-owner");
+    let coordinator = RefreshLeaseCoordinator::new(&root);
+    let sensitive_key = "refresh-token-secret";
+    let paths = coordinator.paths_for_key(sensitive_key);
+
+    let decision = coordinator.acquire(sensitive_key).unwrap();
+    assert_eq!(decision.role(), RefreshLeaseRole::Owner);
+
+    match decision {
+        RefreshLeaseDecision::Owner(owner) => {
+            assert_eq!(owner.lock_path(), paths.lock_path());
+            assert!(owner.lock_path().exists());
+            assert!(
+                !owner
+                    .lock_path()
+                    .display()
+                    .to_string()
+                    .contains(sensitive_key)
+            );
+            assert!(
+                !owner
+                    .result_path()
+                    .display()
+                    .to_string()
+                    .contains(sensitive_key)
+            );
+        }
+        other => panic!("expected owner, got {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn refresh_lease_follower_reads_committed_result() {
+    let root = temp_dir("refresh-lease-follower");
+    let coordinator = RefreshLeaseCoordinator::new(&root);
+    let sensitive_key = "access-token-secret";
+
+    match coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => owner
+            .commit_result("{\"access_token\":\"redacted-result\"}")
+            .unwrap(),
+        other => panic!("expected owner, got {other:?}"),
+    }
+
+    match coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Follower { result_json } => {
+            assert_eq!(result_json, "{\"access_token\":\"redacted-result\"}");
+        }
+        other => panic!("expected follower, got {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn refresh_lease_recovers_stale_lock() {
+    let root = temp_dir("refresh-lease-stale");
+    let coordinator = RefreshLeaseCoordinator::new(&root)
+        .with_lease_ttl(Duration::ZERO)
+        .with_wait_timeout(Duration::from_millis(20))
+        .with_poll_interval(Duration::from_millis(1));
+    let paths = coordinator.paths_for_key("stale-token-secret");
+    fs::write(paths.lock_path(), "pid=old\n").unwrap();
+    std::thread::sleep(Duration::from_millis(2));
+
+    match coordinator.acquire("stale-token-secret").unwrap() {
+        RefreshLeaseDecision::Owner(owner) => {
+            assert_eq!(owner.lock_path(), paths.lock_path());
+            assert!(owner.lock_path().exists());
+        }
+        other => panic!("expected owner after stale cleanup, got {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn refresh_lease_times_out_to_bypass_when_lock_is_held() {
+    let root = temp_dir("refresh-lease-bypass");
+    let owner_coordinator = RefreshLeaseCoordinator::new(&root);
+    let follower_coordinator = RefreshLeaseCoordinator::new(&root)
+        .with_wait_timeout(Duration::ZERO)
+        .with_poll_interval(Duration::from_millis(1));
+    let sensitive_key = "held-token-secret";
+    let owner = match owner_coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => owner,
+        other => panic!("expected owner, got {other:?}"),
+    };
+
+    match follower_coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Bypass { reason } => {
+            assert_eq!(reason, RefreshLeaseBypassReason::WaitTimeout);
+        }
+        other => panic!("expected bypass, got {other:?}"),
+    }
+
+    drop(owner);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn refresh_lease_file_names_use_hash_not_sensitive_material() {
+    let root = temp_dir("refresh-lease-hash");
+    let coordinator = RefreshLeaseCoordinator::new(&root).with_namespace("quota-refresh");
+    let sensitive_key = "sk-prodex-super-secret-token";
+    let paths = coordinator.paths_for_key(sensitive_key);
+    let lock_name = paths.lock_path().file_name().unwrap().to_string_lossy();
+    let result_name = paths.result_path().file_name().unwrap().to_string_lossy();
+
+    assert_eq!(paths.digest().len(), 64);
+    assert!(paths.digest().chars().all(|ch| ch.is_ascii_hexdigit()));
+    assert_eq!(lock_name, format!("{}.lock", paths.digest()));
+    assert_eq!(result_name, format!("{}.result.json", paths.digest()));
+    assert!(!lock_name.contains(sensitive_key));
+    assert!(!result_name.contains(sensitive_key));
+
+    let _ = fs::remove_dir_all(root);
 }

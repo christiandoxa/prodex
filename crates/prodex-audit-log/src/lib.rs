@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::Local;
+use chrono::{Datelike, Local, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 pub const AUDIT_LOG_FILE_NAME: &str = "prodex-audit.log";
 pub const AUDIT_LOG_READ_MAX_BYTES: u64 = 512 * 1024;
+pub const USAGE_LEDGER_FILE_NAME: &str = "prodex-usage-ledger.jsonl";
 
 #[derive(Debug, Serialize)]
 struct AuditEvent<'a> {
@@ -109,6 +110,10 @@ pub fn audit_log_path(default_log_dir: &Path) -> PathBuf {
     audit_log_dir(default_log_dir).join(AUDIT_LOG_FILE_NAME)
 }
 
+pub fn usage_ledger_path(default_log_dir: &Path) -> PathBuf {
+    audit_log_dir(default_log_dir).join(USAGE_LEDGER_FILE_NAME)
+}
+
 pub fn append_audit_event(
     path: &Path,
     component: &str,
@@ -140,6 +145,264 @@ pub fn append_audit_event(
         .with_context(|| format!("failed to open {}", path.display()))?;
     writeln!(file, "{line}").with_context(|| format!("failed to append {}", path.display()))?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsageLedgerMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_domain: Option<String>,
+}
+
+impl UsageLedgerMetadata {
+    pub fn redacted(
+        profile_name: Option<&str>,
+        account_id: Option<&str>,
+        email: Option<&str>,
+    ) -> Self {
+        Self {
+            profile_name: profile_name
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.chars().take(100).collect()),
+            account_hint: redacted_account_hint(account_id),
+            email_domain: email_domain(email),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsageLedgerRow {
+    pub recorded_at_epoch: i64,
+    pub source: String,
+    pub operation: String,
+    pub outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(default)]
+    pub metadata: UsageLedgerMetadata,
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub cached_input_tokens: u64,
+    #[serde(default)]
+    pub reasoning_tokens: u64,
+    #[serde(default)]
+    pub total_tokens: u64,
+    #[serde(default)]
+    pub cost_micros: u64,
+}
+
+impl UsageLedgerRow {
+    pub fn normalized(mut self) -> Self {
+        self.source = normalize_usage_token(&self.source, "unknown", 64);
+        self.operation = normalize_usage_token(&self.operation, "unknown", 64);
+        self.outcome = normalize_usage_token(&self.outcome, "unknown", 32);
+        self.model = self
+            .model
+            .map(|value| normalize_usage_token(&value, "", 128))
+            .filter(|value| !value.is_empty());
+        self.request_id = self
+            .request_id
+            .map(|value| normalize_usage_token(&value, "", 128))
+            .filter(|value| !value.is_empty());
+        if self.total_tokens == 0 {
+            self.total_tokens = self
+                .input_tokens
+                .saturating_add(self.output_tokens)
+                .saturating_add(self.reasoning_tokens);
+        }
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BudgetWindow {
+    Hour,
+    Day,
+    Week,
+    Month,
+}
+
+impl BudgetWindow {
+    pub fn start_epoch(self, now_epoch: i64) -> i64 {
+        match self {
+            Self::Hour => floor_epoch(now_epoch, 60 * 60),
+            Self::Day => floor_epoch(now_epoch, 24 * 60 * 60),
+            Self::Week => floor_epoch(now_epoch, 7 * 24 * 60 * 60),
+            Self::Month => Utc
+                .timestamp_opt(now_epoch, 0)
+                .single()
+                .and_then(|now| {
+                    Utc.with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
+                        .single()
+                })
+                .map(|start| start.timestamp())
+                .unwrap_or_else(|| floor_epoch(now_epoch, 30 * 24 * 60 * 60)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BudgetLimit {
+    pub key: String,
+    pub window: BudgetWindow,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_requests: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost_micros: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsageLedgerSummary {
+    pub since_epoch: i64,
+    pub until_epoch: i64,
+    pub requests: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub total_tokens: u64,
+    pub cost_micros: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BudgetEvaluation {
+    pub key: String,
+    pub window: BudgetWindow,
+    pub allowed: bool,
+    pub reasons: Vec<String>,
+    pub summary: UsageLedgerSummary,
+}
+
+pub fn usage_ledger_row_to_json_line(row: &UsageLedgerRow) -> Result<String> {
+    let line = serde_json::to_string(&row.clone().normalized())
+        .context("failed to serialize usage ledger row")?;
+    Ok(format!("{line}\n"))
+}
+
+pub fn parse_usage_ledger_line(line: &str) -> Option<UsageLedgerRow> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<UsageLedgerRow>(trimmed)
+        .ok()
+        .map(UsageLedgerRow::normalized)
+}
+
+pub fn append_usage_ledger_row(path: &Path, row: &UsageLedgerRow) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let line = usage_ledger_row_to_json_line(row)?;
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    file.write_all(line.as_bytes())
+        .with_context(|| format!("failed to append {}", path.display()))?;
+    Ok(())
+}
+
+pub fn read_usage_ledger_rows(path: &Path) -> Result<Vec<UsageLedgerRow>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(content
+        .lines()
+        .filter_map(parse_usage_ledger_line)
+        .collect())
+}
+
+pub fn summarize_usage_for_window(
+    rows: &[UsageLedgerRow],
+    window: BudgetWindow,
+    now_epoch: i64,
+) -> UsageLedgerSummary {
+    let since_epoch = window.start_epoch(now_epoch);
+    let mut summary = UsageLedgerSummary {
+        since_epoch,
+        until_epoch: now_epoch,
+        ..UsageLedgerSummary::default()
+    };
+    for row in rows {
+        if row.recorded_at_epoch < since_epoch || row.recorded_at_epoch > now_epoch {
+            continue;
+        }
+        summary.requests = summary.requests.saturating_add(1);
+        summary.input_tokens = summary.input_tokens.saturating_add(row.input_tokens);
+        summary.output_tokens = summary.output_tokens.saturating_add(row.output_tokens);
+        summary.cached_input_tokens = summary
+            .cached_input_tokens
+            .saturating_add(row.cached_input_tokens);
+        summary.reasoning_tokens = summary
+            .reasoning_tokens
+            .saturating_add(row.reasoning_tokens);
+        summary.total_tokens = summary.total_tokens.saturating_add(row.total_tokens);
+        summary.cost_micros = summary.cost_micros.saturating_add(row.cost_micros);
+    }
+    summary
+}
+
+pub fn evaluate_budget_limit(
+    limit: &BudgetLimit,
+    rows: &[UsageLedgerRow],
+    now_epoch: i64,
+) -> BudgetEvaluation {
+    let summary = summarize_usage_for_window(rows, limit.window, now_epoch);
+    let mut reasons = Vec::new();
+    if let Some(max_requests) = limit.max_requests
+        && summary.requests >= max_requests
+    {
+        reasons.push(format!(
+            "request limit reached ({}/{})",
+            summary.requests, max_requests
+        ));
+    }
+    if let Some(max_tokens) = limit.max_tokens
+        && summary.total_tokens >= max_tokens
+    {
+        reasons.push(format!(
+            "token limit reached ({}/{})",
+            summary.total_tokens, max_tokens
+        ));
+    }
+    if let Some(max_cost_micros) = limit.max_cost_micros
+        && summary.cost_micros >= max_cost_micros
+    {
+        reasons.push(format!(
+            "cost limit reached ({}/{})",
+            summary.cost_micros, max_cost_micros
+        ));
+    }
+    BudgetEvaluation {
+        key: normalize_usage_token(&limit.key, "global", 100),
+        window: limit.window,
+        allowed: reasons.is_empty(),
+        reasons,
+        summary,
+    }
 }
 
 pub fn format_audit_logs_summary(path: &Path) -> String {
@@ -322,6 +585,57 @@ fn truncate_audit_details(value: &str, max_chars: usize) -> String {
     } else {
         truncated
     }
+}
+
+fn normalize_usage_token(value: &str, fallback: &str, max_chars: usize) -> String {
+    let normalized = value
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/') {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .take(max_chars)
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if normalized.is_empty() {
+        fallback.to_string()
+    } else {
+        normalized
+    }
+}
+
+fn redacted_account_hint(account_id: Option<&str>) -> Option<String> {
+    let account_id = account_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let suffix = account_id
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    Some(format!("...{suffix}"))
+}
+
+fn email_domain(email: Option<&str>) -> Option<String> {
+    let email = email.map(str::trim).filter(|value| !value.is_empty())?;
+    let (_, domain) = email.rsplit_once('@')?;
+    let domain = domain.trim().to_ascii_lowercase();
+    (!domain.is_empty()).then_some(domain.chars().take(100).collect())
+}
+
+fn floor_epoch(value: i64, unit: i64) -> i64 {
+    if unit <= 0 {
+        return value;
+    }
+    value.div_euclid(unit).saturating_mul(unit)
 }
 
 struct AuditLogLineRead {

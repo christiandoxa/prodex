@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "local_bridge.rs"]
+mod local_bridge;
+
 #[test]
 fn normalizes_prodex_openai_mount_paths() {
     assert_eq!(

@@ -213,3 +213,138 @@ fn merge_runtime_state_snapshot_keeps_existing_profile_set_when_present() {
     );
     assert!(merged.response_profile_bindings.is_empty());
 }
+
+#[test]
+fn profile_governance_policy_normalizes_tags_weight_and_note() {
+    let policy = normalize_profile_governance_policy(ProfileGovernancePolicy {
+        tags: vec![
+            " Prod ".to_string(),
+            "PROD".to_string(),
+            "bad tag!".to_string(),
+            "region.us-east".to_string(),
+        ],
+        weight: PROFILE_GOVERNANCE_MAX_WEIGHT + 1,
+        paused: false,
+        drained: false,
+        note: Some(format!(
+            "  {}  ",
+            "x".repeat(PROFILE_GOVERNANCE_MAX_NOTE_LENGTH + 20)
+        )),
+        updated_at: 10,
+    });
+
+    assert_eq!(
+        policy.tags,
+        vec![
+            "prod".to_string(),
+            "badtag".to_string(),
+            "region.us-east".to_string()
+        ]
+    );
+    assert_eq!(policy.weight, PROFILE_GOVERNANCE_MAX_WEIGHT);
+    assert_eq!(
+        policy.note.as_deref().map(str::len),
+        Some(PROFILE_GOVERNANCE_MAX_NOTE_LENGTH)
+    );
+}
+
+#[test]
+fn mutate_profile_governance_policy_sets_updated_at_and_defaults() {
+    let mut policies = BTreeMap::new();
+
+    mutate_profile_governance_policy(&mut policies, "main", 42, |policy| {
+        policy.tags = vec!["Hot Path".to_string()];
+        policy.weight = -5;
+        policy.paused = true;
+    });
+
+    let policy = policies.get("main").expect("policy inserted");
+    assert_eq!(policy.updated_at, 42);
+    assert_eq!(policy.tags, vec!["hotpath".to_string()]);
+    assert_eq!(policy.weight, PROFILE_GOVERNANCE_MIN_WEIGHT);
+    assert!(policy.paused);
+}
+
+#[test]
+fn profile_selection_eligibility_uses_pause_drain_and_missing_profile() {
+    let profiles = BTreeMap::from([profile("ready"), profile("paused"), profile("drained")]);
+    let policies = BTreeMap::from([
+        (
+            "paused".to_string(),
+            ProfileGovernancePolicy {
+                paused: true,
+                ..ProfileGovernancePolicy::default()
+            },
+        ),
+        (
+            "drained".to_string(),
+            ProfileGovernancePolicy {
+                drained: true,
+                ..ProfileGovernancePolicy::default()
+            },
+        ),
+    ]);
+
+    assert_eq!(
+        profile_selection_eligibility_reason(&profiles, &policies, "ready"),
+        ProfileSelectionEligibilityReason::Eligible
+    );
+    assert_eq!(
+        profile_selection_eligibility_reason(&profiles, &policies, "paused").label(),
+        "paused"
+    );
+    assert_eq!(
+        profile_selection_eligibility_reason(&profiles, &policies, "drained").label(),
+        "drained"
+    );
+    assert_eq!(
+        profile_selection_eligibility_reason(&profiles, &policies, "missing").label(),
+        "missing_profile"
+    );
+}
+
+#[test]
+fn profile_governance_prune_and_merge_keep_known_newer_policy() {
+    let profiles = BTreeMap::from([profile("main"), profile("second")]);
+    let existing = BTreeMap::from([
+        (
+            "main".to_string(),
+            ProfileGovernancePolicy {
+                weight: 100,
+                updated_at: 10,
+                ..ProfileGovernancePolicy::default()
+            },
+        ),
+        (
+            "orphan".to_string(),
+            ProfileGovernancePolicy {
+                updated_at: 99,
+                ..ProfileGovernancePolicy::default()
+            },
+        ),
+    ]);
+    let incoming = BTreeMap::from([
+        (
+            "main".to_string(),
+            ProfileGovernancePolicy {
+                weight: 200,
+                updated_at: 5,
+                ..ProfileGovernancePolicy::default()
+            },
+        ),
+        (
+            "second".to_string(),
+            ProfileGovernancePolicy {
+                weight: 300,
+                updated_at: 20,
+                ..ProfileGovernancePolicy::default()
+            },
+        ),
+    ]);
+
+    let merged = merge_profile_governance_policies(&existing, &incoming, &profiles);
+
+    assert_eq!(merged["main"].weight, 100);
+    assert_eq!(merged["second"].weight, 300);
+    assert!(!merged.contains_key("orphan"));
+}

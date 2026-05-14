@@ -9,3 +9,6 @@ repository.workspace = true
 [lib]
 name = "secret_store"
 path = "src/lib.rs"
+
+[dependencies]
+sha2 = { workspace = true }

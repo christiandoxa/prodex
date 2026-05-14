@@ -8,6 +8,12 @@ pub const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
 pub const APP_STATE_SESSION_BINDING_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 30 * 24 * 60 * 60 };
+pub const PROFILE_GOVERNANCE_DEFAULT_WEIGHT: i64 = 100;
+pub const PROFILE_GOVERNANCE_MIN_WEIGHT: i64 = 0;
+pub const PROFILE_GOVERNANCE_MAX_WEIGHT: i64 = 10_000;
+pub const PROFILE_GOVERNANCE_MAX_TAGS: usize = 32;
+pub const PROFILE_GOVERNANCE_MAX_TAG_LENGTH: usize = 48;
+pub const PROFILE_GOVERNANCE_MAX_NOTE_LENGTH: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppStateCompactionPolicy {
@@ -108,6 +114,195 @@ impl ProfileProvider {
 pub struct ResponseProfileBinding {
     pub profile_name: String,
     pub bound_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProfileGovernancePolicy {
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default = "default_profile_governance_weight")]
+    pub weight: i64,
+    #[serde(default)]
+    pub paused: bool,
+    #[serde(default)]
+    pub drained: bool,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub updated_at: i64,
+}
+
+impl Default for ProfileGovernancePolicy {
+    fn default() -> Self {
+        Self {
+            tags: Vec::new(),
+            weight: PROFILE_GOVERNANCE_DEFAULT_WEIGHT,
+            paused: false,
+            drained: false,
+            note: None,
+            updated_at: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileSelectionEligibilityReason {
+    Eligible,
+    MissingProfile,
+    Paused,
+    Drained,
+}
+
+impl ProfileSelectionEligibilityReason {
+    pub fn is_eligible(self) -> bool {
+        matches!(self, Self::Eligible)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Eligible => "eligible",
+            Self::MissingProfile => "missing_profile",
+            Self::Paused => "paused",
+            Self::Drained => "drained",
+        }
+    }
+}
+
+fn default_profile_governance_weight() -> i64 {
+    PROFILE_GOVERNANCE_DEFAULT_WEIGHT
+}
+
+pub fn normalize_profile_governance_tag(tag: &str) -> Option<String> {
+    let normalized = tag
+        .trim()
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        .take(PROFILE_GOVERNANCE_MAX_TAG_LENGTH)
+        .collect::<String>();
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+pub fn normalize_profile_governance_tags<I, S>(tags: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut normalized = Vec::new();
+    for tag in tags {
+        let Some(tag) = normalize_profile_governance_tag(tag.as_ref()) else {
+            continue;
+        };
+        if normalized.contains(&tag) {
+            continue;
+        }
+        normalized.push(tag);
+        if normalized.len() >= PROFILE_GOVERNANCE_MAX_TAGS {
+            break;
+        }
+    }
+    normalized
+}
+
+pub fn clamp_profile_governance_weight(weight: i64) -> i64 {
+    weight.clamp(PROFILE_GOVERNANCE_MIN_WEIGHT, PROFILE_GOVERNANCE_MAX_WEIGHT)
+}
+
+pub fn normalize_profile_governance_note(note: Option<String>) -> Option<String> {
+    let note = note?;
+    let trimmed = note.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(
+        trimmed
+            .chars()
+            .take(PROFILE_GOVERNANCE_MAX_NOTE_LENGTH)
+            .collect(),
+    )
+}
+
+pub fn normalize_profile_governance_policy(
+    mut policy: ProfileGovernancePolicy,
+) -> ProfileGovernancePolicy {
+    policy.tags = normalize_profile_governance_tags(policy.tags);
+    policy.weight = clamp_profile_governance_weight(policy.weight);
+    policy.note = normalize_profile_governance_note(policy.note);
+    policy
+}
+
+pub fn upsert_profile_governance_policy(
+    policies: &mut BTreeMap<String, ProfileGovernancePolicy>,
+    profile_name: impl Into<String>,
+    policy: ProfileGovernancePolicy,
+) -> Option<ProfileGovernancePolicy> {
+    policies.insert(
+        profile_name.into(),
+        normalize_profile_governance_policy(policy),
+    )
+}
+
+pub fn mutate_profile_governance_policy<F>(
+    policies: &mut BTreeMap<String, ProfileGovernancePolicy>,
+    profile_name: impl Into<String>,
+    updated_at: i64,
+    mutate: F,
+) where
+    F: FnOnce(&mut ProfileGovernancePolicy),
+{
+    let profile_name = profile_name.into();
+    let mut policy = policies.remove(&profile_name).unwrap_or_default();
+    mutate(&mut policy);
+    policy.updated_at = updated_at;
+    policies.insert(profile_name, normalize_profile_governance_policy(policy));
+}
+
+pub fn prune_profile_governance_policies(
+    policies: &mut BTreeMap<String, ProfileGovernancePolicy>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) {
+    policies.retain(|profile_name, _| profiles.contains_key(profile_name));
+}
+
+pub fn merge_profile_governance_policies(
+    existing: &BTreeMap<String, ProfileGovernancePolicy>,
+    incoming: &BTreeMap<String, ProfileGovernancePolicy>,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> BTreeMap<String, ProfileGovernancePolicy> {
+    let mut merged = existing.clone();
+    for (profile_name, policy) in incoming {
+        let should_replace = merged
+            .get(profile_name)
+            .is_none_or(|current| current.updated_at <= policy.updated_at);
+        if should_replace {
+            merged.insert(
+                profile_name.clone(),
+                normalize_profile_governance_policy(policy.clone()),
+            );
+        }
+    }
+    prune_profile_governance_policies(&mut merged, profiles);
+    merged
+}
+
+pub fn profile_selection_eligibility_reason(
+    profiles: &BTreeMap<String, ProfileEntry>,
+    policies: &BTreeMap<String, ProfileGovernancePolicy>,
+    profile_name: &str,
+) -> ProfileSelectionEligibilityReason {
+    if !profiles.contains_key(profile_name) {
+        return ProfileSelectionEligibilityReason::MissingProfile;
+    }
+    let Some(policy) = policies.get(profile_name) else {
+        return ProfileSelectionEligibilityReason::Eligible;
+    };
+    if policy.paused {
+        return ProfileSelectionEligibilityReason::Paused;
+    }
+    if policy.drained {
+        return ProfileSelectionEligibilityReason::Drained;
+    }
+    ProfileSelectionEligibilityReason::Eligible
 }
 
 pub fn merge_last_run_selection(
