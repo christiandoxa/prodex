@@ -2,6 +2,24 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.99.0 - 2026-05-14
+
+### Runtime
+
+- Type diagnostics log markers (`fb7d7fc`)
+- Satisfy latest clippy on quota tests (`46f8312`)
+- Improve diagnostics and validation feedback (`b411895`)
+
+### CLI
+
+- Keep quota watch input responsive (`ce27211`)
+
+### Misc
+
+- Satisfy ci warning gates (`f9b85de`)
+- Add multi-auth governance primitives (`8e4acc7`)
+- Harden diagnostics and release safeguards (`f7fef28`)
+
 ## 0.98.0 - 2026-05-13
 
 ### Runtime
@@ -69,7 +87,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Satisfy rust 1.95 clippy (`5c04ca3`)
 - Trust caveman hooks for 0.129 (`e434bfd`)
 - Support codex 0.129 transcript events (`91880c6`)
-
-## 0.87.0 - 2026-05-07
-
-- No grouped changes.
