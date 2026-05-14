@@ -324,10 +324,12 @@ If asked to publish:
 2. run `npm run npm:sync-version`
 3. update `Cargo.lock`
 4. run tests
-5. run dry-run publish for every internal crate under `crates/`
-6. run `cargo publish --dry-run -p prodex`
-7. publish every internal crate under `crates/`, then publish `prodex`
+5. publish through `.github/workflows/npm-publish.yml`
 
-The `.github/workflows/npm-publish.yml` workflow is expected to create or refresh the matching GitHub Release for the published plain `0.x.y` tag after the crate and npm publish jobs succeed. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep the versioned install snippets in `README.md` and `QUICKSTART.md` synced when the release commit matches `origin/main`.
+Do not publish to crates.io in the default release path.
+The workspace currently requires publishing many internal `prodex-*` crates before the root `prodex` crate, which can hit crates.io new-crate rate limits and create partial releases.
+Keep release publishing npm/GitHub-only unless crates.io publishing is explicitly re-enabled with a deliberate plan.
+
+The `.github/workflows/npm-publish.yml` workflow is expected to publish the npm packages and create or refresh the matching GitHub Release for the published plain `0.x.y` tag. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep the versioned install snippets in `README.md` and `QUICKSTART.md` synced when the release commit matches `origin/main`.
 
 If asked to commit, use a conventional commit message.
