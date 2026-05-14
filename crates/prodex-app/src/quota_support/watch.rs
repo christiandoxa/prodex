@@ -2,6 +2,9 @@ use super::*;
 
 #[derive(Debug)]
 enum AllQuotaWatchSnapshot {
+    Loading {
+        updated: String,
+    },
     Reports {
         updated: String,
         profile_count: usize,
@@ -27,6 +30,57 @@ enum QuotaWatchCommand {
 enum QuotaWatchCommandOutcome {
     Continue(usize),
     Quit,
+}
+
+struct AllQuotaWatchRefresh {
+    receiver: Receiver<AllQuotaWatchSnapshot>,
+    sender: mpsc::Sender<AllQuotaWatchSnapshot>,
+    in_flight: bool,
+}
+
+impl AllQuotaWatchRefresh {
+    fn new() -> Self {
+        let (sender, receiver) = mpsc::channel();
+        Self {
+            receiver,
+            sender,
+            in_flight: false,
+        }
+    }
+
+    fn try_start<F>(&mut self, load: F) -> bool
+    where
+        F: FnOnce() -> AllQuotaWatchSnapshot + Send + 'static,
+    {
+        if self.in_flight {
+            return false;
+        }
+
+        self.in_flight = true;
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let _ = sender.send(load());
+        });
+        true
+    }
+
+    fn take_latest(&mut self) -> Option<AllQuotaWatchSnapshot> {
+        let mut latest = None;
+        loop {
+            match self.receiver.try_recv() {
+                Ok(snapshot) => {
+                    self.in_flight = false;
+                    latest = Some(snapshot);
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.in_flight = false;
+                    break;
+                }
+            }
+        }
+        latest
+    }
 }
 
 struct QuotaWatchInput {
@@ -152,6 +206,9 @@ fn render_all_quota_watch_snapshot(
     scroll_offset: usize,
 ) -> String {
     match snapshot {
+        AllQuotaWatchSnapshot::Loading { updated: _updated } => {
+            render_quota_watch_error_panel("Quota", "Loading quota data...")
+        }
         AllQuotaWatchSnapshot::Reports {
             updated: _updated,
             profile_count: _profile_count,
@@ -222,11 +279,21 @@ pub(crate) fn watch_all_quotas(
 ) -> Result<()> {
     let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
-    let mut snapshot = load_all_quota_watch_snapshot(paths, base_url, &auth_filter);
+    let mut snapshot = AllQuotaWatchSnapshot::Loading {
+        updated: quota_watch_updated_at(),
+    };
+    let mut refresh = AllQuotaWatchRefresh::new();
+    let _ = start_all_quota_watch_refresh(&mut refresh, paths, base_url, &auth_filter);
     let mut redraw_needed = true;
-    let mut next_refresh_at = quota_watch_next_refresh_at();
+    let mut next_refresh_at = None;
 
     loop {
+        if let Some(next_snapshot) = refresh.take_latest() {
+            snapshot = next_snapshot;
+            redraw_needed = true;
+            next_refresh_at = Some(quota_watch_next_refresh_at());
+        }
+
         if redraw_needed {
             scroll_offset = scroll_offset.min(quota_watch_max_scroll_offset(&snapshot));
             let output = render_all_quota_watch_snapshot(&snapshot, detail, scroll_offset);
@@ -234,10 +301,10 @@ pub(crate) fn watch_all_quotas(
             redraw_needed = false;
         }
 
-        if Instant::now() >= next_refresh_at {
-            snapshot = load_all_quota_watch_snapshot(paths, base_url, &auth_filter);
-            redraw_needed = true;
-            next_refresh_at = quota_watch_next_refresh_at();
+        if next_refresh_at.is_some_and(|refresh_at| Instant::now() >= refresh_at)
+            && start_all_quota_watch_refresh(&mut refresh, paths, base_url, &auth_filter)
+        {
+            next_refresh_at = None;
             continue;
         }
 
@@ -259,6 +326,19 @@ pub(crate) fn watch_all_quotas(
 
         thread::sleep(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS));
     }
+}
+
+fn start_all_quota_watch_refresh(
+    refresh: &mut AllQuotaWatchRefresh,
+    paths: &AppPaths,
+    base_url: Option<&str>,
+    auth_filter: &QuotaAuthFilter,
+) -> bool {
+    let paths = paths.clone();
+    let base_url = base_url.map(str::to_string);
+    let auth_filter = auth_filter.clone();
+    refresh
+        .try_start(move || load_all_quota_watch_snapshot(&paths, base_url.as_deref(), &auth_filter))
 }
 
 fn quota_watch_updated_at() -> String {
@@ -302,5 +382,50 @@ fn apply_quota_watch_command(
             scroll_offset.saturating_add(1).min(max_scroll_offset),
         ),
         QuotaWatchCommand::Quit => QuotaWatchCommandOutcome::Quit,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_quota_watch_refresh_keeps_single_background_refresh_in_flight() {
+        let mut refresh = AllQuotaWatchRefresh::new();
+        let (release_sender, release_receiver) = mpsc::channel();
+
+        assert!(refresh.try_start(move || {
+            release_receiver
+                .recv()
+                .expect("test refresh should be released");
+            AllQuotaWatchSnapshot::Empty {
+                updated: "done".to_string(),
+            }
+        }));
+        assert!(!refresh.try_start(|| AllQuotaWatchSnapshot::Empty {
+            updated: "second".to_string(),
+        }));
+        assert!(refresh.take_latest().is_none());
+
+        release_sender
+            .send(())
+            .expect("test refresh release should send");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut completed = None;
+        while Instant::now() < deadline {
+            if let Some(snapshot) = refresh.take_latest() {
+                completed = Some(snapshot);
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(matches!(
+            completed,
+            Some(AllQuotaWatchSnapshot::Empty { .. })
+        ));
+        assert!(refresh.try_start(|| AllQuotaWatchSnapshot::Empty {
+            updated: "third".to_string(),
+        }));
     }
 }
