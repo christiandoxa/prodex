@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 
+const CODEX_COMMAND_SERVER_SUBCOMMANDS: [&str; 2] = ["mcp-server", "app-server"];
+
 mod cleanup;
 mod help;
 mod profile;
@@ -169,6 +171,13 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "help"
             | "__runtime-broker"
     )
+}
+
+pub fn is_codex_command_server_subcommand(args: &[OsString]) -> bool {
+    let Some(first_arg) = args.first().and_then(|arg| arg.to_str()) else {
+        return false;
+    };
+    CODEX_COMMAND_SERVER_SUBCOMMANDS.contains(&first_arg)
 }
 
 pub fn rewrite_cli_args_as_run(args: &[OsString]) -> Vec<OsString> {

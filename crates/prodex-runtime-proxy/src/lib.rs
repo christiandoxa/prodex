@@ -523,6 +523,7 @@ pub fn runtime_request_explicit_session_id(
     request: &RuntimeProxyRequest,
 ) -> Option<RuntimeExplicitSessionId> {
     runtime_proxy_request_header_value(&request.headers, "session_id")
+        .or_else(|| runtime_proxy_request_header_value(&request.headers, "session-id"))
         .or_else(|| runtime_proxy_request_header_value(&request.headers, "x-session-id"))
         .and_then(RuntimeExplicitSessionId::from_header_value)
 }

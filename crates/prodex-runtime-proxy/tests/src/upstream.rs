@@ -48,6 +48,24 @@ fn request_header_skip_list_preserves_codex_metadata_headers() {
 }
 
 #[test]
+fn request_header_skip_list_preserves_codex_rust_0_131_passthrough_headers() {
+    for header in [
+        "session-id",
+        "thread-id",
+        "x-codex-parent-thread-id",
+        "x-codex-window-id",
+        "x-codex-inference-call-id",
+        "X-OpenAI-Product-Sku",
+        "x-codex-ws-stream-request-start-ms",
+    ] {
+        assert!(
+            !should_skip_runtime_request_header(header),
+            "runtime proxy should preserve Codex rust-v0.131.0 passthrough header {header}"
+        );
+    }
+}
+
+#[test]
 fn request_header_skip_list_replaces_auth_and_transport_headers() {
     for header in [
         "Authorization",

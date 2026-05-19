@@ -1,4 +1,10 @@
 use super::*;
+use crate::{
+    RuntimePreviousResponseFreshFallbackShape, RuntimeProxyRequest,
+    runtime_request_previous_response_fresh_fallback_shape, runtime_request_session_id,
+    runtime_request_value_previous_response_fresh_fallback_shape,
+    runtime_request_value_requires_previous_response_affinity,
+};
 
 #[derive(Debug, Clone)]
 struct GeneratedRuntimeSseEvent {
@@ -258,6 +264,95 @@ fn runtime_sse_event_extracts_response_token_usage() {
             reasoning_tokens: 7,
         })
     );
+}
+
+#[test]
+fn responses_stream_compaction_v2_request_shape_is_context_dependent() {
+    let value = serde_json::json!({
+        "previous_response_id": "resp-before-compact",
+        "session_id": "sess-compact-v2",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "compact now"}],
+            },
+            {"type": "compaction_trigger"},
+        ],
+    });
+
+    assert!(!runtime_request_value_requires_previous_response_affinity(
+        &value
+    ));
+    assert_eq!(
+        runtime_request_value_previous_response_fresh_fallback_shape(&value),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
+    );
+
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("session-id".to_string(), " sess-compact-v2 ".to_string())],
+        body: value.to_string().into_bytes(),
+    };
+
+    assert_eq!(
+        runtime_request_session_id(&request).as_deref(),
+        Some("sess-compact-v2")
+    );
+    assert_eq!(
+        runtime_request_previous_response_fresh_fallback_shape(&request),
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
+    );
+}
+
+#[test]
+fn responses_stream_compaction_v2_sse_is_not_retry_failure() {
+    let body = concat!(
+        "event: response.created\r\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-compact-v2\",\"headers\":{\"x-codex-turn-state\":\"turn-compact-v2\"}}}\r\n",
+        "\r\n",
+        "event: response.output_item.done\r\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"enc-compact-v2\"}}\r\n",
+        "\r\n",
+        "event: response.completed\r\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-compact-v2\"}}\r\n",
+        "\r\n",
+    );
+
+    let events = collect_runtime_sse_events(&[body.as_bytes()]);
+    assert_eq!(events.len(), 3);
+    assert!(events.iter().all(|event| !event.quota_blocked));
+    assert!(
+        events
+            .iter()
+            .all(|event| !event.previous_response_not_found)
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter_map(|event| event.event_type.as_deref())
+            .collect::<Vec<_>>(),
+        vec![
+            "response.created",
+            "response.output_item.done",
+            "response.completed"
+        ]
+    );
+    assert_eq!(events[0].response_ids, vec!["resp-compact-v2".to_string()]);
+    assert_eq!(events[0].turn_state.as_deref(), Some("turn-compact-v2"));
+    assert_eq!(events[2].response_ids, vec!["resp-compact-v2".to_string()]);
+
+    match inspect_runtime_sse_buffer(body.as_bytes()) {
+        RuntimeSseInspectionProgress::Commit {
+            response_ids,
+            turn_state,
+        } => {
+            assert_eq!(response_ids, vec!["resp-compact-v2".to_string()]);
+            assert_eq!(turn_state.as_deref(), Some("turn-compact-v2"));
+        }
+        other => panic!("compaction v2 stream should be commit-ready, got {other:?}"),
+    }
 }
 
 #[test]

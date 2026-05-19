@@ -42,6 +42,70 @@ fn shared_codex_manifest_includes_environments_toml_as_file() {
     assert!(shared_codex_manifest_entries().contains(&SharedCodexEntry::file("environments.toml")));
 }
 
+#[test]
+fn profile_v2_config_names_match_plain_ascii_profile_names() {
+    assert!(is_shared_codex_profile_v2_config_name(
+        "local_1-prod.config.toml"
+    ));
+    assert!(!is_shared_codex_profile_v2_config_name(".config.toml"));
+    assert!(!is_shared_codex_profile_v2_config_name(
+        "team.prod.config.toml"
+    ));
+    assert!(!is_shared_codex_profile_v2_config_name(
+        "../prod.config.toml"
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_profile_v2_config_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("profile-v2-config-file");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_path = codex_home.join("bedrock.config.toml");
+    let shared_path = paths.shared_codex_root.join("bedrock.config.toml");
+
+    fs::create_dir_all(&codex_home).expect("codex home should be created");
+    fs::write(&local_path, "model_provider = \"amazon-bedrock\"\n")
+        .expect("profile v2 config should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    assert_eq!(
+        fs::read_to_string(&shared_path).expect("shared profile v2 config should be readable"),
+        "model_provider = \"amazon-bedrock\"\n"
+    );
+    assert_eq!(
+        fs::read_link(&local_path).expect("local profile v2 config should be a symlink"),
+        shared_path
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_links_existing_shared_profile_v2_config() {
+    let temp_dir = PrepareTestDir::new("existing-profile-v2-config-file");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_path = codex_home.join("bedrock.config.toml");
+    let shared_path = paths.shared_codex_root.join("bedrock.config.toml");
+
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should be created");
+    fs::write(&shared_path, "model_provider = \"amazon-bedrock\"\n")
+        .expect("shared profile v2 config should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    assert_eq!(
+        fs::read_link(&local_path).expect("local profile v2 config should be a symlink"),
+        shared_path
+    );
+    assert_eq!(
+        fs::read_to_string(&local_path).expect("local profile v2 config link should be readable"),
+        "model_provider = \"amazon-bedrock\"\n"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn prepare_managed_codex_home_migrates_environments_toml_to_shared_root() {

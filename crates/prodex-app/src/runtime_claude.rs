@@ -41,6 +41,7 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             model_context_window_tokens: None,
             force_runtime_proxy: true,
             model_provider_override: None,
+            profile_v2_name: None,
         }
     }
 

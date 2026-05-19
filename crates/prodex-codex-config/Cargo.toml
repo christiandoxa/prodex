@@ -9,3 +9,6 @@ repository.workspace = true
 [lib]
 name = "codex_config"
 path = "src/lib.rs"
+
+[dependencies]
+toml = { workspace = true }

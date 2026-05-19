@@ -113,6 +113,44 @@ fn explicit_session_header_wins_over_body_session() {
 }
 
 #[test]
+fn codex_session_id_header_wins_over_body_session() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("session-id".to_string(), " codex-session ".to_string())],
+        body: br#"{"session_id":"body-session"}"#.to_vec(),
+    };
+
+    assert_eq!(
+        runtime_request_explicit_session_id(&request).as_deref(),
+        Some("codex-session")
+    );
+    assert_eq!(
+        runtime_request_session_id(&request).as_deref(),
+        Some("codex-session")
+    );
+}
+
+#[test]
+fn explicit_session_headers_keep_legacy_precedence() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![
+            ("x-session-id".to_string(), "x-session".to_string()),
+            ("session-id".to_string(), "codex-session".to_string()),
+            ("session_id".to_string(), "legacy-session".to_string()),
+        ],
+        body: Vec::new(),
+    };
+
+    assert_eq!(
+        runtime_request_explicit_session_id(&request).as_deref(),
+        Some("legacy-session")
+    );
+}
+
+#[test]
 fn detects_internal_interactive_origin_case_insensitively() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),

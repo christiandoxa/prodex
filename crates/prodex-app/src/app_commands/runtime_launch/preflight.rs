@@ -11,6 +11,7 @@ pub(super) fn select_runtime_launch_profile(
         state,
         request.profile,
         request.model_provider_override,
+        request.profile_v2_name,
     )?;
     if selection.non_openai_model_provider.is_some() {
         return Ok(selection);
@@ -249,7 +250,12 @@ fn activate_runtime_launch_profile(
     selection: &mut RuntimeLaunchSelection,
     profile_name: &str,
 ) -> Result<()> {
-    selection.select_profile(state, profile_name, request.model_provider_override)?;
+    selection.select_profile(
+        state,
+        profile_name,
+        request.model_provider_override,
+        request.profile_v2_name,
+    )?;
     state.active_profile = Some(profile_name.to_string());
     state.save(paths)?;
     Ok(())

@@ -12,6 +12,7 @@ pub struct RuntimeLaunchRequest<'a> {
     pub model_context_window_tokens: Option<u64>,
     pub force_runtime_proxy: bool,
     pub model_provider_override: Option<&'a str>,
+    pub profile_v2_name: Option<&'a str>,
 }
 
 pub struct PreparedRuntimeLaunch<P, E> {

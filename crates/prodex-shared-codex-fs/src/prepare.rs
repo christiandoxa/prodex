@@ -50,13 +50,13 @@ fn shared_codex_entries_for_roots<'a>(
     scan_roots: impl IntoIterator<Item = &'a Path>,
 ) -> Result<Vec<SharedCodexEntry>> {
     let mut entries = shared_codex_manifest_entries();
-    let mut sqlite_entries = BTreeSet::new();
+    let mut dynamic_file_entries = BTreeSet::new();
 
     for root in scan_roots {
-        collect_shared_codex_sqlite_entries(root, &mut sqlite_entries)?;
+        collect_dynamic_shared_codex_file_entries(root, &mut dynamic_file_entries)?;
     }
 
-    entries.extend(sqlite_entries.into_iter().map(SharedCodexEntry::file));
+    entries.extend(dynamic_file_entries.into_iter().map(SharedCodexEntry::file));
     Ok(entries)
 }
 
@@ -72,7 +72,10 @@ fn shared_codex_manifest_entries() -> Vec<SharedCodexEntry> {
         .collect()
 }
 
-fn collect_shared_codex_sqlite_entries(root: &Path, names: &mut BTreeSet<String>) -> Result<()> {
+fn collect_dynamic_shared_codex_file_entries(
+    root: &Path,
+    names: &mut BTreeSet<String>,
+) -> Result<()> {
     if !root.is_dir() {
         return Ok(());
     }
@@ -81,12 +84,24 @@ fn collect_shared_codex_sqlite_entries(root: &Path, names: &mut BTreeSet<String>
         let entry = entry.with_context(|| format!("failed to read entry in {}", root.display()))?;
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
-        if is_shared_codex_sqlite_name(&file_name) {
+        if is_shared_codex_sqlite_name(&file_name)
+            || is_shared_codex_profile_v2_config_name(&file_name)
+        {
             names.insert(file_name.into_owned());
         }
     }
 
     Ok(())
+}
+
+fn is_shared_codex_profile_v2_config_name(file_name: &str) -> bool {
+    let Some(profile_name) = file_name.strip_suffix(SHARED_CODEX_PROFILE_V2_CONFIG_SUFFIX) else {
+        return false;
+    };
+    !profile_name.is_empty()
+        && profile_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn is_shared_codex_sqlite_name(file_name: &str) -> bool {

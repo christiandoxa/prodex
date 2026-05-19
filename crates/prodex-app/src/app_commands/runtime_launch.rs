@@ -9,6 +9,7 @@ struct RunCommandStrategy {
     mem_mode: Option<RuntimeMemTranscriptMode>,
     dry_run: bool,
     model_provider_override: Option<String>,
+    profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
 }
 
@@ -20,6 +21,7 @@ impl RunCommandStrategy {
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
             codex_cli_config_override_value(&codex_args, "model_provider");
+        let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
         let model_context_window_tokens =
             runtime_launch_cli_model_context_window_tokens(&codex_args);
         let dry_run = args.dry_run || dry_run_arg;
@@ -30,6 +32,7 @@ impl RunCommandStrategy {
             mem_mode,
             dry_run,
             model_provider_override,
+            profile_v2_name,
             model_context_window_tokens,
         }
     }
@@ -48,6 +51,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             model_context_window_tokens: self.model_context_window_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
+            profile_v2_name: self.profile_v2_name.as_deref(),
         }
     }
 
@@ -70,6 +74,10 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
 }
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {
+    if run_launch_route(&args) == RunLaunchRoute::CodexCommandServerDirectPassthrough {
+        return handle_codex_command_server_direct_passthrough(args);
+    }
+
     let strategy = RunCommandStrategy::new(args);
     if strategy.dry_run {
         return print_runtime_launch_dry_run(
@@ -81,6 +89,24 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
         );
     }
     execute_runtime_launch(strategy)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunLaunchRoute {
+    ManagedRuntime,
+    CodexCommandServerDirectPassthrough,
+}
+
+fn run_launch_route(args: &RunArgs) -> RunLaunchRoute {
+    // Command servers own stdio; keep Prodex preflight/proxy wrapping out of the stream.
+    if !args.dry_run && is_codex_command_server_subcommand(&args.codex_args) {
+        return RunLaunchRoute::CodexCommandServerDirectPassthrough;
+    }
+    RunLaunchRoute::ManagedRuntime
+}
+
+fn handle_codex_command_server_direct_passthrough(args: RunArgs) -> Result<()> {
+    exit_with_status(run_codex_direct_passthrough(args.codex_args)?)
 }
 
 #[derive(Debug, Clone)]
@@ -99,12 +125,20 @@ impl RuntimeLaunchSelection {
         state: &AppState,
         requested: Option<&str>,
         model_provider_override: Option<&str>,
+        profile_v2_name: Option<&str>,
     ) -> Result<Self> {
-        if prodex_runtime_launch::allow_profileless_local_home(
-            requested,
+        let profileless_model_provider = codex_non_openai_model_provider_with_profile_v2(
+            &paths.shared_codex_root,
             model_provider_override,
-            SUPER_LOCAL_PROVIDER_ID,
-        ) && state.profiles.is_empty()
+            profile_v2_name,
+        );
+        if requested.is_none()
+            && state.profiles.is_empty()
+            && profileless_model_provider.as_ref().is_some_and(|setting| {
+                setting
+                    .provider_id
+                    .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)
+            })
         {
             let codex_home = paths.shared_codex_root.clone();
             return Ok(Self {
@@ -112,20 +146,18 @@ impl RuntimeLaunchSelection {
                 selected_profile_name: "local".to_string(),
                 codex_home,
                 explicit_profile_requested: false,
-                non_openai_model_provider: model_provider_override.map(|provider_id| {
-                    CodexModelProviderSetting {
-                        provider_id: provider_id.to_string(),
-                        source: CodexModelProviderSource::CliOverride,
-                    }
-                }),
+                non_openai_model_provider: profileless_model_provider,
                 profileless_local_home: true,
             });
         }
 
         let profile_name = resolve_runtime_launch_profile_name(state, requested)?;
         let codex_home = runtime_launch_profile_home(state, &profile_name)?;
-        let non_openai_model_provider =
-            codex_non_openai_model_provider(&codex_home, model_provider_override);
+        let non_openai_model_provider = codex_non_openai_model_provider_with_profile_v2(
+            &codex_home,
+            model_provider_override,
+            profile_v2_name,
+        );
 
         Ok(Self {
             initial_profile_name: profile_name.clone(),
@@ -142,11 +174,15 @@ impl RuntimeLaunchSelection {
         state: &AppState,
         profile_name: &str,
         model_provider_override: Option<&str>,
+        profile_v2_name: Option<&str>,
     ) -> Result<()> {
         self.codex_home = runtime_launch_profile_home(state, profile_name)?;
         self.selected_profile_name = profile_name.to_string();
-        self.non_openai_model_provider =
-            codex_non_openai_model_provider(&self.codex_home, model_provider_override);
+        self.non_openai_model_provider = codex_non_openai_model_provider_with_profile_v2(
+            &self.codex_home,
+            model_provider_override,
+            profile_v2_name,
+        );
         Ok(())
     }
 }
@@ -399,6 +435,7 @@ pub(super) fn prepare_runtime_launch_dry_run(
         &state,
         request.profile,
         request.model_provider_override,
+        request.profile_v2_name,
     )?;
     let managed = if selection.profileless_local_home {
         false
@@ -521,9 +558,10 @@ fn local_rewrite_proxy_upstream_base_url(
         .base_url
         .map(str::to_string)
         .or_else(|| {
-            codex_config_value(
+            codex_config_value_with_profile_v2(
                 &selection.codex_home,
                 &format!("model_providers.{}.base_url", provider.provider_id.as_str()),
+                request.profile_v2_name,
             )
         })
         .filter(|base_url| !base_url.trim().is_empty())
@@ -540,9 +578,12 @@ fn runtime_launch_effective_model_context_window_tokens(
     if !request.smart_context_enabled {
         return None;
     }
-    request
-        .model_context_window_tokens
-        .or_else(|| runtime_launch_config_model_context_window_tokens(&selection.codex_home))
+    request.model_context_window_tokens.or_else(|| {
+        runtime_launch_config_model_context_window_tokens_with_profile_v2(
+            &selection.codex_home,
+            request.profile_v2_name,
+        )
+    })
 }
 
 #[cfg(test)]

@@ -62,3 +62,36 @@ fn runtime_launch_dry_run_report_redacts_secret_env_and_args() {
     assert!(!report.contains("dry-run-env-bearer-secret-12345"));
     assert!(report.contains("Codex/TUI not started"));
 }
+
+#[test]
+fn runtime_launch_dry_run_report_reads_profile_v2_overlay() {
+    let codex_home = std::env::temp_dir().join(format!(
+        "prodex-runtime-launch-profile-v2-dry-run-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(
+        codex_home.join("config.toml"),
+        "model_provider = 'openai'\nmodel = 'gpt-5.4'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        codex_home.join("local.config.toml"),
+        "model_provider = 'prodex-local'\nmodel = 'qwen3-coder'\n",
+    )
+    .unwrap();
+    let plan = RuntimeLaunchPlan::new(
+        ChildProcessPlan::new(OsString::from("codex"), codex_home.clone())
+            .with_args(vec![OsString::from("--profile-v2=local")]),
+    );
+
+    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan);
+
+    assert!(report.contains("Provider: prodex-local"));
+    assert!(report.contains("Model: qwen3-coder"));
+    std::fs::remove_dir_all(codex_home).unwrap();
+}

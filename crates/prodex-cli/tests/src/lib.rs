@@ -211,6 +211,43 @@ fn codex_remote_control_defaults_to_managed_run_passthrough() {
 }
 
 #[test]
+fn codex_command_server_subcommands_default_to_run_passthrough() {
+    for subcommand in ["mcp-server", "app-server"] {
+        assert!(should_default_cli_invocation_to_run(&os_args(&[
+            "prodex", subcommand, "--help",
+        ])));
+
+        let command = parse_cli_command_from(["prodex", subcommand, "--help"])
+            .expect("command-server subcommand should parse as run passthrough");
+        let Commands::Run(args) = command else {
+            panic!("expected run command");
+        };
+
+        assert_eq!(args.codex_args, os_args(&[subcommand, "--help"]));
+    }
+}
+
+#[test]
+fn codex_command_server_detection_is_first_arg_only() {
+    assert!(is_codex_command_server_subcommand(&os_args(&[
+        "mcp-server",
+        "--stdio",
+    ])));
+    assert!(is_codex_command_server_subcommand(&os_args(&[
+        "app-server",
+        "--stdio",
+    ])));
+    assert!(!is_codex_command_server_subcommand(&os_args(&[
+        "remote-control",
+    ])));
+    assert!(!is_codex_command_server_subcommand(&os_args(&[
+        "exec",
+        "mcp-server",
+    ])));
+    assert!(!is_codex_command_server_subcommand(&[]));
+}
+
+#[test]
 fn session_list_parses_line_modes_and_filters() {
     let command = parse_cli_command_from([
         "prodex",

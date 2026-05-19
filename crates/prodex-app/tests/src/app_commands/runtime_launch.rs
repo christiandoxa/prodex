@@ -57,6 +57,7 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
+        profile_v2_name: None,
     })
     .unwrap();
 
@@ -103,6 +104,7 @@ fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
         model_context_window_tokens: None,
         force_runtime_proxy: true,
         model_provider_override: None,
+        profile_v2_name: None,
     }) {
         Ok(_) => panic!("expected Claude launch to reject non-OpenAI model providers"),
         Err(err) => err,
@@ -170,6 +172,7 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
+        profile_v2_name: None,
     })
     .unwrap();
 
@@ -208,6 +211,7 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
+        profile_v2_name: None,
     })
     .unwrap();
 
@@ -218,6 +222,49 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
     assert!(
         !paths.state_file.exists(),
         "profileless local launch should not persist synthetic profile selection"
+    );
+}
+
+#[test]
+fn prepare_runtime_launch_profile_v2_config_enables_profileless_local_rewrite_proxy() {
+    let root = temp_dir("profile-v2-profileless-local-smart-context-proxy");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    fs::create_dir_all(&paths.shared_codex_root).unwrap();
+    fs::write(
+        paths.shared_codex_root.join("local.config.toml"),
+        "model_provider = 'prodex-local'\n[model_providers.prodex-local]\nbase_url = 'http://127.0.0.1:8131/v1'\n",
+    )
+    .unwrap();
+
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: true,
+        skip_quota_check: true,
+        base_url: None,
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: true,
+        model_context_window_tokens: Some(65_536),
+        force_runtime_proxy: false,
+        model_provider_override: None,
+        profile_v2_name: Some("local"),
+    })
+    .unwrap();
+
+    assert_eq!(prepared.codex_home, paths.shared_codex_root);
+    assert!(!prepared.managed);
+    let runtime_proxy = prepared
+        .runtime_proxy
+        .as_ref()
+        .expect("profile-v2 prodex-local should use local rewrite proxy");
+    assert_eq!(
+        runtime_proxy.local_model_provider_id.as_deref(),
+        Some(SUPER_LOCAL_PROVIDER_ID)
+    );
+    assert_eq!(
+        runtime_proxy.openai_mount_path,
+        RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH
     );
 }
 
@@ -238,6 +285,7 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
         model_context_window_tokens: Some(65_536),
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
+        profile_v2_name: None,
     })
     .unwrap();
 
@@ -296,11 +344,60 @@ fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
+        profile_v2_name: None,
     })
     .unwrap();
 
     assert_eq!(prepared.codex_home, main_home);
     assert!(!prepared.managed);
+    assert!(prepared.runtime_proxy.is_none());
+}
+
+#[test]
+fn prepare_runtime_launch_uses_profile_v2_model_provider_overlay() {
+    let root = temp_dir("profile-v2-provider-overlay");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let main_home = root.join("main-home");
+    fs::create_dir_all(&main_home).unwrap();
+    fs::write(main_home.join("config.toml"), "model_provider = 'openai'\n").unwrap();
+    fs::write(
+        main_home.join("bedrock.config.toml"),
+        "model_provider = 'amazon-bedrock'\n",
+    )
+    .unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home.clone(),
+                    managed: false,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: Some("main"),
+        allow_auto_rotate: true,
+        skip_quota_check: true,
+        base_url: None,
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: false,
+        model_context_window_tokens: None,
+        force_runtime_proxy: false,
+        model_provider_override: None,
+        profile_v2_name: Some("bedrock"),
+    })
+    .unwrap();
+
+    assert_eq!(prepared.codex_home, main_home);
     assert!(prepared.runtime_proxy.is_none());
 }
 
@@ -338,6 +435,7 @@ fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_overrid
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
+        profile_v2_name: None,
     })
     .unwrap();
 
@@ -385,6 +483,7 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
+        profile_v2_name: None,
     })
     .unwrap();
 
@@ -414,6 +513,7 @@ fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_
         model_context_window_tokens: Some(65_536),
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
+        profile_v2_name: None,
     })
     .unwrap();
 
@@ -453,6 +553,7 @@ fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
         model_context_window_tokens: None,
         force_runtime_proxy: true,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
+        profile_v2_name: None,
     }) {
         Ok(_) => panic!("expected forced proxy launch to reject profileless local provider"),
         Err(err) => err,
@@ -495,6 +596,7 @@ fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
             model_context_window_tokens: None,
             force_runtime_proxy: false,
             model_provider_override: None,
+            profile_v2_name: None,
         },
     )
     .expect_err("blocked preflight should return an error instead of exiting");
@@ -536,6 +638,7 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
             model_context_window_tokens: None,
             force_runtime_proxy: false,
             model_provider_override: None,
+            profile_v2_name: None,
         },
     )
     .expect("probe failure should still continue without quota gate");
@@ -559,6 +662,64 @@ fn run_command_strategy_keeps_smart_context_autopilot_disabled() {
 }
 
 #[test]
+fn run_command_strategy_carries_profile_v2_name() {
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        skip_quota_check: false,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args: vec![
+            OsString::from("exec"),
+            OsString::from("--profile-v2"),
+            OsString::from("bedrock"),
+            OsString::from("hello"),
+        ],
+    });
+
+    assert_eq!(strategy.runtime_request().profile_v2_name, Some("bedrock"));
+}
+
+#[test]
+fn run_launch_route_sends_command_server_subcommands_directly() {
+    let mcp_args = test_run_args(vec![
+        OsString::from("mcp-server"),
+        OsString::from("--stdio"),
+    ]);
+    let app_args = test_run_args(vec![
+        OsString::from("app-server"),
+        OsString::from("--stdio"),
+    ]);
+
+    assert_eq!(
+        run_launch_route(&mcp_args),
+        RunLaunchRoute::CodexCommandServerDirectPassthrough
+    );
+    assert_eq!(
+        run_launch_route(&app_args),
+        RunLaunchRoute::CodexCommandServerDirectPassthrough
+    );
+}
+
+#[test]
+fn run_launch_route_keeps_remote_control_managed() {
+    let args = test_run_args(vec![OsString::from("remote-control")]);
+
+    assert_eq!(run_launch_route(&args), RunLaunchRoute::ManagedRuntime);
+}
+
+#[test]
+fn run_launch_route_keeps_explicit_dry_run_managed_for_command_server() {
+    let mut args = test_run_args(vec![OsString::from("mcp-server")]);
+    args.dry_run = true;
+
+    assert_eq!(run_launch_route(&args), RunLaunchRoute::ManagedRuntime);
+}
+
+#[test]
 fn runtime_launch_parses_model_context_window_override() {
     assert_eq!(
         runtime_launch_cli_model_context_window_tokens(&[
@@ -569,10 +730,54 @@ fn runtime_launch_parses_model_context_window_override() {
     );
 }
 
+#[test]
+fn runtime_launch_reads_profile_v2_model_context_window_overlay() {
+    let root = temp_dir("profile-v2-context-window");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("config.toml"), "model_context_window = 8192\n").unwrap();
+    fs::write(
+        root.join("local.config.toml"),
+        "model_context_window = 65536\n",
+    )
+    .unwrap();
+
+    assert!(
+        codex_profile_v2_config_path(&root, "local")
+            .unwrap()
+            .exists()
+    );
+    assert_eq!(
+        runtime_launch_config_model_context_window_tokens(&root),
+        Some(8192)
+    );
+    assert_eq!(
+        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("local")),
+        Some(65_536)
+    );
+    assert_eq!(
+        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("missing")),
+        Some(8192)
+    );
+}
+
 fn write_state(root: &Path, state: AppState) {
     fs::create_dir_all(root).unwrap();
     let paths = AppPaths::discover().unwrap();
     state.save(&paths).unwrap();
+}
+
+fn test_run_args(codex_args: Vec<OsString>) -> RunArgs {
+    RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        skip_quota_check: false,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args,
+    }
 }
 
 fn temp_dir(name: &str) -> PathBuf {

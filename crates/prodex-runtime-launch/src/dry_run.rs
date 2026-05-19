@@ -136,5 +136,5 @@ pub fn runtime_launch_dry_run_report(
 
 fn dry_run_config_value(args: &[OsString], codex_home: &Path, key: &str) -> Option<String> {
     codex_config::codex_cli_config_override_value(args, key)
-        .or_else(|| codex_config::codex_config_value(codex_home, key))
+        .or_else(|| codex_config::codex_config_value_for_args(codex_home, args, key))
 }

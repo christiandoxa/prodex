@@ -9,6 +9,7 @@ pub(crate) struct CavemanLaunchStrategy {
     mem_mode: Option<RuntimeMemTranscriptMode>,
     rtk_enabled: bool,
     model_provider_override: Option<String>,
+    profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
 }
 
@@ -25,6 +26,7 @@ impl CavemanLaunchStrategy {
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
             codex_cli_config_override_value(&codex_args, "model_provider");
+        let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
         let model_context_window_tokens =
             runtime_launch_cli_model_context_window_tokens(&codex_args);
         Self {
@@ -34,6 +36,7 @@ impl CavemanLaunchStrategy {
             mem_mode,
             rtk_enabled,
             model_provider_override,
+            profile_v2_name,
             model_context_window_tokens,
         }
     }
@@ -52,6 +55,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             model_context_window_tokens: self.model_context_window_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
+            profile_v2_name: self.profile_v2_name.as_deref(),
         }
     }
 

@@ -5,7 +5,7 @@ use std::process::{Command, ExitStatus};
 
 use crate::{
     CavemanArgs, ChildProcessPlan, CodexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
-    SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value,
+    SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
     prepare_runtime_launch_dry_run, runtime_caveman_extract_launch_prefixes,
     runtime_launch_cli_model_context_window_tokens,
 };
@@ -84,6 +84,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);
     let model_provider_override = codex_cli_config_override_value(&codex_args, "model_provider");
+    let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
     let model_context_window_tokens = runtime_launch_cli_model_context_window_tokens(&codex_args);
     let request = RuntimeLaunchRequest {
         profile: args.profile.as_deref(),
@@ -96,6 +97,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         model_context_window_tokens,
         force_runtime_proxy: false,
         model_provider_override: model_provider_override.as_deref(),
+        profile_v2_name: profile_v2_name.as_deref(),
     };
     print_runtime_launch_dry_run(
         "caveman",

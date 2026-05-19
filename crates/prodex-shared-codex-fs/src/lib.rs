@@ -49,6 +49,7 @@ const SHARED_CODEX_FILE_NAMES: &[&str] = &[
 
 const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_"];
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
+const SHARED_CODEX_PROFILE_V2_CONFIG_SUFFIX: &str = ".config.toml";
 
 fn same_path(left: &Path, right: &Path) -> bool {
     normalize_path_for_compare(left) == normalize_path_for_compare(right)
