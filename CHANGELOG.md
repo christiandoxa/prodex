@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.100.0 - 2026-05-19
+
+### Docs
+
+- Revise README for clarity and additional details (`04532d9`)
+
+### Misc
+
+- Support codex rust 0.131.0 (`0df38f9`)
+
 ## 0.99.0 - 2026-05-14
 
 ### Runtime
@@ -79,11 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.89.0 - 2026-05-08
 
 - No grouped changes.
-
-## 0.88.0 - 2026-05-08
-
-### Misc
-
-- Satisfy rust 1.95 clippy (`5c04ca3`)
-- Trust caveman hooks for 0.129 (`e434bfd`)
-- Support codex 0.129 transcript events (`91880c6`)
