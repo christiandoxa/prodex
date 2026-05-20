@@ -196,7 +196,7 @@ jobs:
         run: |
           set -euo pipefail
           unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
-          NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ node scripts/npm/publish.mjs --root release
+          NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ node scripts/npm/publish.mjs --root release --provenance
 
   sync-release-docs:
     name: Sync release docs
