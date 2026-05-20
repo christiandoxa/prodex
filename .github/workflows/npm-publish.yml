@@ -148,7 +148,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
       - name: Verify npm trusted publishing toolchain
@@ -193,7 +192,11 @@ jobs:
           if-no-files-found: error
 
       - name: Publish staged packages
-        run: node scripts/npm/publish.mjs --root release
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
+          NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ node scripts/npm/publish.mjs --root release
 
   sync-release-docs:
     name: Sync release docs
