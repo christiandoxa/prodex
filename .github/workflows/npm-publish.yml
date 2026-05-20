@@ -147,12 +147,28 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Pin npm publish CLI
-        run: npm install -g npm@10.9.7 && npm --version
+      - name: Verify npm trusted publishing toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm_version="$(npm --version)"
+          echo "${npm_version}"
+          node - "${npm_version}" <<'NODE'
+          const version = process.argv[2];
+          const [major, minor, patch] = version.split(".").map(Number);
+          if (
+            major < 11 ||
+            (major === 11 && minor < 5) ||
+            (major === 11 && minor === 5 && patch < 1)
+          ) {
+            throw new Error(`npm ${version} is too old for trusted publishing`);
+          }
+          NODE
 
       - name: Stage npm packages
         run: node scripts/npm/stage.mjs --input-dir artifacts --output-dir release
@@ -177,9 +193,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish staged packages
-        run: node scripts/npm/publish.mjs --root release --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/npm/publish.mjs --root release
 
   sync-release-docs:
     name: Sync release docs
