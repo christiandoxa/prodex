@@ -151,6 +151,9 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
+      - name: Pin npm publish CLI
+        run: npm install -g npm@10.9.7 && npm --version
+
       - name: Stage npm packages
         run: node scripts/npm/stage.mjs --input-dir artifacts --output-dir release
 
