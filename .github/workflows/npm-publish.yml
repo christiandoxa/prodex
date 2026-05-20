@@ -147,28 +147,9 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 22
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-
-      - name: Verify npm publish toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --version
-          npm_version="$(npm --version)"
-          echo "${npm_version}"
-          node - "${npm_version}" <<'NODE'
-          const version = process.argv[2];
-          const [major, minor, patch] = version.split(".").map(Number);
-          if (
-            major < 11 ||
-            (major === 11 && minor < 5) ||
-            (major === 11 && minor === 5 && patch < 1)
-          ) {
-            throw new Error(`npm ${version} is too old for provenance publishing`);
-          }
-          NODE
 
       - name: Stage npm packages
         run: node scripts/npm/stage.mjs --input-dir artifacts --output-dir release

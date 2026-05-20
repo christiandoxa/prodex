@@ -3,7 +3,6 @@ use super::*;
 #[test]
 fn translate_runtime_anthropic_messages_request_appends_computer_display_context_to_existing_description()
  {
-    let _env_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -48,10 +47,8 @@ fn translate_runtime_anthropic_messages_request_appends_computer_display_context
         )
     );
 }
-
 #[test]
 fn translate_runtime_anthropic_messages_request_preserves_modern_builtin_tool_capabilities() {
-    let _env_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
@@ -162,7 +159,6 @@ fn translate_runtime_anthropic_messages_request_preserves_modern_builtin_tool_ca
 #[test]
 fn translate_runtime_anthropic_messages_request_preserves_modern_builtin_client_tool_capabilities()
 {
-    let _env_guard = TestEnvVarGuard::unset("PRODEX_CLAUDE_NATIVE_CLIENT_TOOLS");
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/v1/messages?beta=true".to_string(),
