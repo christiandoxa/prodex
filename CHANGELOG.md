@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.101.0 - 2026-05-20
+
+### Misc
+
+- Support codex rust 0.132.0 (`09b62d6`)
+
 ## 0.100.0 - 2026-05-19
 
 ### Docs
@@ -83,9 +89,5 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Add rtk mode and repair session resume (`59d47a9`)
 
 ## 0.90.0 - 2026-05-08
-
-- No grouped changes.
-
-## 0.89.0 - 2026-05-08
 
 - No grouped changes.
