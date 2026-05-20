@@ -148,9 +148,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Verify npm trusted publishing toolchain
+      - name: Verify npm publish toolchain
         shell: bash
         run: |
           set -euo pipefail
@@ -165,7 +166,7 @@ jobs:
             (major === 11 && minor < 5) ||
             (major === 11 && minor === 5 && patch < 1)
           ) {
-            throw new Error(`npm ${version} is too old for trusted publishing`);
+            throw new Error(`npm ${version} is too old for provenance publishing`);
           }
           NODE
 
@@ -192,11 +193,9 @@ jobs:
           if-no-files-found: error
 
       - name: Publish staged packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
-          NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ node scripts/npm/publish.mjs --root release --provenance
+        run: node scripts/npm/publish.mjs --root release --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   sync-release-docs:
     name: Sync release docs
