@@ -283,6 +283,24 @@ fn normalize_run_codex_args_rewrites_session_id_to_resume() {
 }
 
 #[test]
+fn explicit_exec_resume_output_schema_survives_resume_normalization() {
+    let args = vec![
+        OsString::from("exec"),
+        OsString::from("resume"),
+        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        OsString::from("--output-schema"),
+        OsString::from("schema.json"),
+        OsString::from("return json"),
+    ];
+
+    assert_eq!(normalize_run_codex_args(&args), args);
+
+    let (launch_args, include_code_review) = prepare_codex_launch_args(&args, false);
+    assert_eq!(launch_args, args);
+    assert!(!include_code_review);
+}
+
+#[test]
 fn prepare_codex_launch_args_preserves_review_detection_after_normalization() {
     let (args, include_code_review) = prepare_codex_launch_args(
         &[

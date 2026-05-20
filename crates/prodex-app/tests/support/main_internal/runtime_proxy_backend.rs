@@ -70,6 +70,7 @@ pub(super) enum RuntimeProxyBackendMode {
     WebsocketPreviousResponseNeedsTurnState,
     WebsocketStaleReuseNeedsTurnState,
     WebsocketTopLevelResponseId,
+    WebsocketKeepaliveBeforeContent,
     WebsocketRealtimeSideband,
 }
 
@@ -238,6 +239,10 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketTopLevelResponseId)
     }
 
+    pub(super) fn start_websocket_keepalive_before_content() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketKeepaliveBeforeContent)
+    }
+
     pub(super) fn start_websocket_realtime_sideband() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::WebsocketRealtimeSideband)
     }
@@ -309,6 +314,7 @@ impl RuntimeProxyBackend {
                                 | RuntimeProxyBackendMode::WebsocketPreviousResponseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketStaleReuseNeedsTurnState
                                 | RuntimeProxyBackendMode::WebsocketTopLevelResponseId
+                                | RuntimeProxyBackendMode::WebsocketKeepaliveBeforeContent
                                 | RuntimeProxyBackendMode::WebsocketRealtimeSideband
                         );
                         let handler = thread::spawn(move || {

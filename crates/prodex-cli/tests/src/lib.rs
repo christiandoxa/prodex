@@ -211,8 +211,47 @@ fn codex_remote_control_defaults_to_managed_run_passthrough() {
 }
 
 #[test]
+fn codex_exec_resume_output_schema_defaults_to_managed_run_passthrough() {
+    assert!(should_default_cli_invocation_to_run(&os_args(&[
+        "prodex",
+        "exec",
+        "resume",
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "--output-schema",
+        "schema.json",
+        "return json",
+    ])));
+
+    let command = parse_cli_command_from([
+        "prodex",
+        "exec",
+        "resume",
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        "--output-schema",
+        "schema.json",
+        "return json",
+    ])
+    .expect("exec resume should parse as run passthrough");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+
+    assert_eq!(
+        args.codex_args,
+        os_args(&[
+            "exec",
+            "resume",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+            "--output-schema",
+            "schema.json",
+            "return json",
+        ])
+    );
+}
+
+#[test]
 fn codex_command_server_subcommands_default_to_run_passthrough() {
-    for subcommand in ["mcp-server", "app-server"] {
+    for subcommand in ["mcp-server", "app-server", "exec-server"] {
         assert!(should_default_cli_invocation_to_run(&os_args(&[
             "prodex", subcommand, "--help",
         ])));
@@ -228,6 +267,56 @@ fn codex_command_server_subcommands_default_to_run_passthrough() {
 }
 
 #[test]
+fn codex_app_server_protocol_args_are_exact_run_passthrough() {
+    let passthrough = [
+        "app-server",
+        "experimentalFeature/list",
+        "--thread-id",
+        "thread_019c9e3d45a07ad0a6eeb194ac2d44f9",
+        "--image-detail",
+        "high",
+        "--payload",
+        r#"{"method":"experimentalFeature/list","params":{"thread_id":"thread_019c9e3d45a07ad0a6eeb194ac2d44f9","image":{"detail":"high"}}}"#,
+    ];
+
+    assert!(should_default_cli_invocation_to_run(&os_args(&[
+        "prodex",
+        passthrough[0],
+        passthrough[1],
+    ])));
+
+    let mut argv = vec!["prodex"];
+    argv.extend(passthrough);
+    let command = parse_cli_command_from(argv).expect("app-server args should parse as run");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+
+    assert_eq!(args.codex_args, os_args(&passthrough));
+}
+
+#[test]
+fn codex_mcp_server_meta_args_are_exact_run_passthrough() {
+    let passthrough = [
+        "mcp-server",
+        "--stdio",
+        "--method",
+        "tools/call",
+        "--params",
+        r#"{"_meta":{"trace_id":"trace-smoke"},"meta":{"compat":"codex-rust-v0.132.0"},"arguments":{"image":{"detail":"low"}}}"#,
+    ];
+
+    let mut argv = vec!["prodex"];
+    argv.extend(passthrough);
+    let command = parse_cli_command_from(argv).expect("mcp-server args should parse as run");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+
+    assert_eq!(args.codex_args, os_args(&passthrough));
+}
+
+#[test]
 fn codex_command_server_detection_is_first_arg_only() {
     assert!(is_codex_command_server_subcommand(&os_args(&[
         "mcp-server",
@@ -235,6 +324,10 @@ fn codex_command_server_detection_is_first_arg_only() {
     ])));
     assert!(is_codex_command_server_subcommand(&os_args(&[
         "app-server",
+        "--stdio",
+    ])));
+    assert!(is_codex_command_server_subcommand(&os_args(&[
+        "exec-server",
         "--stdio",
     ])));
     assert!(!is_codex_command_server_subcommand(&os_args(&[

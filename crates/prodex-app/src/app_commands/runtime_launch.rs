@@ -106,7 +106,31 @@ fn run_launch_route(args: &RunArgs) -> RunLaunchRoute {
 }
 
 fn handle_codex_command_server_direct_passthrough(args: RunArgs) -> Result<()> {
-    exit_with_status(run_codex_direct_passthrough(args.codex_args)?)
+    let plan = codex_command_server_direct_passthrough_plan(args)?;
+    exit_with_status(run_child_plan(&plan, None)?)
+}
+
+fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildProcessPlan> {
+    let paths = AppPaths::discover()?;
+    let state = AppState::load(&paths)?;
+    let selection =
+        RuntimeLaunchSelection::resolve(&paths, &state, args.profile.as_deref(), None, None)?;
+
+    if !selection.profileless_local_home
+        && state
+            .profiles
+            .get(&selection.selected_profile_name)
+            .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
+            .managed
+    {
+        prepare_managed_codex_home(&paths, &selection.codex_home)?;
+    }
+
+    let mut child = codex_child_plan(selection.codex_home, args.codex_args);
+    if args.no_proxy {
+        remove_upstream_proxy_env(&mut child);
+    }
+    Ok(child)
 }
 
 #[derive(Debug, Clone)]

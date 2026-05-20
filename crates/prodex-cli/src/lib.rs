@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 
-const CODEX_COMMAND_SERVER_SUBCOMMANDS: [&str; 2] = ["mcp-server", "app-server"];
+const CODEX_COMMAND_SERVER_SUBCOMMANDS: [&str; 3] = ["mcp-server", "app-server", "exec-server"];
 
 mod cleanup;
 mod help;

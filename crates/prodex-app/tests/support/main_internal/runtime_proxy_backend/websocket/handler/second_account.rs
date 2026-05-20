@@ -181,6 +181,9 @@ fn handle_owned_second_account_continuation(
             "response.completed should be sent",
         );
     } else {
+        if matches!(mode, RuntimeProxyBackendMode::WebsocketKeepaliveBeforeContent) {
+            events::send_keepalive_before_content(websocket);
+        }
         events::send_response_created(websocket, &next_response_id);
         events::send_response_completed(websocket, &next_response_id);
     }
@@ -235,6 +238,9 @@ fn handle_fresh_second_account(
             "response.output_item.added should be sent",
         );
         return BackendWebsocketAction::Continue;
+    }
+    if matches!(mode, RuntimeProxyBackendMode::WebsocketKeepaliveBeforeContent) {
+        events::send_keepalive_before_content(websocket);
     }
     events::send_response_created(websocket, response_id);
     if matches!(mode, RuntimeProxyBackendMode::WebsocketCloseMidTurn) {

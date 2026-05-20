@@ -10,6 +10,15 @@ pub(super) fn send_backend_websocket_json(
         .expect(expect_message);
 }
 
+pub(super) fn send_keepalive_before_content(websocket: &mut tungstenite::WebSocket<TcpStream>) {
+    websocket
+        .send(WsMessage::Ping("upstream-ping-before-content".into()))
+        .expect("upstream websocket ping should be sent");
+    websocket
+        .send(WsMessage::Pong("upstream-pong-before-content".into()))
+        .expect("upstream websocket pong should be sent");
+}
+
 pub(super) fn send_response_created(
     websocket: &mut tungstenite::WebSocket<TcpStream>,
     response_id: &str,
