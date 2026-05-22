@@ -2,11 +2,22 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.104.0 - 2026-05-22
+
+### CLI
+
+- Expand optimizer shortcuts (`d618e23`)
+
 ## 0.103.0 - 2026-05-22
 
 ### CLI
 
 - Discover managed optimizer checkouts (`03ba60d`)
+
+## 0.102.0 - 2026-05-22
+
+### CLI
+
 - Add optimizer overlay (`9ab0612`)
 
 ### Misc
@@ -86,15 +97,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Add safe housekeeping controls (`95ec69b`)
 - Share Codex environments config (`9517257`)
-
-## 0.92.0 - 2026-05-08
-
-### Misc
-
-- Harden caveman rtk launch overlays (`a02baf3`)
-
-## 0.91.0 - 2026-05-08
-
-### Misc
-
-- Add rtk mode and repair session resume (`59d47a9`)
