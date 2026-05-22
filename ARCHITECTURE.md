@@ -114,6 +114,7 @@ These are the parts most open to future simplification if complexity must be red
 - route-specific tuning constants
 - extra health and decay heuristics
 - some selection tie-breakers
+- Super optimizer discovery from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, and `~/.local/share/prodex-optimizers`
 - some UI formatting helpers
 
 These layers should be driven by evidence from tests and logs, not by intuition alone.

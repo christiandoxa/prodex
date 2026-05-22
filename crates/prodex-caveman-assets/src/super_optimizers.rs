@@ -7,6 +7,9 @@ use crate::localization::localize_text_file;
 use crate::toml_helpers::ensure_child_table;
 use crate::{AGENTS_MD, PRODEX_SUPER_OPTIMIZER_AWARENESS, SUPER_OPTIMIZERS_MD};
 
+pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
+const PRODEX_OPTIMIZERS_DIR_NAME: &str = "prodex-optimizers";
+
 pub fn configure_super_optimizer_codex_home(codex_home: &Path) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let optimizers_path = codex_home.join(SUPER_OPTIMIZERS_MD);
@@ -42,6 +45,16 @@ fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) -> Result<(
 }
 
 fn configure_super_optimizer_mcp_servers(codex_home: &Path) -> Result<()> {
+    let path_dirs = path_dirs_from_env();
+    let optimizer_roots = managed_optimizer_roots();
+    configure_super_optimizer_mcp_servers_with_sources(codex_home, &path_dirs, &optimizer_roots)
+}
+
+fn configure_super_optimizer_mcp_servers_with_sources(
+    codex_home: &Path,
+    path_dirs: &[PathBuf],
+    optimizer_roots: &[PathBuf],
+) -> Result<()> {
     let config_path = codex_home.join("config.toml");
     let contents = fs::read_to_string(&config_path).unwrap_or_default();
     let mut table = if contents.trim().is_empty() {
@@ -54,7 +67,7 @@ fn configure_super_optimizer_mcp_servers(codex_home: &Path) -> Result<()> {
             _ => anyhow::bail!("{} did not parse as a TOML table", config_path.display()),
         }
     };
-    if let Some(command) = find_path_command("sqz-mcp") {
+    if let Some(command) = find_optimizer_command("sqz-mcp", path_dirs, optimizer_roots) {
         configure_stdio_mcp_server(
             &mut table,
             "prodex-sqz",
@@ -64,7 +77,7 @@ fn configure_super_optimizer_mcp_servers(codex_home: &Path) -> Result<()> {
         );
     }
 
-    if let Some(command) = find_path_command("token-savior") {
+    if let Some(command) = find_optimizer_command("token-savior", path_dirs, optimizer_roots) {
         let workspace_roots = env::current_dir()
             .ok()
             .map(|path| path.display().to_string())
@@ -149,9 +162,17 @@ fn super_optimizer_mcp_servers_table(table: &mut toml::Table) -> Option<&mut tom
     }
 }
 
-fn find_path_command(command: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
-    for dir in env::split_paths(&path) {
+fn find_optimizer_command(
+    command: &str,
+    path_dirs: &[PathBuf],
+    optimizer_roots: &[PathBuf],
+) -> Option<PathBuf> {
+    find_path_command(command, path_dirs)
+        .or_else(|| find_managed_optimizer_command(command, optimizer_roots))
+}
+
+fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+    for dir in path_dirs {
         let candidate = dir.join(command);
         if executable_file(&candidate) {
             return Some(candidate);
@@ -167,6 +188,110 @@ fn find_path_command(command: &str) -> Option<PathBuf> {
     None
 }
 
+fn find_managed_optimizer_command(command: &str, optimizer_roots: &[PathBuf]) -> Option<PathBuf> {
+    for root in optimizer_roots {
+        for candidate in managed_optimizer_command_candidates(root, command) {
+            if executable_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn path_dirs_from_env() -> Vec<PathBuf> {
+    env::var_os("PATH")
+        .map(|path| env::split_paths(&path).collect())
+        .unwrap_or_default()
+}
+
+fn managed_optimizer_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(path) = env::var_os(PRODEX_OPTIMIZERS_HOME_ENV) {
+        push_unique_path(&mut roots, PathBuf::from(path));
+    }
+    if let Some(path) = env::var_os("XDG_DATA_HOME") {
+        push_unique_path(
+            &mut roots,
+            PathBuf::from(path).join(PRODEX_OPTIMIZERS_DIR_NAME),
+        );
+    }
+    if let Some(home) = home_dir_from_env() {
+        push_unique_path(
+            &mut roots,
+            home.join(".local")
+                .join("share")
+                .join(PRODEX_OPTIMIZERS_DIR_NAME),
+        );
+    }
+    roots
+}
+
+fn home_dir_from_env() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
+fn managed_optimizer_command_candidates(root: &Path, command: &str) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    push_command_candidate(&mut candidates, root.join(command));
+    match command {
+        "sqz-mcp" => {
+            push_sqz_workspace_candidates(&mut candidates, root, command);
+        }
+        "token-savior" => {
+            push_python_tool_candidates(&mut candidates, root, "token-savior", command);
+        }
+        _ => {}
+    }
+    candidates
+}
+
+fn push_sqz_workspace_candidates(candidates: &mut Vec<PathBuf>, root: &Path, command: &str) {
+    let checkout = root.join("sqz");
+    push_command_candidate(candidates, checkout.join(command));
+    push_command_candidate(
+        candidates,
+        checkout.join("target").join("release").join(command),
+    );
+    push_command_candidate(
+        candidates,
+        checkout.join("target").join("debug").join(command),
+    );
+}
+
+fn push_python_tool_candidates(
+    candidates: &mut Vec<PathBuf>,
+    root: &Path,
+    checkout_name: &str,
+    command: &str,
+) {
+    let checkout = root.join(checkout_name);
+    push_command_candidate(candidates, checkout.join(command));
+    push_command_candidate(candidates, checkout.join("bin").join(command));
+    push_command_candidate(candidates, checkout.join(".venv").join("bin").join(command));
+    push_command_candidate(candidates, checkout.join("venv").join("bin").join(command));
+}
+
+fn push_command_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
+    candidates.push(path.clone());
+    #[cfg(windows)]
+    if path.extension().is_none() {
+        if let Some(file_name) = path.file_name() {
+            let mut exe_name = file_name.to_os_string();
+            exe_name.push(".exe");
+            candidates.push(path.with_file_name(exe_name));
+        }
+    }
+}
+
 fn executable_file(path: &Path) -> bool {
     path.is_file()
 }
@@ -174,6 +299,26 @@ fn executable_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        env::temp_dir().join(format!(
+            "prodex-super-optimizers-{name}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
+
+    fn command_path(path: PathBuf) -> PathBuf {
+        #[cfg(windows)]
+        if path.extension().is_none() {
+            return path.with_extension("exe");
+        }
+        path
+    }
 
     #[test]
     fn stdio_mcp_server_config_adds_missing_entry() {
@@ -268,5 +413,66 @@ mod tests {
             table.get("mcp_servers").and_then(toml::Value::as_str),
             Some("invalid")
         );
+    }
+
+    #[test]
+    fn managed_optimizer_discovery_finds_sqz_workspace_release_binary() {
+        let root = temp_dir("sqz-root");
+        let command = command_path(
+            root.join("sqz")
+                .join("target")
+                .join("release")
+                .join("sqz-mcp"),
+        );
+        fs::create_dir_all(command.parent().expect("command parent should exist"))
+            .expect("command parent should be created");
+        fs::write(&command, "").expect("fake command should be written");
+
+        assert_eq!(
+            find_managed_optimizer_command("sqz-mcp", std::slice::from_ref(&root)),
+            Some(command)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn mcp_config_registers_managed_sqz_when_path_is_empty() {
+        let codex_home = temp_dir("codex-home");
+        let optimizer_root = temp_dir("optimizer-root");
+        let command = command_path(
+            optimizer_root
+                .join("sqz")
+                .join("target")
+                .join("release")
+                .join("sqz-mcp"),
+        );
+        fs::create_dir_all(&codex_home).expect("codex home should exist");
+        fs::create_dir_all(command.parent().expect("command parent should exist"))
+            .expect("command parent should be created");
+        fs::write(&command, "").expect("fake command should be written");
+
+        configure_super_optimizer_mcp_servers_with_sources(
+            &codex_home,
+            &[],
+            std::slice::from_ref(&optimizer_root),
+        )
+        .expect("super optimizer MCP config should write");
+
+        let config =
+            fs::read_to_string(codex_home.join("config.toml")).expect("config.toml should exist");
+        let table = toml::from_str::<toml::Value>(&config).expect("config should parse");
+        let command_value = table
+            .get("mcp_servers")
+            .and_then(toml::Value::as_table)
+            .and_then(|servers| servers.get("prodex-sqz"))
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("command"))
+            .and_then(toml::Value::as_str);
+        let expected_command = command.display().to_string();
+        assert_eq!(command_value, Some(expected_command.as_str()));
+
+        let _ = fs::remove_dir_all(codex_home);
+        let _ = fs::remove_dir_all(optimizer_root);
     }
 }

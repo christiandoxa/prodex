@@ -258,7 +258,9 @@ prodex caveman mem rtk --full-access
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman, Claude-Mem, and RTK pieces, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH`, then uses Smart Context Autopilot plus low-token workflow accommodations for targets such as `claw-compactor` and `llm-min.txt`.
+Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman, Claude-Mem, and RTK pieces, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, then uses Smart Context Autopilot plus low-token workflow accommodations for targets such as `claw-compactor` and `llm-min.txt`.
+
+Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 
 `memsearch` and `prompt-cache` are not auto-enabled by `prodex super`. They need embeddings, a model/API-backed index, or a semantic cache, so they remain opt-in external workflows.
 
@@ -441,7 +443,9 @@ Super also enables Smart Context Autopilot in the runtime proxy.
 
 It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
 
-The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH`, and accommodates `claw-compactor` and `llm-min.txt`-style workflows with local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
+The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, and accommodates `claw-compactor` and `llm-min.txt`-style workflows with local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
+
+Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 
 Super does not automatically enable `memsearch` or `prompt-cache`. Those require embeddings, model/API access, or a semantic cache, so use them only when you intentionally opt in to those external capabilities.
 
