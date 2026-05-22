@@ -69,6 +69,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.rtk_enabled {
             prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;
         }
+        if self.args.super_optimizer_overlay {
+            prodex_caveman_assets::configure_super_optimizer_codex_home(&caveman_home)?;
+        }
         if let Some(mem_mode) = self.mem_mode {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home_with_mode(&caveman_home, mem_mode)?;
@@ -147,6 +150,7 @@ mod tests {
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
         assert!(strategy.rtk_enabled);
+        assert!(strategy.args.super_optimizer_overlay);
         assert_eq!(
             strategy.codex_args,
             vec![
@@ -164,6 +168,7 @@ mod tests {
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
         assert!(strategy.rtk_enabled);
+        assert!(strategy.args.super_optimizer_overlay);
     }
 
     #[test]
@@ -192,11 +197,13 @@ mod tests {
             base_url: None,
             no_proxy: false,
             smart_context: false,
+            super_optimizer_overlay: false,
             codex_args: vec![OsString::from("mem"), OsString::from("exec")],
         });
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::Slim));
         assert!(!strategy.rtk_enabled);
+        assert!(!strategy.args.super_optimizer_overlay);
     }
 
     #[test]

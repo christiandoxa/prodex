@@ -243,6 +243,7 @@ It combines:
 - RTK shell-command guidance
 - full-access launch mode
 - Smart Context Autopilot in the runtime proxy
+- deterministic/local accommodation for `sqz`, `token-savior`, `claw-compactor`, and `llm-min.txt`-style low-token workflows
 
 ```bash
 prodex s
@@ -256,6 +257,10 @@ prodex caveman mem rtk --full-access
 ```
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
+
+Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman, Claude-Mem, and RTK pieces, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH`, then uses Smart Context Autopilot plus low-token workflow accommodations for targets such as `claw-compactor` and `llm-min.txt`.
+
+`memsearch` and `prompt-cache` are not auto-enabled by `prodex super`. They need embeddings, a model/API-backed index, or a semantic cache, so they remain opt-in external workflows.
 
 ## Commands
 
@@ -364,7 +369,7 @@ unless Prodex explicitly owns that command.
 |---|---|---|
 | Normal Codex | `prodex` or `prodex run` | Managed Codex launch with profile selection and quota routing. |
 | Caveman | `prodex caveman` | Runs Codex with a temporary overlay `CODEX_HOME`. |
-| Super | `prodex s` or `prodex super` | Daily mode with Caveman, memory, RTK guidance, and full access. |
+| Super | `prodex s` or `prodex super` | Daily mode with Caveman, Claude-Mem, RTK guidance, full access, and deterministic/local token optimizations. |
 | Claude Code | `prodex claude` | Runs Claude Code through Prodex-managed state. |
 
 <details>
@@ -416,7 +421,7 @@ prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex s` is the short alias for `prodex super`.
 
-This is my daily mode. It is the path I keep tuning for normal work: memory enabled, RTK guidance enabled, full access available, and context handling handled by the runtime proxy.
+This is my daily mode. It is the path I keep tuning for normal work: Caveman enabled, Claude-Mem transcript watching enabled, RTK guidance enabled, full access available, and context handling handled by the runtime proxy.
 
 Super mode uses Prodex's slim Claude-Mem Codex schema by default to avoid storing full assistant/tool output in recall context.
 
@@ -434,7 +439,11 @@ prodex super --mem-full
 
 Super also enables Smart Context Autopilot in the runtime proxy.
 
-It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cacheable context, and critical-signal self-checks to reduce token load without dropping failure details.
+It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
+
+The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH`, and accommodates `claw-compactor` and `llm-min.txt`-style workflows with local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
+
+Super does not automatically enable `memsearch` or `prompt-cache`. Those require embeddings, model/API access, or a semantic cache, so use them only when you intentionally opt in to those external capabilities.
 
 </details>
 

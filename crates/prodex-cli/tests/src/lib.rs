@@ -23,6 +23,7 @@ fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
     assert_eq!(left.base_url, right.base_url);
     assert_eq!(left.no_proxy, right.no_proxy);
     assert_eq!(left.smart_context, right.smart_context);
+    assert_eq!(left.super_optimizer_overlay, right.super_optimizer_overlay);
     assert_eq!(left.codex_args, right.codex_args);
 }
 
@@ -159,6 +160,12 @@ fn super_and_s_enable_smart_context_autopilot() {
 }
 
 #[test]
+fn super_and_s_enable_super_optimizer_overlay() {
+    assert!(parse_super_as_caveman(&["prodex", "super"]).super_optimizer_overlay);
+    assert!(parse_super_as_caveman(&["prodex", "s"]).super_optimizer_overlay);
+}
+
+#[test]
 fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
     let args = parse_super_as_caveman(&["prodex", "super", "--url", "http://127.0.0.1:8131"]);
 
@@ -174,6 +181,7 @@ fn caveman_command_keeps_smart_context_autopilot_disabled() {
     };
 
     assert!(!args.smart_context);
+    assert!(!args.super_optimizer_overlay);
 }
 
 #[test]

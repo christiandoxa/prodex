@@ -32,6 +32,36 @@ fn configure_rtk_codex_home_writes_awareness_and_agents_reference() {
     let _ = fs::remove_dir_all(dir);
 }
 
+#[test]
+fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() {
+    let dir = temp_dir("super-optimizers");
+    configure_super_optimizer_codex_home(&dir)
+        .expect("super optimizer codex home should configure");
+
+    let awareness = fs::read_to_string(dir.join("SUPER_OPTIMIZERS.md"))
+        .expect("SUPER_OPTIMIZERS.md should exist");
+    assert!(awareness.contains("sqz"));
+    assert!(awareness.contains("token-savior"));
+    assert!(awareness.contains("claw-compactor"));
+    assert!(awareness.contains("llm-min.txt"));
+    assert!(awareness.contains("memsearch"));
+    assert!(awareness.contains("prompt-cache"));
+    assert!(awareness.contains("Do not auto-enable"));
+
+    let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
+    assert_eq!(
+        agents,
+        format!("@{}\n", dir.join("SUPER_OPTIMIZERS.md").display())
+    );
+
+    configure_super_optimizer_codex_home(&dir)
+        .expect("super optimizer codex home should be idempotent");
+    let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
+    assert_eq!(agents.matches("SUPER_OPTIMIZERS.md").count(), 1);
+
+    let _ = fs::remove_dir_all(dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn configure_rtk_codex_home_localizes_agents_symlink() {
@@ -58,6 +88,41 @@ fn configure_rtk_codex_home_localizes_agents_symlink() {
     let overlay_agents = fs::read_to_string(overlay.join("AGENTS.md")).expect("overlay AGENTS.md");
     assert!(overlay_agents.contains("# Shared"));
     assert!(overlay_agents.contains(&format!("@{}", overlay.join("RTK.md").display())));
+
+    let _ = fs::remove_dir_all(source);
+    let _ = fs::remove_dir_all(overlay);
+}
+
+#[cfg(unix)]
+#[test]
+fn configure_super_optimizer_codex_home_localizes_agents_symlink() {
+    let source = temp_dir("super-optimizers-source");
+    let overlay = temp_dir("super-optimizers-overlay");
+    fs::create_dir_all(&source).expect("source dir");
+    fs::create_dir_all(&overlay).expect("overlay dir");
+    fs::write(source.join("AGENTS.md"), "# Shared\n").expect("source AGENTS.md");
+    std::os::unix::fs::symlink(source.join("AGENTS.md"), overlay.join("AGENTS.md"))
+        .expect("agents symlink");
+
+    configure_super_optimizer_codex_home(&overlay)
+        .expect("super optimizer codex home should configure");
+
+    assert!(
+        !fs::symlink_metadata(overlay.join("AGENTS.md"))
+            .expect("overlay AGENTS metadata")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        fs::read_to_string(source.join("AGENTS.md")).expect("source AGENTS.md"),
+        "# Shared\n"
+    );
+    let overlay_agents = fs::read_to_string(overlay.join("AGENTS.md")).expect("overlay AGENTS.md");
+    assert!(overlay_agents.contains("# Shared"));
+    assert!(overlay_agents.contains(&format!(
+        "@{}",
+        overlay.join("SUPER_OPTIMIZERS.md").display()
+    )));
 
     let _ = fs::remove_dir_all(source);
     let _ = fs::remove_dir_all(overlay);

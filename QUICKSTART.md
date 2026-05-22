@@ -16,6 +16,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Claude Code (`claude`) if you want to use `prodex claude`
 - Optional: `claude-mem` if you want `prodex caveman mem`, `prodex claude mem`, or `prodex claude caveman mem`
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex caveman mem rtk` or default `prodex super` RTK shell-command guidance
+- Optional external workflows such as `memsearch` or `prompt-cache` stay opt-in; Super does not auto-enable them because they require embeddings, model/API access, or a semantic cache
 
 If you install `@christiandoxa/prodex` from npm, the runtime dependency `@openai/codex@latest` is installed for you at install or update time. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
@@ -49,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.101.0`:
+The current local version in this repo is `0.102.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.101.0
+npm install -g @christiandoxa/prodex@0.102.0
 ```
 
 Dependency status in this repo:
@@ -179,7 +180,9 @@ If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex sk
 Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
 Add `rtk` after `mem` to inject RTK shell-command guidance into the temporary Codex overlay. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
 Mem mode uses a slim Codex transcript schema by default so recall stays lower-token; use `prodex super --mem-super-slim` to store prompt summaries/references instead of full prompt bodies, or `prodex super --mem-full` when you need full assistant/tool transcript capture.
-`prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cacheable context, and critical-signal self-checks.
+`prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cache-friendly context framing, and critical-signal self-checks.
+Super's optimization stack is local and deterministic by default: Caveman, Claude-Mem, RTK, auto-registered `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH`, and low-token workflow accommodations for `claw-compactor` and `llm-min.txt`.
+`memsearch` and `prompt-cache` are not auto-enabled by Super because they need embeddings, a model/API-backed index, or a semantic cache. Use them only as explicit opt-in external workflows.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 

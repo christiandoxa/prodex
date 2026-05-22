@@ -86,6 +86,9 @@ pub struct CavemanArgs {
     /// Enable Prodex Smart Context Autopilot in the runtime proxy.
     #[arg(skip)]
     pub smart_context: bool,
+    /// Enable the Prodex Super optimizer launch overlay.
+    #[arg(skip)]
+    pub super_optimizer_overlay: bool,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
@@ -192,6 +195,7 @@ impl SuperArgs {
             base_url: self.base_url.or(local_upstream_base_url),
             no_proxy: self.no_proxy,
             smart_context: true,
+            super_optimizer_overlay: true,
             codex_args,
         }
     }
