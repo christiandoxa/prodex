@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.102.0 - 2026-05-22
+
+### CLI
+
+- Add optimizer overlay (`9ab0612`)
+
+### Misc
+
+- Drop publish troubleshooting changes (`69c6d71`)
+
 ## 0.101.0 - 2026-05-20
 
 ### Misc
@@ -87,7 +97,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add rtk mode and repair session resume (`59d47a9`)
-
-## 0.90.0 - 2026-05-08
-
-- No grouped changes.
