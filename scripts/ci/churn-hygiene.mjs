@@ -314,10 +314,15 @@ async function validateIgnoreBefore(rangeBase, ignoreBefore, head) {
 
 function summarize(rows) {
   const files = rows.length;
-  const behaviorRows = rows.filter((row) => fileMatchesAnyPattern(row.filePath, BEHAVIOR_PATTERNS));
-  const releaseMetadataOnly =
-    rows.length > 0 &&
-    rows.every((row) => fileMatchesAnyPattern(row.filePath, RELEASE_METADATA_CHURN_PATTERNS));
+  const releaseMetadataRows = rows.filter((row) =>
+    fileMatchesAnyPattern(row.filePath, RELEASE_METADATA_CHURN_PATTERNS),
+  );
+  const releaseMetadataOnly = rows.length > 0 && releaseMetadataRows.length === rows.length;
+  const behaviorRows = rows.filter(
+    (row) =>
+      fileMatchesAnyPattern(row.filePath, BEHAVIOR_PATTERNS) &&
+      !fileMatchesAnyPattern(row.filePath, RELEASE_METADATA_CHURN_PATTERNS),
+  );
   const insertions = rows.reduce((sum, row) => sum + row.insertions, 0);
   const deletions = rows.reduce((sum, row) => sum + row.deletions, 0);
   const changedLines = insertions + deletions;

@@ -129,6 +129,23 @@ assert.equal(
   );
 }
 
+{
+  const rows = [
+    row("Cargo.toml", 40, 40),
+    row("Cargo.lock", 40, 40),
+    row("npm/prodex/package.json", 8, 8),
+    row("crates/prodex-app/src/lib.rs", 1, 0),
+  ];
+  const summary = summarize(rows);
+  assert.equal(summary.releaseMetadataOnly, false, "mixed release metadata is not metadata-only");
+  assert.equal(summary.behaviorFiles, 1, "release metadata does not inflate behavior churn");
+  assert.deepEqual(
+    thresholdIssues(summary, { ...thresholds, maxBehaviorFiles: 1 }),
+    [],
+    "mixed release metadata is ignored for behavior-file thresholds",
+  );
+}
+
 assertStructuralExtraction("root src module split", [
   row("src/foo.rs", 2, thresholds.maxFileLines + 20),
   row("src/foo/parser.rs", thresholds.maxFileLines + 20, 1),
