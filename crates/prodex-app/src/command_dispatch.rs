@@ -224,6 +224,21 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Quota(command) => RoutedCommand::new(command),
         Commands::Run(command) => RoutedCommand::new(command),
         Commands::Caveman(command) => RoutedCommand::new(command),
+        Commands::Rtk(command) => {
+            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "rtk"))
+        }
+        Commands::Sqz(command) => {
+            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "sqz"))
+        }
+        Commands::TokenSavior(command) => {
+            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "tokensavior"))
+        }
+        Commands::ClawCompactor(command) => {
+            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "clawcompactor"))
+        }
+        Commands::LlmMin(command) => {
+            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "llmmin"))
+        }
         Commands::Super(command) => RoutedCommand::new(command),
         Commands::Claude(command) => RoutedCommand::new(command),
         Commands::RuntimeBroker(command) => RoutedCommand::new(command),

@@ -62,13 +62,18 @@ If you install from source, make sure the `codex` binary in your `PATH` is alrea
 
 ## Optional tools
 
-`prodex` can run without Claude-Mem or RTK.
+`prodex` can run without Claude-Mem, RTK, SQZ, token-savior, claw-compactor, or llm-min docs.
 
 Install them only if you want to use commands such as:
 
 ```bash
 prodex caveman mem
 prodex caveman mem rtk
+prodex rtk
+prodex sqz
+prodex tokensavior
+prodex clawcompactor
+prodex llmmin
 prodex s
 prodex super
 prodex claude mem
@@ -253,16 +258,19 @@ prodex s exec "review this repo"
 `prodex super` expands to:
 
 ```bash
-prodex caveman mem rtk --full-access
+prodex caveman mem rtk sqz tokensavior clawcompactor llmmin --full-access
 ```
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
 Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman, Claude-Mem, and RTK pieces, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, then uses Smart Context Autopilot plus low-token workflow accommodations for targets such as `claw-compactor` and `llm-min.txt`.
 
-Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
+RTK and SQZ split the token work across different sides of the flow:
 
-`memsearch` and `prompt-cache` are not auto-enabled by `prodex super`. They need embeddings, a model/API-backed index, or a semantic cache, so they remain opt-in external workflows.
+- RTK works upstream/input-side. Use `rtk <cmd>` for noisy terminal commands before their output enters the model context, such as `git diff`, `cargo test`, `npm test`, build logs, and package-manager output.
+- SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server. Use it for repeated workspace reads, large text blobs, and long-session context reuse instead of emitting the same full content again.
+
+Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 
 ## Commands
 
@@ -393,6 +401,11 @@ prodex exec "review this repo"
 prodex caveman
 prodex caveman mem
 prodex caveman mem rtk
+prodex rtk
+prodex sqz
+prodex tokensavior
+prodex clawcompactor
+prodex llmmin
 prodex caveman --dry-run
 prodex caveman --profile main
 prodex caveman exec "review this repo in caveman mode"
@@ -403,7 +416,7 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup to the active Prodex session path instead of the default `~/.codex/sessions`.
 
-Add `rtk` after `mem` when you want Prodex to inject RTK shell-command guidance into the temporary Codex overlay for that launch.
+Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `llmmin`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
@@ -445,9 +458,9 @@ It keeps exact pass-through for continuation-sensitive requests. When safe, it u
 
 The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, and accommodates `claw-compactor` and `llm-min.txt`-style workflows with local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
 
-Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
+RTK handles upstream/input command output before it enters the context window. SQZ handles downstream/context reuse after content is already in the session, using `prodex-sqz` when the MCP server is available.
 
-Super does not automatically enable `memsearch` or `prompt-cache`. Those require embeddings, model/API access, or a semantic cache, so use them only when you intentionally opt in to those external capabilities.
+Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 
 </details>
 

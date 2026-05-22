@@ -8,6 +8,7 @@ const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-basel
 const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/client.rs",
   "codex-rs/core/src/compact_remote.rs",
+  "codex-rs/core/src/realtime_conversation.rs",
   "codex-rs/codex-api/src/sse/responses.rs",
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
 ];
@@ -49,6 +50,13 @@ const REQUIRED_FILE_CONTAINS = {
     "compact_conversation_history",
     "CompactionImplementation::ResponsesCompact",
     "ContextCompactionItem",
+  ],
+  "codex-rs/core/src/realtime_conversation.rs": [
+    "ConversationStartTransport::Websocket",
+    "realtime_request_headers",
+    "RealtimeWsVersion::V1",
+    "openai-alpha",
+    "quicksilver=v1",
   ],
   "codex-rs/codex-api/src/sse/responses.rs": [
     "spawn_response_stream",
@@ -226,6 +234,18 @@ const REQUIRED_SEMANTIC_CHECKS = [
     file: "codex-rs/core/src/client.rs",
     file_contains_all: ["stream_responses_websocket", "OPENAI_BETA_HEADER", "responses_websockets=2026-02-06"],
     expected_headers_all: ["OpenAI-Beta"],
+  },
+  {
+    id: "realtime.websocket-v1-alpha-header",
+    kind: "header_behavior",
+    file: "codex-rs/core/src/realtime_conversation.rs",
+    file_contains_all: [
+      "ConversationStartTransport::Websocket",
+      "realtime_request_headers",
+      "RealtimeWsVersion::V1",
+      "openai-alpha",
+      "quicksilver=v1",
+    ],
   },
   {
     id: "compact.remote-responses-compact",
@@ -809,6 +829,16 @@ function runSelfTest() {
       check.file_contains_all = check.file_contains_all.filter((token) => token !== "process_sse");
     },
     expectedMessage: 'codex.compatibility.semantic_checks.sse.responses-http-route-behavior.file_contains_all missing "process_sse"',
+  });
+
+  assertSelfTestError({
+    name: "missing realtime v1 websocket alpha header token",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "realtime.websocket-v1-alpha-header");
+      check.file_contains_all = check.file_contains_all.filter((token) => token !== "quicksilver=v1");
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.realtime.websocket-v1-alpha-header.file_contains_all missing "quicksilver=v1"',
   });
 
   assertSelfTestError({

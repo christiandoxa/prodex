@@ -108,6 +108,39 @@ fn prepare_managed_codex_home_links_existing_shared_profile_v2_config() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_managed_codex_home_migrates_goals_sqlite_files_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("goals-sqlite-files");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let goals_files = [
+        ("goals_1.sqlite", "main db"),
+        ("goals_1.sqlite-shm", "shared memory"),
+        ("goals_1.sqlite-wal", "write ahead log"),
+    ];
+
+    fs::create_dir_all(&codex_home).expect("codex home should be created");
+    for (file_name, contents) in goals_files {
+        fs::write(codex_home.join(file_name), contents).expect("goals sqlite file should write");
+    }
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    for (file_name, contents) in goals_files {
+        let local_path = codex_home.join(file_name);
+        let shared_path = paths.shared_codex_root.join(file_name);
+        assert_eq!(
+            fs::read_to_string(&shared_path).expect("shared goals sqlite file should be readable"),
+            contents
+        );
+        assert_eq!(
+            fs::read_link(&local_path).expect("local goals sqlite file should be a symlink"),
+            shared_path
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn prepare_managed_codex_home_migrates_environments_toml_to_shared_root() {
     let temp_dir = PrepareTestDir::new("environments-file");
     let paths = temp_dir.app_paths();

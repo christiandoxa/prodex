@@ -78,7 +78,12 @@ async fn send_runtime_proxy_upstream_request_with_events(
         )
     })?;
 
-    let mut upstream_request = shared.async_client.request(method, &upstream_url);
+    let upstream_client = if events.route_kind == RuntimeRouteKind::Compact {
+        build_runtime_upstream_async_http_compact_client(shared.upstream_no_proxy)?
+    } else {
+        shared.async_client.clone()
+    };
+    let mut upstream_request = upstream_client.request(method, &upstream_url);
     for (name, value) in &request.headers {
         if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
             continue;

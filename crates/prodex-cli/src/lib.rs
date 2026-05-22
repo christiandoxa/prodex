@@ -108,8 +108,44 @@ pub enum Commands {
     Caveman(CavemanArgs),
     #[command(
         trailing_var_arg = true,
+        about = "Shortcut for `prodex caveman rtk`.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    Rtk(CavemanArgs),
+    #[command(
+        trailing_var_arg = true,
+        about = "Shortcut for `prodex caveman sqz`.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    Sqz(CavemanArgs),
+    #[command(
+        name = "tokensavior",
+        visible_alias = "token-savior",
+        trailing_var_arg = true,
+        about = "Shortcut for `prodex caveman tokensavior`.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    TokenSavior(CavemanArgs),
+    #[command(
+        name = "clawcompactor",
+        visible_alias = "claw-compactor",
+        trailing_var_arg = true,
+        about = "Shortcut for `prodex caveman clawcompactor`.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    ClawCompactor(CavemanArgs),
+    #[command(
+        name = "llmmin",
+        visible_alias = "llm-min",
+        trailing_var_arg = true,
+        about = "Shortcut for `prodex caveman llmmin`.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    LlmMin(CavemanArgs),
+    #[command(
+        trailing_var_arg = true,
         visible_alias = "s",
-        about = "Alias for `prodex caveman mem rtk --full-access`.",
+        about = "Alias for `prodex caveman mem rtk sqz tokensavior clawcompactor llmmin --full-access`.",
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),
@@ -165,6 +201,14 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "quota"
             | "run"
             | "caveman"
+            | "rtk"
+            | "sqz"
+            | "tokensavior"
+            | "token-savior"
+            | "clawcompactor"
+            | "claw-compactor"
+            | "llmmin"
+            | "llm-min"
             | "super"
             | "s"
             | "claude"

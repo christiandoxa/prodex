@@ -83,6 +83,8 @@ pub const CLI_CAVEMAN_AFTER_HELP: &str = "\
 Examples:
   prodex caveman
   prodex caveman mem
+  prodex rtk
+  prodex sqz
   prodex super
   prodex caveman --profile main
   prodex caveman exec \"review latest diff in caveman mode\"
@@ -93,7 +95,8 @@ Notes:
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
   Prefix Codex args with `mem` to point Claude-Mem transcript watching at the selected Prodex session path.
-  Add the `rtk` prefix after `mem` to inject RTK shell-command guidance into the temporary Codex overlay.
+  Add optimizer prefixes before Codex args to enable launch overlays: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `llmmin`.
+  Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex tokensavior`, `prodex clawcompactor`, and `prodex llmmin` map to `prodex caveman <prefix>`.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
@@ -104,13 +107,13 @@ Examples:
   prodex super --profile main
 
 Notes:
-  `prodex super` is a shortcut for `prodex caveman mem rtk --full-access`.
-  It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, RTK shell-command guidance, and launch-time full access.
+  `prodex super` is a shortcut for `prodex caveman mem rtk sqz tokensavior clawcompactor llmmin --full-access`.
+  It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, RTK shell-command guidance, Super optimizer overlay, and launch-time full access.
   Use `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies in Claude-Mem recall.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
-  Additional Codex args are appended after the implied mem schema prefix.";
+  Additional Codex args are appended after the implied optimizer prefixes.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
   prodex doctor

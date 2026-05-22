@@ -15,8 +15,10 @@ pub(crate) struct CavemanLaunchStrategy {
 
 impl CavemanLaunchStrategy {
     pub(crate) fn new(args: CavemanArgs) -> Self {
-        let (mem_mode, rtk_enabled, codex_args) =
+        let (mem_mode, rtk_enabled, super_optimizer_prefix_enabled, codex_args) =
             runtime_caveman_extract_launch_prefixes(&args.codex_args);
+        let mut args = args;
+        args.super_optimizer_overlay |= super_optimizer_prefix_enabled;
         let mem_mode = if args.smart_context {
             runtime_mem_super_default_transcript_mode(mem_mode)
         } else {
@@ -101,20 +103,24 @@ pub(super) fn prepare_caveman_launch_home(
 
 pub(crate) fn runtime_caveman_extract_launch_prefixes(
     args: &[OsString],
-) -> (Option<RuntimeMemTranscriptMode>, bool, Vec<OsString>) {
+) -> (Option<RuntimeMemTranscriptMode>, bool, bool, Vec<OsString>) {
     let mut mem_mode = None;
     let mut rtk_enabled = false;
+    let mut super_optimizer_overlay = false;
     let mut remaining = args.to_vec();
 
     loop {
-        if remaining
-            .first()
-            .and_then(|arg| arg.to_str())
-            .is_some_and(|arg| arg == "rtk")
-        {
-            rtk_enabled = true;
-            remaining.remove(0);
-            continue;
+        if let Some(prefix) = remaining.first().and_then(|arg| arg.to_str()) {
+            if prefix == "rtk" {
+                rtk_enabled = true;
+                remaining.remove(0);
+                continue;
+            }
+            if runtime_caveman_super_optimizer_prefix(prefix) {
+                super_optimizer_overlay = true;
+                remaining.remove(0);
+                continue;
+            }
         }
 
         let (next_mem_mode, next_remaining) = runtime_mem_extract_mode_with_detail(&remaining);
@@ -127,7 +133,20 @@ pub(crate) fn runtime_caveman_extract_launch_prefixes(
         break;
     }
 
-    (mem_mode, rtk_enabled, remaining)
+    (mem_mode, rtk_enabled, super_optimizer_overlay, remaining)
+}
+
+fn runtime_caveman_super_optimizer_prefix(prefix: &str) -> bool {
+    matches!(
+        prefix,
+        "sqz"
+            | "tokensavior"
+            | "token-savior"
+            | "clawcompactor"
+            | "claw-compactor"
+            | "llmmin"
+            | "llm-min"
+    )
 }
 
 #[cfg(test)]
@@ -208,16 +227,18 @@ mod tests {
 
     #[test]
     fn caveman_launch_prefixes_extract_mem_then_rtk() {
-        let (mem_mode, rtk_enabled, codex_args) = runtime_caveman_extract_launch_prefixes(&[
-            OsString::from("mem"),
-            OsString::from("rtk"),
-            OsString::from("--full-access"),
-            OsString::from("exec"),
-            OsString::from("hi"),
-        ]);
+        let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
+            runtime_caveman_extract_launch_prefixes(&[
+                OsString::from("mem"),
+                OsString::from("rtk"),
+                OsString::from("--full-access"),
+                OsString::from("exec"),
+                OsString::from("hi"),
+            ]);
 
         assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Slim));
         assert!(rtk_enabled);
+        assert!(!super_optimizer_overlay);
         assert_eq!(
             codex_args,
             vec![
@@ -230,14 +251,44 @@ mod tests {
 
     #[test]
     fn caveman_launch_prefixes_extract_rtk_then_mem() {
-        let (mem_mode, rtk_enabled, codex_args) = runtime_caveman_extract_launch_prefixes(&[
-            OsString::from("rtk"),
-            OsString::from("mem-full"),
-            OsString::from("exec"),
-        ]);
+        let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
+            runtime_caveman_extract_launch_prefixes(&[
+                OsString::from("rtk"),
+                OsString::from("mem-full"),
+                OsString::from("exec"),
+            ]);
 
         assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
         assert!(rtk_enabled);
+        assert!(!super_optimizer_overlay);
         assert_eq!(codex_args, vec![OsString::from("exec")]);
+    }
+
+    #[test]
+    fn caveman_launch_prefixes_extract_all_super_optimizers() {
+        let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
+            runtime_caveman_extract_launch_prefixes(&[
+                OsString::from("mem"),
+                OsString::from("rtk"),
+                OsString::from("sqz"),
+                OsString::from("tokensavior"),
+                OsString::from("clawcompactor"),
+                OsString::from("llmmin"),
+                OsString::from("--full-access"),
+                OsString::from("exec"),
+                OsString::from("hi"),
+            ]);
+
+        assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Slim));
+        assert!(rtk_enabled);
+        assert!(super_optimizer_overlay);
+        assert_eq!(
+            codex_args,
+            vec![
+                OsString::from("--full-access"),
+                OsString::from("exec"),
+                OsString::from("hi")
+            ]
+        );
     }
 }

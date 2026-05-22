@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex main branch",
+      "baseline_source": "openai/codex rust-v0.133.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -49,6 +49,17 @@
             "compact_conversation_history",
             "CompactionImplementation::ResponsesCompact",
             "ContextCompactionItem"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/realtime_conversation.rs",
+          "reason": "Owns realtime websocket start header construction; v1 websocket sessions require the openai-alpha quicksilver=v1 header.",
+          "required_contains": [
+            "ConversationStartTransport::Websocket",
+            "realtime_request_headers",
+            "RealtimeWsVersion::V1",
+            "openai-alpha",
+            "quicksilver=v1"
           ]
         },
         {
@@ -254,6 +265,19 @@
           ]
         },
         {
+          "id": "realtime.websocket-v1-alpha-header",
+          "kind": "header_behavior",
+          "file": "codex-rs/core/src/realtime_conversation.rs",
+          "reason": "Realtime v1 websocket startup must send the upstream openai-alpha quicksilver=v1 header.",
+          "file_contains_all": [
+            "ConversationStartTransport::Websocket",
+            "realtime_request_headers",
+            "RealtimeWsVersion::V1",
+            "openai-alpha",
+            "quicksilver=v1"
+          ]
+        },
+        {
           "id": "compact.remote-responses-compact",
           "kind": "route",
           "file": "codex-rs/core/src/compact_remote.rs",
@@ -414,19 +438,19 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.129.0",
-      "name": "0.129.0",
-      "published_at": "2026-05-07T17:02:13Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.129.0",
+      "tag_name": "rust-v0.133.0",
+      "name": "0.133.0",
+      "published_at": "2026-05-21T16:48:03Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.133.0",
       "body_head": [
         "## New Features",
-        "- The TUI now supports modal Vim editing in the composer, including `/vim`, default-mode config, and Vim-specific keymap contexts. (#18595)",
-        "- TUI workflows are easier to resume and copy from with a redesigned resume/fork picker, raw scrollback mode, `/ide` context injection, and workspace-aware `/diff`. (#20065, #20819, #20294, #21001)",
-        "- The status line can show theme-aware colors plus optional PR and branch-change summaries, and `/keymap debug` helps inspect terminal key events. (#19631, #20892, #20794)",
-        "- Plugin management now supports workspace sharing, share access controls, source filtering, local share path tracking, marketplace removal/upgrades, remote bundle sync, and admin-disabled status handling. (#20278, #21124, #21419, #20560, #19843, #20478, #20268, #20298)",
-        "- Hooks can be browsed and toggled from `/hooks`, can run before/after compaction, and can add `PreToolUse` context; Codex Apps auth and eligible MCP elicitations now surface through TUI/Guardian flows. (#19882, #19905, #20692, #19193, #19431)",
-        "- Experimental goals are now discoverable, stay paused across resume unless the user opts back in, and show clearer validation and multi-day duration output. (#20083, #20790, #20746, #20558)",
-        "## Bug Fixes"
+        "- Goals are now enabled by default, backed by dedicated storage, and track progress across active turns. (#23300, #23685, #23696, #23732)",
+        "- `codex remote-control` now runs like a foreground command, waits for readiness, reports machine status, and keeps explicit daemon-style `start`/`stop` commands. (#22878)",
+        "- Permission profiles gained list APIs, inheritance, managed `requirements.toml` support, runtime refresh behavior, and stronger Windows sandbox integration. (#22928, #23412, #22270, #23433, #22931, #23715)",
+        "- Plugin discovery is easier to inspect, with marketplace-aware list output, installed versions, visible marketplace roots, and remote collection support. (#23372, #23584, #23727, #23730)",
+        "- Extensions can observe more lifecycle events, including subagent start/stop, tool execution, turn metadata, and async approval/turn processing. (#22782, #22873, #23309, #23688, #23690, #23692)",
+        "## Bug Fixes",
+        "- Fixed TUI startup choosing the wrong working directory when reusing a local app-server socket. (#23538)"
       ]
     }
   },

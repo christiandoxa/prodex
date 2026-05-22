@@ -20,6 +20,8 @@ fn configure_rtk_codex_home_writes_awareness_and_agents_reference() {
 
     let rtk_md = fs::read_to_string(dir.join("RTK.md")).expect("RTK.md should exist");
     assert!(rtk_md.contains("RTK - Rust Token Killer"));
+    assert!(rtk_md.contains("upstream/input side"));
+    assert!(rtk_md.contains("before terminal output enters the model context"));
     assert!(rtk_md.contains("rtk gain"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
@@ -41,12 +43,12 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     let awareness = fs::read_to_string(dir.join("SUPER_OPTIMIZERS.md"))
         .expect("SUPER_OPTIMIZERS.md should exist");
     assert!(awareness.contains("sqz"));
+    assert!(awareness.contains("RTK handles upstream/input command output"));
+    assert!(awareness.contains("SQZ handles downstream/context reuse"));
+    assert!(awareness.contains("prodex-sqz"));
     assert!(awareness.contains("token-savior"));
     assert!(awareness.contains("claw-compactor"));
     assert!(awareness.contains("llm-min.txt"));
-    assert!(awareness.contains("memsearch"));
-    assert!(awareness.contains("prompt-cache"));
-    assert!(awareness.contains("Do not auto-enable"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
     assert_eq!(

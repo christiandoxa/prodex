@@ -109,7 +109,7 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
 }
 
 #[test]
-fn super_mem_super_slim_expands_to_super_slim_mem_and_rtk_prefixes() {
+fn super_mem_super_slim_expands_to_all_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "--mem-super-slim", "exec", "review"]);
 
     assert_eq!(
@@ -117,6 +117,10 @@ fn super_mem_super_slim_expands_to_super_slim_mem_and_rtk_prefixes() {
         vec![
             OsString::from("mem-super-slim"),
             OsString::from("rtk"),
+            OsString::from("sqz"),
+            OsString::from("tokensavior"),
+            OsString::from("clawcompactor"),
+            OsString::from("llmmin"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -124,7 +128,7 @@ fn super_mem_super_slim_expands_to_super_slim_mem_and_rtk_prefixes() {
 }
 
 #[test]
-fn super_default_keeps_slim_mem_and_rtk_prefixes() {
+fn super_default_keeps_all_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
 
     assert_eq!(
@@ -132,6 +136,10 @@ fn super_default_keeps_slim_mem_and_rtk_prefixes() {
         vec![
             OsString::from("mem"),
             OsString::from("rtk"),
+            OsString::from("sqz"),
+            OsString::from("tokensavior"),
+            OsString::from("clawcompactor"),
+            OsString::from("llmmin"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -199,6 +207,40 @@ fn s_is_recognized_as_super_not_default_run_argument() {
         panic!("expected super command");
     };
     assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
+}
+
+#[test]
+fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
+    for (command_name, expected) in [
+        ("rtk", "rtk"),
+        ("sqz", "sqz"),
+        ("tokensavior", "tokensavior"),
+        ("token-savior", "tokensavior"),
+        ("clawcompactor", "clawcompactor"),
+        ("claw-compactor", "clawcompactor"),
+        ("llmmin", "llmmin"),
+        ("llm-min", "llmmin"),
+    ] {
+        assert!(!should_default_cli_invocation_to_run(&os_args(&[
+            "prodex",
+            command_name,
+        ])));
+        let command = parse_cli_command_from(["prodex", command_name, "exec", "hello"])
+            .expect("optimizer shortcut should parse");
+        let args = match command {
+            Commands::Rtk(args)
+            | Commands::Sqz(args)
+            | Commands::TokenSavior(args)
+            | Commands::ClawCompactor(args)
+            | Commands::LlmMin(args) => args,
+            other => panic!("expected optimizer shortcut command, got {other:?}"),
+        };
+        assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
+        assert_eq!(
+            caveman_args_with_optimizer_prefix(args, expected).codex_args,
+            os_args(&[expected, "exec", "hello"])
+        );
+    }
 }
 
 #[test]

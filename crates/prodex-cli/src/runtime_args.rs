@@ -1,6 +1,8 @@
 use clap::Args;
 use std::ffi::OsString;
 
+pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "llmmin"];
+
 #[derive(Args, Debug)]
 pub struct RunArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
@@ -173,8 +175,9 @@ impl SuperArgs {
         let local_mode = self.url.is_some();
         let skip_quota_check = self.skip_quota_check || local_mode;
 
-        let mut codex_args =
-            Vec::with_capacity(self.codex_args.len() + 2 + local_provider_args.len());
+        let mut codex_args = Vec::with_capacity(
+            self.codex_args.len() + 2 + SUPER_OPTIMIZER_PREFIXES.len() + local_provider_args.len(),
+        );
         codex_args.push(OsString::from(if self.mem_super_slim {
             "mem-super-slim"
         } else if self.mem_full {
@@ -183,6 +186,7 @@ impl SuperArgs {
             "mem"
         }));
         codex_args.push(OsString::from("rtk"));
+        codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
         codex_args.extend(local_provider_args);
         codex_args.extend(self.codex_args);
         CavemanArgs {
@@ -199,6 +203,11 @@ impl SuperArgs {
             codex_args,
         }
     }
+}
+
+pub fn caveman_args_with_optimizer_prefix(mut args: CavemanArgs, prefix: &str) -> CavemanArgs {
+    args.codex_args.insert(0, OsString::from(prefix));
+    args
 }
 
 pub const SUPER_LOCAL_PROVIDER_ID: &str = "prodex-local";

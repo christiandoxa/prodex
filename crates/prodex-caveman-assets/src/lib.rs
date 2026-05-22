@@ -36,6 +36,10 @@ pub(crate) const PRODEX_RTK_CODEX_AWARENESS: &str = r#"# RTK - Rust Token Killer
 
 RTK is a token-optimized CLI proxy for shell commands.
 
+## Role
+
+RTK works on the upstream/input side. Use it before terminal output enters the model context: `git diff`, `cargo test`, `npm test`, `pytest`, build logs, and similar command output.
+
 ## Rule
 
 Prefix shell commands with `rtk` when RTK is available.
@@ -72,6 +76,12 @@ pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Super Opti
 
 Prodex Super mode already enables Caveman, RTK guidance, Claude-Mem super-slim recall, and Smart Context Autopilot. Use extra token optimizers only when they are local, deterministic, and safe for the current task.
 
+## Token Flow
+
+RTK handles upstream/input command output before it enters the context window. Use `rtk <cmd>` for noisy shell commands such as diffs, tests, builds, and package-manager output.
+
+SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large text blobs, and conversation/context compression instead of re-emitting full text.
+
 ## Repeated Reads
 
 Prefer existing artifact refs and Smart Context summaries over asking for the same file or command output again. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads instead of emitting full repeated content.
@@ -89,10 +99,6 @@ If `claw-compactor` is installed, use it only as a manual, reversible code-summa
 ## Documentation
 
 Prefer checked-in or user-supplied `llm-min.txt` / SKF-style documentation when present. Do not run documentation minifiers that call Gemini, LLMs, SLMs, embeddings, or remote APIs unless the user explicitly asks.
-
-## Manual Opt-In Only
-
-Do not auto-enable `memsearch`, `prompt-cache`, semantic caches, embedding caches, or model-backed prompt compression. They may be useful for explicit research/memory workflows, but they are unsafe as default coding-path optimizers because they can return stale or semantically near-but-wrong context.
 
 ## Safety
 

@@ -19,6 +19,16 @@ pub(crate) fn build_runtime_upstream_async_http_client(
     )
 }
 
+pub(crate) fn build_runtime_upstream_async_http_compact_client(
+    explicit_no_proxy: bool,
+) -> Result<reqwest::Client> {
+    prodex_proxy_config::build_runtime_upstream_async_http_compact_client(
+        explicit_no_proxy,
+        runtime_proxy_http_connect_timeout_ms(),
+        runtime_proxy_stream_idle_timeout_ms(),
+    )
+}
+
 pub(crate) fn build_upstream_blocking_http_client(
     context_label: &'static str,
     explicit_no_proxy: bool,
