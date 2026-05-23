@@ -7,6 +7,11 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Remove llmmin optimizer overlay (`2045674`)
+
+## 0.105.0 - 2026-05-23
+
+### Misc
+
 - Use explicit presidio imports (`c40ab0a`)
 - Add presidio support (`dae6097`)
 
@@ -92,9 +97,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Deps
 
 - Bump tokio to 1.52.3 (`af1a739`)
-
-## 0.94.0 - 2026-05-10
-
-### Misc
-
-- Silence selection helper reexports (`4b952d3`)
