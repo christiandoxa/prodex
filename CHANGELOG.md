@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.109.0 - 2026-05-24
+
+### Runtime
+
+- Enforce optimizer runtime stack (`7becbef`)
+
 ## 0.108.0 - 2026-05-24
 
 ### Misc
 
+- Satisfy capability ci guards (`a570c5f`)
 - Add setup diagnostics and capability reporting (`e9499fc`)
 
 ## 0.107.0 - 2026-05-24
@@ -88,10 +95,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Remove unused runtime payload re-export (`9a8eb22`)
-
-## 0.97.0 - 2026-05-13
-
-### Runtime
-
-- Remove blocking SSE lookahead (`fa08c43`)
-- Avoid SSE lookahead starving prefetch (`c84c053`)
