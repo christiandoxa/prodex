@@ -243,9 +243,6 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::ClawCompactor(command) => {
             RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "clawcompactor"))
         }
-        Commands::LlmMin(command) => {
-            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "llmmin"))
-        }
         Commands::Super(command) => RoutedCommand::new(command),
         Commands::Claude(command) => RoutedCommand::new(command),
         Commands::RuntimeBroker(command) => RoutedCommand::new(command),

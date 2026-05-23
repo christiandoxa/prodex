@@ -150,7 +150,6 @@ fn super_mem_super_slim_expands_to_all_super_prefixes() {
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
-            OsString::from("llmmin"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -169,7 +168,6 @@ fn super_default_keeps_all_super_prefixes() {
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
-            OsString::from("llmmin"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -218,7 +216,6 @@ fn super_can_add_presidio_prefix_when_requested() {
             "sqz",
             "tokensavior",
             "clawcompactor",
-            "llmmin",
             "presidio",
             "exec",
             "hello",
@@ -271,8 +268,6 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
         ("token-savior", "tokensavior"),
         ("clawcompactor", "clawcompactor"),
         ("claw-compactor", "clawcompactor"),
-        ("llmmin", "llmmin"),
-        ("llm-min", "llmmin"),
     ] {
         assert!(!should_default_cli_invocation_to_run(&os_args(&[
             "prodex",
@@ -284,8 +279,7 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
             Commands::Rtk(args)
             | Commands::Sqz(args)
             | Commands::TokenSavior(args)
-            | Commands::ClawCompactor(args)
-            | Commands::LlmMin(args) => args,
+            | Commands::ClawCompactor(args) => args,
             other => panic!("expected optimizer shortcut command, got {other:?}"),
         };
         assert_eq!(args.codex_args, os_args(&["exec", "hello"]));

@@ -1,7 +1,7 @@
 use clap::Args;
 use std::ffi::OsString;
 
-pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "llmmin"];
+pub const SUPER_OPTIMIZER_PREFIXES: [&str; 3] = ["sqz", "tokensavior", "clawcompactor"];
 
 #[derive(Args, Debug)]
 pub struct RunArgs {

@@ -163,13 +163,7 @@ pub(crate) fn runtime_caveman_extract_presidio_prefix(
 fn runtime_caveman_super_optimizer_prefix(prefix: &str) -> bool {
     matches!(
         prefix,
-        "sqz"
-            | "tokensavior"
-            | "token-savior"
-            | "clawcompactor"
-            | "claw-compactor"
-            | "llmmin"
-            | "llm-min"
+        "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor"
     )
 }
 
@@ -297,7 +291,6 @@ mod tests {
                 OsString::from("sqz"),
                 OsString::from("tokensavior"),
                 OsString::from("clawcompactor"),
-                OsString::from("llmmin"),
                 OsString::from("--full-access"),
                 OsString::from("exec"),
                 OsString::from("hi"),

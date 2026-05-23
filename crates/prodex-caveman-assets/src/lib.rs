@@ -96,10 +96,6 @@ Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed opt
 
 If `claw-compactor` is installed, use it only as a manual, reversible code-summary aid for exploration. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
 
-## Documentation
-
-Prefer checked-in or user-supplied `llm-min.txt` / SKF-style documentation when present. Do not run documentation minifiers that call Gemini, LLMs, SLMs, embeddings, or remote APIs unless the user explicitly asks.
-
 ## Safety
 
 Never compress away critical signals: errors, panics, denied permissions, test failures, stack traces, diffs, review findings, secrets, auth material, quota/runtime proxy diagnostics, or exact command output that the user asked to see.

@@ -16,7 +16,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Claude Code (`claude`) if you want to use `prodex claude`
 - Optional: `claude-mem` if you want `prodex caveman mem`, `prodex claude mem`, or `prodex claude caveman mem`
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex caveman mem rtk` or default `prodex super` RTK shell-command guidance
-- Optional: `sqz-mcp`, `token-savior`, `claw-compactor`, and checked-in `llm-min.txt` docs if you want the matching `prodex sqz`, `prodex tokensavior`, `prodex clawcompactor`, or `prodex llmmin` optimizer overlays
+- Optional: `sqz-mcp`, `token-savior`, and `claw-compactor` if you want the matching `prodex sqz`, `prodex tokensavior`, or `prodex clawcompactor` optimizer overlays
 
 If you install `@christiandoxa/prodex` from npm, the runtime dependency `@openai/codex@latest` is installed for you at install or update time. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
@@ -171,7 +171,6 @@ prodex rtk
 prodex sqz
 prodex tokensavior
 prodex clawcompactor
-prodex llmmin
 prodex super --url http://127.0.0.1:8131
 prodex super --url http://127.0.0.1:8131 --dry-run
 prodex caveman --profile second
@@ -183,10 +182,10 @@ Use this path when you want Codex itself as the front end but want Caveman mode 
 If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
 
 Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
-Add optimizer prefixes before Codex args to inject launch overlays into the temporary Codex home: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `llmmin`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
+Add optimizer prefixes before Codex args to inject launch overlays into the temporary Codex home: `mem`, `rtk`, `sqz`, `tokensavior`, or `clawcompactor`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
 Mem mode uses a slim Codex transcript schema by default so recall stays lower-token; use `prodex super --mem-super-slim` to store prompt summaries/references instead of full prompt bodies, or `prodex super --mem-full` when you need full assistant/tool transcript capture.
 `prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cache-friendly context framing, and critical-signal self-checks.
-Super's optimization stack is local and deterministic by default: Caveman, Claude-Mem, RTK, auto-registered `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, and low-token workflow accommodations for `claw-compactor` and `llm-min.txt`.
+Super's optimization stack is local and deterministic by default: Caveman, Claude-Mem, RTK, auto-registered `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, and low-token workflow accommodations for `claw-compactor`.
 RTK handles upstream/input command output before it enters the context window. SQZ handles downstream/context reuse through the auto-registered `prodex-sqz` MCP server when `sqz-mcp` is available.
 Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 

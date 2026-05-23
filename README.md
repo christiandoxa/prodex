@@ -68,7 +68,7 @@ If you install from source, make sure the `codex` binary in your `PATH` is alrea
 
 ## Optional tools
 
-`prodex` can run without Claude-Mem, RTK, SQZ, token-savior, claw-compactor, llm-min docs, or Presidio.
+`prodex` can run without Claude-Mem, RTK, SQZ, token-savior, claw-compactor, or Presidio.
 
 Install them only if you want to use commands such as:
 
@@ -82,7 +82,6 @@ prodex rtk
 prodex sqz
 prodex tokensavior
 prodex clawcompactor
-prodex llmmin
 prodex presidio doctor
 prodex presidio redact --text "My phone is 212-555-1234"
 prodex s
@@ -309,34 +308,6 @@ python3 ~/.local/share/claw-compactor/scripts/mem_compress.py /path/to/workspace
 </details>
 
 <details>
-<summary>Install or generate llm-min docs</summary>
-
-`prodex llmmin` and Super mode look for checked-in `llm-min.txt`-style documentation. Prodex does not require the `llm-min` generator at runtime.
-
-Install the upstream generator only when you want to create or refresh those docs:
-
-```bash
-python3 -m pip install llm-min
-playwright install
-```
-
-`llm-min` uses Gemini for document compression, so set a Gemini API key before generating docs:
-
-```bash
-export GEMINI_API_KEY=your_api_key_here
-```
-
-Generate from local docs:
-
-```bash
-llm-min -i ./docs -o ./llm_min_docs -n project
-```
-
-Then check in or reference the generated `llm-min.txt`/`llm-full.txt` artifacts as appropriate for your repo. If you do not want remote model calls, skip the generator and provide hand-written or checked-in `llm-min.txt` files.
-
-</details>
-
-<details>
 <summary>Install Presidio</summary>
 
 Presidio is used by `prodex presidio` and by the optional Super-mode privacy prompt. It runs as local Analyzer and Anonymizer HTTP services.
@@ -459,7 +430,7 @@ It combines:
 - RTK shell-command guidance
 - full-access launch mode
 - Smart Context Autopilot in the runtime proxy
-- deterministic/local accommodation for `sqz`, `token-savior`, `claw-compactor`, and `llm-min.txt`-style low-token workflows
+- deterministic/local accommodation for `sqz`, `token-savior`, and `claw-compactor` low-token workflows
 
 ```bash
 prodex s
@@ -469,7 +440,7 @@ prodex s exec "review this repo"
 `prodex super` expands to:
 
 ```bash
-prodex caveman mem rtk sqz tokensavior clawcompactor llmmin --full-access
+prodex caveman mem rtk sqz tokensavior clawcompactor --full-access
 ```
 
 Before an interactive Super session starts, Prodex asks whether to enable Presidio:
@@ -481,12 +452,12 @@ Use Presidio for data safety? [y/N]
 The default is `n`. Answering `y` is equivalent to adding the `presidio` prefix:
 
 ```bash
-prodex caveman mem rtk sqz tokensavior clawcompactor llmmin presidio --full-access
+prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access
 ```
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman, Claude-Mem, and RTK pieces, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, then uses Smart Context Autopilot plus low-token workflow accommodations for targets such as `claw-compactor` and `llm-min.txt`.
+Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman, Claude-Mem, and RTK pieces, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, then uses Smart Context Autopilot plus low-token workflow accommodations for targets such as `claw-compactor`.
 
 RTK and SQZ split the token work across different sides of the flow:
 
@@ -630,7 +601,6 @@ prodex rtk
 prodex sqz
 prodex tokensavior
 prodex clawcompactor
-prodex llmmin
 prodex caveman --dry-run
 prodex caveman --profile main
 prodex caveman exec "review this repo in caveman mode"
@@ -641,7 +611,7 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup to the active Prodex session path instead of the default `~/.codex/sessions`.
 
-Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `llmmin`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`.
+Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `mem`, `rtk`, `sqz`, `tokensavior`, or `clawcompactor`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
@@ -681,7 +651,7 @@ Super also enables Smart Context Autopilot in the runtime proxy.
 
 It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
 
-The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, and accommodates `claw-compactor` and `llm-min.txt`-style workflows with local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
+The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, and accommodates `claw-compactor` workflows with local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
 
 RTK handles upstream/input command output before it enters the context window. SQZ handles downstream/context reuse after content is already in the session, using `prodex-sqz` when the MCP server is available.
 
