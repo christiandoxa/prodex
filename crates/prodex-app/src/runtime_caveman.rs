@@ -8,6 +8,7 @@ pub(crate) struct CavemanLaunchStrategy {
     include_code_review: bool,
     mem_mode: Option<RuntimeMemTranscriptMode>,
     rtk_enabled: bool,
+    presidio_enabled: bool,
     model_provider_override: Option<String>,
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
@@ -17,6 +18,7 @@ impl CavemanLaunchStrategy {
     pub(crate) fn new(args: CavemanArgs) -> Self {
         let (mem_mode, rtk_enabled, super_optimizer_prefix_enabled, codex_args) =
             runtime_caveman_extract_launch_prefixes(&args.codex_args);
+        let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
         let mut args = args;
         args.super_optimizer_overlay |= super_optimizer_prefix_enabled;
         let mem_mode = if args.smart_context {
@@ -37,6 +39,7 @@ impl CavemanLaunchStrategy {
             include_code_review,
             mem_mode,
             rtk_enabled,
+            presidio_enabled,
             model_provider_override,
             profile_v2_name,
             model_context_window_tokens,
@@ -82,6 +85,12 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
+        }
+        if self.presidio_enabled {
+            child.extra_env.push((
+                OsString::from("PRODEX_PRESIDIO_ENABLED"),
+                OsString::from("1"),
+            ));
         }
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home))
     }
@@ -134,6 +143,21 @@ pub(crate) fn runtime_caveman_extract_launch_prefixes(
     }
 
     (mem_mode, rtk_enabled, super_optimizer_overlay, remaining)
+}
+
+pub(crate) fn runtime_caveman_extract_presidio_prefix(
+    args: Vec<OsString>,
+) -> (bool, Vec<OsString>) {
+    let mut enabled = false;
+    let mut remaining = Vec::with_capacity(args.len());
+    for arg in args {
+        if arg.to_str() == Some("presidio") {
+            enabled = true;
+        } else {
+            remaining.push(arg);
+        }
+    }
+    (enabled, remaining)
 }
 
 fn runtime_caveman_super_optimizer_prefix(prefix: &str) -> bool {
@@ -289,6 +313,29 @@ mod tests {
                 OsString::from("exec"),
                 OsString::from("hi")
             ]
+        );
+    }
+
+    #[test]
+    fn caveman_launch_extracts_presidio_prefix_after_super_optimizers() {
+        let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
+            runtime_caveman_extract_launch_prefixes(&[
+                OsString::from("mem"),
+                OsString::from("rtk"),
+                OsString::from("sqz"),
+                OsString::from("presidio"),
+                OsString::from("exec"),
+                OsString::from("hi"),
+            ]);
+        let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
+
+        assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Slim));
+        assert!(rtk_enabled);
+        assert!(super_optimizer_overlay);
+        assert!(presidio_enabled);
+        assert_eq!(
+            codex_args,
+            vec![OsString::from("exec"), OsString::from("hi")]
         );
     }
 }

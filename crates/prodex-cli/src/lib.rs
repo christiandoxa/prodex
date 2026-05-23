@@ -12,9 +12,12 @@ mod session_context;
 pub use cleanup::*;
 pub use help::RUNTIME_PROXY_DOCTOR_TAIL_BYTES;
 use help::*;
+pub use presidio::*;
 pub use profile::*;
 pub use runtime_args::*;
 pub use session_context::*;
+
+mod presidio;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -75,6 +78,11 @@ pub enum Commands {
         after_help = CLI_CLEANUP_AFTER_HELP
     )]
     Cleanup(CleanupArgs),
+    #[command(
+        subcommand,
+        about = "Manage local Microsoft Presidio PII detection and anonymization."
+    )]
+    Presidio(PresidioCommands),
     #[command(
         trailing_var_arg = true,
         about = "Run codex login inside a selected or auto-created profile.",
@@ -195,6 +203,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "audit"
             | "context"
             | "cleanup"
+            | "presidio"
             | "login"
             | "logout"
             | "update"

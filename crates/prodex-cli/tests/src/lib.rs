@@ -51,6 +51,36 @@ fn cleanup_aggressive_conflicts_with_older_than() {
 }
 
 #[test]
+fn presidio_commands_parse_as_top_level_commands() {
+    let command = parse_cli_command_from(["prodex", "presidio", "doctor", "--json"])
+        .expect("presidio doctor should parse");
+    assert!(matches!(
+        command,
+        Commands::Presidio(PresidioCommands::Doctor(PresidioDoctorArgs {
+            json: true,
+            ..
+        }))
+    ));
+
+    let command = parse_cli_command_from([
+        "prodex",
+        "presidio",
+        "redact",
+        "--text",
+        "my phone is 212-555-1234",
+        "--json",
+    ])
+    .expect("presidio redact should parse");
+    assert!(matches!(
+        command,
+        Commands::Presidio(PresidioCommands::Redact(PresidioRedactArgs {
+            json: true,
+            ..
+        }))
+    ));
+}
+
+#[test]
 fn super_and_s_parse_to_same_default_super_behavior() {
     let super_args = parse_super_as_caveman(&["prodex", "super"]);
     let alias_args = parse_super_as_caveman(&["prodex", "s"]);
@@ -171,6 +201,29 @@ fn super_and_s_enable_smart_context_autopilot() {
 fn super_and_s_enable_super_optimizer_overlay() {
     assert!(parse_super_as_caveman(&["prodex", "super"]).super_optimizer_overlay);
     assert!(parse_super_as_caveman(&["prodex", "s"]).super_optimizer_overlay);
+}
+
+#[test]
+fn super_can_add_presidio_prefix_when_requested() {
+    let command = parse_cli_command_from(["prodex", "super", "exec", "hello"])
+        .expect("super command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+    assert_eq!(
+        args.into_caveman_args_with_presidio(true).codex_args,
+        os_args(&[
+            "mem",
+            "rtk",
+            "sqz",
+            "tokensavior",
+            "clawcompactor",
+            "llmmin",
+            "presidio",
+            "exec",
+            "hello",
+        ])
+    );
 }
 
 #[test]

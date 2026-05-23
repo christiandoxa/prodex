@@ -13,7 +13,7 @@ use std::ffi::OsString;
 use std::fs;
 #[cfg(test)]
 use std::hash::{Hash, Hasher};
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Cursor, IsTerminal, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

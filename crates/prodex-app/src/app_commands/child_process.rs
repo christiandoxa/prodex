@@ -7,7 +7,7 @@ use crate::{
     CavemanArgs, ChildProcessPlan, CodexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
     prepare_runtime_launch_dry_run, runtime_caveman_extract_launch_prefixes,
-    runtime_launch_cli_model_context_window_tokens,
+    runtime_caveman_extract_presidio_prefix, runtime_launch_cli_model_context_window_tokens,
 };
 pub(crate) use prodex_runtime_launch::{
     RuntimeLaunchDryRunChild, codex_sandbox_removed_env, extract_prodex_dry_run_flag,
@@ -80,6 +80,7 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     let (_mem_mode, _rtk_enabled, _super_optimizer_overlay, codex_args) =
         runtime_caveman_extract_launch_prefixes(&args.codex_args);
+    let (_presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);

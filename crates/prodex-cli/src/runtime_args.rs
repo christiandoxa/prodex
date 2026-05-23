@@ -159,6 +159,10 @@ pub struct SuperArgs {
 
 impl SuperArgs {
     pub fn into_caveman_args(self) -> CavemanArgs {
+        self.into_caveman_args_with_presidio(false)
+    }
+
+    pub fn into_caveman_args_with_presidio(self, presidio: bool) -> CavemanArgs {
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
         let local_provider_args = self
             .url
@@ -187,6 +191,9 @@ impl SuperArgs {
         }));
         codex_args.push(OsString::from("rtk"));
         codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
+        if presidio {
+            codex_args.push(OsString::from("presidio"));
+        }
         codex_args.extend(local_provider_args);
         codex_args.extend(self.codex_args);
         CavemanArgs {

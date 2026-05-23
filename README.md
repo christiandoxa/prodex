@@ -46,13 +46,17 @@ You need at least one logged-in Prodex profile.
 
 ## Installation
 
-### npm
+<details open>
+<summary>Install from npm</summary>
 
 ```bash
 npm install -g @christiandoxa/prodex
 ```
 
-### Source checkout
+</details>
+
+<details>
+<summary>Install from source checkout</summary>
 
 ```bash
 cargo install --path .
@@ -60,11 +64,16 @@ cargo install --path .
 
 If you install from source, make sure the `codex` binary in your `PATH` is already installed and up to date.
 
+</details>
+
 ## Optional tools
 
-`prodex` can run without Claude-Mem, RTK, SQZ, token-savior, claw-compactor, or llm-min docs.
+`prodex` can run without Claude-Mem, RTK, SQZ, token-savior, claw-compactor, llm-min docs, or Presidio.
 
 Install them only if you want to use commands such as:
+
+<details>
+<summary>Optional tool commands</summary>
 
 ```bash
 prodex caveman mem
@@ -74,11 +83,15 @@ prodex sqz
 prodex tokensavior
 prodex clawcompactor
 prodex llmmin
+prodex presidio doctor
+prodex presidio redact --text "My phone is 212-555-1234"
 prodex s
 prodex super
 prodex claude mem
 prodex claude caveman mem
 ```
+
+</details>
 
 <details>
 <summary>Install Claude-Mem</summary>
@@ -114,13 +127,13 @@ RTK is used by the `rtk` variants and by my daily `prodex s` / `prodex super` wo
 ### Homebrew
 
 ```bash
-brew install rtk
+brew install rtk-ai/tap/rtk
 ```
 
 ### Linux/macOS quick install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh
 ```
 
 If it installs to `~/.local/bin`, make sure that directory is in your `PATH`:
@@ -138,7 +151,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ### Cargo
 
 ```bash
-cargo install --git https://github.com/rtk-ai/rtk
+cargo install --git https://github.com/rtk-ai/rtk rtk
 ```
 
 ### Verify RTK
@@ -154,7 +167,7 @@ Remove it and reinstall from the Git URL:
 
 ```bash
 cargo uninstall rtk
-cargo install --git https://github.com/rtk-ai/rtk
+cargo install --git https://github.com/rtk-ai/rtk rtk
 ```
 
 ### Initialize RTK
@@ -175,9 +188,193 @@ Then restart your coding tool.
 
 </details>
 
+<details>
+<summary>Install SQZ</summary>
+
+SQZ is used by `prodex sqz` and by Super mode when the `sqz-mcp` binary is available on `PATH` or under a managed optimizer checkout.
+
+Recommended Linux/macOS install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.ps1 | iex
+```
+
+Alternative npm install:
+
+```bash
+npm install -g sqz-cli
+```
+
+Optional source install:
+
+```bash
+cargo install sqz-cli
+```
+
+Initialize hooks if you also want SQZ outside Prodex:
+
+```bash
+sqz init --global
+# or only for the current project
+sqz init
+```
+
+Verify:
+
+```bash
+sqz --version
+sqz gain
+which sqz-mcp
+```
+
+Prodex auto-registers `prodex-sqz` for Super/Caveman overlay sessions when `sqz-mcp` is discoverable.
+
+</details>
+
+<details>
+<summary>Install token-savior</summary>
+
+token-savior is used by `prodex tokensavior` and by Super mode when the `token-savior` binary is available on `PATH` or under a managed optimizer checkout.
+
+Recommended isolated install:
+
+```bash
+git clone https://github.com/Mibayy/token-savior ~/.local/share/token-savior
+python3 -m venv ~/.local/token-savior-venv
+~/.local/token-savior-venv/bin/pip install -e "$HOME/.local/share/token-savior[mcp]"
+ln -sf ~/.local/token-savior-venv/bin/token-savior ~/.local/bin/token-savior
+```
+
+Make sure `~/.local/bin` is on `PATH`:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+If you use Zsh:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+Verify:
+
+```bash
+token-savior --help
+which token-savior
+```
+
+Prodex handles MCP registration for its own overlay session when it can find the binary, so you do not need to manually edit `.mcp.json` just for `prodex super`.
+
+</details>
+
+<details>
+<summary>Install claw-compactor</summary>
+
+claw-compactor is used by `prodex clawcompactor` and by Super mode as a deterministic/local context compaction aid.
+
+Recommended source install:
+
+```bash
+git clone https://github.com/aeromomo/claw-compactor.git ~/.local/share/claw-compactor
+python3 -m venv ~/.local/claw-compactor-venv
+~/.local/claw-compactor-venv/bin/pip install -e "$HOME/.local/share/claw-compactor[accurate]"
+```
+
+If you only need exact token counting for the scripts:
+
+```bash
+~/.local/claw-compactor-venv/bin/pip install tiktoken
+```
+
+Expose the checkout to Prodex's managed optimizer discovery:
+
+```bash
+mkdir -p ~/.local/share/prodex-optimizers
+ln -sfn ~/.local/share/claw-compactor ~/.local/share/prodex-optimizers/claw-compactor
+```
+
+Quick non-destructive benchmark:
+
+```bash
+python3 ~/.local/share/claw-compactor/scripts/mem_compress.py /path/to/workspace benchmark
+```
+
+</details>
+
+<details>
+<summary>Install or generate llm-min docs</summary>
+
+`prodex llmmin` and Super mode look for checked-in `llm-min.txt`-style documentation. Prodex does not require the `llm-min` generator at runtime.
+
+Install the upstream generator only when you want to create or refresh those docs:
+
+```bash
+python3 -m pip install llm-min
+playwright install
+```
+
+`llm-min` uses Gemini for document compression, so set a Gemini API key before generating docs:
+
+```bash
+export GEMINI_API_KEY=your_api_key_here
+```
+
+Generate from local docs:
+
+```bash
+llm-min -i ./docs -o ./llm_min_docs -n project
+```
+
+Then check in or reference the generated `llm-min.txt`/`llm-full.txt` artifacts as appropriate for your repo. If you do not want remote model calls, skip the generator and provide hand-written or checked-in `llm-min.txt` files.
+
+</details>
+
+<details>
+<summary>Install Presidio</summary>
+
+Presidio is used by `prodex presidio` and by the optional Super-mode privacy prompt. It runs as local Analyzer and Anonymizer HTTP services.
+
+Fast Docker install using Microsoft's published images:
+
+```bash
+docker pull mcr.microsoft.com/presidio-analyzer
+docker pull mcr.microsoft.com/presidio-anonymizer
+
+docker run -d --name presidio-analyzer -p 5002:3000 mcr.microsoft.com/presidio-analyzer:latest
+docker run -d --name presidio-anonymizer -p 5001:3000 mcr.microsoft.com/presidio-anonymizer:latest
+```
+
+Source checkout with Compose:
+
+```bash
+git clone https://github.com/microsoft/presidio.git ~/.local/share/presidio
+cd ~/.local/share/presidio
+docker compose -f docker-compose-text.yml up -d --build
+```
+
+Verify with Prodex:
+
+```bash
+prodex presidio doctor
+prodex presidio redact --text "My name is John Smith and my phone is 212-555-1234."
+prodex presidio enable
+```
+
+`prodex super` / `prodex s` asks `Use Presidio for data safety? [y/N]` before starting an interactive session. The default is `n`. Answering `y` marks the session as Presidio-enabled and is equivalent to adding the `presidio` prefix to the Super stack.
+
+</details>
+
 ## Quick start
 
-### Import your current Codex login
+<details open>
+<summary>Import your current Codex login</summary>
 
 If your current Codex home is already logged in:
 
@@ -185,7 +382,10 @@ If your current Codex home is already logged in:
 prodex profile import-current main
 ```
 
-### Or create profiles from scratch
+</details>
+
+<details>
+<summary>Create profiles from scratch</summary>
 
 ```bash
 prodex login
@@ -193,7 +393,10 @@ prodex profile add second
 prodex login --profile second
 ```
 
-### Check profiles and quota
+</details>
+
+<details>
+<summary>Check profiles and quota</summary>
 
 ```bash
 prodex profile list
@@ -201,7 +404,10 @@ prodex quota --all
 prodex session list
 ```
 
-### Start Codex through Prodex
+</details>
+
+<details>
+<summary>Start Codex through Prodex</summary>
 
 ```bash
 prodex
@@ -212,6 +418,8 @@ Or run a one-off prompt:
 ```bash
 prodex exec "review this repo"
 ```
+
+</details>
 
 <details>
 <summary>Import a Copilot CLI account</summary>
@@ -226,6 +434,9 @@ When you import a Copilot profile, Prodex does not move the Copilot token into P
 </details>
 
 ## Daily command: `prodex s`
+
+<details open>
+<summary>Super mode overview</summary>
 
 For daily work, I use:
 
@@ -261,6 +472,18 @@ prodex s exec "review this repo"
 prodex caveman mem rtk sqz tokensavior clawcompactor llmmin --full-access
 ```
 
+Before an interactive Super session starts, Prodex asks whether to enable Presidio:
+
+```text
+Use Presidio for data safety? [y/N]
+```
+
+The default is `n`. Answering `y` is equivalent to adding the `presidio` prefix:
+
+```bash
+prodex caveman mem rtk sqz tokensavior clawcompactor llmmin presidio --full-access
+```
+
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
 Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman, Claude-Mem, and RTK pieces, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, then uses Smart Context Autopilot plus low-token workflow accommodations for targets such as `claw-compactor` and `llm-min.txt`.
@@ -271,6 +494,8 @@ RTK and SQZ split the token work across different sides of the flow:
 - SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server. Use it for repeated workspace reads, large text blobs, and long-session context reuse instead of emitting the same full content again.
 
 Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
+
+</details>
 
 ## Commands
 

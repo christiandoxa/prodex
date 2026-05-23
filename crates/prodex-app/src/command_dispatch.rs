@@ -150,6 +150,12 @@ impl CommandExecute for InfoArgs {
     }
 }
 
+impl CommandExecute for PresidioCommands {
+    fn execute(self) -> Result<()> {
+        handle_presidio(self)
+    }
+}
+
 impl CommandExecute for ListProfilesCommand {
     fn execute(self) -> Result<()> {
         handle_list_profiles()
@@ -218,6 +224,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Audit(command) => RoutedCommand::new(command),
         Commands::Context(command) => RoutedCommand::new(command),
         Commands::Cleanup(command) => RoutedCommand::new(command),
+        Commands::Presidio(command) => RoutedCommand::new(command),
         Commands::Login(command) => RoutedCommand::new(command),
         Commands::Logout(command) => RoutedCommand::new(command),
         Commands::Update(command) => RoutedCommand::new(command),
