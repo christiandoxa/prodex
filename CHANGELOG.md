@@ -2,10 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.105.0 - 2026-05-23
+## 0.106.0 - 2026-05-23
 
 ### Misc
 
+- Remove llmmin optimizer overlay (`2045674`)
+- Use explicit presidio imports (`c40ab0a`)
 - Add presidio support (`dae6097`)
 
 ## 0.104.0 - 2026-05-22
