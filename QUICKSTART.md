@@ -246,6 +246,7 @@ prodex current
 ```bash
 prodex cleanup
 prodex doctor
+prodex doctor --install
 prodex audit
 prodex audit --tail 20 --component profile
 prodex context audit
@@ -254,6 +255,8 @@ prodex doctor --quota
 prodex doctor --runtime
 prodex doctor --runtime --json
 prodex doctor --bundle ./prodex-doctor.json --redacted
+prodex setup --dry-run
+prodex capability list
 ```
 
 If you see `409 stale_continuation`, Prodex found continuation state for the request but could not safely replay it as a fresh turn on a different profile. That is deliberate: the missing or stale binding may still belong to a specific profile, session, or tool-output chain, and replaying it elsewhere can break the conversation. Start a new prompt, or return to the same session/profile if the original continuation is still available.

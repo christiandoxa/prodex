@@ -759,8 +759,11 @@ See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 ```bash
 prodex info
+prodex doctor --install
 prodex doctor --runtime
 prodex doctor --bundle ./prodex-doctor.json --redacted
+prodex setup --dry-run
+prodex capability list
 prodex context audit
 prodex context compress ~/.codex/AGENTS.md --dry-run
 git diff | prodex context compact-output --kind git-diff
@@ -769,8 +772,11 @@ git diff | prodex context compact-output --kind git-diff
 | Command | Description |
 |---|---|
 | `prodex info` | Shows effective runtime tuning values after environment, policy, and default resolution. |
+| `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |
+| `prodex setup --dry-run` | Shows setup reconciliation actions without changing files. |
+| `prodex capability list` | Lists built-in and optional Prodex capabilities with availability status. |
 | `prodex context audit` | Reports approximate token weight for shared instruction and memory files. |
 | `prodex context compress` | Compresses Markdown/text context files and writes an `.original.md` backup. |
 | `prodex context compact-output` | Compacts copied command output such as `git status`, `git diff`, `rg`, `grep`, `find`, `tree`, or long logs. |
@@ -857,6 +863,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 
 - [QUICKSTART.md](./QUICKSTART.md) — longer walkthrough
 - [LOCAL.md](./LOCAL.md) — self-hosted local model setup and testing
+- [docs/state-model.md](./docs/state-model.md) — state ownership and persistence model
 - [docs/runtime-policy.md](./docs/runtime-policy.md) — runtime policy keys, environment overrides, and runtime log path resolution
 - [docs/testing.md](./docs/testing.md) — contributor testing guidance
 

@@ -81,6 +81,49 @@ fn presidio_commands_parse_as_top_level_commands() {
 }
 
 #[test]
+fn doctor_install_parse_as_top_level_command() {
+    let command = parse_cli_command_from(["prodex", "doctor", "--install"])
+        .expect("doctor install should parse");
+    let Commands::Doctor(args) = command else {
+        panic!("expected doctor command");
+    };
+
+    assert!(args.install);
+}
+
+#[test]
+fn setup_parse_as_top_level_command() {
+    let command =
+        parse_cli_command_from(["prodex", "setup", "--dry-run", "--verify-assets", "--json"])
+            .expect("setup should parse");
+    let Commands::Setup(args) = command else {
+        panic!("expected setup command");
+    };
+
+    assert!(args.dry_run);
+    assert!(args.verify_assets);
+    assert!(args.json);
+    assert!(!should_default_cli_invocation_to_run(&os_args(&[
+        "prodex", "setup",
+    ])));
+}
+
+#[test]
+fn capability_list_parse_as_top_level_command() {
+    let command = parse_cli_command_from(["prodex", "capability", "list", "--json"])
+        .expect("capability list should parse");
+    let Commands::Capability(CapabilityCommands::List(args)) = command else {
+        panic!("expected capability list command");
+    };
+
+    assert!(args.json);
+    assert!(!should_default_cli_invocation_to_run(&os_args(&[
+        "prodex",
+        "capability",
+    ])));
+}
+
+#[test]
 fn super_and_s_parse_to_same_default_super_behavior() {
     let super_args = parse_super_as_caveman(&["prodex", "super"]);
     let alias_args = parse_super_as_caveman(&["prodex", "s"]);

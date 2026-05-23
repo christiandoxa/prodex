@@ -80,6 +80,19 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                     repaired_import_auth_journals,
                 ),
             );
+            if args.install {
+                object.insert(
+                    "install_checks".to_string(),
+                    serde_json::Value::Array(
+                        collect_install_check_rows(&paths)
+                            .into_iter()
+                            .map(|(name, status)| {
+                                serde_json::json!({ "name": name, "status": status })
+                            })
+                            .collect(),
+                    ),
+                );
+            }
         }
         let json = serde_json::to_string_pretty(&value)
             .context("failed to serialize runtime doctor summary")?;
@@ -153,6 +166,11 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         ),
     ];
     print_panel("Doctor", &summary_fields);
+
+    if args.install {
+        print_blank_line();
+        print_panel("Install Checks", &collect_install_check_rows(&paths));
+    }
 
     if args.runtime {
         print_blank_line();

@@ -88,6 +88,9 @@ pub struct DoctorArgs {
     /// Also summarize runtime proxy state and recent logs from the configured log directory.
     #[arg(long)]
     pub runtime: bool,
+    /// Also check install/runtime prerequisites without mutating local state.
+    #[arg(long)]
+    pub install: bool,
     /// Recover orphaned profile import auth rollback journals before reporting.
     #[arg(long)]
     pub repair_import_auth_journals: bool,
@@ -112,6 +115,32 @@ pub struct DoctorArgs {
     /// Required for --bundle; secret values are never emitted.
     #[arg(long, requires = "bundle")]
     pub redacted: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct SetupArgs {
+    /// Preview planned setup/repair actions without writing files.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Verify embedded Caveman/Super asset manifests and guidance.
+    #[arg(long)]
+    pub verify_assets: bool,
+    /// Emit machine-readable JSON output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CapabilityCommands {
+    /// List optional Prodex capabilities and local availability.
+    List(CapabilityListArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct CapabilityListArgs {
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug)]

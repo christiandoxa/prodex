@@ -2,6 +2,7 @@ use super::*;
 
 mod audit;
 mod broker;
+mod capability;
 mod child_process;
 mod cleanup;
 mod context;
@@ -17,6 +18,7 @@ mod shared;
 
 pub(crate) use self::audit::*;
 pub(crate) use self::broker::*;
+pub(crate) use self::capability::*;
 pub(crate) use self::child_process::*;
 pub(crate) use self::cleanup::*;
 pub(crate) use self::context::*;

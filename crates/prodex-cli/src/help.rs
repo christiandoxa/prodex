@@ -117,10 +117,20 @@ Notes:
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\
 Examples:
   prodex doctor
+  prodex doctor --install
   prodex doctor --quota
   prodex doctor --runtime
   prodex doctor --runtime --json
   prodex doctor --bundle ./prodex-doctor.json --redacted";
+pub const CLI_SETUP_AFTER_HELP: &str = "\
+Examples:
+  prodex setup --dry-run
+  prodex setup --verify-assets
+  prodex setup --dry-run --json";
+pub const CLI_CAPABILITY_AFTER_HELP: &str = "\
+Examples:
+  prodex capability list
+  prodex capability list --json";
 pub const CLI_AUDIT_AFTER_HELP: &str = "\
 Examples:
   prodex audit

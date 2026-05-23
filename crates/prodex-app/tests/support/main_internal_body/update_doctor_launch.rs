@@ -65,6 +65,7 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
     assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
         quota: false,
         runtime: true,
+        install: false,
         repair_import_auth_journals: false,
         tail_bytes: RUNTIME_PROXY_DOCTOR_TAIL_BYTES,
         suggest_policy: false,

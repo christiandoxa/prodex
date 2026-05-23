@@ -1,3 +1,4 @@
+mod asset_verification;
 mod embedded_files;
 mod embedded_tree;
 mod hook_trust;
@@ -7,6 +8,8 @@ mod marketplace;
 mod rtk;
 mod super_optimizers;
 mod toml_helpers;
+
+use anyhow::Result;
 
 pub use embedded_tree::install_claude_caveman_plugin;
 pub use hook_trust::trust_claude_mem_codex_plugin_hooks;
@@ -100,6 +103,17 @@ If `claw-compactor` is installed, use it only as a manual, reversible code-summa
 
 Never compress away critical signals: errors, panics, denied permissions, test failures, stack traces, diffs, review findings, secrets, auth material, quota/runtime proxy diagnostics, or exact command output that the user asked to see.
 "#;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CavemanAssetVerification {
+    pub codex_plugin_files: usize,
+    pub claude_plugin_files: usize,
+    pub skill_files: usize,
+}
+
+pub fn verify_embedded_caveman_assets() -> Result<CavemanAssetVerification> {
+    asset_verification::verify_embedded_caveman_assets()
+}
 
 #[cfg(test)]
 use std::{env, fs, path::PathBuf};

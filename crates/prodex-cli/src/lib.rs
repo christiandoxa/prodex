@@ -63,6 +63,17 @@ pub enum Commands {
     )]
     Doctor(DoctorArgs),
     #[command(
+        about = "Reconcile optional Prodex install surfaces and verify embedded assets.",
+        after_help = CLI_SETUP_AFTER_HELP
+    )]
+    Setup(SetupArgs),
+    #[command(
+        subcommand,
+        about = "List optional Prodex capabilities and local availability.",
+        after_help = CLI_CAPABILITY_AFTER_HELP
+    )]
+    Capability(CapabilityCommands),
+    #[command(
         about = "Inspect structured enterprise audit events written to /tmp.",
         after_help = CLI_AUDIT_AFTER_HELP
     )]
@@ -192,6 +203,8 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "info"
             | "session"
             | "doctor"
+            | "setup"
+            | "capability"
             | "audit"
             | "context"
             | "cleanup"

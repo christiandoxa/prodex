@@ -14,6 +14,16 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 #[test]
+fn embedded_caveman_assets_verify() {
+    let verification =
+        verify_embedded_caveman_assets().expect("embedded Caveman assets should verify");
+
+    assert!(verification.codex_plugin_files > 0);
+    assert!(verification.claude_plugin_files > 0);
+    assert!(verification.skill_files > 0);
+}
+
+#[test]
 fn configure_rtk_codex_home_writes_awareness_and_agents_reference() {
     let dir = temp_dir("rtk");
     configure_rtk_codex_home(&dir).expect("rtk codex home should configure");

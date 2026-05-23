@@ -92,6 +92,12 @@ impl CommandExecute for CleanupArgs {
     }
 }
 
+impl CommandExecute for CapabilityCommands {
+    fn execute(self) -> Result<()> {
+        handle_capability(self)
+    }
+}
+
 impl CommandExecute for CodexPassthroughArgs {
     fn execute(self) -> Result<()> {
         handle_codex_login(self)
@@ -204,6 +210,12 @@ impl CommandExecute for SessionCommands {
     }
 }
 
+impl CommandExecute for SetupArgs {
+    fn execute(self) -> Result<()> {
+        handle_setup(self)
+    }
+}
+
 impl CommandExecute for SuperArgs {
     fn execute(self) -> Result<()> {
         if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
@@ -221,6 +233,8 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Info(command) => RoutedCommand::new(command),
         Commands::Session(command) => RoutedCommand::new(command),
         Commands::Doctor(command) => RoutedCommand::new(command),
+        Commands::Setup(command) => RoutedCommand::new(command),
+        Commands::Capability(command) => RoutedCommand::new(command),
         Commands::Audit(command) => RoutedCommand::new(command),
         Commands::Context(command) => RoutedCommand::new(command),
         Commands::Cleanup(command) => RoutedCommand::new(command),
