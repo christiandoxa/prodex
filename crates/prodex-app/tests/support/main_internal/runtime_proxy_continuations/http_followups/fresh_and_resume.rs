@@ -37,8 +37,21 @@ fn runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chai
         !body.contains("usage limit") && !body.contains("service_unavailable"),
         "retryable usage-limit failures must not leak once a later profile succeeds: {body}"
     );
+    let responses_accounts = fixture.backend.responses_accounts();
     assert_eq!(
-        fixture.backend.responses_accounts(),
+        responses_accounts.first().map(String::as_str),
+        Some("fifth-account"),
+        "fresh rotation should try the current profile first: {responses_accounts:?}"
+    );
+    assert_eq!(
+        responses_accounts.last().map(String::as_str),
+        Some("third-account"),
+        "runtime proxy should keep rotating until the later healthy profile is tried: {responses_accounts:?}"
+    );
+    let mut sorted_responses_accounts = responses_accounts.clone();
+    sorted_responses_accounts.sort();
+    assert_eq!(
+        sorted_responses_accounts,
         vec![
             "fifth-account".to_string(),
             "fourth-account".to_string(),
@@ -46,7 +59,7 @@ fn runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chai
             "second-account".to_string(),
             "third-account".to_string(),
         ],
-        "runtime proxy should keep rotating until the later healthy profile is tried"
+        "runtime proxy should try every usage-limit account exactly once before success: {responses_accounts:?}"
     );
 }
 
@@ -158,4 +171,3 @@ fn runtime_proxy_http_resume_continuation_preserves_metadata_headers_and_affinit
         "successful resume continuation should preserve session binding: {log}"
     );
 }
-
