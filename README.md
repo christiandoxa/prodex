@@ -340,7 +340,7 @@ prodex presidio redact --text "My name is John Smith and my phone is 212-555-123
 prodex presidio enable
 ```
 
-`prodex super` / `prodex s` asks `Use Presidio for data safety? [y/N]` before starting an interactive session. The default is `n`. Answering `y` marks the session as Presidio-enabled and is equivalent to adding the `presidio` prefix to the Super stack.
+`prodex super` / `prodex s` asks `Use Presidio for data safety? [y/N]` before starting an interactive session. The default is `n`. Answering `y` starts a dedicated runtime proxy for that session and redacts UTF-8 HTTP request bodies and WebSocket text frames through the local Presidio Analyzer and Anonymizer before forwarding them upstream. It is equivalent to adding the `presidio` prefix to the Super stack. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
 
 </details>
 
@@ -451,7 +451,7 @@ Before an interactive Super session starts, Prodex asks whether to enable Presid
 Use Presidio for data safety? [y/N]
 ```
 
-The default is `n`. Answering `y` is equivalent to adding the `presidio` prefix:
+The default is `n`. Answering `y` enables runtime request-body and WebSocket text redaction through local Presidio for that session and is equivalent to adding the `presidio` prefix:
 
 ```bash
 prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access
@@ -459,11 +459,11 @@ prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman, Claude-Mem, and RTK pieces, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, then uses Smart Context Autopilot plus low-token workflow accommodations for targets such as `claw-compactor`.
+Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman and Claude-Mem pieces, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping.
 
 RTK and SQZ split the token work across different sides of the flow:
 
-- RTK works upstream/input-side. Use `rtk <cmd>` for noisy terminal commands before their output enters the model context, such as `git diff`, `cargo test`, `npm test`, build logs, and package-manager output.
+- RTK works upstream/input-side. Use visible `rtk <cmd>` for noisy terminal commands before their output enters the model context, such as `git diff`, `cargo test`, `npm test`, build logs, and package-manager output. Prodex also auto-wraps common noisy commands as a fallback when RTK is installed.
 - SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server. Use it for repeated workspace reads, large text blobs, and long-session context reuse instead of emitting the same full content again.
 
 Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
@@ -653,9 +653,9 @@ Super also enables Smart Context Autopilot in the runtime proxy.
 
 It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
 
-The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, and accommodates `claw-compactor` workflows with local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
+The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when discoverable, and uses a dedicated runtime proxy for local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
 
-RTK handles upstream/input command output before it enters the context window. SQZ handles downstream/context reuse after content is already in the session, using `prodex-sqz` when the MCP server is available.
+RTK handles upstream/input command output before it enters the context window, using visible `rtk <cmd>` commands and overlay auto-wrappers when available. SQZ handles downstream/context reuse after content is already in the session, using `prodex-sqz` when the MCP server is available.
 
 Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 

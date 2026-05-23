@@ -57,6 +57,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
             smart_context_enabled: self.args.smart_context,
+            presidio_redaction_enabled: self.presidio_enabled,
             model_context_window_tokens: self.model_context_window_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
@@ -83,6 +84,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             prodex_caveman_assets::trust_claude_mem_codex_plugin_hooks(&caveman_home)?;
         }
         let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
+        prepend_child_path(&mut child, caveman_home.join("bin"));
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
         }
@@ -93,6 +95,19 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             ));
         }
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home))
+    }
+}
+
+fn prepend_child_path(child: &mut ChildProcessPlan, path: PathBuf) {
+    if !path.is_dir() {
+        return;
+    }
+    let mut paths = vec![path];
+    if let Some(existing) = env::var_os("PATH") {
+        paths.extend(env::split_paths(&existing));
+    }
+    if let Ok(joined) = env::join_paths(paths) {
+        child.extra_env.push((OsString::from("PATH"), joined));
     }
 }
 

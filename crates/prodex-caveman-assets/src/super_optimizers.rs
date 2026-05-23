@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::localization::localize_text_file;
@@ -47,7 +49,8 @@ fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) -> Result<(
 fn configure_super_optimizer_mcp_servers(codex_home: &Path) -> Result<()> {
     let path_dirs = path_dirs_from_env();
     let optimizer_roots = managed_optimizer_roots();
-    configure_super_optimizer_mcp_servers_with_sources(codex_home, &path_dirs, &optimizer_roots)
+    configure_super_optimizer_mcp_servers_with_sources(codex_home, &path_dirs, &optimizer_roots)?;
+    configure_super_optimizer_command_wrappers(codex_home, &path_dirs, &optimizer_roots)
 }
 
 fn configure_super_optimizer_mcp_servers_with_sources(
@@ -103,6 +106,83 @@ fn configure_super_optimizer_mcp_servers_with_sources(
         .context("failed to render Super optimizer config overlay")?;
     fs::write(&config_path, rendered)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
+    Ok(())
+}
+
+fn configure_super_optimizer_command_wrappers(
+    codex_home: &Path,
+    path_dirs: &[PathBuf],
+    optimizer_roots: &[PathBuf],
+) -> Result<()> {
+    let bin_dir = codex_home.join("bin");
+    if let Some(command) = find_optimizer_command("sqz", path_dirs, optimizer_roots) {
+        write_shell_wrapper(&bin_dir.join("sqz"), &command, &[])?;
+        write_shell_wrapper(&bin_dir.join("prodex-sqz-cli"), &command, &[])?;
+    }
+    if let Some(command) = find_optimizer_command("sqz-mcp", path_dirs, optimizer_roots) {
+        write_shell_wrapper(&bin_dir.join("sqz-mcp"), &command, &[])?;
+    }
+    if let Some(command) = find_optimizer_command("claw-compactor", path_dirs, optimizer_roots) {
+        write_shell_wrapper(&bin_dir.join("claw-compactor"), &command, &[])?;
+        write_shell_wrapper(&bin_dir.join("prodex-claw-compactor"), &command, &[])?;
+    } else if let Some((python, script)) = find_claw_compactor_script(optimizer_roots) {
+        write_shell_wrapper(
+            &bin_dir.join("claw-compactor"),
+            &python,
+            &[script.to_string_lossy().as_ref()],
+        )?;
+        write_shell_wrapper(
+            &bin_dir.join("prodex-claw-compactor"),
+            &python,
+            &[script.to_string_lossy().as_ref()],
+        )?;
+    }
+    Ok(())
+}
+
+fn find_claw_compactor_script(optimizer_roots: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {
+    for root in optimizer_roots {
+        let checkout = root.join("claw-compactor");
+        let script = checkout.join("scripts").join("mem_compress.py");
+        if !script.is_file() {
+            continue;
+        }
+        let python = [
+            checkout.join(".venv").join("bin").join("python"),
+            checkout.join("venv").join("bin").join("python"),
+            PathBuf::from("python3"),
+        ]
+        .into_iter()
+        .find(|candidate| candidate.is_file() || candidate == &PathBuf::from("python3"))?;
+        return Some((python, script));
+    }
+    None
+}
+
+fn write_shell_wrapper(path: &Path, command: &Path, args: &[&str]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let args = args
+        .iter()
+        .map(|arg| format!(" '{}'", arg.replace('\'', "'\\''")))
+        .collect::<String>();
+    let script = format!(
+        "#!/usr/bin/env sh\nexec '{}'{} \"$@\"\n",
+        command.display().to_string().replace('\'', "'\\''"),
+        args
+    );
+    fs::write(path, script).with_context(|| format!("failed to write {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(path)
+            .with_context(|| format!("failed to stat {}", path.display()))?
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)
+            .with_context(|| format!("failed to chmod {}", path.display()))?;
+    }
     Ok(())
 }
 
@@ -254,8 +334,14 @@ fn managed_optimizer_command_candidates(root: &Path, command: &str) -> Vec<PathB
         "sqz-mcp" => {
             push_sqz_workspace_candidates(&mut candidates, root, command);
         }
+        "sqz" => {
+            push_sqz_workspace_candidates(&mut candidates, root, command);
+        }
         "token-savior" => {
             push_python_tool_candidates(&mut candidates, root, "token-savior", command);
+        }
+        "claw-compactor" => {
+            push_python_tool_candidates(&mut candidates, root, "claw-compactor", command);
         }
         _ => {}
     }
@@ -507,6 +593,62 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn managed_claw_compactor_discovery_finds_venv_binary() {
+        let root = temp_dir("claw-compactor-root");
+        let command = command_path(
+            root.join("claw-compactor")
+                .join(".venv")
+                .join("bin")
+                .join("claw-compactor"),
+        );
+        fs::create_dir_all(command.parent().expect("command parent should exist"))
+            .expect("command parent should be created");
+        fs::write(&command, "").expect("fake command should be written");
+
+        assert_eq!(
+            find_managed_optimizer_command("claw-compactor", std::slice::from_ref(&root)),
+            Some(command)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn command_wrappers_register_claw_compactor_script_checkout() {
+        let codex_home = temp_dir("claw-codex-home");
+        let optimizer_root = temp_dir("claw-optimizer-root");
+        let script = optimizer_root
+            .join("claw-compactor")
+            .join("scripts")
+            .join("mem_compress.py");
+        fs::create_dir_all(&codex_home).expect("codex home should exist");
+        fs::create_dir_all(script.parent().expect("script parent should exist"))
+            .expect("script parent should be created");
+        fs::write(&script, "print('ok')\n").expect("fake script should be written");
+
+        configure_super_optimizer_command_wrappers(
+            &codex_home,
+            &[],
+            std::slice::from_ref(&optimizer_root),
+        )
+        .expect("claw wrapper should write");
+
+        let wrapper = fs::read_to_string(codex_home.join("bin").join("claw-compactor"))
+            .expect("wrapper should exist");
+        assert!(wrapper.contains("python3"));
+        assert!(wrapper.contains("mem_compress.py"));
+        assert!(
+            codex_home
+                .join("bin")
+                .join("prodex-claw-compactor")
+                .is_file()
+        );
+
+        let _ = fs::remove_dir_all(codex_home);
+        let _ = fs::remove_dir_all(optimizer_root);
     }
 
     #[test]

@@ -28,6 +28,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         include_code_review: args.include_code_review,
         upstream_no_proxy: args.upstream_no_proxy,
         smart_context_enabled: args.smart_context_enabled,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: args.model_context_window_tokens,
         preferred_listen_addr: args.listen_addr.as_deref(),
     })?;

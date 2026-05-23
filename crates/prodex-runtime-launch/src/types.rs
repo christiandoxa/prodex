@@ -9,6 +9,7 @@ pub struct RuntimeLaunchRequest<'a> {
     pub upstream_no_proxy: bool,
     pub include_code_review: bool,
     pub smart_context_enabled: bool,
+    pub presidio_redaction_enabled: bool,
     pub model_context_window_tokens: Option<u64>,
     pub force_runtime_proxy: bool,
     pub model_provider_override: Option<&'a str>,

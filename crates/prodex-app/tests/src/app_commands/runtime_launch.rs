@@ -57,6 +57,7 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
@@ -104,6 +105,7 @@ fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: true,
         model_provider_override: None,
@@ -172,6 +174,7 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
@@ -198,6 +201,114 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
 }
 
 #[test]
+fn prepare_runtime_launch_enables_runtime_proxy_for_openai_smart_context_single_profile() {
+    let root = temp_dir("smart-context-single-profile-runtime-proxy");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let main_home = root.join("main-home");
+    fs::create_dir_all(&main_home).unwrap();
+    fs::write(
+        secret_store::auth_json_path(&main_home),
+        r#"{"tokens":{"access_token":"main-token"}}"#,
+    )
+    .unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: false,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: true,
+        skip_quota_check: true,
+        base_url: None,
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: true,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: Some(65_536),
+        force_runtime_proxy: false,
+        model_provider_override: None,
+        profile_v2_name: None,
+    })
+    .unwrap();
+
+    assert_eq!(
+        prepared
+            .runtime_proxy
+            .as_ref()
+            .expect("Smart Context should force runtime proxy for OpenAI")
+            .openai_mount_path,
+        RUNTIME_PROXY_OPENAI_MOUNT_PATH
+    );
+}
+
+#[test]
+fn prepare_runtime_launch_dry_run_previews_proxy_for_presidio_redaction() {
+    let root = temp_dir("presidio-dry-run-runtime-proxy");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let main_home = root.join("main-home");
+    fs::create_dir_all(&main_home).unwrap();
+    fs::write(
+        secret_store::auth_json_path(&main_home),
+        r#"{"tokens":{"access_token":"main-token"}}"#,
+    )
+    .unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: false,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: true,
+        skip_quota_check: true,
+        base_url: None,
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: true,
+        model_context_window_tokens: None,
+        force_runtime_proxy: false,
+        model_provider_override: None,
+        profile_v2_name: None,
+    })
+    .unwrap();
+
+    assert_eq!(
+        prepared
+            .runtime_proxy
+            .as_ref()
+            .expect("Presidio should force runtime proxy preview")
+            .openai_mount_path,
+        RUNTIME_PROXY_OPENAI_MOUNT_PATH
+    );
+}
+
+#[test]
 fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist() {
     let root = temp_dir("profileless-local-home");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
@@ -211,6 +322,7 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
@@ -248,6 +360,7 @@ fn prepare_runtime_launch_profile_v2_config_enables_profileless_local_rewrite_pr
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: true,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: Some(65_536),
         force_runtime_proxy: false,
         model_provider_override: None,
@@ -285,6 +398,7 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: true,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: Some(65_536),
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
@@ -344,6 +458,7 @@ fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
@@ -393,6 +508,7 @@ fn prepare_runtime_launch_uses_profile_v2_model_provider_overlay() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
@@ -435,6 +551,7 @@ fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_overrid
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
@@ -483,6 +600,7 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: false,
         model_provider_override: None,
@@ -513,6 +631,7 @@ fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: true,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: Some(65_536),
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
@@ -553,6 +672,7 @@ fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
         upstream_no_proxy: false,
         include_code_review: false,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         force_runtime_proxy: true,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
@@ -596,6 +716,7 @@ fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
             upstream_no_proxy: false,
             include_code_review: false,
             smart_context_enabled: false,
+            presidio_redaction_enabled: false,
             model_context_window_tokens: None,
             force_runtime_proxy: false,
             model_provider_override: None,
@@ -638,6 +759,7 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
             upstream_no_proxy: false,
             include_code_review: false,
             smart_context_enabled: false,
+            presidio_redaction_enabled: false,
             model_context_window_tokens: None,
             force_runtime_proxy: false,
             model_provider_override: None,

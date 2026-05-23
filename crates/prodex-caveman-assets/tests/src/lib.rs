@@ -32,6 +32,7 @@ fn configure_rtk_codex_home_writes_awareness_and_agents_reference() {
     assert!(rtk_md.contains("RTK - Rust Token Killer"));
     assert!(rtk_md.contains("upstream/input side"));
     assert!(rtk_md.contains("before terminal output enters the model context"));
+    assert!(rtk_md.contains("rtk <cmd>"));
     assert!(rtk_md.contains("rtk gain"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");

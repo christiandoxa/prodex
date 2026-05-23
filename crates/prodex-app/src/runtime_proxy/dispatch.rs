@@ -81,7 +81,7 @@ fn dispatch_runtime_http_proxy_request(
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
 ) {
-    let captured = match capture_runtime_proxy_request(&mut request) {
+    let mut captured = match capture_runtime_proxy_request(&mut request) {
         Ok(captured) => captured,
         Err(err) => {
             runtime_proxy_log_dispatch_error(shared, request_id, "capture_error", err.to_string());
@@ -89,6 +89,17 @@ fn dispatch_runtime_http_proxy_request(
             return;
         }
     };
+    if let Err(err) = apply_runtime_presidio_redaction_to_request(request_id, &mut captured, shared)
+    {
+        runtime_proxy_log_dispatch_error(
+            shared,
+            request_id,
+            "presidio_redaction_failed",
+            format!("{err:#}"),
+        );
+        let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+        return;
+    }
 
     runtime_proxy_log(
         shared,

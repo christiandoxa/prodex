@@ -36,6 +36,7 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
         include_code_review: false,
         upstream_no_proxy: false,
         smart_context_enabled: true,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: None,
     })

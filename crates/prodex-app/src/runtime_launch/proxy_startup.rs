@@ -52,6 +52,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
         include_code_review,
         upstream_no_proxy,
         smart_context_enabled: false,
+        presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr,
     })
@@ -65,6 +66,7 @@ pub(crate) struct RuntimeRotationProxyStartOptions<'a> {
     pub(crate) include_code_review: bool,
     pub(crate) upstream_no_proxy: bool,
     pub(crate) smart_context_enabled: bool,
+    pub(crate) presidio_redaction_enabled: bool,
     pub(crate) model_context_window_tokens: Option<u64>,
     pub(crate) preferred_listen_addr: Option<&'a str>,
 }
@@ -80,6 +82,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         include_code_review,
         upstream_no_proxy,
         smart_context_enabled,
+        presidio_redaction_enabled,
         model_context_window_tokens,
         preferred_listen_addr,
     } = options;
@@ -294,10 +297,18 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         model_context_window_tokens,
         Some(paths.root.join("runtime-smart-context-artifacts.json")),
     );
+    register_runtime_presidio_redaction_proxy_state(
+        &log_path,
+        if presidio_redaction_enabled {
+            Some(runtime_presidio_redaction_config(paths)?)
+        } else {
+            None
+        },
+    );
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime proxy started listen_addr={listen_addr} current_profile={current_profile} include_code_review={include_code_review} smart_context_enabled={smart_context_enabled} upstream_base_url={upstream_base_url} persistence_mode={}",
+            "runtime proxy started listen_addr={listen_addr} current_profile={current_profile} include_code_review={include_code_review} smart_context_enabled={smart_context_enabled} presidio_redaction_enabled={presidio_redaction_enabled} upstream_base_url={upstream_base_url} persistence_mode={}",
             if persistence_enabled {
                 "owner"
             } else {

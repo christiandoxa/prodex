@@ -48,6 +48,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
             smart_context_enabled: false,
+            presidio_redaction_enabled: false,
             model_context_window_tokens: self.model_context_window_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
@@ -385,6 +386,15 @@ impl RuntimeProxyStartupFactory {
         }
 
         let runtime_upstream_base_url = quota_base_url(request.base_url);
+        if request.presidio_redaction_enabled || request.smart_context_enabled {
+            return Ok(Some(start_dedicated_runtime_proxy_endpoint(
+                paths,
+                state,
+                selection,
+                request,
+                runtime_upstream_base_url,
+            )?));
+        }
         if request.force_runtime_proxy && !request.allow_auto_rotate {
             return Ok(Some(start_fixed_runtime_proxy_endpoint(
                 paths,
@@ -429,7 +439,9 @@ impl RuntimeProxyStartupFactory {
             return Ok(None);
         }
 
-        if request.force_runtime_proxy
+        if request.presidio_redaction_enabled
+            || request.force_runtime_proxy
+            || request.smart_context_enabled
             || should_enable_runtime_rotation_proxy(
                 state,
                 &selection.selected_profile_name,
@@ -506,6 +518,37 @@ fn runtime_local_rewrite_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<Runt
     })
 }
 
+fn start_dedicated_runtime_proxy_endpoint(
+    paths: &AppPaths,
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+    runtime_upstream_base_url: String,
+) -> Result<RuntimeProxyEndpoint> {
+    let model_context_window_tokens =
+        runtime_launch_effective_model_context_window_tokens(request, selection);
+    let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
+        paths,
+        state,
+        current_profile: &selection.selected_profile_name,
+        upstream_base_url: runtime_upstream_base_url,
+        include_code_review: request.include_code_review,
+        upstream_no_proxy: request.upstream_no_proxy,
+        smart_context_enabled: request.smart_context_enabled,
+        presidio_redaction_enabled: request.presidio_redaction_enabled,
+        model_context_window_tokens,
+        preferred_listen_addr: None,
+    })?;
+    Ok(RuntimeProxyEndpoint {
+        listen_addr: proxy.listen_addr,
+        openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
+        local_model_provider_id: None,
+        lease_dir: paths.root.join("runtime-dedicated-proxy-leases"),
+        _lease: None,
+        _direct_proxy: Some(proxy),
+    })
+}
+
 fn start_fixed_runtime_proxy_endpoint(
     paths: &AppPaths,
     state: &AppState,
@@ -524,6 +567,7 @@ fn start_fixed_runtime_proxy_endpoint(
         include_code_review: request.include_code_review,
         upstream_no_proxy: request.upstream_no_proxy,
         smart_context_enabled: request.smart_context_enabled,
+        presidio_redaction_enabled: request.presidio_redaction_enabled,
         model_context_window_tokens,
         preferred_listen_addr: None,
     })?;
@@ -552,6 +596,7 @@ fn start_local_rewrite_proxy_endpoint(
         upstream_base_url,
         request.upstream_no_proxy,
         request.smart_context_enabled,
+        request.presidio_redaction_enabled,
         model_context_window_tokens,
     )?;
     Ok(RuntimeProxyEndpoint {

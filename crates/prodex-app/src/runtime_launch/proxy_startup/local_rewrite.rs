@@ -17,6 +17,7 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
     upstream_base_url: String,
     upstream_no_proxy: bool,
     smart_context_enabled: bool,
+    presidio_redaction_enabled: bool,
     model_context_window_tokens: Option<u64>,
 ) -> Result<RuntimeRotationProxy> {
     let log_path = initialize_runtime_proxy_log_path();
@@ -83,10 +84,18 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         model_context_window_tokens,
         Some(paths.root.join("runtime-smart-context-artifacts.json")),
     );
+    register_runtime_presidio_redaction_proxy_state(
+        &log_path,
+        if presidio_redaction_enabled {
+            Some(runtime_presidio_redaction_config(paths)?)
+        } else {
+            None
+        },
+    );
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime local rewrite proxy started listen_addr={listen_addr} smart_context_enabled={smart_context_enabled} upstream_base_url={upstream_base_url} upstream_proxy_mode={}",
+            "runtime local rewrite proxy started listen_addr={listen_addr} smart_context_enabled={smart_context_enabled} presidio_redaction_enabled={presidio_redaction_enabled} upstream_base_url={upstream_base_url} upstream_proxy_mode={}",
             runtime_upstream_proxy_mode_label(true)
         ),
     );
@@ -189,7 +198,7 @@ fn handle_runtime_local_rewrite_proxy_request(
     }
 
     let mut request = request;
-    let captured = match capture_runtime_proxy_request(&mut request) {
+    let mut captured = match capture_runtime_proxy_request(&mut request) {
         Ok(captured) => captured,
         Err(err) => {
             runtime_proxy_log(
@@ -207,6 +216,23 @@ fn handle_runtime_local_rewrite_proxy_request(
             return;
         }
     };
+    if let Err(err) =
+        apply_runtime_presidio_redaction_to_request(request_id, &mut captured, runtime_shared)
+    {
+        runtime_proxy_log(
+            runtime_shared,
+            runtime_proxy_structured_log_message(
+                "local_rewrite_presidio_redaction_failed",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("error", format!("{err:#}")),
+                ],
+            ),
+        );
+        let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+        return;
+    }
     let response = match send_runtime_local_rewrite_upstream_request(request_id, &captured, shared)
     {
         Ok(response) => response,

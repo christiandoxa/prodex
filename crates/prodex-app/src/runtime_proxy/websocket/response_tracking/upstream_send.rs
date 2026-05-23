@@ -3,7 +3,8 @@ use tungstenite::Message as WsMessage;
 
 use super::{
     RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeRouteKind, RuntimeUpstreamWebSocket,
-    RuntimeWebsocketAttempt, RuntimeWebsocketSessionState, note_runtime_profile_transport_failure,
+    RuntimeWebsocketAttempt, RuntimeWebsocketSessionState,
+    apply_runtime_presidio_redaction_to_websocket_text, note_runtime_profile_transport_failure,
     prepare_runtime_smart_context_websocket_text, runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_structured_log_message,
 };
@@ -35,9 +36,11 @@ pub(super) fn send_runtime_websocket_upstream_request(
         upstream_socket,
     } = request;
 
+    let redacted_request_text =
+        apply_runtime_presidio_redaction_to_websocket_text(request_id, request_text, shared)?;
     let upstream_request_text = prepare_runtime_smart_context_websocket_text(
         request_id,
-        request_text,
+        redacted_request_text.as_ref(),
         handshake_request,
         shared,
         profile_name,

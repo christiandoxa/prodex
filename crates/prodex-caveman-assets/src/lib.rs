@@ -45,7 +45,7 @@ RTK works on the upstream/input side. Use it before terminal output enters the m
 
 ## Rule
 
-Prefix shell commands with `rtk` when RTK is available.
+Hard rule: the visible shell command for noisy terminal work must begin with `rtk <cmd>`. Prodex Super also puts an overlay `rtk` wrapper first on PATH and auto-wraps common noisy commands when RTK is installed, but do not rely on that fallback when writing commands.
 
 Examples:
 
@@ -56,7 +56,7 @@ rtk npm run build
 rtk pytest -q
 ```
 
-If `rtk` is not installed or `rtk gain` fails, run the command raw and tell the user RTK is unavailable.
+If `rtk` is not installed or `rtk gain` fails, tell the user RTK is unavailable. Do not pretend RTK compression happened.
 
 ## Meta Commands
 
@@ -81,7 +81,7 @@ Prodex Super mode already enables Caveman, RTK guidance, Claude-Mem super-slim r
 
 ## Token Flow
 
-RTK handles upstream/input command output before it enters the context window. Use `rtk <cmd>` for noisy shell commands such as diffs, tests, builds, and package-manager output.
+RTK handles upstream/input command output before it enters the context window. Visible noisy shell commands must use `rtk <cmd>` for diffs, tests, builds, and package-manager output; Prodex also auto-wraps common noisy commands as a safety fallback when RTK is installed.
 
 SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large text blobs, and conversation/context compression instead of re-emitting full text.
 
@@ -97,7 +97,7 @@ Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed opt
 
 ## AST Compression
 
-If `claw-compactor` is installed, use it only as a manual, reversible code-summary aid for exploration. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
+If `claw-compactor` is available, use it only as a manual, reversible code-summary aid for exploration. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
 
 ## Safety
 
