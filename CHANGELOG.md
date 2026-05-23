@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.107.0 - 2026-05-24
+
+### CLI
+
+- Prefer managed token-savior venv (`5181b7c`)
+
 ## 0.106.0 - 2026-05-23
 
 ### Misc
@@ -87,13 +93,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.96.0 - 2026-05-12
 
 - No grouped changes.
-
-## 0.95.0 - 2026-05-11
-
-### Runtime
-
-- Rotate through full profile pool (`3930e27`)
-
-### Deps
-
-- Bump tokio to 1.52.3 (`af1a739`)
