@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.105.0 - 2026-05-23
+
+### Misc
+
+- Add presidio support (`dae6097`)
+
 ## 0.104.0 - 2026-05-22
 
 ### CLI
@@ -90,10 +96,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Silence selection helper reexports (`4b952d3`)
-
-## 0.93.0 - 2026-05-09
-
-### Misc
-
-- Add safe housekeeping controls (`95ec69b`)
-- Share Codex environments config (`9517257`)
