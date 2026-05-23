@@ -1,4 +1,10 @@
-use super::*;
+use crate::{claude_bin, codex_bin};
+use anyhow::{Context, Result};
+use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs};
+use prodex_core::AppPaths;
+use std::fs;
+use std::process::{Command, Stdio};
+use terminal_ui::{print_blank_line, print_panel, print_stdout_line};
 
 #[derive(Debug, Clone)]
 struct ProdexCapability {
@@ -56,15 +62,15 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
     let mut rows = Vec::new();
     rows.push((
         "Codex CLI".to_string(),
-        command_version_status(&codex_bin(), "--version"),
+        command_version_status(codex_bin(), "--version"),
     ));
     rows.push((
         "Codex auth".to_string(),
-        command_status(&codex_bin(), &["login", "status"]),
+        command_status(codex_bin(), &["login", "status"]),
     ));
     rows.push((
         "Claude Code".to_string(),
-        command_version_status(&claude_bin(), "--version"),
+        command_version_status(claude_bin(), "--version"),
     ));
     rows.push((
         "RTK".to_string(),
