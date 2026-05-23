@@ -1,57 +1,21 @@
 use super::await_runtime_proxy_async_task;
+use crate::RuntimePresidioRedactionConfig;
 use crate::runtime_core_shared::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use crate::runtime_proxy_log;
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
 use anyhow::{Context, Result};
-use prodex_core::AppPaths;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
-const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
-const DEFAULT_PRESIDIO_ANONYMIZER_URL: &str = "http://localhost:5001";
-const DEFAULT_PRESIDIO_LANGUAGE: &str = "en";
 const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 static RUNTIME_PRESIDIO_REDACTION_BY_LOG_PATH: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimePresidioRedactionConfig>>,
 > = OnceLock::new();
-
-#[derive(Debug, Clone, serde::Deserialize)]
-struct ProdexPresidioRuntimeFileConfig {
-    #[serde(default = "default_presidio_analyzer_url")]
-    analyzer_url: String,
-    #[serde(default = "default_presidio_anonymizer_url")]
-    anonymizer_url: String,
-    #[serde(default = "default_presidio_language")]
-    language: String,
-    #[serde(default = "default_presidio_fail_mode")]
-    fail_mode: String,
-}
-
-impl Default for ProdexPresidioRuntimeFileConfig {
-    fn default() -> Self {
-        Self {
-            analyzer_url: default_presidio_analyzer_url(),
-            anonymizer_url: default_presidio_anonymizer_url(),
-            language: default_presidio_language(),
-            fail_mode: default_presidio_fail_mode(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimePresidioRedactionConfig {
-    analyzer_url: String,
-    anonymizer_url: String,
-    language: String,
-    fail_closed: bool,
-}
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct PresidioAnalyzerResult {
@@ -64,43 +28,6 @@ struct PresidioAnalyzerResult {
 #[derive(Debug, serde::Deserialize)]
 struct PresidioAnonymizeResponse {
     text: String,
-}
-
-fn default_presidio_analyzer_url() -> String {
-    DEFAULT_PRESIDIO_ANALYZER_URL.to_string()
-}
-
-fn default_presidio_anonymizer_url() -> String {
-    DEFAULT_PRESIDIO_ANONYMIZER_URL.to_string()
-}
-
-fn default_presidio_language() -> String {
-    DEFAULT_PRESIDIO_LANGUAGE.to_string()
-}
-
-fn default_presidio_fail_mode() -> String {
-    "open".to_string()
-}
-
-pub(crate) fn runtime_presidio_redaction_config(
-    paths: &AppPaths,
-) -> Result<RuntimePresidioRedactionConfig> {
-    let path = paths.root.join(PRODEX_PRESIDIO_FILE_NAME);
-    let file_config = if path.exists() {
-        toml::from_str::<ProdexPresidioRuntimeFileConfig>(
-            &fs::read_to_string(&path)
-                .with_context(|| format!("failed to read {}", path.display()))?,
-        )
-        .with_context(|| format!("failed to parse {}", path.display()))?
-    } else {
-        ProdexPresidioRuntimeFileConfig::default()
-    };
-    Ok(RuntimePresidioRedactionConfig {
-        analyzer_url: file_config.analyzer_url,
-        anonymizer_url: file_config.anonymizer_url,
-        language: file_config.language,
-        fail_closed: file_config.fail_mode.eq_ignore_ascii_case("closed"),
-    })
 }
 
 pub(crate) fn register_runtime_presidio_redaction_proxy_state(
