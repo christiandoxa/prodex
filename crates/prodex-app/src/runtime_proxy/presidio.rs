@@ -1,5 +1,16 @@
-use super::*;
+use super::await_runtime_proxy_async_task;
+use crate::runtime_core_shared::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
+use crate::runtime_proxy_log;
+use crate::runtime_state_shared::RuntimeRotationProxyShared;
+use crate::shared_types::RuntimeProxyRequest;
+use anyhow::{Context, Result};
+use prodex_core::AppPaths;
 use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
 const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
@@ -290,7 +301,10 @@ fn presidio_endpoint(base_url: &str, path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{RuntimePresidioRedactionConfig, runtime_presidio_redact_body};
+    use std::thread;
+    use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
+    use tokio::runtime::Builder as TokioRuntimeBuilder;
 
     fn start_presidio_fixture(
         response_body: &'static str,
