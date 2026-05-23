@@ -167,8 +167,16 @@ fn find_optimizer_command(
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
 ) -> Option<PathBuf> {
+    if prefer_managed_optimizer(command) {
+        return find_managed_optimizer_command(command, optimizer_roots)
+            .or_else(|| find_path_command(command, path_dirs));
+    }
     find_path_command(command, path_dirs)
         .or_else(|| find_managed_optimizer_command(command, optimizer_roots))
+}
+
+fn prefer_managed_optimizer(command: &str) -> bool {
+    matches!(command, "token-savior")
 }
 
 fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
@@ -274,10 +282,10 @@ fn push_python_tool_candidates(
     command: &str,
 ) {
     let checkout = root.join(checkout_name);
-    push_command_candidate(candidates, checkout.join(command));
-    push_command_candidate(candidates, checkout.join("bin").join(command));
     push_command_candidate(candidates, checkout.join(".venv").join("bin").join(command));
     push_command_candidate(candidates, checkout.join("venv").join("bin").join(command));
+    push_command_candidate(candidates, checkout.join("bin").join(command));
+    push_command_candidate(candidates, checkout.join(command));
 }
 
 fn push_command_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
@@ -431,6 +439,71 @@ mod tests {
         assert_eq!(
             find_managed_optimizer_command("sqz-mcp", std::slice::from_ref(&root)),
             Some(command)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn token_savior_discovery_prefers_managed_venv_over_path() {
+        let path_root = temp_dir("path-root");
+        let optimizer_root = temp_dir("optimizer-root");
+        let path_command = command_path(path_root.join("token-savior"));
+        let managed_command = command_path(
+            optimizer_root
+                .join("token-savior")
+                .join(".venv")
+                .join("bin")
+                .join("token-savior"),
+        );
+        fs::create_dir_all(path_command.parent().expect("path parent should exist"))
+            .expect("path parent should be created");
+        fs::create_dir_all(
+            managed_command
+                .parent()
+                .expect("managed parent should exist"),
+        )
+        .expect("managed parent should be created");
+        fs::write(&path_command, "").expect("path command should be written");
+        fs::write(&managed_command, "").expect("managed command should be written");
+
+        assert_eq!(
+            find_optimizer_command(
+                "token-savior",
+                std::slice::from_ref(&path_root),
+                std::slice::from_ref(&optimizer_root),
+            ),
+            Some(managed_command)
+        );
+
+        let _ = fs::remove_dir_all(path_root);
+        let _ = fs::remove_dir_all(optimizer_root);
+    }
+
+    #[test]
+    fn managed_token_savior_discovery_prefers_venv_binary() {
+        let root = temp_dir("token-savior-root");
+        let checkout_command = command_path(root.join("token-savior").join("token-savior"));
+        let venv_command = command_path(
+            root.join("token-savior")
+                .join(".venv")
+                .join("bin")
+                .join("token-savior"),
+        );
+        fs::create_dir_all(
+            checkout_command
+                .parent()
+                .expect("checkout parent should exist"),
+        )
+        .expect("checkout parent should be created");
+        fs::create_dir_all(venv_command.parent().expect("venv parent should exist"))
+            .expect("venv parent should be created");
+        fs::write(&checkout_command, "").expect("checkout command should be written");
+        fs::write(&venv_command, "").expect("venv command should be written");
+
+        assert_eq!(
+            find_managed_optimizer_command("token-savior", std::slice::from_ref(&root)),
+            Some(venv_command)
         );
 
         let _ = fs::remove_dir_all(root);

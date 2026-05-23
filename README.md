@@ -244,11 +244,13 @@ token-savior is used by `prodex tokensavior` and by Super mode when the `token-s
 Recommended isolated install:
 
 ```bash
-git clone https://github.com/Mibayy/token-savior ~/.local/share/token-savior
-python3 -m venv ~/.local/token-savior-venv
-~/.local/token-savior-venv/bin/pip install -e "$HOME/.local/share/token-savior[mcp]"
-ln -sf ~/.local/token-savior-venv/bin/token-savior ~/.local/bin/token-savior
+git clone https://github.com/Mibayy/token-savior ~/.local/share/prodex-optimizers/token-savior
+python3.12 -m venv ~/.local/share/prodex-optimizers/token-savior/.venv
+~/.local/share/prodex-optimizers/token-savior/.venv/bin/pip install -e "$HOME/.local/share/prodex-optimizers/token-savior[mcp]"
+ln -sf ~/.local/share/prodex-optimizers/token-savior/.venv/bin/token-savior ~/.local/bin/token-savior
 ```
+
+Use a stable Python interpreter supported by token-savior dependencies, such as Python 3.11, 3.12, or 3.13. Avoid pointing this MCP server at experimental Python releases unless its native dependencies already support them.
 
 Make sure `~/.local/bin` is on `PATH`:
 
