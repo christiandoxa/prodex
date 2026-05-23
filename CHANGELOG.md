@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.108.0 - 2026-05-24
+
+### Misc
+
+- Add setup diagnostics and capability reporting (`e9499fc`)
+
 ## 0.107.0 - 2026-05-24
 
 ### CLI
@@ -89,7 +95,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Remove blocking SSE lookahead (`fa08c43`)
 - Avoid SSE lookahead starving prefetch (`c84c053`)
-
-## 0.96.0 - 2026-05-12
-
-- No grouped changes.
