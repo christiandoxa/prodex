@@ -414,7 +414,8 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
     assert!(
         parsed_config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
             .as_str()
-            .is_some_and(|command| command.contains("CAVEMAN MODE ACTIVE"))
+            .is_some_and(|command| command.contains("CAVEMAN MODE ACTIVE")
+                && command.contains("noisy shell commands must visibly start with rtk <cmd>"))
     );
     let hook_key = format!("{}:session_start:0:0", temp_config.display());
     let trusted_hash = parsed_config["hooks"]["state"][&hook_key]["trusted_hash"]

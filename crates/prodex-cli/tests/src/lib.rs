@@ -193,6 +193,7 @@ fn super_mem_super_slim_expands_to_all_super_prefixes() {
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
+            OsString::from("presidio"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -214,6 +215,7 @@ fn super_default_keeps_all_super_prefixes() {
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
+            OsString::from("presidio"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -248,14 +250,14 @@ fn super_and_s_enable_super_optimizer_overlay() {
 }
 
 #[test]
-fn super_can_add_presidio_prefix_when_requested() {
+fn super_includes_presidio_prefix_by_default() {
     let command = parse_cli_command_from(["prodex", "super", "exec", "hello"])
         .expect("super command should parse");
     let Commands::Super(args) = command else {
         panic!("expected super command");
     };
     assert_eq!(
-        args.into_caveman_args_with_presidio(true).codex_args,
+        args.into_caveman_args().codex_args,
         os_args(&[
             "mem",
             "rtk",

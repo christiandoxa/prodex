@@ -94,6 +94,20 @@ pub fn trust_claude_mem_codex_plugin_hooks(codex_home: &Path) -> Result<()> {
 }
 
 pub(crate) fn configure_caveman_session_start_hook(table: &mut toml::Table) -> usize {
+    configure_session_start_command_hook(table, PRODEX_CAVEMAN_HOOK_COMMAND)
+}
+
+pub(crate) fn configure_trusted_session_start_command_hook(
+    table: &mut toml::Table,
+    config_path: &Path,
+    command: &str,
+) -> Result<usize> {
+    let group_index = configure_session_start_command_hook(table, command);
+    configure_session_start_command_hook_trust_state(table, config_path, group_index, command)?;
+    Ok(group_index)
+}
+
+fn configure_session_start_command_hook(table: &mut toml::Table, command: &str) -> usize {
     let hooks = ensure_child_table(table, "hooks");
     let session_start = hooks
         .entry("SessionStart".to_string())
@@ -113,7 +127,7 @@ pub(crate) fn configure_caveman_session_start_hook(table: &mut toml::Table) -> u
     );
     command_hook.insert(
         "command".to_string(),
-        toml::Value::String(PRODEX_CAVEMAN_HOOK_COMMAND.to_string()),
+        toml::Value::String(command.to_string()),
     );
 
     let mut group = toml::Table::new();
@@ -130,8 +144,22 @@ pub(crate) fn configure_caveman_hook_trust_state(
     config_path: &Path,
     group_index: usize,
 ) -> Result<()> {
+    configure_session_start_command_hook_trust_state(
+        table,
+        config_path,
+        group_index,
+        PRODEX_CAVEMAN_HOOK_COMMAND,
+    )
+}
+
+fn configure_session_start_command_hook_trust_state(
+    table: &mut toml::Table,
+    config_path: &Path,
+    group_index: usize,
+    command: &str,
+) -> Result<()> {
     let hook_key = caveman_hook_trust_key(config_path, group_index, 0);
-    let trusted_hash = caveman_session_start_hook_hash()?;
+    let trusted_hash = session_start_command_hook_hash(command)?;
     let hooks = ensure_child_table(table, "hooks");
     let state = ensure_child_table(hooks, "state");
     let hook_state = ensure_child_table(state, &hook_key);
@@ -149,12 +177,12 @@ fn caveman_hook_trust_key(config_path: &Path, group_index: usize, hook_index: us
     )
 }
 
-fn caveman_session_start_hook_hash() -> Result<String> {
+fn session_start_command_hook_hash(command: &str) -> Result<String> {
     // Codex 0.129 hashes the normalized hook identity, including default timeout.
     let group = CavemanHookMatcherGroup {
         matcher: None,
         hooks: vec![CavemanHookHandlerConfig::Command {
-            command: PRODEX_CAVEMAN_HOOK_COMMAND.to_string(),
+            command: command.to_string(),
             timeout_sec: Some(PRODEX_CAVEMAN_HOOK_TIMEOUT_SEC),
             r#async: false,
             status_message: None,

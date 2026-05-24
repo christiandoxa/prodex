@@ -202,6 +202,7 @@ mod tests {
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
         assert!(strategy.rtk_enabled);
+        assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
         assert_eq!(
             strategy.codex_args,
@@ -220,6 +221,7 @@ mod tests {
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
         assert!(strategy.rtk_enabled);
+        assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
     }
 
@@ -235,6 +237,7 @@ mod tests {
 
         assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::Full));
         assert!(strategy.rtk_enabled);
+        assert!(strategy.presidio_enabled);
     }
 
     #[test]

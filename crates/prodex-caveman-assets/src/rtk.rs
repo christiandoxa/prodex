@@ -320,6 +320,8 @@ mod tests {
         let output = Command::new(&wrapper)
             .arg("test")
             .env("PRODEX_RTK_MARKER", &marker)
+            .env_remove("PRODEX_RTK_AUTO_WRAP_DEPTH")
+            .env_remove("PRODEX_RTK_DISABLE_AUTO_WRAP")
             .output()
             .expect("wrapper should run");
         assert!(output.status.success());
@@ -331,6 +333,8 @@ mod tests {
         let output = Command::new(&wrapper)
             .arg("fmt")
             .env("PRODEX_RTK_MARKER", &marker)
+            .env_remove("PRODEX_RTK_AUTO_WRAP_DEPTH")
+            .env_remove("PRODEX_RTK_DISABLE_AUTO_WRAP")
             .output()
             .expect("wrapper should run raw command");
         assert!(output.status.success());

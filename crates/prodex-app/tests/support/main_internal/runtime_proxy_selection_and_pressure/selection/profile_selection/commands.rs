@@ -139,6 +139,7 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_full_super_prefix_
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
+            OsString::from("presidio"),
             OsString::from("exec"),
             OsString::from("review this repo")
         ]
@@ -413,6 +414,7 @@ fn super_command_mem_full_expands_to_full_mem_prefix() {
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
+            OsString::from("presidio"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -422,6 +424,8 @@ fn super_command_mem_full_expands_to_full_mem_prefix() {
     assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
     assert!(rtk_enabled);
     assert!(super_optimizer_overlay);
+    let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
+    assert!(presidio_enabled);
     assert_eq!(codex_args, vec![OsString::from("exec"), OsString::from("review")]);
 }
 
@@ -458,6 +462,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
     assert_eq!(rendered.get(2).map(String::as_str), Some("sqz"));
     assert_eq!(rendered.get(3).map(String::as_str), Some("tokensavior"));
     assert_eq!(rendered.get(4).map(String::as_str), Some("clawcompactor"));
+    assert_eq!(rendered.get(5).map(String::as_str), Some("presidio"));
     assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
     assert!(rendered.contains(&"model=\"local/qwen\"".to_string()));
     assert!(rendered.contains(

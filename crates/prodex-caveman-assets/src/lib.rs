@@ -31,7 +31,7 @@ pub const PRODEX_RTK_SOURCE_REPO: &str = "https://github.com/rtk-ai/rtk.git";
 
 pub(crate) const CLAUDE_MEM_PLUGIN_NAME: &str = "claude-mem";
 pub(crate) const PRODEX_CAVEMAN_HOOK_TIMEOUT_SEC: u64 = 600;
-pub(crate) const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "echo 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.'";
+pub(crate) const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "printf '%s\\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'RTK ACTIVE WHEN CONFIGURED. In prodex rtk/s/super, noisy shell commands must visibly start with rtk <cmd>; do not wait for the user to remind you.'";
 pub(crate) const RTK_MD: &str = "RTK.md";
 pub(crate) const SUPER_OPTIMIZERS_MD: &str = "SUPER_OPTIMIZERS.md";
 pub(crate) const AGENTS_MD: &str = "AGENTS.md";
@@ -45,9 +45,11 @@ RTK works on the upstream/input side. Use it before terminal output enters the m
 
 ## Rule
 
-Hard rule: the visible shell command for noisy terminal work must begin with `rtk <cmd>`. Prodex Super also puts an overlay `rtk` wrapper first on PATH and auto-wraps common noisy commands when RTK is installed, but do not rely on that fallback when writing commands.
+The `prodex rtk`, `prodex s`, or `prodex super` launch is the user instruction to use RTK. Do not wait for the user to ask again.
 
-Do not write plain noisy commands such as `git show ...`, `cargo test ...`, `npm run ...`, or `pytest ...` and assume the wrapper is enough. The wrapper is a fail-safe only; it does not make the Codex TUI/transcript show the `rtk` prefix and can be bypassed by inherited wrapper-depth environment.
+Hard rule: the visible shell command for noisy terminal work must begin with `rtk <cmd>`. This includes diffs, commit inspection, tests, builds, package-manager output, recursive search, and long logs.
+
+Do not write plain noisy commands such as `git show ...`, `cargo test ...`, `npm run ...`, or `pytest ...`. Prodex Super also puts an overlay `rtk` wrapper first on PATH and auto-wraps common noisy commands when RTK is installed, but that wrapper is only a safety net. It does not make the Codex TUI/transcript show the `rtk` prefix and can be bypassed by inherited wrapper-depth environment.
 
 Examples:
 
@@ -79,13 +81,13 @@ which rtk
 
 pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Super Optimizers
 
-Prodex Super mode already enables Caveman, RTK guidance, Claude-Mem super-slim recall, and Smart Context Autopilot. Use extra token optimizers only when they are local, deterministic, and safe for the current task.
+Prodex Super mode already enables Caveman, Presidio redaction, RTK guidance, Claude-Mem super-slim recall, and Smart Context Autopilot. Use extra token optimizers only when they are local, deterministic, and safe for the current task.
 
 ## Token Flow
 
-RTK handles upstream/input command output before it enters the context window. Visible noisy shell commands must use `rtk <cmd>` for diffs, tests, builds, and package-manager output; Prodex also auto-wraps common noisy commands as a safety fallback when RTK is installed.
+RTK handles upstream/input command output before it enters the context window. Launching through `prodex s` or `prodex super` is already the user's instruction to use RTK; do not wait for a reminder.
 
-Auto-wrappers are only a backstop for accidental misses. They are not a substitute for writing visible `rtk <cmd>` commands, because the Codex TUI shows the command text before PATH resolution.
+Visible noisy shell commands must use `rtk <cmd>` for diffs, commit inspection, tests, builds, package-manager output, recursive search, and long logs. Prodex also auto-wraps common noisy commands as a safety fallback when RTK is installed, but auto-wrappers are only a backstop for accidental misses. They are not a substitute for writing visible `rtk <cmd>` commands, because the Codex TUI shows the command text before PATH resolution.
 
 SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large text blobs, and conversation/context compression instead of re-emitting full text.
 
@@ -101,7 +103,7 @@ Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed opt
 
 ## AST Compression
 
-If `claw-compactor` is available, use it only as a manual, reversible code-summary aid for exploration. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
+If `claw-compactor` is available, Prodex Super invokes a trusted SessionStart benchmark probe through `prodex-claw-compactor-auto "$(pwd)"` so the runtime receives a compact workspace savings signal. Use `claw-compactor` only as a manual, reversible code-summary aid for exploration after that. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
 
 ## Safety
 
