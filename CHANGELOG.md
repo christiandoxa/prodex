@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.110.0 - 2026-05-24
+
+### CLI
+
+- Harden optimizer stack diagnostics (`cc23f21`)
+
 ## 0.109.0 - 2026-05-24
 
 ### Runtime
@@ -89,9 +95,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Satisfy ci warning gates (`f9b85de`)
 - Add multi-auth governance primitives (`8e4acc7`)
 - Harden diagnostics and release safeguards (`f7fef28`)
-
-## 0.98.0 - 2026-05-13
-
-### Runtime
-
-- Remove unused runtime payload re-export (`9a8eb22`)
