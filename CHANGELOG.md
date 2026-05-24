@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.114.0 - 2026-05-25
+
+### Misc
+
+- Add claw shadow workspace fallback (`ccf2127`)
+
 ## 0.113.0 - 2026-05-24
 
 ### CLI
@@ -70,13 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Discover managed optimizer checkouts (`03ba60d`)
-
-## 0.102.0 - 2026-05-22
-
-### CLI
-
-- Add optimizer overlay (`9ab0612`)
-
-### Misc
-
-- Drop publish troubleshooting changes (`69c6d71`)
