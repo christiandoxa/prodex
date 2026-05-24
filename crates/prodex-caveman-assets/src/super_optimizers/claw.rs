@@ -265,9 +265,9 @@ mod tests {
             &[],
         )
         .expect("claw wrappers should write");
-        configure_session_hook(&codex_home, &[path_root.clone()], &[])
+        configure_session_hook(&codex_home, std::slice::from_ref(&path_root), &[])
             .expect("claw hook should write");
-        configure_session_hook(&codex_home, &[path_root.clone()], &[])
+        configure_session_hook(&codex_home, std::slice::from_ref(&path_root), &[])
             .expect("claw hook should be idempotent");
 
         let wrapper = fs::read_to_string(codex_home.join("bin").join(AUTO_WRAPPER))
