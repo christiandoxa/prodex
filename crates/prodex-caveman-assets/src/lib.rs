@@ -103,7 +103,7 @@ Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed opt
 
 ## AST Compression
 
-If `claw-compactor` is available, Prodex Super invokes a trusted SessionStart benchmark probe through `prodex-claw-compactor-auto "$(pwd)"` so the runtime receives a compact workspace savings signal. Use `claw-compactor` only as a manual, reversible code-summary aid for exploration after that. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
+If `claw-compactor` is available, Prodex Super invokes a trusted SessionStart benchmark probe through `prodex-claw-compactor-auto "$(pwd)"` so the runtime receives a compact workspace savings signal. When the current directory has no Markdown memory files, the wrapper generates a temporary shadow workspace with a synthetic `MEMORY.md` summary and leaves the original directory untouched. Use `claw-compactor` only as a manual, reversible code-summary aid for exploration after that. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
 
 ## Safety
 

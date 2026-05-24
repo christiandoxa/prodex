@@ -114,13 +114,69 @@ fn write_auto_wrapper_for_binary(path: &Path, command: &Path) -> Result<()> {
     let script = format!(
         r#"#!/usr/bin/env sh
 workspace="${{1:-$(pwd)}}"
-if output=$({command} benchmark "$workspace" --json 2>/dev/null); then
-  printf 'CLAW_COMPACTOR_ACTIVE %.12000s\n' "$output"
-elif output=$({command} "$workspace" benchmark --json 2>/dev/null); then
-  printf 'CLAW_COMPACTOR_ACTIVE %.12000s\n' "$output"
-else
-  printf '%s\n' 'CLAW_COMPACTOR_UNAVAILABLE'
+
+run_claw() {{
+  target="$1"
+  if output=$({command} benchmark "$target" --json 2>/dev/null); then
+    printf 'CLAW_COMPACTOR_ACTIVE %.12000s\n' "$output"
+    return 0
+  elif output=$({command} "$target" benchmark --json 2>/dev/null); then
+    printf 'CLAW_COMPACTOR_ACTIVE %.12000s\n' "$output"
+    return 0
+  fi
+  return 1
+}}
+
+has_claw_markdown() {{
+  target="$1"
+  if find "$target" -maxdepth 1 -type f -name '*.md' -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  if [ -d "$target/memory" ] && find "$target/memory" -maxdepth 1 -type f -name '*.md' ! -name '.*' -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  return 1
+}}
+
+write_shadow_memory() {{
+  original="$1"
+  output="$2"
+  {{
+    printf '# Prodex Claw Shadow Workspace\n\n'
+    printf 'Original workspace: `%s`\n\n' "$original"
+    printf '%s\n\n' 'This temporary Markdown file lets claw-compactor benchmark a directory that has no Markdown memory files. Prodex generated it outside the original workspace.'
+    printf '## Top-Level Entries\n\n'
+    if [ -d "$original" ]; then
+      find "$original" -maxdepth 1 -mindepth 1 \( -name '.git' -o -name 'node_modules' -o -name 'target' -o -name 'dist' -o -name 'build' -o -name '.venv' -o -name 'venv' -o -name '__pycache__' \) -prune -o -print 2>/dev/null | sort | head -80 | sed 's/^/- /'
+    fi
+    printf '\n## Important Files\n\n'
+    if [ -d "$original" ]; then
+      find "$original" -maxdepth 3 \( -type d \( -name '.git' -o -name 'node_modules' -o -name 'target' -o -name 'dist' -o -name 'build' -o -name '.venv' -o -name 'venv' -o -name '__pycache__' -o -name 'vendor' \) -prune \) -o \( -type f \( -name 'Cargo.toml' -o -name 'package.json' -o -name 'pyproject.toml' -o -name 'go.mod' -o -name 'pom.xml' -o -name 'build.gradle' -o -name 'Makefile' -o -name 'Dockerfile' \) -print \) 2>/dev/null | sort | head -80 | sed 's/^/- /'
+    fi
+    printf '\n## Code File Sample\n\n'
+    if [ -d "$original" ]; then
+      find "$original" -maxdepth 3 \( -type d \( -name '.git' -o -name 'node_modules' -o -name 'target' -o -name 'dist' -o -name 'build' -o -name '.venv' -o -name 'venv' -o -name '__pycache__' -o -name 'vendor' \) -prune \) -o \( -type f \( -name '*.rs' -o -name '*.py' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.go' -o -name '*.java' -o -name '*.kt' -o -name '*.swift' -o -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) -print \) 2>/dev/null | sort | head -120 | sed 's/^/- /'
+    fi
+  }} > "$output"
+}}
+
+run_shadow_claw() {{
+  target="$1"
+  [ -d "$target" ] || return 1
+  has_claw_markdown "$target" && return 1
+  shadow="$(mktemp -d "${{TMPDIR:-/tmp}}/prodex-claw-shadow.XXXXXX")" || return 1
+  trap 'rm -rf "$shadow"' EXIT HUP INT TERM
+  write_shadow_memory "$target" "$shadow/MEMORY.md" || return 1
+  run_claw "$shadow"
+}}
+
+if run_claw "$workspace"; then
+  exit 0
 fi
+if run_shadow_claw "$workspace"; then
+  exit 0
+fi
+printf '%s\n' 'CLAW_COMPACTOR_UNAVAILABLE'
 "#
     );
     write_executable_script(path, &script)
@@ -132,11 +188,66 @@ fn write_auto_wrapper_for_script(path: &Path, python: &Path, script_path: &Path)
     let script = format!(
         r#"#!/usr/bin/env sh
 workspace="${{1:-$(pwd)}}"
-if output=$({python} {script_path} "$workspace" benchmark --json 2>/dev/null); then
-  printf 'CLAW_COMPACTOR_ACTIVE %.12000s\n' "$output"
-else
-  printf '%s\n' 'CLAW_COMPACTOR_UNAVAILABLE'
+
+run_claw() {{
+  target="$1"
+  if output=$({python} {script_path} "$target" benchmark --json 2>/dev/null); then
+    printf 'CLAW_COMPACTOR_ACTIVE %.12000s\n' "$output"
+    return 0
+  fi
+  return 1
+}}
+
+has_claw_markdown() {{
+  target="$1"
+  if find "$target" -maxdepth 1 -type f -name '*.md' -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  if [ -d "$target/memory" ] && find "$target/memory" -maxdepth 1 -type f -name '*.md' ! -name '.*' -print -quit 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  return 1
+}}
+
+write_shadow_memory() {{
+  original="$1"
+  output="$2"
+  {{
+    printf '# Prodex Claw Shadow Workspace\n\n'
+    printf 'Original workspace: `%s`\n\n' "$original"
+    printf '%s\n\n' 'This temporary Markdown file lets claw-compactor benchmark a directory that has no Markdown memory files. Prodex generated it outside the original workspace.'
+    printf '## Top-Level Entries\n\n'
+    if [ -d "$original" ]; then
+      find "$original" -maxdepth 1 -mindepth 1 \( -name '.git' -o -name 'node_modules' -o -name 'target' -o -name 'dist' -o -name 'build' -o -name '.venv' -o -name 'venv' -o -name '__pycache__' \) -prune -o -print 2>/dev/null | sort | head -80 | sed 's/^/- /'
+    fi
+    printf '\n## Important Files\n\n'
+    if [ -d "$original" ]; then
+      find "$original" -maxdepth 3 \( -type d \( -name '.git' -o -name 'node_modules' -o -name 'target' -o -name 'dist' -o -name 'build' -o -name '.venv' -o -name 'venv' -o -name '__pycache__' -o -name 'vendor' \) -prune \) -o \( -type f \( -name 'Cargo.toml' -o -name 'package.json' -o -name 'pyproject.toml' -o -name 'go.mod' -o -name 'pom.xml' -o -name 'build.gradle' -o -name 'Makefile' -o -name 'Dockerfile' \) -print \) 2>/dev/null | sort | head -80 | sed 's/^/- /'
+    fi
+    printf '\n## Code File Sample\n\n'
+    if [ -d "$original" ]; then
+      find "$original" -maxdepth 3 \( -type d \( -name '.git' -o -name 'node_modules' -o -name 'target' -o -name 'dist' -o -name 'build' -o -name '.venv' -o -name 'venv' -o -name '__pycache__' -o -name 'vendor' \) -prune \) -o \( -type f \( -name '*.rs' -o -name '*.py' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.go' -o -name '*.java' -o -name '*.kt' -o -name '*.swift' -o -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) -print \) 2>/dev/null | sort | head -120 | sed 's/^/- /'
+    fi
+  }} > "$output"
+}}
+
+run_shadow_claw() {{
+  target="$1"
+  [ -d "$target" ] || return 1
+  has_claw_markdown "$target" && return 1
+  shadow="$(mktemp -d "${{TMPDIR:-/tmp}}/prodex-claw-shadow.XXXXXX")" || return 1
+  trap 'rm -rf "$shadow"' EXIT HUP INT TERM
+  write_shadow_memory "$target" "$shadow/MEMORY.md" || return 1
+  run_claw "$shadow"
+}}
+
+if run_claw "$workspace"; then
+  exit 0
 fi
+if run_shadow_claw "$workspace"; then
+  exit 0
+fi
+printf '%s\n' 'CLAW_COMPACTOR_UNAVAILABLE'
 "#
     );
     write_executable_script(path, &script)
@@ -168,6 +279,8 @@ fn write_executable_script(path: &Path, script: &str) -> Result<()> {
 mod tests {
     use super::*;
     use std::env;
+    #[cfg(unix)]
+    use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -274,6 +387,10 @@ mod tests {
             .expect("auto wrapper should exist");
         assert!(wrapper.contains("benchmark"));
         assert!(wrapper.contains("--json"));
+        assert!(wrapper.contains("Prodex Claw Shadow Workspace"));
+        assert!(wrapper.contains("MEMORY.md"));
+        assert!(wrapper.contains("mktemp -d"));
+        assert!(wrapper.contains("has_claw_markdown"));
 
         let config_path = codex_home.join("config.toml");
         let config = fs::read_to_string(&config_path).expect("config.toml should be written");
@@ -307,5 +424,51 @@ mod tests {
 
         let _ = fs::remove_dir_all(codex_home);
         let _ = fs::remove_dir_all(path_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn auto_wrapper_uses_shadow_workspace_when_markdown_is_missing() {
+        let root = temp_dir("shadow-wrapper");
+        let workspace = root.join("plain-workspace");
+        let bin_dir = root.join("bin");
+        let fake_claw = command_path(bin_dir.join("claw-compactor"));
+        let wrapper = bin_dir.join(AUTO_WRAPPER);
+        fs::create_dir_all(&workspace).expect("plain workspace should exist");
+        fs::write(workspace.join("main.rs"), "fn main() {}\n")
+            .expect("sample source should be written");
+        write_executable_script(
+            &fake_claw,
+            r#"#!/usr/bin/env sh
+if [ "$1" = "benchmark" ]; then
+  target="$2"
+else
+  target="$1"
+fi
+if [ -f "$target/MEMORY.md" ]; then
+  printf '{"shadow":true,"target":"%s"}\n' "$target"
+  exit 0
+fi
+exit 1
+"#,
+        )
+        .expect("fake claw should be executable");
+        write_auto_wrapper_for_binary(&wrapper, &fake_claw)
+            .expect("auto wrapper should be written");
+
+        let output = Command::new(&wrapper)
+            .arg(&workspace)
+            .output()
+            .expect("wrapper should run");
+        assert!(output.status.success());
+        let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+        assert!(stdout.contains("CLAW_COMPACTOR_ACTIVE"));
+        assert!(stdout.contains(r#""shadow":true"#));
+        assert!(
+            !workspace.join("MEMORY.md").exists(),
+            "shadow fallback must not write into the original workspace"
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 }

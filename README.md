@@ -278,7 +278,7 @@ Prodex handles MCP registration for its own overlay session when it can find the
 <details>
 <summary>Install claw-compactor</summary>
 
-claw-compactor is used by `prodex clawcompactor` and by Super mode as a deterministic/local context compaction aid. When discoverable, Super installs a trusted startup probe that runs `claw-compactor benchmark <workspace> --json` through Prodex's compatibility wrapper.
+claw-compactor is used by `prodex clawcompactor` and by Super mode as a deterministic/local context compaction aid. When discoverable, Super installs a trusted startup probe that runs `claw-compactor benchmark <workspace> --json` through Prodex's compatibility wrapper. If the workspace has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a synthetic `MEMORY.md` summary instead of writing into the original directory.
 
 Recommended source install:
 
@@ -455,7 +455,7 @@ Use `prodex super --presidio` to enable Presidio without prompting, or `prodex s
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman and Claude-Mem pieces, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted `prodex-claw-compactor-auto "$(pwd)"` SessionStart benchmark probe when Claw-Compactor is available, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. Presidio redaction is added to that proxy only when you opt in at the prompt.
+Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman and Claude-Mem pieces, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted `prodex-claw-compactor-auto "$(pwd)"` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. Presidio redaction is added to that proxy only when you opt in at the prompt.
 
 RTK and SQZ split the token work across different sides of the flow:
 
