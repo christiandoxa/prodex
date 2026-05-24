@@ -13,3 +13,5 @@ mod quota_doctor;
 mod run;
 #[path = "auto_rotate/shared_state.rs"]
 mod shared_state;
+#[path = "auto_rotate/super_mode.rs"]
+mod super_mode;

@@ -114,6 +114,7 @@ pub(crate) fn print_runtime_launch_dry_run(
     child: RuntimeLaunchDryRunChild,
 ) -> Result<()> {
     let upstream_no_proxy = request.upstream_no_proxy;
+    let presidio_redaction_enabled = request.presidio_redaction_enabled;
     let prepared = prepare_runtime_launch_dry_run(request)?;
     let runtime_proxy = runtime_proxy_codex_endpoint(prepared.runtime_proxy.as_ref());
     let plan = prodex_runtime_launch::runtime_launch_dry_run_plan(
@@ -125,12 +126,21 @@ pub(crate) fn print_runtime_launch_dry_run(
         SUPER_LOCAL_PROVIDER_ID,
         child,
     );
-    let output = prodex_runtime_launch::runtime_launch_dry_run_report(
+    let mut output = prodex_runtime_launch::runtime_launch_dry_run_report(
         flow,
         &prepared.codex_home,
         runtime_proxy,
         &plan,
     );
+    output.push_str(&format!(
+        "Presidio redaction: {}",
+        if presidio_redaction_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    ));
+    output.push('\n');
     print!("{output}");
     Ok(())
 }

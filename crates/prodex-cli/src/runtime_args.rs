@@ -119,6 +119,12 @@ pub struct SuperArgs {
     /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
     #[arg(long)]
     pub no_proxy: bool,
+    /// Enable Presidio request-body and WebSocket text redaction without prompting.
+    #[arg(long, conflicts_with = "no_presidio")]
+    pub presidio: bool,
+    /// Disable Presidio redaction and skip the interactive opt-in prompt.
+    #[arg(long, conflicts_with = "presidio")]
+    pub no_presidio: bool,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
     #[arg(long, value_name = "URL", value_parser = parse_super_local_url)]
     pub url: Option<String>,
@@ -158,6 +164,16 @@ pub struct SuperArgs {
 }
 
 impl SuperArgs {
+    pub fn presidio_preference(&self) -> Option<bool> {
+        if self.presidio {
+            Some(true)
+        } else if self.no_presidio {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
     pub fn into_caveman_args(self) -> CavemanArgs {
         self.into_caveman_args_with_presidio(false)
     }
@@ -180,7 +196,11 @@ impl SuperArgs {
         let skip_quota_check = self.skip_quota_check || local_mode;
 
         let mut codex_args = Vec::with_capacity(
-            self.codex_args.len() + 2 + SUPER_OPTIMIZER_PREFIXES.len() + local_provider_args.len(),
+            self.codex_args.len()
+                + 2
+                + SUPER_OPTIMIZER_PREFIXES.len()
+                + usize::from(presidio)
+                + local_provider_args.len(),
         );
         codex_args.push(OsString::from(if self.mem_super_slim {
             "mem-super-slim"

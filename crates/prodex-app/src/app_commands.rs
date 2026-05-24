@@ -1,5 +1,5 @@
 use super::*;
-use std::io::IsTerminal;
+use std::io::{BufRead, IsTerminal, Write};
 
 mod audit;
 mod broker;
@@ -37,7 +37,10 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
 }
 
 pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
-    let use_presidio = prompt_super_presidio_opt_in()?;
+    let use_presidio = match args.presidio_preference() {
+        Some(use_presidio) => use_presidio,
+        None => prompt_super_presidio_opt_in()?,
+    };
     handle_caveman(args.into_caveman_args_with_presidio(use_presidio))
 }
 
@@ -62,18 +65,87 @@ pub(crate) fn resolve_runtime_launch_profile_name(
 }
 
 fn prompt_super_presidio_opt_in() -> Result<bool> {
-    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+    let stdin = io::stdin();
+    let stderr = io::stderr();
+    prompt_super_presidio_opt_in_from(
+        stdin.is_terminal(),
+        stderr.is_terminal(),
+        stdin.lock(),
+        stderr,
+    )
+}
+
+fn prompt_super_presidio_opt_in_from<R, W>(
+    stdin_is_terminal: bool,
+    stderr_is_terminal: bool,
+    mut input: R,
+    mut output: W,
+) -> Result<bool>
+where
+    R: BufRead,
+    W: Write,
+{
+    if !stdin_is_terminal || !stderr_is_terminal {
         return Ok(false);
     }
 
-    eprint!("Use Presidio for data safety? [y/N] ");
-    io::stderr().flush().context("failed to flush prompt")?;
+    write!(output, "Use Presidio for data safety? [y/N] ")?;
+    output.flush().context("failed to flush prompt")?;
     let mut answer = String::new();
-    io::stdin()
+    input
         .read_line(&mut answer)
         .context("failed to read Presidio prompt answer")?;
     Ok(matches!(
         answer.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prompt_answer(answer: &str) -> Result<(bool, String)> {
+        let mut output = Vec::new();
+        let enabled =
+            prompt_super_presidio_opt_in_from(true, true, io::Cursor::new(answer), &mut output)?;
+        let output = String::from_utf8(output).context("prompt output should be UTF-8")?;
+        Ok((enabled, output))
+    }
+
+    #[test]
+    fn super_presidio_prompt_accepts_y_and_yes() -> Result<()> {
+        for answer in ["y\n", "Y\n", "yes\n", "YES\n"] {
+            let (enabled, output) = prompt_answer(answer)?;
+            assert!(enabled, "{answer:?} should opt in");
+            assert_eq!(output, "Use Presidio for data safety? [y/N] ");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn super_presidio_prompt_rejects_n_and_default() -> Result<()> {
+        for answer in ["n\n", "N\n", "\n", "no\n"] {
+            let (enabled, output) = prompt_answer(answer)?;
+            assert!(!enabled, "{answer:?} should not opt in");
+            assert_eq!(output, "Use Presidio for data safety? [y/N] ");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn super_presidio_prompt_skips_non_terminal_io() -> Result<()> {
+        for (stdin_is_terminal, stderr_is_terminal) in [(false, true), (true, false)] {
+            let mut output = Vec::new();
+            let enabled = prompt_super_presidio_opt_in_from(
+                stdin_is_terminal,
+                stderr_is_terminal,
+                io::Cursor::new("y\n"),
+                &mut output,
+            )?;
+            assert!(!enabled);
+            assert!(output.is_empty());
+        }
+        Ok(())
+    }
 }

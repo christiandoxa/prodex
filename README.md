@@ -340,7 +340,7 @@ prodex presidio redact --text "My name is John Smith and my phone is 212-555-123
 prodex presidio enable
 ```
 
-When you answer `y` to the `prodex super` / `prodex s` Presidio prompt, Super starts a dedicated runtime proxy that redacts UTF-8 HTTP request bodies and WebSocket text frames through the local Presidio Analyzer and Anonymizer before forwarding them upstream. This is equivalent to adding the `presidio` prefix to the Super stack. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
+When you answer `y` to the `prodex super` / `prodex s` Presidio prompt or pass `--presidio`, Super starts a dedicated runtime proxy that redacts UTF-8 HTTP request bodies and WebSocket text frames through the local Presidio Analyzer and Anonymizer before forwarding them upstream. This is equivalent to adding the `presidio` prefix to the Super stack. Use `--no-presidio` to skip the prompt and keep redaction disabled. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
 
 </details>
 
@@ -445,7 +445,13 @@ prodex s exec "review this repo"
 prodex caveman mem rtk sqz tokensavior clawcompactor --full-access
 ```
 
-Before launch, Super asks whether to add Presidio redaction. If you answer `y`, it enables runtime request-body and WebSocket text redaction through local Presidio for the session. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
+Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps the expansion above. If you answer `y`, it is equivalent to:
+
+```bash
+prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access
+```
+
+Use `prodex super --presidio` to enable Presidio without prompting, or `prodex super --no-presidio` to skip the prompt and keep Presidio disabled. Presidio enables runtime request-body and WebSocket text redaction through local Presidio for the session. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
@@ -603,7 +609,7 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup to the active Prodex session path instead of the default `~/.codex/sessions`.
 
-Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `mem`, `rtk`, `sqz`, `tokensavior`, or `clawcompactor`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`.
+Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `presidio`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
@@ -640,6 +646,8 @@ prodex super --mem-full
 ```
 
 Super also enables Smart Context Autopilot in the runtime proxy.
+
+Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use.
 
 It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
 

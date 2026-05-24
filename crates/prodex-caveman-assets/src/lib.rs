@@ -81,7 +81,7 @@ which rtk
 
 pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Super Optimizers
 
-Prodex Super mode already enables Caveman, Presidio redaction, RTK guidance, Claude-Mem super-slim recall, and Smart Context Autopilot. Use extra token optimizers only when they are local, deterministic, and safe for the current task.
+Prodex Super mode already enables Caveman, RTK guidance, Claude-Mem super-slim recall, and Smart Context Autopilot. Presidio redaction is active only when the user opts in at the Super prompt or passes `--presidio`. Use extra token optimizers only when they are local, deterministic, and safe for the current task.
 
 ## Token Flow
 

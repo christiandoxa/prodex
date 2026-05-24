@@ -219,7 +219,8 @@ impl CommandExecute for SetupArgs {
 impl CommandExecute for SuperArgs {
     fn execute(self) -> Result<()> {
         if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
-            return handle_caveman_dry_run(self.into_caveman_args());
+            let use_presidio = self.presidio_preference().unwrap_or(false);
+            return handle_caveman_dry_run(self.into_caveman_args_with_presidio(use_presidio));
         }
         handle_super(self)
     }

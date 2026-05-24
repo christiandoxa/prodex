@@ -9,6 +9,15 @@ fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
     args.into_caveman_args()
 }
 
+fn parse_super_as_caveman_with_presidio_preference(args: &[&str]) -> CavemanArgs {
+    let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+    let use_presidio = args.presidio_preference().unwrap_or(false);
+    args.into_caveman_args_with_presidio(use_presidio)
+}
+
 fn os_args(args: &[&str]) -> Vec<OsString> {
     args.iter().map(OsString::from).collect()
 }
@@ -287,6 +296,82 @@ fn super_includes_presidio_prefix_when_opted_in() {
             "exec",
             "hello",
         ])
+    );
+}
+
+#[test]
+fn super_presidio_flag_enables_presidio_without_prompt() {
+    let args = parse_super_as_caveman_with_presidio_preference(&[
+        "prodex",
+        "super",
+        "--presidio",
+        "exec",
+        "hello",
+    ]);
+
+    assert_eq!(
+        args.codex_args,
+        os_args(&[
+            "mem",
+            "rtk",
+            "sqz",
+            "tokensavior",
+            "clawcompactor",
+            "presidio",
+            "exec",
+            "hello",
+        ])
+    );
+}
+
+#[test]
+fn s_presidio_flag_matches_super_presidio_flag() {
+    let super_args = parse_super_as_caveman_with_presidio_preference(&[
+        "prodex",
+        "super",
+        "--presidio",
+        "exec",
+        "hello",
+    ]);
+    let alias_args = parse_super_as_caveman_with_presidio_preference(&[
+        "prodex",
+        "s",
+        "--presidio",
+        "exec",
+        "hello",
+    ]);
+
+    assert_same_caveman_args(super_args, alias_args);
+}
+
+#[test]
+fn super_no_presidio_flag_disables_presidio_without_prompt() {
+    let args = parse_super_as_caveman_with_presidio_preference(&[
+        "prodex",
+        "super",
+        "--no-presidio",
+        "exec",
+        "hello",
+    ]);
+
+    assert_eq!(
+        args.codex_args,
+        os_args(&[
+            "mem",
+            "rtk",
+            "sqz",
+            "tokensavior",
+            "clawcompactor",
+            "exec",
+            "hello",
+        ])
+    );
+}
+
+#[test]
+fn super_presidio_flags_conflict() {
+    assert!(
+        parse_cli_command_from(["prodex", "super", "--presidio", "--no-presidio", "exec"]).is_err()
     );
 }
 

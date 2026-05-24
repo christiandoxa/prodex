@@ -56,6 +56,7 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     let awareness = fs::read_to_string(dir.join("SUPER_OPTIMIZERS.md"))
         .expect("SUPER_OPTIMIZERS.md should exist");
     assert!(awareness.contains("sqz"));
+    assert!(awareness.contains("Presidio redaction is active only"));
     assert!(awareness.contains("RTK handles upstream/input command output"));
     assert!(awareness.contains("do not wait for a reminder"));
     assert!(awareness.contains("auto-wrappers are only a backstop"));

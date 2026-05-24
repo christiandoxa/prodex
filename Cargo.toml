@@ -130,6 +130,7 @@ prodex_app = { workspace = true }
 [dev-dependencies]
 base64 = { workspace = true }
 criterion = "0.8.2"
+libc = "0.2.186"
 serde = { workspace = true }
 serde_json = { workspace = true }
 
