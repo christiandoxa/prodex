@@ -340,7 +340,7 @@ prodex presidio redact --text "My name is John Smith and my phone is 212-555-123
 prodex presidio enable
 ```
 
-`prodex super` / `prodex s` starts a dedicated runtime proxy and redacts UTF-8 HTTP request bodies and WebSocket text frames through the local Presidio Analyzer and Anonymizer before forwarding them upstream. It is equivalent to adding the `presidio` prefix to the Super stack. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
+When you answer `y` to the `prodex super` / `prodex s` Presidio prompt, Super starts a dedicated runtime proxy that redacts UTF-8 HTTP request bodies and WebSocket text frames through the local Presidio Analyzer and Anonymizer before forwarding them upstream. This is equivalent to adding the `presidio` prefix to the Super stack. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
 
 </details>
 
@@ -442,14 +442,14 @@ prodex s exec "review this repo"
 `prodex super` expands to:
 
 ```bash
-prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access
+prodex caveman mem rtk sqz tokensavior clawcompactor --full-access
 ```
 
-Super enables runtime request-body and WebSocket text redaction through local Presidio for the session. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
+Before launch, Super asks whether to add Presidio redaction. If you answer `y`, it enables runtime request-body and WebSocket text redaction through local Presidio for the session. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman and Claude-Mem pieces, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted `prodex-claw-compactor-auto "$(pwd)"` SessionStart benchmark probe when Claw-Compactor is available, then uses Presidio redaction and Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping.
+Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman and Claude-Mem pieces, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted `prodex-claw-compactor-auto "$(pwd)"` SessionStart benchmark probe when Claw-Compactor is available, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. Presidio redaction is added to that proxy only when you opt in at the prompt.
 
 RTK and SQZ split the token work across different sides of the flow:
 

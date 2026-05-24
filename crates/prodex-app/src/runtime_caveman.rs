@@ -192,7 +192,7 @@ mod tests {
         let Commands::Super(args) = command else {
             panic!("expected super command");
         };
-        args.into_caveman_args()
+        args.into_caveman_args_with_presidio(true)
     }
 
     #[test]

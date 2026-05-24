@@ -107,8 +107,9 @@ Examples:
   prodex super --profile main
 
 Notes:
-  `prodex super` is a shortcut for `prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access`.
-  It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, RTK shell-command guidance, Super optimizer overlay, Presidio redaction, and launch-time full access.
+  `prodex super` is a shortcut for `prodex caveman mem rtk sqz tokensavior clawcompactor --full-access`, with an interactive Presidio opt-in prompt before launch.
+  It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, RTK shell-command guidance, Super optimizer overlay, and launch-time full access.
+  Answer `y` at the Presidio prompt to add runtime request-body and WebSocket text redaction for the session.
   Use `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies in Claude-Mem recall.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.

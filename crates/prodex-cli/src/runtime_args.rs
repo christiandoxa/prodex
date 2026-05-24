@@ -159,7 +159,7 @@ pub struct SuperArgs {
 
 impl SuperArgs {
     pub fn into_caveman_args(self) -> CavemanArgs {
-        self.into_caveman_args_with_presidio(true)
+        self.into_caveman_args_with_presidio(false)
     }
 
     pub fn into_caveman_args_with_presidio(self, presidio: bool) -> CavemanArgs {
