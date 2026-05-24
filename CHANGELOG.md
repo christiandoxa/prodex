@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.113.0 - 2026-05-24
+
+### CLI
+
+- Harden presidio opt-in controls (`2ff072d`)
+
 ## 0.112.0 - 2026-05-24
 
 ### CLI
@@ -74,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Drop publish troubleshooting changes (`69c6d71`)
-
-## 0.101.0 - 2026-05-20
-
-### Misc
-
-- Support codex rust 0.132.0 (`09b62d6`)
