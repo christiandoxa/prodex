@@ -31,3 +31,10 @@ pub(super) use state::{
 pub(super) use temp_dir::TestDir;
 pub(super) use token::chatgpt_id_token;
 pub(super) use usage_server::UsageServer;
+
+pub(super) fn normalized_output(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}

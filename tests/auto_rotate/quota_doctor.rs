@@ -62,7 +62,7 @@ fn doctor_warns_and_repairs_orphan_profile_import_auth_journals() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = normalized_output(&output.stdout);
     assert!(
         stdout.contains("profile-import-auth-journal contains 1 orphan journal(s)"),
         "doctor should surface orphan import auth journal, stdout: {stdout}"

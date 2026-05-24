@@ -45,7 +45,7 @@ fn login_without_profile_creates_profile_from_email() {
             .is_file()
     );
     assert!(
-        String::from_utf8_lossy(&output.stdout)
+        normalized_output(&output.stdout)
             .contains("Logged in as main@example.com. Created profile 'main_example.com'.")
     );
 }
@@ -86,7 +86,7 @@ fn login_without_profile_reuses_existing_profile_for_same_email() {
         Some(1)
     );
     assert!(!fixture.prodex_home.join("profiles/primary").exists());
-    assert!(String::from_utf8_lossy(&output.stdout).contains(
+    assert!(normalized_output(&output.stdout).contains(
         "Logged in as main@example.com. Updated auth token for existing profile 'primary'."
     ));
 }
@@ -138,7 +138,7 @@ fn login_without_profile_does_not_reuse_email_derived_profile_name_for_other_ema
         "main@example.com"
     );
     assert!(
-        String::from_utf8_lossy(&output.stdout)
+        normalized_output(&output.stdout)
             .contains("Logged in as main@example.com. Created profile 'main_example.com'.")
     );
 }
@@ -211,7 +211,7 @@ fn login_without_profile_looks_up_existing_profiles_in_parallel() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains(
+    assert!(normalized_output(&output.stdout).contains(
         "Logged in as main@example.com. Updated auth token for existing profile 'main'."
     ));
     assert!(
