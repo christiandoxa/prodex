@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.112.0 - 2026-05-24
+
+### CLI
+
+- Restore presidio opt-in prompt (`4151e96`)
+
 ## 0.111.0 - 2026-05-24
 
 ### CLI
@@ -74,13 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Support codex rust 0.132.0 (`09b62d6`)
-
-## 0.100.0 - 2026-05-19
-
-### Docs
-
-- Revise README for clarity and additional details (`04532d9`)
-
-### Misc
-
-- Support codex rust 0.131.0 (`0df38f9`)
