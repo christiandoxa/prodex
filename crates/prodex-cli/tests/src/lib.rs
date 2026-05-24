@@ -203,6 +203,9 @@ fn super_mem_super_slim_expands_to_all_super_prefixes() {
 fn super_default_keeps_all_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
 
+    assert!(args.full_access);
+    assert!(args.smart_context);
+    assert!(args.super_optimizer_overlay);
     assert_eq!(
         args.codex_args,
         vec![

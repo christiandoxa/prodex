@@ -86,7 +86,10 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
     ));
     rows.push((
         "claw-compactor".to_string(),
-        command_version_status("claw-compactor", "--version"),
+        command_probe_status(
+            "claw-compactor",
+            command_capability_probe_args("claw-compactor"),
+        ),
     ));
     rows.push((
         "Caveman assets".to_string(),
@@ -249,7 +252,7 @@ fn capability(
 
 fn command_available_status(command: &str) -> &'static str {
     if Command::new(command)
-        .arg("--version")
+        .args(command_capability_probe_args(command))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -258,6 +261,13 @@ fn command_available_status(command: &str) -> &'static str {
         "available"
     } else {
         "missing"
+    }
+}
+
+fn command_capability_probe_args(command: &str) -> &'static [&'static str] {
+    match command {
+        "claw-compactor" => &["--help"],
+        _ => &["--version"],
     }
 }
 
@@ -280,10 +290,29 @@ fn command_version_status(command: impl AsRef<std::ffi::OsStr>, version_arg: &st
     }
 }
 
+fn command_probe_status(command: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> String {
+    match Command::new(command.as_ref()).args(args).output() {
+        Ok(output) if output.status.success() => "ok (available)".to_string(),
+        Ok(output) => format!("warn (exit {})", output.status),
+        Err(err) => format!("missing ({})", err.kind()),
+    }
+}
+
 fn command_status(command: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> String {
     match Command::new(command.as_ref()).args(args).output() {
         Ok(output) if output.status.success() => "ok".to_string(),
         Ok(output) => format!("warn (exit {})", output.status),
         Err(err) => format!("missing ({})", err.kind()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::command_capability_probe_args;
+
+    #[test]
+    fn claw_compactor_capability_probe_uses_help() {
+        assert_eq!(command_capability_probe_args("claw-compactor"), &["--help"]);
+        assert_eq!(command_capability_probe_args("rtk"), &["--version"]);
     }
 }

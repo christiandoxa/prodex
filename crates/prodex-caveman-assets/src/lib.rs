@@ -47,6 +47,8 @@ RTK works on the upstream/input side. Use it before terminal output enters the m
 
 Hard rule: the visible shell command for noisy terminal work must begin with `rtk <cmd>`. Prodex Super also puts an overlay `rtk` wrapper first on PATH and auto-wraps common noisy commands when RTK is installed, but do not rely on that fallback when writing commands.
 
+Do not write plain noisy commands such as `git show ...`, `cargo test ...`, `npm run ...`, or `pytest ...` and assume the wrapper is enough. The wrapper is a fail-safe only; it does not make the Codex TUI/transcript show the `rtk` prefix and can be bypassed by inherited wrapper-depth environment.
+
 Examples:
 
 ```bash
@@ -82,6 +84,8 @@ Prodex Super mode already enables Caveman, RTK guidance, Claude-Mem super-slim r
 ## Token Flow
 
 RTK handles upstream/input command output before it enters the context window. Visible noisy shell commands must use `rtk <cmd>` for diffs, tests, builds, and package-manager output; Prodex also auto-wraps common noisy commands as a safety fallback when RTK is installed.
+
+Auto-wrappers are only a backstop for accidental misses. They are not a substitute for writing visible `rtk <cmd>` commands, because the Codex TUI shows the command text before PATH resolution.
 
 SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large text blobs, and conversation/context compression instead of re-emitting full text.
 
