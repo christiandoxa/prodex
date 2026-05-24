@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.111.0 - 2026-05-24
+
+### CLI
+
+- Invoke optimizer stack at launch (`04edf37`)
+
 ## 0.110.0 - 2026-05-24
 
 ### CLI
@@ -77,21 +83,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Support codex rust 0.131.0 (`0df38f9`)
-
-## 0.99.0 - 2026-05-14
-
-### Runtime
-
-- Type diagnostics log markers (`fb7d7fc`)
-- Satisfy latest clippy on quota tests (`46f8312`)
-- Improve diagnostics and validation feedback (`b411895`)
-
-### CLI
-
-- Keep quota watch input responsive (`ce27211`)
-
-### Misc
-
-- Satisfy ci warning gates (`f9b85de`)
-- Add multi-auth governance primitives (`8e4acc7`)
-- Harden diagnostics and release safeguards (`f7fef28`)
