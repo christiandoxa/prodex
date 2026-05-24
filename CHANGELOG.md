@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### CLI
 
+- Satisfy claw hook clippy gate (`5ae196c`)
 - Invoke optimizer stack at launch (`04edf37`)
 
 ## 0.110.0 - 2026-05-24
