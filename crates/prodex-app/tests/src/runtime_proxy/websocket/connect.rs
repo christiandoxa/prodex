@@ -100,6 +100,78 @@ fn websocket_hard_affinity_connect_failure_does_not_return_retryable_transport_a
 }
 
 #[test]
+fn websocket_interrupted_handshake_returns_transport_attempt_instead_of_panicking() {
+    let _guard = acquire_test_runtime_lock();
+    let _env_lock = TestEnvVarGuard::lock();
+    let _http_proxy = TestEnvVarGuard::unset("HTTP_PROXY");
+    let _http_proxy_lower = TestEnvVarGuard::unset("http_proxy");
+    let _https_proxy = TestEnvVarGuard::unset("HTTPS_PROXY");
+    let _https_proxy_lower = TestEnvVarGuard::unset("https_proxy");
+    let _all_proxy = TestEnvVarGuard::unset("ALL_PROXY");
+    let _all_proxy_lower = TestEnvVarGuard::unset("all_proxy");
+    let _proxy = TestEnvVarGuard::unset("PROXY");
+    let _proxy_lower = TestEnvVarGuard::unset("proxy");
+
+    let upstream =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("stalled upstream listener should bind");
+    let upstream_addr = upstream
+        .local_addr()
+        .expect("stalled upstream listener should expose addr");
+    let upstream_thread = thread::spawn(move || {
+        let (_stream, _) = upstream
+            .accept()
+            .expect("stalled upstream should accept websocket TCP connection");
+        thread::sleep(Duration::from_millis(
+            runtime_proxy_websocket_precommit_progress_timeout_ms() + 80,
+        ));
+    });
+
+    let shared = websocket_test_shared_with_main_profile("interrupted-handshake", upstream_addr);
+    let (mut local_socket, _client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 39,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create","session_id":"sess-stalled"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: Some("sess-stalled"),
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("fresh interrupted handshake should be retryable");
+
+    assert!(matches!(
+        attempt,
+        RuntimeWebsocketAttempt::TransportFailed {
+            profile_name,
+            stage: "connect",
+        } if profile_name == "main"
+    ));
+    upstream_thread
+        .join()
+        .expect("stalled upstream thread should finish");
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "upstream_connect_failure");
+    assert!(
+        log.contains("upstream websocket handshake interrupted before completion"),
+        "interrupted handshake should be logged as transport failure: {log}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
 fn websocket_upstream_connect_uses_http_connect_proxy_from_env() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test proxy should bind");
     let proxy_addr = listener

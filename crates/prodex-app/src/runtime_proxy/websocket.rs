@@ -430,9 +430,10 @@ pub(super) fn connect_runtime_proxy_upstream_websocket_with_timeout(
             attempted_addrs,
         )),
         Err(WsHandshakeError::Failure(err)) => Err(err),
-        Err(WsHandshakeError::Interrupted(_)) => {
-            unreachable!("blocking upstream websocket handshake should not interrupt")
-        }
+        Err(WsHandshakeError::Interrupted(_)) => Err(WsError::Io(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "upstream websocket handshake interrupted before completion",
+        ))),
     }
 }
 
