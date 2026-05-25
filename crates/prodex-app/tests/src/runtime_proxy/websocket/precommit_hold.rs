@@ -255,13 +255,14 @@ fn websocket_precommit_hold_timeout_does_not_promote_created_frame_without_usabl
 }
 
 #[test]
-fn websocket_precommit_hold_timeout_does_not_promote_previous_response_affinity() {
+fn websocket_precommit_hold_response_created_commits_previous_response_affinity() {
     let _guard = acquire_test_runtime_lock();
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("upstream websocket listener should bind");
     let upstream_addr = listener
         .local_addr()
         .expect("upstream websocket listener should expose address");
+    let (allow_completed_tx, allow_completed_rx) = mpsc::channel::<()>();
     let upstream = thread::spawn(move || {
         let (stream, _) = listener
             .accept()
@@ -277,66 +278,88 @@ fn websocket_precommit_hold_timeout_does_not_promote_previous_response_affinity(
                     .into(),
             ))
             .expect("upstream should send response.created");
-        thread::sleep(Duration::from_millis(
-            runtime_proxy_websocket_precommit_progress_timeout_ms() + 40,
-        ));
+        allow_completed_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("test should allow terminal event after response.created is forwarded");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.completed","response":{"id":"resp-affinity-hold"}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send response.completed");
     });
 
     let shared = websocket_test_shared_with_main_profile("precommit-hold-affinity", upstream_addr);
-    let (mut local_socket, _client_socket) = websocket_test_local_pair();
-    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
     let handshake_request = RuntimeProxyRequest {
         method: "GET".to_string(),
         path_and_query: "/backend-api/prodex/responses".to_string(),
         headers: Vec::new(),
         body: Vec::new(),
     };
+    let attempt_shared = shared.clone();
+    let attempt = thread::spawn(move || {
+        let mut websocket_session = RuntimeWebsocketSessionState::default();
+        attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+            request_id: 32,
+            local_socket: &mut local_socket,
+            handshake_request: &handshake_request,
+            request_text: r#"{"type":"response.create","previous_response_id":"resp-owner"}"#,
+            request_previous_response_id: Some("resp-owner"),
+            request_prompt_cache_key: None,
+            request_session_id: None,
+            request_turn_state: None,
+            shared: &attempt_shared,
+            websocket_session: &mut websocket_session,
+            profile_name: "main",
+            turn_state_override: None,
+            promote_committed_profile: false,
+        })
+    });
 
-    let err = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
-        request_id: 32,
-        local_socket: &mut local_socket,
-        handshake_request: &handshake_request,
-        request_text: r#"{"type":"response.create","previous_response_id":"resp-owner"}"#,
-        request_previous_response_id: Some("resp-owner"),
-        request_prompt_cache_key: None,
-        request_session_id: None,
-        request_turn_state: None,
-        shared: &shared,
-        websocket_session: &mut websocket_session,
-        profile_name: "main",
-        turn_state_override: None,
-        promote_committed_profile: false,
-    })
-    .expect_err("hard-affinity hold timeout should not promote buffered frames");
-
-    assert!(
-        err.to_string()
-            .contains("runtime websocket upstream failed before response.completed"),
-        "unexpected hard-affinity timeout error: {err:?}"
-    );
+    let created = client_socket
+        .read()
+        .expect("client should receive hard-affinity response.created");
+    allow_completed_tx
+        .send(())
+        .expect("test should allow upstream terminal event");
+    let completed = client_socket
+        .read()
+        .expect("client should receive hard-affinity response.completed");
+    let attempt = attempt
+        .join()
+        .expect("websocket attempt thread should finish")
+        .expect("hard-affinity response.created should commit without timeout");
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
+    assert!(created.to_string().contains("response.created"));
+    assert!(completed.to_string().contains("response.completed"));
     upstream
         .join()
         .expect("upstream websocket thread should finish");
 
-    let log = read_websocket_test_log_after_marker(&shared.log_path, "upstream_read_error");
+    let log =
+        read_websocket_test_log_after_marker(&shared.log_path, "websocket_precommit_hold_promoted");
     assert!(
-        log.contains("upstream_read_error")
+        log.contains("websocket_precommit_hold_promoted")
             && log.contains("request=32")
-            && !log.contains("websocket_precommit_hold_promoted")
-            && !log.contains("transport=websocket committed profile=main"),
-        "hard-affinity hold timeout must not commit/promote: {log}"
+            && log.contains("profile_promotion_allowed=false")
+            && log.contains("transport=websocket committed profile=main")
+            && !log.contains("websocket_precommit_hold_timeout"),
+        "hard-affinity response.created should commit without active-profile promotion: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);
 }
 
 #[test]
-fn websocket_precommit_hold_timeout_does_not_promote_reused_session() {
+fn websocket_precommit_hold_response_created_commits_reused_session() {
     let _guard = acquire_test_runtime_lock();
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("upstream websocket listener should bind");
     let upstream_addr = listener
         .local_addr()
         .expect("upstream websocket listener should expose address");
+    let (allow_reused_completed_tx, allow_reused_completed_rx) = mpsc::channel::<()>();
     let upstream = thread::spawn(move || {
         let (stream, _) = listener
             .accept()
@@ -369,9 +392,16 @@ fn websocket_precommit_hold_timeout_does_not_promote_reused_session() {
                     .into(),
             ))
             .expect("upstream should send reused response.created");
-        thread::sleep(Duration::from_millis(
-            runtime_proxy_websocket_precommit_progress_timeout_ms() + 40,
-        ));
+        allow_reused_completed_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("test should allow reused terminal event after response.created is forwarded");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.completed","response":{"id":"resp-reuse-hold"}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send reused response.completed");
     });
 
     let shared = websocket_test_shared_with_main_profile("precommit-hold-reuse", upstream_addr);
@@ -408,42 +438,53 @@ fn websocket_precommit_hold_timeout_does_not_promote_reused_session() {
         .read()
         .expect("client should receive first response.completed");
 
-    let reused_attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
-        request_id: 34,
-        local_socket: &mut local_socket,
-        handshake_request: &handshake_request,
-        request_text: r#"{"type":"response.create"}"#,
-        request_previous_response_id: None,
-        request_prompt_cache_key: None,
-        request_session_id: None,
-        request_turn_state: None,
-        shared: &shared,
-        websocket_session: &mut websocket_session,
-        profile_name: "main",
-        turn_state_override: None,
-        promote_committed_profile: true,
-    })
-    .expect("reused websocket attempt should return watchdog outcome");
-
-    assert!(matches!(
-        reused_attempt,
-        RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-            profile_name,
-            event: "upstream_read_error",
-        } if profile_name == "main"
-    ));
+    let reused_shared = shared.clone();
+    let reused_attempt = thread::spawn(move || {
+        attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+            request_id: 34,
+            local_socket: &mut local_socket,
+            handshake_request: &handshake_request,
+            request_text: r#"{"type":"response.create"}"#,
+            request_previous_response_id: None,
+            request_prompt_cache_key: None,
+            request_session_id: None,
+            request_turn_state: None,
+            shared: &reused_shared,
+            websocket_session: &mut websocket_session,
+            profile_name: "main",
+            turn_state_override: None,
+            promote_committed_profile: true,
+        })
+    });
+    let reused_created = client_socket
+        .read()
+        .expect("client should receive reused response.created");
+    allow_reused_completed_tx
+        .send(())
+        .expect("test should allow reused terminal event");
+    let reused_completed = client_socket
+        .read()
+        .expect("client should receive reused response.completed");
+    let reused_attempt = reused_attempt
+        .join()
+        .expect("reused websocket attempt thread should finish")
+        .expect("reused websocket response.created should commit without timeout");
+    assert!(matches!(reused_attempt, RuntimeWebsocketAttempt::Delivered));
+    assert!(reused_created.to_string().contains("response.created"));
+    assert!(reused_completed.to_string().contains("response.completed"));
     upstream
         .join()
         .expect("upstream websocket thread should finish");
 
-    let log = read_websocket_test_log_after_marker(&shared.log_path, "upstream_read_error");
+    let log =
+        read_websocket_test_log_after_marker(&shared.log_path, "websocket_precommit_hold_promoted");
     assert!(
-        log.contains("websocket_reuse_watchdog")
-            && log.contains("upstream_read_error")
+        log.contains("websocket_precommit_hold_promoted")
             && log.contains("request=34")
-            && !log.contains("request=34 transport=websocket committed profile=main")
-            && !log.contains("websocket_precommit_hold_promoted request=34"),
-        "reused-session hold timeout must not commit/promote: {log}"
+            && log.contains("profile_promotion_allowed=false")
+            && log.contains("request=34 transport=websocket committed profile=main")
+            && !log.contains("websocket_precommit_hold_timeout"),
+        "reused-session response.created should commit without timeout: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);
 }

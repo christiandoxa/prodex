@@ -127,7 +127,7 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
         text: text.to_string(),
         response_ids: inspected.response_ids.clone(),
     });
-    if precommit_hold_promotion_allowed && *precommit_hold_promotion_event_seen {
+    if *precommit_hold_promotion_event_seen {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -138,6 +138,10 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
                     runtime_proxy_log_field("event", "response_created"),
                     runtime_proxy_log_field("reuse", reuse_existing_session.to_string()),
                     runtime_proxy_log_field("hold_count", (*precommit_hold_count).to_string()),
+                    runtime_proxy_log_field(
+                        "profile_promotion_allowed",
+                        precommit_hold_promotion_allowed.to_string(),
+                    ),
                 ],
             ),
         );

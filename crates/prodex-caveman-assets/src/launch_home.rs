@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use chrono::Local;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,7 +11,8 @@ use crate::localization::localize_text_file;
 use crate::marketplace::{install_caveman_marketplace, install_caveman_plugin_cache};
 use crate::toml_helpers::ensure_child_table;
 use crate::{
-    PRODEX_CAVEMAN_MARKETPLACE_NAME, PRODEX_CAVEMAN_PLUGIN_ID, PRODEX_CAVEMAN_SOURCE_REPO,
+    PRODEX_CAVEMAN_HOOK_MARKER, PRODEX_CAVEMAN_HOOK_SCRIPT, PRODEX_CAVEMAN_MARKETPLACE_NAME,
+    PRODEX_CAVEMAN_PLUGIN_ID, PRODEX_CAVEMAN_SOURCE_REPO,
 };
 
 pub fn prepare_caveman_launch_home(
@@ -28,10 +31,29 @@ pub fn prepare_caveman_launch_home(
 
 pub fn configure_caveman_launch_home(codex_home: &Path) -> Result<()> {
     localize_text_file(&codex_home.join("config.toml"))?;
+    configure_caveman_session_start_script(codex_home)?;
     configure_caveman_config(codex_home)?;
     install_caveman_marketplace(codex_home)?;
     install_caveman_plugin_cache(codex_home)?;
     Ok(())
+}
+
+fn configure_caveman_session_start_script(codex_home: &Path) -> Result<()> {
+    let script_path = codex_home.join("bin").join(PRODEX_CAVEMAN_HOOK_SCRIPT);
+    let script = format!(
+        r#"#!/usr/bin/env sh
+codex_home="${{CODEX_HOME:-${{HOME:-}}/.codex}}"
+marker="$codex_home/{PRODEX_CAVEMAN_HOOK_MARKER}"
+marker_dir=$(dirname "$marker")
+mkdir -p "$marker_dir" 2>/dev/null || true
+if [ -e "$marker" ]; then
+  exit 0
+fi
+: > "$marker" 2>/dev/null || exit 0
+printf '%s\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'RTK ACTIVE WHEN CONFIGURED. In prodex rtk/s/super, noisy shell commands must visibly start with rtk <cmd>; do not wait for the user to remind you.'
+"#
+    );
+    write_executable_script(&script_path, &script)
 }
 
 fn create_temporary_caveman_home(managed_profiles_root: &Path) -> Result<PathBuf> {
@@ -103,5 +125,23 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
         .context("failed to render Caveman config overlay")?;
     fs::write(&config_path, rendered)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
+    Ok(())
+}
+
+fn write_executable_script(path: &Path, script: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::write(path, script).with_context(|| format!("failed to write {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(path)
+            .with_context(|| format!("failed to stat {}", path.display()))?
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)
+            .with_context(|| format!("failed to chmod {}", path.display()))?;
+    }
     Ok(())
 }

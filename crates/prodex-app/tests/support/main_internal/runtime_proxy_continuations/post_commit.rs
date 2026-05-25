@@ -43,10 +43,10 @@ fn runtime_proxy_websocket_previous_response_not_found_after_prelude_surfaces_st
         "proxy should not leak raw previous_response_not_found before visible output: {response_message}"
     );
     assert!(
-        !frames
+        frames
             .iter()
             .any(|frame| frame.contains("\"type\":\"response.created\"")),
-        "precommit hold frames should stay buffered when continuation fails before visible output: {frames:?}"
+        "response.created is an upstream commit signal and should be forwarded before later continuation failure: {frames:?}"
     );
 
     let websocket_requests = fixture.backend.websocket_requests();

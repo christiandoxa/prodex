@@ -401,7 +401,7 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
     assert!(rendered_config.contains("[[hooks.SessionStart]]"));
     assert!(rendered_config.contains("[[hooks.SessionStart.hooks]]"));
     assert!(rendered_config.contains("type = \"command\""));
-    assert!(rendered_config.contains("CAVEMAN MODE ACTIVE"));
+    assert!(rendered_config.contains("command = \"prodex-caveman-sessionstart\""));
     assert!(rendered_config.contains("[marketplaces.prodex-caveman]"));
     assert!(rendered_config.contains("[plugins.\"caveman@prodex-caveman\"]"));
     assert!(rendered_config.contains("enabled = true"));
@@ -414,9 +414,13 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
     assert!(
         parsed_config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
             .as_str()
-            .is_some_and(|command| command.contains("CAVEMAN MODE ACTIVE")
-                && command.contains("noisy shell commands must visibly start with rtk <cmd>"))
+            .is_some_and(|command| command == "prodex-caveman-sessionstart")
     );
+    let hook_script = fs::read_to_string(caveman_home.join("bin/prodex-caveman-sessionstart"))
+        .expect("Caveman SessionStart script should exist");
+    assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
+    assert!(hook_script.contains("noisy shell commands must visibly start with rtk <cmd>"));
+    assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
     let hook_key = format!("{}:session_start:0:0", temp_config.display());
     let trusted_hash = parsed_config["hooks"]["state"][&hook_key]["trusted_hash"]
         .as_str()

@@ -31,7 +31,9 @@ pub const PRODEX_RTK_SOURCE_REPO: &str = "https://github.com/rtk-ai/rtk.git";
 
 pub(crate) const CLAUDE_MEM_PLUGIN_NAME: &str = "claude-mem";
 pub(crate) const PRODEX_CAVEMAN_HOOK_TIMEOUT_SEC: u64 = 600;
-pub(crate) const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "printf '%s\\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'RTK ACTIVE WHEN CONFIGURED. In prodex rtk/s/super, noisy shell commands must visibly start with rtk <cmd>; do not wait for the user to remind you.'";
+pub(crate) const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "prodex-caveman-sessionstart";
+pub(crate) const PRODEX_CAVEMAN_HOOK_SCRIPT: &str = "prodex-caveman-sessionstart";
+pub(crate) const PRODEX_CAVEMAN_HOOK_MARKER: &str = ".prodex-hooks/caveman-sessionstart";
 pub(crate) const RTK_MD: &str = "RTK.md";
 pub(crate) const SUPER_OPTIMIZERS_MD: &str = "SUPER_OPTIMIZERS.md";
 pub(crate) const AGENTS_MD: &str = "AGENTS.md";
@@ -103,7 +105,7 @@ Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed opt
 
 ## AST Compression
 
-If `claw-compactor` is available, Prodex Super invokes a trusted SessionStart benchmark probe through `prodex-claw-compactor-auto "$(pwd)"` so the runtime receives a compact workspace savings signal. When the current directory has no Markdown memory files, the wrapper generates a temporary shadow workspace with a synthetic `MEMORY.md` summary and leaves the original directory untouched. Use `claw-compactor` only as a manual, reversible code-summary aid for exploration after that. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
+If `claw-compactor` is available, Prodex Super invokes a trusted one-shot SessionStart benchmark probe through `prodex-claw-compactor-sessionstart` so the runtime receives a compact workspace savings signal without replaying the probe after Codex restarts a conversation inside the same launch home. The wrapper delegates to `prodex-claw-compactor-auto "$(pwd)"`. When the current directory has no Markdown memory files, the wrapper generates a temporary shadow workspace with a synthetic `MEMORY.md` summary and leaves the original directory untouched. Use `claw-compactor` only as a manual, reversible code-summary aid for exploration after that. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
 
 ## Safety
 

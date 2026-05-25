@@ -118,6 +118,12 @@ fn configure_session_start_command_hook(table: &mut toml::Table, command: &str) 
     let Some(session_start_groups) = session_start.as_array_mut() else {
         unreachable!("SessionStart should be an array after insertion");
     };
+    if let Some(group_index) =
+        session_start_command_hook_group_index(session_start_groups.as_slice(), command)
+    {
+        return group_index;
+    }
+
     let group_index = session_start_groups.len();
 
     let mut command_hook = toml::Table::new();
@@ -137,6 +143,24 @@ fn configure_session_start_command_hook(table: &mut toml::Table, command: &str) 
     );
     session_start_groups.push(toml::Value::Table(group));
     group_index
+}
+
+fn session_start_command_hook_group_index(
+    session_start_groups: &[toml::Value],
+    command: &str,
+) -> Option<usize> {
+    session_start_groups
+        .iter()
+        .enumerate()
+        .find_map(|(group_index, group)| {
+            let contains_command = group
+                .get("hooks")
+                .and_then(toml::Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|hook| hook.get("command").and_then(toml::Value::as_str) == Some(command));
+            contains_command.then_some(group_index)
+        })
 }
 
 pub(crate) fn configure_caveman_hook_trust_state(

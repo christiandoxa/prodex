@@ -221,7 +221,46 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
     let overlay_config =
         fs::read_to_string(overlay.join("config.toml")).expect("overlay config.toml");
     assert!(overlay_config.contains("prodex-caveman"));
+    let hook_script = fs::read_to_string(overlay.join("bin").join("prodex-caveman-sessionstart"))
+        .expect("Caveman SessionStart script should exist");
+    assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
+    assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
 
     let _ = fs::remove_dir_all(base);
     let _ = fs::remove_dir_all(managed_root);
+}
+
+#[cfg(unix)]
+#[test]
+fn caveman_session_start_script_outputs_once_per_launch_home() {
+    let codex_home = temp_dir("caveman-sessionstart-once");
+    fs::create_dir_all(&codex_home).expect("codex home should exist");
+
+    configure_caveman_launch_home(&codex_home).expect("caveman home should configure");
+    configure_caveman_launch_home(&codex_home)
+        .expect("caveman home configure should be idempotent");
+
+    let config = fs::read_to_string(codex_home.join("config.toml")).expect("config should read");
+    assert_eq!(config.matches("prodex-caveman-sessionstart").count(), 1);
+
+    let script = codex_home.join("bin").join("prodex-caveman-sessionstart");
+    let first = std::process::Command::new(&script)
+        .env("CODEX_HOME", &codex_home)
+        .output()
+        .expect("first SessionStart script should run");
+    assert!(first.status.success());
+    let first_stdout = String::from_utf8(first.stdout).expect("first stdout should be utf8");
+    assert!(first_stdout.contains("CAVEMAN MODE ACTIVE"));
+
+    let second = std::process::Command::new(&script)
+        .env("CODEX_HOME", &codex_home)
+        .output()
+        .expect("second SessionStart script should run");
+    assert!(second.status.success());
+    assert!(
+        second.stdout.is_empty(),
+        "SessionStart script should not replay after marker"
+    );
+
+    let _ = fs::remove_dir_all(codex_home);
 }

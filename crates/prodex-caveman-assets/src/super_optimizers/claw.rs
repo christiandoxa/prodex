@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use crate::hook_trust::configure_trusted_session_start_command_hook;
 
 const AUTO_WRAPPER: &str = "prodex-claw-compactor-auto";
-const SESSION_HOOK: &str = "prodex-claw-compactor-auto \"$(pwd)\"";
+const SESSION_HOOK: &str = "prodex-claw-compactor-sessionstart";
+const SESSION_WRAPPER: &str = "prodex-claw-compactor-sessionstart";
+const SESSION_MARKER: &str = ".prodex-hooks/claw-compactor-sessionstart";
 
 pub(super) fn configure_command_wrappers(
     bin_dir: &Path,
@@ -20,6 +22,7 @@ pub(super) fn configure_command_wrappers(
         super::write_shell_wrapper(&bin_dir.join("claw-compactor"), &command, &[])?;
         super::write_shell_wrapper(&bin_dir.join("prodex-claw-compactor"), &command, &[])?;
         write_auto_wrapper_for_binary(&bin_dir.join(AUTO_WRAPPER), &command)?;
+        write_session_wrapper(&bin_dir.join(SESSION_WRAPPER))?;
     } else if let Some((python, script)) = find_script(optimizer_roots) {
         super::write_shell_wrapper(
             &bin_dir.join("claw-compactor"),
@@ -32,6 +35,7 @@ pub(super) fn configure_command_wrappers(
             &[script.to_string_lossy().as_ref()],
         )?;
         write_auto_wrapper_for_script(&bin_dir.join(AUTO_WRAPPER), &python, &script)?;
+        write_session_wrapper(&bin_dir.join(SESSION_WRAPPER))?;
     }
     Ok(())
 }
@@ -253,6 +257,23 @@ printf '%s\n' 'CLAW_COMPACTOR_UNAVAILABLE'
     write_executable_script(path, &script)
 }
 
+fn write_session_wrapper(path: &Path) -> Result<()> {
+    let script = format!(
+        r#"#!/usr/bin/env sh
+codex_home="${{CODEX_HOME:-${{HOME:-}}/.codex}}"
+marker="$codex_home/{SESSION_MARKER}"
+marker_dir=$(dirname "$marker")
+mkdir -p "$marker_dir" 2>/dev/null || true
+if [ -e "$marker" ]; then
+  exit 0
+fi
+: > "$marker" 2>/dev/null || exit 0
+exec {AUTO_WRAPPER} "${{1:-$(pwd)}}"
+"#
+    );
+    write_executable_script(path, &script)
+}
+
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -391,6 +412,10 @@ mod tests {
         assert!(wrapper.contains("MEMORY.md"));
         assert!(wrapper.contains("mktemp -d"));
         assert!(wrapper.contains("has_claw_markdown"));
+        let session_wrapper = fs::read_to_string(codex_home.join("bin").join(SESSION_WRAPPER))
+            .expect("session wrapper should exist");
+        assert!(session_wrapper.contains(AUTO_WRAPPER));
+        assert!(session_wrapper.contains(SESSION_MARKER));
 
         let config_path = codex_home.join("config.toml");
         let config = fs::read_to_string(&config_path).expect("config.toml should be written");
@@ -467,6 +492,57 @@ exit 1
         assert!(
             !workspace.join("MEMORY.md").exists(),
             "shadow fallback must not write into the original workspace"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn session_wrapper_outputs_once_per_codex_home() {
+        let root = temp_dir("session-wrapper-once");
+        let codex_home = root.join("codex-home");
+        let workspace = root.join("workspace");
+        let bin_dir = root.join("bin");
+        let fake_auto = bin_dir.join(AUTO_WRAPPER);
+        let wrapper = bin_dir.join(SESSION_WRAPPER);
+        fs::create_dir_all(&codex_home).expect("codex home should exist");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        write_executable_script(
+            &fake_auto,
+            r#"#!/usr/bin/env sh
+printf 'CLAW_COMPACTOR_ACTIVE {"target":"%s"}\n' "$1"
+"#,
+        )
+        .expect("fake auto wrapper should be executable");
+        write_session_wrapper(&wrapper).expect("session wrapper should be written");
+
+        let mut path_entries = vec![bin_dir.clone()];
+        if let Some(existing) = env::var_os("PATH") {
+            path_entries.extend(env::split_paths(&existing));
+        }
+        let path = env::join_paths(path_entries).expect("PATH should join");
+
+        let first = Command::new(&wrapper)
+            .arg(&workspace)
+            .env("CODEX_HOME", &codex_home)
+            .env("PATH", &path)
+            .output()
+            .expect("first session wrapper should run");
+        assert!(first.status.success());
+        let first_stdout = String::from_utf8(first.stdout).expect("first stdout should be utf8");
+        assert!(first_stdout.contains("CLAW_COMPACTOR_ACTIVE"));
+
+        let second = Command::new(&wrapper)
+            .arg(&workspace)
+            .env("CODEX_HOME", &codex_home)
+            .env("PATH", &path)
+            .output()
+            .expect("second session wrapper should run");
+        assert!(second.status.success());
+        assert!(
+            second.stdout.is_empty(),
+            "Claw SessionStart wrapper should not replay after marker"
         );
 
         let _ = fs::remove_dir_all(root);
