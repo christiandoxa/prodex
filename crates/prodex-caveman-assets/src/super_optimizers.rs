@@ -12,7 +12,9 @@ use crate::{AGENTS_MD, PRODEX_SUPER_OPTIMIZER_AWARENESS, SUPER_OPTIMIZERS_MD};
 mod claw;
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
+const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
 const PRODEX_OPTIMIZERS_DIR_NAME: &str = "prodex-optimizers";
+const TOKEN_SAVIOR_STATE_DIR_NAME: &str = "token-savior";
 
 pub fn configure_super_optimizer_codex_home(codex_home: &Path) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
@@ -88,14 +90,8 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             .ok()
             .map(|path| path.display().to_string())
             .unwrap_or_default();
-        let token_savior_env = [
-            ("TOKEN_SAVIOR_CLIENT", "codex"),
-            ("TOKEN_SAVIOR_PROFILE", "optimized"),
-            ("TS_CAPTURE_DISABLED", "1"),
-            ("TS_MEMORY_DISABLE", "1"),
-            ("TS_AUTO_EXTRACT", "0"),
-            ("WORKSPACE_ROOTS", workspace_roots.as_str()),
-        ];
+        let token_savior_state = token_savior_state_dirs_from_env();
+        let token_savior_env = token_savior_mcp_env(&workspace_roots, token_savior_state.as_ref());
         configure_stdio_mcp_server(
             &mut table,
             "prodex-token-savior",
@@ -160,41 +156,101 @@ fn configure_stdio_mcp_server(
     server_name: &str,
     command: PathBuf,
     args: &[&str],
-    env_vars: &[(&str, &str)],
+    env_vars: &[(&str, String)],
 ) {
     let Some(mcp_servers) = super_optimizer_mcp_servers_table(table) else {
         return;
     };
-    if mcp_servers.contains_key(server_name) {
-        return;
-    }
-    let server = ensure_child_table(mcp_servers, server_name);
-    server.insert(
-        "command".to_string(),
-        toml::Value::String(command.display().to_string()),
-    );
-    if args.is_empty() {
-        server.remove("args");
+    let is_new_server = !mcp_servers.contains_key(server_name);
+    let server = if is_new_server {
+        ensure_child_table(mcp_servers, server_name)
     } else {
+        match mcp_servers.get_mut(server_name) {
+            Some(toml::Value::Table(server)) => server,
+            _ => return,
+        }
+    };
+    if is_new_server {
         server.insert(
-            "args".to_string(),
-            toml::Value::Array(
-                args.iter()
-                    .map(|arg| toml::Value::String((*arg).to_string()))
-                    .collect(),
-            ),
+            "command".to_string(),
+            toml::Value::String(command.display().to_string()),
         );
-    }
-    if env_vars.is_empty() {
-        server.remove("env");
-    } else {
-        let env_table = ensure_child_table(server, "env");
-        for (key, value) in env_vars {
-            env_table.insert(
-                (*key).to_string(),
-                toml::Value::String((*value).to_string()),
+        if args.is_empty() {
+            server.remove("args");
+        } else {
+            server.insert(
+                "args".to_string(),
+                toml::Value::Array(
+                    args.iter()
+                        .map(|arg| toml::Value::String((*arg).to_string()))
+                        .collect(),
+                ),
             );
         }
+    }
+    if !env_vars.is_empty() {
+        let env_table = ensure_child_table(server, "env");
+        for (key, value) in env_vars {
+            env_table.insert((*key).to_string(), toml::Value::String(value.clone()));
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TokenSaviorStateDirs {
+    cache_dir: PathBuf,
+    stats_dir: PathBuf,
+}
+
+fn token_savior_mcp_env(
+    workspace_roots: &str,
+    state_dirs: Option<&TokenSaviorStateDirs>,
+) -> Vec<(&'static str, String)> {
+    let mut env_vars = vec![
+        ("TOKEN_SAVIOR_CLIENT", "codex".to_string()),
+        ("TOKEN_SAVIOR_PROFILE", "optimized".to_string()),
+        ("TS_CAPTURE_DISABLED", "1".to_string()),
+        ("TS_MEMORY_DISABLE", "1".to_string()),
+        ("TS_AUTO_EXTRACT", "0".to_string()),
+        ("WORKSPACE_ROOTS", workspace_roots.to_string()),
+    ];
+    if let Some(state_dirs) = state_dirs {
+        env_vars.push((
+            "TOKEN_SAVIOR_CACHE_DIR",
+            state_dirs.cache_dir.display().to_string(),
+        ));
+        env_vars.push((
+            "TOKEN_SAVIOR_STATS_DIR",
+            state_dirs.stats_dir.display().to_string(),
+        ));
+    }
+    env_vars
+}
+
+fn token_savior_state_dirs_from_env() -> Option<TokenSaviorStateDirs> {
+    let prodex_home = env::var_os(PRODEX_HOME_ENV)
+        .map(PathBuf::from)
+        .map(absolutize_path_lossy)
+        .or_else(|| home_dir_from_env().map(|home| home.join(".prodex")))?;
+    Some(token_savior_state_dirs_from_prodex_home(&prodex_home))
+}
+
+fn absolutize_path_lossy(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    env::current_dir()
+        .map(|current_dir| current_dir.join(&path))
+        .unwrap_or(path)
+}
+
+fn token_savior_state_dirs_from_prodex_home(prodex_home: &Path) -> TokenSaviorStateDirs {
+    let root = prodex_home
+        .join("optimizer-state")
+        .join(TOKEN_SAVIOR_STATE_DIR_NAME);
+    TokenSaviorStateDirs {
+        cache_dir: root.join("cache"),
+        stats_dir: root.join("stats"),
     }
 }
 
@@ -454,6 +510,99 @@ mod tests {
             Some("/custom/sqz-mcp")
         );
         assert!(mcp_servers.contains_key("custom"));
+    }
+
+    #[test]
+    fn stdio_mcp_server_config_merges_env_into_existing_entry() {
+        let mut table = toml::Table::new();
+        let mcp_servers = ensure_child_table(&mut table, "mcp_servers");
+        mcp_servers.insert(
+            "prodex-token-savior".to_string(),
+            toml::Value::Table({
+                let mut table = toml::Table::new();
+                table.insert(
+                    "command".to_string(),
+                    toml::Value::String("/custom/token-savior".to_string()),
+                );
+                table.insert(
+                    "env".to_string(),
+                    toml::Value::Table({
+                        let mut env = toml::Table::new();
+                        env.insert(
+                            "CUSTOM_ENV".to_string(),
+                            toml::Value::String("preserved".to_string()),
+                        );
+                        env.insert(
+                            "TOKEN_SAVIOR_PROFILE".to_string(),
+                            toml::Value::String("legacy".to_string()),
+                        );
+                        env
+                    }),
+                );
+                table
+            }),
+        );
+
+        configure_stdio_mcp_server(
+            &mut table,
+            "prodex-token-savior",
+            PathBuf::from("/tmp/token-savior"),
+            &[],
+            &[
+                ("TOKEN_SAVIOR_PROFILE", "optimized".to_string()),
+                ("TOKEN_SAVIOR_CACHE_DIR", "/tmp/prodex/cache".to_string()),
+            ],
+        );
+
+        let server = table
+            .get("mcp_servers")
+            .and_then(toml::Value::as_table)
+            .and_then(|servers| servers.get("prodex-token-savior"))
+            .and_then(toml::Value::as_table)
+            .expect("token-savior server should exist");
+        assert_eq!(
+            server.get("command").and_then(toml::Value::as_str),
+            Some("/custom/token-savior")
+        );
+        let env = server
+            .get("env")
+            .and_then(toml::Value::as_table)
+            .expect("token-savior env should exist");
+        assert_eq!(
+            env.get("CUSTOM_ENV").and_then(toml::Value::as_str),
+            Some("preserved")
+        );
+        assert_eq!(
+            env.get("TOKEN_SAVIOR_PROFILE")
+                .and_then(toml::Value::as_str),
+            Some("optimized")
+        );
+        assert_eq!(
+            env.get("TOKEN_SAVIOR_CACHE_DIR")
+                .and_then(toml::Value::as_str),
+            Some("/tmp/prodex/cache")
+        );
+    }
+
+    #[test]
+    fn token_savior_mcp_env_routes_state_under_prodex_home() {
+        let prodex_home = PathBuf::from("/tmp/prodex-home");
+        let state_dirs = token_savior_state_dirs_from_prodex_home(&prodex_home);
+        let env = token_savior_mcp_env("/workspace", Some(&state_dirs));
+        let value_for = |key: &str| {
+            env.iter()
+                .find_map(|(candidate, value)| (*candidate == key).then_some(value.as_str()))
+        };
+
+        assert_eq!(value_for("WORKSPACE_ROOTS"), Some("/workspace"));
+        assert_eq!(
+            value_for("TOKEN_SAVIOR_CACHE_DIR"),
+            Some("/tmp/prodex-home/optimizer-state/token-savior/cache")
+        );
+        assert_eq!(
+            value_for("TOKEN_SAVIOR_STATS_DIR"),
+            Some("/tmp/prodex-home/optimizer-state/token-savior/stats")
+        );
     }
 
     #[test]

@@ -12,9 +12,10 @@ pub(crate) fn runtime_probe_refresh_take_next_job(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     loop {
         if let Some(key) = pending.keys().next().cloned() {
-            return pending
-                .remove(&key)
-                .expect("selected probe refresh job should remain queued");
+            if let Some(job) = pending.remove(&key) {
+                return job;
+            }
+            continue;
         }
         pending = queue
             .wake
@@ -28,16 +29,11 @@ pub(super) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQu
         let job = runtime_probe_refresh_take_next_job(&queue);
         queue.active.fetch_add(1, Ordering::SeqCst);
         let log_path = job.shared.log_path.clone();
-        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job.execute()));
+        let panic_result = crate::runtime_panic::catch_runtime_unwind_silently(|| job.execute());
         queue.active.fetch_sub(1, Ordering::SeqCst);
         if let Err(panic_payload) = panic_result {
-            let panic_message = if let Some(message) = panic_payload.downcast_ref::<&str>() {
-                (*message).to_string()
-            } else if let Some(message) = panic_payload.downcast_ref::<String>() {
-                message.clone()
-            } else {
-                "unknown panic payload".to_string()
-            };
+            let panic_message =
+                crate::runtime_panic::runtime_panic_payload_label(panic_payload.as_ref());
             runtime_proxy_log_to_path(
                 &log_path,
                 &runtime_proxy_structured_log_message(

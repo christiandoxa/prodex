@@ -1,14 +1,14 @@
+use crate::runtime_panic::{catch_runtime_unwind_silently, runtime_panic_payload_label};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
-use std::any::Any;
 use std::fs;
 use std::io;
-use std::panic::{self, AssertUnwindSafe};
+use std::panic;
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
 
 use super::{runtime_proxy_latest_log_pointer_path, runtime_proxy_log_to_path};
 
-pub(crate) fn spawn_runtime_background_worker_or_panic(
+pub(crate) fn spawn_runtime_background_worker_or_log(
     name: impl Into<String>,
     panic_log_path: Option<PathBuf>,
     worker: impl FnOnce() + Send + 'static,
@@ -18,7 +18,6 @@ pub(crate) fn spawn_runtime_background_worker_or_panic(
         try_spawn_runtime_background_worker(name.clone(), panic_log_path.clone(), worker)
     {
         log_runtime_background_worker_spawn_error(panic_log_path.as_deref(), &name, &err);
-        panic!("failed to spawn runtime background worker {name}: {err}");
     }
 }
 
@@ -30,9 +29,9 @@ pub(crate) fn try_spawn_runtime_background_worker(
     let name = name.into();
     let worker_name = name.clone();
     thread::Builder::new().name(name).spawn(move || {
-        let panic_result = panic::catch_unwind(AssertUnwindSafe(worker));
+        let panic_result = catch_runtime_unwind_silently(worker);
         if let Err(payload) = panic_result {
-            let panic_message = runtime_background_panic_message(payload.as_ref());
+            let panic_message = runtime_panic_payload_label(payload.as_ref());
             log_runtime_background_worker_panic(
                 panic_log_path.as_deref(),
                 &worker_name,
@@ -91,16 +90,6 @@ fn runtime_background_latest_log_path() -> Option<PathBuf> {
     let pointer = fs::read_to_string(runtime_proxy_latest_log_pointer_path()).ok()?;
     let path = pointer.lines().next()?.trim();
     (!path.is_empty()).then(|| PathBuf::from(path))
-}
-
-fn runtime_background_panic_message(payload: &(dyn Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_string()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "unknown panic payload".to_string()
-    }
 }
 
 #[cfg(test)]

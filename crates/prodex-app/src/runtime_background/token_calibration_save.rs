@@ -1,6 +1,6 @@
 use super::{
     runtime_allocator_trim_best_effort, runtime_proxy_log_to_path,
-    worker_spawn::spawn_runtime_background_worker_or_panic,
+    worker_spawn::spawn_runtime_background_worker_or_log,
 };
 use anyhow::{Context, Result};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
@@ -82,7 +82,7 @@ fn runtime_smart_context_token_calibration_save_queue()
                 wake: Condvar::new(),
             });
             let worker_queue = Arc::clone(&queue);
-            spawn_runtime_background_worker_or_panic(
+            spawn_runtime_background_worker_or_log(
                 "prodex-runtime-smart-context-token-calibration-save",
                 None,
                 move || runtime_smart_context_token_calibration_save_worker_loop(worker_queue),

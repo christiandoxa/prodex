@@ -24,6 +24,12 @@ use self::previous_response::{
     runtime_responses_previous_response_not_found_context,
 };
 
+fn runtime_responses_stale_continuation_reply() -> RuntimeResponsesReply {
+    RuntimeResponsesReply::Buffered(RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
+        runtime_proxy_crate::runtime_proxy_stale_continuation_http_parts(),
+    ))
+}
+
 pub(crate) fn proxy_runtime_responses_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -518,7 +524,7 @@ pub(crate) fn proxy_runtime_responses_request(
                         continue;
                     }
                     RuntimePreviousResponseNotFoundAction::StaleContinuation => {
-                        unreachable!("responses previous_response policy cannot return this action")
+                        return Ok(runtime_responses_stale_continuation_reply());
                     }
                 }
             }

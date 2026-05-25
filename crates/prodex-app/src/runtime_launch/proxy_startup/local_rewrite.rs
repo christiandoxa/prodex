@@ -114,7 +114,22 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         worker_threads.push(thread::spawn(move || {
             loop {
                 match server.recv() {
-                    Ok(request) => handle_runtime_local_rewrite_proxy_request(request, &shared),
+                    Ok(request) => {
+                        let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
+                            handle_runtime_local_rewrite_proxy_request(request, &shared);
+                        });
+                        if let Err(panic) = result {
+                            runtime_proxy_log(
+                                &shared.runtime_shared,
+                                format!(
+                                    "runtime_proxy_worker_panic lane=local_rewrite panic={}",
+                                    crate::runtime_panic::runtime_panic_payload_label(
+                                        panic.as_ref()
+                                    )
+                                ),
+                            );
+                        }
+                    }
                     Err(_) if shutdown.load(Ordering::SeqCst) => break,
                     Err(_) => {}
                 }

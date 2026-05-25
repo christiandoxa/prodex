@@ -64,6 +64,7 @@ mod runtime_doctor;
 mod runtime_launch;
 mod runtime_launch_shared;
 mod runtime_mem;
+mod runtime_panic;
 mod runtime_persistence;
 mod runtime_policy;
 mod runtime_proxy;

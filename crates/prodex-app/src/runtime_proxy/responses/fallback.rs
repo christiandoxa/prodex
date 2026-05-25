@@ -217,7 +217,9 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
                     Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
                 }
                 RuntimePreviousResponseNotFoundAction::StaleContinuation => {
-                    unreachable!("responses previous_response policy cannot return this action")
+                    Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+                        Box::new(runtime_responses_stale_continuation_reply()),
+                    )))
                 }
             }
         }

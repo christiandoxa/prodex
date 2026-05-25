@@ -5,16 +5,6 @@ pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, start_runtime_local_rewrite_proxy,
 };
 
-fn runtime_proxy_panic_payload_label(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return (*message).to_string();
-    }
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    "non_string_panic".to_string()
-}
-
 #[cfg(test)]
 pub(crate) fn start_runtime_rotation_proxy(
     paths: &AppPaths,
@@ -398,15 +388,17 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
                         condvar.notify_all();
                         drop(guard);
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
                             handle_runtime_rotation_proxy_request(request, &shared);
-                        }));
+                        });
                         if let Err(panic) = result {
                             runtime_proxy_log(
                                 &shared,
                                 format!(
                                     "runtime_proxy_worker_panic lane=long_lived panic={}",
-                                    runtime_proxy_panic_payload_label(&panic)
+                                    crate::runtime_panic::runtime_panic_payload_label(
+                                        panic.as_ref()
+                                    )
                                 ),
                             );
                         }
@@ -464,15 +456,17 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
                             }
                         } else {
                             let result =
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                crate::runtime_panic::catch_runtime_unwind_silently(|| {
                                     handle_runtime_rotation_proxy_request(request, &shared);
-                                }));
+                                });
                             if let Err(panic) = result {
                                 runtime_proxy_log(
                                     &shared,
                                     format!(
                                         "runtime_proxy_worker_panic lane=standard panic={}",
-                                        runtime_proxy_panic_payload_label(&panic)
+                                        crate::runtime_panic::runtime_panic_payload_label(
+                                            panic.as_ref()
+                                        )
                                     ),
                                 );
                             }

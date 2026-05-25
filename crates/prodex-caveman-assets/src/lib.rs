@@ -99,7 +99,7 @@ Prefer existing artifact refs and Smart Context summaries over asking for the sa
 
 If the `prodex-token-savior` MCP server is available, prefer its symbol/navigation tools before reading large source files. Keep exact source for edits, failing tests, stack traces, migrations, generated files, lockfiles, and security-sensitive changes.
 
-Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, and `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly.
+Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, and `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly. Prodex routes compatible token-savior cache/state under `PRODEX_HOME` (default `~/.prodex`) instead of the workspace.
 
 ## AST Compression
 

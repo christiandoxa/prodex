@@ -1,6 +1,6 @@
 use super::super::*;
 use super::worker::runtime_probe_refresh_worker_loop;
-use crate::runtime_background::worker_spawn::spawn_runtime_background_worker_or_panic;
+use crate::runtime_background::worker_spawn::spawn_runtime_background_worker_or_log;
 
 pub(crate) fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
     Arc::clone(RUNTIME_PROBE_REFRESH_QUEUE.get_or_init(|| {
@@ -13,7 +13,7 @@ pub(crate) fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
         });
         for worker_index in 0..runtime_probe_refresh_worker_count() {
             let worker_queue = Arc::clone(&queue);
-            spawn_runtime_background_worker_or_panic(
+            spawn_runtime_background_worker_or_log(
                 format!("prodex-runtime-probe-refresh-{worker_index}"),
                 None,
                 move || runtime_probe_refresh_worker_loop(worker_queue),
