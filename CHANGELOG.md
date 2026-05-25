@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.117.0 - 2026-05-25
+
+### Runtime
+
+- Harden runtime panic recovery (`bc7d909`)
+
 ## 0.116.0 - 2026-05-25
 
 ### Runtime
@@ -69,10 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Remove llmmin optimizer overlay (`2045674`)
-
-## 0.105.0 - 2026-05-23
-
-### Misc
-
-- Use explicit presidio imports (`c40ab0a`)
-- Add presidio support (`dae6097`)
