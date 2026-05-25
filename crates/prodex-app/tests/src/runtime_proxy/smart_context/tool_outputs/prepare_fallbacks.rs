@@ -151,8 +151,21 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
     assert!(log.contains("route=websocket"));
     assert!(log.contains("profile=main"));
     assert!(log.contains("panic=non_string_panic"));
+    assert!(log.contains("smart_context_disabled"));
     assert!(log.contains("decision=pass_through"));
     assert!(!log.contains("runtime_proxy_worker_panic"));
+
+    let rewritten_after_panic = prepare_runtime_smart_context_websocket_text(
+        45,
+        &request_text,
+        &handshake_request,
+        &shared,
+        "main",
+    );
+    assert!(matches!(rewritten_after_panic, Cow::Borrowed(_)));
+    assert_eq!(rewritten_after_panic.as_ref(), request_text.as_str());
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("reason=panic_cooldown"));
 }
 
 #[test]

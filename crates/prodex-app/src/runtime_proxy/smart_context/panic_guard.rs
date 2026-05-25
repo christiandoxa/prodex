@@ -77,6 +77,11 @@ where
 }
 
 fn runtime_smart_context_panic_payload_label(payload: &(dyn std::any::Any + Send)) -> String {
+    if payload.is::<RuntimeSmartContextInjectedPanic>()
+        || payload.is::<Box<RuntimeSmartContextInjectedPanic>>()
+    {
+        return "runtime_smart_context_injected_panic".to_string();
+    }
     if let Some(message) = payload.downcast_ref::<&str>() {
         return (*message).to_string();
     }

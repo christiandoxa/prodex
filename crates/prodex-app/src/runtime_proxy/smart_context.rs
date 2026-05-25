@@ -45,6 +45,28 @@ use types::*;
 static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimeSmartContextProxyState>>,
 > = OnceLock::new();
+const RUNTIME_SMART_CONTEXT_PANIC_COOLDOWN_SECS: u64 = 60;
+static RUNTIME_SMART_CONTEXT_DISABLED_UNTIL: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> =
+    OnceLock::new();
+
+fn runtime_smart_context_disabled_until_for(shared: &RuntimeRotationProxyShared) -> u64 {
+    let Some(disabled) = RUNTIME_SMART_CONTEXT_DISABLED_UNTIL.get() else {
+        return 0;
+    };
+    let Ok(disabled) = disabled.lock() else {
+        return 0;
+    };
+    disabled.get(&shared.log_path).copied().unwrap_or_default()
+}
+
+fn runtime_smart_context_disable_temporarily(shared: &RuntimeRotationProxyShared, now: u64) -> u64 {
+    let disabled_until = now.saturating_add(RUNTIME_SMART_CONTEXT_PANIC_COOLDOWN_SECS);
+    let disabled = RUNTIME_SMART_CONTEXT_DISABLED_UNTIL.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let Ok(mut disabled) = disabled.lock() {
+        disabled.insert(shared.log_path.clone(), disabled_until);
+    }
+    disabled_until
+}
 
 pub(crate) fn runtime_smart_context_effective_prompt_cache_key(
     request: &RuntimeProxyRequest,
@@ -225,6 +247,20 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     if !runtime_smart_context_enabled(shared) {
         return Cow::Borrowed(&request.body);
     }
+    let now = runtime_smart_context_unix_secs_now();
+    let disabled_until = runtime_smart_context_disabled_until_for(shared);
+    if disabled_until > now {
+        runtime_smart_context_log_prepare_fallback(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            profile_name,
+            request.body.len(),
+            "panic_cooldown",
+        );
+        return Cow::Borrowed(&request.body);
+    }
 
     if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE") {
         runtime_smart_context_log_prepare_fallback(
@@ -256,6 +292,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     match result {
         Ok(body) => body,
         Err(panic) => {
+            let disabled_until = runtime_smart_context_disable_temporarily(shared, now);
             runtime_smart_context_log_panic(
                 request_id,
                 shared,
@@ -264,6 +301,20 @@ fn prepare_runtime_smart_context_body_safely<'a>(
                 profile_name,
                 request.body.len(),
                 &panic,
+            );
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "smart_context_disabled",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", transport.label()),
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("profile", profile_name.unwrap_or("-")),
+                        runtime_proxy_log_field("reason", "panic"),
+                        runtime_proxy_log_field("until", disabled_until.to_string()),
+                    ],
+                ),
             );
             Cow::Borrowed(&request.body)
         }
