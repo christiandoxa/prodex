@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.118.0 - 2026-05-26
+
+### Runtime
+
+- Stabilize super session restarts (`ba1599c`)
+
 ## 0.117.0 - 2026-05-25
 
 ### Runtime
@@ -69,9 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Prefer managed token-savior venv (`5181b7c`)
-
-## 0.106.0 - 2026-05-23
-
-### Misc
-
-- Remove llmmin optimizer overlay (`2045674`)

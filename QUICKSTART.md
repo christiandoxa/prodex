@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.117.0`:
+The current local version in this repo is `0.118.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.117.0
+npm install -g @christiandoxa/prodex@0.118.0
 ```
 
 Dependency status in this repo:
@@ -185,7 +185,7 @@ Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install
 Add optimizer prefixes before Codex args to inject launch overlays into the temporary Codex home: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `presidio`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
 Mem mode uses a slim Codex transcript schema by default so recall stays lower-token; use `prodex super --mem-super-slim` to store prompt summaries/references instead of full prompt bodies, or `prodex super --mem-full` when you need full assistant/tool transcript capture.
 `prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot through a dedicated runtime proxy for OpenAI/Codex providers, then ask whether to enable Presidio redaction. Empty input or `n` is equivalent to `prodex caveman mem rtk sqz tokensavior clawcompactor --full-access`; `y` is equivalent to `prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access`. Use `--presidio` or `--no-presidio` to make that choice non-interactive. When enabled, Presidio redacts UTF-8 HTTP request bodies and WebSocket text frames through local Presidio before forwarding them upstream. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cache-friendly context framing, and critical-signal self-checks.
-Super's optimization stack is local and deterministic by default: Caveman, Claude-Mem, an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registered `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, overlay `sqz`/`claw-compactor` wrappers when discoverable, and a trusted `prodex-claw-compactor-auto "$(pwd)"` SessionStart benchmark probe when Claw-Compactor is available. If the directory has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a generated `MEMORY.md` and does not modify the original directory.
+Super's optimization stack is local and deterministic by default: Caveman, Claude-Mem, an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registered `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, overlay `sqz`/`claw-compactor` wrappers when discoverable, and a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME`, so Codex conversation restarts do not replay it. If the directory has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a generated `MEMORY.md` and does not modify the original directory.
 For token-savior, prefer an isolated stable-Python venv at `~/.local/share/prodex-optimizers/token-savior/.venv`; Prodex prefers that managed venv over a global `PATH` binary to avoid experimental Python dependency breakage.
 Prodex passes token-savior cache and stats paths under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions keep generated state out of worktrees.
 RTK handles upstream/input command output before it enters the context window through visible `rtk <cmd>` commands, with overlay auto-wrappers as a safety fallback. Auto-wrappers are only a backstop; write `rtk <cmd>` explicitly when you want the TUI/transcript to show RTK usage. SQZ handles downstream/context reuse through the auto-registered `prodex-sqz` MCP server when `sqz-mcp` is available.
