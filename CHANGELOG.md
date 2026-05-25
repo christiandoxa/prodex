@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.116.0 - 2026-05-25
+
+### Runtime
+
+- Recover smart context after runtime panic (`f8cb338`)
+
 ## 0.115.0 - 2026-05-25
 
 ### Runtime
@@ -70,9 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Use explicit presidio imports (`c40ab0a`)
 - Add presidio support (`dae6097`)
-
-## 0.104.0 - 2026-05-22
-
-### CLI
-
-- Expand optimizer shortcuts (`d618e23`)
