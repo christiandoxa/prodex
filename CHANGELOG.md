@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.115.0 - 2026-05-25
+
+### Runtime
+
+- Handle interrupted websocket handshakes (`18bcb36`)
+
 ## 0.114.0 - 2026-05-25
 
 ### Misc
@@ -70,9 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Expand optimizer shortcuts (`d618e23`)
-
-## 0.103.0 - 2026-05-22
-
-### CLI
-
-- Discover managed optimizer checkouts (`03ba60d`)
