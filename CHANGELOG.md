@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.120.0 - 2026-05-26
+
+### Misc
+
+- Add API key login (`63c3945`)
+
 ## 0.119.0 - 2026-05-26
 
 ### Claude
@@ -68,10 +74,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Enforce optimizer runtime stack (`7becbef`)
-
-## 0.108.0 - 2026-05-24
-
-### Misc
-
-- Satisfy capability ci guards (`a570c5f`)
-- Add setup diagnostics and capability reporting (`e9499fc`)
