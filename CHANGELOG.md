@@ -2,6 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.123.0 - 2026-05-27
+
+### Misc
+
+- Smooth super provider launch (`fa40386`)
+
+## 0.122.0 - 2026-05-26
+
+### CLI
+
+- Add DeepSeek provider adapter (`9760a43`)
+
 ## 0.121.0 - 2026-05-26
 
 ### Runtime
@@ -61,16 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Restore presidio opt-in prompt (`4151e96`)
-
-## 0.111.0 - 2026-05-24
-
-### CLI
-
-- Satisfy claw hook clippy gate (`5ae196c`)
-- Invoke optimizer stack at launch (`04edf37`)
-
-## 0.110.0 - 2026-05-24
-
-### CLI
-
-- Harden optimizer stack diagnostics (`cc23f21`)
