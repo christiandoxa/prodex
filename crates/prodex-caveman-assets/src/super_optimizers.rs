@@ -287,13 +287,13 @@ fn prefer_managed_optimizer(command: &str) -> bool {
 fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
     for dir in path_dirs {
         let candidate = dir.join(command);
-        if executable_file(&candidate) {
+        if optimizer_command_ready(command, &candidate) {
             return Some(candidate);
         }
         #[cfg(windows)]
         {
             let candidate = dir.join(format!("{command}.exe"));
-            if executable_file(&candidate) {
+            if optimizer_command_ready(command, &candidate) {
                 return Some(candidate);
             }
         }
@@ -304,12 +304,54 @@ fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
 fn find_managed_optimizer_command(command: &str, optimizer_roots: &[PathBuf]) -> Option<PathBuf> {
     for root in optimizer_roots {
         for candidate in managed_optimizer_command_candidates(root, command) {
-            if executable_file(&candidate) {
+            if optimizer_command_ready(command, &candidate) {
                 return Some(candidate);
             }
         }
     }
     None
+}
+
+fn optimizer_command_ready(command: &str, path: &Path) -> bool {
+    executable_file(path) && (command != "token-savior" || token_savior_command_ready(path))
+}
+
+fn token_savior_command_ready(path: &Path) -> bool {
+    let Some(venv_root) = python_venv_root_for_command(path) else {
+        return true;
+    };
+    python_venv_has_module(venv_root, "mcp")
+}
+
+fn python_venv_root_for_command(path: &Path) -> Option<&Path> {
+    let bin_dir = path.parent()?;
+    let venv_root = bin_dir.parent()?;
+    let bin_name = bin_dir.file_name()?.to_str()?;
+    let venv_name = venv_root.file_name()?.to_str()?;
+    if matches!(bin_name, "bin" | "Scripts") && matches!(venv_name, ".venv" | "venv") {
+        Some(venv_root)
+    } else {
+        None
+    }
+}
+
+fn python_venv_has_module(venv_root: &Path, module_name: &str) -> bool {
+    let windows_site_packages = venv_root.join("Lib").join("site-packages");
+    if windows_site_packages.join(module_name).is_dir() {
+        return true;
+    }
+
+    let lib_dir = venv_root.join("lib");
+    let Ok(entries) = fs::read_dir(lib_dir) else {
+        return false;
+    };
+    entries.filter_map(|entry| entry.ok()).any(|entry| {
+        entry
+            .path()
+            .join("site-packages")
+            .join(module_name)
+            .is_dir()
+    })
 }
 
 fn path_dirs_from_env() -> Vec<PathBuf> {
@@ -437,6 +479,16 @@ mod tests {
             return path.with_extension("exe");
         }
         path
+    }
+
+    fn write_fake_mcp_package_for_venv_command(command: &Path) {
+        let venv_root = python_venv_root_for_command(command).expect("command should be in a venv");
+        let site_packages = venv_root
+            .join("lib")
+            .join("python3.13")
+            .join("site-packages")
+            .join("mcp");
+        fs::create_dir_all(&site_packages).expect("fake mcp package should be created");
     }
 
     #[test]
@@ -670,6 +722,7 @@ mod tests {
         .expect("managed parent should be created");
         fs::write(&path_command, "").expect("path command should be written");
         fs::write(&managed_command, "").expect("managed command should be written");
+        write_fake_mcp_package_for_venv_command(&managed_command);
 
         assert_eq!(
             find_optimizer_command(
@@ -678,6 +731,42 @@ mod tests {
                 std::slice::from_ref(&optimizer_root),
             ),
             Some(managed_command)
+        );
+
+        let _ = fs::remove_dir_all(path_root);
+        let _ = fs::remove_dir_all(optimizer_root);
+    }
+
+    #[test]
+    fn token_savior_discovery_skips_managed_venv_without_mcp_and_falls_back_to_path() {
+        let path_root = temp_dir("path-root");
+        let optimizer_root = temp_dir("optimizer-root");
+        let path_command = command_path(path_root.join("token-savior"));
+        let managed_command = command_path(
+            optimizer_root
+                .join("token-savior")
+                .join(".venv")
+                .join("bin")
+                .join("token-savior"),
+        );
+        fs::create_dir_all(path_command.parent().expect("path parent should exist"))
+            .expect("path parent should be created");
+        fs::create_dir_all(
+            managed_command
+                .parent()
+                .expect("managed parent should exist"),
+        )
+        .expect("managed parent should be created");
+        fs::write(&path_command, "").expect("path command should be written");
+        fs::write(&managed_command, "").expect("managed command should be written");
+
+        assert_eq!(
+            find_optimizer_command(
+                "token-savior",
+                std::slice::from_ref(&path_root),
+                std::slice::from_ref(&optimizer_root),
+            ),
+            Some(path_command)
         );
 
         let _ = fs::remove_dir_all(path_root);
@@ -704,6 +793,7 @@ mod tests {
             .expect("venv parent should be created");
         fs::write(&checkout_command, "").expect("checkout command should be written");
         fs::write(&venv_command, "").expect("venv command should be written");
+        write_fake_mcp_package_for_venv_command(&venv_command);
 
         assert_eq!(
             find_managed_optimizer_command("token-savior", std::slice::from_ref(&root)),
