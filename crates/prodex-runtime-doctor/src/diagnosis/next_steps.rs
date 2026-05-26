@@ -39,6 +39,9 @@ pub fn runtime_doctor_compact_final_failure_next_step(summary: &RuntimeDoctorSum
         (_, "overload") => format!(
             "Inspect compact overload and backoff markers{profile}, then retry after the local pressure clears."
         ),
+        (_, "transport") => format!(
+            "Inspect compact transport markers{profile}; Prodex backed off the failing route, so retry after short transport backoff or let a fresh compact select another eligible profile."
+        ),
         (_, "inflight_saturation") => format!(
             "Wait for in-flight compact work to drain{profile} before retrying."
         ),

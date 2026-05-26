@@ -132,6 +132,11 @@ pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) ->
         "runtime_proxy.stream_idle_timeout_ms",
     )?;
     validate_optional_u64(
+        policy.runtime_proxy.compact_request_timeout_ms,
+        path,
+        "runtime_proxy.compact_request_timeout_ms",
+    )?;
+    validate_optional_u64(
         policy.runtime_proxy.sse_lookahead_timeout_ms,
         path,
         "runtime_proxy.sse_lookahead_timeout_ms",

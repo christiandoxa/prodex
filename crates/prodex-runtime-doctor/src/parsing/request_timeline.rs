@@ -75,6 +75,7 @@ fn runtime_doctor_request_timeline_phase(marker: &str) -> Option<&'static str> {
         | "compact_precommit_budget_exhausted"
         | "compact_candidate_exhausted"
         | "compact_retryable_failure"
+        | "compact_transport_failure"
         | "compact_final_failure"
         | "compact_exit_fresh_fallback_blocked"
         | "compact_exit_pressure_shed"

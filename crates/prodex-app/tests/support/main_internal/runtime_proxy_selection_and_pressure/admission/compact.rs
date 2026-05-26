@@ -283,6 +283,61 @@ fn compact_smart_context_prepare_fallback_passes_original_body_to_upstream() {
 }
 
 #[test]
+fn compact_transport_timeout_rotates_fresh_request_to_next_profile() {
+    let _compact_timeout_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS", "300");
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
+        [RuntimeProxyBackendFaultStep::stalled_json(
+            RuntimeProxyBackendFaultRoute::Compact,
+            "main-account",
+            Duration::from_millis(400),
+        )],
+    ));
+    let ready = runtime_usage_snapshot(quota_window_ready(80, 3600), quota_window_ready(80, 86_400));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
+        .build();
+    let shared = harness.shared();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("x-openai-subagent".to_string(), "compact".to_string()),
+        ],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_standard_request(45, &request, shared)
+        .expect("fresh compact transport failure should rotate before returning");
+    let (status, body) = tiny_http_response_status_and_body(response);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert_eq!(
+        status, 200,
+        "unexpected compact response body: {body}; log: {log}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    assert!(
+        log.contains(
+            "compact_transport_failure profile=main route=compact stage=compact_forward_response"
+        ) && log.contains("profile_transport_backoff")
+            && log.contains("route=compact")
+            && log.contains("compact_committed profile=second"),
+        "compact transport timeout should back off main and commit second: {log}"
+    );
+}
+
+#[test]
 fn compact_final_failure_logs_overload_terminal_reason() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_compact_overloaded();

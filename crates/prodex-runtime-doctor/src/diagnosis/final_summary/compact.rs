@@ -7,7 +7,7 @@ use super::super::marker_accessors::runtime_doctor_marker_count;
 pub(super) fn runtime_doctor_compact_exit_counts(
     summary: &RuntimeDoctorSummary,
 ) -> BTreeMap<String, usize> {
-    let compact_markers: [(&str, &[&str]); 10] = [
+    let compact_markers: [(&str, &[&str]); 11] = [
         (
             "candidate_exhausted",
             &[
@@ -63,6 +63,7 @@ pub(super) fn runtime_doctor_compact_exit_counts(
                 "compact_exit_retryable_failure",
             ],
         ),
+        ("transport_failure", &["compact_transport_failure"]),
     ];
 
     compact_markers

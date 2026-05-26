@@ -126,6 +126,12 @@ const runtimeProxyKeys = [
     meaning: "Responses stream idle timeout, aligned with Codex behavior.",
   },
   {
+    policy: "runtime_proxy.compact_request_timeout_ms",
+    env: "PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS",
+    defaultValue: "`90000`",
+    meaning: "Total request timeout for unary remote compact calls before Codex can observe failure and retry.",
+  },
+  {
     policy: "runtime_proxy.sse_lookahead_timeout_ms",
     env: "PRODEX_RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS",
     defaultValue: "`1000`",

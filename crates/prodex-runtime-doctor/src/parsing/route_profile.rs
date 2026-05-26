@@ -32,6 +32,7 @@ fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
         | "upstream_read_error"
         | "upstream_send_error"
         | "upstream_stream_error"
+        | "compact_transport_failure"
         | "websocket_precommit_frame_timeout"
         | "websocket_precommit_hold_timeout" => Some("transport_failure"),
         "quota_blocked"

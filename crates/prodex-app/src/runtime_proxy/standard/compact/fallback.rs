@@ -27,6 +27,7 @@ pub(super) struct RuntimeProxyCompactSelectionExhausted<'a> {
     pub(super) pressure_mode: bool,
     pub(super) exit: &'static str,
     pub(super) fallback_exit: &'static str,
+    pub(super) saw_transport_failure: bool,
 }
 
 pub(super) fn finish_runtime_proxy_compact_selection_exhausted(
@@ -34,9 +35,15 @@ pub(super) fn finish_runtime_proxy_compact_selection_exhausted(
     last_failure: Option<(tiny_http::ResponseBox, bool)>,
     saw_inflight_saturation: bool,
 ) -> Result<tiny_http::ResponseBox> {
-    let final_reason =
-        runtime_proxy_compact_final_failure_reason(last_failure.as_ref(), saw_inflight_saturation);
-    let last_failure_kind = runtime_proxy_compact_last_failure_kind(last_failure.as_ref());
+    let final_reason = runtime_proxy_compact_final_failure_reason(
+        last_failure.as_ref(),
+        saw_inflight_saturation,
+        exhausted.saw_transport_failure,
+    );
+    let last_failure_kind = runtime_proxy_compact_last_failure_kind(
+        last_failure.as_ref(),
+        exhausted.saw_transport_failure,
+    );
     if let Some(response) = runtime_proxy_final_retryable_http_failure_response(
         last_failure,
         saw_inflight_saturation,
@@ -53,23 +60,32 @@ pub(super) fn finish_runtime_proxy_compact_selection_exhausted(
                 pressure_mode: exhausted.pressure_mode,
                 last_failure_kind,
                 saw_inflight_saturation,
+                saw_transport_failure: exhausted.saw_transport_failure,
                 profile_name: None,
             },
         );
         return Ok(response);
     }
-    if exhausted.strict_affinity_profile.is_some() || exhausted.session_profile.is_some() {
+    if exhausted.strict_affinity_profile.is_some()
+        || exhausted.session_profile.is_some()
+        || exhausted.saw_transport_failure
+    {
         log_runtime_proxy_compact_final_failure(
             exhausted.shared,
             RuntimeProxyCompactFinalFailureLog {
                 request_id: exhausted.request_id,
                 exit: exhausted.exit,
-                reason: "local_selection",
+                reason: if exhausted.saw_transport_failure {
+                    "transport"
+                } else {
+                    "local_selection"
+                },
                 selection_attempts: exhausted.selection_attempts,
                 selection_started_at: exhausted.selection_started_at,
                 pressure_mode: exhausted.pressure_mode,
                 last_failure_kind,
                 saw_inflight_saturation,
+                saw_transport_failure: exhausted.saw_transport_failure,
                 profile_name: None,
             },
         );
@@ -155,6 +171,23 @@ fn attempt_runtime_compact_owner_fallback(
                 runtime_proxy_local_selection_failure_message(),
             ))
         }
+        RuntimeStandardAttempt::TransportFailed {
+            profile_name,
+            stage: _,
+        } => {
+            log_runtime_proxy_compact_fallback_failure(
+                &exhausted,
+                "transport",
+                last_failure_kind,
+                saw_inflight_saturation,
+                &profile_name,
+            );
+            Ok(build_runtime_proxy_json_error_response(
+                503,
+                "service_unavailable",
+                runtime_proxy_local_selection_failure_message(),
+            ))
+        }
     }
 }
 
@@ -176,6 +209,7 @@ fn log_runtime_proxy_compact_fallback_failure(
             pressure_mode: exhausted.pressure_mode,
             last_failure_kind,
             saw_inflight_saturation,
+            saw_transport_failure: exhausted.saw_transport_failure,
             profile_name: Some(profile_name),
         },
     );

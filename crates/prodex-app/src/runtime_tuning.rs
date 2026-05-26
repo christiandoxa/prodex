@@ -112,6 +112,14 @@ pub(super) fn runtime_proxy_stream_idle_timeout_ms() -> u64 {
     )
 }
 
+pub(super) fn runtime_proxy_compact_request_timeout_ms() -> u64 {
+    timeout_override_ms_with_policy(
+        "PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS",
+        runtime_policy_proxy().and_then(|policy| policy.compact_request_timeout_ms),
+        RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS,
+    )
+}
+
 pub(super) fn runtime_proxy_sse_lookahead_timeout_ms() -> u64 {
     timeout_override_ms_with_policy(
         "PRODEX_RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS",

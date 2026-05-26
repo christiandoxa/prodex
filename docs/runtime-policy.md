@@ -50,6 +50,7 @@ The preset changes only local concurrency and admission tuning; transport timeou
 | `runtime_proxy.pressure_long_lived_queue_wait_budget_ms` | `PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS` | `200` | Shorter long-lived queue wait budget under pressure. |
 | `runtime_proxy.http_connect_timeout_ms` | `PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS` | `5000` | Upstream HTTP connect timeout. |
 | `runtime_proxy.stream_idle_timeout_ms` | `PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS` | `300000` | Responses stream idle timeout, aligned with Codex behavior. |
+| `runtime_proxy.compact_request_timeout_ms` | `PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS` | `90000` | Total request timeout for unary remote compact calls before Codex can observe failure and retry. |
 | `runtime_proxy.sse_lookahead_timeout_ms` | `PRODEX_RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS` | `1000` | Pre-commit SSE lookahead timeout. |
 | `runtime_proxy.prefetch_backpressure_retry_ms` | `PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS` | `10` | Retry delay while stream prefetch is backpressured. |
 | `runtime_proxy.prefetch_backpressure_timeout_ms` | `PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS` | `1000` | Max wait for stream prefetch backpressure to clear. |

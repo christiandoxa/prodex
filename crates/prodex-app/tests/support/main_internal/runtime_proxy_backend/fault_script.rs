@@ -54,6 +54,23 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn stalled_json(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+        stall: Duration,
+    ) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 200 OK",
+            content_type: "application/json",
+            body: serde_json::json!({ "ok": true }).to_string(),
+            response_turn_state: None,
+            initial_body_stall: Some(stall),
+            chunk_delay: None,
+        }
+    }
+
     fn matches(&self, route: RuntimeProxyBackendFaultRoute, account_id: &str) -> bool {
         self.route == route && self.account_id.as_deref().is_none_or(|id| id == account_id)
     }

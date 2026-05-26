@@ -60,6 +60,7 @@ macro_rules! runtime_doctor_marker_registry {
             CompactPrecommitBudgetExhausted => "compact_precommit_budget_exhausted",
             CompactCandidateExhausted => "compact_candidate_exhausted",
             CompactRetryableFailure => "compact_retryable_failure",
+            CompactTransportFailure => "compact_transport_failure",
             CompactOverloadConservativeRetry => "compact_overload_conservative_retry",
             CompactQuotaUnclassified => "compact_quota_unclassified",
             CompactPreSendAllowQuotaExhausted => "compact_pre_send_allow_quota_exhausted",
@@ -317,6 +318,7 @@ pub const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
     ("Compact budget", "compact_precommit_budget_exhausted"),
     ("Compact exhausted", "compact_candidate_exhausted"),
     ("Compact retry", "compact_retryable_failure"),
+    ("Compact transport", "compact_transport_failure"),
     ("Compact owner retry", "compact_overload_conservative_retry"),
     ("Compact quota misc", "compact_quota_unclassified"),
     ("Compact final", "compact_final_failure"),
@@ -399,6 +401,7 @@ pub const RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS: &[&str] = &[
     "precommit_budget_exhausted",
     "compact_precommit_budget_exhausted",
     "compact_candidate_exhausted",
+    "compact_transport_failure",
 ];
 
 pub const RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS: &[&str] = &[
@@ -413,6 +416,7 @@ pub const RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS: &[&str] = &[
     "upstream_read_error",
     "upstream_send_error",
     "upstream_stream_error",
+    "compact_transport_failure",
     "profile_transport_failure",
     "profile_transport_backoff",
     "profile_circuit_open",

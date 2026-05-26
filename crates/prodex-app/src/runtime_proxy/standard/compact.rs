@@ -6,8 +6,8 @@ use super::super::{
     release_runtime_compact_lineage, release_runtime_quota_blocked_affinity,
     runtime_candidate_has_hard_affinity, runtime_compact_route_followup_bound_profile,
     runtime_has_route_eligible_quota_fallback, runtime_profile_inflight_hard_limited_for_context,
-    runtime_proxy_current_profile, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_precommit_budget_exhausted_for_route,
+    runtime_proxy_current_profile, runtime_proxy_local_selection_failure_message,
+    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_profile_inflight_hard_limit,
     runtime_proxy_should_shed_fresh_compact_request, runtime_proxy_structured_log_message,
     runtime_proxy_sync_probe_pressure_pause,
@@ -96,6 +96,7 @@ pub(super) fn proxy_runtime_compact_request(
                 pressure_mode,
                 last_failure_kind: "none",
                 saw_inflight_saturation: false,
+                saw_transport_failure: false,
                 profile_name: None,
             },
         );
@@ -109,6 +110,7 @@ pub(super) fn proxy_runtime_compact_request(
     let mut conservative_overload_retried_profiles = BTreeSet::new();
     let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
     let mut saw_inflight_saturation = false;
+    let mut saw_transport_failure = false;
 
     loop {
         if runtime_proxy_precommit_budget_exhausted_for_route(
@@ -140,6 +142,7 @@ pub(super) fn proxy_runtime_compact_request(
                     pressure_mode,
                     exit: "precommit_budget_exhausted",
                     fallback_exit: "precommit_budget_exhausted_fallback",
+                    saw_transport_failure,
                 },
                 last_failure,
                 saw_inflight_saturation,
@@ -205,6 +208,7 @@ pub(super) fn proxy_runtime_compact_request(
                     pressure_mode,
                     exit: "candidate_exhausted",
                     fallback_exit: "candidate_exhausted_fallback",
+                    saw_transport_failure,
                 },
                 last_failure,
                 saw_inflight_saturation,
@@ -286,6 +290,54 @@ pub(super) fn proxy_runtime_compact_request(
                 return Ok(response);
             }
             RuntimeStandardAttempt::StaleContinuation { response } => return Ok(response),
+            RuntimeStandardAttempt::TransportFailed {
+                profile_name,
+                stage,
+            } => {
+                saw_transport_failure = true;
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http compact_transport_failure profile={profile_name} route=compact stage={stage}"
+                    ),
+                );
+                if runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
+                    route_kind: RuntimeRouteKind::Compact,
+                    candidate_name: &profile_name,
+                    strict_affinity_profile: compact_followup_profile
+                        .as_ref()
+                        .map(|(profile_name, _)| profile_name.as_str()),
+                    pinned_profile: None,
+                    turn_state_profile: None,
+                    session_profile: session_profile.as_deref(),
+                    trusted_previous_response_affinity: false,
+                }) {
+                    log_runtime_proxy_compact_final_failure(
+                        shared,
+                        RuntimeProxyCompactFinalFailureLog {
+                            request_id,
+                            exit: "hard_affinity_transport_failure",
+                            reason: "transport",
+                            selection_attempts,
+                            selection_started_at,
+                            pressure_mode,
+                            last_failure_kind: runtime_proxy_compact_last_failure_kind(
+                                last_failure.as_ref(),
+                                saw_transport_failure,
+                            ),
+                            saw_inflight_saturation,
+                            saw_transport_failure,
+                            profile_name: Some(&profile_name),
+                        },
+                    );
+                    return Ok(build_runtime_proxy_json_error_response(
+                        503,
+                        "service_unavailable",
+                        runtime_proxy_local_selection_failure_message(),
+                    ));
+                }
+                excluded_profiles.insert(profile_name);
+            }
             RuntimeStandardAttempt::RetryableFailure {
                 profile_name,
                 response,
@@ -368,8 +420,10 @@ pub(super) fn proxy_runtime_compact_request(
                             pressure_mode,
                             last_failure_kind: runtime_proxy_compact_last_failure_kind(
                                 last_failure.as_ref(),
+                                saw_transport_failure,
                             ),
                             saw_inflight_saturation,
+                            saw_transport_failure,
                             profile_name: Some(&profile_name),
                         },
                     );
@@ -426,8 +480,10 @@ pub(super) fn proxy_runtime_compact_request(
                             pressure_mode,
                             last_failure_kind: runtime_proxy_compact_last_failure_kind(
                                 last_failure.as_ref(),
+                                saw_transport_failure,
                             ),
                             saw_inflight_saturation,
+                            saw_transport_failure,
                             profile_name: Some(&profile_name),
                         },
                     );
@@ -468,8 +524,10 @@ pub(super) fn proxy_runtime_compact_request(
                             pressure_mode,
                             last_failure_kind: runtime_proxy_compact_last_failure_kind(
                                 last_failure.as_ref(),
+                                saw_transport_failure,
                             ),
                             saw_inflight_saturation,
+                            saw_transport_failure,
                             profile_name: Some(&profile_name),
                         },
                     );

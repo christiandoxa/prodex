@@ -328,7 +328,7 @@ pub(super) fn attempt_runtime_standard_request(
         let upstream_shared = shared.clone();
         let upstream_profile_name = profile_name.to_string();
         let response =
-            await_runtime_proxy_async_task(shared, "compact_upstream_request", async move {
+            match await_runtime_proxy_async_task(shared, "compact_upstream_request", async move {
                 send_runtime_proxy_upstream_request(
                     request_id,
                     &upstream_request,
@@ -338,22 +338,31 @@ pub(super) fn attempt_runtime_standard_request(
                     upstream_auth,
                 )
                 .await
-            })
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Compact,
-                    "compact_upstream_request",
-                    err,
-                );
-            })?;
+            }) {
+                Ok(response) => response,
+                Err(err) => {
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Compact,
+                        "compact_upstream_request",
+                        &err,
+                    );
+                    if is_runtime_proxy_transport_failure(&err) {
+                        return Ok(RuntimeStandardAttempt::TransportFailed {
+                            profile_name: profile_name.to_string(),
+                            stage: "compact_upstream_request",
+                        });
+                    }
+                    return Err(err);
+                }
+            };
         let compact_request = is_runtime_compact_path(&request.path_and_query);
         if !compact_request || response.status().is_success() {
             let response_turn_state = compact_request
                 .then(|| runtime_proxy_header_value(response.headers(), "x-codex-turn-state"))
                 .flatten();
-            let response = if compact_request {
+            let response_result = if compact_request {
                 await_runtime_proxy_async_task(
                     shared,
                     "compact_forward_response",
@@ -369,16 +378,26 @@ pub(super) fn attempt_runtime_standard_request(
                     "compact_forward_response",
                     forward_runtime_proxy_response(response, Vec::new()),
                 )
-            }
-            .inspect_err(|err| {
-                note_runtime_profile_transport_failure(
-                    shared,
-                    profile_name,
-                    RuntimeRouteKind::Compact,
-                    "compact_forward_response",
-                    err,
-                );
-            })?;
+            };
+            let response = match response_result {
+                Ok(response) => response,
+                Err(err) => {
+                    note_runtime_profile_transport_failure(
+                        shared,
+                        profile_name,
+                        RuntimeRouteKind::Compact,
+                        "compact_forward_response",
+                        &err,
+                    );
+                    if is_runtime_proxy_transport_failure(&err) {
+                        return Ok(RuntimeStandardAttempt::TransportFailed {
+                            profile_name: profile_name.to_string(),
+                            stage: "compact_forward_response",
+                        });
+                    }
+                    return Err(err);
+                }
+            };
             remember_runtime_session_id(
                 shared,
                 profile_name,
@@ -413,20 +432,29 @@ pub(super) fn attempt_runtime_standard_request(
         }
 
         let status = response.status().as_u16();
-        let parts = await_runtime_proxy_async_task(
+        let parts = match await_runtime_proxy_async_task(
             shared,
             "compact_buffer_response",
             buffer_runtime_proxy_async_response_parts(response, Vec::new()),
-        )
-        .inspect_err(|err| {
-            note_runtime_profile_transport_failure(
-                shared,
-                profile_name,
-                RuntimeRouteKind::Compact,
-                "compact_buffer_response",
-                err,
-            );
-        })?;
+        ) {
+            Ok(parts) => parts,
+            Err(err) => {
+                note_runtime_profile_transport_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Compact,
+                    "compact_buffer_response",
+                    &err,
+                );
+                if is_runtime_proxy_transport_failure(&err) {
+                    return Ok(RuntimeStandardAttempt::TransportFailed {
+                        profile_name: profile_name.to_string(),
+                        stage: "compact_buffer_response",
+                    });
+                }
+                return Err(err);
+            }
+        };
         if status == 401
             && runtime_try_recover_profile_auth_from_unauthorized_steps(
                 request_id,

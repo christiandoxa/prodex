@@ -139,6 +139,7 @@ pub fn runtime_doctor_incident_explainer(
         "upstream_read_error",
         "upstream_send_error",
         "upstream_stream_error",
+        "compact_transport_failure",
         "stream_read_error",
     ];
     let transport_count = runtime_doctor_incident_marker_total(summary, &transport_markers);

@@ -110,6 +110,8 @@ pub(crate) const QUOTA_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else
 pub(crate) const QUOTA_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 500 } else { 10_000 };
 // Match Codex's default Responses stream idle timeout so the local proxy stays transport-transparent.
 pub(crate) const RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 300_000 };
+pub(crate) const RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS: u64 =
+    if cfg!(test) { 1_000 } else { 90_000 };
 pub(crate) const RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 250 } else { 5_000 };
 pub(crate) const RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 =
     if cfg!(test) { 250 } else { 15_000 };

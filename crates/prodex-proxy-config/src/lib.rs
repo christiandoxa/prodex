@@ -39,13 +39,11 @@ pub fn runtime_compact_request_timeout_ms(stream_idle_timeout_ms: u64) -> u64 {
 pub fn build_runtime_upstream_async_http_compact_client(
     explicit_no_proxy: bool,
     connect_timeout_ms: u64,
-    stream_idle_timeout_ms: u64,
+    compact_request_timeout_ms: u64,
 ) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_millis(connect_timeout_ms))
-        .timeout(Duration::from_millis(runtime_compact_request_timeout_ms(
-            stream_idle_timeout_ms,
-        )));
+        .timeout(Duration::from_millis(compact_request_timeout_ms));
     if runtime_upstream_no_proxy(explicit_no_proxy) {
         builder = builder.no_proxy();
     }
@@ -111,8 +109,10 @@ mod tests {
     fn compact_async_client_allows_full_response_timeout_past_idle_timeout() {
         let idle_timeout_ms = 200;
         let url = spawn_delayed_response_server(Duration::from_millis(450));
-        let client = build_runtime_upstream_async_http_compact_client(true, 500, idle_timeout_ms)
-            .expect("compact client should build");
+        let compact_timeout_ms = runtime_compact_request_timeout_ms(idle_timeout_ms);
+        let client =
+            build_runtime_upstream_async_http_compact_client(true, 500, compact_timeout_ms)
+                .expect("compact client should build");
         let runtime = test_tokio_runtime();
 
         let response = runtime
@@ -120,6 +120,25 @@ mod tests {
             .expect("compact client should wait past stream idle timeout");
 
         assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(compact_timeout_ms, 800);
+    }
+
+    #[test]
+    fn compact_async_client_uses_explicit_request_timeout() {
+        let url = spawn_delayed_response_server(Duration::from_millis(450));
+        let client = build_runtime_upstream_async_http_compact_client(true, 500, 200)
+            .expect("compact client should build");
+        let runtime = test_tokio_runtime();
+
+        let result = runtime.block_on(async { client.post(url).body("{}").send().await });
+
+        assert!(
+            result
+                .as_ref()
+                .err()
+                .is_some_and(reqwest::Error::is_timeout),
+            "compact client should use explicit request timeout; got {result:?}"
+        );
     }
 
     fn test_tokio_runtime() -> tokio::runtime::Runtime {

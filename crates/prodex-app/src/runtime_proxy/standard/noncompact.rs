@@ -72,6 +72,12 @@ pub(super) fn proxy_runtime_noncompact_request(
                     runtime_proxy_local_selection_failure_message(),
                 ))
             }
+            RuntimeStandardAttempt::TransportFailed { .. } => {
+                Ok(build_runtime_proxy_text_response(
+                    503,
+                    runtime_proxy_local_selection_failure_message(),
+                ))
+            }
         };
     }
     let preferred_profile = session_profile
@@ -320,6 +326,24 @@ pub(super) fn proxy_runtime_noncompact_request(
                 );
                 if session_profile.as_deref() == Some(profile_name.as_str()) {
                     session_profile = None;
+                }
+                excluded_profiles.insert(profile_name);
+            }
+            RuntimeStandardAttempt::TransportFailed {
+                profile_name,
+                stage,
+            } => {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http standard_transport_failure profile={profile_name} stage={stage}"
+                    ),
+                );
+                if session_profile.as_deref() == Some(profile_name.as_str()) {
+                    return Ok(build_runtime_proxy_text_response(
+                        503,
+                        runtime_proxy_local_selection_failure_message(),
+                    ));
                 }
                 excluded_profiles.insert(profile_name);
             }
