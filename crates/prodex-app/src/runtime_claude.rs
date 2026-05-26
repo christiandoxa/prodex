@@ -43,6 +43,8 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             force_runtime_proxy: true,
             model_provider_override: None,
             profile_v2_name: None,
+            external_provider: None,
+            external_provider_api_key: None,
         }
     }
 

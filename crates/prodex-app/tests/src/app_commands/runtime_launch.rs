@@ -64,6 +64,8 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
         force_runtime_proxy: false,
         model_provider_override: None,
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -112,6 +114,8 @@ fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
         force_runtime_proxy: true,
         model_provider_override: None,
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     }) {
         Ok(_) => panic!("expected Claude launch to reject non-OpenAI model providers"),
         Err(err) => err,
@@ -181,6 +185,8 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
         force_runtime_proxy: false,
         model_provider_override: None,
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -221,6 +227,8 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -259,6 +267,8 @@ fn prepare_runtime_launch_profile_v2_config_enables_profileless_local_rewrite_pr
         force_runtime_proxy: false,
         model_provider_override: None,
         profile_v2_name: Some("local"),
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -297,6 +307,8 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -318,6 +330,51 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
     assert!(
         !paths.state_file.exists(),
         "profileless local proxy launch should not persist synthetic profile selection"
+    );
+}
+
+#[test]
+fn prepare_runtime_launch_enables_deepseek_rewrite_proxy_for_super_provider() {
+    let root = temp_dir("profileless-deepseek-smart-context-proxy");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: true,
+        skip_quota_check: true,
+        base_url: Some("https://api.deepseek.com"),
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: true,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: Some(1_048_576),
+        force_runtime_proxy: false,
+        model_provider_override: Some(SUPER_DEEPSEEK_PROVIDER_ID),
+        profile_v2_name: None,
+        external_provider: Some("deepseek"),
+        external_provider_api_key: Some("test-deepseek-key"),
+    })
+    .unwrap();
+
+    assert_eq!(prepared.codex_home, paths.shared_codex_root);
+    assert!(prepared.codex_home.is_dir());
+    assert!(!prepared.managed);
+    let runtime_proxy = prepared
+        .runtime_proxy
+        .as_ref()
+        .expect("DeepSeek provider should use local rewrite proxy");
+    assert_eq!(
+        runtime_proxy.local_model_provider_id.as_deref(),
+        Some(SUPER_DEEPSEEK_PROVIDER_ID)
+    );
+    assert_eq!(
+        runtime_proxy.openai_mount_path,
+        RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH
+    );
+    assert!(
+        !paths.state_file.exists(),
+        "profileless DeepSeek proxy launch should not persist synthetic profile selection"
     );
 }
 
@@ -357,6 +414,8 @@ fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
         force_runtime_proxy: false,
         model_provider_override: Some("prodex-local"),
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -407,6 +466,8 @@ fn prepare_runtime_launch_uses_profile_v2_model_provider_overlay() {
         force_runtime_proxy: false,
         model_provider_override: None,
         profile_v2_name: Some("bedrock"),
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -450,6 +511,8 @@ fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_overrid
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -499,6 +562,8 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
         force_runtime_proxy: false,
         model_provider_override: None,
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -530,6 +595,8 @@ fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_
         force_runtime_proxy: false,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -571,6 +638,8 @@ fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
         force_runtime_proxy: true,
         model_provider_override: Some(SUPER_LOCAL_PROVIDER_ID),
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     }) {
         Ok(_) => panic!("expected forced proxy launch to reject profileless local provider"),
         Err(err) => err,
@@ -615,6 +684,8 @@ fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
             force_runtime_proxy: false,
             model_provider_override: None,
             profile_v2_name: None,
+            external_provider: None,
+            external_provider_api_key: None,
         },
     )
     .expect_err("blocked preflight should return an error instead of exiting");
@@ -658,6 +729,8 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
             force_runtime_proxy: false,
             model_provider_override: None,
             profile_v2_name: None,
+            external_provider: None,
+            external_provider_api_key: None,
         },
     )
     .expect("probe failure should still continue without quota gate");

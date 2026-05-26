@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{ArgGroup, Args};
 use std::ffi::OsString;
 
 pub const SUPER_OPTIMIZER_PREFIXES: [&str; 3] = ["sqz", "tokensavior", "clawcompactor"];
@@ -91,12 +91,23 @@ pub struct CavemanArgs {
     /// Enable the Prodex Super optimizer launch overlay.
     #[arg(skip)]
     pub super_optimizer_overlay: bool,
+    /// External provider selected by a higher-level launch shortcut.
+    #[arg(skip)]
+    pub external_provider: Option<SuperExternalProvider>,
+    /// External provider API key supplied by a higher-level launch shortcut.
+    #[arg(skip)]
+    pub external_provider_api_key: Option<String>,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
 }
 
 #[derive(Args, Debug)]
+#[command(group(
+    ArgGroup::new("provider_or_url")
+        .args(["provider", "url"])
+        .multiple(false)
+))]
 pub struct SuperArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
@@ -126,30 +137,41 @@ pub struct SuperArgs {
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
-    #[arg(long, value_name = "URL", value_parser = parse_super_local_url)]
+    #[arg(
+        long,
+        value_name = "URL",
+        value_parser = parse_super_local_url,
+        conflicts_with = "provider"
+    )]
     pub url: Option<String>,
-    /// Model id to use with --url.
+    /// External provider preset to use through Codex/Super.
+    #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
+    pub provider: Option<SuperExternalProvider>,
+    /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
+    #[arg(long = "api-key", value_name = "KEY", requires = "provider")]
+    pub api_key: Option<String>,
+    /// Model id to use with --url or --provider.
     #[arg(
         long = "model",
         visible_alias = "local-model",
         value_name = "MODEL",
-        requires = "url"
+        requires = "provider_or_url"
     )]
     pub local_model: Option<String>,
-    /// Context window advertised to Codex when using --url.
+    /// Context window advertised to Codex when using --url or --provider.
     #[arg(
         long = "context-window",
         visible_alias = "local-context-window",
         value_name = "TOKENS",
-        requires = "url"
+        requires = "provider_or_url"
     )]
     pub local_context_window: Option<usize>,
-    /// Auto-compact threshold advertised to Codex when using --url.
+    /// Auto-compact threshold advertised to Codex when using --url or --provider.
     #[arg(
         long = "auto-compact-token-limit",
         visible_alias = "local-auto-compact-token-limit",
         value_name = "TOKENS",
-        requires = "url"
+        requires = "provider_or_url"
     )]
     pub local_auto_compact_token_limit: Option<usize>,
     /// Use the full Claude-Mem Codex transcript schema instead of Prodex's slim default.
@@ -180,6 +202,12 @@ impl SuperArgs {
 
     pub fn into_caveman_args_with_presidio(self, presidio: bool) -> CavemanArgs {
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
+        let external_upstream_base_url = self.provider.map(|provider| {
+            self.base_url
+                .as_deref()
+                .map(super_external_provider_base_url)
+                .unwrap_or_else(|| provider.default_base_url().to_string())
+        });
         let local_provider_args = self
             .url
             .as_deref()
@@ -192,7 +220,19 @@ impl SuperArgs {
                 )
             })
             .unwrap_or_default();
-        let local_mode = self.url.is_some();
+        let external_provider_args = self
+            .provider
+            .map(|provider| {
+                super_external_provider_codex_args(
+                    provider,
+                    external_upstream_base_url.as_deref().unwrap_or_default(),
+                    self.local_model.as_deref(),
+                    self.local_context_window,
+                    self.local_auto_compact_token_limit,
+                )
+            })
+            .unwrap_or_default();
+        let local_mode = self.url.is_some() || self.provider.is_some();
         let skip_quota_check = self.skip_quota_check || local_mode;
 
         let mut codex_args = Vec::with_capacity(
@@ -200,7 +240,8 @@ impl SuperArgs {
                 + 2
                 + SUPER_OPTIMIZER_PREFIXES.len()
                 + usize::from(presidio)
-                + local_provider_args.len(),
+                + local_provider_args.len()
+                + external_provider_args.len(),
         );
         codex_args.push(OsString::from(if self.mem_super_slim {
             "mem-super-slim"
@@ -215,6 +256,7 @@ impl SuperArgs {
             codex_args.push(OsString::from("presidio"));
         }
         codex_args.extend(local_provider_args);
+        codex_args.extend(external_provider_args);
         codex_args.extend(self.codex_args);
         CavemanArgs {
             profile: self.profile,
@@ -223,10 +265,14 @@ impl SuperArgs {
             skip_quota_check,
             full_access: true,
             dry_run: self.dry_run,
-            base_url: self.base_url.or(local_upstream_base_url),
+            base_url: local_upstream_base_url
+                .or(external_upstream_base_url)
+                .or(self.base_url),
             no_proxy: self.no_proxy,
             smart_context: true,
             super_optimizer_overlay: true,
+            external_provider: self.provider,
+            external_provider_api_key: self.api_key,
             codex_args,
         }
     }
@@ -242,6 +288,72 @@ const SUPER_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
 const SUPER_DEFAULT_LOCAL_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
 const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 16_384;
 const SUPER_DEFAULT_AUTO_COMPACT_LIMIT: usize = 14_000;
+pub const SUPER_DEEPSEEK_PROVIDER_ID: &str = "prodex-deepseek";
+const SUPER_DEEPSEEK_PROVIDER_NAME: &str = "DeepSeek";
+pub const SUPER_DEEPSEEK_DEFAULT_MODEL: &str = "deepseek-v4-pro";
+const SUPER_DEEPSEEK_DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
+const SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
+const SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuperExternalProvider {
+    DeepSeek,
+}
+
+impl SuperExternalProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DeepSeek => "deepseek",
+        }
+    }
+
+    pub fn model_provider_id(self) -> &'static str {
+        match self {
+            Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_ID,
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_NAME,
+        }
+    }
+
+    fn default_model(self) -> &'static str {
+        match self {
+            Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_MODEL,
+        }
+    }
+
+    fn default_base_url(self) -> &'static str {
+        match self {
+            Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_BASE_URL,
+        }
+    }
+
+    fn default_context_window(self) -> usize {
+        match self {
+            Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
+        }
+    }
+
+    fn default_auto_compact_token_limit(self) -> usize {
+        match self {
+            Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
+        }
+    }
+}
+
+fn parse_super_external_provider(
+    value: &str,
+) -> std::result::Result<SuperExternalProvider, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "deepseek" => Ok(SuperExternalProvider::DeepSeek),
+        other => Err(format!(
+            "invalid --provider: supported values are deepseek, got {other:?}"
+        )),
+    }
+}
 
 fn super_local_provider_codex_args(
     url: &str,
@@ -293,6 +405,55 @@ fn super_local_provider_codex_args(
     args
 }
 
+fn super_external_provider_codex_args(
+    provider: SuperExternalProvider,
+    base_url: &str,
+    model: Option<&str>,
+    context_window: Option<usize>,
+    auto_compact_token_limit: Option<usize>,
+) -> Vec<OsString> {
+    let provider_id = provider.model_provider_id();
+    let base_url = super_external_provider_base_url(base_url);
+    let model = model
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or_else(|| provider.default_model());
+    let context_window = context_window
+        .filter(|value| *value > 1)
+        .unwrap_or_else(|| provider.default_context_window());
+    let auto_compact_token_limit = auto_compact_token_limit
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| provider.default_auto_compact_token_limit())
+        .min(context_window.saturating_sub(1));
+    let overrides = [
+        format!("model_provider={}", toml_string_literal(provider_id)),
+        format!("model={}", toml_string_literal(model)),
+        format!(
+            "model_providers.{provider_id}.name={}",
+            toml_string_literal(provider.display_name())
+        ),
+        format!(
+            "model_providers.{provider_id}.base_url={}",
+            toml_string_literal(&base_url)
+        ),
+        format!("model_providers.{provider_id}.wire_api=\"responses\""),
+        format!("model_providers.{provider_id}.supports_websockets=false"),
+        format!("model_context_window={context_window}"),
+        format!("model_auto_compact_token_limit={auto_compact_token_limit}"),
+        "model_reasoning_summary=\"none\"".to_string(),
+        "model_supports_reasoning_summaries=false".to_string(),
+        "web_search=\"disabled\"".to_string(),
+        "features.js_repl=false".to_string(),
+        "features.image_generation=false".to_string(),
+    ];
+
+    let mut args = Vec::with_capacity(overrides.len() * 2);
+    for override_entry in overrides {
+        args.push(OsString::from("-c"));
+        args.push(OsString::from(override_entry));
+    }
+    args
+}
+
 fn super_local_provider_base_url(url: &str) -> String {
     let trimmed = url.trim();
     if let Ok(mut parsed) = reqwest::Url::parse(trimmed) {
@@ -303,6 +464,10 @@ fn super_local_provider_base_url(url: &str) -> String {
         }
     }
     trimmed.trim_end_matches('/').to_string()
+}
+
+fn super_external_provider_base_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_string()
 }
 
 fn parse_super_local_url(url: &str) -> std::result::Result<String, String> {

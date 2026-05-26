@@ -101,6 +101,10 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         force_runtime_proxy: false,
         model_provider_override: model_provider_override.as_deref(),
         profile_v2_name: profile_v2_name.as_deref(),
+        external_provider: args
+            .external_provider
+            .map(crate::SuperExternalProvider::as_str),
+        external_provider_api_key: args.external_provider_api_key.as_deref(),
     };
     print_runtime_launch_dry_run(
         "caveman",

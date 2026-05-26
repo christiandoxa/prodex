@@ -102,6 +102,7 @@ pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
   prodex super
   prodex super --url http://127.0.0.1:8131
+  prodex super --provider deepseek --model deepseek-v4-pro
   prodex super exec \"review latest diff in super mode\"
   prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
   prodex super --profile main
@@ -114,6 +115,7 @@ Notes:
   Use `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies in Claude-Mem recall.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
+  Use `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key` or DEEPSEEK_API_KEY.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied optimizer prefixes.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\

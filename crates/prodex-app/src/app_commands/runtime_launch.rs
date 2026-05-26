@@ -53,6 +53,8 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
             profile_v2_name: self.profile_v2_name.as_deref(),
+            external_provider: None,
+            external_provider_api_key: None,
         }
     }
 
@@ -161,11 +163,9 @@ impl RuntimeLaunchSelection {
         );
         if requested.is_none()
             && state.profiles.is_empty()
-            && profileless_model_provider.as_ref().is_some_and(|setting| {
-                setting
-                    .provider_id
-                    .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)
-            })
+            && profileless_model_provider
+                .as_ref()
+                .is_some_and(runtime_launch_model_provider_uses_local_rewrite)
         {
             let codex_home = paths.shared_codex_root.clone();
             return Ok(Self {
@@ -344,9 +344,15 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
 
         if local_rewrite_proxy_upstream_base_url(&self.selection, &self.request).is_some() {
             print_wrapped_stderr(&section_header("Runtime Provider"));
-            print_wrapped_stderr(
-                "Using prodex-local through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.",
-            );
+            if let Some(provider) = self.request.external_provider {
+                print_wrapped_stderr(&format!(
+                    "Using provider '{provider}' through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.",
+                ));
+            } else {
+                print_wrapped_stderr(
+                    "Using prodex-local through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.",
+                );
+            }
             return Ok(());
         }
 
@@ -459,7 +465,9 @@ impl RuntimeProxyStartupFactory {
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
         if local_rewrite_proxy_upstream_base_url(selection, request).is_some() {
-            return Ok(Some(runtime_local_rewrite_proxy_dry_run_endpoint(paths)?));
+            return Ok(Some(runtime_local_rewrite_proxy_dry_run_endpoint(
+                paths, selection, request,
+            )?));
         }
 
         if selection.non_openai_model_provider.is_some() {
@@ -532,13 +540,19 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
     })
 }
 
-fn runtime_local_rewrite_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoint> {
+fn runtime_local_rewrite_proxy_dry_run_endpoint(
+    paths: &AppPaths,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<RuntimeProxyEndpoint> {
+    let local_model_provider_id = runtime_local_rewrite_model_provider_id(selection, request)
+        .unwrap_or(SUPER_LOCAL_PROVIDER_ID);
     Ok(RuntimeProxyEndpoint {
         listen_addr: "127.0.0.1:0"
             .parse()
             .context("failed to build dry-run runtime local rewrite proxy address")?,
         openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
-        local_model_provider_id: Some(SUPER_LOCAL_PROVIDER_ID.to_string()),
+        local_model_provider_id: Some(local_model_provider_id.to_string()),
         lease_dir: paths.root.join("runtime-local-proxy-dry-run-leases"),
         _lease: None,
         _direct_proxy: None,
@@ -617,19 +631,22 @@ fn start_local_rewrite_proxy_endpoint(
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, selection);
-    let proxy = start_runtime_local_rewrite_proxy(
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
         paths,
         state,
         upstream_base_url,
-        request.upstream_no_proxy,
-        request.smart_context_enabled,
-        request.presidio_redaction_enabled,
+        provider: runtime_local_rewrite_provider_options(request)?,
+        upstream_no_proxy: request.upstream_no_proxy,
+        smart_context_enabled: request.smart_context_enabled,
+        presidio_redaction_enabled: request.presidio_redaction_enabled,
         model_context_window_tokens,
-    )?;
+    })?;
+    let local_model_provider_id = runtime_local_rewrite_model_provider_id(selection, request)
+        .unwrap_or(SUPER_LOCAL_PROVIDER_ID);
     Ok(RuntimeProxyEndpoint {
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
-        local_model_provider_id: Some(SUPER_LOCAL_PROVIDER_ID.to_string()),
+        local_model_provider_id: Some(local_model_provider_id.to_string()),
         lease_dir: paths.root.join("runtime-local-proxy-leases"),
         _lease: None,
         _direct_proxy: Some(proxy),
@@ -644,10 +661,7 @@ fn local_rewrite_proxy_upstream_base_url(
         return None;
     }
     let provider = selection.non_openai_model_provider.as_ref()?;
-    if !provider
-        .provider_id
-        .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)
-    {
+    if !runtime_launch_model_provider_uses_local_rewrite(provider) {
         return None;
     }
     request
@@ -661,6 +675,62 @@ fn local_rewrite_proxy_upstream_base_url(
             )
         })
         .filter(|base_url| !base_url.trim().is_empty())
+}
+
+fn runtime_launch_model_provider_uses_local_rewrite(provider: &CodexModelProviderSetting) -> bool {
+    provider
+        .provider_id
+        .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)
+        || provider
+            .provider_id
+            .eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID)
+}
+
+fn runtime_local_rewrite_model_provider_id<'a>(
+    selection: &'a RuntimeLaunchSelection,
+    request: &'a RuntimeLaunchRequest<'_>,
+) -> Option<&'a str> {
+    request
+        .external_provider
+        .and_then(|provider| {
+            if provider.eq_ignore_ascii_case("deepseek") {
+                Some(SUPER_DEEPSEEK_PROVIDER_ID)
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            selection
+                .non_openai_model_provider
+                .as_ref()
+                .map(|provider| provider.provider_id.as_str())
+        })
+}
+
+fn runtime_local_rewrite_provider_options(
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<RuntimeLocalRewriteProviderOptions> {
+    match request.external_provider {
+        Some(provider) if provider.eq_ignore_ascii_case("deepseek") => {
+            let api_key = request
+                .external_provider_api_key
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    env::var("DEEPSEEK_API_KEY")
+                        .ok()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                })
+                .context(
+                    "DeepSeek provider requires --api-key or DEEPSEEK_API_KEY in the environment",
+                )?;
+            Ok(RuntimeLocalRewriteProviderOptions::DeepSeek { api_key })
+        }
+        Some(provider) => bail!("unsupported external provider '{provider}'"),
+        None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses),
+    }
 }
 
 fn fixed_runtime_proxy_state(state: &AppState, profile_name: &str) -> Result<AppState> {

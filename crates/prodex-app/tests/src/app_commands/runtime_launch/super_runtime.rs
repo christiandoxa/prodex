@@ -45,6 +45,8 @@ fn prepare_runtime_launch_enables_runtime_proxy_for_openai_smart_context_single_
         force_runtime_proxy: false,
         model_provider_override: None,
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 
@@ -99,6 +101,8 @@ fn prepare_runtime_launch_dry_run_previews_proxy_for_presidio_redaction() {
         force_runtime_proxy: false,
         model_provider_override: None,
         profile_v2_name: None,
+        external_provider: None,
+        external_provider_api_key: None,
     })
     .unwrap();
 

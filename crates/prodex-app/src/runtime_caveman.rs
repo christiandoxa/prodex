@@ -62,6 +62,11 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
             profile_v2_name: self.profile_v2_name.as_deref(),
+            external_provider: self
+                .args
+                .external_provider
+                .map(SuperExternalProvider::as_str),
+            external_provider_api_key: self.args.external_provider_api_key.as_deref(),
         }
     }
 
@@ -255,6 +260,8 @@ mod tests {
             no_proxy: false,
             smart_context: false,
             super_optimizer_overlay: false,
+            external_provider: None,
+            external_provider_api_key: None,
             codex_args: vec![OsString::from("mem"), OsString::from("exec")],
         });
 

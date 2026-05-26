@@ -777,9 +777,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.4.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
+checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
 dependencies = [
  "bytes",
  "itoa",
@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "base64",
  "criterion",
@@ -1365,7 +1365,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1425,7 +1425,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app-reports"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "chrono",
  "prodex-quota",
@@ -1440,7 +1440,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-audit-log"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1450,11 +1450,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-bench-support"
-version = "0.121.0"
+version = "0.122.0"
 
 [[package]]
 name = "prodex-caveman-assets"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1467,7 +1467,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-cli"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "clap",
  "reqwest",
@@ -1475,14 +1475,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-codex-config"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "prodex-context"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "prodex-terminal-ui",
@@ -1492,7 +1492,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-core"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1500,7 +1500,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-housekeeping"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "prodex-core",
  "prodex-state",
@@ -1508,7 +1508,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-identity"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1532,7 +1532,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-proxy-config"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-quota"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1553,14 +1553,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-anthropic"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1569,7 +1569,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "prodex-runtime-state",
  "serde",
@@ -1578,14 +1578,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker-log"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-capabilities"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "prodex-runtime-anthropic",
  "prodex-runtime-proxy",
@@ -1594,7 +1594,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-claude"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1608,7 +1608,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-cookies"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "chrono",
  "reqwest",
@@ -1617,7 +1617,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-doctor"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1630,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-launch"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "prodex-codex-config",
@@ -1646,7 +1646,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-log"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "prodex-runtime-proxy",
  "serde_json",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-mem"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1663,14 +1663,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-metrics"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "prodex-core",
@@ -1681,7 +1681,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "base64",
  "prodex-runtime-tuning",
@@ -1690,7 +1690,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-quota"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "chrono",
  "prodex-quota",
@@ -1701,14 +1701,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "prodex-runtime-store"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "prodex-runtime-state",
  "prodex-state",
@@ -1716,18 +1716,18 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.121.0"
+version = "0.122.0"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "sha2",
 ]
 
 [[package]]
 name = "prodex-session-store"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "prodex-app-reports",
@@ -1738,7 +1738,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-codex-fs"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "prodex-core",
@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-types"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "prodex-quota",
  "prodex-runtime-proxy",
@@ -1757,21 +1757,21 @@ dependencies = [
 
 [[package]]
 name = "prodex-state"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "prodex-terminal-ui"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
 ]
 
 [[package]]
 name = "prodex-update-notice"
-version = "0.121.0"
+version = "0.122.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1960,9 +1960,9 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "reqwest"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62e0021ea2c22aed41653bc7e1419abb2c97e038ff2c33d0e1309e49a97deec0"
+checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64",
  "bytes",

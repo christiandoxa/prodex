@@ -14,6 +14,8 @@ pub struct RuntimeLaunchRequest<'a> {
     pub force_runtime_proxy: bool,
     pub model_provider_override: Option<&'a str>,
     pub profile_v2_name: Option<&'a str>,
+    pub external_provider: Option<&'a str>,
+    pub external_provider_api_key: Option<&'a str>,
 }
 
 pub struct PreparedRuntimeLaunch<P, E> {

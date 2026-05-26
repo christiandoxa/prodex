@@ -1,3 +1,4 @@
+use super::deepseek_rewrite::*;
 use super::*;
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
@@ -8,18 +9,42 @@ struct RuntimeLocalRewriteProxyShared {
     runtime_shared: RuntimeRotationProxyShared,
     upstream_base_url: String,
     mount_path: String,
+    provider: RuntimeLocalRewriteProviderOptions,
+    deepseek_conversations: RuntimeDeepSeekConversationStore,
+    deepseek_pending_messages: RuntimeDeepSeekPendingMessages,
     client: reqwest::blocking::Client,
 }
 
+#[derive(Clone)]
+pub(crate) enum RuntimeLocalRewriteProviderOptions {
+    OpenAiResponses,
+    DeepSeek { api_key: String },
+}
+
+pub(crate) struct RuntimeLocalRewriteProxyStartOptions<'a> {
+    pub(crate) paths: &'a AppPaths,
+    pub(crate) state: &'a AppState,
+    pub(crate) upstream_base_url: String,
+    pub(crate) provider: RuntimeLocalRewriteProviderOptions,
+    pub(crate) upstream_no_proxy: bool,
+    pub(crate) smart_context_enabled: bool,
+    pub(crate) presidio_redaction_enabled: bool,
+    pub(crate) model_context_window_tokens: Option<u64>,
+}
+
 pub(crate) fn start_runtime_local_rewrite_proxy(
-    paths: &AppPaths,
-    state: &AppState,
-    upstream_base_url: String,
-    upstream_no_proxy: bool,
-    smart_context_enabled: bool,
-    presidio_redaction_enabled: bool,
-    model_context_window_tokens: Option<u64>,
+    options: RuntimeLocalRewriteProxyStartOptions<'_>,
 ) -> Result<RuntimeRotationProxy> {
+    let RuntimeLocalRewriteProxyStartOptions {
+        paths,
+        state,
+        upstream_base_url,
+        provider,
+        upstream_no_proxy,
+        smart_context_enabled,
+        presidio_redaction_enabled,
+        model_context_window_tokens,
+    } = options;
     let log_path = initialize_runtime_proxy_log_path();
     let server = Arc::new(
         TinyServer::http("127.0.0.1:0")
@@ -103,6 +128,9 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         runtime_shared: runtime_shared.clone(),
         upstream_base_url,
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
+        provider,
+        deepseek_conversations: Arc::new(Mutex::new(BTreeMap::new())),
+        deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
         client: build_runtime_local_rewrite_http_client()?,
     };
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -248,6 +276,17 @@ fn handle_runtime_local_rewrite_proxy_request(
         let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
         return;
     }
+    if matches!(
+        &shared.provider,
+        RuntimeLocalRewriteProviderOptions::DeepSeek { .. }
+    ) && path_without_query(&captured.path_and_query).ends_with("/responses/compact")
+    {
+        let _ = request.respond(build_runtime_proxy_text_response(
+            501,
+            "DeepSeek provider does not support Codex remote compact yet",
+        ));
+        return;
+    }
     let response = match send_runtime_local_rewrite_upstream_request(request_id, &captured, shared)
     {
         Ok(response) => response,
@@ -267,7 +306,7 @@ fn handle_runtime_local_rewrite_proxy_request(
             return;
         }
     };
-    respond_runtime_local_rewrite_proxy_request(request_id, request, response, runtime_shared);
+    respond_runtime_local_rewrite_proxy_request(request_id, request, response, &captured, shared);
 }
 
 fn send_runtime_local_rewrite_upstream_request(
@@ -283,11 +322,33 @@ fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )
     .into_owned();
-    let upstream_url = runtime_local_rewrite_upstream_url(
-        &shared.upstream_base_url,
-        &shared.mount_path,
-        &request.path_and_query,
-    );
+    let body = match &shared.provider {
+        RuntimeLocalRewriteProviderOptions::OpenAiResponses => body,
+        RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => {
+            if path_without_query(&request.path_and_query).ends_with("/responses") {
+                let translated =
+                    runtime_deepseek_chat_request_body(&body, &shared.deepseek_conversations)?;
+                if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
+                    pending.insert(request_id, translated.messages);
+                }
+                translated.body
+            } else {
+                body
+            }
+        }
+    };
+    let upstream_url = match &shared.provider {
+        RuntimeLocalRewriteProviderOptions::OpenAiResponses => runtime_local_rewrite_upstream_url(
+            &shared.upstream_base_url,
+            &shared.mount_path,
+            &request.path_and_query,
+        ),
+        RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => runtime_deepseek_upstream_url(
+            &shared.upstream_base_url,
+            &shared.mount_path,
+            &request.path_and_query,
+        ),
+    };
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
         format!(
             "failed to proxy unsupported HTTP method '{}' for runtime local rewrite",
@@ -295,11 +356,23 @@ fn send_runtime_local_rewrite_upstream_request(
         )
     })?;
     let mut upstream_request = shared.client.request(method, &upstream_url);
-    for (name, value) in &request.headers {
-        if should_skip_runtime_local_rewrite_request_header(name) {
-            continue;
+    match &shared.provider {
+        RuntimeLocalRewriteProviderOptions::OpenAiResponses => {
+            for (name, value) in &request.headers {
+                if should_skip_runtime_local_rewrite_request_header(name) {
+                    continue;
+                }
+                upstream_request = upstream_request.header(name.as_str(), value.as_str());
+            }
         }
-        upstream_request = upstream_request.header(name.as_str(), value.as_str());
+        RuntimeLocalRewriteProviderOptions::DeepSeek { api_key } => {
+            upstream_request = upstream_request
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .bearer_auth(api_key);
+            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+            }
+        }
     }
     runtime_proxy_log(
         &shared.runtime_shared,
@@ -338,7 +411,8 @@ fn respond_runtime_local_rewrite_proxy_request(
     request_id: u64,
     request: tiny_http::Request,
     response: reqwest::blocking::Response,
-    shared: &RuntimeRotationProxyShared,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
 ) {
     let status = response.status().as_u16();
     let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
@@ -359,6 +433,51 @@ fn respond_runtime_local_rewrite_proxy_request(
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_ascii_lowercase();
+    let deepseek_responses_route = matches!(
+        &shared.provider,
+        RuntimeLocalRewriteProviderOptions::DeepSeek { .. }
+    ) && path_without_query(&captured.path_and_query)
+        .ends_with("/responses");
+    if deepseek_responses_route && (200..300).contains(&status) {
+        let conversation_messages =
+            runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
+        if content_type.contains("text/event-stream") {
+            let writer = request.into_writer();
+            let streaming = RuntimeStreamingResponse {
+                status,
+                headers: vec![(
+                    "content-type".to_string(),
+                    "text/event-stream; charset=utf-8".to_string(),
+                )],
+                body: Box::new(RuntimeDeepSeekChatSseReader::new(
+                    response,
+                    request_id,
+                    conversation_messages,
+                    Arc::clone(&shared.deepseek_conversations),
+                )),
+                request_id,
+                profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
+                log_path: shared.runtime_shared.log_path.clone(),
+                shared: shared.runtime_shared.clone(),
+                _inflight_guard: None,
+            };
+            let _ = write_runtime_streaming_response(writer, streaming);
+            return;
+        }
+
+        let response = runtime_deepseek_chat_buffered_response_parts(
+            status,
+            response,
+            request_id,
+            conversation_messages,
+            &shared.deepseek_conversations,
+        )
+        .map(build_runtime_proxy_response_from_parts)
+        .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
+        let _ = request.respond(response);
+        return;
+    }
+
     if content_type.contains("text/event-stream") {
         let writer = request.into_writer();
         let streaming = RuntimeStreamingResponse {
@@ -367,8 +486,8 @@ fn respond_runtime_local_rewrite_proxy_request(
             body: Box::new(response),
             request_id,
             profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
-            log_path: shared.log_path.clone(),
-            shared: shared.clone(),
+            log_path: shared.runtime_shared.log_path.clone(),
+            shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
         let _ = write_runtime_streaming_response(writer, streaming);
@@ -437,6 +556,25 @@ fn runtime_local_rewrite_upstream_url(
     upstream_url
 }
 
+fn runtime_deepseek_upstream_url(base_url: &str, mount_path: &str, path_and_query: &str) -> String {
+    let path = path_without_query(path_and_query);
+    if path.ends_with("/responses") {
+        return runtime_local_rewrite_upstream_url(base_url, mount_path, "/chat/completions");
+    }
+    runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
+}
+
+fn runtime_local_rewrite_header<'a>(
+    request: &'a RuntimeProxyRequest,
+    expected_name: &str,
+) -> Option<&'a str> {
+    request
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(expected_name))
+        .map(|(_, value)| value.as_str())
+}
+
 fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(
@@ -453,4 +591,116 @@ fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
             | "upgrade"
     ) || lower.starts_with("sec-websocket-")
         || lower.starts_with("x-prodex-internal-")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn deepseek_conversation_store() -> RuntimeDeepSeekConversationStore {
+        Arc::new(Mutex::new(BTreeMap::new()))
+    }
+
+    #[test]
+    fn deepseek_request_translation_maps_responses_input_and_tools() {
+        let conversations = deepseek_conversation_store();
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "stream": true,
+            "instructions": "Be concise.",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "List files"}]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "README.md"
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "shell",
+                        "description": "Run shell",
+                        "parameters": {"type": "object"}
+                    }
+                },
+                {"type": "web_search_preview"}
+            ],
+            "max_output_tokens": 123
+        });
+
+        let translated =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect("request should translate");
+        let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+        assert_eq!(translated["model"], "deepseek-v4-pro");
+        assert_eq!(translated["stream"], true);
+        assert_eq!(translated["max_tokens"], 123);
+        assert_eq!(translated["messages"][0]["role"], "system");
+        assert_eq!(translated["messages"][1]["content"], "List files");
+        assert_eq!(translated["messages"][2]["role"], "tool");
+        assert_eq!(translated["messages"][2]["tool_call_id"], "call_1");
+        assert_eq!(translated["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(translated["tools"][0]["function"]["name"], "shell");
+    }
+
+    #[test]
+    fn deepseek_request_translation_prepends_previous_response_history() {
+        let conversations = deepseek_conversation_store();
+        conversations.lock().unwrap().insert(
+            "resp_prev".to_string(),
+            vec![
+                serde_json::json!({"role": "user", "content": "old prompt"}),
+                serde_json::json!({"role": "assistant", "content": "old answer"}),
+            ],
+        );
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "previous_response_id": "resp_prev",
+            "input": "new prompt"
+        });
+
+        let translated =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect("request should translate");
+        let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+        assert_eq!(translated["messages"][0]["content"], "old prompt");
+        assert_eq!(translated["messages"][1]["content"], "old answer");
+        assert_eq!(translated["messages"][2]["content"], "new prompt");
+    }
+
+    #[test]
+    fn deepseek_sse_reader_maps_text_and_tool_calls_to_responses_events() {
+        let conversations = deepseek_conversation_store();
+        let stream = concat!(
+            "data: {\"id\":\"chatcmpl_1\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"shell\",\"arguments\":\"{\\\"cmd\\\":\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"ls\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut reader = RuntimeDeepSeekChatSseReader::new(
+            Cursor::new(stream.as_bytes()),
+            7,
+            Vec::new(),
+            conversations,
+        );
+        let mut output = String::new();
+        reader.read_to_string(&mut output).unwrap();
+
+        assert!(output.contains("event: response.created"));
+        assert!(output.contains("\"type\":\"response.output_text.delta\""));
+        assert!(output.contains("\"delta\":\"hi\""));
+        assert!(output.contains("\"type\":\"response.output_item.added\""));
+        assert!(output.contains("\"type\":\"response.function_call_arguments.delta\""));
+        assert!(output.contains("\"type\":\"response.output_item.done\""));
+        assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\""));
+        assert!(output.contains("event: response.completed"));
+    }
 }

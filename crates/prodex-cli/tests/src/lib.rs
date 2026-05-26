@@ -33,6 +33,11 @@ fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
     assert_eq!(left.no_proxy, right.no_proxy);
     assert_eq!(left.smart_context, right.smart_context);
     assert_eq!(left.super_optimizer_overlay, right.super_optimizer_overlay);
+    assert_eq!(left.external_provider, right.external_provider);
+    assert_eq!(
+        left.external_provider_api_key,
+        right.external_provider_api_key
+    );
     assert_eq!(left.codex_args, right.codex_args);
 }
 
@@ -380,6 +385,52 @@ fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
     let args = parse_super_as_caveman(&["prodex", "super", "--url", "http://127.0.0.1:8131"]);
 
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8131/v1"));
+}
+
+#[test]
+fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
+    let args = parse_super_as_caveman(&[
+        "prodex",
+        "s",
+        "--provider",
+        "deepseek",
+        "--model",
+        "deepseek-v4-pro",
+        "--api-key",
+        "ds-test-key",
+        "exec",
+        "review",
+    ]);
+
+    assert_eq!(
+        args.external_provider,
+        Some(SuperExternalProvider::DeepSeek)
+    );
+    assert_eq!(
+        args.external_provider_api_key.as_deref(),
+        Some("ds-test-key")
+    );
+    assert_eq!(args.base_url.as_deref(), Some("https://api.deepseek.com"));
+    assert!(args.skip_quota_check);
+    let rendered = args
+        .codex_args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(rendered.contains(&"model_provider=\"prodex-deepseek\"".to_string()));
+    assert!(rendered.contains(&"model=\"deepseek-v4-pro\"".to_string()));
+    assert!(rendered.contains(
+        &"model_providers.prodex-deepseek.base_url=\"https://api.deepseek.com\"".to_string()
+    ));
+    assert!(
+        rendered.contains(&"model_providers.prodex-deepseek.wire_api=\"responses\"".to_string())
+    );
+    assert!(!rendered.iter().any(|arg| arg.contains("ds-test-key")));
+}
+
+#[test]
+fn super_deepseek_provider_rejects_unknown_provider() {
+    assert!(parse_cli_command_from(["prodex", "s", "--provider", "unknown", "exec"]).is_err());
 }
 
 #[test]
