@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.119.0 - 2026-05-26
+
+### Claude
+
+- Skip token-savior venvs missing mcp (`82eea00`)
+
 ## 0.118.0 - 2026-05-26
 
 ### Runtime
@@ -69,9 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy capability ci guards (`a570c5f`)
 - Add setup diagnostics and capability reporting (`e9499fc`)
-
-## 0.107.0 - 2026-05-24
-
-### CLI
-
-- Prefer managed token-savior venv (`5181b7c`)
