@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.121.0 - 2026-05-26
+
+### Runtime
+
+- Fail fast on stalled compact requests (`f420c85`)
+
 ## 0.120.0 - 2026-05-26
 
 ### Misc
@@ -68,9 +74,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Harden optimizer stack diagnostics (`cc23f21`)
-
-## 0.109.0 - 2026-05-24
-
-### Runtime
-
-- Enforce optimizer runtime stack (`7becbef`)
