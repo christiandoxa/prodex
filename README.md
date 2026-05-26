@@ -660,7 +660,7 @@ Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek 
 prodex s --provider deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KEY"
 ```
 
-If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight/account rotation disabled. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
+If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight/account rotation disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use.
 

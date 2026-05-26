@@ -51,14 +51,17 @@ pub(super) fn runtime_deepseek_chat_request_body(
         "messages".to_string(),
         serde_json::Value::Array(messages.clone()),
     );
+    runtime_deepseek_apply_reasoning_from_responses_request(&value, &mut request);
     if let Some(tools) = runtime_deepseek_tools_from_responses_request(&value) {
         request.insert("tools".to_string(), serde_json::Value::Array(tools));
+    }
+    if let Some(tool_choice) = runtime_deepseek_tool_choice_from_responses_request(&value) {
+        request.insert("tool_choice".to_string(), tool_choice);
     }
     for (from, to) in [
         ("temperature", "temperature"),
         ("top_p", "top_p"),
         ("max_output_tokens", "max_tokens"),
-        ("tool_choice", "tool_choice"),
     ] {
         if let Some(next) = value.get(from) {
             request.insert(to.to_string(), next.clone());
@@ -229,15 +232,110 @@ fn runtime_deepseek_tools_from_responses_request(
     let tools = value.get("tools")?.as_array()?;
     let tools = tools
         .iter()
-        .filter_map(|tool| {
-            let object = tool.as_object()?;
-            if object.get("type").and_then(serde_json::Value::as_str) != Some("function") {
-                return None;
-            }
-            Some(serde_json::Value::Object(object.clone()))
-        })
+        .filter_map(runtime_deepseek_tool_from_responses_tool)
         .collect::<Vec<_>>();
     if tools.is_empty() { None } else { Some(tools) }
+}
+
+fn runtime_deepseek_tool_from_responses_tool(
+    tool: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let object = tool.as_object()?;
+    if object.get("type").and_then(serde_json::Value::as_str) != Some("function") {
+        return None;
+    }
+    let function_object = object
+        .get("function")
+        .and_then(serde_json::Value::as_object)
+        .unwrap_or(object);
+    let name = runtime_deepseek_json_string(function_object, &["name"])
+        .filter(|name| !name.trim().is_empty())?;
+    let mut function = serde_json::Map::new();
+    function.insert("name".to_string(), serde_json::Value::String(name));
+    if let Some(description) = runtime_deepseek_json_string(function_object, &["description"])
+        .filter(|description| !description.trim().is_empty())
+    {
+        function.insert(
+            "description".to_string(),
+            serde_json::Value::String(description),
+        );
+    }
+    if let Some(parameters) = function_object.get("parameters") {
+        function.insert("parameters".to_string(), parameters.clone());
+    }
+
+    Some(serde_json::json!({
+        "type": "function",
+        "function": function,
+    }))
+}
+
+fn runtime_deepseek_tool_choice_from_responses_request(
+    value: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let choice = value.get("tool_choice")?;
+    if let Some(choice) = choice.as_str() {
+        return matches!(choice, "auto" | "none" | "required")
+            .then(|| serde_json::Value::String(choice.to_string()));
+    }
+
+    let object = choice.as_object()?;
+    let choice_type = object.get("type").and_then(serde_json::Value::as_str)?;
+    if choice_type != "function" {
+        return None;
+    }
+    let name = runtime_deepseek_json_string(object, &["name"])
+        .or_else(|| runtime_deepseek_json_string_at_path(object, &["function", "name"]))
+        .filter(|name| !name.trim().is_empty())?;
+    Some(serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": name,
+        },
+    }))
+}
+
+fn runtime_deepseek_apply_reasoning_from_responses_request(
+    value: &serde_json::Value,
+    request: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    let effort = value
+        .get("reasoning")
+        .and_then(|reasoning| reasoning.get("effort"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            value
+                .get("reasoning_effort")
+                .and_then(serde_json::Value::as_str)
+        });
+    match effort.and_then(runtime_deepseek_reasoning_effort) {
+        Some(Some(effort)) => {
+            request.insert(
+                "thinking".to_string(),
+                serde_json::json!({"type": "enabled"}),
+            );
+            request.insert(
+                "reasoning_effort".to_string(),
+                serde_json::Value::String(effort.to_string()),
+            );
+        }
+        Some(None) => {
+            request.insert(
+                "thinking".to_string(),
+                serde_json::json!({"type": "disabled"}),
+            );
+        }
+        None => {}
+    }
+}
+
+fn runtime_deepseek_reasoning_effort(effort: &str) -> Option<Option<&'static str>> {
+    match effort.trim().to_ascii_lowercase().as_str() {
+        "xhigh" | "max" => Some(Some("max")),
+        "high" | "medium" | "low" => Some(Some("high")),
+        "minimal" | "none" => Some(None),
+        _ => None,
+    }
 }
 
 fn runtime_deepseek_json_string(

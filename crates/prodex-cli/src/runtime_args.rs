@@ -292,8 +292,8 @@ pub const SUPER_DEEPSEEK_PROVIDER_ID: &str = "prodex-deepseek";
 const SUPER_DEEPSEEK_PROVIDER_NAME: &str = "DeepSeek";
 pub const SUPER_DEEPSEEK_DEFAULT_MODEL: &str = "deepseek-v4-pro";
 const SUPER_DEEPSEEK_DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
-const SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
-const SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
+pub const SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
+pub const SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExternalProvider {
@@ -440,7 +440,7 @@ fn super_external_provider_codex_args(
         format!("model_context_window={context_window}"),
         format!("model_auto_compact_token_limit={auto_compact_token_limit}"),
         "model_reasoning_summary=\"none\"".to_string(),
-        "model_supports_reasoning_summaries=false".to_string(),
+        "model_supports_reasoning_summaries=true".to_string(),
         "web_search=\"disabled\"".to_string(),
         "features.js_repl=false".to_string(),
         "features.image_generation=false".to_string(),

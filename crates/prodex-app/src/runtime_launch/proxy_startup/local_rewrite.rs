@@ -623,14 +623,19 @@ mod tests {
             "tools": [
                 {
                     "type": "function",
-                    "function": {
-                        "name": "shell",
-                        "description": "Run shell",
-                        "parameters": {"type": "object"}
-                    }
+                    "name": "shell",
+                    "description": "Run shell",
+                    "parameters": {"type": "object"}
                 },
                 {"type": "web_search_preview"}
             ],
+            "tool_choice": {
+                "type": "function",
+                "name": "shell"
+            },
+            "reasoning": {
+                "effort": "xhigh"
+            },
             "max_output_tokens": 123
         });
 
@@ -648,6 +653,9 @@ mod tests {
         assert_eq!(translated["messages"][2]["tool_call_id"], "call_1");
         assert_eq!(translated["tools"].as_array().unwrap().len(), 1);
         assert_eq!(translated["tools"][0]["function"]["name"], "shell");
+        assert_eq!(translated["tool_choice"]["function"]["name"], "shell");
+        assert_eq!(translated["thinking"]["type"], "enabled");
+        assert_eq!(translated["reasoning_effort"], "max");
     }
 
     #[test]

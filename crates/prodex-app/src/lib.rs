@@ -61,6 +61,7 @@ mod runtime_claude;
 #[path = "runtime_tuning.rs"]
 mod runtime_config;
 mod runtime_core_shared;
+mod runtime_deepseek_config;
 mod runtime_doctor;
 mod runtime_launch;
 mod runtime_launch_shared;
@@ -107,6 +108,7 @@ use runtime_caveman::*;
 use runtime_claude::*;
 use runtime_config::*;
 use runtime_core_shared::*;
+use runtime_deepseek_config::*;
 use runtime_doctor::*;
 use runtime_launch::*;
 use runtime_launch_shared::*;

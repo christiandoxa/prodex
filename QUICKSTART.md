@@ -200,7 +200,7 @@ Use DeepSeek with the Codex/Super front end:
 DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
 ```
 
-`--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. This path starts a local Responses-to-DeepSeek adapter, skips OpenAI quota/rotation, and keeps the Super optional tools working as local Codex overlays. Remote compact is not implemented for the adapter yet.
+`--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota/rotation, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. Remote compact is not implemented for the adapter yet.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
