@@ -90,6 +90,17 @@ if [ -n "$TEST_LONG_RUNNING_RUN" ]; then
 fi
 if [ "$1" = "login" ]; then
   mkdir -p "$CODEX_HOME"
+  with_api_key=0
+  for arg in "$@"; do
+    if [ "$arg" = "--with-api-key" ]; then
+      with_api_key=1
+    fi
+  done
+  if [ "$with_api_key" = "1" ]; then
+    IFS= read -r api_key
+    printf '{"auth_mode":"apikey","OPENAI_API_KEY":"%s"}\n' "$api_key" > "$CODEX_HOME/auth.json"
+    exit 0
+  fi
   account_id="${TEST_LOGIN_ACCOUNT_ID:-main-account}"
   token="${TEST_LOGIN_ACCESS_TOKEN:-test-token}"
   id_token="${TEST_LOGIN_ID_TOKEN:-}"

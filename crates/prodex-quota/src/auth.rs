@@ -81,7 +81,7 @@ pub fn auth_summary_from_stored_auth(stored_auth: &StoredAuth) -> AuthSummary {
         return AuthSummaryKind::Chatgpt.into_summary();
     }
 
-    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
+    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key" | "apikey")) || has_api_key {
         return AuthSummaryKind::ApiKey.into_summary();
     }
 
@@ -105,7 +105,7 @@ pub fn usage_auth_from_stored_auth(stored_auth: &StoredAuth) -> Result<UsageAuth
         .openai_api_key
         .as_deref()
         .is_some_and(|key| !key.trim().is_empty());
-    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key")) || has_api_key {
+    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key" | "apikey")) || has_api_key {
         bail!("quota endpoint requires a ChatGPT access token. Run `codex login` first.");
     }
 

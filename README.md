@@ -366,6 +366,12 @@ prodex profile add second
 prodex login --profile second
 ```
 
+Interactive `prodex login` now asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, or API-key login. For API-key profiles, you can also set an OpenAI-compatible backend URL:
+
+```bash
+printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
+```
+
 </details>
 
 <details>

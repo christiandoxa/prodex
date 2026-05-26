@@ -65,7 +65,9 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home_with_mode(&prepared.codex_home, mem_mode)?;
         }
-        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
+        let codex_args =
+            profile_openai_compatible_codex_args(&prepared.codex_home, &self.codex_args);
+        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
@@ -182,7 +184,13 @@ impl RuntimeLaunchSelection {
             &codex_home,
             model_provider_override,
             profile_v2_name,
-        );
+        )
+        .or_else(|| {
+            profile_openai_compatible_model_provider_for_launch(
+                &codex_home,
+                model_provider_override,
+            )
+        });
 
         Ok(Self {
             initial_profile_name: profile_name.clone(),
@@ -207,9 +215,28 @@ impl RuntimeLaunchSelection {
             &self.codex_home,
             model_provider_override,
             profile_v2_name,
-        );
+        )
+        .or_else(|| {
+            profile_openai_compatible_model_provider_for_launch(
+                &self.codex_home,
+                model_provider_override,
+            )
+        });
         Ok(())
     }
+}
+
+fn profile_openai_compatible_model_provider_for_launch(
+    codex_home: &Path,
+    model_provider_override: Option<&str>,
+) -> Option<CodexModelProviderSetting> {
+    if model_provider_override.is_some() {
+        return None;
+    }
+    read_profile_openai_compatible_base_url(codex_home).map(|_| CodexModelProviderSetting {
+        provider_id: PRODEX_OPENAI_COMPAT_PROVIDER_ID.to_string(),
+        source: CodexModelProviderSource::CliOverride,
+    })
 }
 
 pub(crate) fn resolve_runtime_launch_profile_name(

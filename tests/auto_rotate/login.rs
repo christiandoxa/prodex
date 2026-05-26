@@ -51,6 +51,98 @@ fn login_without_profile_creates_profile_from_email() {
 }
 
 #[test]
+fn login_with_api_key_and_base_url_creates_openai_compatible_profile() {
+    let fixture = setup_fixture();
+    write_json(
+        &fixture.prodex_home.join("state.json"),
+        &json!({
+            "profiles": {}
+        }),
+    );
+    let base_url = "http://127.0.0.1:8080/v1";
+
+    let output = run_prodex_with_env_and_stdin(
+        &fixture,
+        &["login", "--with-api-key", "--base-url", base_url],
+        &[],
+        "sk-test\n",
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let state = read_state(&fixture.prodex_home);
+    assert_eq!(state["active_profile"], "api_key_127.0.0.1");
+    assert_eq!(state["profiles"]["api_key_127.0.0.1"]["email"], Value::Null);
+    let profile_home = fixture.prodex_home.join("profiles/api_key_127.0.0.1");
+    let auth_json =
+        fs::read_to_string(profile_home.join("auth.json")).expect("api key auth.json should exist");
+    let auth: Value = serde_json::from_str(&auth_json).expect("auth json should parse");
+    assert_eq!(auth["OPENAI_API_KEY"], "sk-test");
+    assert!(auth.get("tokens").is_none());
+    let local_config = fs::read_to_string(profile_home.join(".prodex-profile.toml"))
+        .expect("profile local config should exist");
+    assert!(local_config.contains(base_url));
+
+    let args_log = fixture.codex_args_log.display().to_string();
+    let output = run_prodex_with_env(
+        &fixture,
+        &[
+            "run",
+            "--profile",
+            "api_key_127.0.0.1",
+            "--skip-quota-check",
+            "--no-auto-rotate",
+        ],
+        &[("TEST_CODEX_ARGS_LOG", args_log.as_str())],
+    );
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let codex_args =
+        fs::read_to_string(&fixture.codex_args_log).expect("failed to read codex args log");
+    assert!(codex_args.contains("model_provider=\"prodex-openai-compatible\""));
+    assert!(codex_args.contains(
+        "model_providers.prodex-openai-compatible.base_url=\"http://127.0.0.1:8080/v1\""
+    ));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("Quota Preflight"));
+}
+
+#[cfg(unix)]
+#[test]
+fn interactive_login_prompts_before_starting_chatgpt_browser_flow() {
+    let fixture = setup_fixture();
+    let args_log = fixture.codex_args_log.display().to_string();
+
+    let output = run_prodex_with_pty_prompt_answer(
+        &fixture,
+        &["login"],
+        &[("TEST_CODEX_ARGS_LOG", args_log.as_str())],
+        "Select login method",
+        "2\n",
+    );
+
+    assert!(
+        output.output.status.success(),
+        "stderr/tty: {}",
+        output.tty_output
+    );
+    assert!(output.tty_output.contains("Sign in with ChatGPT"));
+    assert!(output.tty_output.contains("Provide your own API key"));
+    let codex_args =
+        fs::read_to_string(&fixture.codex_args_log).expect("failed to read codex args log");
+    assert_eq!(
+        codex_args.lines().collect::<Vec<_>>(),
+        vec!["login", "--device-auth"]
+    );
+}
+
+#[test]
 fn login_without_profile_reuses_existing_profile_for_same_email() {
     let fixture = setup_fixture();
     write_json(

@@ -91,7 +91,10 @@ Or create a profile through the normal Codex login flow:
 ```bash
 prodex login
 prodex login --device-auth
+printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
 ```
+
+Interactive `prodex login` asks for ChatGPT browser login, device-code login, or API-key login before opening any browser.
 
 If you want a fixed profile name first:
 

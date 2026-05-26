@@ -1,13 +1,14 @@
 use anyhow::{Context, Result};
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 use crate::{
     CavemanArgs, ChildProcessPlan, CodexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
-    prepare_runtime_launch_dry_run, runtime_caveman_extract_launch_prefixes,
-    runtime_caveman_extract_presidio_prefix, runtime_launch_cli_model_context_window_tokens,
+    prepare_runtime_launch_dry_run, profile_openai_compatible_codex_args,
+    runtime_caveman_extract_launch_prefixes, runtime_caveman_extract_presidio_prefix,
+    runtime_launch_cli_model_context_window_tokens,
 };
 pub(crate) use prodex_runtime_launch::{
     RuntimeLaunchDryRunChild, codex_sandbox_removed_env, extract_prodex_dry_run_flag,
@@ -117,6 +118,7 @@ pub(crate) fn print_runtime_launch_dry_run(
     let presidio_redaction_enabled = request.presidio_redaction_enabled;
     let prepared = prepare_runtime_launch_dry_run(request)?;
     let runtime_proxy = runtime_proxy_codex_endpoint(prepared.runtime_proxy.as_ref());
+    let child = profile_openai_compatible_dry_run_child(&prepared.codex_home, child);
     let plan = prodex_runtime_launch::runtime_launch_dry_run_plan(
         codex_bin(),
         &prepared.codex_home,
@@ -143,6 +145,20 @@ pub(crate) fn print_runtime_launch_dry_run(
     output.push('\n');
     print!("{output}");
     Ok(())
+}
+
+fn profile_openai_compatible_dry_run_child(
+    codex_home: &Path,
+    child: RuntimeLaunchDryRunChild,
+) -> RuntimeLaunchDryRunChild {
+    match child {
+        RuntimeLaunchDryRunChild::Codex { codex_args } => RuntimeLaunchDryRunChild::Codex {
+            codex_args: profile_openai_compatible_codex_args(codex_home, &codex_args),
+        },
+        RuntimeLaunchDryRunChild::Caveman { codex_args } => RuntimeLaunchDryRunChild::Caveman {
+            codex_args: profile_openai_compatible_codex_args(codex_home, &codex_args),
+        },
+    }
 }
 
 fn runtime_proxy_codex_endpoint(

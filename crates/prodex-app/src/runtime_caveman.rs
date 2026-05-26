@@ -70,7 +70,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
-        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &self.codex_args);
+        let codex_args =
+            profile_openai_compatible_codex_args(&prepared.codex_home, &self.codex_args);
+        let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
         if self.rtk_enabled {
             prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;
