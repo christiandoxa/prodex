@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.127.0 - 2026-05-27
+
+### Misc
+
+- Skip replayed tool outputs (`06e9c98`)
+
 ## 0.126.0 - 2026-05-27
 
 ### Misc
@@ -67,9 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Recover smart context after runtime panic (`f8cb338`)
-
-## 0.115.0 - 2026-05-25
-
-### Runtime
-
-- Handle interrupted websocket handshakes (`18bcb36`)
