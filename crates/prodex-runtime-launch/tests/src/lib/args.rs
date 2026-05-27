@@ -141,3 +141,29 @@ fn prepare_codex_launch_args_full_access_keeps_resume_normalization_and_review_d
     );
     assert!(include_code_review);
 }
+
+#[test]
+fn prepare_codex_launch_args_rewrites_legacy_profile_v2_flag_for_codex_0134() {
+    let (args, include_code_review) = prepare_codex_launch_args(
+        &[
+            OsString::from("exec"),
+            OsString::from("--profile-v2"),
+            OsString::from("bedrock"),
+            OsString::from("--profile-v2=local"),
+            OsString::from("hello"),
+        ],
+        false,
+    );
+
+    assert_eq!(
+        args,
+        vec![
+            OsString::from("exec"),
+            OsString::from("--profile"),
+            OsString::from("bedrock"),
+            OsString::from("--profile=local"),
+            OsString::from("hello"),
+        ]
+    );
+    assert!(!include_code_review);
+}

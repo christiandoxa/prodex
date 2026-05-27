@@ -121,11 +121,12 @@ pub fn codex_cli_profile_v2_name(args: &[OsString]) -> Option<String> {
             index += 1;
             continue;
         };
-        let profile_v2_name = if arg == "--profile-v2" {
+        let profile_v2_name = if matches!(arg, "--profile" | "--profile-v2") {
             index += 1;
             args.get(index).and_then(|value| value.to_str())
         } else {
-            arg.strip_prefix("--profile-v2=")
+            arg.strip_prefix("--profile=")
+                .or_else(|| arg.strip_prefix("--profile-v2="))
         };
         if let Some(profile_v2_name) =
             profile_v2_name.filter(|name| is_valid_codex_profile_v2_name(name))

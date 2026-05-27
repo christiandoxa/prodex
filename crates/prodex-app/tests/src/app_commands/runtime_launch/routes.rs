@@ -130,6 +130,49 @@ fn command_server_direct_passthrough_uses_selected_profile_home() {
 }
 
 #[test]
+fn command_server_direct_passthrough_rewrites_legacy_profile_v2_for_codex_0134() {
+    let root = temp_dir("command-server-profile-v2-rewrite");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let main_home = root.join("main-home");
+    fs::create_dir_all(&main_home).unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("main".to_string()),
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: false,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let args = test_run_args(vec![
+        OsString::from("exec-server"),
+        OsString::from("--profile-v2"),
+        OsString::from("work"),
+        OsString::from("--stdio"),
+    ]);
+
+    let plan = codex_command_server_direct_passthrough_plan(args).unwrap();
+
+    assert_eq!(
+        plan.args,
+        vec![
+            OsString::from("exec-server"),
+            OsString::from("--profile"),
+            OsString::from("work"),
+            OsString::from("--stdio"),
+        ]
+    );
+}
+
+#[test]
 fn run_launch_route_keeps_remote_control_managed() {
     let args = test_run_args(vec![OsString::from("remote-control")]);
 

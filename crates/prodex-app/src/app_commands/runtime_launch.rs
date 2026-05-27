@@ -132,7 +132,8 @@ fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildPr
         prepare_managed_codex_home(&paths, &selection.codex_home)?;
     }
 
-    let mut child = codex_child_plan(selection.codex_home, args.codex_args);
+    let codex_args = prodex_runtime_launch::normalize_codex_profile_args(&args.codex_args);
+    let mut child = codex_child_plan(selection.codex_home, codex_args);
     if args.no_proxy {
         remove_upstream_proxy_env(&mut child);
     }

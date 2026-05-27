@@ -766,7 +766,7 @@ fn run_command_strategy_carries_profile_v2_name() {
         dry_run: false,
         codex_args: vec![
             OsString::from("exec"),
-            OsString::from("--profile-v2"),
+            OsString::from("--profile"),
             OsString::from("bedrock"),
             OsString::from("hello"),
         ],

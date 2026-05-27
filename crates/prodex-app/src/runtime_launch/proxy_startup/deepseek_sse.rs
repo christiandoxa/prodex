@@ -110,6 +110,7 @@ struct RuntimeDeepSeekSseState {
     eof: bool,
     model: Option<String>,
     output_text: String,
+    reasoning_content: String,
     tool_calls: BTreeMap<usize, RuntimeDeepSeekToolCall>,
     usage: Option<serde_json::Value>,
     conversation_messages: Vec<serde_json::Value>,
@@ -141,6 +142,7 @@ impl RuntimeDeepSeekSseState {
             eof: false,
             model: None,
             output_text: String::new(),
+            reasoning_content: String::new(),
             tool_calls: BTreeMap::new(),
             usage: None,
             conversation_messages,
@@ -185,6 +187,13 @@ impl RuntimeDeepSeekSseState {
             return events;
         };
         if let Some(delta) = choice.get("delta") {
+            if let Some(reasoning_content) = delta
+                .get("reasoning_content")
+                .and_then(serde_json::Value::as_str)
+                .filter(|text| !text.is_empty())
+            {
+                self.reasoning_content.push_str(reasoning_content);
+            }
             if let Some(text) = delta
                 .get("content")
                 .and_then(serde_json::Value::as_str)
@@ -370,7 +379,10 @@ impl RuntimeDeepSeekSseState {
     }
 
     fn chat_assistant_messages(&self) -> Vec<serde_json::Value> {
-        if self.output_text.is_empty() && self.tool_calls.is_empty() {
+        if self.output_text.is_empty()
+            && self.reasoning_content.is_empty()
+            && self.tool_calls.is_empty()
+        {
             return Vec::new();
         }
         let mut assistant = serde_json::json!({
@@ -381,6 +393,10 @@ impl RuntimeDeepSeekSseState {
                 serde_json::Value::String(self.output_text.clone())
             },
         });
+        if !self.reasoning_content.is_empty() {
+            assistant["reasoning_content"] =
+                serde_json::Value::String(self.reasoning_content.clone());
+        }
         if !self.tool_calls.is_empty() {
             assistant["tool_calls"] = serde_json::Value::Array(
                 self.tool_calls
@@ -445,5 +461,47 @@ impl RuntimeDeepSeekSseState {
         let next = self.sequence_number;
         self.sequence_number = self.sequence_number.saturating_add(1);
         next
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn conversation_store() -> RuntimeDeepSeekConversationStore {
+        Arc::new(Mutex::new(BTreeMap::new()))
+    }
+
+    #[test]
+    fn deepseek_sse_reader_stores_reasoning_content_for_tool_call_replay() {
+        let conversations = conversation_store();
+        let stream = concat!(
+            "data: {\"id\":\"chatcmpl_1\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Need package \"}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{\"reasoning_content\":\"metadata.\"}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{\"content\":\"I will inspect it.\"}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"shell\",\"arguments\":\"{\\\"cmd\\\":\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"cat package.json\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut reader = RuntimeDeepSeekChatSseReader::new(
+            std::io::Cursor::new(stream.as_bytes()),
+            7,
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "read package metadata"
+            })],
+            Arc::clone(&conversations),
+        );
+        let mut output = String::new();
+        reader.read_to_string(&mut output).unwrap();
+
+        assert!(!output.contains("reasoning_content"));
+        let stored = conversations.lock().unwrap();
+        let messages = stored
+            .get("chatcmpl_1")
+            .expect("stream should store conversation");
+        assert_eq!(messages[1]["reasoning_content"], "Need package metadata.");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
     }
 }

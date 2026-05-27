@@ -70,11 +70,15 @@ fn parses_valid_profile_v2_from_codex_args() {
     assert_eq!(
         codex_cli_profile_v2_name(&[
             OsString::from("exec"),
-            OsString::from("--profile-v2"),
+            OsString::from("--profile"),
             OsString::from("local_1-prod"),
         ])
         .as_deref(),
         Some("local_1-prod")
+    );
+    assert_eq!(
+        codex_cli_profile_v2_name(&[OsString::from("--profile=team_2")]).as_deref(),
+        Some("team_2")
     );
     assert_eq!(
         codex_cli_profile_v2_name(&[OsString::from("--profile-v2=team_2")]).as_deref(),
@@ -138,10 +142,7 @@ fn profile_v2_config_is_used_for_args_when_no_cli_override_exists() {
 
     let provider = codex_non_openai_model_provider_for_args(
         &root,
-        &[
-            OsString::from("exec"),
-            OsString::from("--profile-v2=bedrock"),
-        ],
+        &[OsString::from("exec"), OsString::from("--profile=bedrock")],
     )
     .unwrap();
 

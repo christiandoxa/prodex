@@ -5,6 +5,8 @@ use std::net::SocketAddr;
 const PRODEX_CODEX_FULL_ACCESS_ARG: &str = "--full-access";
 const PRODEX_DRY_RUN_ARG: &str = "--dry-run";
 const CODEX_BYPASS_APPROVALS_AND_SANDBOX_ARG: &str = "--dangerously-bypass-approvals-and-sandbox";
+const CODEX_PROFILE_ARG: &str = "--profile";
+const CODEX_LEGACY_PROFILE_V2_ARG: &str = "--profile-v2";
 
 pub fn runtime_proxy_codex_passthrough_args(
     runtime_proxy: Option<RuntimeProxyCodexEndpoint<'_>>,
@@ -185,6 +187,7 @@ pub fn prepare_codex_launch_args(
     full_access_requested: bool,
 ) -> (Vec<OsString>, bool) {
     let (passthrough_full_access, codex_args) = extract_prodex_full_access_flag(codex_args);
+    let codex_args = normalize_codex_profile_args(&codex_args);
     let codex_args = normalize_run_codex_args(&codex_args);
     let include_code_review = is_review_invocation(&codex_args);
     let codex_args = codex_launch_args_with_full_access(
@@ -192,6 +195,24 @@ pub fn prepare_codex_launch_args(
         full_access_requested || passthrough_full_access,
     );
     (codex_args, include_code_review)
+}
+
+pub fn normalize_codex_profile_args(codex_args: &[OsString]) -> Vec<OsString> {
+    codex_args
+        .iter()
+        .map(|arg| {
+            let Some(value) = arg.to_str() else {
+                return arg.clone();
+            };
+            if value == CODEX_LEGACY_PROFILE_V2_ARG {
+                return OsString::from(CODEX_PROFILE_ARG);
+            }
+            if let Some(profile) = value.strip_prefix("--profile-v2=") {
+                return OsString::from(format!("{CODEX_PROFILE_ARG}={profile}"));
+            }
+            arg.clone()
+        })
+        .collect()
 }
 
 pub fn extract_prodex_dry_run_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {

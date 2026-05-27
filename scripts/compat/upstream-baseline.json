@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.133.0 release",
+      "baseline_source": "openai/codex rust-v0.134.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -438,19 +438,19 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.133.0",
-      "name": "0.133.0",
-      "published_at": "2026-05-21T16:48:03Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.133.0",
+      "tag_name": "rust-v0.134.0",
+      "name": "0.134.0",
+      "published_at": "2026-05-26T19:13:26Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.134.0",
       "body_head": [
         "## New Features",
-        "- Goals are now enabled by default, backed by dedicated storage, and track progress across active turns. (#23300, #23685, #23696, #23732)",
-        "- `codex remote-control` now runs like a foreground command, waits for readiness, reports machine status, and keeps explicit daemon-style `start`/`stop` commands. (#22878)",
-        "- Permission profiles gained list APIs, inheritance, managed `requirements.toml` support, runtime refresh behavior, and stronger Windows sandbox integration. (#22928, #23412, #22270, #23433, #22931, #23715)",
-        "- Plugin discovery is easier to inspect, with marketplace-aware list output, installed versions, visible marketplace roots, and remote collection support. (#23372, #23584, #23727, #23730)",
-        "- Extensions can observe more lifecycle events, including subagent start/stop, tool execution, turn metadata, and async approval/turn processing. (#22782, #22873, #23309, #23688, #23690, #23692)",
-        "## Bug Fixes",
-        "- Fixed TUI startup choosing the wrong working directory when reusing a local app-server socket. (#23538)"
+        "- Added search across local conversation history, including case-insensitive content matches with result previews. (#23519, #23921)",
+        "- Made `--profile` the primary profile selector across CLI, TUI permissions, and sandbox flows, with legacy profile configs rejected through migration guidance. (#23708, #23883, #23890, #24051, #24055, #24059, #24067, #24110)",
+        "- Improved MCP setup with per-server environment targeting and OAuth options for streamable HTTP servers. (#23583, #24120)",
+        "- Made connector tool schemas more reliable by preserving local `$ref`/`$defs` structures and compacting oversized schemas before exposure. (#23357, #23904)",
+        "- Let read-only MCP tools run concurrently when they advertise `readOnlyHint`. (#23750)",
+        "- Added richer extension and hook context, including conversation history for extension tools and subagent identity in hook inputs. (#22882, #23963)",
+        "## Bug Fixes"
       ]
     }
   },

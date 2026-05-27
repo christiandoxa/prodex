@@ -432,8 +432,12 @@ fn runtime_deepseek_chat_assistant_messages_from_response_value(
         .get("content")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
+    let reasoning_content = message
+        .get("reasoning_content")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
     let tool_calls = message.get("tool_calls").cloned();
-    if content.is_empty() && tool_calls.is_none() {
+    if content.is_empty() && reasoning_content.is_empty() && tool_calls.is_none() {
         return Vec::new();
     }
     let mut assistant = serde_json::json!({
@@ -444,6 +448,9 @@ fn runtime_deepseek_chat_assistant_messages_from_response_value(
             serde_json::Value::String(content.to_string())
         },
     });
+    if !reasoning_content.is_empty() {
+        assistant["reasoning_content"] = serde_json::Value::String(reasoning_content.to_string());
+    }
     if let Some(tool_calls) = tool_calls {
         assistant["tool_calls"] = tool_calls;
     }
@@ -560,4 +567,74 @@ pub(super) fn runtime_deepseek_created_at() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn conversation_store() -> RuntimeDeepSeekConversationStore {
+        Arc::new(Mutex::new(BTreeMap::new()))
+    }
+
+    #[test]
+    fn deepseek_tool_turn_replays_reasoning_content_from_previous_response() {
+        let conversations = conversation_store();
+        let first_turn_messages = vec![serde_json::json!({
+            "role": "user",
+            "content": "read package metadata",
+        })];
+        let response = serde_json::json!({
+            "id": "chatcmpl_1",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": "Need to inspect the package file before answering.",
+                    "content": "I will inspect it.",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": "{\"cmd\":\"cat package.json\"}"
+                        }
+                    }]
+                }
+            }]
+        });
+        runtime_deepseek_store_conversation(
+            &conversations,
+            "chatcmpl_1",
+            first_turn_messages,
+            runtime_deepseek_chat_assistant_messages_from_response_value(&response),
+        );
+
+        let next_request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "stream": true,
+            "previous_response_id": "chatcmpl_1",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "{\"name\":\"prodex\"}"
+            }],
+            "reasoning": {"effort": "xhigh"}
+        });
+        let translated = runtime_deepseek_chat_request_body(
+            &serde_json::to_vec(&next_request).unwrap(),
+            &conversations,
+        )
+        .expect("request should translate");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+        assert_eq!(
+            body["messages"][1]["reasoning_content"],
+            "Need to inspect the package file before answering."
+        );
+        assert_eq!(body["messages"][1]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(body["messages"][2]["role"], "tool");
+        assert_eq!(body["reasoning_effort"], "max");
+        assert_eq!(body["thinking"]["type"], "enabled");
+    }
 }
