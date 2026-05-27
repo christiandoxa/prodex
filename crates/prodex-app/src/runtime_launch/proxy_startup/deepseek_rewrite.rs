@@ -77,6 +77,7 @@ fn runtime_deepseek_messages_from_responses_request(
     conversations: &RuntimeDeepSeekConversationStore,
 ) -> Option<Vec<serde_json::Value>> {
     let mut messages = Vec::new();
+    let mut has_history = false;
     if let Some(previous_response_id) = value
         .get("previous_response_id")
         .and_then(serde_json::Value::as_str)
@@ -84,6 +85,13 @@ fn runtime_deepseek_messages_from_responses_request(
         && let Some(history) = conversations.get(previous_response_id)
     {
         messages.extend(history.iter().cloned());
+        has_history = true;
+    }
+    if !has_history
+        && let Some(call_id) = runtime_deepseek_first_function_call_output_call_id(value)
+        && let Some(history) = runtime_deepseek_history_for_tool_call(conversations, &call_id)
+    {
+        messages.extend(history);
     }
     if let Some(instructions) = value
         .get("instructions")
@@ -114,6 +122,47 @@ fn runtime_deepseek_messages_from_responses_request(
     } else {
         Some(messages)
     }
+}
+
+fn runtime_deepseek_first_function_call_output_call_id(
+    value: &serde_json::Value,
+) -> Option<String> {
+    value
+        .get("input")?
+        .as_array()?
+        .iter()
+        .filter_map(serde_json::Value::as_object)
+        .find_map(|object| {
+            (object.get("type").and_then(serde_json::Value::as_str) == Some("function_call_output"))
+                .then(|| runtime_deepseek_json_string(object, &["call_id", "tool_call_id", "id"]))
+                .flatten()
+        })
+        .filter(|call_id| !call_id.trim().is_empty())
+}
+
+fn runtime_deepseek_history_for_tool_call(
+    conversations: &RuntimeDeepSeekConversationStore,
+    call_id: &str,
+) -> Option<Vec<serde_json::Value>> {
+    let conversations = conversations.lock().ok()?;
+    conversations
+        .values()
+        .rev()
+        .find(|history| runtime_deepseek_history_has_tool_call(history, call_id))
+        .cloned()
+}
+
+fn runtime_deepseek_history_has_tool_call(history: &[serde_json::Value], call_id: &str) -> bool {
+    history.iter().any(|message| {
+        message
+            .get("tool_calls")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|tool_calls| {
+                tool_calls.iter().any(|tool_call| {
+                    tool_call.get("id").and_then(serde_json::Value::as_str) == Some(call_id)
+                })
+            })
+    })
 }
 
 fn runtime_deepseek_push_message_from_responses_item(
@@ -636,5 +685,56 @@ mod tests {
         assert_eq!(body["messages"][2]["role"], "tool");
         assert_eq!(body["reasoning_effort"], "max");
         assert_eq!(body["thinking"]["type"], "enabled");
+    }
+
+    #[test]
+    fn deepseek_tool_output_without_previous_response_id_replays_history_by_call_id() {
+        let conversations = conversation_store();
+        runtime_deepseek_store_conversation(
+            &conversations,
+            "chatcmpl_1",
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "read commit history",
+            })],
+            vec![serde_json::json!({
+                "role": "assistant",
+                "reasoning_content": "Need to inspect recent commits before answering.",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "shell",
+                        "arguments": "{\"cmd\":\"git log --oneline -10\"}"
+                    }
+                }]
+            })],
+        );
+
+        let next_request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "stream": true,
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "befa38d chore(release): prepare 0.124.0"
+            }],
+            "reasoning": {"effort": "xhigh"}
+        });
+        let translated = runtime_deepseek_chat_request_body(
+            &serde_json::to_vec(&next_request).unwrap(),
+            &conversations,
+        )
+        .expect("request should translate");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+        assert_eq!(body["messages"][0]["content"], "read commit history");
+        assert_eq!(
+            body["messages"][1]["reasoning_content"],
+            "Need to inspect recent commits before answering."
+        );
+        assert_eq!(body["messages"][1]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(body["messages"][2]["tool_call_id"], "call_1");
     }
 }

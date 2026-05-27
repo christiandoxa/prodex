@@ -227,6 +227,9 @@ impl RuntimeDeepSeekSseState {
             .is_some()
         {
             events.extend(self.complete_tool_call_events());
+            if !self.tool_calls.is_empty() {
+                self.store_conversation_snapshot();
+            }
         }
         events
     }
@@ -378,6 +381,15 @@ impl RuntimeDeepSeekSseState {
         Some(events.join(""))
     }
 
+    fn store_conversation_snapshot(&self) {
+        runtime_deepseek_store_conversation(
+            &self.conversations,
+            &self.response_id,
+            self.conversation_messages.clone(),
+            self.chat_assistant_messages(),
+        );
+    }
+
     fn chat_assistant_messages(&self) -> Vec<serde_json::Value> {
         if self.output_text.is_empty()
             && self.reasoning_content.is_empty()
@@ -502,6 +514,58 @@ mod tests {
             .get("chatcmpl_1")
             .expect("stream should store conversation");
         assert_eq!(messages[1]["reasoning_content"], "Need package metadata.");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+    }
+
+    #[test]
+    fn deepseek_sse_state_stores_tool_call_snapshot_before_done_event() {
+        let conversations = conversation_store();
+        let mut state = RuntimeDeepSeekSseState::new(
+            7,
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "read recent commits"
+            })],
+            Arc::clone(&conversations),
+        );
+
+        state.observe_chat_chunk(&serde_json::json!({
+            "id": "chatcmpl_1",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "delta": {
+                    "reasoning_content": "Need commit history.",
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_1",
+                        "function": {
+                            "name": "shell",
+                            "arguments": "{\"cmd\":\"git log"
+                        }
+                    }]
+                }
+            }]
+        }));
+        state.observe_chat_chunk(&serde_json::json!({
+            "id": "chatcmpl_1",
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "function": {
+                            "arguments": " --oneline -10\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }));
+
+        let stored = conversations.lock().unwrap();
+        let messages = stored
+            .get("chatcmpl_1")
+            .expect("tool-call finish should store conversation before stream done");
+        assert_eq!(messages[1]["reasoning_content"], "Need commit history.");
         assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
     }
 }
