@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.125.0 - 2026-05-27
+
+### Misc
+
+- Replay reasoning before tool output (`43b77d6`)
+
 ## 0.124.0 - 2026-05-27
 
 ### Runtime
@@ -67,9 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add claw shadow workspace fallback (`ccf2127`)
-
-## 0.113.0 - 2026-05-24
-
-### CLI
-
-- Harden presidio opt-in controls (`2ff072d`)
