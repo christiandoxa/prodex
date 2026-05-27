@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.124.0 - 2026-05-27
+
+### Runtime
+
+- Support DeepSeek reasoning replay (`d574c65`)
+
 ## 0.123.0 - 2026-05-27
 
 ### Misc
@@ -67,9 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Harden presidio opt-in controls (`2ff072d`)
-
-## 0.112.0 - 2026-05-24
-
-### CLI
-
-- Restore presidio opt-in prompt (`4151e96`)
