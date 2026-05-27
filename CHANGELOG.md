@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.126.0 - 2026-05-27
+
+### Misc
+
+- Keep tool output adjacent (`3492005`)
+
 ## 0.125.0 - 2026-05-27
 
 ### Misc
@@ -67,9 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Handle interrupted websocket handshakes (`18bcb36`)
-
-## 0.114.0 - 2026-05-25
-
-### Misc
-
-- Add claw shadow workspace fallback (`ccf2127`)
