@@ -653,7 +653,7 @@ mod tests {
         assert_eq!(translated["messages"][2]["tool_call_id"], "call_1");
         assert_eq!(translated["tools"].as_array().unwrap().len(), 1);
         assert_eq!(translated["tools"][0]["function"]["name"], "shell");
-        assert_eq!(translated["tool_choice"]["function"]["name"], "shell");
+        assert!(translated.get("tool_choice").is_none());
         assert_eq!(translated["thinking"]["type"], "enabled");
         assert_eq!(translated["reasoning_effort"], "max");
     }

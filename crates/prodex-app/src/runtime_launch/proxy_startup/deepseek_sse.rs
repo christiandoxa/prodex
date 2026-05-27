@@ -108,6 +108,8 @@ struct RuntimeDeepSeekSseState {
     created: bool,
     completed: bool,
     eof: bool,
+    output_text_item_added: bool,
+    output_text_item_done: bool,
     model: Option<String>,
     output_text: String,
     reasoning_content: String,
@@ -140,6 +142,8 @@ impl RuntimeDeepSeekSseState {
             created: false,
             completed: false,
             eof: false,
+            output_text_item_added: false,
+            output_text_item_done: false,
             model: None,
             output_text: String::new(),
             reasoning_content: String::new(),
@@ -199,6 +203,9 @@ impl RuntimeDeepSeekSseState {
                 .and_then(serde_json::Value::as_str)
                 .filter(|text| !text.is_empty())
             {
+                if let Some(event) = self.output_text_item_added_event() {
+                    events.push(event);
+                }
                 self.output_text.push_str(text);
                 let sequence_number = self.next_sequence_number();
                 events.push(self.event(
@@ -351,6 +358,7 @@ impl RuntimeDeepSeekSseState {
             return None;
         }
         let mut events = self.complete_tool_call_events();
+        events.extend(self.complete_output_text_item_events());
         let mut response = serde_json::json!({
             "id": self.response_id,
             "output": self.output_items(),
@@ -381,6 +389,62 @@ impl RuntimeDeepSeekSseState {
         Some(events.join(""))
     }
 
+    fn output_text_item_id(&self) -> String {
+        format!("msg_deepseek_{}", self.request_id)
+    }
+
+    fn output_text_item_added_event(&mut self) -> Option<String> {
+        if self.output_text_item_added {
+            return None;
+        }
+        self.output_text_item_added = true;
+        let sequence_number = self.next_sequence_number();
+        Some(self.event(
+            "response.output_item.added",
+            serde_json::json!({
+                "type": "response.output_item.added",
+                "sequence_number": sequence_number,
+                "response_id": self.response_id,
+                "item": {
+                    "id": self.output_text_item_id(),
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                },
+            }),
+        ))
+    }
+
+    fn complete_output_text_item_events(&mut self) -> Vec<String> {
+        if self.output_text.is_empty() || self.output_text_item_done {
+            return Vec::new();
+        }
+        let mut events = Vec::new();
+        if let Some(event) = self.output_text_item_added_event() {
+            events.push(event);
+        }
+        self.output_text_item_done = true;
+        let sequence_number = self.next_sequence_number();
+        events.push(self.event(
+            "response.output_item.done",
+            serde_json::json!({
+                "type": "response.output_item.done",
+                "sequence_number": sequence_number,
+                "response_id": self.response_id,
+                "item": {
+                    "id": self.output_text_item_id(),
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{
+                        "type": "output_text",
+                        "text": self.output_text,
+                    }],
+                },
+            }),
+        ));
+        events
+    }
+
     fn store_conversation_snapshot(&self) {
         runtime_deepseek_store_conversation(
             &self.conversations,
@@ -400,7 +464,11 @@ impl RuntimeDeepSeekSseState {
         let mut assistant = serde_json::json!({
             "role": "assistant",
             "content": if self.output_text.is_empty() {
-                serde_json::Value::Null
+                if self.tool_calls.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String(String::new())
+                }
             } else {
                 serde_json::Value::String(self.output_text.clone())
             },
@@ -567,5 +635,41 @@ mod tests {
             .expect("tool-call finish should store conversation before stream done");
         assert_eq!(messages[1]["reasoning_content"], "Need commit history.");
         assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+    }
+
+    #[test]
+    fn deepseek_sse_reader_wraps_text_delta_in_message_item() {
+        let conversations = conversation_store();
+        let stream = concat!(
+            "data: {\"id\":\"chatcmpl_2\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut reader = RuntimeDeepSeekChatSseReader::new(
+            std::io::Cursor::new(stream.as_bytes()),
+            7,
+            Vec::new(),
+            conversations,
+        );
+        let mut output = String::new();
+        reader.read_to_string(&mut output).unwrap();
+
+        let item_added = output
+            .find("\"type\":\"response.output_item.added\"")
+            .expect("message item should be added before text delta");
+        let text_delta = output
+            .find("\"type\":\"response.output_text.delta\"")
+            .expect("text delta should be emitted");
+        let item_done = output
+            .find("\"type\":\"response.output_item.done\"")
+            .expect("message item should be done before completion");
+        let completed = output
+            .find("\"type\":\"response.completed\"")
+            .expect("response should complete");
+
+        assert!(item_added < text_delta);
+        assert!(text_delta < item_done);
+        assert!(item_done < completed);
+        assert!(output.contains("\"type\":\"message\""));
+        assert!(output.contains("\"text\":\"done\""));
     }
 }
