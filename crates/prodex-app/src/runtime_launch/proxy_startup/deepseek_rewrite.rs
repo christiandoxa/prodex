@@ -109,6 +109,7 @@ fn runtime_deepseek_messages_from_responses_request(
         }));
     }
     let replayed_tool_call_ids = runtime_deepseek_tool_call_ids(&history_messages);
+    let replayed_tool_output_call_ids = runtime_deepseek_tool_output_call_ids(&history_messages);
     let replayed_message_signatures = runtime_deepseek_message_signatures(&history_messages);
     messages.extend(history_messages);
     match value.get("input") {
@@ -124,6 +125,7 @@ fn runtime_deepseek_messages_from_responses_request(
                     item,
                     &mut messages,
                     &replayed_tool_call_ids,
+                    &replayed_tool_output_call_ids,
                     &replayed_message_signatures,
                 );
             }
@@ -203,6 +205,20 @@ fn runtime_deepseek_tool_call_ids(history: &[serde_json::Value]) -> BTreeSet<Str
         .collect()
 }
 
+fn runtime_deepseek_tool_output_call_ids(history: &[serde_json::Value]) -> BTreeSet<String> {
+    history
+        .iter()
+        .filter(|message| message.get("role").and_then(serde_json::Value::as_str) == Some("tool"))
+        .filter_map(|message| {
+            message
+                .get("tool_call_id")
+                .and_then(serde_json::Value::as_str)
+        })
+        .filter(|call_id| !call_id.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 fn runtime_deepseek_message_signatures(
     history: &[serde_json::Value],
 ) -> BTreeSet<(String, String)> {
@@ -230,6 +246,7 @@ fn runtime_deepseek_push_message_from_responses_item(
     item: &serde_json::Value,
     messages: &mut Vec<serde_json::Value>,
     replayed_tool_call_ids: &BTreeSet<String>,
+    replayed_tool_output_call_ids: &BTreeSet<String>,
     replayed_message_signatures: &BTreeSet<(String, String)>,
 ) {
     let Some(object) = item.as_object() else {
@@ -286,6 +303,9 @@ fn runtime_deepseek_push_message_from_responses_item(
         Some("function_call_output") => {
             let call_id = runtime_deepseek_json_string(object, &["call_id", "tool_call_id", "id"])
                 .unwrap_or_else(|| "call_0".to_string());
+            if replayed_tool_output_call_ids.contains(&call_id) {
+                return;
+            }
             let output = runtime_deepseek_json_string(object, &["output"])
                 .or_else(|| object.get("output").map(|value| value.to_string()))
                 .unwrap_or_default();
