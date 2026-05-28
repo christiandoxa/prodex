@@ -21,6 +21,7 @@ pub fn prepare_caveman_launch_home(
 ) -> Result<PathBuf> {
     let caveman_home = create_temporary_caveman_home(managed_profiles_root)?;
     if let Err(err) = prodex_shared_codex_fs::copy_codex_home(base_codex_home, &caveman_home)
+        .and_then(|_| share_caveman_chat_history(base_codex_home, &caveman_home))
         .and_then(|_| configure_caveman_launch_home(&caveman_home))
     {
         let _ = fs::remove_dir_all(&caveman_home);
@@ -79,6 +80,96 @@ fn create_temporary_caveman_home(managed_profiles_root: &Path) -> Result<PathBuf
     }
 
     bail!("failed to allocate a temporary CODEX_HOME for Caveman")
+}
+
+fn share_caveman_chat_history(base_codex_home: &Path, caveman_home: &Path) -> Result<()> {
+    link_caveman_shared_chat_file(
+        &base_codex_home.join("history.jsonl"),
+        &caveman_home.join("history.jsonl"),
+    )?;
+    link_caveman_shared_chat_dir(
+        &base_codex_home.join("sessions"),
+        &caveman_home.join("sessions"),
+    )?;
+    link_caveman_shared_chat_dir(
+        &base_codex_home.join("archived_sessions"),
+        &caveman_home.join("archived_sessions"),
+    )
+}
+
+fn link_caveman_shared_chat_file(source: &Path, link: &Path) -> Result<()> {
+    if let Some(parent) = source.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    if fs::symlink_metadata(source).is_err() {
+        fs::write(source, "").with_context(|| format!("failed to write {}", source.display()))?;
+    }
+    replace_caveman_path_with_symlink(source, link, false)
+}
+
+fn link_caveman_shared_chat_dir(source: &Path, link: &Path) -> Result<()> {
+    fs::create_dir_all(source).with_context(|| format!("failed to create {}", source.display()))?;
+    replace_caveman_path_with_symlink(source, link, true)
+}
+
+fn replace_caveman_path_with_symlink(target: &Path, link: &Path, is_dir: bool) -> Result<()> {
+    if let Some(parent) = link.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    if fs::symlink_metadata(link).is_ok() {
+        remove_caveman_path(link)?;
+    }
+    create_caveman_symlink(target, link, is_dir)
+}
+
+fn remove_caveman_path(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))
+    } else {
+        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))
+    }
+}
+
+fn create_caveman_symlink(target: &Path, link: &Path, is_dir: bool) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let _ = is_dir;
+        std::os::unix::fs::symlink(target, link).with_context(|| {
+            format!(
+                "failed to link Caveman chat history {} -> {}",
+                link.display(),
+                target.display()
+            )
+        })?;
+    }
+
+    #[cfg(windows)]
+    {
+        if is_dir {
+            std::os::windows::fs::symlink_dir(target, link)
+        } else {
+            std::os::windows::fs::symlink_file(target, link)
+        }
+        .with_context(|| {
+            format!(
+                "failed to link Caveman chat history {} -> {}",
+                link.display(),
+                target.display()
+            )
+        })?;
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, link, is_dir);
+        bail!("Caveman chat history links are not supported on this platform");
+    }
+
+    Ok(())
 }
 
 fn configure_caveman_config(codex_home: &Path) -> Result<()> {

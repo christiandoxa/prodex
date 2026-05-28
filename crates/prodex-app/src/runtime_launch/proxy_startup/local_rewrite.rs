@@ -649,8 +649,7 @@ mod tests {
         assert_eq!(translated["max_tokens"], 123);
         assert_eq!(translated["messages"][0]["role"], "system");
         assert_eq!(translated["messages"][1]["content"], "List files");
-        assert_eq!(translated["messages"][2]["role"], "tool");
-        assert_eq!(translated["messages"][2]["tool_call_id"], "call_1");
+        assert_eq!(translated["messages"].as_array().unwrap().len(), 2);
         assert_eq!(translated["tools"].as_array().unwrap().len(), 1);
         assert_eq!(translated["tools"][0]["function"]["name"], "shell");
         assert!(translated.get("tool_choice").is_none());

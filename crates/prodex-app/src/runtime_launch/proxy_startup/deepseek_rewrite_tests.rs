@@ -366,6 +366,131 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_tool_turn_trims_unanswered_parallel_tool_calls() {
+        let conversations = conversation_store();
+        runtime_deepseek_store_conversation(
+            &conversations,
+            "chatcmpl_1",
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "inspect repo and package metadata",
+            })],
+            vec![serde_json::json!({
+                "role": "assistant",
+                "reasoning_content": "Need two local reads.",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": "{\"cmd\":\"git status --short\"}"
+                        }
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": "{\"cmd\":\"cat package.json\"}"
+                        }
+                    }
+                ]
+            })],
+        );
+
+        let next_request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "stream": true,
+            "previous_response_id": "chatcmpl_1",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "M crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs"
+            }],
+            "reasoning": {"effort": "xhigh"}
+        });
+        let translated = runtime_deepseek_chat_request_body(
+            &serde_json::to_vec(&next_request).unwrap(),
+            &conversations,
+        )
+        .expect("request should translate");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        let messages = body["messages"].as_array().unwrap();
+
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["tool_calls"].as_array().unwrap().len(), 1);
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+        assert_eq!(messages.len(), 3);
+        assert!(!serde_json::to_string(messages).unwrap().contains("call_2"));
+    }
+
+    #[test]
+    fn deepseek_tool_turn_moves_late_tool_output_next_to_tool_call() {
+        let conversations = conversation_store();
+        runtime_deepseek_store_conversation(
+            &conversations,
+            "chatcmpl_1",
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "read commit history",
+            })],
+            vec![serde_json::json!({
+                "role": "assistant",
+                "reasoning_content": "Need recent commits.",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "shell",
+                        "arguments": "{\"cmd\":\"git log --oneline -3\"}"
+                    }
+                }]
+            })],
+        );
+
+        let next_request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "stream": true,
+            "previous_response_id": "chatcmpl_1",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "continue after reading it"}]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "7828df3 fix(deepseek): tolerate missing thinking replay"
+                }
+            ],
+            "reasoning": {"effort": "xhigh"}
+        });
+        let translated = runtime_deepseek_chat_request_body(
+            &serde_json::to_vec(&next_request).unwrap(),
+            &conversations,
+        )
+        .expect("request should translate");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        let messages = body["messages"].as_array().unwrap();
+
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+        assert_eq!(messages[3]["role"], "user");
+        assert_eq!(messages[3]["content"], "continue after reading it");
+        assert_eq!(messages.len(), 4);
+    }
+
+    #[test]
     fn deepseek_followup_skips_replayed_tool_output_after_final_answer() {
         let conversations = conversation_store();
         runtime_deepseek_store_conversation(

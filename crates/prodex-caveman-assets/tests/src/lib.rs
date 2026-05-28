@@ -232,6 +232,61 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_caveman_home_shares_base_chat_history() {
+    let base = temp_dir("history-base");
+    let managed_root = temp_dir("history-managed");
+    let base_session_dir = base.join("sessions/2026/05/28");
+    fs::create_dir_all(&base_session_dir).expect("base session dir");
+    fs::write(
+        base.join("history.jsonl"),
+        "{\"session_id\":\"base\",\"text\":\"old chat\"}\n",
+    )
+    .expect("base history");
+    fs::write(base_session_dir.join("base.jsonl"), "old session").expect("base session");
+
+    let overlay = prepare_caveman_launch_home(&managed_root, &base)
+        .expect("caveman launch home should prepare");
+
+    assert_eq!(
+        fs::read_link(overlay.join("history.jsonl")).expect("history should be a symlink"),
+        base.join("history.jsonl")
+    );
+    assert_eq!(
+        fs::read_link(overlay.join("sessions")).expect("sessions should be a symlink"),
+        base.join("sessions")
+    );
+    assert_eq!(
+        fs::read_to_string(overlay.join("history.jsonl")).expect("overlay history"),
+        "{\"session_id\":\"base\",\"text\":\"old chat\"}\n"
+    );
+    fs::write(
+        overlay.join("history.jsonl"),
+        concat!(
+            "{\"session_id\":\"base\",\"text\":\"old chat\"}\n",
+            "{\"session_id\":\"base\",\"text\":\"new chat\"}\n"
+        ),
+    )
+    .expect("overlay history write");
+    fs::write(overlay.join("sessions/2026/05/28/new.jsonl"), "new session")
+        .expect("overlay session write");
+
+    assert!(
+        fs::read_to_string(base.join("history.jsonl"))
+            .expect("base history should receive overlay write")
+            .contains("\"new chat\"")
+    );
+    assert_eq!(
+        fs::read_to_string(base.join("sessions/2026/05/28/new.jsonl"))
+            .expect("base session should receive overlay write"),
+        "new session"
+    );
+
+    let _ = fs::remove_dir_all(managed_root);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+#[test]
 fn caveman_session_start_script_outputs_once_per_launch_home() {
     let codex_home = temp_dir("caveman-sessionstart-once");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
