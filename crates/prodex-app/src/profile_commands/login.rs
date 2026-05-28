@@ -59,14 +59,42 @@ fn login_into_profile(
     login_request: &LoginRequest,
 ) -> Result<ExitStatus> {
     let profile_name = resolve_profile_name(state, Some(profile_name))?;
-    let codex_home = prepare_profile_login_home(paths, state, &profile_name)?;
-    let status = run_codex_login(&codex_home, login_request)?;
+
+    // Validate the profile exists and supports codex runtime before creating
+    // a temporary login home (non-destructive check, no home prep needed yet).
+    {
+        let profile = state
+            .profiles
+            .get(&profile_name)
+            .with_context(|| format!("profile '{}' is missing", profile_name))?;
+        if !profile.provider.supports_codex_runtime() {
+            bail!(
+                "profile '{}' uses {}. `prodex login --profile` currently supports OpenAI/Codex profiles only.",
+                profile_name,
+                profile.provider.display_name()
+            );
+        }
+    }
+
+    // Run codex login in a temporary home so the existing auth.json is
+    // preserved when login fails or is cancelled.
+    let login_home = create_temporary_login_home(paths)?;
+    let status = run_codex_login(&login_home, login_request)?;
     if !status.success() {
+        remove_dir_if_exists(&login_home)?;
         return Ok(status);
     }
     if login_request.method == LoginMethod::Status {
+        remove_dir_if_exists(&login_home)?;
         return Ok(status);
     }
+
+    // Login succeeded — prepare the real profile home (dirs only, never
+    // deletes auth.json) and copy the new auth across.
+    let codex_home = prepare_profile_login_home(paths, state, &profile_name)?;
+    let auth_json = required_auth_json_text(&login_home)?;
+    write_secret_text_file(&secret_store::auth_json_path(&codex_home), &auth_json)?;
+    remove_dir_if_exists(&login_home)?;
 
     finish_named_profile_login(
         paths,
