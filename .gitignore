@@ -16,3 +16,4 @@ Thumbs.db
 
 # Local Codex workspace markers/state
 /.codex
+/.token-savior-cache.json
