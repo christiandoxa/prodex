@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.131.0 - 2026-05-28
+
+### Misc
+
+- Add google auth provider (`b74ed9b`)
+
 ## 0.130.0 - 2026-05-28
 
 ### Runtime
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add API key login (`63c3945`)
-
-## 0.119.0 - 2026-05-26
-
-### Claude
-
-- Skip token-savior venvs missing mcp (`82eea00`)
