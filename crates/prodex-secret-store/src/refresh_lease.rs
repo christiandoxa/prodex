@@ -88,11 +88,18 @@ impl RefreshLeaseCoordinator {
 
             match create_lock(&paths.lock_path) {
                 Ok(()) => {
-                    return Ok(RefreshLeaseDecision::Owner(RefreshLeaseOwner {
+                    let mut owner = RefreshLeaseOwner {
                         lock_path: paths.lock_path,
                         result_path: paths.result_path,
                         released: false,
-                    }));
+                    };
+                    if let Some(result_json) =
+                        read_fresh_result(&owner.result_path, self.result_ttl)?
+                    {
+                        owner.release()?;
+                        return Ok(RefreshLeaseDecision::Follower { result_json });
+                    }
+                    return Ok(RefreshLeaseDecision::Owner(owner));
                 }
                 Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(err) => return Err(RefreshLeaseError::io(&paths.lock_path, err)),

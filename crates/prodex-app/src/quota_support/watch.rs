@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum AllQuotaWatchSnapshot {
     Loading {
         updated: String,
@@ -24,11 +24,13 @@ const QUOTA_WATCH_INPUT_POLL_MS: u64 = 100;
 enum QuotaWatchCommand {
     Up,
     Down,
+    Sort,
     Quit,
 }
 
 enum QuotaWatchCommandOutcome {
     Continue(usize),
+    Sort,
     Quit,
 }
 
@@ -114,6 +116,7 @@ impl QuotaWatchInput {
             [b'q' | b'Q', ..] => Some(QuotaWatchCommand::Quit),
             [b'k' | b'K', ..] => Some(QuotaWatchCommand::Up),
             [b'j' | b'J', ..] => Some(QuotaWatchCommand::Down),
+            [b's' | b'S', ..] => Some(QuotaWatchCommand::Sort),
             [0x1b, b'[', b'A', ..] => Some(QuotaWatchCommand::Up),
             [0x1b, b'[', b'B', ..] => Some(QuotaWatchCommand::Down),
             _ => None,
@@ -175,6 +178,7 @@ pub(crate) fn render_all_quota_watch_output(
         &collect_all_quota_watch_snapshot(updated, state_result, base_url, &QuotaAuthFilter::All),
         detail,
         0,
+        QuotaReportSort::Remaining,
     )
 }
 
@@ -204,6 +208,7 @@ fn render_all_quota_watch_snapshot(
     snapshot: &AllQuotaWatchSnapshot,
     detail: bool,
     scroll_offset: usize,
+    sort: QuotaReportSort,
 ) -> String {
     match snapshot {
         AllQuotaWatchSnapshot::Loading { updated: _updated } => {
@@ -213,7 +218,7 @@ fn render_all_quota_watch_snapshot(
             updated: _updated,
             profile_count: _profile_count,
             reports,
-        } => render_all_quota_watch_report_output(reports, detail, scroll_offset),
+        } => render_all_quota_watch_report_output(reports, detail, scroll_offset, sort),
         AllQuotaWatchSnapshot::Empty { updated: _updated } => {
             render_quota_watch_error_panel("Quota", "No profiles configured")
         }
@@ -228,16 +233,24 @@ fn render_all_quota_watch_report_output(
     reports: &[QuotaReport],
     detail: bool,
     scroll_offset: usize,
+    sort: QuotaReportSort,
 ) -> String {
-    render_quota_reports_window_with_layout(
+    let mut output = render_quota_reports_window_with_sort(
         reports,
         detail,
         quota_watch_available_report_lines(""),
         current_cli_width(),
         scroll_offset,
         true,
+        sort,
     )
-    .output
+    .output;
+    output.push('\n');
+    output.push_str(&format!(
+        "sort: {} | s sort | j/k/Up/Down scroll | q quit",
+        sort.label()
+    ));
+    output
 }
 
 fn redraw_quota_watch(output: &str) -> Result<()> {
@@ -250,7 +263,7 @@ fn redraw_quota_watch(output: &str) -> Result<()> {
 
 fn quota_watch_available_report_lines(header: &str) -> Option<usize> {
     let terminal_height = terminal_height_lines()?;
-    let reserved = header.lines().count().saturating_add(1);
+    let reserved = header.lines().count().saturating_add(2);
     Some(terminal_height.saturating_sub(reserved))
 }
 
@@ -279,6 +292,7 @@ pub(crate) fn watch_all_quotas(
 ) -> Result<()> {
     let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
+    let mut sort = QuotaReportSort::Remaining;
     let mut snapshot = AllQuotaWatchSnapshot::Loading {
         updated: quota_watch_updated_at(),
     };
@@ -289,14 +303,14 @@ pub(crate) fn watch_all_quotas(
 
     loop {
         if let Some(next_snapshot) = refresh.take_latest() {
-            snapshot = next_snapshot;
+            snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
             redraw_needed = true;
             next_refresh_at = Some(quota_watch_next_refresh_at());
         }
 
         if redraw_needed {
             scroll_offset = scroll_offset.min(quota_watch_max_scroll_offset(&snapshot));
-            let output = render_all_quota_watch_snapshot(&snapshot, detail, scroll_offset);
+            let output = render_all_quota_watch_snapshot(&snapshot, detail, scroll_offset, sort);
             redraw_quota_watch(&output)?;
             redraw_needed = false;
         }
@@ -319,6 +333,11 @@ pub(crate) fn watch_all_quotas(
                         scroll_offset = next_offset;
                         redraw_needed = true;
                     }
+                }
+                QuotaWatchCommandOutcome::Sort => {
+                    sort = sort.next();
+                    scroll_offset = 0;
+                    redraw_needed = true;
                 }
                 QuotaWatchCommandOutcome::Quit => return Ok(()),
             }
@@ -369,6 +388,55 @@ fn quota_watch_max_scroll_offset(snapshot: &AllQuotaWatchSnapshot) -> usize {
     }
 }
 
+fn merge_all_quota_watch_snapshot(
+    previous: &AllQuotaWatchSnapshot,
+    next: AllQuotaWatchSnapshot,
+) -> AllQuotaWatchSnapshot {
+    match (previous, next) {
+        (
+            AllQuotaWatchSnapshot::Reports {
+                reports: previous_reports,
+                ..
+            },
+            AllQuotaWatchSnapshot::Reports {
+                updated,
+                profile_count,
+                mut reports,
+            },
+        ) => {
+            preserve_previous_successful_quota_reports(previous_reports, &mut reports);
+            AllQuotaWatchSnapshot::Reports {
+                updated,
+                profile_count,
+                reports,
+            }
+        }
+        (AllQuotaWatchSnapshot::Reports { .. }, AllQuotaWatchSnapshot::Error { .. }) => {
+            previous.clone()
+        }
+        (_, next) => next,
+    }
+}
+
+fn preserve_previous_successful_quota_reports(
+    previous_reports: &[QuotaReport],
+    reports: &mut [QuotaReport],
+) {
+    for report in reports {
+        if report.result.is_ok() {
+            continue;
+        }
+        let Some(previous) = previous_reports.iter().find(|previous| {
+            previous.name == report.name
+                && previous.result.is_ok()
+                && previous.auth.label == report.auth.label
+        }) else {
+            continue;
+        };
+        *report = previous.clone();
+    }
+}
+
 fn apply_quota_watch_command(
     command: QuotaWatchCommand,
     scroll_offset: usize,
@@ -381,6 +449,7 @@ fn apply_quota_watch_command(
         QuotaWatchCommand::Down => QuotaWatchCommandOutcome::Continue(
             scroll_offset.saturating_add(1).min(max_scroll_offset),
         ),
+        QuotaWatchCommand::Sort => QuotaWatchCommandOutcome::Sort,
         QuotaWatchCommand::Quit => QuotaWatchCommandOutcome::Quit,
     }
 }
@@ -388,6 +457,33 @@ fn apply_quota_watch_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_quota_report(
+        name: &str,
+        result: std::result::Result<ProviderQuotaSnapshot, String>,
+    ) -> QuotaReport {
+        QuotaReport {
+            name: name.to_string(),
+            active: false,
+            auth: AuthSummary {
+                label: "chatgpt".to_string(),
+                quota_compatible: true,
+            },
+            workspace_id: None,
+            result,
+            fetched_at: 1_700_000_000,
+        }
+    }
+
+    fn test_usage(email: &str) -> ProviderQuotaSnapshot {
+        ProviderQuotaSnapshot::OpenAi(UsageResponse {
+            email: Some(email.to_string()),
+            plan_type: Some("plus".to_string()),
+            rate_limit: None,
+            code_review_rate_limit: None,
+            additional_rate_limits: Vec::new(),
+        })
+    }
 
     #[test]
     fn all_quota_watch_refresh_keeps_single_background_refresh_in_flight() {
@@ -427,5 +523,72 @@ mod tests {
         assert!(refresh.try_start(|| AllQuotaWatchSnapshot::Empty {
             updated: "third".to_string(),
         }));
+    }
+
+    #[test]
+    fn all_quota_watch_merge_preserves_previous_successful_report_on_refresh_error() {
+        let previous = AllQuotaWatchSnapshot::Reports {
+            updated: "before".to_string(),
+            profile_count: 1,
+            reports: vec![test_quota_report(
+                "main",
+                Ok(test_usage("main@example.com")),
+            )],
+        };
+        let next = AllQuotaWatchSnapshot::Reports {
+            updated: "after".to_string(),
+            profile_count: 1,
+            reports: vec![test_quota_report("main", Err("HTTP 401".to_string()))],
+        };
+
+        let merged = merge_all_quota_watch_snapshot(&previous, next);
+
+        let AllQuotaWatchSnapshot::Reports {
+            updated, reports, ..
+        } = merged
+        else {
+            panic!("expected report snapshot");
+        };
+        assert_eq!(updated, "after");
+        assert!(reports[0].result.is_ok());
+    }
+
+    #[test]
+    fn all_quota_watch_merge_keeps_previous_snapshot_on_full_refresh_error() {
+        let previous = AllQuotaWatchSnapshot::Reports {
+            updated: "before".to_string(),
+            profile_count: 1,
+            reports: vec![test_quota_report(
+                "main",
+                Ok(test_usage("main@example.com")),
+            )],
+        };
+
+        let merged = merge_all_quota_watch_snapshot(
+            &previous,
+            AllQuotaWatchSnapshot::Error {
+                updated: "after".to_string(),
+                message: "load failed".to_string(),
+            },
+        );
+
+        let AllQuotaWatchSnapshot::Reports {
+            updated, reports, ..
+        } = merged
+        else {
+            panic!("expected previous report snapshot");
+        };
+        assert_eq!(updated, "before");
+        assert!(reports[0].result.is_ok());
+    }
+
+    #[test]
+    fn quota_watch_sort_command_cycles_sort_mode() {
+        assert!(matches!(
+            apply_quota_watch_command(QuotaWatchCommand::Sort, 3, 10),
+            QuotaWatchCommandOutcome::Sort
+        ));
+        assert_eq!(QuotaReportSort::Remaining.next(), QuotaReportSort::Profile);
+        assert_eq!(QuotaReportSort::Plan.next(), QuotaReportSort::Remaining);
     }
 }

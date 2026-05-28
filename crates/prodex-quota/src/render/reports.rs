@@ -49,10 +49,30 @@ pub fn render_quota_reports_window_with_layout(
     start_profile: usize,
     interactive_scroll_hint: bool,
 ) -> RenderedQuotaReportWindow {
+    render_quota_reports_window_with_sort(
+        reports,
+        detail,
+        max_lines,
+        total_width,
+        start_profile,
+        interactive_scroll_hint,
+        QuotaReportSort::Remaining,
+    )
+}
+
+pub fn render_quota_reports_window_with_sort(
+    reports: &[QuotaReport],
+    detail: bool,
+    max_lines: Option<usize>,
+    total_width: usize,
+    start_profile: usize,
+    interactive_scroll_hint: bool,
+    sort: QuotaReportSort,
+) -> RenderedQuotaReportWindow {
     let column_widths = quota_report_column_widths(total_width);
     let pool_summary =
         render_quota_pool_summary_lines(&collect_quota_pool_aggregate(reports), total_width);
-    let sections = build_quota_report_sections(reports, column_widths, detail, total_width);
+    let sections = build_quota_report_sections(reports, column_widths, detail, total_width, sort);
     let header = render_quota_report_header(column_widths);
     let has_pool_summary = !pool_summary.is_empty();
     let mut output =
@@ -197,9 +217,10 @@ fn build_quota_report_sections(
     column_widths: QuotaReportColumnWidths,
     detail: bool,
     total_width: usize,
+    sort: QuotaReportSort,
 ) -> Vec<Vec<String>> {
     let duplicate_workspace_emails = quota_report_duplicate_workspace_emails(reports);
-    sort_quota_reports_for_display(reports)
+    sort_quota_reports_for_display_with_sort(reports, sort)
         .into_iter()
         .map(|report| {
             render_quota_report_section(
@@ -436,27 +457,78 @@ fn quota_report_window_notice(
 }
 
 pub fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
-    sorted_quota_report_indexes(reports)
+    sort_quota_reports_for_display_with_sort(reports, QuotaReportSort::Remaining)
+}
+
+pub fn sort_quota_reports_for_display_with_sort(
+    reports: &[QuotaReport],
+    sort: QuotaReportSort,
+) -> Vec<&QuotaReport> {
+    sorted_quota_report_indexes_by(reports, sort)
         .into_iter()
         .map(|index| &reports[index])
         .collect()
 }
 
 pub fn sorted_quota_report_indexes(reports: &[QuotaReport]) -> Vec<usize> {
+    sorted_quota_report_indexes_by(reports, QuotaReportSort::Remaining)
+}
+
+pub fn sorted_quota_report_indexes_by(
+    reports: &[QuotaReport],
+    sort: QuotaReportSort,
+) -> Vec<usize> {
     let mut sorted = (0..reports.len()).collect::<Vec<_>>();
     sorted.sort_by(|&left, &right| {
-        quota_report_sort_key(&reports[left])
-            .cmp(&quota_report_sort_key(&reports[right]))
+        compare_quota_reports_for_sort(&reports[left], &reports[right], sort)
             .then_with(|| reports[left].name.cmp(&reports[right].name))
     });
     sorted
 }
 
-fn quota_report_sort_key(report: &QuotaReport) -> (usize, i64) {
+fn compare_quota_reports_for_sort(
+    left: &QuotaReport,
+    right: &QuotaReport,
+    sort: QuotaReportSort,
+) -> Ordering {
+    match sort {
+        QuotaReportSort::Remaining => {
+            quota_report_remaining_sort_key(left).cmp(&quota_report_remaining_sort_key(right))
+        }
+        QuotaReportSort::Profile => compare_sort_text(&left.name, &right.name),
+        QuotaReportSort::Auth => compare_sort_text(&left.auth.label, &right.auth.label),
+        QuotaReportSort::Account => compare_sort_text(
+            &quota_report_account_sort_value(left),
+            &quota_report_account_sort_value(right),
+        ),
+        QuotaReportSort::Plan => compare_sort_text(
+            &quota_report_plan_sort_value(left),
+            &quota_report_plan_sort_value(right),
+        ),
+    }
+}
+
+fn compare_sort_text(left: &str, right: &str) -> Ordering {
+    normalize_sort_text(left).cmp(&normalize_sort_text(right))
+}
+
+fn normalize_sort_text(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn quota_report_remaining_sort_key(report: &QuotaReport) -> (usize, i64) {
     (
         quota_report_status_rank(report),
         quota_report_earliest_main_reset_epoch(report).unwrap_or(i64::MAX),
     )
+}
+
+fn quota_report_account_sort_value(report: &QuotaReport) -> String {
+    quota_report_view_data(report).email
+}
+
+fn quota_report_plan_sort_value(report: &QuotaReport) -> String {
+    quota_report_view_data(report).plan
 }
 
 fn quota_report_status_rank(report: &QuotaReport) -> usize {

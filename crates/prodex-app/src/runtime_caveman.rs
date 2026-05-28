@@ -92,6 +92,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         }
         let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
         prepend_child_path(&mut child, caveman_home.join("bin"));
+        if self.rtk_enabled {
+            clear_rtk_auto_wrap_control_env(&mut child);
+        }
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
         }
@@ -103,6 +106,13 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         }
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home))
     }
+}
+
+fn clear_rtk_auto_wrap_control_env(child: &mut ChildProcessPlan) {
+    let mut removed = BTreeSet::<OsString>::from_iter(child.removed_env.iter().cloned());
+    removed.insert(OsString::from("PRODEX_RTK_AUTO_WRAP_DEPTH"));
+    removed.insert(OsString::from("PRODEX_RTK_DISABLE_AUTO_WRAP"));
+    child.removed_env = removed.into_iter().collect();
 }
 
 fn prepend_child_path(child: &mut ChildProcessPlan, path: PathBuf) {
@@ -357,5 +367,30 @@ mod tests {
             codex_args,
             vec![OsString::from("exec"), OsString::from("hi")]
         );
+    }
+
+    #[test]
+    fn rtk_launch_clears_auto_wrap_control_env() {
+        let mut child = ChildProcessPlan {
+            binary: OsString::from("codex"),
+            args: Vec::new(),
+            codex_home: PathBuf::from("/tmp/prodex-caveman-test"),
+            extra_env: Vec::new(),
+            removed_env: vec![OsString::from("CODEX_SANDBOX")],
+        };
+
+        clear_rtk_auto_wrap_control_env(&mut child);
+
+        assert!(
+            child
+                .removed_env
+                .contains(&OsString::from("PRODEX_RTK_AUTO_WRAP_DEPTH"))
+        );
+        assert!(
+            child
+                .removed_env
+                .contains(&OsString::from("PRODEX_RTK_DISABLE_AUTO_WRAP"))
+        );
+        assert!(child.removed_env.contains(&OsString::from("CODEX_SANDBOX")));
     }
 }

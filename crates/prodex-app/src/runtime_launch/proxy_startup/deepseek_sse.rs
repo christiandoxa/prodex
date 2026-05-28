@@ -1,6 +1,7 @@
 use super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_created_at,
-    runtime_deepseek_responses_usage, runtime_deepseek_store_conversation,
+    runtime_deepseek_responses_usage, runtime_deepseek_rtk_wrapped_tool_arguments,
+    runtime_deepseek_store_conversation,
 };
 use std::collections::BTreeMap;
 use std::io::{self, Read};
@@ -296,45 +297,46 @@ impl RuntimeDeepSeekSseState {
                 }),
             ));
         }
-        if let Some(arguments) = argument_delta {
-            let sequence_number = self.next_sequence_number();
-            events.push(self.event(
-                "response.function_call_arguments.delta",
-                serde_json::json!({
-                    "type": "response.function_call_arguments.delta",
-                    "sequence_number": sequence_number,
-                    "call_id": call_id,
-                    "delta": arguments,
-                }),
-            ));
-        }
         events
     }
 
     fn complete_tool_call_events(&mut self) -> Vec<String> {
         let mut events = Vec::new();
-        let pending =
-            self.tool_calls
-                .iter_mut()
-                .filter_map(|(index, tool_call)| {
-                    if tool_call.done {
-                        return None;
-                    }
-                    tool_call.done = true;
-                    Some((
-                        *index,
-                        tool_call.call_id.clone().unwrap_or_else(|| {
-                            format!("call_deepseek_{}_{}", self.request_id, index)
-                        }),
-                        tool_call
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| "tool_call".to_string()),
-                        tool_call.arguments.clone(),
-                    ))
-                })
-                .collect::<Vec<_>>();
-        for (_index, call_id, name, arguments) in pending {
+        let pending = self
+            .tool_calls
+            .iter_mut()
+            .filter_map(|(index, tool_call)| {
+                if tool_call.done {
+                    return None;
+                }
+                tool_call.done = true;
+                let call_id = tool_call
+                    .call_id
+                    .clone()
+                    .unwrap_or_else(|| format!("call_deepseek_{}_{}", self.request_id, index));
+                let name = tool_call
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "tool_call".to_string());
+                let arguments =
+                    runtime_deepseek_rtk_wrapped_tool_arguments(&name, &tool_call.arguments);
+                tool_call.arguments = arguments.clone();
+                Some((call_id, name, arguments))
+            })
+            .collect::<Vec<_>>();
+        for (call_id, name, arguments) in pending {
+            if !arguments.is_empty() {
+                let sequence_number = self.next_sequence_number();
+                events.push(self.event(
+                    "response.function_call_arguments.delta",
+                    serde_json::json!({
+                        "type": "response.function_call_arguments.delta",
+                        "sequence_number": sequence_number,
+                        "call_id": call_id,
+                        "delta": arguments,
+                    }),
+                ));
+            }
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
                 "response.output_item.done",
@@ -671,5 +673,37 @@ mod tests {
         assert!(item_done < completed);
         assert!(output.contains("\"type\":\"message\""));
         assert!(output.contains("\"text\":\"done\""));
+    }
+
+    #[test]
+    fn deepseek_sse_reader_wraps_noisy_shell_call_with_rtk() {
+        let conversations = conversation_store();
+        let stream = concat!(
+            "data: {\"id\":\"chatcmpl_3\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"shell\",\"arguments\":\"{\\\"cmd\\\":\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_3\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"cargo test -q login\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut reader = RuntimeDeepSeekChatSseReader::new(
+            std::io::Cursor::new(stream.as_bytes()),
+            7,
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "run focused tests"
+            })],
+            Arc::clone(&conversations),
+        );
+        let mut output = String::new();
+        reader.read_to_string(&mut output).unwrap();
+
+        assert!(output.contains(r#""delta":"{\"cmd\":\"rtk cargo test -q login\"}""#));
+        assert!(output.contains(r#""arguments":"{\"cmd\":\"rtk cargo test -q login\"}""#));
+        let stored = conversations.lock().unwrap();
+        let messages = stored
+            .get("chatcmpl_3")
+            .expect("stream should store conversation");
+        assert_eq!(
+            messages[1]["tool_calls"][0]["function"]["arguments"],
+            r#"{"cmd":"rtk cargo test -q login"}"#
+        );
     }
 }

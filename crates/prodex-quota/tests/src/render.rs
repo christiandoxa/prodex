@@ -42,6 +42,13 @@ fn openai_report(name: &str, usage: UsageResponse) -> QuotaReport {
     }
 }
 
+fn sorted_names_by(reports: &[QuotaReport], sort: QuotaReportSort) -> Vec<String> {
+    sorted_quota_report_indexes_by(reports, sort)
+        .into_iter()
+        .map(|index| reports[index].name.clone())
+        .collect()
+}
+
 #[test]
 fn labels_standard_windows() {
     assert_eq!(window_label(Some(18_000)), "5h");
@@ -127,6 +134,43 @@ fn profile_quota_render_contains_core_fields() {
     assert!(rendered.contains("Quota main"));
     assert!(rendered.contains("me@example.com"));
     assert!(rendered.contains("5h quota unavailable"));
+}
+
+#[test]
+fn quota_report_sort_modes_order_by_selected_columns() {
+    let mut beta_usage = usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800);
+    beta_usage.email = Some("alpha@example.com".to_string());
+    beta_usage.plan_type = Some("basic".to_string());
+    let mut alpha_usage = usage_with_main_windows(90, 1_700_001_800, 95, 1_700_259_200);
+    alpha_usage.email = Some("zeta@example.com".to_string());
+    alpha_usage.plan_type = Some("plus".to_string());
+    let mut reports = vec![
+        openai_report("beta", beta_usage),
+        openai_report("alpha", alpha_usage),
+    ];
+    reports[0].auth.label = "zzz".to_string();
+    reports[1].auth.label = "aaa".to_string();
+
+    assert_eq!(
+        sorted_names_by(&reports, QuotaReportSort::Remaining),
+        vec!["alpha", "beta"]
+    );
+    assert_eq!(
+        sorted_names_by(&reports, QuotaReportSort::Profile),
+        vec!["alpha", "beta"]
+    );
+    assert_eq!(
+        sorted_names_by(&reports, QuotaReportSort::Auth),
+        vec!["alpha", "beta"]
+    );
+    assert_eq!(
+        sorted_names_by(&reports, QuotaReportSort::Account),
+        vec!["beta", "alpha"]
+    );
+    assert_eq!(
+        sorted_names_by(&reports, QuotaReportSort::Plan),
+        vec!["beta", "alpha"]
+    );
 }
 
 #[test]

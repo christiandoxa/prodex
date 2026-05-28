@@ -16,7 +16,7 @@ pub(crate) enum ProviderQuotaSnapshot {
     Copilot(CopilotUserInfo),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct QuotaReport {
     pub(crate) name: String,
     pub(crate) active: bool,

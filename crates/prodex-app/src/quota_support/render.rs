@@ -4,7 +4,7 @@ use prodex_profile_export::CopilotUserInfo;
 use prodex_quota::UsageWindow;
 use prodex_quota::{BlockedLimit, UsageResponse};
 
-pub(crate) use prodex_quota::RenderedQuotaReportWindow;
+pub(crate) use prodex_quota::{QuotaReportSort, RenderedQuotaReportWindow};
 
 fn render_quota_report_inputs(reports: &[QuotaReport]) -> Vec<prodex_quota::QuotaReport> {
     reports.iter().map(render_quota_report_input).collect()
@@ -79,6 +79,7 @@ pub(crate) fn render_quota_reports_with_layout(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn render_quota_reports_window_with_layout(
     reports: &[QuotaReport],
     detail: bool,
@@ -94,6 +95,26 @@ pub(crate) fn render_quota_reports_window_with_layout(
         total_width,
         start_profile,
         interactive_scroll_hint,
+    )
+}
+
+pub(crate) fn render_quota_reports_window_with_sort(
+    reports: &[QuotaReport],
+    detail: bool,
+    max_lines: Option<usize>,
+    total_width: usize,
+    start_profile: usize,
+    interactive_scroll_hint: bool,
+    sort: QuotaReportSort,
+) -> RenderedQuotaReportWindow {
+    prodex_quota::render_quota_reports_window_with_sort(
+        &render_quota_report_inputs(reports),
+        detail,
+        max_lines,
+        total_width,
+        start_profile,
+        interactive_scroll_hint,
+        sort,
     )
 }
 

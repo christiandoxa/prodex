@@ -52,6 +52,37 @@ pub struct RenderedQuotaReportWindow {
     pub hidden_after: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaReportSort {
+    Remaining,
+    Profile,
+    Auth,
+    Account,
+    Plan,
+}
+
+impl QuotaReportSort {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Remaining => Self::Profile,
+            Self::Profile => Self::Auth,
+            Self::Auth => Self::Account,
+            Self::Account => Self::Plan,
+            Self::Plan => Self::Remaining,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Remaining => "remaining",
+            Self::Profile => "profile",
+            Self::Auth => "auth",
+            Self::Account => "account",
+            Self::Plan => "plan",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuotaAuthFilter {
     All,

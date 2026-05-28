@@ -61,6 +61,9 @@ fn custom_base_url_maps_to_codex_usage() {
 #[test]
 fn runtime_responses_refreshes_access_token_after_401_before_rotating() {
     let temp_dir = TestDir::isolated();
+    let prodex_home = temp_dir.path.join("prodex-home");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
     let backend = TokenAwareServer::start_responses("fresh-token", "main-account");
     let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
     let _refresh_guard =
@@ -220,6 +223,9 @@ fn backend_api_base_url_maps_to_wham_usage() {
 #[test]
 fn fetch_usage_json_refreshes_access_token_after_401() {
     let temp_dir = TestDir::isolated();
+    let prodex_home = temp_dir.path.join("prodex-home");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
     let usage_server =
         TokenAwareServer::start_usage("fresh-token", "main-account", "main@example.com");
     let refresh_server = AuthRefreshServer::start("fresh-token", "fresh-refresh-token");
@@ -254,6 +260,65 @@ fn fetch_usage_json_refreshes_access_token_after_401() {
     assert_eq!(auth_json["tokens"]["access_token"], "fresh-token");
     assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
     assert!(auth_json.get("last_refresh").is_some());
+}
+
+#[test]
+fn concurrent_quota_fetches_share_refresh_result_for_same_refresh_token() {
+    let temp_dir = TestDir::isolated();
+    let prodex_home = temp_dir.path.join("prodex-home");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home_guard = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
+    let usage_server =
+        TokenAwareServer::start_usage("fresh-token", "main-account", "main@example.com");
+    let refresh_server = AuthRefreshServer::start_single_use("fresh-token", "fresh-refresh-token");
+    let _refresh_guard =
+        TestEnvVarGuard::set(CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, &refresh_server.url());
+    let first_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    for codex_home in [&first_home, &second_home] {
+        write_auth_json_with_tokens(
+            &codex_home.join("auth.json"),
+            "stale-token",
+            "main-account",
+            Some("stale-refresh-token"),
+            None,
+        );
+    }
+    let usage_base_url = usage_server.base_url();
+
+    let (first_usage, second_usage) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| fetch_usage_json(&first_home, Some(&usage_base_url)));
+        let second = scope.spawn(|| fetch_usage_json(&second_home, Some(&usage_base_url)));
+        (
+            first.join().expect("first quota thread should not panic"),
+            second.join().expect("second quota thread should not panic"),
+        )
+    });
+    if first_usage.is_err() || second_usage.is_err() {
+        panic!(
+            "quota fetches should share refresh result; first={:?}; second={:?}; refresh_requests={}; usage_auth_headers={:?}",
+            first_usage.as_ref().err(),
+            second_usage.as_ref().err(),
+            refresh_server.request_bodies().len(),
+            usage_server.auth_headers(),
+        );
+    }
+    let first_usage = first_usage.expect("first quota fetch should refresh and succeed");
+    let second_usage = second_usage.expect("second quota fetch should reuse refresh result");
+
+    assert_eq!(first_usage["email"], "main@example.com");
+    assert_eq!(second_usage["email"], "main@example.com");
+    assert_eq!(refresh_server.request_bodies().len(), 1);
+
+    for codex_home in [first_home, second_home] {
+        let auth_json = fs::read_to_string(codex_home.join("auth.json"))
+            .expect("updated auth.json should be readable");
+        let auth_json: serde_json::Value =
+            serde_json::from_str(&auth_json).expect("updated auth.json should parse");
+        assert_eq!(auth_json["tokens"]["access_token"], "fresh-token");
+        assert_eq!(auth_json["tokens"]["refresh_token"], "fresh-refresh-token");
+        assert!(auth_json.get("last_refresh").is_some());
+    }
 }
 
 #[test]

@@ -257,6 +257,35 @@ fn refresh_lease_follower_reads_committed_result() {
 }
 
 #[test]
+fn refresh_lease_waiting_follower_reads_committed_result() {
+    let root = temp_dir("refresh-lease-waiting-follower");
+    let owner_coordinator = RefreshLeaseCoordinator::new(&root);
+    let follower_coordinator = RefreshLeaseCoordinator::new(&root)
+        .with_wait_timeout(Duration::from_secs(2))
+        .with_poll_interval(Duration::from_millis(1));
+    let sensitive_key = "shared-refresh-token-secret";
+    let owner = match owner_coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => owner,
+        other => panic!("expected owner, got {other:?}"),
+    };
+
+    let follower = std::thread::spawn(move || follower_coordinator.acquire(sensitive_key).unwrap());
+    std::thread::sleep(Duration::from_millis(20));
+    owner
+        .commit_result("{\"access_token\":\"shared-result\"}")
+        .unwrap();
+
+    match follower.join().unwrap() {
+        RefreshLeaseDecision::Follower { result_json } => {
+            assert_eq!(result_json, "{\"access_token\":\"shared-result\"}");
+        }
+        other => panic!("expected follower, got {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn refresh_lease_recovers_stale_lock() {
     let root = temp_dir("refresh-lease-stale");
     let coordinator = RefreshLeaseCoordinator::new(&root)

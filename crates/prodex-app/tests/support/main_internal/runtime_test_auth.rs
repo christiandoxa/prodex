@@ -263,6 +263,18 @@ pub(super) struct AuthRefreshServer {
 
 impl AuthRefreshServer {
     pub(super) fn start(access_token: &str, refresh_token: &str) -> Self {
+        Self::start_with_success_limit(access_token, refresh_token, None)
+    }
+
+    pub(super) fn start_single_use(access_token: &str, refresh_token: &str) -> Self {
+        Self::start_with_success_limit(access_token, refresh_token, Some(1))
+    }
+
+    fn start_with_success_limit(
+        access_token: &str,
+        refresh_token: &str,
+        success_limit: Option<usize>,
+    ) -> Self {
         let listener =
             TcpListener::bind("127.0.0.1:0").expect("failed to bind auth refresh server");
         let listen_addr = listener
@@ -278,6 +290,7 @@ impl AuthRefreshServer {
         let request_bodies_flag = Arc::clone(&request_bodies);
         let access_token = access_token.to_string();
         let refresh_token = refresh_token.to_string();
+        let successes_remaining = success_limit.map(AtomicUsize::new).map(Arc::new);
         let thread = thread::spawn(move || {
             while !shutdown_flag.load(Ordering::SeqCst) {
                 match listener.accept() {
@@ -293,13 +306,36 @@ impl AuthRefreshServer {
                             .lock()
                             .expect("request_bodies poisoned")
                             .push(body);
-                        let response_body = serde_json::json!({
-                            "access_token": access_token,
-                            "refresh_token": refresh_token,
-                        })
-                        .to_string();
+                        let refresh_allowed = match successes_remaining.as_ref() {
+                            Some(remaining) => remaining
+                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                                    current.checked_sub(1)
+                                })
+                                .is_ok(),
+                            None => true,
+                        };
+                        let (status_line, response_body) = if refresh_allowed {
+                            (
+                                "HTTP/1.1 200 OK",
+                                serde_json::json!({
+                                    "access_token": access_token,
+                                    "refresh_token": refresh_token,
+                                })
+                                .to_string(),
+                            )
+                        } else {
+                            (
+                                "HTTP/1.1 401 Unauthorized",
+                                serde_json::json!({
+                                    "error": {
+                                        "code": "refresh_token_reused",
+                                    }
+                                })
+                                .to_string(),
+                            )
+                        };
                         let response = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                             response_body.len(),
                             response_body
                         );

@@ -7,6 +7,7 @@ use super::{
 use anyhow::{Context, Result, bail};
 use chrono::Local;
 use codex_config::codex_non_openai_model_provider;
+use prodex_core::AppPaths;
 use prodex_quota::{AuthSummary, UsageAuth, UsageAuthSyncOutcome, UsageAuthSyncSource};
 use prodex_shared_types::StoredAuth;
 use reqwest::blocking::Client;
@@ -252,7 +253,7 @@ fn refresh_usage_auth_file(
     upstream_no_proxy: bool,
 ) -> Result<()> {
     let mut auth_json = read_auth_json_value(codex_home)?;
-    let refreshed = request_chatgpt_auth_refresh(refresh_token, upstream_no_proxy)?;
+    let refreshed = request_chatgpt_auth_refresh_with_lease(refresh_token, upstream_no_proxy)?;
     apply_chatgpt_refresh(&mut auth_json, refreshed)?;
     write_auth_json_value(codex_home, &auth_json)
 }
@@ -283,7 +284,39 @@ fn read_auth_json_value(codex_home: &Path) -> Result<serde_json::Value> {
         .with_context(|| format!("failed to parse {}", auth_location.display()))
 }
 
-fn request_chatgpt_auth_refresh(
+fn request_chatgpt_auth_refresh_with_lease(
+    refresh_token: &str,
+    upstream_no_proxy: bool,
+) -> Result<prodex_quota::ChatgptRefreshResponse> {
+    let coordinator = usage_auth_refresh_lease_coordinator()?;
+    match coordinator
+        .acquire(refresh_token.as_bytes())
+        .map_err(anyhow::Error::new)?
+    {
+        secret_store::RefreshLeaseDecision::Follower { result_json } => {
+            serde_json::from_str(&result_json).context("failed to parse shared auth refresh JSON")
+        }
+        secret_store::RefreshLeaseDecision::Owner(owner) => {
+            let refreshed = request_chatgpt_auth_refresh_direct(refresh_token, upstream_no_proxy)?;
+            let result_json = serde_json::to_string(&refreshed)
+                .context("failed to serialize shared auth refresh JSON")?;
+            let _ = owner.commit_result(&result_json);
+            Ok(refreshed)
+        }
+        secret_store::RefreshLeaseDecision::Bypass { .. } => {
+            request_chatgpt_auth_refresh_direct(refresh_token, upstream_no_proxy)
+        }
+    }
+}
+
+fn usage_auth_refresh_lease_coordinator() -> Result<secret_store::RefreshLeaseCoordinator> {
+    Ok(secret_store::RefreshLeaseCoordinator::new(
+        AppPaths::discover()?.root.join("auth-refresh-leases"),
+    )
+    .with_namespace("quota-auth-refresh"))
+}
+
+fn request_chatgpt_auth_refresh_direct(
     refresh_token: &str,
     upstream_no_proxy: bool,
 ) -> Result<prodex_quota::ChatgptRefreshResponse> {

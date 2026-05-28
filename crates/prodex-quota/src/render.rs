@@ -1,4 +1,5 @@
 use chrono::{Local, TimeZone};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use terminal_ui::{
     CLI_LABEL_WIDTH, CLI_TABLE_GAP, current_cli_width, fit_cell, format_field_lines_with_layout,
@@ -7,7 +8,7 @@ use terminal_ui::{
 
 use super::{
     BlockedLimit, CopilotQuotaInfo, MainWindowSnapshot, ProviderQuotaSnapshot, QuotaReport,
-    RenderedQuotaReportWindow, RuntimeQuotaPressureBand, RuntimeQuotaSummary,
+    QuotaReportSort, RenderedQuotaReportWindow, RuntimeQuotaPressureBand, RuntimeQuotaSummary,
     RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
 };
 
