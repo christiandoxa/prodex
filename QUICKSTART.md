@@ -2,7 +2,7 @@
 
 One Prodex profile pool for OpenAI-backed routing, plus direct pass-through when a profile selects a different upstream `model_provider`.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex quota` also supports Google Gemini OAuth profiles and imported Copilot accounts through their provider quota APIs. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
 
 For contributors: this is a Cargo workspace. `src/main.rs` is the binary entrypoint, `src/lib.rs` is a compatibility shim, application orchestration lives under `crates/prodex-app/`, and reusable leaf crates live under `crates/`.
 
@@ -91,10 +91,11 @@ Or create a profile through the normal Codex login flow:
 ```bash
 prodex login
 prodex login --device-auth
+prodex login --with-google
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
 ```
 
-Interactive `prodex login` asks for ChatGPT browser login, device-code login, or API-key login before opening any browser.
+Interactive `prodex login` asks for ChatGPT browser login, device-code login, API-key login, or Google sign-in for Gemini before opening any browser.
 
 If you want a fixed profile name first:
 
@@ -141,7 +142,7 @@ prodex profile remove --all
 
 `prodex profile export` exports all configured profiles by default and asks whether to password-protect the bundle, defaulting to protected. In non-interactive use, pass `--password-protect` with `PRODEX_PROFILE_EXPORT_PASSWORD` set, or pass `--no-password` to explicitly write an unencrypted bundle.
 
-`prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow. `prodex run`, `prodex login`, and `prodex logout` still target OpenAI/Codex profiles only, while `prodex quota` can inspect Copilot provider quota data through the Copilot CLI account API. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not quota-compatible in Prodex.
+`prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s --provider gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot and Gemini provider quota data through their provider APIs. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not quota-compatible in Prodex.
 
 ## 3. Run Codex CLI with `prodex`
 
@@ -201,6 +202,16 @@ DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
 ```
 
 `--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota/rotation, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. Remote compact is not implemented for the adapter yet.
+
+Use Gemini with Google sign-in or an API key:
+
+```bash
+prodex login --with-google
+prodex s --provider gemini
+GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
+```
+
+When no API key is supplied, the Gemini path uses the Google OAuth profile from login. With `--api-key`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`, it uses the public Gemini API. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 

@@ -25,7 +25,7 @@ pub(super) use proxy_startup::start_runtime_rotation_proxy;
 #[cfg(test)]
 pub(super) use proxy_startup::start_runtime_rotation_proxy_with_listen_addr;
 pub(super) use proxy_startup::{
-    RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeLocalRewriteProviderOptions,
+    RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeGeminiAuth, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,
 };
 pub(super) use proxy_startup::{

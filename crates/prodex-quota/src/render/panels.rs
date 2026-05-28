@@ -48,6 +48,7 @@ pub fn render_profile_quota_snapshot(
     match snapshot {
         ProviderQuotaSnapshot::OpenAi(usage) => render_profile_quota(profile_name, usage),
         ProviderQuotaSnapshot::Copilot(info) => render_profile_copilot_quota(profile_name, info),
+        ProviderQuotaSnapshot::Gemini(info) => render_profile_gemini_quota(profile_name, info),
     }
 }
 
@@ -85,6 +86,40 @@ pub fn render_profile_copilot_quota_with_width(
     fields.push(("Main".to_string(), format_copilot_main_quota(info)));
     if let Some(reset) = format_copilot_reset_summary(info) {
         fields.push(("Reset".to_string(), reset));
+    }
+    render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
+}
+
+pub fn render_profile_gemini_quota(profile_name: &str, info: &GeminiQuotaInfo) -> String {
+    render_profile_gemini_quota_with_width(profile_name, info, current_cli_width())
+}
+
+pub fn render_profile_gemini_quota_with_width(
+    profile_name: &str,
+    info: &GeminiQuotaInfo,
+    total_width: usize,
+) -> String {
+    let mut fields = vec![
+        ("Profile".to_string(), profile_name.to_string()),
+        (
+            "Account".to_string(),
+            display_optional(info.email.as_deref()).to_string(),
+        ),
+        (
+            "Project".to_string(),
+            display_optional(info.project_id.as_deref()).to_string(),
+        ),
+        ("Status".to_string(), format_gemini_quota_status(info)),
+        ("Main".to_string(), format_gemini_main_quota(info)),
+    ];
+    if let Some(reset) = format_gemini_reset_summary(info) {
+        fields.push(("Reset".to_string(), reset));
+    }
+    for (index, bucket) in info.buckets.iter().enumerate() {
+        fields.push((
+            format!("Bucket {}", index + 1),
+            format_gemini_bucket_summary(bucket),
+        ));
     }
     render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
 }

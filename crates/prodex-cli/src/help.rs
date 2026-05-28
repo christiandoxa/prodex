@@ -27,7 +27,8 @@ pub const CLI_LOGIN_AFTER_HELP: &str = "\
 Examples:
   prodex login
   prodex login --profile main
-  prodex login --device-auth";
+  prodex login --device-auth
+  prodex login --with-google";
 pub const CLI_QUOTA_AFTER_HELP: &str = "\
 Best practice:
   Use `prodex quota --all --detail` for the clearest live quota view across profiles.
@@ -41,7 +42,7 @@ Examples:
   prodex quota --raw --profile main
 
 Notes:
-  `prodex quota` supports OpenAI/Codex profiles and imported Copilot accounts.
+  `prodex quota` supports OpenAI/Codex profiles, Google Gemini OAuth profiles, and imported Copilot accounts.
   Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, quota inspection is unavailable for that profile.";
 pub const CLI_RUN_AFTER_HELP: &str = "\
@@ -103,6 +104,7 @@ Examples:
   prodex super
   prodex super --url http://127.0.0.1:8131
   prodex super --provider deepseek --model deepseek-v4-pro
+  prodex super --provider gemini
   prodex super exec \"review latest diff in super mode\"
   prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
   prodex super --profile main
@@ -116,6 +118,7 @@ Notes:
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Use `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key` or DEEPSEEK_API_KEY.
+  Use `--provider gemini` to route through Gemini. Supply `--api-key` / GEMINI_API_KEY, or sign in with Google via `prodex login`.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied optimizer prefixes.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\

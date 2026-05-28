@@ -294,52 +294,66 @@ pub const SUPER_DEEPSEEK_DEFAULT_MODEL: &str = "deepseek-v4-pro";
 const SUPER_DEEPSEEK_DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
 pub const SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
 pub const SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
+pub const SUPER_GEMINI_PROVIDER_ID: &str = "prodex-gemini";
+const SUPER_GEMINI_PROVIDER_NAME: &str = "Google Gemini";
+pub const SUPER_GEMINI_DEFAULT_MODEL: &str = "gemini-2.5-pro";
+const SUPER_GEMINI_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
+pub const SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
+pub const SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExternalProvider {
     DeepSeek,
+    Gemini,
 }
 
 impl SuperExternalProvider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::DeepSeek => "deepseek",
+            Self::Gemini => "gemini",
         }
     }
 
     pub fn model_provider_id(self) -> &'static str {
         match self {
             Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_ID,
+            Self::Gemini => SUPER_GEMINI_PROVIDER_ID,
         }
     }
 
     fn display_name(self) -> &'static str {
         match self {
             Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_NAME,
+            Self::Gemini => SUPER_GEMINI_PROVIDER_NAME,
         }
     }
 
     fn default_model(self) -> &'static str {
         match self {
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_MODEL,
+            Self::Gemini => SUPER_GEMINI_DEFAULT_MODEL,
         }
     }
 
     fn default_base_url(self) -> &'static str {
         match self {
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_BASE_URL,
+            Self::Gemini => SUPER_GEMINI_DEFAULT_BASE_URL,
         }
     }
 
     fn default_context_window(self) -> usize {
         match self {
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
+            Self::Gemini => SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW,
         }
     }
 
     fn default_auto_compact_token_limit(self) -> usize {
         match self {
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
+            Self::Gemini => SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
         }
     }
 }
@@ -349,8 +363,9 @@ fn parse_super_external_provider(
 ) -> std::result::Result<SuperExternalProvider, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "deepseek" => Ok(SuperExternalProvider::DeepSeek),
+        "gemini" => Ok(SuperExternalProvider::Gemini),
         other => Err(format!(
-            "invalid --provider: supported values are deepseek, got {other:?}"
+            "invalid --provider: supported values are deepseek, gemini, got {other:?}"
         )),
     }
 }

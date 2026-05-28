@@ -26,10 +26,35 @@ pub struct CopilotQuotaInfo {
     pub limited_user_reset_date: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GeminiQuotaInfo {
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub buckets: Vec<GeminiQuotaBucket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GeminiQuotaBucket {
+    #[serde(default, rename = "remainingAmount")]
+    pub remaining_amount: Option<String>,
+    #[serde(default, rename = "remainingFraction")]
+    pub remaining_fraction: Option<f64>,
+    #[serde(default, rename = "resetTime")]
+    pub reset_time: Option<String>,
+    #[serde(default, rename = "tokenType")]
+    pub token_type: Option<String>,
+    #[serde(default, rename = "modelId")]
+    pub model_id: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum ProviderQuotaSnapshot {
     OpenAi(UsageResponse),
     Copilot(CopilotQuotaInfo),
+    Gemini(GeminiQuotaInfo),
 }
 
 #[derive(Debug, Clone)]

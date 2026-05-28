@@ -1,6 +1,8 @@
 use super::*;
 mod preflight;
+mod providers;
 use preflight::*;
+use providers::*;
 
 struct RunCommandStrategy {
     args: RunArgs,
@@ -70,6 +72,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         let codex_args =
             profile_openai_compatible_codex_args(&prepared.codex_home, &self.codex_args);
         let codex_args = prepare_deepseek_provider_codex_args(&prepared.codex_home, &codex_args)?;
+        let codex_args = prepare_gemini_provider_codex_args(&prepared.codex_home, &codex_args)?;
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);
         if self.args.no_proxy && runtime_proxy.is_none() {
@@ -119,8 +122,15 @@ fn handle_codex_command_server_direct_passthrough(args: RunArgs) -> Result<()> {
 fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildProcessPlan> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let selection =
-        RuntimeLaunchSelection::resolve(&paths, &state, args.profile.as_deref(), None, None)?;
+    let selection = RuntimeLaunchSelection::resolve(
+        &paths,
+        &state,
+        args.profile.as_deref(),
+        None,
+        None,
+        None,
+        None,
+    )?;
 
     if !selection.profileless_local_home
         && state
@@ -157,14 +167,23 @@ impl RuntimeLaunchSelection {
         requested: Option<&str>,
         model_provider_override: Option<&str>,
         profile_v2_name: Option<&str>,
+        external_provider: Option<&str>,
+        external_provider_api_key: Option<&str>,
     ) -> Result<Self> {
         let profileless_model_provider = codex_non_openai_model_provider_with_profile_v2(
             &paths.shared_codex_root,
             model_provider_override,
             profile_v2_name,
         );
+        let gemini_external_provider =
+            external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("gemini"));
         if requested.is_none()
-            && state.profiles.is_empty()
+            && (state.profiles.is_empty()
+                || runtime_launch_should_use_profileless_gemini(
+                    state,
+                    gemini_external_provider,
+                    external_provider_api_key,
+                ))
             && profileless_model_provider
                 .as_ref()
                 .is_some_and(runtime_launch_model_provider_uses_local_rewrite)
@@ -180,8 +199,16 @@ impl RuntimeLaunchSelection {
             });
         }
 
-        let profile_name = resolve_runtime_launch_profile_name(state, requested)?;
-        let codex_home = runtime_launch_profile_home(state, &profile_name)?;
+        let profile_name = if gemini_external_provider {
+            resolve_gemini_runtime_launch_profile_name(state, requested)?
+        } else {
+            resolve_runtime_launch_profile_name(state, requested)?
+        };
+        let codex_home = runtime_launch_profile_home_for_external_provider(
+            state,
+            &profile_name,
+            external_provider,
+        )?;
         let non_openai_model_provider = codex_non_openai_model_provider_with_profile_v2(
             &codex_home,
             model_provider_override,
@@ -509,6 +536,8 @@ pub(super) fn prepare_runtime_launch_dry_run(
         request.profile,
         request.model_provider_override,
         request.profile_v2_name,
+        request.external_provider,
+        request.external_provider_api_key,
     )?;
     let managed = if selection.profileless_local_home {
         false
@@ -637,7 +666,7 @@ fn start_local_rewrite_proxy_endpoint(
         paths,
         state,
         upstream_base_url,
-        provider: runtime_local_rewrite_provider_options(request)?,
+        provider: runtime_local_rewrite_provider_options(state, selection, request)?,
         upstream_no_proxy: request.upstream_no_proxy,
         smart_context_enabled: request.smart_context_enabled,
         presidio_redaction_enabled: request.presidio_redaction_enabled,
@@ -677,62 +706,6 @@ fn local_rewrite_proxy_upstream_base_url(
             )
         })
         .filter(|base_url| !base_url.trim().is_empty())
-}
-
-fn runtime_launch_model_provider_uses_local_rewrite(provider: &CodexModelProviderSetting) -> bool {
-    provider
-        .provider_id
-        .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)
-        || provider
-            .provider_id
-            .eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID)
-}
-
-fn runtime_local_rewrite_model_provider_id<'a>(
-    selection: &'a RuntimeLaunchSelection,
-    request: &'a RuntimeLaunchRequest<'_>,
-) -> Option<&'a str> {
-    request
-        .external_provider
-        .and_then(|provider| {
-            if provider.eq_ignore_ascii_case("deepseek") {
-                Some(SUPER_DEEPSEEK_PROVIDER_ID)
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            selection
-                .non_openai_model_provider
-                .as_ref()
-                .map(|provider| provider.provider_id.as_str())
-        })
-}
-
-fn runtime_local_rewrite_provider_options(
-    request: &RuntimeLaunchRequest<'_>,
-) -> Result<RuntimeLocalRewriteProviderOptions> {
-    match request.external_provider {
-        Some(provider) if provider.eq_ignore_ascii_case("deepseek") => {
-            let api_key = request
-                .external_provider_api_key
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .or_else(|| {
-                    env::var("DEEPSEEK_API_KEY")
-                        .ok()
-                        .map(|value| value.trim().to_string())
-                        .filter(|value| !value.is_empty())
-                })
-                .context(
-                    "DeepSeek provider requires --api-key or DEEPSEEK_API_KEY in the environment",
-                )?;
-            Ok(RuntimeLocalRewriteProviderOptions::DeepSeek { api_key })
-        }
-        Some(provider) => bail!("unsupported external provider '{provider}'"),
-        None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses),
-    }
 }
 
 fn fixed_runtime_proxy_state(state: &AppState, profile_name: &str) -> Result<AppState> {

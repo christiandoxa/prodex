@@ -9,17 +9,22 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod api_key;
+mod google;
+
+use self::api_key::*;
+use self::google::*;
 use super::write_secret_text_file;
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, LogoutArgs, ProfileEntry,
     ProfileProvider, codex_child_plan, create_codex_home_if_missing, ensure_managed_profiles_root,
     exit_with_status, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
-    managed_profile_home_path, persist_login_home, prepare_managed_codex_home, print_panel,
-    read_auth_summary, remove_dir_if_exists, required_auth_json_text, resolve_profile_name,
-    run_child_plan, unique_profile_name_for_email, update_existing_profile_auth,
+    login_with_google_oauth, managed_profile_home_path, persist_login_home,
+    prepare_managed_codex_home, print_panel, read_auth_summary, read_gemini_oauth_secret,
+    remove_dir_if_exists, required_auth_json_text, resolve_profile_name, run_child_plan,
+    unique_profile_name_for_email, update_existing_profile_auth, write_gemini_oauth_secret,
     write_profile_openai_compatible_base_url,
 };
-use serde_json::json;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LoginMethod {
@@ -27,6 +32,7 @@ enum LoginMethod {
     DeviceCode,
     ApiKey,
     AccessToken,
+    Google,
     Status,
 }
 
@@ -67,7 +73,15 @@ fn login_into_profile(
             .profiles
             .get(&profile_name)
             .with_context(|| format!("profile '{}' is missing", profile_name))?;
-        if !profile.provider.supports_codex_runtime() {
+        if login_request.method == LoginMethod::Google {
+            if matches!(profile.provider, ProfileProvider::Copilot { .. }) {
+                bail!(
+                    "profile '{}' uses {}. Google sign-in supports OpenAI/Codex placeholders or Google Gemini profiles.",
+                    profile_name,
+                    profile.provider.display_name()
+                );
+            }
+        } else if !profile.provider.supports_codex_runtime() {
             bail!(
                 "profile '{}' uses {}. `prodex login --profile` currently supports OpenAI/Codex profiles only.",
                 profile_name,
@@ -86,6 +100,14 @@ fn login_into_profile(
     }
     if login_request.method == LoginMethod::Status {
         remove_dir_if_exists(&login_home)?;
+        return Ok(status);
+    }
+    if login_request.method == LoginMethod::Google {
+        let secret = read_gemini_oauth_secret(&login_home)?;
+        let codex_home = prepare_gemini_profile_login_home(paths, state, &profile_name)?;
+        write_gemini_oauth_secret(&codex_home, &secret)?;
+        remove_dir_if_exists(&login_home)?;
+        finish_named_gemini_profile_login(paths, state, &profile_name, &codex_home, &secret)?;
         return Ok(status);
     }
 
@@ -201,6 +223,11 @@ fn login_with_auto_profile(
         remove_dir_if_exists(&login_home)?;
         return Ok(status);
     }
+    if login_request.method == LoginMethod::Google {
+        let secret = read_gemini_oauth_secret(&login_home)?;
+        finish_auto_login_for_gemini_profile(paths, state, &login_home, &secret)?;
+        return Ok(status);
+    }
 
     let auth_json = required_auth_json_text(&login_home)?;
     if read_auth_summary(&login_home).label == "api-key" {
@@ -275,137 +302,6 @@ fn finish_auto_login_for_existing_profile(
     Ok(())
 }
 
-fn finish_auto_login_for_api_key_profile(
-    paths: &AppPaths,
-    state: &mut AppState,
-    login_home: &Path,
-    requested_profile_name: Option<&str>,
-    openai_base_url: Option<&str>,
-    openai_base_url_specified: bool,
-    auth_json: &str,
-) -> Result<()> {
-    let profile_name = requested_profile_name
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| default_api_key_profile_name(openai_base_url));
-
-    if state.profiles.contains_key(&profile_name) {
-        finish_api_key_login_for_existing_profile(
-            paths,
-            state,
-            login_home,
-            &profile_name,
-            openai_base_url,
-            openai_base_url_specified,
-            auth_json,
-        )?;
-        return Ok(());
-    }
-
-    finish_api_key_login_for_new_profile(
-        paths,
-        state,
-        login_home,
-        &profile_name,
-        openai_base_url,
-        openai_base_url_specified,
-    )
-}
-
-fn finish_api_key_login_for_existing_profile(
-    paths: &AppPaths,
-    state: &mut AppState,
-    login_home: &Path,
-    profile_name: &str,
-    openai_base_url: Option<&str>,
-    openai_base_url_specified: bool,
-    auth_json: &str,
-) -> Result<()> {
-    let provider = state
-        .profiles
-        .get(profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?
-        .provider
-        .clone();
-    if !provider.supports_codex_runtime() {
-        bail!(
-            "profile '{}' uses {}. API key login supports OpenAI/Codex profiles only.",
-            profile_name,
-            provider.display_name()
-        );
-    }
-
-    let updated = update_existing_profile_auth(paths, state, profile_name, None, auth_json, true)?;
-    if let Some(profile) = state.profiles.get_mut(profile_name) {
-        profile.email = None;
-    }
-    if openai_base_url_specified {
-        write_profile_openai_compatible_base_url(&updated.codex_home, openai_base_url)?;
-    }
-    remove_dir_if_exists(login_home)?;
-    state.save(paths)?;
-
-    let fields = vec![
-        (
-            "Result".to_string(),
-            format!(
-                "Logged in with API key. Updated profile '{}'.",
-                updated.profile_name
-            ),
-        ),
-        ("Account".to_string(), "api-key".to_string()),
-        ("Profile".to_string(), updated.profile_name),
-        (
-            "CODEX_HOME".to_string(),
-            updated.codex_home.display().to_string(),
-        ),
-    ];
-    print_panel("Login", &fields);
-    Ok(())
-}
-
-fn finish_api_key_login_for_new_profile(
-    paths: &AppPaths,
-    state: &mut AppState,
-    login_home: &Path,
-    requested_profile_name: &str,
-    openai_base_url: Option<&str>,
-    openai_base_url_specified: bool,
-) -> Result<()> {
-    let profile_name = unique_profile_name_for_slug(paths, state, requested_profile_name);
-    let codex_home = managed_profile_home_path(paths, &profile_name)?;
-    if openai_base_url_specified {
-        write_profile_openai_compatible_base_url(login_home, openai_base_url)?;
-    }
-    persist_login_home(login_home, &codex_home)?;
-    prepare_managed_codex_home(paths, &codex_home)?;
-
-    state.profiles.insert(
-        profile_name.clone(),
-        ProfileEntry {
-            codex_home: codex_home.clone(),
-            managed: true,
-            email: None,
-            provider: ProfileProvider::Openai,
-        },
-    );
-    state.active_profile = Some(profile_name.clone());
-    state.save(paths)?;
-
-    let fields = vec![
-        (
-            "Result".to_string(),
-            format!("Logged in with API key. Created profile '{profile_name}'."),
-        ),
-        ("Account".to_string(), "api-key".to_string()),
-        ("Profile".to_string(), profile_name),
-        ("CODEX_HOME".to_string(), codex_home.display().to_string()),
-    ];
-    print_panel("Login", &fields);
-    Ok(())
-}
-
 fn finish_auto_login_for_new_profile(
     paths: &AppPaths,
     state: &mut AppState,
@@ -443,6 +339,11 @@ fn finish_auto_login_for_new_profile(
 }
 
 fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<ExitStatus> {
+    if login_request.method == LoginMethod::Google {
+        login_with_google_oauth(codex_home)?;
+        return Ok(success_exit_status());
+    }
+
     if login_request.method == LoginMethod::ApiKey
         && let Some(api_key) = login_request.api_key.as_deref()
     {
@@ -472,16 +373,6 @@ fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<Ex
         )?;
     }
     Ok(status)
-}
-
-fn write_api_key_auth_json(codex_home: &Path, api_key: &str) -> Result<()> {
-    create_codex_home_if_missing(codex_home)?;
-    let auth_json = serde_json::to_string_pretty(&json!({
-        "auth_mode": "apikey",
-        "OPENAI_API_KEY": api_key,
-    }))
-    .context("failed to serialize API key auth JSON")?;
-    write_secret_text_file(&secret_store::auth_json_path(codex_home), &auth_json)
 }
 
 fn resolve_login_request(
@@ -567,6 +458,19 @@ fn prompt_login_request(
                 api_key_profile_name,
             })
         }
+        LoginMethod::Google => {
+            if openai_base_url_specified {
+                bail!("--base-url is only supported for API key login");
+            }
+            Ok(LoginRequest {
+                method,
+                codex_args: Vec::new(),
+                api_key: None,
+                openai_base_url: None,
+                openai_base_url_specified: false,
+                api_key_profile_name: None,
+            })
+        }
         LoginMethod::AccessToken | LoginMethod::Status => Ok(LoginRequest {
             method,
             codex_args: Vec::new(),
@@ -593,6 +497,10 @@ fn prompt_login_method() -> Result<LoginMethod> {
         stderr,
         "  3. Provide your own API key\n     Pay for what you use"
     )?;
+    writeln!(
+        stderr,
+        "  4. Sign in with Google\n     Use Gemini through Google's OAuth flow"
+    )?;
     loop {
         write!(stderr, "Select login method [1]: ")?;
         stderr.flush()?;
@@ -604,7 +512,8 @@ fn prompt_login_method() -> Result<LoginMethod> {
             "" | "1" => return Ok(LoginMethod::ChatGpt),
             "2" => return Ok(LoginMethod::DeviceCode),
             "3" => return Ok(LoginMethod::ApiKey),
-            _ => writeln!(stderr, "Enter 1, 2, or 3.")?,
+            "4" => return Ok(LoginMethod::Google),
+            _ => writeln!(stderr, "Enter 1, 2, 3, or 4.")?,
         }
     }
 }
@@ -715,6 +624,12 @@ fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
     }
     if codex_args.iter().any(|arg| arg == "--with-api-key") {
         return LoginMethod::ApiKey;
+    }
+    if codex_args
+        .iter()
+        .any(|arg| arg == "--with-google" || arg == "--google")
+    {
+        return LoginMethod::Google;
     }
     if codex_args.iter().any(|arg| arg == "--with-access-token") {
         return LoginMethod::AccessToken;

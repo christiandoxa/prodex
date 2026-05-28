@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::{
     AppPaths, AuthSummary, RecoveredLoad, acquire_state_file_lock, compact_app_state,
-    load_json_file_with_backup, merge_app_state_for_save, read_auth_summary,
-    state_last_good_file_path, write_state_json_atomic,
+    gemini_oauth_secret_path, load_json_file_with_backup, merge_app_state_for_save,
+    read_auth_summary, state_last_good_file_path, write_state_json_atomic,
 };
 
 pub(crate) use prodex_state::{
@@ -20,6 +20,10 @@ impl ProfileProviderExt for ProfileProvider {
     fn auth_summary(&self, codex_home: &Path) -> AuthSummary {
         match self {
             Self::Openai => read_auth_summary(codex_home),
+            Self::Gemini { .. } => AuthSummary {
+                label: "gemini-oauth".to_string(),
+                quota_compatible: gemini_oauth_secret_path(codex_home).exists(),
+            },
             Self::Copilot { .. } => AuthSummary {
                 label: "copilot".to_string(),
                 quota_compatible: false,

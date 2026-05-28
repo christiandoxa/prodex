@@ -78,6 +78,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
         let codex_args = profile_openai_compatible_codex_args(&caveman_home, &self.codex_args);
         let codex_args = prepare_deepseek_provider_codex_args(&caveman_home, &codex_args)?;
+        let codex_args = prepare_gemini_provider_codex_args(&caveman_home, &codex_args)?;
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         if self.rtk_enabled {
             prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;

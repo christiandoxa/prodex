@@ -33,6 +33,9 @@ fn render_quota_snapshot(snapshot: &ProviderQuotaSnapshot) -> prodex_quota::Prov
         ProviderQuotaSnapshot::Copilot(info) => {
             prodex_quota::ProviderQuotaSnapshot::Copilot(render_copilot_quota_info(info))
         }
+        ProviderQuotaSnapshot::Gemini(info) => {
+            prodex_quota::ProviderQuotaSnapshot::Gemini(info.clone())
+        }
     }
 }
 
@@ -182,6 +185,18 @@ pub(crate) fn format_copilot_main_quota(info: &CopilotUserInfo) -> String {
 
 pub(crate) fn format_copilot_reset_summary(info: &CopilotUserInfo) -> Option<String> {
     prodex_quota::format_copilot_reset_summary(&render_copilot_quota_info(info))
+}
+
+pub(crate) fn format_gemini_quota_status(info: &prodex_quota::GeminiQuotaInfo) -> String {
+    prodex_quota::format_gemini_quota_status(info)
+}
+
+pub(crate) fn format_gemini_main_quota(info: &prodex_quota::GeminiQuotaInfo) -> String {
+    prodex_quota::format_gemini_main_quota(info)
+}
+
+pub(crate) fn format_gemini_reset_summary(info: &prodex_quota::GeminiQuotaInfo) -> Option<String> {
+    prodex_quota::format_gemini_reset_summary(info)
 }
 
 pub(crate) fn render_profile_quota_snapshot(

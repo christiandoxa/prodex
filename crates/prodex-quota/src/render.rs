@@ -7,18 +7,21 @@ use terminal_ui::{
 };
 
 use super::{
-    BlockedLimit, CopilotQuotaInfo, MainWindowSnapshot, ProviderQuotaSnapshot, QuotaReport,
-    QuotaReportSort, RenderedQuotaReportWindow, RuntimeQuotaPressureBand, RuntimeQuotaSummary,
-    RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
+    BlockedLimit, CopilotQuotaInfo, GeminiQuotaBucket, GeminiQuotaInfo, MainWindowSnapshot,
+    ProviderQuotaSnapshot, QuotaReport, QuotaReportSort, RenderedQuotaReportWindow,
+    RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
+    RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
 };
 
 mod copilot;
+mod gemini;
 mod panels;
 mod pool;
 mod reports;
 mod windows;
 
 pub use copilot::*;
+pub use gemini::*;
 pub use panels::*;
 pub use pool::*;
 pub use reports::*;

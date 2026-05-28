@@ -364,9 +364,10 @@ prodex profile import-current main
 prodex login
 prodex profile add second
 prodex login --profile second
+prodex login --with-google
 ```
 
-Interactive `prodex login` now asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, or API-key login. For API-key profiles, you can also set an OpenAI-compatible backend URL:
+Interactive `prodex login` now asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, or Google sign-in for Gemini. For API-key profiles, you can also set an OpenAI-compatible backend URL:
 
 ```bash
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
@@ -628,6 +629,7 @@ RTK is still an external binary. Install it separately if `rtk gain` is unavaila
 prodex s
 prodex s exec "review this repo"
 DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
+prodex s --provider gemini
 prodex super
 prodex super --profile main
 prodex super --dry-run
@@ -661,6 +663,17 @@ prodex s --provider deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KE
 ```
 
 If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight/account rotation disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
+
+Use `--provider gemini` when you want the Codex/Super front end with Gemini upstream:
+
+```bash
+prodex login --with-google
+prodex s --provider gemini
+GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
+prodex s --provider gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
+```
+
+Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. With `--api-key`, or `GEMINI_API_KEY` / `GOOGLE_API_KEY`, Prodex routes through the public Gemini API. The default model is `gemini-2.5-pro`, matching Gemini CLI's current default, and the injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path.
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use.
 
@@ -824,7 +837,7 @@ Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shar
 <details>
 <summary>Bedrock and custom providers</summary>
 
-Auto-rotate and quota checks apply to supported OpenAI/Codex profiles.
+Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Google Gemini OAuth profiles and imported Copilot accounts through their provider quota APIs.
 
 If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy.
 

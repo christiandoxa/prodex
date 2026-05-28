@@ -60,6 +60,11 @@ pub struct ProfileEntry {
 pub enum ProfileProvider {
     #[default]
     Openai,
+    Gemini {
+        email: String,
+        #[serde(default)]
+        project_id: Option<String>,
+    },
     Copilot {
         host: String,
         login: String,
@@ -75,6 +80,7 @@ impl ProfileProvider {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Openai => "openai",
+            Self::Gemini { .. } => "gemini",
             Self::Copilot { .. } => "copilot",
         }
     }
@@ -82,6 +88,7 @@ impl ProfileProvider {
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Openai => "OpenAI/Codex",
+            Self::Gemini { .. } => "Google Gemini",
             Self::Copilot { .. } => "GitHub Copilot",
         }
     }
@@ -90,6 +97,7 @@ impl ProfileProvider {
         match self {
             // Native OpenAI/Codex pool stays primary; other providers are fallback candidates.
             Self::Openai => 0,
+            Self::Gemini { .. } => 1,
             Self::Copilot { .. } => 1,
         }
     }
@@ -105,7 +113,17 @@ impl ProfileProvider {
                 login: stored_login,
                 ..
             } => stored_host.trim() == host.trim() && stored_login.trim() == login.trim(),
-            Self::Openai => false,
+            Self::Openai | Self::Gemini { .. } => false,
+        }
+    }
+
+    pub fn gemini_matches(&self, email: &str) -> bool {
+        match self {
+            Self::Gemini {
+                email: stored_email,
+                ..
+            } => stored_email.trim().eq_ignore_ascii_case(email.trim()),
+            Self::Openai | Self::Copilot { .. } => false,
         }
     }
 }

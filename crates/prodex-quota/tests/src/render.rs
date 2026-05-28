@@ -338,6 +338,46 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
 }
 
 #[test]
+fn quota_reports_render_gemini_code_assist_buckets() {
+    let reports = vec![QuotaReport {
+        name: "gemini-main".to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: "gemini-oauth".to_string(),
+            quota_compatible: true,
+        },
+        workspace_id: None,
+        result: Ok(ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
+            email: Some("gemini-user@example.com".to_string()),
+            project_id: Some("proj-1".to_string()),
+            buckets: vec![GeminiQuotaBucket {
+                remaining_amount: Some("50".to_string()),
+                remaining_fraction: Some(0.5),
+                reset_time: Some("2026-05-09T00:00:00Z".to_string()),
+                token_type: Some("TOKENS".to_string()),
+                model_id: Some("models/gemini-2.5-pro".to_string()),
+            }],
+        })),
+        fetched_at: 1_700_000_101,
+    }];
+
+    let output = render_quota_reports_with_layout(&reports, true, None, 160);
+
+    assert!(output.contains("gemini-main"));
+    assert!(output.contains("gemini-user@example.com"));
+    assert!(output.contains("proj-1"));
+    assert!(output.contains("gemini-2.5-pro 50/100 left"));
+    assert!(output.contains("status: Ready"));
+    assert!(output.contains("resets: 2026-05-09T00:00:00Z"));
+
+    let panel = render_profile_quota_snapshot("gemini-main", reports[0].result.as_ref().unwrap());
+    assert!(panel.contains("Quota gemini-main"));
+    assert!(panel.contains("Project"));
+    assert!(panel.contains("proj-1"));
+    assert!(panel.contains("Bucket 1"));
+}
+
+#[test]
 fn quota_reports_fit_requested_width_in_narrow_layout() {
     let reports = vec![
         openai_report(

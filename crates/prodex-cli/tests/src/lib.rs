@@ -429,6 +429,44 @@ fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
 }
 
 #[test]
+fn super_gemini_provider_expands_to_local_responses_adapter_config() {
+    let args = parse_super_as_caveman(&[
+        "prodex",
+        "s",
+        "--provider",
+        "gemini",
+        "--api-key",
+        "gemini-test-key",
+        "exec",
+        "review",
+    ]);
+
+    assert_eq!(args.external_provider, Some(SuperExternalProvider::Gemini));
+    assert_eq!(
+        args.external_provider_api_key.as_deref(),
+        Some("gemini-test-key")
+    );
+    assert_eq!(
+        args.base_url.as_deref(),
+        Some("https://generativelanguage.googleapis.com/v1beta")
+    );
+    assert!(args.skip_quota_check);
+    let rendered = args
+        .codex_args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(rendered.contains(&"model_provider=\"prodex-gemini\"".to_string()));
+    assert!(rendered.contains(&"model=\"gemini-2.5-pro\"".to_string()));
+    assert!(rendered.contains(
+        &"model_providers.prodex-gemini.base_url=\"https://generativelanguage.googleapis.com/v1beta\""
+            .to_string()
+    ));
+    assert!(rendered.contains(&"model_providers.prodex-gemini.wire_api=\"responses\"".to_string()));
+    assert!(!rendered.iter().any(|arg| arg.contains("gemini-test-key")));
+}
+
+#[test]
 fn super_deepseek_provider_rejects_unknown_provider() {
     assert!(parse_cli_command_from(["prodex", "s", "--provider", "unknown", "exec"]).is_err());
 }

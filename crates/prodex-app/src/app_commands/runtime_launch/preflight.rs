@@ -12,6 +12,8 @@ pub(super) fn select_runtime_launch_profile(
         request.profile,
         request.model_provider_override,
         request.profile_v2_name,
+        request.external_provider,
+        request.external_provider_api_key,
     )?;
     if selection.non_openai_model_provider.is_some() {
         return Ok(selection);

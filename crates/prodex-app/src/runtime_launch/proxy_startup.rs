@@ -2,7 +2,10 @@ use super::*;
 
 mod deepseek_rewrite;
 mod deepseek_sse;
+mod gemini_rewrite;
+mod gemini_sse;
 mod local_rewrite;
+pub(crate) use gemini_rewrite::RuntimeGeminiAuth;
 pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,

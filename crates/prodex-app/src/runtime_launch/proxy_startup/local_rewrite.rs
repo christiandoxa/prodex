@@ -1,4 +1,6 @@
 use super::deepseek_rewrite::*;
+use super::gemini_rewrite::*;
+use super::gemini_sse::RuntimeGeminiGenerateSseReader;
 use super::*;
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
@@ -12,6 +14,8 @@ struct RuntimeLocalRewriteProxyShared {
     provider: RuntimeLocalRewriteProviderOptions,
     deepseek_conversations: RuntimeDeepSeekConversationStore,
     deepseek_pending_messages: RuntimeDeepSeekPendingMessages,
+    gemini_conversations: RuntimeDeepSeekConversationStore,
+    gemini_pending_messages: RuntimeDeepSeekPendingMessages,
     client: reqwest::blocking::Client,
 }
 
@@ -19,6 +23,7 @@ struct RuntimeLocalRewriteProxyShared {
 pub(crate) enum RuntimeLocalRewriteProviderOptions {
     OpenAiResponses,
     DeepSeek { api_key: String },
+    Gemini { auth: RuntimeGeminiAuth },
 }
 
 pub(crate) struct RuntimeLocalRewriteProxyStartOptions<'a> {
@@ -131,6 +136,8 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         provider,
         deepseek_conversations: Arc::new(Mutex::new(BTreeMap::new())),
         deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
+        gemini_conversations: Arc::new(Mutex::new(BTreeMap::new())),
+        gemini_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
         client: build_runtime_local_rewrite_http_client()?,
     };
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -279,11 +286,16 @@ fn handle_runtime_local_rewrite_proxy_request(
     if matches!(
         &shared.provider,
         RuntimeLocalRewriteProviderOptions::DeepSeek { .. }
+            | RuntimeLocalRewriteProviderOptions::Gemini { .. }
     ) && path_without_query(&captured.path_and_query).ends_with("/responses/compact")
     {
+        let provider_name = match &shared.provider {
+            RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
+            _ => "DeepSeek",
+        };
         let _ = request.respond(build_runtime_proxy_text_response(
             501,
-            "DeepSeek provider does not support Codex remote compact yet",
+            &format!("{provider_name} provider does not support Codex remote compact yet"),
         ));
         return;
     }
@@ -322,6 +334,7 @@ fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )
     .into_owned();
+    let mut gemini_request = None;
     let body = match &shared.provider {
         RuntimeLocalRewriteProviderOptions::OpenAiResponses => body,
         RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => {
@@ -331,6 +344,23 @@ fn send_runtime_local_rewrite_upstream_request(
                 if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
                     pending.insert(request_id, translated.messages);
                 }
+                translated.body
+            } else {
+                body
+            }
+        }
+        RuntimeLocalRewriteProviderOptions::Gemini { auth } => {
+            if path_without_query(&request.path_and_query).ends_with("/responses") {
+                let translated = runtime_gemini_generate_request_body(
+                    &body,
+                    &shared.gemini_conversations,
+                    matches!(auth, RuntimeGeminiAuth::OAuth { .. }),
+                    runtime_gemini_project_id(auth),
+                )?;
+                if let Ok(mut pending) = shared.gemini_pending_messages.lock() {
+                    pending.insert(request_id, translated.messages.clone());
+                }
+                gemini_request = Some((translated.model, translated.stream));
                 translated.body
             } else {
                 body
@@ -348,6 +378,13 @@ fn send_runtime_local_rewrite_upstream_request(
             &shared.mount_path,
             &request.path_and_query,
         ),
+        RuntimeLocalRewriteProviderOptions::Gemini { auth } => {
+            let (model, stream) = gemini_request
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| (prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string(), false));
+            runtime_gemini_upstream_url(&shared.upstream_base_url, auth, &model, stream)
+        }
     };
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
         format!(
@@ -369,6 +406,25 @@ fn send_runtime_local_rewrite_upstream_request(
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .bearer_auth(api_key);
+            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+            }
+        }
+        RuntimeLocalRewriteProviderOptions::Gemini { auth } => {
+            upstream_request = upstream_request
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "text/event-stream, application/json",
+                );
+            match auth {
+                RuntimeGeminiAuth::ApiKey { api_key } => {
+                    upstream_request = upstream_request.header("x-goog-api-key", api_key);
+                }
+                RuntimeGeminiAuth::OAuth { access_token, .. } => {
+                    upstream_request = upstream_request.bearer_auth(access_token);
+                }
+            }
             if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
                 upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
             }
@@ -438,6 +494,11 @@ fn respond_runtime_local_rewrite_proxy_request(
         RuntimeLocalRewriteProviderOptions::DeepSeek { .. }
     ) && path_without_query(&captured.path_and_query)
         .ends_with("/responses");
+    let gemini_responses_route = matches!(
+        &shared.provider,
+        RuntimeLocalRewriteProviderOptions::Gemini { .. }
+    ) && path_without_query(&captured.path_and_query)
+        .ends_with("/responses");
     if deepseek_responses_route && (200..300).contains(&status) {
         let conversation_messages =
             runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
@@ -471,6 +532,46 @@ fn respond_runtime_local_rewrite_proxy_request(
             request_id,
             conversation_messages,
             &shared.deepseek_conversations,
+        )
+        .map(build_runtime_proxy_response_from_parts)
+        .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
+        let _ = request.respond(response);
+        return;
+    }
+
+    if gemini_responses_route && (200..300).contains(&status) {
+        let conversation_messages =
+            runtime_deepseek_take_pending_messages(&shared.gemini_pending_messages, request_id);
+        if content_type.contains("text/event-stream") {
+            let writer = request.into_writer();
+            let streaming = RuntimeStreamingResponse {
+                status,
+                headers: vec![(
+                    "content-type".to_string(),
+                    "text/event-stream; charset=utf-8".to_string(),
+                )],
+                body: Box::new(RuntimeGeminiGenerateSseReader::new(
+                    response,
+                    request_id,
+                    conversation_messages,
+                    Arc::clone(&shared.gemini_conversations),
+                )),
+                request_id,
+                profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
+                log_path: shared.runtime_shared.log_path.clone(),
+                shared: shared.runtime_shared.clone(),
+                _inflight_guard: None,
+            };
+            let _ = write_runtime_streaming_response(writer, streaming);
+            return;
+        }
+
+        let response = runtime_gemini_generate_buffered_response_parts(
+            status,
+            response,
+            request_id,
+            conversation_messages,
+            &shared.gemini_conversations,
         )
         .map(build_runtime_proxy_response_from_parts)
         .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));

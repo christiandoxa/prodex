@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "runtime_launch/provider_rewrite.rs"]
+mod provider_rewrite;
 #[path = "runtime_launch/routes.rs"]
 mod routes;
 #[path = "runtime_launch/super_runtime.rs"]
@@ -330,51 +332,6 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
     assert!(
         !paths.state_file.exists(),
         "profileless local proxy launch should not persist synthetic profile selection"
-    );
-}
-
-#[test]
-fn prepare_runtime_launch_enables_deepseek_rewrite_proxy_for_super_provider() {
-    let root = temp_dir("profileless-deepseek-smart-context-proxy");
-    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
-    let paths = AppPaths::discover().unwrap();
-
-    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
-        profile: None,
-        allow_auto_rotate: true,
-        skip_quota_check: true,
-        base_url: Some("https://api.deepseek.com"),
-        upstream_no_proxy: false,
-        include_code_review: false,
-        smart_context_enabled: true,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: Some(1_048_576),
-        force_runtime_proxy: false,
-        model_provider_override: Some(SUPER_DEEPSEEK_PROVIDER_ID),
-        profile_v2_name: None,
-        external_provider: Some("deepseek"),
-        external_provider_api_key: Some("test-deepseek-key"),
-    })
-    .unwrap();
-
-    assert_eq!(prepared.codex_home, paths.shared_codex_root);
-    assert!(prepared.codex_home.is_dir());
-    assert!(!prepared.managed);
-    let runtime_proxy = prepared
-        .runtime_proxy
-        .as_ref()
-        .expect("DeepSeek provider should use local rewrite proxy");
-    assert_eq!(
-        runtime_proxy.local_model_provider_id.as_deref(),
-        Some(SUPER_DEEPSEEK_PROVIDER_ID)
-    );
-    assert_eq!(
-        runtime_proxy.openai_mount_path,
-        RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH
-    );
-    assert!(
-        !paths.state_file.exists(),
-        "profileless DeepSeek proxy launch should not persist synthetic profile selection"
     );
 }
 

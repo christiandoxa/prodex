@@ -8,12 +8,15 @@ pub(super) use self::auth::*;
 pub(super) use self::render::*;
 pub(super) use self::watch::*;
 pub(crate) use prodex_core::format_binary_resolution;
-pub(crate) use prodex_quota::{AuthSummary, BlockedLimit, QuotaAuthFilter, UsageAuth};
+pub(crate) use prodex_quota::{
+    AuthSummary, BlockedLimit, GeminiQuotaInfo, QuotaAuthFilter, UsageAuth,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProviderQuotaSnapshot {
     OpenAi(UsageResponse),
     Copilot(CopilotUserInfo),
+    Gemini(GeminiQuotaInfo),
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +95,7 @@ pub(crate) fn collect_quota_reports_with_auth_filter(
             ProfileProvider::Openai => read_profile_account_id_from_auth(&job.codex_home)
                 .ok()
                 .flatten(),
-            ProfileProvider::Copilot { .. } => None,
+            ProfileProvider::Gemini { .. } | ProfileProvider::Copilot { .. } => None,
         };
         let result = fetch_profile_quota(&job.provider, &job.codex_home, base_url.as_deref())
             .map_err(|err| err.to_string());
@@ -157,6 +160,9 @@ pub(crate) fn fetch_profile_quota(
         ProfileProvider::Openai => Ok(ProviderQuotaSnapshot::OpenAi(fetch_usage(
             codex_home, base_url,
         )?)),
+        ProfileProvider::Gemini { project_id, .. } => Ok(ProviderQuotaSnapshot::Gemini(
+            fetch_gemini_quota(codex_home, project_id.as_deref())?,
+        )),
         ProfileProvider::Copilot { host, login, .. } => Ok(ProviderQuotaSnapshot::Copilot(
             fetch_copilot_user_info_for_account(host, login)?,
         )),
@@ -171,6 +177,9 @@ pub(crate) fn fetch_profile_quota_json(
     ensure_profile_supports_quota(provider, codex_home)?;
     match provider {
         ProfileProvider::Openai => fetch_usage_json(codex_home, base_url),
+        ProfileProvider::Gemini { project_id, .. } => {
+            fetch_gemini_quota_json(codex_home, project_id.as_deref())
+        }
         ProfileProvider::Copilot { host, login, .. } => {
             fetch_copilot_user_info_json_for_account(host, login)
         }

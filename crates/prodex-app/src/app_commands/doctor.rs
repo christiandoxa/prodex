@@ -253,6 +253,13 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                         fields.push(("Reset".to_string(), reset));
                     }
                 }
+                Ok(ProviderQuotaSnapshot::Gemini(info)) => {
+                    fields.push(("Quota".to_string(), format_gemini_quota_status(&info)));
+                    fields.push(("Main".to_string(), format_gemini_main_quota(&info)));
+                    if let Some(reset) = format_gemini_reset_summary(&info) {
+                        fields.push(("Reset".to_string(), reset));
+                    }
+                }
                 Err(err) => {
                     fields.push((
                         "Quota".to_string(),
