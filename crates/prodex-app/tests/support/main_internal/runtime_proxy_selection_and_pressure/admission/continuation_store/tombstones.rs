@@ -68,67 +68,66 @@ fn runtime_continuation_tombstone_merge_boundaries_cover_all_binding_kinds() {
     #[derive(Clone, Copy)]
     struct TombstoneCase {
         name: &'static str,
-        existing_binding_at: Option<i64>,
-        incoming_binding_at: Option<i64>,
-        existing_dead_at: Option<i64>,
-        incoming_dead_at: Option<i64>,
+        existing_binding_offset: Option<i64>,
+        incoming_binding_offset: Option<i64>,
+        existing_dead_offset: Option<i64>,
+        incoming_dead_offset: Option<i64>,
         expect_binding: bool,
         expect_dead: bool,
     }
 
-    let now = Local::now().timestamp();
     let cases = [
         TombstoneCase {
             name: "existing_dead_prunes_older_incoming_binding",
-            existing_binding_at: None,
-            incoming_binding_at: Some(now - 1),
-            existing_dead_at: Some(now),
-            incoming_dead_at: None,
+            existing_binding_offset: None,
+            incoming_binding_offset: Some(-1),
+            existing_dead_offset: Some(0),
+            incoming_dead_offset: None,
             expect_binding: false,
             expect_dead: true,
         },
         TombstoneCase {
             name: "existing_dead_prunes_same_second_incoming_binding",
-            existing_binding_at: None,
-            incoming_binding_at: Some(now),
-            existing_dead_at: Some(now),
-            incoming_dead_at: None,
+            existing_binding_offset: None,
+            incoming_binding_offset: Some(0),
+            existing_dead_offset: Some(0),
+            incoming_dead_offset: None,
             expect_binding: false,
             expect_dead: true,
         },
         TombstoneCase {
             name: "newer_incoming_binding_shadows_existing_dead",
-            existing_binding_at: None,
-            incoming_binding_at: Some(now + 1),
-            existing_dead_at: Some(now),
-            incoming_dead_at: None,
+            existing_binding_offset: None,
+            incoming_binding_offset: Some(1),
+            existing_dead_offset: Some(0),
+            incoming_dead_offset: None,
             expect_binding: true,
             expect_dead: false,
         },
         TombstoneCase {
             name: "incoming_dead_prunes_existing_binding",
-            existing_binding_at: Some(now),
-            incoming_binding_at: None,
-            existing_dead_at: None,
-            incoming_dead_at: Some(now + 1),
+            existing_binding_offset: Some(0),
+            incoming_binding_offset: None,
+            existing_dead_offset: None,
+            incoming_dead_offset: Some(1),
             expect_binding: false,
             expect_dead: true,
         },
         TombstoneCase {
             name: "incoming_same_second_dead_prunes_existing_binding",
-            existing_binding_at: Some(now),
-            incoming_binding_at: None,
-            existing_dead_at: None,
-            incoming_dead_at: Some(now),
+            existing_binding_offset: Some(0),
+            incoming_binding_offset: None,
+            existing_dead_offset: None,
+            incoming_dead_offset: Some(0),
             expect_binding: false,
             expect_dead: true,
         },
         TombstoneCase {
             name: "newer_existing_binding_shadows_incoming_dead",
-            existing_binding_at: Some(now + 1),
-            incoming_binding_at: None,
-            existing_dead_at: None,
-            incoming_dead_at: Some(now),
+            existing_binding_offset: Some(1),
+            incoming_binding_offset: None,
+            existing_dead_offset: None,
+            incoming_dead_offset: Some(0),
             expect_binding: true,
             expect_dead: false,
         },
@@ -150,18 +149,19 @@ fn runtime_continuation_tombstone_merge_boundaries_cover_all_binding_kinds() {
             let profiles = single_profile_test_profiles(&temp_dir);
             let mut existing = RuntimeContinuationStore::default();
             let mut incoming = RuntimeContinuationStore::default();
+            let now = Local::now().timestamp();
 
-            if let Some(bound_at) = case.existing_binding_at {
-                insert_continuation_binding(&mut existing, kind, key, bound_at);
+            if let Some(offset) = case.existing_binding_offset {
+                insert_continuation_binding(&mut existing, kind, key, now + offset);
             }
-            if let Some(bound_at) = case.incoming_binding_at {
-                insert_continuation_binding(&mut incoming, kind, key, bound_at);
+            if let Some(offset) = case.incoming_binding_offset {
+                insert_continuation_binding(&mut incoming, kind, key, now + offset);
             }
-            if let Some(dead_at) = case.existing_dead_at {
-                insert_dead_continuation_status(&mut existing, kind, key, dead_at);
+            if let Some(offset) = case.existing_dead_offset {
+                insert_dead_continuation_status(&mut existing, kind, key, now + offset);
             }
-            if let Some(dead_at) = case.incoming_dead_at {
-                insert_dead_continuation_status(&mut incoming, kind, key, dead_at);
+            if let Some(offset) = case.incoming_dead_offset {
+                insert_dead_continuation_status(&mut incoming, kind, key, now + offset);
             }
 
             let merged = merge_runtime_continuation_store(&existing, &incoming, &profiles);

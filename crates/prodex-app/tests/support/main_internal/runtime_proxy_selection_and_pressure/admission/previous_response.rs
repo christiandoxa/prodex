@@ -273,18 +273,17 @@ fn previous_response_negative_cache_boundary_matrix_respects_threshold_and_expir
     struct BoundaryCase {
         name: &'static str,
         seeded_score: Option<u32>,
-        updated_at: i64,
+        expired: bool,
         expect_release: bool,
         expect_score: u32,
         expect_binding_retained: bool,
     }
 
-    let now = Local::now().timestamp();
     let cases = [
         BoundaryCase {
             name: "empty_cache_first_miss",
             seeded_score: None,
-            updated_at: now,
+            expired: false,
             expect_release: false,
             expect_score: 1,
             expect_binding_retained: true,
@@ -292,7 +291,7 @@ fn previous_response_negative_cache_boundary_matrix_respects_threshold_and_expir
         BoundaryCase {
             name: "fresh_threshold_minus_one_releases",
             seeded_score: Some(RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD - 1),
-            updated_at: now,
+            expired: false,
             expect_release: true,
             expect_score: RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD,
             expect_binding_retained: false,
@@ -300,7 +299,7 @@ fn previous_response_negative_cache_boundary_matrix_respects_threshold_and_expir
         BoundaryCase {
             name: "expired_threshold_minus_one_restarts_counter",
             seeded_score: Some(RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD - 1),
-            updated_at: now - RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS - 1,
+            expired: true,
             expect_release: false,
             expect_score: 1,
             expect_binding_retained: true,
@@ -320,21 +319,24 @@ fn previous_response_negative_cache_boundary_matrix_respects_threshold_and_expir
                 runtime_route_kind_label(route_kind),
                 case.name
             );
-            let negative_cache = case.seeded_score.map(|score| {
-                (
-                    runtime_previous_response_negative_cache_key(&response_id, "main", route_kind),
-                    RuntimeProfileHealth {
-                        score,
-                        updated_at: case.updated_at,
-                    },
-                )
-            });
             let shared = previous_response_affinity_test_shared(
                 &temp_dir,
                 &response_id,
-                now,
-                negative_cache.into_iter().collect(),
+                Local::now().timestamp(),
+                BTreeMap::new(),
             );
+            if let Some(score) = case.seeded_score {
+                let now = Local::now().timestamp();
+                let updated_at = if case.expired {
+                    now - RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_SECONDS - 1
+                } else {
+                    now
+                };
+                shared.runtime.lock().expect("runtime lock").profile_health.insert(
+                    runtime_previous_response_negative_cache_key(&response_id, "main", route_kind),
+                    RuntimeProfileHealth { score, updated_at },
+                );
+            }
 
             assert_eq!(
                 release_runtime_previous_response_affinity(
