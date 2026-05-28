@@ -59,6 +59,12 @@ export const RELEASE_HYGIENE_POLICY = Object.freeze([
     fixture: true,
   },
   {
+    label: "publish-tests",
+    command: "node",
+    args: ["--test", "scripts/npm/publish.test.mjs"],
+    fixture: true,
+  },
+  {
     label: "changelog-tests",
     command: "node",
     args: ["--test", "scripts/npm/changelog.test.mjs"],

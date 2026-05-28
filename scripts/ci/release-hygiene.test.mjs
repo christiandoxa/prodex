@@ -15,6 +15,7 @@ test("release hygiene policy keeps ordered mandatory guards and fixtures", () =>
       "release-tag-changelog-guard",
       "release-hygiene-tests",
       "release-run-tests",
+      "publish-tests",
       "changelog-tests",
       "release-guard-fixtures",
       "release-cut-fixtures",
