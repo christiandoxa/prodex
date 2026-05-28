@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.130.0 - 2026-05-28
+
+### Runtime
+
+- Align deepseek runtime and quota behavior (`01e8955`)
+
+### CLI
+
+- Use temporary home for --profile login to preserve auth.json on failure (`a22daf2`)
+
 ## 0.129.0 - 2026-05-28
 
 ### Misc
@@ -68,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Claude
 
 - Skip token-savior venvs missing mcp (`82eea00`)
-
-## 0.118.0 - 2026-05-26
-
-### Runtime
-
-- Stabilize super session restarts (`ba1599c`)
