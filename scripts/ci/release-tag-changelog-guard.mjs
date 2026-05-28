@@ -5,10 +5,12 @@ import { repoRoot } from "../npm/common.mjs";
 import {
   commitSummary,
   hasChangelogHeading,
+  normalizeVersionTag,
   rangeCommits,
   requiredValue,
   versionTagsAtRev,
 } from "./release-guard-common.mjs";
+import { git } from "./guard-common.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -83,7 +85,7 @@ function printHelp() {
       "Usage: node scripts/ci/release-tag-changelog-guard.mjs [options]",
       "",
       "Fails when a version tag points at a revision but CHANGELOG.md lacks the matching release section",
-      "or the tagged commit subject is not chore(release): release <version>.",
+      "or no matching release marker exists at the tagged commit or since the previous version tag.",
       "",
       "Options:",
       "  --rev <rev>             revision to inspect; default HEAD",
@@ -153,22 +155,88 @@ async function versionTagsAtSelectedCommits(commits) {
   return tags;
 }
 
+function acceptedReleaseMarkerSubjects(version) {
+  return [
+    `chore(release): release ${version}`,
+    `chore(release): prepare ${version}`,
+  ];
+}
+
+function isAcceptedReleaseMarkerSubject(subject, version) {
+  return acceptedReleaseMarkerSubjects(version).includes(subject);
+}
+
+async function mergedVersionTags(commit) {
+  const { stdout } = await git(["tag", "--merged", commit, "--sort=version:refname"], { cwd: repoRoot });
+  return stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((tag) => ({ tag, version: normalizeVersionTag(tag) }))
+    .filter(({ version }) => version);
+}
+
+async function previousMergedVersionTag(commit, tag) {
+  const tags = await mergedVersionTags(commit);
+  const index = tags.findIndex((entry) => entry.tag === tag);
+  if (index <= 0) {
+    return null;
+  }
+  return tags[index - 1];
+}
+
+async function releaseMarkerRange(commit, tag) {
+  const previous = await previousMergedVersionTag(commit, tag);
+  return previous ? `${previous.tag}..${commit}` : commit;
+}
+
+async function matchingReleaseMarker(commit, tag, version, taggedSubject) {
+  if (isAcceptedReleaseMarkerSubject(taggedSubject, version)) {
+    const summary = await commitSummary(commit);
+    return {
+      ...summary,
+      direct: true,
+    };
+  }
+
+  const range = await releaseMarkerRange(commit, tag);
+  const commits = await rangeCommits(range);
+  for (const rev of commits) {
+    const summary = await commitSummary(rev);
+    if (isAcceptedReleaseMarkerSubject(summary.subject, version)) {
+      return {
+        ...summary,
+        direct: false,
+      };
+    }
+  }
+  return null;
+}
+
 async function check(args) {
   const selector = selectorFromArgs(args);
   const commits = await selectedCommits(selector);
   const tags = await versionTagsAtSelectedCommits(commits);
   const changelogPath = path.resolve(repoRoot, args.changelog);
   const changelog = tags.length > 0 ? await fs.readFile(changelogPath, "utf8") : "";
-  const checked = tags.map(({ commit, tag, version, subject, shortHash }) => ({
-    commit,
-    shortHash,
-    tag,
-    version,
-    expectedSubject: `chore(release): release ${version}`,
-    subject,
-    subjectOk: subject === `chore(release): release ${version}`,
-    found: hasChangelogHeading(changelog, version),
-  }));
+  const checked = [];
+  for (const { commit, tag, version, subject, shortHash } of tags) {
+    const marker = await matchingReleaseMarker(commit, tag, version, subject);
+    checked.push({
+      commit,
+      shortHash,
+      tag,
+      version,
+      expectedSubject: `${acceptedReleaseMarkerSubjects(version).join(" or ")} at the tag or since the previous version tag`,
+      subject,
+      subjectOk: Boolean(marker),
+      releaseMarker: marker ? {
+        shortHash: marker.shortHash,
+        subject: marker.subject,
+        direct: marker.direct,
+      } : null,
+      found: hasChangelogHeading(changelog, version),
+    });
+  }
   const missing = checked.filter(({ found }) => !found);
   const invalidSubjects = checked.filter(({ subjectOk }) => !subjectOk);
 

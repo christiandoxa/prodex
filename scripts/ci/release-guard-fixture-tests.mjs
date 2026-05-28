@@ -255,6 +255,12 @@ async function buildFixtures(fixtureRoot) {
   const badSubjectTaggedRelease = await commit(fixtureRoot, "feat: tag release 0.4.1 incorrectly");
   await git(fixtureRoot, ["tag", "0.4.1", badSubjectTaggedRelease]);
 
+  await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.4.2 - 2026-01-03\n\n- Retried release marker.\n");
+  const retriedReleasePrepare = await commit(fixtureRoot, "chore(release): prepare 0.4.2");
+  await appendFile(fixtureRoot, "scripts/npm/publish.mjs", "export const retrySafe = true;\n");
+  const retriedReleaseHotfix = await commit(fixtureRoot, "fix(npm): skip already published packages");
+  await git(fixtureRoot, ["tag", "0.4.2", retriedReleaseHotfix]);
+
   const normalBase = (await git(fixtureRoot, ["rev-parse", "HEAD"])).trim();
   await appendFile(fixtureRoot, "CHANGELOG.md", "\n## 0.5.0 - Unreleased\n\n- Prepare marker.\n");
   const normalPrepare = await commit(fixtureRoot, "chore(release): prepare 0.5.0");
@@ -371,6 +377,13 @@ async function buildFixtures(fixtureRoot) {
       script: "release-tag-changelog-guard.mjs",
       args: ["--rev", "0.4.1"],
       expectedExit: 1,
+    },
+    {
+      name: "tagged retried release accepts matching marker before hotfix",
+      script: "release-tag-changelog-guard.mjs",
+      args: ["--rev", "0.4.2"],
+      expectedExit: 0,
+      dependsOn: [retriedReleasePrepare],
     },
     {
       name: "current tagged range has matching changelog state",
