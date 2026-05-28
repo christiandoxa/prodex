@@ -661,7 +661,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
 
         assert_eq!(translated.model, "gemini-2.5-pro");
-        assert_eq!(translated.stream, true);
+        assert!(translated.stream);
         assert_eq!(value["contents"][0]["parts"][0]["text"], "List files");
         assert_eq!(
             value["tools"][0]["functionDeclarations"][0]["name"],
