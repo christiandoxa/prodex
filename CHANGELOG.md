@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.129.0 - 2026-05-28
+
+### Misc
+
+- Repair tool replay and share super history (`7bea070`)
+
 ## 0.128.0 - 2026-05-28
 
 ### Misc
 
+- Skip already published packages (`acfe62a`)
 - Tolerate missing thinking replay (`7828df3`)
 
 ## 0.127.0 - 2026-05-27
@@ -67,9 +74,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Stabilize super session restarts (`ba1599c`)
-
-## 0.117.0 - 2026-05-25
-
-### Runtime
-
-- Harden runtime panic recovery (`bc7d909`)
