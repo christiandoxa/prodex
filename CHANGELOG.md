@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.128.0 - 2026-05-28
+
+### Misc
+
+- Tolerate missing thinking replay (`7828df3`)
+
 ## 0.127.0 - 2026-05-27
 
 ### Misc
@@ -67,9 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden runtime panic recovery (`bc7d909`)
-
-## 0.116.0 - 2026-05-25
-
-### Runtime
-
-- Recover smart context after runtime panic (`f8cb338`)
