@@ -1,3 +1,4 @@
+use self::thinking::runtime_deepseek_normalize_thinking_tool_call_messages;
 pub(super) use super::deepseek_sse::RuntimeDeepSeekChatSseReader;
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
@@ -6,6 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+mod thinking;
 
 pub(super) type RuntimeDeepSeekConversationStore =
     Arc<Mutex<BTreeMap<String, Vec<serde_json::Value>>>>;
@@ -40,18 +43,21 @@ pub(super) fn runtime_deepseek_chat_request_body(
                 .unwrap_or(false),
         ),
     );
-    let messages = runtime_deepseek_messages_from_responses_request(&value, conversations)
+    let thinking_enabled = runtime_deepseek_thinking_enabled(&value);
+    let mut messages = runtime_deepseek_messages_from_responses_request(&value, conversations)
         .unwrap_or_else(|| {
             vec![serde_json::json!({
                 "role": "user",
                 "content": "",
             })]
         });
+    if thinking_enabled {
+        runtime_deepseek_normalize_thinking_tool_call_messages(&mut messages);
+    }
     request.insert(
         "messages".to_string(),
         serde_json::Value::Array(messages.clone()),
     );
-    let thinking_enabled = runtime_deepseek_thinking_enabled(&value);
     runtime_deepseek_apply_reasoning_from_responses_request(&value, &mut request);
     if let Some(tools) = runtime_deepseek_tools_from_responses_request(&value) {
         request.insert("tools".to_string(), serde_json::Value::Array(tools));

@@ -316,6 +316,56 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_thinking_tool_turn_adds_empty_reasoning_content_when_missing() {
+        let conversations = conversation_store();
+        runtime_deepseek_store_conversation(
+            &conversations,
+            "chatcmpl_1",
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "read commit history",
+            })],
+            vec![serde_json::json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "shell",
+                        "arguments": "{\"cmd\":\"git log --oneline -3\"}"
+                    }
+                }]
+            })],
+        );
+
+        let next_request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "stream": true,
+            "previous_response_id": "chatcmpl_1",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "f05b28c chore(release): prepare 0.127.0"
+            }],
+            "reasoning": {"effort": "xhigh"}
+        });
+        let translated = runtime_deepseek_chat_request_body(
+            &serde_json::to_vec(&next_request).unwrap(),
+            &conversations,
+        )
+        .expect("request should translate");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        let messages = body["messages"].as_array().unwrap();
+
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"], "");
+        assert_eq!(messages[1]["reasoning_content"], "");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(messages[2]["role"], "tool");
+    }
+
+    #[test]
     fn deepseek_followup_skips_replayed_tool_output_after_final_answer() {
         let conversations = conversation_store();
         runtime_deepseek_store_conversation(
