@@ -72,6 +72,13 @@ fn runtime_proxy_websocket_previous_response_not_found_after_prelude_surfaces_st
 
 #[test]
 fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let _stream_idle_timeout_guard = ci_runtime_proxy_timeout_guard(
+        "PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS",
+        2_000,
+        5_000,
+    );
+
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_previous_response_not_found_after_commit();
     let second_home = temp_dir.path.join("homes/second");
