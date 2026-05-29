@@ -380,9 +380,12 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
                         self.request.external_provider,
                         self.request.external_provider_api_key,
                     ) {
-                    "Gemini OAuth account rotation is enabled; quota preflight stays disabled."
+                    runtime_gemini_oauth_rotation_summary(
+                        &self.state,
+                        &self.selection.selected_profile_name,
+                    )
                 } else {
-                    "Quota preflight and account rotation stay disabled."
+                    "Quota preflight and account rotation stay disabled.".to_string()
                 };
                 print_wrapped_stderr(&format!(
                     "Using provider '{provider}' through the Smart Context rewrite proxy. {rotation}",

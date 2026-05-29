@@ -163,6 +163,28 @@ pub(super) fn runtime_provider_mode_uses_single_api_key(
     })
 }
 
+pub(super) fn runtime_gemini_oauth_rotation_summary(
+    state: &AppState,
+    selected_profile_name: &str,
+) -> String {
+    let profile_count = active_profile_selection_order(state, selected_profile_name)
+        .into_iter()
+        .filter(|profile_name| {
+            state
+                .profiles
+                .get(profile_name)
+                .is_some_and(|profile| matches!(profile.provider, ProfileProvider::Gemini { .. }))
+        })
+        .count();
+    if profile_count > 1 {
+        format!(
+            "Gemini OAuth account rotation is enabled across {profile_count} profiles; quota preflight stays disabled."
+        )
+    } else {
+        "Using the single available Gemini OAuth profile; account rotation is skipped and quota preflight stays disabled.".to_string()
+    }
+}
+
 fn runtime_gemini_oauth_profiles_for_provider(
     state: &AppState,
     selection: &RuntimeLaunchSelection,

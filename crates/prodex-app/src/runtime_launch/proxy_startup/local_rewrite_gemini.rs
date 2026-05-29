@@ -18,8 +18,12 @@ use runtime_proxy_crate::{
 };
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 const RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT: usize = 4096;
+const RUNTIME_GEMINI_RETRY_AFTER_CAP_MS: u64 = 5_000;
+const RUNTIME_GEMINI_RATE_LIMIT_RETRY_DELAYS_MS: &[u64] = &[1_000, 2_000, 4_000];
 
 #[derive(Clone)]
 pub(super) struct RuntimeGeminiOAuthPool {
@@ -76,7 +80,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
     let attempts = runtime_gemini_auth_attempts(auth, shared.gemini_oauth_pool.as_ref(), &body)?;
-    for (attempt_index, selected) in attempts.iter().enumerate() {
+    'auth_attempts: for (attempt_index, selected) in attempts.iter().enumerate() {
         let translated = if responses_route {
             runtime_gemini_generate_request_body(
                 &body,
@@ -98,57 +102,105 @@ pub(super) fn send_runtime_gemini_upstream_request(
             &translated.model,
             translated.stream,
         );
-        let response = send_runtime_local_rewrite_prepared_request(
-            request_id,
-            request,
-            shared,
-            &upstream_url,
-            translated.body,
-            RuntimeLocalRewritePreparedAuth::Gemini {
-                auth: &selected.auth,
-            },
-        )?;
-        let status = response.status().as_u16();
-        if runtime_gemini_should_rotate_after_quota_response(
-            status,
-            selected.hard_affinity,
-            attempt_index,
-            attempts.len(),
-        ) {
-            let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
-            if runtime_gemini_buffered_parts_are_quota_blocked(status, &parts) {
+        let mut rate_limit_retry_index = 0;
+        loop {
+            let response = send_runtime_local_rewrite_prepared_request(
+                request_id,
+                request,
+                shared,
+                &upstream_url,
+                translated.body.clone(),
+                RuntimeLocalRewritePreparedAuth::Gemini {
+                    auth: &selected.auth,
+                },
+            )?;
+            let status = response.status().as_u16();
+            if runtime_gemini_should_rotate_after_quota_response(
+                status,
+                selected.hard_affinity,
+                attempt_index,
+                attempts.len(),
+            ) {
+                if status == 429 {
+                    runtime_proxy_log(
+                        &shared.runtime_shared,
+                        runtime_proxy_structured_log_message(
+                            "local_rewrite_gemini_quota_rotate",
+                            [
+                                runtime_proxy_log_field("request", request_id.to_string()),
+                                runtime_proxy_log_field("profile", selected.profile_name.as_str()),
+                                runtime_proxy_log_field("status", status.to_string()),
+                                runtime_proxy_log_field("reason", "rate_limit"),
+                            ],
+                        ),
+                    );
+                    continue 'auth_attempts;
+                }
+
+                let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
+                if runtime_gemini_buffered_parts_are_quota_blocked(status, &parts) {
+                    runtime_proxy_log(
+                        &shared.runtime_shared,
+                        runtime_proxy_structured_log_message(
+                            "local_rewrite_gemini_quota_rotate",
+                            [
+                                runtime_proxy_log_field("request", request_id.to_string()),
+                                runtime_proxy_log_field("profile", selected.profile_name.as_str()),
+                                runtime_proxy_log_field("status", status.to_string()),
+                                runtime_proxy_log_field("reason", "quota_body"),
+                            ],
+                        ),
+                    );
+                    continue 'auth_attempts;
+                }
+                return Ok(RuntimeLocalRewriteUpstreamResult {
+                    response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                    gemini_context: None,
+                });
+            }
+
+            if status == 429
+                && let Some(delay_ms) = runtime_gemini_retry_delay_ms(
+                    response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok()),
+                    rate_limit_retry_index,
+                )
+            {
                 runtime_proxy_log(
                     &shared.runtime_shared,
                     runtime_proxy_structured_log_message(
-                        "local_rewrite_gemini_quota_rotate",
+                        "local_rewrite_gemini_rate_limit_retry",
                         [
                             runtime_proxy_log_field("request", request_id.to_string()),
                             runtime_proxy_log_field("profile", selected.profile_name.as_str()),
                             runtime_proxy_log_field("status", status.to_string()),
+                            runtime_proxy_log_field("retry", rate_limit_retry_index.to_string()),
+                            runtime_proxy_log_field("delay_ms", delay_ms.to_string()),
                         ],
                     ),
                 );
+                rate_limit_retry_index += 1;
+                drop(response);
+                thread::sleep(Duration::from_millis(delay_ms));
                 continue;
             }
+
+            let binding_recorder = shared
+                .gemini_oauth_pool
+                .as_ref()
+                .map(|pool| runtime_gemini_binding_recorder(pool, selected.profile_name.clone()));
+            let gemini_context = responses_route.then(|| RuntimeGeminiRequestContext {
+                profile_name: selected.profile_name.clone(),
+                conversation_messages: translated.messages,
+                binding_recorder,
+            });
             return Ok(RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                gemini_context: None,
+                response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                gemini_context,
             });
         }
-
-        let binding_recorder = shared
-            .gemini_oauth_pool
-            .as_ref()
-            .map(|pool| runtime_gemini_binding_recorder(pool, selected.profile_name.clone()));
-        let gemini_context = responses_route.then(|| RuntimeGeminiRequestContext {
-            profile_name: selected.profile_name.clone(),
-            conversation_messages: translated.messages,
-            binding_recorder,
-        });
-        return Ok(RuntimeLocalRewriteUpstreamResult {
-            response: RuntimeLocalRewriteUpstreamResponse::Live(response),
-            gemini_context,
-        });
     }
 
     bail!("no Gemini auth attempts were available")
@@ -335,6 +387,19 @@ fn runtime_gemini_buffered_parts_are_quota_blocked(
     runtime_gemini_response_retryable_quota(status)
         && (extract_runtime_proxy_quota_message(&parts.body).is_some()
             || runtime_gemini_google_quota_message(&parts.body).is_some())
+}
+
+fn runtime_gemini_retry_delay_ms(retry_after: Option<&str>, retry_index: usize) -> Option<u64> {
+    let default_ms = *RUNTIME_GEMINI_RATE_LIMIT_RETRY_DELAYS_MS.get(retry_index)?;
+    let retry_after_ms = retry_after
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|seconds| seconds.saturating_mul(1_000))
+        .filter(|delay_ms| *delay_ms > 0);
+    Some(
+        retry_after_ms
+            .unwrap_or(default_ms)
+            .min(RUNTIME_GEMINI_RETRY_AFTER_CAP_MS),
+    )
 }
 
 fn runtime_gemini_google_quota_message(body: &[u8]) -> Option<String> {
@@ -560,6 +625,9 @@ mod tests {
             429, false, 0, 2
         ));
         assert!(!runtime_gemini_should_rotate_after_quota_response(
+            429, false, 0, 1
+        ));
+        assert!(!runtime_gemini_should_rotate_after_quota_response(
             429, true, 0, 2
         ));
         assert!(!runtime_gemini_should_rotate_after_quota_response(
@@ -568,5 +636,15 @@ mod tests {
         assert!(!runtime_gemini_should_rotate_after_quota_response(
             500, false, 0, 2
         ));
+    }
+
+    #[test]
+    fn gemini_rate_limit_retry_delay_uses_defaults_and_retry_after_cap() {
+        assert_eq!(runtime_gemini_retry_delay_ms(None, 0), Some(1_000));
+        assert_eq!(runtime_gemini_retry_delay_ms(None, 1), Some(2_000));
+        assert_eq!(runtime_gemini_retry_delay_ms(Some("3"), 0), Some(3_000));
+        assert_eq!(runtime_gemini_retry_delay_ms(Some("99"), 0), Some(5_000));
+        assert_eq!(runtime_gemini_retry_delay_ms(Some("bad"), 2), Some(4_000));
+        assert_eq!(runtime_gemini_retry_delay_ms(None, 3), None);
     }
 }

@@ -46,6 +46,10 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         response,
         gemini_context,
     } = response;
+    let provider_profile_name = gemini_context
+        .as_ref()
+        .map(|context| context.profile_name.clone())
+        .unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
     let response = match response {
         RuntimeLocalRewriteUpstreamResponse::Live(response) => response,
         RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
@@ -114,7 +118,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             headers: text_headers,
             body: Box::new(response),
             request_id,
-            profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
+            profile_name: provider_profile_name,
             log_path: shared.runtime_shared.log_path.clone(),
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
