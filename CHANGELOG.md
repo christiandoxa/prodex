@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.132.0 - 2026-05-29
+
+### Runtime
+
+- Support Codex rust v0.135.0 (`4d7ab9b`)
+
 ## 0.131.0 - 2026-05-28
 
 ### Misc
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Fail fast on stalled compact requests (`f420c85`)
-
-## 0.120.0 - 2026-05-26
-
-### Misc
-
-- Add API key login (`63c3945`)
