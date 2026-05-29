@@ -12,8 +12,13 @@ use super::local_rewrite::{
 use super::local_rewrite_gemini::{
     RuntimeGeminiRequestContext, runtime_gemini_remember_bindings_from_responses_body,
 };
-use super::*;
+use crate::{
+    RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeStreamingResponse,
+    build_runtime_proxy_response_from_parts, build_runtime_proxy_text_response,
+    write_runtime_streaming_response,
+};
 use anyhow::{Context, Result};
+use runtime_proxy_crate::path_without_query;
 use std::io::Read;
 use std::sync::Arc;
 

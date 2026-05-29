@@ -10,8 +10,12 @@ use super::local_rewrite::{
     RuntimeLocalRewriteUpstreamResult, send_runtime_local_rewrite_prepared_request,
 };
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
-use super::*;
+use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result, bail};
+use runtime_proxy_crate::{
+    extract_runtime_proxy_quota_message, path_without_query, runtime_proxy_log_field,
+    runtime_proxy_structured_log_message,
+};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
