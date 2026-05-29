@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.133.0 - 2026-05-29
+
+### Runtime
+
+- Add Gemini provider rotation (`89d3cff`)
+
 ## 0.132.0 - 2026-05-29
 
 ### Runtime
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Add DeepSeek provider adapter (`9760a43`)
-
-## 0.121.0 - 2026-05-26
-
-### Runtime
-
-- Fail fast on stalled compact requests (`f420c85`)
