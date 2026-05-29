@@ -5,6 +5,8 @@ mod deepseek_sse;
 mod gemini_rewrite;
 mod gemini_sse;
 mod local_rewrite;
+mod local_rewrite_gemini;
+mod local_rewrite_response;
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeLocalRewriteProviderOptions,
