@@ -21,6 +21,32 @@ pub(crate) enum RuntimeGeminiAuth {
     },
 }
 
+#[derive(Clone)]
+pub(crate) enum RuntimeGeminiProviderAuth {
+    ApiKey {
+        api_key: String,
+    },
+    OAuthProfiles {
+        profiles: Vec<RuntimeGeminiOAuthProfileAuth>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RuntimeGeminiOAuthProfileAuth {
+    pub(crate) profile_name: String,
+    pub(crate) access_token: String,
+    pub(crate) project_id: Option<String>,
+}
+
+impl RuntimeGeminiOAuthProfileAuth {
+    pub(crate) fn auth(&self) -> RuntimeGeminiAuth {
+        RuntimeGeminiAuth::OAuth {
+            access_token: self.access_token.clone(),
+            project_id: self.project_id.clone(),
+        }
+    }
+}
+
 pub(super) struct RuntimeGeminiTranslatedRequest {
     pub(super) body: Vec<u8>,
     pub(super) messages: Vec<serde_json::Value>,
@@ -382,11 +408,10 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
                                     serde_json::from_str::<serde_json::Value>(args).ok()
                                 })
                                 .unwrap_or_else(|| serde_json::json!({}));
+                            let function_call =
+                                runtime_gemini_function_call_part(call_id, name, args);
                             parts.push(serde_json::json!({
-                                "functionCall": {
-                                    "name": name,
-                                    "args": args,
-                                }
+                                "functionCall": function_call,
                             }));
                         }
                     }
@@ -416,13 +441,12 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
                             "output": chat_message_text(message).unwrap_or_default()
                         })
                     });
+                let function_response =
+                    runtime_gemini_function_response_part(call_id, &name, response);
                 contents.push(serde_json::json!({
-                    "role": "function",
+                    "role": "user",
                     "parts": [{
-                        "functionResponse": {
-                            "name": name,
-                            "response": response,
-                        }
+                        "functionResponse": function_response,
                     }],
                 }));
             }
@@ -441,6 +465,36 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
         }));
     }
     contents
+}
+
+fn runtime_gemini_function_call_part(
+    call_id: &str,
+    name: &str,
+    args: serde_json::Value,
+) -> serde_json::Value {
+    let mut call = serde_json::json!({
+        "name": name,
+        "args": args,
+    });
+    if !call_id.trim().is_empty() {
+        call["id"] = serde_json::Value::String(call_id.to_string());
+    }
+    call
+}
+
+fn runtime_gemini_function_response_part(
+    call_id: &str,
+    name: &str,
+    response: serde_json::Value,
+) -> serde_json::Value {
+    let mut function_response = serde_json::json!({
+        "name": name,
+        "response": response,
+    });
+    if !call_id.trim().is_empty() {
+        function_response["id"] = serde_json::Value::String(call_id.to_string());
+    }
+    function_response
 }
 
 fn runtime_gemini_system_instruction(chat: &serde_json::Value) -> Option<serde_json::Value> {
@@ -671,6 +725,50 @@ mod tests {
         assert_eq!(
             value["generationConfig"]["thinkingConfig"]["thinkingBudget"],
             8192
+        );
+    }
+
+    #[test]
+    fn gemini_request_translation_maps_tool_outputs_as_user_function_responses() {
+        let body = serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_shell_1",
+                    "name": "shell",
+                    "arguments": "{\"cmd\":\"git log -n 5\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_shell_1",
+                    "output": "commit abc123"
+                }
+            ]
+        });
+
+        let translated = runtime_gemini_generate_request_body(
+            &serde_json::to_vec(&body).unwrap(),
+            &conversation_store(),
+            false,
+            None,
+        )
+        .expect("request should translate");
+        let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+        assert_eq!(value["contents"][0]["role"], "model");
+        assert_eq!(
+            value["contents"][0]["parts"][0]["functionCall"]["id"],
+            "call_shell_1"
+        );
+        assert_eq!(value["contents"][1]["role"], "user");
+        assert_eq!(
+            value["contents"][1]["parts"][0]["functionResponse"]["id"],
+            "call_shell_1"
+        );
+        assert_eq!(
+            value["contents"][1]["parts"][0]["functionResponse"]["response"]["output"],
+            "commit abc123"
         );
     }
 }

@@ -1,10 +1,11 @@
 use super::deepseek_rewrite::*;
 use super::gemini_rewrite::*;
-use super::gemini_sse::RuntimeGeminiGenerateSseReader;
+use super::gemini_sse::{RuntimeGeminiBindingRecorder, RuntimeGeminiGenerateSseReader};
 use super::*;
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
 const RUNTIME_LOCAL_REWRITE_PROFILE: &str = "local";
+const RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT: usize = 4096;
 
 #[derive(Clone)]
 struct RuntimeLocalRewriteProxyShared {
@@ -15,7 +16,7 @@ struct RuntimeLocalRewriteProxyShared {
     deepseek_conversations: RuntimeDeepSeekConversationStore,
     deepseek_pending_messages: RuntimeDeepSeekPendingMessages,
     gemini_conversations: RuntimeDeepSeekConversationStore,
-    gemini_pending_messages: RuntimeDeepSeekPendingMessages,
+    gemini_oauth_pool: Option<RuntimeGeminiOAuthPool>,
     client: reqwest::blocking::Client,
 }
 
@@ -23,7 +24,34 @@ struct RuntimeLocalRewriteProxyShared {
 pub(crate) enum RuntimeLocalRewriteProviderOptions {
     OpenAiResponses,
     DeepSeek { api_key: String },
-    Gemini { auth: RuntimeGeminiAuth },
+    Gemini { auth: RuntimeGeminiProviderAuth },
+}
+
+#[derive(Clone)]
+struct RuntimeGeminiOAuthPool {
+    state: Arc<Mutex<RuntimeGeminiOAuthPoolState>>,
+}
+
+#[derive(Debug)]
+struct RuntimeGeminiOAuthPoolState {
+    profiles: Vec<RuntimeGeminiOAuthProfileAuth>,
+    next_index: usize,
+    response_profile_bindings: BTreeMap<String, String>,
+    tool_call_profile_bindings: BTreeMap<String, String>,
+}
+
+#[derive(Clone)]
+struct RuntimeGeminiSelectedAuth {
+    profile_name: String,
+    auth: RuntimeGeminiAuth,
+    hard_affinity: bool,
+}
+
+#[derive(Clone)]
+struct RuntimeGeminiRequestContext {
+    profile_name: String,
+    conversation_messages: Vec<serde_json::Value>,
+    binding_recorder: Option<RuntimeGeminiBindingRecorder>,
 }
 
 pub(crate) struct RuntimeLocalRewriteProxyStartOptions<'a> {
@@ -129,6 +157,7 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
             runtime_upstream_proxy_mode_label(true)
         ),
     );
+    let gemini_oauth_pool = runtime_gemini_oauth_pool_from_provider(&provider);
     let shared = RuntimeLocalRewriteProxyShared {
         runtime_shared: runtime_shared.clone(),
         upstream_base_url,
@@ -137,7 +166,7 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         deepseek_conversations: Arc::new(Mutex::new(BTreeMap::new())),
         deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
         gemini_conversations: Arc::new(Mutex::new(BTreeMap::new())),
-        gemini_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
+        gemini_oauth_pool,
         client: build_runtime_local_rewrite_http_client()?,
     };
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -184,6 +213,25 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         log_path,
         active_request_count: Arc::clone(&runtime_shared.active_request_count),
         owner_lock: None,
+    })
+}
+
+fn runtime_gemini_oauth_pool_from_provider(
+    provider: &RuntimeLocalRewriteProviderOptions,
+) -> Option<RuntimeGeminiOAuthPool> {
+    let RuntimeLocalRewriteProviderOptions::Gemini {
+        auth: RuntimeGeminiProviderAuth::OAuthProfiles { profiles },
+    } = provider
+    else {
+        return None;
+    };
+    Some(RuntimeGeminiOAuthPool {
+        state: Arc::new(Mutex::new(RuntimeGeminiOAuthPoolState {
+            profiles: profiles.clone(),
+            next_index: 0,
+            response_profile_bindings: BTreeMap::new(),
+            tool_call_profile_bindings: BTreeMap::new(),
+        })),
     })
 }
 
@@ -321,11 +369,21 @@ fn handle_runtime_local_rewrite_proxy_request(
     respond_runtime_local_rewrite_proxy_request(request_id, request, response, &captured, shared);
 }
 
+struct RuntimeLocalRewriteUpstreamResult {
+    response: RuntimeLocalRewriteUpstreamResponse,
+    gemini_context: Option<RuntimeGeminiRequestContext>,
+}
+
+enum RuntimeLocalRewriteUpstreamResponse {
+    Live(reqwest::blocking::Response),
+    Buffered(RuntimeHeapTrimmedBufferedResponseParts),
+}
+
 fn send_runtime_local_rewrite_upstream_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
-) -> Result<reqwest::blocking::Response> {
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let route_kind = runtime_local_rewrite_route_kind(&request.path_and_query);
     let body = prepare_runtime_smart_context_http_body(
         request_id,
@@ -334,11 +392,28 @@ fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )
     .into_owned();
-    let mut gemini_request = None;
-    let body = match &shared.provider {
-        RuntimeLocalRewriteProviderOptions::OpenAiResponses => body,
-        RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => {
-            if path_without_query(&request.path_and_query).ends_with("/responses") {
+    match &shared.provider {
+        RuntimeLocalRewriteProviderOptions::OpenAiResponses => {
+            let upstream_url = runtime_local_rewrite_upstream_url(
+                &shared.upstream_base_url,
+                &shared.mount_path,
+                &request.path_and_query,
+            );
+            let response = send_runtime_local_rewrite_prepared_request(
+                request_id,
+                request,
+                shared,
+                &upstream_url,
+                body,
+                RuntimeLocalRewritePreparedAuth::OpenAiResponses,
+            )?;
+            Ok(RuntimeLocalRewriteUpstreamResult {
+                response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                gemini_context: None,
+            })
+        }
+        RuntimeLocalRewriteProviderOptions::DeepSeek { api_key } => {
+            let body = if path_without_query(&request.path_and_query).ends_with("/responses") {
                 let translated =
                     runtime_deepseek_chat_request_body(&body, &shared.deepseek_conversations)?;
                 if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
@@ -347,54 +422,54 @@ fn send_runtime_local_rewrite_upstream_request(
                 translated.body
             } else {
                 body
-            }
+            };
+            let upstream_url = runtime_deepseek_upstream_url(
+                &shared.upstream_base_url,
+                &shared.mount_path,
+                &request.path_and_query,
+            );
+            let response = send_runtime_local_rewrite_prepared_request(
+                request_id,
+                request,
+                shared,
+                &upstream_url,
+                body,
+                RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
+            )?;
+            Ok(RuntimeLocalRewriteUpstreamResult {
+                response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                gemini_context: None,
+            })
         }
         RuntimeLocalRewriteProviderOptions::Gemini { auth } => {
-            if path_without_query(&request.path_and_query).ends_with("/responses") {
-                let translated = runtime_gemini_generate_request_body(
-                    &body,
-                    &shared.gemini_conversations,
-                    matches!(auth, RuntimeGeminiAuth::OAuth { .. }),
-                    runtime_gemini_project_id(auth),
-                )?;
-                if let Ok(mut pending) = shared.gemini_pending_messages.lock() {
-                    pending.insert(request_id, translated.messages.clone());
-                }
-                gemini_request = Some((translated.model, translated.stream));
-                translated.body
-            } else {
-                body
-            }
+            send_runtime_gemini_upstream_request(request_id, request, shared, body, auth)
         }
-    };
-    let upstream_url = match &shared.provider {
-        RuntimeLocalRewriteProviderOptions::OpenAiResponses => runtime_local_rewrite_upstream_url(
-            &shared.upstream_base_url,
-            &shared.mount_path,
-            &request.path_and_query,
-        ),
-        RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => runtime_deepseek_upstream_url(
-            &shared.upstream_base_url,
-            &shared.mount_path,
-            &request.path_and_query,
-        ),
-        RuntimeLocalRewriteProviderOptions::Gemini { auth } => {
-            let (model, stream) = gemini_request
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| (prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string(), false));
-            runtime_gemini_upstream_url(&shared.upstream_base_url, auth, &model, stream)
-        }
-    };
+    }
+}
+
+enum RuntimeLocalRewritePreparedAuth<'a> {
+    OpenAiResponses,
+    DeepSeek { api_key: &'a str },
+    Gemini { auth: &'a RuntimeGeminiAuth },
+}
+
+fn send_runtime_local_rewrite_prepared_request(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    upstream_url: &str,
+    body: Vec<u8>,
+    auth: RuntimeLocalRewritePreparedAuth<'_>,
+) -> Result<reqwest::blocking::Response> {
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
         format!(
             "failed to proxy unsupported HTTP method '{}' for runtime local rewrite",
             request.method
         )
     })?;
-    let mut upstream_request = shared.client.request(method, &upstream_url);
-    match &shared.provider {
-        RuntimeLocalRewriteProviderOptions::OpenAiResponses => {
+    let mut upstream_request = shared.client.request(method, upstream_url);
+    match auth {
+        RuntimeLocalRewritePreparedAuth::OpenAiResponses => {
             for (name, value) in &request.headers {
                 if should_skip_runtime_local_rewrite_request_header(name) {
                     continue;
@@ -402,7 +477,7 @@ fn send_runtime_local_rewrite_upstream_request(
                 upstream_request = upstream_request.header(name.as_str(), value.as_str());
             }
         }
-        RuntimeLocalRewriteProviderOptions::DeepSeek { api_key } => {
+        RuntimeLocalRewritePreparedAuth::DeepSeek { api_key } => {
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .bearer_auth(api_key);
@@ -410,7 +485,7 @@ fn send_runtime_local_rewrite_upstream_request(
                 upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
             }
         }
-        RuntimeLocalRewriteProviderOptions::Gemini { auth } => {
+        RuntimeLocalRewritePreparedAuth::Gemini { auth } => {
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .header(
@@ -438,7 +513,7 @@ fn send_runtime_local_rewrite_upstream_request(
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("method", request.method.as_str()),
-                runtime_proxy_log_field("url", upstream_url.as_str()),
+                runtime_proxy_log_field("url", upstream_url),
                 runtime_proxy_log_field("body_bytes", body.len().to_string()),
             ],
         ),
@@ -463,13 +538,401 @@ fn send_runtime_local_rewrite_upstream_request(
     Ok(response)
 }
 
+fn send_runtime_gemini_upstream_request(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    body: Vec<u8>,
+    auth: &RuntimeGeminiProviderAuth,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
+    let attempts = runtime_gemini_auth_attempts(auth, shared.gemini_oauth_pool.as_ref(), &body)?;
+    for (attempt_index, selected) in attempts.iter().enumerate() {
+        let translated = if responses_route {
+            runtime_gemini_generate_request_body(
+                &body,
+                &shared.gemini_conversations,
+                matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }),
+                runtime_gemini_project_id(&selected.auth),
+            )?
+        } else {
+            RuntimeGeminiTranslatedRequest {
+                body: body.clone(),
+                messages: Vec::new(),
+                model: prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string(),
+                stream: false,
+            }
+        };
+        let upstream_url = runtime_gemini_upstream_url(
+            &shared.upstream_base_url,
+            &selected.auth,
+            &translated.model,
+            translated.stream,
+        );
+        let response = send_runtime_local_rewrite_prepared_request(
+            request_id,
+            request,
+            shared,
+            &upstream_url,
+            translated.body,
+            RuntimeLocalRewritePreparedAuth::Gemini {
+                auth: &selected.auth,
+            },
+        )?;
+        let status = response.status().as_u16();
+        if runtime_gemini_should_rotate_after_quota_response(
+            status,
+            selected.hard_affinity,
+            attempt_index,
+            attempts.len(),
+        ) {
+            let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
+            if runtime_gemini_buffered_parts_are_quota_blocked(status, &parts) {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_gemini_quota_rotate",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("profile", selected.profile_name.as_str()),
+                            runtime_proxy_log_field("status", status.to_string()),
+                        ],
+                    ),
+                );
+                continue;
+            }
+            return Ok(RuntimeLocalRewriteUpstreamResult {
+                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                gemini_context: None,
+            });
+        }
+
+        let binding_recorder = shared
+            .gemini_oauth_pool
+            .as_ref()
+            .map(|pool| runtime_gemini_binding_recorder(pool, selected.profile_name.clone()));
+        let gemini_context = responses_route.then(|| RuntimeGeminiRequestContext {
+            profile_name: selected.profile_name.clone(),
+            conversation_messages: translated.messages,
+            binding_recorder,
+        });
+        return Ok(RuntimeLocalRewriteUpstreamResult {
+            response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+            gemini_context,
+        });
+    }
+
+    bail!("no Gemini auth attempts were available")
+}
+
+fn runtime_gemini_auth_attempts(
+    auth: &RuntimeGeminiProviderAuth,
+    pool: Option<&RuntimeGeminiOAuthPool>,
+    body: &[u8],
+) -> Result<Vec<RuntimeGeminiSelectedAuth>> {
+    match auth {
+        RuntimeGeminiProviderAuth::ApiKey { api_key } => Ok(vec![RuntimeGeminiSelectedAuth {
+            profile_name: "api-key".to_string(),
+            auth: RuntimeGeminiAuth::ApiKey {
+                api_key: api_key.clone(),
+            },
+            hard_affinity: true,
+        }]),
+        RuntimeGeminiProviderAuth::OAuthProfiles { profiles } => {
+            let pool = pool.context("Gemini OAuth pool was not initialized")?;
+            pool.select_attempts(body, profiles)
+        }
+    }
+}
+
+impl RuntimeGeminiOAuthPool {
+    fn select_attempts(
+        &self,
+        body: &[u8],
+        fallback_profiles: &[RuntimeGeminiOAuthProfileAuth],
+    ) -> Result<Vec<RuntimeGeminiSelectedAuth>> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Gemini OAuth pool lock poisoned"))?;
+        if let Some(profile_name) = state.affinity_profile_for_body(body)
+            && let Some(profile) = state.profile_by_name(&profile_name)
+        {
+            return Ok(vec![RuntimeGeminiSelectedAuth {
+                profile_name,
+                auth: profile.auth(),
+                hard_affinity: true,
+            }]);
+        }
+        let profiles = if state.profiles.is_empty() {
+            fallback_profiles.to_vec()
+        } else {
+            state.profiles.clone()
+        };
+        if profiles.is_empty() {
+            bail!("Gemini OAuth pool is empty");
+        }
+        let start = state.next_index.min(profiles.len().saturating_sub(1));
+        state.next_index = (start + 1) % profiles.len();
+        Ok((0..profiles.len())
+            .map(|offset| {
+                let profile = profiles[(start + offset) % profiles.len()].clone();
+                RuntimeGeminiSelectedAuth {
+                    profile_name: profile.profile_name.clone(),
+                    auth: profile.auth(),
+                    hard_affinity: false,
+                }
+            })
+            .collect())
+    }
+}
+
+impl RuntimeGeminiOAuthPoolState {
+    fn profile_by_name(&self, profile_name: &str) -> Option<RuntimeGeminiOAuthProfileAuth> {
+        self.profiles
+            .iter()
+            .find(|profile| profile.profile_name == profile_name)
+            .cloned()
+    }
+
+    fn affinity_profile_for_body(&self, body: &[u8]) -> Option<String> {
+        let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
+        if let Some(previous_response_id) = value
+            .get("previous_response_id")
+            .and_then(serde_json::Value::as_str)
+            && let Some(profile_name) = self.response_profile_bindings.get(previous_response_id)
+        {
+            return Some(profile_name.clone());
+        }
+        runtime_gemini_tool_output_call_ids_from_request(&value)
+            .into_iter()
+            .find_map(|call_id| self.tool_call_profile_bindings.get(&call_id).cloned())
+    }
+
+    fn remember_bindings(
+        &mut self,
+        profile_name: &str,
+        response_id: &str,
+        tool_call_ids: &[String],
+    ) {
+        if !response_id.trim().is_empty() {
+            self.response_profile_bindings
+                .insert(response_id.to_string(), profile_name.to_string());
+        }
+        for call_id in tool_call_ids {
+            if !call_id.trim().is_empty() {
+                self.tool_call_profile_bindings
+                    .insert(call_id.clone(), profile_name.to_string());
+            }
+        }
+        runtime_gemini_prune_binding_map(
+            &mut self.response_profile_bindings,
+            RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT,
+        );
+        runtime_gemini_prune_binding_map(
+            &mut self.tool_call_profile_bindings,
+            RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT,
+        );
+    }
+}
+
+fn runtime_gemini_binding_recorder(
+    pool: &RuntimeGeminiOAuthPool,
+    profile_name: String,
+) -> RuntimeGeminiBindingRecorder {
+    let pool = pool.clone();
+    Arc::new(move |response_id, tool_call_ids| {
+        if let Ok(mut state) = pool.state.lock() {
+            state.remember_bindings(&profile_name, &response_id, &tool_call_ids);
+        }
+    })
+}
+
+fn runtime_gemini_prune_binding_map(map: &mut BTreeMap<String, String>, limit: usize) {
+    while map.len() > limit {
+        let Some(key) = map.keys().next().cloned() else {
+            break;
+        };
+        map.remove(&key);
+    }
+}
+
+fn runtime_gemini_tool_output_call_ids_from_request(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .filter(|object| {
+            matches!(
+                object.get("type").and_then(serde_json::Value::as_str),
+                Some("function_call_output" | "mcp_call_output" | "mcp_tool_result")
+            )
+        })
+        .filter_map(|object| {
+            ["call_id", "tool_call_id", "id"]
+                .into_iter()
+                .find_map(|key| {
+                    object
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+        })
+        .filter(|call_id| !call_id.trim().is_empty())
+        .collect()
+}
+
+fn runtime_gemini_response_retryable_quota(status: u16) -> bool {
+    matches!(status, 403 | 429)
+}
+
+fn runtime_gemini_should_rotate_after_quota_response(
+    status: u16,
+    hard_affinity: bool,
+    attempt_index: usize,
+    attempt_count: usize,
+) -> bool {
+    runtime_gemini_response_retryable_quota(status)
+        && !hard_affinity
+        && attempt_index + 1 < attempt_count
+}
+
+fn runtime_gemini_buffered_parts_are_quota_blocked(
+    status: u16,
+    parts: &RuntimeHeapTrimmedBufferedResponseParts,
+) -> bool {
+    runtime_gemini_response_retryable_quota(status)
+        && (extract_runtime_proxy_quota_message(&parts.body).is_some()
+            || runtime_gemini_google_quota_message(&parts.body).is_some())
+}
+
+fn runtime_gemini_google_quota_message(body: &[u8]) -> Option<String> {
+    let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
+    runtime_gemini_google_quota_message_from_value(&value)
+}
+
+fn runtime_gemini_google_quota_message_from_value(value: &serde_json::Value) -> Option<String> {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            serde_json::Value::Object(object) => {
+                let message = object
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| object.get("detail").and_then(serde_json::Value::as_str))
+                    .or_else(|| object.get("error").and_then(serde_json::Value::as_str));
+                let explicit_quota = ["status", "code", "reason"].into_iter().any(|key| {
+                    object
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(runtime_gemini_google_quota_code)
+                });
+                if explicit_quota {
+                    return Some(
+                        message
+                            .unwrap_or("Gemini account quota was exhausted.")
+                            .to_string(),
+                    );
+                }
+                stack.extend(object.values());
+            }
+            serde_json::Value::Array(values) => {
+                stack.extend(values);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn runtime_gemini_google_quota_code(code: &str) -> bool {
+    matches!(
+        code.trim().to_ascii_lowercase().as_str(),
+        "resource_exhausted"
+            | "quota_exceeded"
+            | "rate_limit_exceeded"
+            | "rate_limit_exceeded_error"
+    )
+}
+
+fn runtime_gemini_remember_bindings_from_responses_body(
+    recorder: Option<&RuntimeGeminiBindingRecorder>,
+    body: &[u8],
+) {
+    let Some(recorder) = recorder else {
+        return;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return;
+    };
+    let response_id = value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let tool_call_ids = runtime_gemini_tool_call_ids_from_responses_value(&value);
+    if !response_id.trim().is_empty() || !tool_call_ids.is_empty() {
+        recorder(response_id, tool_call_ids);
+    }
+}
+
+fn runtime_gemini_tool_call_ids_from_responses_value(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("output")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .filter(|object| {
+            object
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind == "function_call")
+        })
+        .filter_map(|object| {
+            object
+                .get("call_id")
+                .or_else(|| object.get("id"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .filter(|call_id| !call_id.trim().is_empty())
+        .collect()
+}
+
+fn runtime_local_rewrite_buffered_response_from_response(
+    response: reqwest::blocking::Response,
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
+    let status = response.status().as_u16();
+    let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
+        response
+            .headers()
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_bytes())),
+    );
+    runtime_local_rewrite_buffered_response_parts(status, headers, response)
+}
+
 fn respond_runtime_local_rewrite_proxy_request(
     request_id: u64,
     request: tiny_http::Request,
-    response: reqwest::blocking::Response,
+    response: RuntimeLocalRewriteUpstreamResult,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
+    let RuntimeLocalRewriteUpstreamResult {
+        response,
+        gemini_context,
+    } = response;
+    let response = match response {
+        RuntimeLocalRewriteUpstreamResponse::Live(response) => response,
+        RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
+            let _ = request.respond(build_runtime_proxy_response_from_parts(parts));
+            return;
+        }
+    };
     let status = response.status().as_u16();
     let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
         response
@@ -540,8 +1003,15 @@ fn respond_runtime_local_rewrite_proxy_request(
     }
 
     if gemini_responses_route && (200..300).contains(&status) {
-        let conversation_messages =
-            runtime_deepseek_take_pending_messages(&shared.gemini_pending_messages, request_id);
+        let RuntimeGeminiRequestContext {
+            profile_name,
+            conversation_messages,
+            binding_recorder,
+        } = gemini_context.unwrap_or_else(|| RuntimeGeminiRequestContext {
+            profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
+            conversation_messages: Vec::new(),
+            binding_recorder: None,
+        });
         if content_type.contains("text/event-stream") {
             let writer = request.into_writer();
             let streaming = RuntimeStreamingResponse {
@@ -555,9 +1025,10 @@ fn respond_runtime_local_rewrite_proxy_request(
                     request_id,
                     conversation_messages,
                     Arc::clone(&shared.gemini_conversations),
+                    binding_recorder,
                 )),
                 request_id,
-                profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
+                profile_name,
                 log_path: shared.runtime_shared.log_path.clone(),
                 shared: shared.runtime_shared.clone(),
                 _inflight_guard: None,
@@ -573,7 +1044,13 @@ fn respond_runtime_local_rewrite_proxy_request(
             conversation_messages,
             &shared.gemini_conversations,
         )
-        .map(build_runtime_proxy_response_from_parts)
+        .map(|parts| {
+            runtime_gemini_remember_bindings_from_responses_body(
+                binding_recorder.as_ref(),
+                &parts.body,
+            );
+            build_runtime_proxy_response_from_parts(parts)
+        })
         .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
         let _ = request.respond(response);
         return;
@@ -700,6 +1177,141 @@ mod tests {
 
     fn deepseek_conversation_store() -> RuntimeDeepSeekConversationStore {
         Arc::new(Mutex::new(BTreeMap::new()))
+    }
+
+    fn gemini_profile(profile_name: &str) -> RuntimeGeminiOAuthProfileAuth {
+        RuntimeGeminiOAuthProfileAuth {
+            profile_name: profile_name.to_string(),
+            access_token: format!("token-{profile_name}"),
+            project_id: Some(format!("project-{profile_name}")),
+        }
+    }
+
+    fn gemini_pool(profile_names: &[&str]) -> RuntimeGeminiOAuthPool {
+        RuntimeGeminiOAuthPool {
+            state: Arc::new(Mutex::new(RuntimeGeminiOAuthPoolState {
+                profiles: profile_names
+                    .iter()
+                    .map(|profile_name| gemini_profile(profile_name))
+                    .collect(),
+                next_index: 0,
+                response_profile_bindings: BTreeMap::new(),
+                tool_call_profile_bindings: BTreeMap::new(),
+            })),
+        }
+    }
+
+    #[test]
+    fn gemini_oauth_pool_rotates_fresh_requests() {
+        let pool = gemini_pool(&["alpha", "beta"]);
+        let body = serde_json::to_vec(&serde_json::json!({"input": "hi"})).unwrap();
+
+        let first = pool.select_attempts(&body, &[]).unwrap();
+        let second = pool.select_attempts(&body, &[]).unwrap();
+
+        assert_eq!(first[0].profile_name, "alpha");
+        assert_eq!(first[1].profile_name, "beta");
+        assert!(!first[0].hard_affinity);
+        assert_eq!(second[0].profile_name, "beta");
+        assert_eq!(second[1].profile_name, "alpha");
+    }
+
+    #[test]
+    fn gemini_oauth_pool_preserves_previous_response_affinity() {
+        let pool = gemini_pool(&["alpha", "beta"]);
+        pool.state
+            .lock()
+            .unwrap()
+            .remember_bindings("beta", "resp_1", &[]);
+        let body =
+            serde_json::to_vec(&serde_json::json!({"previous_response_id": "resp_1"})).unwrap();
+
+        let attempts = pool.select_attempts(&body, &[]).unwrap();
+
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].profile_name, "beta");
+        assert!(attempts[0].hard_affinity);
+    }
+
+    #[test]
+    fn gemini_oauth_pool_preserves_tool_output_affinity() {
+        let pool = gemini_pool(&["alpha", "beta"]);
+        pool.state
+            .lock()
+            .unwrap()
+            .remember_bindings("beta", "resp_1", &["call_1".to_string()]);
+        let body = serde_json::to_vec(&serde_json::json!({
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "done"
+            }]
+        }))
+        .unwrap();
+
+        let attempts = pool.select_attempts(&body, &[]).unwrap();
+
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].profile_name, "beta");
+        assert!(attempts[0].hard_affinity);
+    }
+
+    #[test]
+    fn gemini_binding_recorder_reads_responses_body() {
+        let captured = Arc::new(Mutex::new(None::<(String, Vec<String>)>));
+        let captured_for_recorder = Arc::clone(&captured);
+        let recorder: RuntimeGeminiBindingRecorder = Arc::new(move |response_id, call_ids| {
+            *captured_for_recorder.lock().unwrap() = Some((response_id, call_ids));
+        });
+        let body = serde_json::to_vec(&serde_json::json!({
+            "id": "resp_1",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "shell",
+                "arguments": "{}"
+            }]
+        }))
+        .unwrap();
+
+        runtime_gemini_remember_bindings_from_responses_body(Some(&recorder), &body);
+
+        let (response_id, call_ids) = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(response_id, "resp_1");
+        assert_eq!(call_ids, vec!["call_1"]);
+    }
+
+    #[test]
+    fn gemini_google_resource_exhausted_is_quota_blocked() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "error": {
+                "code": 429,
+                "message": "Quota exceeded for quota metric.",
+                "status": "RESOURCE_EXHAUSTED"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            runtime_gemini_google_quota_message(&body).as_deref(),
+            Some("Quota exceeded for quota metric.")
+        );
+    }
+
+    #[test]
+    fn gemini_quota_rotation_predicate_respects_affinity_and_attempt_budget() {
+        assert!(runtime_gemini_should_rotate_after_quota_response(
+            429, false, 0, 2
+        ));
+        assert!(!runtime_gemini_should_rotate_after_quota_response(
+            429, true, 0, 2
+        ));
+        assert!(!runtime_gemini_should_rotate_after_quota_response(
+            429, false, 1, 2
+        ));
+        assert!(!runtime_gemini_should_rotate_after_quota_response(
+            500, false, 0, 2
+        ));
     }
 
     #[test]

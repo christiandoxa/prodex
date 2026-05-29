@@ -374,8 +374,18 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         if local_rewrite_proxy_upstream_base_url(&self.selection, &self.request).is_some() {
             print_wrapped_stderr(&section_header("Runtime Provider"));
             if let Some(provider) = self.request.external_provider {
+                let rotation = if provider.eq_ignore_ascii_case("gemini")
+                    && self.request.allow_auto_rotate
+                    && !runtime_provider_mode_uses_single_api_key(
+                        self.request.external_provider,
+                        self.request.external_provider_api_key,
+                    ) {
+                    "Gemini OAuth account rotation is enabled; quota preflight stays disabled."
+                } else {
+                    "Quota preflight and account rotation stay disabled."
+                };
                 print_wrapped_stderr(&format!(
-                    "Using provider '{provider}' through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.",
+                    "Using provider '{provider}' through the Smart Context rewrite proxy. {rotation}",
                 ));
             } else {
                 print_wrapped_stderr(

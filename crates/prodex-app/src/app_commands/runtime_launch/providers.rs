@@ -1,12 +1,12 @@
 use super::{
-    RuntimeLaunchRequest, RuntimeLaunchSelection, resolve_runtime_launch_profile_name,
-    runtime_launch_profile_home,
+    RuntimeLaunchRequest, RuntimeLaunchSelection, active_profile_selection_order,
+    resolve_runtime_launch_profile_name, runtime_launch_profile_home,
 };
 use crate::{
-    AppState, CodexModelProviderSetting, ProfileProvider, RuntimeGeminiAuth,
-    RuntimeLocalRewriteProviderOptions, SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID,
-    SUPER_LOCAL_PROVIDER_ID, gemini_oauth_project_from_env, refresh_gemini_oauth_secret_if_needed,
-    resolve_profile_name,
+    AppState, CodexModelProviderSetting, ProfileProvider, RuntimeGeminiOAuthProfileAuth,
+    RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions, SUPER_DEEPSEEK_PROVIDER_ID,
+    SUPER_GEMINI_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID, gemini_oauth_project_from_env,
+    refresh_gemini_oauth_secret_if_needed, resolve_profile_name,
 };
 use anyhow::{Context, Result, bail};
 use std::env;
@@ -134,7 +134,7 @@ pub(super) fn runtime_local_rewrite_provider_options(
                 runtime_gemini_api_key_from_request_or_env(request.external_provider_api_key)
             {
                 return Ok(RuntimeLocalRewriteProviderOptions::Gemini {
-                    auth: RuntimeGeminiAuth::ApiKey { api_key },
+                    auth: RuntimeGeminiProviderAuth::ApiKey { api_key },
                 });
             }
             if selection.profileless_local_home {
@@ -142,33 +142,86 @@ pub(super) fn runtime_local_rewrite_provider_options(
                     "Gemini provider requires Google sign-in from `prodex login`, or --api-key / GEMINI_API_KEY"
                 );
             }
-            let profile = state
-                .profiles
-                .get(&selection.selected_profile_name)
-                .with_context(|| {
-                    format!("profile '{}' is missing", selection.selected_profile_name)
-                })?;
-            let ProfileProvider::Gemini { project_id, .. } = &profile.provider else {
-                bail!(
-                    "profile '{}' uses {}. Run `prodex login` and choose Sign in with Google, or pass --api-key / GEMINI_API_KEY.",
-                    selection.selected_profile_name,
-                    profile.provider.display_name()
-                );
-            };
-            let secret = refresh_gemini_oauth_secret_if_needed(&selection.codex_home)?;
+            let profiles = runtime_gemini_oauth_profiles_for_provider(state, selection, request)?;
             Ok(RuntimeLocalRewriteProviderOptions::Gemini {
-                auth: RuntimeGeminiAuth::OAuth {
-                    access_token: secret.access_token,
-                    project_id: secret
-                        .project_id
-                        .or_else(gemini_oauth_project_from_env)
-                        .or_else(|| project_id.clone()),
-                },
+                auth: RuntimeGeminiProviderAuth::OAuthProfiles { profiles },
             })
         }
         Some(provider) => bail!("unsupported external provider '{provider}'"),
         None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses),
     }
+}
+
+pub(super) fn runtime_provider_mode_uses_single_api_key(
+    external_provider: Option<&str>,
+    external_provider_api_key: Option<&str>,
+) -> bool {
+    external_provider.is_some_and(|provider| {
+        provider.eq_ignore_ascii_case("deepseek")
+            || (provider.eq_ignore_ascii_case("gemini")
+                && runtime_gemini_api_key_from_request_or_env(external_provider_api_key).is_some())
+    })
+}
+
+fn runtime_gemini_oauth_profiles_for_provider(
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<Vec<RuntimeGeminiOAuthProfileAuth>> {
+    let selected_profile_name = selection.selected_profile_name.as_str();
+    let selected_profile = state
+        .profiles
+        .get(selected_profile_name)
+        .with_context(|| format!("profile '{}' is missing", selected_profile_name))?;
+    if !matches!(selected_profile.provider, ProfileProvider::Gemini { .. }) {
+        bail!(
+            "profile '{}' uses {}. Run `prodex login` and choose Sign in with Google, or pass --api-key / GEMINI_API_KEY.",
+            selected_profile_name,
+            selected_profile.provider.display_name()
+        );
+    }
+
+    let profile_names = if request.allow_auto_rotate {
+        active_profile_selection_order(state, selected_profile_name)
+    } else {
+        vec![selected_profile_name.to_string()]
+    };
+    let mut profiles = Vec::new();
+    let mut errors = Vec::new();
+    for profile_name in profile_names {
+        let Some(profile) = state.profiles.get(&profile_name) else {
+            continue;
+        };
+        let ProfileProvider::Gemini { project_id, .. } = &profile.provider else {
+            continue;
+        };
+        match refresh_gemini_oauth_secret_if_needed(&profile.codex_home) {
+            Ok(secret) => {
+                profiles.push(RuntimeGeminiOAuthProfileAuth {
+                    profile_name: profile_name.clone(),
+                    access_token: secret.access_token,
+                    project_id: secret
+                        .project_id
+                        .or_else(gemini_oauth_project_from_env)
+                        .or_else(|| project_id.clone()),
+                });
+            }
+            Err(err) => {
+                errors.push(format!("{profile_name}: {err:#}"));
+            }
+        }
+    }
+
+    if profiles.is_empty() {
+        let suffix = if errors.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", errors.join("; "))
+        };
+        bail!("no usable Gemini OAuth profiles found{suffix}");
+    }
+
+    Ok(profiles)
 }
 
 fn runtime_deepseek_api_key_from_request_or_env(value: Option<&str>) -> Option<String> {

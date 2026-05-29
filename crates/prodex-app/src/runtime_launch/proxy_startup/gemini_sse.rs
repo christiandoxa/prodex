@@ -8,6 +8,9 @@ use super::gemini_rewrite::{
 use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 use std::io::{self, Read};
+use std::sync::Arc;
+
+pub(super) type RuntimeGeminiBindingRecorder = Arc<dyn Fn(String, Vec<String>) + Send + Sync>;
 
 pub(super) struct RuntimeGeminiGenerateSseReader<R: Read> {
     reader: std::io::BufReader<R>,
@@ -22,12 +25,18 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
         request_id: u64,
         conversation_messages: Vec<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
+        binding_recorder: Option<RuntimeGeminiBindingRecorder>,
     ) -> Self {
         Self {
             reader: std::io::BufReader::new(reader),
             pending: Vec::new(),
             pending_offset: 0,
-            state: RuntimeGeminiSseState::new(request_id, conversation_messages, conversations),
+            state: RuntimeGeminiSseState::new(
+                request_id,
+                conversation_messages,
+                conversations,
+                binding_recorder,
+            ),
         }
     }
 
@@ -104,7 +113,6 @@ impl<R: Read> Read for RuntimeGeminiGenerateSseReader<R> {
     }
 }
 
-#[derive(Debug)]
 struct RuntimeGeminiSseState {
     request_id: u64,
     response_id: String,
@@ -122,6 +130,7 @@ struct RuntimeGeminiSseState {
     usage: Option<serde_json::Value>,
     conversation_messages: Vec<serde_json::Value>,
     conversations: RuntimeDeepSeekConversationStore,
+    binding_recorder: Option<RuntimeGeminiBindingRecorder>,
 }
 
 #[derive(Debug, Default)]
@@ -138,6 +147,7 @@ impl RuntimeGeminiSseState {
         request_id: u64,
         conversation_messages: Vec<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
+        binding_recorder: Option<RuntimeGeminiBindingRecorder>,
     ) -> Self {
         Self {
             request_id,
@@ -156,6 +166,7 @@ impl RuntimeGeminiSseState {
             usage: None,
             conversation_messages,
             conversations,
+            binding_recorder,
         }
     }
 
@@ -270,7 +281,12 @@ impl RuntimeGeminiSseState {
         let mut events = Vec::new();
         let (call_id, should_add) = {
             let tool_call = self.tool_calls.entry(index).or_default();
-            tool_call.call_id = Some(format!("call_gemini_{}_{}", self.request_id, index));
+            tool_call.call_id = value
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .map(str::to_string)
+                .or_else(|| Some(format!("call_gemini_{}_{}", self.request_id, index)));
             tool_call.name = Some(name.clone());
             tool_call.arguments = args;
             let call_id = tool_call.call_id.clone().unwrap_or_default();
@@ -385,6 +401,9 @@ impl RuntimeGeminiSseState {
             self.conversation_messages.clone(),
             self.chat_assistant_messages(),
         );
+        if let Some(recorder) = &self.binding_recorder {
+            recorder(self.response_id.clone(), self.tool_call_ids());
+        }
         self.completed = true;
         Some(events.join(""))
     }
@@ -532,6 +551,19 @@ impl RuntimeGeminiSseState {
         output
     }
 
+    fn tool_call_ids(&self) -> Vec<String> {
+        self.tool_calls
+            .iter()
+            .map(|(index, tool_call)| {
+                tool_call
+                    .call_id
+                    .clone()
+                    .unwrap_or_else(|| format!("call_gemini_{}_{}", self.request_id, index))
+            })
+            .filter(|call_id| !call_id.trim().is_empty())
+            .collect()
+    }
+
     fn event(&self, event: &str, data: serde_json::Value) -> String {
         let data = serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string());
         format!("event: {event}\r\ndata: {data}\r\n\r\n")
@@ -565,6 +597,7 @@ mod tests {
             9,
             Vec::new(),
             conversation_store(),
+            None,
         );
         let mut output = String::new();
         reader.read_to_string(&mut output).unwrap();
@@ -576,5 +609,31 @@ mod tests {
         assert!(output.contains("\"type\":\"response.function_call_arguments.delta\""));
         assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\""));
         assert!(output.contains("event: response.completed"));
+    }
+
+    #[test]
+    fn gemini_sse_reader_records_response_and_tool_call_bindings() {
+        let captured = Arc::new(Mutex::new(None::<(String, Vec<String>)>));
+        let captured_for_recorder = Arc::clone(&captured);
+        let recorder: RuntimeGeminiBindingRecorder = Arc::new(move |response_id, call_ids| {
+            *captured_for_recorder.lock().unwrap() = Some((response_id, call_ids));
+        });
+        let stream = concat!(
+            "data: {\"responseId\":\"resp_1\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"id\":\"call_1\",\"name\":\"shell\",\"args\":{\"cmd\":\"ls\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let mut reader = RuntimeGeminiGenerateSseReader::new(
+            std::io::Cursor::new(stream.as_bytes()),
+            9,
+            Vec::new(),
+            conversation_store(),
+            Some(recorder),
+        );
+        let mut output = String::new();
+        reader.read_to_string(&mut output).unwrap();
+
+        let (response_id, call_ids) = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(response_id, "resp_1");
+        assert_eq!(call_ids, vec!["call_1"]);
     }
 }

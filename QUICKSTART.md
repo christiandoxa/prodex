@@ -129,6 +129,8 @@ prodex info
 prodex quota --all --once
 ```
 
+In the live `prodex quota --all --detail` view, press `f` to cycle provider filters: `all`, `openai`, `gemini`.
+
 Use `prodex session list` to inspect shared Codex parent sessions, or `prodex session current` to show parent sessions started from the current directory. Add `--include-subagents` only when you explicitly need spawned agent sessions for diagnostics.
 
 `prodex info` includes the effective runtime worker, admission, websocket, lane, and inflight tuning values after environment, policy, and default resolution.

@@ -25,13 +25,48 @@ enum QuotaWatchCommand {
     Up,
     Down,
     Sort,
+    Filter,
     Quit,
 }
 
 enum QuotaWatchCommandOutcome {
     Continue(usize),
     Sort,
+    Filter,
     Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuotaProviderFilter {
+    All,
+    OpenAi,
+    Gemini,
+}
+
+impl QuotaProviderFilter {
+    fn next(self) -> Self {
+        match self {
+            Self::All => Self::OpenAi,
+            Self::OpenAi => Self::Gemini,
+            Self::Gemini => Self::All,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::OpenAi => "openai",
+            Self::Gemini => "gemini",
+        }
+    }
+
+    fn matches(self, provider: &ProfileProvider) -> bool {
+        match self {
+            Self::All => true,
+            Self::OpenAi => matches!(provider, ProfileProvider::Openai),
+            Self::Gemini => matches!(provider, ProfileProvider::Gemini { .. }),
+        }
+    }
 }
 
 struct AllQuotaWatchRefresh {
@@ -117,6 +152,7 @@ impl QuotaWatchInput {
             [b'k' | b'K', ..] => Some(QuotaWatchCommand::Up),
             [b'j' | b'J', ..] => Some(QuotaWatchCommand::Down),
             [b's' | b'S', ..] => Some(QuotaWatchCommand::Sort),
+            [b'f' | b'F', ..] => Some(QuotaWatchCommand::Filter),
             [0x1b, b'[', b'A', ..] => Some(QuotaWatchCommand::Up),
             [0x1b, b'[', b'B', ..] => Some(QuotaWatchCommand::Down),
             _ => None,
@@ -179,6 +215,7 @@ pub(crate) fn render_all_quota_watch_output(
         detail,
         0,
         QuotaReportSort::Remaining,
+        QuotaProviderFilter::All,
     )
 }
 
@@ -209,6 +246,7 @@ fn render_all_quota_watch_snapshot(
     detail: bool,
     scroll_offset: usize,
     sort: QuotaReportSort,
+    provider_filter: QuotaProviderFilter,
 ) -> String {
     match snapshot {
         AllQuotaWatchSnapshot::Loading { updated: _updated } => {
@@ -218,7 +256,13 @@ fn render_all_quota_watch_snapshot(
             updated: _updated,
             profile_count: _profile_count,
             reports,
-        } => render_all_quota_watch_report_output(reports, detail, scroll_offset, sort),
+        } => render_all_quota_watch_report_output(
+            reports,
+            detail,
+            scroll_offset,
+            sort,
+            provider_filter,
+        ),
         AllQuotaWatchSnapshot::Empty { updated: _updated } => {
             render_quota_watch_error_panel("Quota", "No profiles configured")
         }
@@ -234,9 +278,11 @@ fn render_all_quota_watch_report_output(
     detail: bool,
     scroll_offset: usize,
     sort: QuotaReportSort,
+    provider_filter: QuotaProviderFilter,
 ) -> String {
+    let filtered_reports = filter_quota_reports_by_provider(reports, provider_filter);
     let mut output = render_quota_reports_window_with_sort(
-        reports,
+        &filtered_reports,
         detail,
         quota_watch_available_report_lines(""),
         current_cli_width(),
@@ -247,10 +293,22 @@ fn render_all_quota_watch_report_output(
     .output;
     output.push('\n');
     output.push_str(&format!(
-        "sort: {} | s sort | j/k/Up/Down scroll | q quit",
-        sort.label()
+        "sort: {} | filter: {} | s sort | f provider | j/k/Up/Down scroll | q quit",
+        sort.label(),
+        provider_filter.label()
     ));
     output
+}
+
+fn filter_quota_reports_by_provider(
+    reports: &[QuotaReport],
+    provider_filter: QuotaProviderFilter,
+) -> Vec<QuotaReport> {
+    reports
+        .iter()
+        .filter(|report| provider_filter.matches(&report.provider))
+        .cloned()
+        .collect()
 }
 
 fn redraw_quota_watch(output: &str) -> Result<()> {
@@ -293,6 +351,7 @@ pub(crate) fn watch_all_quotas(
     let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
     let mut sort = QuotaReportSort::Remaining;
+    let mut provider_filter = QuotaProviderFilter::All;
     let mut snapshot = AllQuotaWatchSnapshot::Loading {
         updated: quota_watch_updated_at(),
     };
@@ -309,8 +368,15 @@ pub(crate) fn watch_all_quotas(
         }
 
         if redraw_needed {
-            scroll_offset = scroll_offset.min(quota_watch_max_scroll_offset(&snapshot));
-            let output = render_all_quota_watch_snapshot(&snapshot, detail, scroll_offset, sort);
+            scroll_offset =
+                scroll_offset.min(quota_watch_max_scroll_offset(&snapshot, provider_filter));
+            let output = render_all_quota_watch_snapshot(
+                &snapshot,
+                detail,
+                scroll_offset,
+                sort,
+                provider_filter,
+            );
             redraw_quota_watch(&output)?;
             redraw_needed = false;
         }
@@ -326,7 +392,7 @@ pub(crate) fn watch_all_quotas(
             match apply_quota_watch_command(
                 command,
                 scroll_offset,
-                quota_watch_max_scroll_offset(&snapshot),
+                quota_watch_max_scroll_offset(&snapshot, provider_filter),
             ) {
                 QuotaWatchCommandOutcome::Continue(next_offset) => {
                     if next_offset != scroll_offset {
@@ -336,6 +402,11 @@ pub(crate) fn watch_all_quotas(
                 }
                 QuotaWatchCommandOutcome::Sort => {
                     sort = sort.next();
+                    scroll_offset = 0;
+                    redraw_needed = true;
+                }
+                QuotaWatchCommandOutcome::Filter => {
+                    provider_filter = provider_filter.next();
                     scroll_offset = 0;
                     redraw_needed = true;
                 }
@@ -381,9 +452,16 @@ fn quota_watch_next_refresh_at() -> Instant {
     Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
 }
 
-fn quota_watch_max_scroll_offset(snapshot: &AllQuotaWatchSnapshot) -> usize {
+fn quota_watch_max_scroll_offset(
+    snapshot: &AllQuotaWatchSnapshot,
+    provider_filter: QuotaProviderFilter,
+) -> usize {
     match snapshot {
-        AllQuotaWatchSnapshot::Reports { reports, .. } => reports.len().saturating_sub(1),
+        AllQuotaWatchSnapshot::Reports { reports, .. } => reports
+            .iter()
+            .filter(|report| provider_filter.matches(&report.provider))
+            .count()
+            .saturating_sub(1),
         _ => 0,
     }
 }
@@ -449,6 +527,7 @@ fn apply_quota_watch_command(
         QuotaWatchCommand::Down => QuotaWatchCommandOutcome::Continue(
             scroll_offset.saturating_add(1).min(max_scroll_offset),
         ),
+        QuotaWatchCommand::Filter => QuotaWatchCommandOutcome::Filter,
         QuotaWatchCommand::Sort => QuotaWatchCommandOutcome::Sort,
         QuotaWatchCommand::Quit => QuotaWatchCommandOutcome::Quit,
     }
@@ -462,6 +541,14 @@ mod tests {
         name: &str,
         result: std::result::Result<ProviderQuotaSnapshot, String>,
     ) -> QuotaReport {
+        test_quota_report_with_provider(name, ProfileProvider::Openai, result)
+    }
+
+    fn test_quota_report_with_provider(
+        name: &str,
+        provider: ProfileProvider,
+        result: std::result::Result<ProviderQuotaSnapshot, String>,
+    ) -> QuotaReport {
         QuotaReport {
             name: name.to_string(),
             active: false,
@@ -469,6 +556,7 @@ mod tests {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            provider,
             workspace_id: None,
             result,
             fetched_at: 1_700_000_000,
@@ -482,6 +570,14 @@ mod tests {
             rate_limit: None,
             code_review_rate_limit: None,
             additional_rate_limits: Vec::new(),
+        })
+    }
+
+    fn test_gemini_quota(email: &str) -> ProviderQuotaSnapshot {
+        ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
+            email: Some(email.to_string()),
+            project_id: Some("test-project".to_string()),
+            buckets: Vec::new(),
         })
     }
 
@@ -590,5 +686,50 @@ mod tests {
         ));
         assert_eq!(QuotaReportSort::Remaining.next(), QuotaReportSort::Profile);
         assert_eq!(QuotaReportSort::Plan.next(), QuotaReportSort::Remaining);
+    }
+
+    #[test]
+    fn quota_watch_filter_command_cycles_provider_filter() {
+        assert!(matches!(
+            apply_quota_watch_command(QuotaWatchCommand::Filter, 3, 10),
+            QuotaWatchCommandOutcome::Filter
+        ));
+        assert_eq!(QuotaProviderFilter::All.next(), QuotaProviderFilter::OpenAi);
+        assert_eq!(
+            QuotaProviderFilter::OpenAi.next(),
+            QuotaProviderFilter::Gemini
+        );
+        assert_eq!(QuotaProviderFilter::Gemini.next(), QuotaProviderFilter::All);
+    }
+
+    #[test]
+    fn all_quota_watch_output_filters_reports_by_provider() {
+        let reports = vec![
+            test_quota_report_with_provider(
+                "openai-main",
+                ProfileProvider::Openai,
+                Ok(test_usage("main@example.com")),
+            ),
+            test_quota_report_with_provider(
+                "gemini-main",
+                ProfileProvider::Gemini {
+                    email: "gemini@example.com".to_string(),
+                    project_id: Some("test-project".to_string()),
+                },
+                Ok(test_gemini_quota("gemini@example.com")),
+            ),
+        ];
+
+        let output = render_all_quota_watch_report_output(
+            &reports,
+            true,
+            0,
+            QuotaReportSort::Remaining,
+            QuotaProviderFilter::Gemini,
+        );
+
+        assert!(output.contains("filter: gemini"));
+        assert!(output.contains("gemini-main"));
+        assert!(!output.contains("openai-main"));
     }
 }

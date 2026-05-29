@@ -24,6 +24,7 @@ pub(crate) struct QuotaReport {
     pub(crate) name: String,
     pub(crate) active: bool,
     pub(crate) auth: AuthSummary,
+    pub(crate) provider: ProfileProvider,
     pub(crate) workspace_id: Option<String>,
     pub(crate) result: std::result::Result<ProviderQuotaSnapshot, String>,
     pub(crate) fetched_at: i64,
@@ -91,7 +92,7 @@ pub(crate) fn collect_quota_reports_with_auth_filter(
     let base_url = base_url.map(str::to_owned);
 
     map_parallel(jobs, |job| {
-        let workspace_id = match job.provider {
+        let workspace_id = match &job.provider {
             ProfileProvider::Openai => read_profile_account_id_from_auth(&job.codex_home)
                 .ok()
                 .flatten(),
@@ -103,6 +104,7 @@ pub(crate) fn collect_quota_reports_with_auth_filter(
             name: job.name,
             active: job.active,
             auth: job.auth,
+            provider: job.provider,
             workspace_id,
             result,
             fetched_at: Local::now().timestamp(),

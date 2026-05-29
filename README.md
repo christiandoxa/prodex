@@ -524,6 +524,8 @@ prodex quota --all --once
 prodex quota --all --auth no-auth --once
 ```
 
+The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, and `gemini`.
+
 </details>
 
 <details>

@@ -148,6 +148,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            provider: ProfileProvider::Openai,
             workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 0, 3_600, 80, 86_400,
@@ -161,6 +162,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            provider: ProfileProvider::Openai,
             workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 7_200, 95, 172_800,
@@ -174,6 +176,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            provider: ProfileProvider::Openai,
             workspace_id: None,
             result: Err("boom".to_string()),
             fetched_at: 1_700_000_000,
@@ -185,6 +188,7 @@ fn quota_overview_sort_prioritizes_status_then_nearest_reset() {
                 label: "chatgpt".to_string(),
                 quota_compatible: true,
             },
+            provider: ProfileProvider::Openai,
             workspace_id: None,
             result: Ok(ProviderQuotaSnapshot::OpenAi(usage_with_main_windows(
                 90, 1_800, 95, 259_200,

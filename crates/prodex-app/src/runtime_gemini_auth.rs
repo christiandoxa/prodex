@@ -241,7 +241,6 @@ fn retrieve_gemini_user_quota(
         .bearer_auth(&secret.access_token)
         .json(&json!({
             "project": project_id,
-            "userAgent": "prodex",
         }))
         .send()
         .context("failed to fetch Gemini quota")?;
@@ -620,6 +619,7 @@ mod tests {
                 .read_to_string(&mut body)
                 .expect("quota request body should read");
             assert!(body.contains("\"project\":\"gemini-project\""));
+            assert!(!body.contains("userAgent"));
             request
                 .respond(TinyResponse::from_string(
                     r#"{"buckets":[{"modelId":"models/gemini-2.5-pro","remainingAmount":"50","remainingFraction":0.5,"resetTime":"2026-05-09T00:00:00Z"}]}"#,
