@@ -70,7 +70,18 @@ jobs:
 
       - name: Install cross
         if: ${{ matrix.use-cross }}
-        run: cargo install cross --locked
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if CARGO_HTTP_MULTIPLEXING=false cargo install cross --locked; then
+              exit 0
+            fi
+            if [ "${attempt}" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
 
       - name: Build prodex
         shell: bash
