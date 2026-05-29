@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.134.0 - 2026-05-29
+
+### Runtime
+
+- Harden Gemini rate-limit handling (`0a2447b`)
+
 ## 0.133.0 - 2026-05-29
 
 ### Runtime
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Smooth super provider launch (`fa40386`)
-
-## 0.122.0 - 2026-05-26
-
-### CLI
-
-- Add DeepSeek provider adapter (`9760a43`)
