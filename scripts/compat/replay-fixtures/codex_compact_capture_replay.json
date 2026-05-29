@@ -22,7 +22,7 @@
         },
         {
           "name": "User-Agent",
-          "value": "codex-cli/0.61.0"
+          "value": "codex-cli/0.135.0"
         },
         {
           "name": "session_id",

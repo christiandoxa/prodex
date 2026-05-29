@@ -47,7 +47,7 @@ const SHARED_CODEX_FILE_NAMES: &[&str] = &[
     ".tmp/app-server-remote-plugin-sync-v1",
 ];
 
-const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_", "goals_"];
+const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_", "goals_", "memories_"];
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 const SHARED_CODEX_PROFILE_V2_CONFIG_SUFFIX: &str = ".config.toml";
 

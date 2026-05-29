@@ -297,6 +297,10 @@ fn caveman_session_start_script_outputs_once_per_launch_home() {
 
     let config = fs::read_to_string(codex_home.join("config.toml")).expect("config should read");
     assert_eq!(config.matches("prodex-caveman-sessionstart").count(), 1);
+    assert!(
+        !config.contains("zsh_path"),
+        "Caveman overlay must not override Codex package-managed zsh discovery"
+    );
 
     let script = codex_home.join("bin").join("prodex-caveman-sessionstart");
     let first = std::process::Command::new(&script)

@@ -71,6 +71,63 @@ fn runtime_proxy_websocket_keepalive_before_content_does_not_commit_or_block_for
 }
 
 #[test]
+fn runtime_proxy_websocket_preserves_rich_turn_metadata_handshake_header() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+
+    let turn_metadata = codex_0135_compaction_turn_metadata();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket(),
+        "second",
+        &["second"],
+        &[],
+        Vec::new(),
+    );
+    let mut socket = fixture.connect_websocket_with_headers(
+        "backend-api/prodex/responses",
+        &[
+            runtime_continuation_header("session_id", "sess-rich-metadata"),
+            runtime_continuation_header("x-codex-turn-state", "turn-rich-metadata"),
+            runtime_continuation_header("x-codex-turn-metadata", turn_metadata.clone()),
+        ],
+    );
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "hello"
+            }],
+        }),
+    );
+
+    let (_frames, completed_message) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("\"type\":\"response.completed\"")
+    });
+    let _ = socket.close(None);
+
+    assert!(
+        completed_message.contains("\"response\":{\"id\":\"resp-second\"}"),
+        "normal websocket response should complete: {completed_message}"
+    );
+    let responses_headers = fixture.backend.responses_headers();
+    assert_eq!(
+        responses_headers.len(),
+        1,
+        "backend should observe one websocket handshake: {responses_headers:?}"
+    );
+    assert_eq!(
+        responses_headers[0]
+            .get("x-codex-turn-metadata")
+            .map(String::as_str),
+        Some(turn_metadata.as_str()),
+        "websocket handshake should preserve Codex 0.135 turn metadata unchanged"
+    );
+}
+
+#[test]
 fn runtime_proxy_websocket_empty_session_previous_response_does_not_fresh_fallback() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =

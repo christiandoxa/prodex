@@ -8,11 +8,15 @@
     },
     {
       "name": "User-Agent",
-      "value": "codex-cli/0.61.0"
+      "value": "codex-cli/0.135.0"
     },
     {
       "name": "x-codex-turn-state",
       "value": "turn_live_20260428"
+    },
+    {
+      "name": "x-codex-turn-metadata",
+      "value": "{\"request_kind\":\"turn\",\"session_id\":\"sess_codex_20260428\",\"thread_id\":\"thread_codex_20260428\",\"turn_id\":\"turn_codex_20260428\",\"window_id\":\"thread_codex_20260428:2\"}"
     },
     {
       "name": "x-openai-subagent",

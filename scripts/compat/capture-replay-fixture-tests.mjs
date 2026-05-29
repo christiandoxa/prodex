@@ -58,6 +58,7 @@ const FIXTURES = [
       assertHeader(handshake, "ChatGPT-Account-Id", "<account_id>");
       assertHeader(handshake, "session_id", "<session_id>");
       assertHeader(handshake, "x-codex-turn-state", "<turn_state>");
+      assertHeader(handshake, "x-codex-turn-metadata", "<turn_metadata>");
       assertHeader(handshake, "Sec-WebSocket-Protocol", "codex.realtime");
       assertHeader(handshake, "Sec-WebSocket-Key", "<websocket_key>");
       assert.equal(clientMessage.direction, "client_to_upstream");
@@ -91,6 +92,7 @@ const FIXTURES = [
       assertHeader(request, "Authorization", "Bearer <redacted>");
       assertHeader(request, "ChatGPT-Account-Id", "<account_id>");
       assertHeader(request, "session_id", "<session_id>");
+      assertHeader(request, "x-codex-turn-metadata", "<turn_metadata>");
       assert.equal(request.body.previous_response_id, "<previous_response_id>");
       assert.equal(request.body.session_id, "<session_id>");
       assert.equal(response.status, 429);

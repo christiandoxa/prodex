@@ -809,6 +809,8 @@ git diff | prodex context compact-output --kind git-diff
 
 For full policy keys, environment overrides, and runtime log path resolution, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 
+When a support case appears to come from upstream Codex itself, run `codex doctor --json` in the same environment as Prodex. Codex 0.135.0 and newer reports richer environment, Git, terminal, app-server, and thread-inventory diagnostics than Prodex's runtime-proxy doctor owns.
+
 </details>
 
 ## Advanced behavior
@@ -824,7 +826,11 @@ On Unix-like systems, this is usually:
 ~/.codex
 ```
 
-In practice, profile `history.jsonl`, `sessions`, `config.toml`, `environments.toml`, plugins, skills, and related shared files link to the same Codex home that direct Codex uses.
+In practice, profile `history.jsonl`, `sessions`, `config.toml`, `environments.toml`, plugins, skills, app-server plugin state, memory-extension state, and Codex runtime SQLite files such as `state_*`, `goals_*`, `logs_*`, and `memories_*` link to the same Codex home that direct Codex uses.
+
+Prodex does not synthesize legacy Codex `[profiles.*]` behavior. File-based Codex profile config selected by `--profile` stays in shared Codex state, while Prodex-owned account selection remains in Prodex profile metadata.
+
+Prodex also leaves packaged Codex runtime resources alone, including Codex 0.135.0's bundled patched zsh helper under the Codex package layout. Do not set `zsh_path` through Prodex unless you are intentionally debugging direct Codex config.
 
 This matches direct Codex behavior: logging out or switching accounts does not hide chat history.
 

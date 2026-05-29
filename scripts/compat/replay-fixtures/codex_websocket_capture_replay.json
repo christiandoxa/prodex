@@ -18,7 +18,7 @@
         },
         {
           "name": "User-Agent",
-          "value": "codex-cli/0.61.0"
+          "value": "codex-cli/0.135.0"
         },
         {
           "name": "session_id",
@@ -27,6 +27,10 @@
         {
           "name": "x-codex-turn-state",
           "value": "<turn_state>"
+        },
+        {
+          "name": "x-codex-turn-metadata",
+          "value": "<turn_metadata>"
         },
         {
           "name": "Sec-WebSocket-Protocol",

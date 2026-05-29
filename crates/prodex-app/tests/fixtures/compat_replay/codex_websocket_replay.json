@@ -5,11 +5,15 @@
     "headers": [
       {
         "name": "User-Agent",
-        "value": "codex-cli/0.61.0"
+        "value": "codex-cli/0.135.0"
       },
       {
         "name": "x-codex-turn-state",
         "value": "turn_ws_20260428"
+      },
+      {
+        "name": "x-codex-turn-metadata",
+        "value": "{\"request_kind\":\"prewarm\",\"session_id\":\"sess_ws_header_20260428\",\"thread_id\":\"thread_ws_20260428\",\"turn_id\":\"turn_ws_20260428\",\"window_id\":\"thread_ws_20260428:2\"}"
       },
       {
         "name": "session_id",

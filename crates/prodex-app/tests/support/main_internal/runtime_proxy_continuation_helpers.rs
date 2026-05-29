@@ -94,6 +94,22 @@ pub(super) fn runtime_continuation_header(
     }
 }
 
+pub(super) fn codex_0135_compaction_turn_metadata() -> String {
+    concat!(
+        r#"{"request_kind":"compaction","#,
+        r#""session_id":"sess-rich-metadata","#,
+        r#""thread_id":"thread-rich-metadata","#,
+        r#""turn_id":"turn-rich-metadata","#,
+        r#""window_id":"thread-rich-metadata:2","#,
+        r#""compaction":{"trigger":"token_limit","#,
+        r#""reason":"context_window_full","#,
+        r#""implementation":"responses_compact","#,
+        r#""phase":"pre_turn","#,
+        r#""strategy":"memento"}}"#
+    )
+    .to_string()
+}
+
 pub(super) struct RuntimeContinuationFixture {
     _temp_dir: TestDir,
     pub(super) backend: RuntimeProxyBackend,
@@ -208,9 +224,29 @@ impl RuntimeContinuationFixture {
     }
 
     pub(super) fn connect_websocket(&self, route: &str) -> RuntimeContinuationClientWebSocket {
+        self.connect_websocket_with_headers(route, &[])
+    }
+
+    pub(super) fn connect_websocket_with_headers(
+        &self,
+        route: &str,
+        headers: &[RuntimeContinuationHeader],
+    ) -> RuntimeContinuationClientWebSocket {
+        use tungstenite::client::IntoClientRequest;
+
+        let mut request = format!("ws://{}/{}", self.proxy.listen_addr, route)
+            .into_client_request()
+            .expect("websocket client request should build");
+        for header in headers {
+            request.headers_mut().insert(
+                tungstenite::http::HeaderName::from_bytes(header.name.as_bytes())
+                    .expect("websocket header name should be valid"),
+                tungstenite::http::HeaderValue::from_str(header.value.as_str())
+                    .expect("websocket header value should be valid"),
+            );
+        }
         let (mut socket, _response) =
-            ws_connect(format!("ws://{}/{}", self.proxy.listen_addr, route))
-                .expect("websocket client should connect");
+            ws_connect(request).expect("websocket client should connect");
         set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
         socket
     }

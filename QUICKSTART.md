@@ -60,6 +60,7 @@ Dependency status in this repo:
 
 - The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest
 - Source installs still use whatever `codex` binary is on your `PATH`
+- Packaged Codex runtime resources, including the Codex 0.135.0 bundled patched zsh helper, stay owned by the Codex package; Prodex does not override `zsh_path`
 - `prodex update` passes through to `codex update` directly without profile selection, quota preflight, or the local runtime proxy
 - Run `cargo update` whenever dependency metadata changes so the workspace lockfile stays in sync
 - Versioned npm install snippets in this guide and `README.md` are synced from `Cargo.toml`
@@ -104,9 +105,11 @@ prodex profile add second
 prodex login --profile second
 ```
 
-Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history, session, and environment state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl`, `sessions`, and `environments.toml` aligned with direct Codex, so logout or account switching does not hide prior chats.
+Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history, session, environment, plugin/app-server, and memory database state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl`, `sessions`, `environments.toml`, plugin cache/state, and Codex SQLite files including `memories_*` aligned with direct Codex, so logout or account switching does not hide prior chats.
 
 Older Prodex shared state from `$PRODEX_HOME/.codex` is merged into the native Codex home on the next managed-profile launch. Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shared Codex root.
+
+Codex file-based profiles selected by `--profile` remain Codex-owned shared config. Prodex does not re-enable legacy Codex `[profiles.*]` behavior; Prodex account selection stays in Prodex profile metadata.
 
 ## 2. Inspect the pool
 
@@ -295,6 +298,7 @@ tail -n 200 "$(prodex doctor --runtime --json | jq -r '.log_path')"
 The default runtime log directory is the OS temp directory, usually `/tmp` on Linux, but `PRODEX_RUNTIME_LOG_DIR` or `runtime.log_dir` in `policy.toml` can override it.
 Use `prodex doctor --runtime --json` to find the active `log_path`, resolved `runtime_logs.directory`, and live broker metrics before tailing files.
 Use `prodex doctor --bundle ./prodex-doctor.json --redacted` when sharing diagnostics; the bundle includes version, policy/config, profile, and runtime-log summaries without auth tokens or headers.
+For suspected upstream Codex issues, also run `codex doctor --json` from the same shell. Codex 0.135.0 and newer includes app-server version and thread-inventory diagnostics that Prodex's runtime doctor does not duplicate.
 
 Prodex also schedules non-blocking automatic housekeeping for stale runtime logs, temp login homes, stale root temp files, and dead broker artifacts. Use `prodex cleanup` when you want a manual cleanup that also clears transient runtime cache files, collapses duplicate profiles that point at the same OpenAI workspace identity into one surviving profile, and removes old orphaned managed profile homes that are no longer tracked. Orphaned managed profile homes use a conservative 7-day threshold by default; override that explicitly with `prodex cleanup --older-than 1d` or `prodex cleanup --aggressive` when you want faster reclaim. Codex and Claude chat histories are left to the upstream runtimes.
 

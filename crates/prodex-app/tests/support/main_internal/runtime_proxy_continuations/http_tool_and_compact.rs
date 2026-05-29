@@ -517,6 +517,7 @@ fn runtime_proxy_http_compaction_v2_stream_uses_session_bound_profile() {
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
+    let turn_metadata = codex_0135_compaction_turn_metadata();
     let response = Client::builder()
         .build()
         .expect("client")
@@ -526,6 +527,7 @@ fn runtime_proxy_http_compaction_v2_stream_uses_session_bound_profile() {
         ))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .header("session-id", "sess-compact-v2")
+        .header("x-codex-turn-metadata", turn_metadata.as_str())
         .body(
             serde_json::json!({
                 "model": "gpt-5",
@@ -582,6 +584,13 @@ fn runtime_proxy_http_compaction_v2_stream_uses_session_bound_profile() {
             .get("chatgpt-account-id")
             .map(String::as_str),
         Some("second-account")
+    );
+    assert_eq!(
+        responses_headers[0]
+            .get("x-codex-turn-metadata")
+            .map(String::as_str),
+        Some(turn_metadata.as_str()),
+        "compaction v2 stream should preserve Codex 0.135 turn metadata unchanged"
     );
 
     let responses_bodies = backend.responses_bodies();
@@ -693,6 +702,7 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
         .expect("runtime proxy should start");
+    let turn_metadata = codex_0135_compaction_turn_metadata();
     let response = Client::builder()
         .build()
         .expect("client")
@@ -702,6 +712,7 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
         ))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .header("x-openai-subagent", "compact")
+        .header("x-codex-turn-metadata", turn_metadata.as_str())
         .body(
             serde_json::json!({
                 "previous_response_id": "resp-compact-missing",
@@ -735,5 +746,13 @@ fn runtime_proxy_http_compact_previous_response_not_found_surfaces_stale_continu
         responses_bodies[0].contains("\"previous_response_id\":\"resp-compact-missing\""),
         "compact request should preserve the original previous_response_id: {}",
         responses_bodies[0]
+    );
+    let responses_headers = backend.responses_headers();
+    assert_eq!(
+        responses_headers[0]
+            .get("x-codex-turn-metadata")
+            .map(String::as_str),
+        Some(turn_metadata.as_str()),
+        "compact unary path should preserve Codex 0.135 turn metadata unchanged"
     );
 }
