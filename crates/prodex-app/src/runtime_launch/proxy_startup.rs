@@ -6,6 +6,7 @@ mod gemini_rewrite;
 mod gemini_sse;
 mod local_rewrite;
 mod local_rewrite_gemini;
+mod local_rewrite_gemini_quota;
 mod local_rewrite_response;
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
