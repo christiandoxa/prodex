@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.135.0 - 2026-05-30
+
+### Runtime
+
+- Improve Gemini rate-limit retries (`16fcfe8`)
+
 ## 0.134.0 - 2026-05-29
 
 ### Runtime
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Support DeepSeek reasoning replay (`d574c65`)
-
-## 0.123.0 - 2026-05-27
-
-### Misc
-
-- Smooth super provider launch (`fa40386`)

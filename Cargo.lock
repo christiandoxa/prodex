@@ -217,9 +217,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.62"
+version = "1.2.63"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1dce859f0832a7d088c4f1119888ab94ef4b5d6795d1ce05afb7fe159d79f98"
+checksum = "556e016178bb5662a08681bbe0f00f8e17631781a4dfc8c45e466e4b185ec27f"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -346,9 +346,9 @@ dependencies = [
 
 [[package]]
 name = "cmov"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f88a43d011fc4a6876cb7344703e297c71dda42494fee094d5f7c76bf13f746"
+checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
 name = "colorchoice"
@@ -571,9 +571,9 @@ dependencies = [
 
 [[package]]
 name = "displaydoc"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0"
+checksum = "1ac70aa55017e108007fbaf5aa0f54b021c98f92ff8af59d42eda9da96e3dd4f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -831,9 +831,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.9.0"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6299f016b246a94207e63da54dbe807655bf9e00044f73ded42c3ac5305fbcca"
+checksum = "55281c53a1894c864990125767da440a4e630446785086f52523b20033b74498"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1155,9 +1155,9 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libredox"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
+checksum = "f02ab6bace2054fb888a3c16f990117b579d14a3088e472d63c6011fa185c9d3"
 dependencies = [
  "libc",
 ]
@@ -1182,15 +1182,15 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "memchr"
-version = "2.8.0"
+version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
 
 [[package]]
 name = "mio"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1"
+checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
 dependencies = [
  "libc",
  "wasi",
@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "base64",
  "criterion",
@@ -1365,7 +1365,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1426,7 +1426,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app-reports"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "chrono",
  "prodex-quota",
@@ -1441,7 +1441,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-audit-log"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1451,11 +1451,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-bench-support"
-version = "0.134.0"
+version = "0.135.0"
 
 [[package]]
 name = "prodex-caveman-assets"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-cli"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "clap",
  "reqwest",
@@ -1476,14 +1476,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-codex-config"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "prodex-context"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "prodex-terminal-ui",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-core"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1501,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-housekeeping"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "prodex-core",
  "prodex-state",
@@ -1509,7 +1509,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1523,7 +1523,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-identity"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1533,7 +1533,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-proxy-config"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -1542,7 +1542,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-quota"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1554,14 +1554,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-anthropic"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1570,7 +1570,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "prodex-runtime-state",
  "serde",
@@ -1579,14 +1579,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker-log"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-capabilities"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "prodex-runtime-anthropic",
  "prodex-runtime-proxy",
@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-claude"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-cookies"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "chrono",
  "reqwest",
@@ -1618,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-doctor"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1631,7 +1631,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-launch"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "prodex-codex-config",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-log"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "prodex-runtime-proxy",
  "serde_json",
@@ -1655,7 +1655,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-mem"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1664,14 +1664,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-metrics"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "prodex-core",
@@ -1682,7 +1682,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "base64",
  "prodex-runtime-tuning",
@@ -1691,7 +1691,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-quota"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "chrono",
  "prodex-quota",
@@ -1702,14 +1702,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "prodex-runtime-store"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "prodex-runtime-state",
  "prodex-state",
@@ -1717,18 +1717,18 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.134.0"
+version = "0.135.0"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "sha2",
 ]
 
 [[package]]
 name = "prodex-session-store"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "prodex-app-reports",
@@ -1739,7 +1739,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-codex-fs"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "prodex-core",
@@ -1748,7 +1748,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-types"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "prodex-quota",
  "prodex-runtime-proxy",
@@ -1758,21 +1758,21 @@ dependencies = [
 
 [[package]]
 name = "prodex-state"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "prodex-terminal-ui"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
 ]
 
 [[package]]
 name = "prodex-update-notice"
-version = "0.134.0"
+version = "0.135.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2252,9 +2252,9 @@ dependencies = [
 
 [[package]]
 name = "shlex"
-version = "1.3.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "simd_cesu8"
@@ -2286,9 +2286,9 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "socket2"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
+checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -2586,9 +2586,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.20.0"
+version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40ce102ab67701b8526c123c1bab5cbe42d7040ccfd0f64af1a385808d2f43de"
+checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "unicode-ident"
@@ -3206,18 +3206,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.48"
+version = "0.8.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
+checksum = "3b065d4f0e55f82fae73202e189638116a87c55ab6b8e6c2721e13dd9d854ad1"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.48"
+version = "0.8.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
+checksum = "0b631b19d36a892ab55420c92dbc83ccd79274f25be714855d3074aa71cab639"
 dependencies = [
  "proc-macro2",
  "quote",
