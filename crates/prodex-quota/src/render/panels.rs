@@ -49,6 +49,7 @@ pub fn render_profile_quota_snapshot(
         ProviderQuotaSnapshot::OpenAi(usage) => render_profile_quota(profile_name, usage),
         ProviderQuotaSnapshot::Copilot(info) => render_profile_copilot_quota(profile_name, info),
         ProviderQuotaSnapshot::Gemini(info) => render_profile_gemini_quota(profile_name, info),
+        ProviderQuotaSnapshot::External(info) => render_profile_external_quota(profile_name, info),
     }
 }
 
@@ -120,6 +121,38 @@ pub fn render_profile_gemini_quota_with_width(
             format!("Bucket {}", index + 1),
             format_gemini_bucket_summary(bucket),
         ));
+    }
+    render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
+}
+
+pub fn render_profile_external_quota(profile_name: &str, info: &ExternalQuotaInfo) -> String {
+    render_profile_external_quota_with_width(profile_name, info, current_cli_width())
+}
+
+pub fn render_profile_external_quota_with_width(
+    profile_name: &str,
+    info: &ExternalQuotaInfo,
+    total_width: usize,
+) -> String {
+    let mut fields = vec![
+        ("Profile".to_string(), profile_name.to_string()),
+        ("Provider".to_string(), info.provider.clone()),
+        (
+            "Account".to_string(),
+            display_optional(info.account.as_deref()).to_string(),
+        ),
+        (
+            "Plan".to_string(),
+            display_optional(info.plan.as_deref()).to_string(),
+        ),
+        ("Status".to_string(), info.status.clone()),
+        ("Main".to_string(), info.main.clone()),
+    ];
+    if let Some(reset) = info.reset.as_deref() {
+        fields.push(("Reset".to_string(), reset.to_string()));
+    }
+    for detail in &info.details {
+        fields.push((detail.label.clone(), detail.value.clone()));
     }
     render_panel_with_width(&format!("Quota {profile_name}"), &fields, total_width)
 }

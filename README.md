@@ -57,16 +57,16 @@ Prodex supports two provider paths:
 |---|---:|---|---:|---|
 | OpenAI / Codex | `prodex`, `prodex run`, `prodex s` | ChatGPT OAuth, device code, or OpenAI/API-compatible key via `prodex login` | Yes | Full quota preflight and profile auto-rotation. |
 | Google Gemini | `prodex s --provider gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY` / `--api-key` | OAuth profiles | OAuth mode can rotate across Gemini profiles; API-key mode is runtime-only. |
-| Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | No | Runs through Prodex's local Responses-to-Anthropic adapter. |
+| Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | OAuth profiles | Shows Claude OAuth readiness; add `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups. |
 | GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY` / `--api-key` | Imported profiles | Native Copilot profile mode keeps continuations bound to the owning profile. |
-| DeepSeek | `prodex s --provider deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | No | API-key-only provider; no OAuth login profile in Prodex. |
-| Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | No | Injects a temporary local provider and skips quota preflight. |
-| Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | No | Prodex does not proxy or quota-check these profiles. |
+| DeepSeek | `prodex s --provider deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
+| Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
+| Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
 
 <details>
 <summary>Provider behavior details</summary>
 
-The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth and imported Copilot profiles have provider-specific quota views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, local URLs, and Bedrock/custom Codex providers skip Prodex quota preflight.
+The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers now have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, local URLs, and Bedrock/custom Codex providers still skip OpenAI quota preflight.
 
 </details>
 
@@ -562,9 +562,11 @@ prodex quota --all
 prodex quota --all --once
 prodex quota --all --auth no-auth --once
 prodex quota --all --detail --provider openai
+prodex quota --all --provider deepseek --once
+prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
 ```
 
-The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, and `copilot`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, or `--provider copilot` to start locked to a single provider.
+The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, and `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider deepseek`, or `--provider local` to start locked to a single provider.
 
 </details>
 
@@ -709,7 +711,7 @@ prodex s --provider anthropic --model claude-sonnet-4-6
 prodex s --provider anthropic --model claude-sonnet-4-6 --api-key "$ANTHROPIC_API_KEY"
 ```
 
-If `--api-key` is omitted, Prodex uses the Anthropic profile created by `prodex login --with-claude` or `prodex profile import claude`. API-key mode still reads `ANTHROPIC_API_KEY`; `ANTHROPIC_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path injects a temporary `prodex-anthropic` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to Anthropic's OpenAI-compatible chat API, and keeps quota preflight disabled.
+If `--api-key` is omitted, Prodex uses the Anthropic profile created by `prodex login --with-claude` or `prodex profile import claude`. API-key mode still reads `ANTHROPIC_API_KEY`; `ANTHROPIC_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path injects a temporary `prodex-anthropic` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to Anthropic's OpenAI-compatible chat API, and keeps quota preflight disabled. `prodex quota --all --provider anthropic` shows OAuth readiness for Anthropic profiles; set `ANTHROPIC_ADMIN_KEY` when you want Anthropic Admin rate-limit groups included.
 
 Use `--provider copilot` when you want the Codex/Super front end with GitHub Copilot upstream:
 
@@ -726,7 +728,7 @@ Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek 
 prodex s --provider deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KEY"
 ```
 
-If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
+If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` environment and fetches DeepSeek `/user/balance`. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
 
 Use `--provider gemini` when you want the Codex/Super front end with Gemini upstream:
 
@@ -824,6 +826,12 @@ By default, Prodex:
 - advertises a conservative 16k local context window
 - skips quota/proxy routing for that launch
 
+Check local server reachability with:
+
+```bash
+prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
+```
+
 The default local model id is:
 
 ```bash
@@ -907,13 +915,13 @@ Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shar
 <details>
 <summary>Bedrock and custom providers</summary>
 
-Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Google Gemini OAuth profiles and imported Copilot accounts through their provider quota APIs.
+Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Google Gemini OAuth profiles, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health snapshots, and configured custom providers.
 
 If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy.
 
 Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
 
-`prodex quota` is not available for those profiles.
+`prodex quota` shows the configured provider metadata for those profiles instead of failing the view.
 
 </details>
 

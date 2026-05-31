@@ -66,6 +66,7 @@ fn provider_quota_snapshot_is_available(snapshot: &ProviderQuotaSnapshot) -> boo
         ProviderQuotaSnapshot::OpenAi(usage) => collect_blocked_limits(usage, false).is_empty(),
         ProviderQuotaSnapshot::Copilot(info) => copilot_quota_is_ready(info),
         ProviderQuotaSnapshot::Gemini(info) => gemini_quota_is_ready(info),
+        ProviderQuotaSnapshot::External(info) => info.available.unwrap_or(false),
     }
 }
 

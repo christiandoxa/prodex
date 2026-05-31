@@ -2,7 +2,7 @@
 
 One Prodex profile pool for OpenAI-backed routing, plus runtime provider bridges for Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s --provider gemini|anthropic|copilot|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` also supports Google Gemini OAuth profiles and imported Copilot accounts through their provider quota APIs. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s --provider gemini|anthropic|copilot|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
 
 For contributors: this is a Cargo workspace. `src/main.rs` is the binary entrypoint, `src/lib.rs` is a compatibility shim, application orchestration lives under `crates/prodex-app/`, and reusable leaf crates live under `crates/`.
 
@@ -123,6 +123,8 @@ prodex profile import copilot
 prodex quota --all
 prodex quota --all --auth no-auth --once
 prodex quota --all --detail --provider openai
+prodex quota --all --provider deepseek --once
+prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
 prodex session list
 prodex info
 ```
@@ -133,7 +135,7 @@ prodex info
 prodex quota --all --once
 ```
 
-In the live `prodex quota --all --detail` view, press `f` to cycle provider filters: `all`, `openai`, `gemini`, `anthropic`, `copilot`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, or `--provider copilot` to start locked to one provider.
+In the live `prodex quota --all --detail` view, press `f` to cycle provider filters: `all`, `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider deepseek`, or `--provider local` to start locked to one provider.
 
 Use `prodex session list` to inspect shared Codex parent sessions, or `prodex session current` to show parent sessions started from the current directory. Add `--include-subagents` only when you explicitly need spawned agent sessions for diagnostics.
 
@@ -151,7 +153,7 @@ prodex profile remove --all
 
 `prodex profile export` exports all configured profiles by default and asks whether to password-protect the bundle, defaulting to protected. In non-interactive use, pass `--password-protect` with `PRODEX_PROFILE_EXPORT_PASSWORD` set, or pass `--no-password` to explicitly write an unencrypted bundle.
 
-`prodex profile import claude` imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s --provider gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot and Gemini provider quota data through their provider APIs. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not quota-compatible in Prodex.
+`prodex profile import claude` imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s --provider gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot, Gemini, Anthropic, DeepSeek, local, and custom provider snapshots. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not OpenAI quota-compatible, but they still render provider metadata in `prodex quota`.
 
 ## 3. Run Codex CLI with `prodex`
 
@@ -172,7 +174,7 @@ New Codex top-level subcommands stay on this managed path by default. For exampl
 
 Codex CLI 0.124.0 added first-class Amazon Bedrock and OpenAI-compatible custom provider support. Configure Bedrock or another provider in the selected profile's Codex `config.toml`, for example with `model_provider = "amazon-bedrock"`.
 
-If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Codex directly without the local runtime proxy. Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
+If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Codex directly without the local runtime proxy. `prodex quota` still shows the configured provider metadata; Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider.
 
 ## 4. Run Codex with `prodex caveman`
 
@@ -210,7 +212,7 @@ Use DeepSeek with the Codex/Super front end:
 DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
 ```
 
-`--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. `DEEPSEEK_API_KEYS` may contain comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota preflight, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. Remote compact is not implemented for the adapter yet.
+`--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. `DEEPSEEK_API_KEYS` may contain comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota preflight, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` values and fetches DeepSeek `/user/balance`. Remote compact is not implemented for the adapter yet.
 
 Use Anthropic with the Codex/Super front end:
 
@@ -220,7 +222,7 @@ prodex s --provider anthropic --model claude-sonnet-4-6
 ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6
 ```
 
-Without `--api-key`, this path uses the Anthropic profile from `prodex login --with-claude` or `prodex profile import claude`. API-key mode starts the same local Responses-to-Anthropic adapter and forwards through Anthropic's OpenAI-compatible chat API. Use `ANTHROPIC_API_KEYS` with comma-, semicolon-, or newline-separated keys for round-robin request rotation.
+Without `--api-key`, this path uses the Anthropic profile from `prodex login --with-claude` or `prodex profile import claude`. API-key mode starts the same local Responses-to-Anthropic adapter and forwards through Anthropic's OpenAI-compatible chat API. Use `ANTHROPIC_API_KEYS` with comma-, semicolon-, or newline-separated keys for round-robin request rotation. `prodex quota --all --provider anthropic` shows OAuth readiness; set `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups.
 
 Use GitHub Copilot with the Codex/Super front end:
 
@@ -241,7 +243,7 @@ GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
 
 When no API key is supplied, the Gemini path uses the Google OAuth profile from login. With `--api-key`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`, it uses the public Gemini API. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays.
 
-Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
+Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. Check local reachability with `prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once`. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 Use `--dry-run` on `prodex run`, `prodex caveman`, or `prodex super` when you want to inspect resolved provider/model choices, proxy args, and launch env without starting Codex. Secret-looking values are redacted.
 

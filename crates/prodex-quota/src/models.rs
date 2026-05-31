@@ -50,11 +50,35 @@ pub struct GeminiQuotaBucket {
     pub model_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalQuotaInfo {
+    pub provider: String,
+    #[serde(default)]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub plan: Option<String>,
+    pub status: String,
+    pub main: String,
+    #[serde(default)]
+    pub reset: Option<String>,
+    #[serde(default)]
+    pub available: Option<bool>,
+    #[serde(default)]
+    pub details: Vec<ExternalQuotaDetail>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalQuotaDetail {
+    pub label: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum ProviderQuotaSnapshot {
     OpenAi(UsageResponse),
     Copilot(CopilotQuotaInfo),
     Gemini(GeminiQuotaInfo),
+    External(ExternalQuotaInfo),
 }
 
 #[derive(Debug, Clone)]

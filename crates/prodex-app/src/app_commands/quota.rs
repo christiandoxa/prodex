@@ -26,7 +26,12 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
         args.provider.is_some() && provider_filter != QuotaProviderFilter::All;
 
     if args.all {
-        if state.profiles.is_empty() {
+        if state.profiles.is_empty()
+            && !matches!(
+                provider_filter,
+                QuotaProviderFilter::DeepSeek | QuotaProviderFilter::Local
+            )
+        {
             bail!("no profiles configured");
         }
         if quota_watch_enabled(&args) {

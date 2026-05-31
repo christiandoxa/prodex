@@ -40,15 +40,17 @@ Examples:
   prodex quota --profile main --detail
   prodex quota --all --detail
   prodex quota --all --detail --provider openai
+  prodex quota --all --provider deepseek --base-url https://api.deepseek.com --once
+  prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
   prodex quota --all --once
   prodex quota --all --auth no-auth --once
   prodex quota --raw --profile main
 
 Notes:
-  `prodex quota` supports OpenAI/Codex profiles, Google Gemini OAuth profiles, and imported Copilot accounts.
-  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, or `copilot`.
+  `prodex quota` supports OpenAI/Codex, Gemini OAuth, Anthropic OAuth, imported Copilot, DeepSeek API-key, local OpenAI-compatible, and custom provider snapshots.
+  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, or `local`.
   Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
-  If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, quota inspection is unavailable for that profile.";
+  If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, prodex shows a provider snapshot instead of failing the quota view.";
 pub const CLI_RUN_AFTER_HELP: &str = "\
 Examples:
   prodex

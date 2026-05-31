@@ -36,6 +36,9 @@ fn render_quota_snapshot(snapshot: &ProviderQuotaSnapshot) -> prodex_quota::Prov
         ProviderQuotaSnapshot::Gemini(info) => {
             prodex_quota::ProviderQuotaSnapshot::Gemini(info.clone())
         }
+        ProviderQuotaSnapshot::External(info) => {
+            prodex_quota::ProviderQuotaSnapshot::External(info.clone())
+        }
     }
 }
 

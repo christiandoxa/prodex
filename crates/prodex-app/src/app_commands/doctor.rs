@@ -260,6 +260,13 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                         fields.push(("Reset".to_string(), reset));
                     }
                 }
+                Ok(ProviderQuotaSnapshot::External(info)) => {
+                    fields.push(("Quota".to_string(), info.status));
+                    fields.push(("Main".to_string(), info.main));
+                    if let Some(reset) = info.reset {
+                        fields.push(("Reset".to_string(), reset));
+                    }
+                }
                 Err(err) => {
                     fields.push((
                         "Quota".to_string(),

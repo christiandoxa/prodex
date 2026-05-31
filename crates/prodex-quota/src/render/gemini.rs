@@ -42,6 +42,20 @@ fn gemini_bucket_label(bucket: &GeminiQuotaBucket) -> String {
         .unwrap_or_else(|| "gemini".to_string())
 }
 
+fn gemini_bucket_remaining_percent(bucket: &GeminiQuotaBucket) -> Option<i64> {
+    if let Some(fraction) = bucket.remaining_fraction {
+        return Some((fraction * 100.0).round() as i64);
+    }
+    let GeminiBucketRemaining {
+        remaining,
+        total: Some(total),
+    } = gemini_bucket_remaining(bucket)?
+    else {
+        return None;
+    };
+    (total > 0).then(|| ((remaining as f64 / total as f64) * 100.0).round() as i64)
+}
+
 fn gemini_blocked_buckets(info: &GeminiQuotaInfo) -> Vec<String> {
     info.buckets
         .iter()
@@ -91,16 +105,34 @@ pub fn format_gemini_main_quota(info: &GeminiQuotaInfo) -> String {
     if info.buckets.is_empty() {
         return "-".to_string();
     }
-    let mut parts = info
+    let percents = info
         .buckets
         .iter()
-        .take(3)
-        .map(format_gemini_bucket_summary)
+        .filter_map(gemini_bucket_remaining_percent)
         .collect::<Vec<_>>();
-    if info.buckets.len() > parts.len() {
-        parts.push(format!("+{}", info.buckets.len() - parts.len()));
+    if let Some(percent) = percents.iter().copied().min() {
+        let bucket_count = info.buckets.len();
+        return if bucket_count == 1 {
+            format!("gemini {percent}% left")
+        } else {
+            format!("gemini {percent}% left ({bucket_count} buckets)")
+        };
     }
-    parts.join(" | ")
+
+    let known_amounts = info
+        .buckets
+        .iter()
+        .filter_map(gemini_bucket_remaining)
+        .map(|remaining| remaining.remaining)
+        .collect::<Vec<_>>();
+    if known_amounts.is_empty() {
+        "gemini quota unknown".to_string()
+    } else {
+        format!(
+            "gemini {} left",
+            known_amounts.iter().copied().min().unwrap_or(0)
+        )
+    }
 }
 
 pub(super) fn gemini_reset_epoch(info: &GeminiQuotaInfo) -> Option<i64> {

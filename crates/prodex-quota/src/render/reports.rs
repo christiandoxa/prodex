@@ -178,6 +178,16 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
                 |value| format!("resets: {value}"),
             )),
         },
+        Ok(ProviderQuotaSnapshot::External(info)) => QuotaReportViewData {
+            email: display_optional(info.account.as_deref()).to_string(),
+            plan: display_optional(info.plan.as_deref()).to_string(),
+            main: info.main.clone(),
+            status: info.status.clone(),
+            resets: Some(info.reset.as_ref().map_or_else(
+                || "resets: unavailable".to_string(),
+                |value| format!("resets: {value}"),
+            )),
+        },
         Err(err) => QuotaReportViewData {
             email: "-".to_string(),
             plan: "-".to_string(),
@@ -304,7 +314,9 @@ fn quota_report_openai_email(report: &QuotaReport) -> Option<&str> {
             .as_deref()
             .map(str::trim)
             .filter(|email| !email.is_empty()),
-        ProviderQuotaSnapshot::Copilot(_) | ProviderQuotaSnapshot::Gemini(_) => None,
+        ProviderQuotaSnapshot::Copilot(_)
+        | ProviderQuotaSnapshot::Gemini(_)
+        | ProviderQuotaSnapshot::External(_) => None,
     }
 }
 
@@ -553,6 +565,11 @@ fn quota_report_status_rank(report: &QuotaReport) -> usize {
         Ok(ProviderQuotaSnapshot::Copilot(_)) => 1,
         Ok(ProviderQuotaSnapshot::Gemini(info)) if gemini_quota_is_ready(info) => 0,
         Ok(ProviderQuotaSnapshot::Gemini(_)) => 1,
+        Ok(ProviderQuotaSnapshot::External(info)) => match info.available {
+            Some(true) => 0,
+            Some(false) => 1,
+            None => 1,
+        },
         Err(_) => 2,
     }
 }
@@ -562,5 +579,6 @@ fn quota_report_earliest_main_reset_epoch(report: &QuotaReport) -> Option<i64> {
         ProviderQuotaSnapshot::OpenAi(usage) => earliest_required_main_reset_epoch(usage),
         ProviderQuotaSnapshot::Copilot(info) => copilot_reset_epoch(info),
         ProviderQuotaSnapshot::Gemini(info) => gemini_reset_epoch(info),
+        ProviderQuotaSnapshot::External(_) => None,
     }
 }

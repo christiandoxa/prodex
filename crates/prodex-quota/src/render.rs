@@ -6,11 +6,13 @@ use terminal_ui::{
     panel_label_width, section_header_with_width, text_width, wrap_text,
 };
 
+#[cfg(test)]
+use super::ExternalQuotaDetail;
 use super::{
-    BlockedLimit, CopilotQuotaInfo, GeminiQuotaBucket, GeminiQuotaInfo, MainWindowSnapshot,
-    ProviderQuotaSnapshot, QuotaReport, QuotaReportSort, RenderedQuotaReportWindow,
-    RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
-    RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
+    BlockedLimit, CopilotQuotaInfo, ExternalQuotaInfo, GeminiQuotaBucket, GeminiQuotaInfo,
+    MainWindowSnapshot, ProviderQuotaSnapshot, QuotaReport, QuotaReportSort,
+    RenderedQuotaReportWindow, RuntimeQuotaPressureBand, RuntimeQuotaSummary,
+    RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
 };
 
 mod copilot;

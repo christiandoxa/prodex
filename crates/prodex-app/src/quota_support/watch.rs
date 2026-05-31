@@ -295,7 +295,7 @@ fn filter_quota_reports_by_provider(
 ) -> Vec<QuotaReport> {
     reports
         .iter()
-        .filter(|report| provider_filter.matches(&report.provider))
+        .filter(|report| provider_filter.matches_report(report))
         .cloned()
         .collect()
 }
@@ -474,7 +474,7 @@ fn quota_watch_max_scroll_offset(
     match snapshot {
         AllQuotaWatchSnapshot::Reports { reports, .. } => reports
             .iter()
-            .filter(|report| provider_filter.matches(&report.provider))
+            .filter(|report| provider_filter.matches_report(report))
             .count()
             .saturating_sub(1),
         _ => 0,
@@ -724,8 +724,13 @@ mod tests {
         );
         assert_eq!(
             QuotaProviderFilter::Copilot.next(),
-            QuotaProviderFilter::All
+            QuotaProviderFilter::DeepSeek
         );
+        assert_eq!(
+            QuotaProviderFilter::DeepSeek.next(),
+            QuotaProviderFilter::Local
+        );
+        assert_eq!(QuotaProviderFilter::Local.next(), QuotaProviderFilter::All);
     }
 
     #[test]
@@ -746,7 +751,14 @@ mod tests {
             QuotaProviderFilter::parse("github-copilot").unwrap(),
             QuotaProviderFilter::Copilot
         );
-        assert!(QuotaProviderFilter::parse("deepseek").is_err());
+        assert_eq!(
+            QuotaProviderFilter::parse("deepseek").unwrap(),
+            QuotaProviderFilter::DeepSeek
+        );
+        assert_eq!(
+            QuotaProviderFilter::parse("openai-compatible").unwrap(),
+            QuotaProviderFilter::Local
+        );
 
         assert!(QuotaProviderFilter::OpenAi.matches(&ProfileProvider::Openai));
         assert!(
