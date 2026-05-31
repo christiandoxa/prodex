@@ -1275,6 +1275,30 @@ fn sanitize_profile_slug(value: &str) -> String {
     }
 }
 
+pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
+    let paths = AppPaths::discover()?;
+    let state = AppState::load(&paths)?;
+    let profile_name = resolve_profile_name(&state, args.selected_profile())?;
+    let codex_home = state
+        .profiles
+        .get(&profile_name)
+        .with_context(|| format!("profile '{}' is missing", profile_name))?;
+    if !codex_home.provider.supports_codex_runtime() {
+        bail!(
+            "profile '{}' uses {}. `prodex logout` currently supports OpenAI/Codex profiles only.",
+            profile_name,
+            codex_home.provider.display_name()
+        );
+    }
+    let codex_home = codex_home.codex_home.clone();
+
+    let status = run_child_plan(
+        &codex_child_plan(codex_home.clone(), vec![OsString::from("logout")]),
+        None,
+    )?;
+    exit_with_status(status)
+}
+
 #[cfg(test)]
 mod login_menu_tests {
     use super::*;
@@ -1367,28 +1391,4 @@ mod login_menu_tests {
             LoginMenuKey::Digit(8)
         );
     }
-}
-
-pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
-    let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
-    let profile_name = resolve_profile_name(&state, args.selected_profile())?;
-    let codex_home = state
-        .profiles
-        .get(&profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    if !codex_home.provider.supports_codex_runtime() {
-        bail!(
-            "profile '{}' uses {}. `prodex logout` currently supports OpenAI/Codex profiles only.",
-            profile_name,
-            codex_home.provider.display_name()
-        );
-    }
-    let codex_home = codex_home.codex_home.clone();
-
-    let status = run_child_plan(
-        &codex_child_plan(codex_home.clone(), vec![OsString::from("logout")]),
-        None,
-    )?;
-    exit_with_status(status)
 }

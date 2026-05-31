@@ -803,9 +803,7 @@ mod tests {
 
     #[test]
     fn gemini_sse_reader_maps_embedded_error_to_failed_event() {
-        let stream = concat!(
-            "data: {\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"quota busy\"}}\n\n",
-        );
+        let stream = "data: {\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"quota busy\"}}\n\n";
         let mut reader = RuntimeGeminiGenerateSseReader::new(
             std::io::Cursor::new(stream.as_bytes()),
             9,

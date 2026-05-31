@@ -872,8 +872,7 @@ mod tests {
 
     #[test]
     fn deepseek_sse_reader_maps_embedded_error_to_failed_event() {
-        let stream =
-            concat!("data: {\"error\":{\"type\":\"rate_limit_error\",\"message\":\"busy\"}}\n\n",);
+        let stream = "data: {\"error\":{\"type\":\"rate_limit_error\",\"message\":\"busy\"}}\n\n";
         let mut reader = RuntimeDeepSeekChatSseReader::new(
             std::io::Cursor::new(stream.as_bytes()),
             7,
