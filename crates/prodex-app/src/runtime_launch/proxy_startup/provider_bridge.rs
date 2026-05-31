@@ -399,8 +399,6 @@ pub(super) fn runtime_provider_error_class(
     }
     if status >= 500 {
         RuntimeProviderErrorClass::Transient
-    } else if status >= 400 {
-        RuntimeProviderErrorClass::Fatal
     } else {
         RuntimeProviderErrorClass::Fatal
     }

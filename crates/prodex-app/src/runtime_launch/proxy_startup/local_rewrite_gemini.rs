@@ -175,14 +175,13 @@ pub(super) fn send_runtime_gemini_upstream_request(
                         RuntimeProviderErrorClass::Quota
                             | RuntimeProviderErrorClass::RateLimit
                             | RuntimeProviderErrorClass::Transient
-                    ) {
-                        if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
-                            pool.remember_model_cooldown(
-                                &selected.profile_name,
-                                &translated.model,
-                                delay_ms,
-                            );
-                        }
+                    ) && let Some(pool) = shared.gemini_oauth_pool.as_ref()
+                    {
+                        pool.remember_model_cooldown(
+                            &selected.profile_name,
+                            &translated.model,
+                            delay_ms,
+                        );
                     }
                     if runtime_provider_should_retry_with_next_model(class)
                         && model_index + 1 < model_chain.len()
