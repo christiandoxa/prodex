@@ -1,8 +1,8 @@
 # Quick Start
 
-One Prodex profile pool for OpenAI-backed routing, plus direct pass-through when a profile selects a different upstream `model_provider`.
+One Prodex profile pool for OpenAI-backed routing, plus runtime provider bridges for Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex quota` also supports Google Gemini OAuth profiles and imported Copilot accounts through their provider quota APIs. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s --provider gemini|anthropic|copilot|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` also supports Google Gemini OAuth profiles and imported Copilot accounts through their provider quota APIs. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, `prodex quota` is unavailable for that profile, and `prodex claude` is unsupported.
 
 For contributors: this is a Cargo workspace. `src/main.rs` is the binary entrypoint, `src/lib.rs` is a compatibility shim, application orchestration lives under `crates/prodex-app/`, and reusable leaf crates live under `crates/`.
 
@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.138.0`:
+The current local version in this repo is `0.139.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.138.0
+npm install -g @christiandoxa/prodex@0.139.0
 ```
 
 Dependency status in this repo:
@@ -122,6 +122,7 @@ prodex profile import claude
 prodex profile import copilot
 prodex quota --all
 prodex quota --all --auth no-auth --once
+prodex quota --all --detail --provider openai
 prodex session list
 prodex info
 ```
@@ -132,7 +133,7 @@ prodex info
 prodex quota --all --once
 ```
 
-In the live `prodex quota --all --detail` view, press `f` to cycle provider filters: `all`, `openai`, `gemini`.
+In the live `prodex quota --all --detail` view, press `f` to cycle provider filters: `all`, `openai`, `gemini`, `anthropic`, `copilot`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, or `--provider copilot` to start locked to one provider.
 
 Use `prodex session list` to inspect shared Codex parent sessions, or `prodex session current` to show parent sessions started from the current directory. Add `--include-subagents` only when you explicitly need spawned agent sessions for diagnostics.
 

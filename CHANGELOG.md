@@ -2,6 +2,27 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.139.0 - 2026-05-31
+
+### CLI
+
+- Correct quota availability count (`6f545db`)
+- Improve multi-provider routing and quota UX (`00c49e9`)
+
+## 0.138.0 - 2026-05-31
+
+### Runtime
+
+- Add Claude OAuth and Copilot profile rotation (`b94a122`)
+- Refresh Gemini OAuth on auth failures (`0fffe21`)
+
+## 0.137.0 - 2026-05-31
+
+### Runtime
+
+- Satisfy provider bridge lints (`376432f`)
+- Unify provider bridge routing (`6d9e118`)
+
 ## 0.136.0 - 2026-05-31
 
 ### Runtime
@@ -60,21 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Skip already published packages (`acfe62a`)
 - Tolerate missing thinking replay (`7828df3`)
-
-## 0.127.0 - 2026-05-27
-
-### Misc
-
-- Skip replayed tool outputs (`06e9c98`)
-
-## 0.126.0 - 2026-05-27
-
-### Misc
-
-- Keep tool output adjacent (`3492005`)
-
-## 0.125.0 - 2026-05-27
-
-### Misc
-
-- Replay reasoning before tool output (`43b77d6`)
