@@ -38,6 +38,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT: usize = 4096;
 const RUNTIME_GEMINI_LOCAL_RETRY_LIMIT: usize = 9;
 
+#[path = "local_rewrite_gemini_auth.rs"]
+mod local_rewrite_gemini_auth;
+
 #[derive(Clone)]
 pub(super) struct RuntimeGeminiOAuthPool {
     state: Arc<Mutex<RuntimeGeminiOAuthPoolState>>,
@@ -97,7 +100,8 @@ pub(super) fn send_runtime_gemini_upstream_request(
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
     let attempts = runtime_gemini_auth_attempts(auth, shared.gemini_oauth_pool.as_ref(), &body)?;
-    'auth_attempts: for (attempt_index, selected) in attempts.iter().enumerate() {
+    let attempt_count = attempts.len();
+    'auth_attempts: for (attempt_index, mut selected) in attempts.into_iter().enumerate() {
         let requested_model = runtime_provider_model_from_body(&body)
             .unwrap_or_else(|| prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string());
         let model_chain = if responses_route {
@@ -136,6 +140,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 translated.stream,
             );
             let mut rate_limit_retry_index = 0;
+            let mut auth_refresh_attempted = false;
             loop {
                 let response = send_runtime_local_rewrite_prepared_request(
                     request_id,
@@ -228,7 +233,63 @@ pub(super) fn send_runtime_gemini_upstream_request(
                                 ],
                             ),
                         );
-                        if !selected.hard_affinity && attempt_index + 1 < attempts.len() {
+                        if !auth_refresh_attempted
+                            && let Some(pool) = shared.gemini_oauth_pool.as_ref()
+                        {
+                            auth_refresh_attempted = true;
+                            match pool.refresh_profile_auth(
+                                &selected.profile_name,
+                                selected.hard_affinity,
+                            ) {
+                                Ok(Some(refreshed)) => {
+                                    selected = refreshed;
+                                    runtime_proxy_log(
+                                        &shared.runtime_shared,
+                                        runtime_proxy_structured_log_message(
+                                            "local_rewrite_provider_auth_refresh",
+                                            [
+                                                runtime_proxy_log_field(
+                                                    "request",
+                                                    request_id.to_string(),
+                                                ),
+                                                runtime_proxy_log_field("provider", "gemini"),
+                                                runtime_proxy_log_field(
+                                                    "profile",
+                                                    selected.profile_name.as_str(),
+                                                ),
+                                                runtime_proxy_log_field(
+                                                    "status",
+                                                    status.to_string(),
+                                                ),
+                                            ],
+                                        ),
+                                    );
+                                    continue;
+                                }
+                                Ok(None) => {}
+                                Err(err) => {
+                                    runtime_proxy_log(
+                                        &shared.runtime_shared,
+                                        runtime_proxy_structured_log_message(
+                                            "local_rewrite_provider_auth_refresh_failed",
+                                            [
+                                                runtime_proxy_log_field(
+                                                    "request",
+                                                    request_id.to_string(),
+                                                ),
+                                                runtime_proxy_log_field("provider", "gemini"),
+                                                runtime_proxy_log_field(
+                                                    "profile",
+                                                    selected.profile_name.as_str(),
+                                                ),
+                                                runtime_proxy_log_field("error", err.to_string()),
+                                            ],
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        if !selected.hard_affinity && attempt_index + 1 < attempt_count {
                             continue 'auth_attempts;
                         }
                     }
@@ -236,7 +297,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                         status,
                         selected.hard_affinity,
                         attempt_index,
-                        attempts.len(),
+                        attempt_count,
                     ) && (status == 429 || quota_blocked)
                     {
                         runtime_proxy_log(

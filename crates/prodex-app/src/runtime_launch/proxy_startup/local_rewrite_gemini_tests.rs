@@ -4,6 +4,7 @@ use super::{
     runtime_gemini_remember_bindings_from_responses_body,
     runtime_gemini_should_rotate_after_quota_response,
 };
+use crate::GeminiOAuthSecret;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -150,6 +151,37 @@ fn gemini_oauth_pool_model_cooldown_is_model_scoped() {
 
     assert_eq!(attempts[0].profile_name, "alpha");
     assert_eq!(attempts[1].profile_name, "beta");
+}
+
+#[test]
+fn gemini_oauth_pool_updates_refreshed_auth() {
+    let pool = gemini_pool(&["alpha"]);
+    let refreshed = GeminiOAuthSecret {
+        auth_mode: "gemini_oauth".to_string(),
+        access_token: "token-refreshed".to_string(),
+        refresh_token: Some("refresh-alpha".to_string()),
+        token_type: Some("Bearer".to_string()),
+        scope: None,
+        expiry_date: None,
+        email: "alpha-refreshed@example.com".to_string(),
+        project_id: Some("project-refreshed".to_string()),
+    };
+
+    let selected = pool
+        .remember_refreshed_auth("alpha", refreshed, false)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(selected.profile_name, "alpha");
+    assert!(!selected.hard_affinity);
+    let state = pool.state.lock().unwrap();
+    let profile = state.profile_by_name("alpha").unwrap();
+    assert_eq!(profile.access_token, "token-refreshed");
+    assert_eq!(
+        profile.email.as_deref(),
+        Some("alpha-refreshed@example.com")
+    );
+    assert_eq!(profile.project_id.as_deref(), Some("project-refreshed"));
 }
 
 #[test]

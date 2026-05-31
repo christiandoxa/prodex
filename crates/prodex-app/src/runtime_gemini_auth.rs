@@ -113,10 +113,22 @@ pub(crate) fn login_with_google_oauth(codex_home: &Path) -> Result<GeminiOAuthSe
 pub(crate) fn refresh_gemini_oauth_secret_if_needed(
     codex_home: &Path,
 ) -> Result<GeminiOAuthSecret> {
-    let mut secret = read_gemini_oauth_secret(codex_home)?;
+    let secret = read_gemini_oauth_secret(codex_home)?;
     if !gemini_oauth_secret_expired(&secret) {
         return Ok(secret);
     }
+    refresh_gemini_oauth_secret(codex_home, secret)
+}
+
+pub(crate) fn force_refresh_gemini_oauth_secret(codex_home: &Path) -> Result<GeminiOAuthSecret> {
+    let secret = read_gemini_oauth_secret(codex_home)?;
+    refresh_gemini_oauth_secret(codex_home, secret)
+}
+
+fn refresh_gemini_oauth_secret(
+    codex_home: &Path,
+    mut secret: GeminiOAuthSecret,
+) -> Result<GeminiOAuthSecret> {
     let refresh_token = secret.refresh_token.as_deref().context(
         "Gemini OAuth refresh token is missing; run `prodex login` and choose Sign in with Google",
     )?;
@@ -216,7 +228,7 @@ fn fetch_gemini_quota_json_with_code_assist_endpoint(
         .build()
         .context("failed to build Gemini quota HTTP client")?;
     let mut secret = refresh_gemini_oauth_secret_if_needed(codex_home)?;
-    let project_id = resolve_gemini_quota_project_id(
+    let mut project_id = resolve_gemini_quota_project_id(
         &client,
         codex_home,
         &mut secret,
@@ -224,7 +236,22 @@ fn fetch_gemini_quota_json_with_code_assist_endpoint(
         code_assist_endpoint,
     )?;
     let mut value =
-        retrieve_gemini_user_quota(&client, &secret, &project_id, code_assist_endpoint)?;
+        match retrieve_gemini_user_quota(&client, &secret, &project_id, code_assist_endpoint) {
+            Ok(value) => value,
+            Err(err) if gemini_error_is_http_401(&err) => {
+                secret = force_refresh_gemini_oauth_secret(codex_home)
+                    .context("Gemini quota auth failed and OAuth token refresh failed")?;
+                project_id = resolve_gemini_quota_project_id(
+                    &client,
+                    codex_home,
+                    &mut secret,
+                    provider_project_id,
+                    code_assist_endpoint,
+                )?;
+                retrieve_gemini_user_quota(&client, &secret, &project_id, code_assist_endpoint)?
+            }
+            Err(err) => return Err(err),
+        };
     if let Some(object) = value.as_object_mut() {
         object.insert("email".to_string(), Value::String(secret.email.clone()));
         object.insert("project_id".to_string(), Value::String(project_id));
@@ -292,6 +319,11 @@ fn retrieve_gemini_user_quota(
         );
     }
     serde_json::from_str(&body).context("failed to parse Gemini quota response")
+}
+
+fn gemini_error_is_http_401(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.to_string().contains("HTTP 401"))
 }
 
 fn gemini_oauth_authorize_url(redirect_uri: &str, state: &str) -> Result<String> {
