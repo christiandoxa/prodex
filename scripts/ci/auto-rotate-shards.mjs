@@ -32,6 +32,7 @@ const AUTO_ROTATE_SHARDS = Object.freeze([
     id: "run-broker-recovery",
     label: "run broker recovery",
     filters: ["run::run_recovers_when_runtime_broker_registry_points_to_a_dead_pid"],
+    exclusive: true,
   },
   {
     id: "run-fast-passthrough",
@@ -183,14 +184,37 @@ async function runShard(shard, options) {
 
 async function runShardsParallel(shards, options) {
   if (options.dryRun) {
-    process.stdout.write(`dry-run: ${shards.length} auto-rotate shard(s), jobs=${options.jobs}\n`);
+    const exclusiveCount = shards.filter((shard) => shard.exclusive).length;
+    process.stdout.write(
+      `dry-run: ${shards.length} auto-rotate shard(s), jobs=${options.jobs}, exclusive=${exclusiveCount}\n`,
+    );
   }
 
-  const queue = [...shards];
+  const exclusiveShards = shards.filter((shard) => shard.exclusive);
+  const queue = shards.filter((shard) => !shard.exclusive);
   const failures = [];
   const shardTimings = [];
   const stepTimings = [];
-  const workerCount = Math.max(1, Math.min(options.jobs, shards.length || 1));
+  const workerCount = Math.max(1, Math.min(options.jobs, queue.length || 1));
+
+  for (const shard of exclusiveShards) {
+    try {
+      const timing = await runShard(shard, options);
+      shardTimings.push(timing);
+      stepTimings.push(...timing.stepTimings);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      [
+        `${failures.length} auto-rotate shard(s) failed:`,
+        ...failures.map((error) => `  - ${error instanceof Error ? error.message : String(error)}`),
+      ].join("\n"),
+    );
+  }
 
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
