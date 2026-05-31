@@ -2,10 +2,11 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.135.0 - 2026-05-30
+## 0.136.0 - 2026-05-31
 
 ### Runtime
 
+- Improve provider quotas and tool routing (`e94fd60`)
 - Improve Gemini rate-limit retries (`16fcfe8`)
 
 ## 0.134.0 - 2026-05-29
