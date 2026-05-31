@@ -1,5 +1,4 @@
 use super::*;
-
 #[derive(Debug, Clone)]
 enum AllQuotaWatchSnapshot {
     Loading {
@@ -18,9 +17,7 @@ enum AllQuotaWatchSnapshot {
         message: String,
     },
 }
-
 const QUOTA_WATCH_INPUT_POLL_MS: u64 = 100;
-
 enum QuotaWatchCommand {
     Up,
     Down,
@@ -28,20 +25,17 @@ enum QuotaWatchCommand {
     Filter,
     Quit,
 }
-
 enum QuotaWatchCommandOutcome {
     Continue(usize),
     Sort,
     Filter,
     Quit,
 }
-
 struct AllQuotaWatchRefresh {
     receiver: Receiver<AllQuotaWatchSnapshot>,
     sender: mpsc::Sender<AllQuotaWatchSnapshot>,
     in_flight: bool,
 }
-
 impl AllQuotaWatchRefresh {
     fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
