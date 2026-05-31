@@ -2,12 +2,23 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.140.0 - 2026-05-31
+
+### CLI
+
+- Add external provider quota views (`c04696f`)
+
 ## 0.139.0 - 2026-05-31
 
 ### CLI
 
 - Correct quota availability count (`6f545db`)
 - Improve multi-provider routing and quota UX (`00c49e9`)
+
+### Misc
+
+- Remove wildcard sse test imports (`b6aff72`)
+- Satisfy rust 1.96 clippy (`f304168`)
 
 ## 0.138.0 - 2026-05-31
 
@@ -74,10 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Repair tool replay and share super history (`7bea070`)
-
-## 0.128.0 - 2026-05-28
-
-### Misc
-
-- Skip already published packages (`acfe62a`)
-- Tolerate missing thinking replay (`7828df3`)
