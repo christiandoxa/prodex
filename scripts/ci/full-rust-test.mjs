@@ -21,6 +21,8 @@ const WORKSPACE_SERIAL_SKIP_ARGS = Object.freeze([
   "super_mode::",
   "--skip",
   "continuity_failure_reason_metrics_",
+  "--skip",
+  "rtk::tests::",
 ]);
 
 function defaultTestThreads() {
@@ -103,6 +105,7 @@ function printHelp() {
       "  - prebuild all all-features workspace test binaries once",
       "  - run workspace-safe all-features tests with parallel libtest threads",
       "  - run global-cache broker-log metrics tests serial",
+      "  - run temp-executable rtk wrapper tests serial",
       "  - run auto_rotate integration tests as parallel serial shards",
     ].join("\n") + "\n",
   );
@@ -155,6 +158,22 @@ function workspaceSteps(args) {
         "--lib",
         "--all-features",
         "continuity_failure_reason_metrics_",
+        "--",
+        "--test-threads=1",
+      ],
+      failOnZeroTests: true,
+    },
+    {
+      label: "workspace:caveman-rtk-serial",
+      command: "cargo",
+      args: [
+        "test",
+        "-q",
+        "-p",
+        "prodex-caveman-assets",
+        "--lib",
+        "--all-features",
+        "rtk::tests::",
         "--",
         "--test-threads=1",
       ],
