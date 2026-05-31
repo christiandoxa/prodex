@@ -27,7 +27,9 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         let Ok(snapshot) = &report.result else {
             continue;
         };
-        aggregate.available_profiles += 1;
+        if provider_quota_snapshot_is_available(snapshot) {
+            aggregate.available_profiles += 1;
+        }
         let ProviderQuotaSnapshot::OpenAi(usage) = snapshot else {
             continue;
         };
@@ -57,6 +59,14 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
     }
 
     aggregate
+}
+
+fn provider_quota_snapshot_is_available(snapshot: &ProviderQuotaSnapshot) -> bool {
+    match snapshot {
+        ProviderQuotaSnapshot::OpenAi(usage) => collect_blocked_limits(usage, false).is_empty(),
+        ProviderQuotaSnapshot::Copilot(info) => copilot_quota_is_ready(info),
+        ProviderQuotaSnapshot::Gemini(info) => gemini_quota_is_ready(info),
+    }
 }
 
 pub(super) fn render_quota_pool_summary_lines(

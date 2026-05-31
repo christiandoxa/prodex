@@ -121,6 +121,25 @@ fn quota_summary_marks_exhausted_window() {
 }
 
 #[test]
+fn quota_pool_available_count_excludes_blocked_profiles() {
+    let reports = vec![
+        openai_report(
+            "ready",
+            usage_with_main_windows(80, 1_700_001_800, 95, 1_700_259_200),
+        ),
+        openai_report(
+            "blocked",
+            usage_with_main_windows(0, 1_700_003_600, 80, 1_700_086_400),
+        ),
+    ];
+
+    let output = render_quota_reports_with_layout(&reports, true, None, 90);
+
+    assert!(output.contains("Available:"));
+    assert!(output.contains("1/2 profile"));
+}
+
+#[test]
 fn profile_quota_render_contains_core_fields() {
     let usage = UsageResponse {
         email: Some("me@example.com".to_string()),
