@@ -18,6 +18,7 @@ Examples:
   prodex profile export
   prodex profile export backup.json
   prodex profile import backup.json
+  prodex profile import claude
   prodex profile import copilot
   prodex profile import copilot --name copilot-main --activate
   prodex profile import-current main
@@ -28,7 +29,8 @@ Examples:
   prodex login
   prodex login --profile main
   prodex login --device-auth
-  prodex login --with-google";
+  prodex login --with-google
+  prodex login --with-claude";
 pub const CLI_QUOTA_AFTER_HELP: &str = "\
 Best practice:
   Use `prodex quota --all --detail` for the clearest live quota view across profiles.
@@ -117,7 +119,9 @@ Notes:
   Use `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies in Claude-Mem recall.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
-  Use `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key` or DEEPSEEK_API_KEY.
+  Use `--provider anthropic` to route through Anthropic's OpenAI-compatible Chat Completions API. Sign in with `prodex login --with-claude`, or supply `--api-key`, ANTHROPIC_API_KEY, or ANTHROPIC_API_KEYS.
+  Use `--provider copilot` to route through GitHub Copilot's Responses API. Import Copilot profiles first for native account rotation, or supply `--api-key` / GITHUB_COPILOT_API_KEY.
+  Use `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
   Use `--provider gemini` to route through Gemini. Supply `--api-key` / GEMINI_API_KEY, or sign in with Google via `prodex login`.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied optimizer prefixes.";

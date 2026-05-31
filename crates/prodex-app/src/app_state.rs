@@ -24,6 +24,10 @@ impl ProfileProviderExt for ProfileProvider {
                 label: "gemini-oauth".to_string(),
                 quota_compatible: gemini_oauth_secret_path(codex_home).exists(),
             },
+            Self::Anthropic { .. } => AuthSummary {
+                label: "claude-oauth".to_string(),
+                quota_compatible: false,
+            },
             Self::Copilot { .. } => AuthSummary {
                 label: "copilot".to_string(),
                 quota_compatible: false,

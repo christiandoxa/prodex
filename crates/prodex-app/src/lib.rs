@@ -58,6 +58,7 @@ mod runtime_broker_shared;
 mod runtime_capabilities;
 mod runtime_caveman;
 mod runtime_claude;
+mod runtime_claude_auth;
 #[path = "runtime_tuning.rs"]
 mod runtime_config;
 mod runtime_core_shared;
@@ -108,6 +109,7 @@ use runtime_broker_shared::*;
 use runtime_capabilities::*;
 use runtime_caveman::*;
 use runtime_claude::*;
+use runtime_claude_auth::*;
 use runtime_config::*;
 use runtime_core_shared::*;
 use runtime_deepseek_config::*;

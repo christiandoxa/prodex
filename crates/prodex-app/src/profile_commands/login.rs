@@ -10,20 +10,22 @@ use std::process::ExitStatus;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod api_key;
+mod claude;
 mod google;
 
 use self::api_key::*;
+use self::claude::*;
 use self::google::*;
 use super::write_secret_text_file;
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, LogoutArgs, ProfileEntry,
     ProfileProvider, codex_child_plan, create_codex_home_if_missing, ensure_managed_profiles_root,
     exit_with_status, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
-    login_with_google_oauth, managed_profile_home_path, persist_login_home,
-    prepare_managed_codex_home, print_panel, read_auth_summary, read_gemini_oauth_secret,
-    remove_dir_if_exists, required_auth_json_text, resolve_profile_name, run_child_plan,
-    unique_profile_name_for_email, update_existing_profile_auth, write_gemini_oauth_secret,
-    write_profile_openai_compatible_base_url,
+    login_with_claude_oauth, login_with_google_oauth, managed_profile_home_path,
+    persist_login_home, prepare_managed_codex_home, print_panel, read_auth_summary,
+    read_gemini_oauth_secret, remove_dir_if_exists, required_auth_json_text, resolve_profile_name,
+    run_child_plan, unique_profile_name_for_email, update_existing_profile_auth,
+    write_gemini_oauth_secret, write_profile_openai_compatible_base_url,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +35,7 @@ enum LoginMethod {
     ApiKey,
     AccessToken,
     Google,
+    Claude,
     Status,
 }
 
@@ -81,6 +84,17 @@ fn login_into_profile(
                     profile.provider.display_name()
                 );
             }
+        } else if login_request.method == LoginMethod::Claude {
+            if matches!(
+                profile.provider,
+                ProfileProvider::Gemini { .. } | ProfileProvider::Copilot { .. }
+            ) {
+                bail!(
+                    "profile '{}' uses {}. Claude sign-in supports OpenAI/Codex placeholders or Anthropic Claude profiles.",
+                    profile_name,
+                    profile.provider.display_name()
+                );
+            }
         } else if !profile.provider.supports_codex_runtime() {
             bail!(
                 "profile '{}' uses {}. `prodex login --profile` currently supports OpenAI/Codex profiles only.",
@@ -108,6 +122,13 @@ fn login_into_profile(
         write_gemini_oauth_secret(&codex_home, &secret)?;
         remove_dir_if_exists(&login_home)?;
         finish_named_gemini_profile_login(paths, state, &profile_name, &codex_home, &secret)?;
+        return Ok(status);
+    }
+    if login_request.method == LoginMethod::Claude {
+        let codex_home = prepare_anthropic_profile_login_home(paths, state, &profile_name)?;
+        crate::copy_claude_oauth_credentials(&login_home, &codex_home)?;
+        remove_dir_if_exists(&login_home)?;
+        finish_named_anthropic_profile_login(paths, state, &profile_name, &codex_home)?;
         return Ok(status);
     }
 
@@ -228,6 +249,10 @@ fn login_with_auto_profile(
         finish_auto_login_for_gemini_profile(paths, state, &login_home, &secret)?;
         return Ok(status);
     }
+    if login_request.method == LoginMethod::Claude {
+        finish_auto_login_for_anthropic_profile(paths, state, &login_home)?;
+        return Ok(status);
+    }
 
     let auth_json = required_auth_json_text(&login_home)?;
     if read_auth_summary(&login_home).label == "api-key" {
@@ -342,6 +367,9 @@ fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<Ex
     if login_request.method == LoginMethod::Google {
         login_with_google_oauth(codex_home)?;
         return Ok(success_exit_status());
+    }
+    if login_request.method == LoginMethod::Claude {
+        return login_with_claude_oauth(codex_home, None);
     }
 
     if login_request.method == LoginMethod::ApiKey
@@ -471,6 +499,19 @@ fn prompt_login_request(
                 api_key_profile_name: None,
             })
         }
+        LoginMethod::Claude => {
+            if openai_base_url_specified {
+                bail!("--base-url is only supported for API key login");
+            }
+            Ok(LoginRequest {
+                method,
+                codex_args: Vec::new(),
+                api_key: None,
+                openai_base_url: None,
+                openai_base_url_specified: false,
+                api_key_profile_name: None,
+            })
+        }
         LoginMethod::AccessToken | LoginMethod::Status => Ok(LoginRequest {
             method,
             codex_args: Vec::new(),
@@ -501,6 +542,10 @@ fn prompt_login_method() -> Result<LoginMethod> {
         stderr,
         "  4. Sign in with Google\n     Use Gemini through Google's OAuth flow"
     )?;
+    writeln!(
+        stderr,
+        "  5. Sign in with Claude\n     Use Claude through Claude Code OAuth"
+    )?;
     loop {
         write!(stderr, "Select login method [1]: ")?;
         stderr.flush()?;
@@ -513,7 +558,8 @@ fn prompt_login_method() -> Result<LoginMethod> {
             "2" => return Ok(LoginMethod::DeviceCode),
             "3" => return Ok(LoginMethod::ApiKey),
             "4" => return Ok(LoginMethod::Google),
-            _ => writeln!(stderr, "Enter 1, 2, 3, or 4.")?,
+            "5" => return Ok(LoginMethod::Claude),
+            _ => writeln!(stderr, "Enter 1, 2, 3, 4, or 5.")?,
         }
     }
 }
@@ -630,6 +676,12 @@ fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
         .any(|arg| arg == "--with-google" || arg == "--google")
     {
         return LoginMethod::Google;
+    }
+    if codex_args
+        .iter()
+        .any(|arg| arg == "--with-claude" || arg == "--claude")
+    {
+        return LoginMethod::Claude;
     }
     if codex_args.iter().any(|arg| arg == "--with-access-token") {
         return LoginMethod::AccessToken;

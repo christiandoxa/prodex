@@ -8,12 +8,15 @@ use super::secrets::write_secret_text_file;
 use super::*;
 
 pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
+    if super::super::anthropic::is_claude_import_source(&args.path) {
+        return handle_import_claude_profile(&args);
+    }
     if super::super::copilot::is_copilot_import_source(&args.path) {
         return handle_import_copilot_profile(&args);
     }
     if args.name.is_some() || args.activate {
         bail!(
-            "--name and --activate are only supported for built-in import sources such as `copilot`"
+            "--name and --activate are only supported for built-in import sources such as `claude` or `copilot`"
         );
     }
 

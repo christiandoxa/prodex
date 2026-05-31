@@ -65,6 +65,12 @@ pub enum ProfileProvider {
         #[serde(default)]
         project_id: Option<String>,
     },
+    Anthropic {
+        #[serde(default)]
+        account: Option<String>,
+        #[serde(default)]
+        auth_method: Option<String>,
+    },
     Copilot {
         host: String,
         login: String,
@@ -81,6 +87,7 @@ impl ProfileProvider {
         match self {
             Self::Openai => "openai",
             Self::Gemini { .. } => "gemini",
+            Self::Anthropic { .. } => "anthropic",
             Self::Copilot { .. } => "copilot",
         }
     }
@@ -89,6 +96,7 @@ impl ProfileProvider {
         match self {
             Self::Openai => "OpenAI/Codex",
             Self::Gemini { .. } => "Google Gemini",
+            Self::Anthropic { .. } => "Anthropic Claude",
             Self::Copilot { .. } => "GitHub Copilot",
         }
     }
@@ -98,6 +106,7 @@ impl ProfileProvider {
             // Native OpenAI/Codex pool stays primary; other providers are fallback candidates.
             Self::Openai => 0,
             Self::Gemini { .. } => 1,
+            Self::Anthropic { .. } => 1,
             Self::Copilot { .. } => 1,
         }
     }
@@ -113,7 +122,7 @@ impl ProfileProvider {
                 login: stored_login,
                 ..
             } => stored_host.trim() == host.trim() && stored_login.trim() == login.trim(),
-            Self::Openai | Self::Gemini { .. } => false,
+            Self::Openai | Self::Gemini { .. } | Self::Anthropic { .. } => false,
         }
     }
 
@@ -123,7 +132,29 @@ impl ProfileProvider {
                 email: stored_email,
                 ..
             } => stored_email.trim().eq_ignore_ascii_case(email.trim()),
-            Self::Openai | Self::Copilot { .. } => false,
+            Self::Openai | Self::Anthropic { .. } | Self::Copilot { .. } => false,
+        }
+    }
+
+    pub fn anthropic_matches(&self, account: Option<&str>, auth_method: Option<&str>) -> bool {
+        match self {
+            Self::Anthropic {
+                account: stored_account,
+                auth_method: stored_auth_method,
+            } => {
+                let account_matches = match (stored_account.as_deref(), account) {
+                    (Some(left), Some(right)) => left.trim().eq_ignore_ascii_case(right.trim()),
+                    (None, None) => true,
+                    _ => false,
+                };
+                let auth_method_matches = match (stored_auth_method.as_deref(), auth_method) {
+                    (Some(left), Some(right)) => left.trim().eq_ignore_ascii_case(right.trim()),
+                    (None, _) => true,
+                    (_, None) => true,
+                };
+                account_matches && auth_method_matches
+            }
+            Self::Openai | Self::Gemini { .. } | Self::Copilot { .. } => false,
         }
     }
 }

@@ -5,6 +5,8 @@ use runtime_proxy_crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RuntimeProviderBridgeKind {
+    Anthropic,
+    Copilot,
     OpenAiResponses,
     DeepSeek,
     Gemini,
@@ -110,6 +112,76 @@ const RUNTIME_PROVIDER_DEEPSEEK_MODELS: &[RuntimeProviderModelSpec] = &[
     RuntimeProviderModelSpec {
         id: "deepseek-reasoner",
         owned_by: "deepseek",
+    },
+];
+
+const RUNTIME_PROVIDER_ANTHROPIC_MODELS: &[RuntimeProviderModelSpec] = &[
+    RuntimeProviderModelSpec {
+        id: "auto",
+        owned_by: "anthropic",
+    },
+    RuntimeProviderModelSpec {
+        id: "opus",
+        owned_by: "anthropic",
+    },
+    RuntimeProviderModelSpec {
+        id: "sonnet",
+        owned_by: "anthropic",
+    },
+    RuntimeProviderModelSpec {
+        id: "haiku",
+        owned_by: "anthropic",
+    },
+    RuntimeProviderModelSpec {
+        id: "claude-opus-4-8",
+        owned_by: "anthropic",
+    },
+    RuntimeProviderModelSpec {
+        id: "claude-sonnet-4-6",
+        owned_by: "anthropic",
+    },
+    RuntimeProviderModelSpec {
+        id: "claude-haiku-4-5",
+        owned_by: "anthropic",
+    },
+    RuntimeProviderModelSpec {
+        id: "claude-opus-4-6",
+        owned_by: "anthropic",
+    },
+    RuntimeProviderModelSpec {
+        id: "claude-opus-4-20250514",
+        owned_by: "anthropic",
+    },
+];
+
+const RUNTIME_PROVIDER_COPILOT_MODELS: &[RuntimeProviderModelSpec] = &[
+    RuntimeProviderModelSpec {
+        id: "auto",
+        owned_by: "github-copilot",
+    },
+    RuntimeProviderModelSpec {
+        id: "codex",
+        owned_by: "github-copilot",
+    },
+    RuntimeProviderModelSpec {
+        id: "gpt-5.1-codex",
+        owned_by: "github-copilot",
+    },
+    RuntimeProviderModelSpec {
+        id: "gpt-5.4",
+        owned_by: "github-copilot",
+    },
+    RuntimeProviderModelSpec {
+        id: "gpt-5.3-codex",
+        owned_by: "github-copilot",
+    },
+    RuntimeProviderModelSpec {
+        id: "claude-sonnet-4-6",
+        owned_by: "github-copilot",
+    },
+    RuntimeProviderModelSpec {
+        id: "gemini-3.1-pro-preview",
+        owned_by: "github-copilot",
     },
 ];
 
@@ -232,6 +304,8 @@ const RUNTIME_PROVIDER_ERROR_RULES: &[RuntimeProviderErrorRule] = &[
 
 pub(super) fn runtime_provider_label(kind: RuntimeProviderBridgeKind) -> &'static str {
     match kind {
+        RuntimeProviderBridgeKind::Anthropic => "anthropic",
+        RuntimeProviderBridgeKind::Copilot => "copilot",
         RuntimeProviderBridgeKind::OpenAiResponses => "openai",
         RuntimeProviderBridgeKind::DeepSeek => "deepseek",
         RuntimeProviderBridgeKind::Gemini => "gemini",
@@ -244,8 +318,13 @@ pub(super) fn runtime_provider_native_passthrough(
 ) -> bool {
     let path = path_without_query(path_and_query);
     match kind {
-        RuntimeProviderBridgeKind::OpenAiResponses => true,
+        RuntimeProviderBridgeKind::OpenAiResponses | RuntimeProviderBridgeKind::Copilot => true,
         RuntimeProviderBridgeKind::DeepSeek | RuntimeProviderBridgeKind::Gemini => {
+            !(path.ends_with("/responses")
+                || path.ends_with("/responses/compact")
+                || runtime_provider_models_path_suffix(path).is_some())
+        }
+        RuntimeProviderBridgeKind::Anthropic => {
             !(path.ends_with("/responses")
                 || path.ends_with("/responses/compact")
                 || runtime_provider_models_path_suffix(path).is_some())
@@ -330,6 +409,28 @@ pub(super) fn runtime_provider_model_fallback_chain(
     }
     let lower = model.to_ascii_lowercase();
     let chain: &[&str] = match kind {
+        RuntimeProviderBridgeKind::Anthropic => match lower.as_str() {
+            "" | "auto" | "default" => &[
+                prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
+                "claude-opus-4-8",
+                "claude-haiku-4-5",
+            ],
+            "opus" | "best" => &["claude-opus-4-8", "claude-sonnet-4-6"],
+            "sonnet" | "pro" => &["claude-sonnet-4-6", "claude-opus-4-8"],
+            "haiku" | "flash" => &["claude-haiku-4-5", "claude-sonnet-4-6"],
+            _ => return vec![model.to_string()],
+        },
+        RuntimeProviderBridgeKind::Copilot => match lower.as_str() {
+            "" | "auto" | "default" => &[
+                prodex_cli::SUPER_COPILOT_DEFAULT_MODEL,
+                "gpt-5.4",
+                "gpt-5.3-codex",
+            ],
+            "codex" | "pro" => &["gpt-5.1-codex", "gpt-5.3-codex", "gpt-5.4"],
+            "claude" | "sonnet" => &["claude-sonnet-4-6", "gpt-5.1-codex"],
+            "gemini" => &["gemini-3.1-pro-preview", "gpt-5.1-codex"],
+            _ => return vec![model.to_string()],
+        },
         RuntimeProviderBridgeKind::Gemini => match lower.as_str() {
             "" => &[prodex_cli::SUPER_GEMINI_DEFAULT_MODEL],
             "auto" | "auto-gemini-3" => &[
@@ -487,6 +588,8 @@ fn runtime_provider_model_catalog(
     kind: RuntimeProviderBridgeKind,
 ) -> &'static [RuntimeProviderModelSpec] {
     match kind {
+        RuntimeProviderBridgeKind::Anthropic => RUNTIME_PROVIDER_ANTHROPIC_MODELS,
+        RuntimeProviderBridgeKind::Copilot => RUNTIME_PROVIDER_COPILOT_MODELS,
         RuntimeProviderBridgeKind::OpenAiResponses => RUNTIME_PROVIDER_OPENAI_MODELS,
         RuntimeProviderBridgeKind::DeepSeek => RUNTIME_PROVIDER_DEEPSEEK_MODELS,
         RuntimeProviderBridgeKind::Gemini => RUNTIME_PROVIDER_GEMINI_MODELS,
@@ -666,6 +769,41 @@ mod tests {
     }
 
     #[test]
+    fn anthropic_and_copilot_models_endpoint_expose_provider_catalogs() {
+        let anthropic = runtime_provider_models_buffered_response(
+            RuntimeProviderBridgeKind::Anthropic,
+            "GET",
+            "/v1/models",
+        )
+        .unwrap();
+        let anthropic_body: serde_json::Value = serde_json::from_slice(&anthropic.body).unwrap();
+        let anthropic_models = anthropic_body["data"].as_array().unwrap();
+
+        assert!(
+            anthropic_models
+                .iter()
+                .any(|model| model["id"] == prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL)
+        );
+        assert!(anthropic_models.iter().any(|model| model["id"] == "opus"));
+
+        let copilot = runtime_provider_models_buffered_response(
+            RuntimeProviderBridgeKind::Copilot,
+            "GET",
+            "/models",
+        )
+        .unwrap();
+        let copilot_body: serde_json::Value = serde_json::from_slice(&copilot.body).unwrap();
+        let copilot_models = copilot_body["data"].as_array().unwrap();
+
+        assert!(
+            copilot_models
+                .iter()
+                .any(|model| model["id"] == prodex_cli::SUPER_COPILOT_DEFAULT_MODEL)
+        );
+        assert!(copilot_models.iter().any(|model| model["id"] == "codex"));
+    }
+
+    #[test]
     fn provider_model_fallback_supports_aliases_and_combo() {
         assert_eq!(
             runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "flash"),
@@ -677,6 +815,14 @@ mod tests {
                 "combo:deepseek-v4-pro,deepseek-v4-flash,deepseek-v4-pro"
             ),
             vec!["deepseek-v4-pro", "deepseek-v4-flash"]
+        );
+        assert_eq!(
+            runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Anthropic, "sonnet"),
+            vec!["claude-sonnet-4-6", "claude-opus-4-8"]
+        );
+        assert_eq!(
+            runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, "codex"),
+            vec!["gpt-5.1-codex", "gpt-5.3-codex", "gpt-5.4"]
         );
     }
 
@@ -720,6 +866,14 @@ mod tests {
         assert!(runtime_provider_native_passthrough(
             RuntimeProviderBridgeKind::DeepSeek,
             "/v1/chat/completions"
+        ));
+        assert!(!runtime_provider_native_passthrough(
+            RuntimeProviderBridgeKind::Anthropic,
+            "/v1/responses"
+        ));
+        assert!(runtime_provider_native_passthrough(
+            RuntimeProviderBridgeKind::Copilot,
+            "/v1/responses"
         ));
     }
 }

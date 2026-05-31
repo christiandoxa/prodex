@@ -1,21 +1,27 @@
 use super::*;
 
+mod anthropic_rewrite;
 mod deepseek_rewrite;
 mod deepseek_sse;
 mod gemini_rewrite;
 mod gemini_sse;
 mod local_rewrite;
+mod local_rewrite_copilot;
 mod local_rewrite_gemini;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_rate_limits;
 mod local_rewrite_response;
 mod provider_bridge;
 mod provider_tools;
+pub(crate) use anthropic_rewrite::{
+    RuntimeAnthropicAuth, RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth,
+};
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,
 };
+pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 
 #[cfg(test)]
 pub(crate) fn start_runtime_rotation_proxy(

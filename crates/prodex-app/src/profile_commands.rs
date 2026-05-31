@@ -4,6 +4,7 @@ use super::profile_identity::{
 use super::shared_codex_fs::{create_codex_home_if_missing, prepare_managed_codex_home};
 use super::*;
 
+mod anthropic;
 mod copilot;
 mod import_export;
 mod login;
@@ -12,7 +13,7 @@ mod remove;
 
 pub(crate) use self::copilot::{
     CopilotUserInfo, fetch_copilot_user_info_for_account, fetch_copilot_user_info_json_for_account,
-    handle_import_copilot_profile,
+    handle_import_copilot_profile, resolve_copilot_runtime_api_auth,
 };
 use self::import_export::write_secret_text_file;
 #[cfg(test)]
@@ -121,3 +122,4 @@ pub(super) fn update_existing_profile_auth(
 #[cfg(test)]
 #[path = "../tests/support/profile_commands_internal_harness.rs"]
 mod profile_commands_internal_tests;
+pub(crate) use self::anthropic::handle_import_claude_profile;

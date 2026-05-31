@@ -300,9 +300,23 @@ pub const SUPER_GEMINI_DEFAULT_MODEL: &str = "gemini-2.5-pro";
 const SUPER_GEMINI_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 pub const SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
 pub const SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
+pub const SUPER_ANTHROPIC_PROVIDER_ID: &str = "prodex-anthropic";
+const SUPER_ANTHROPIC_PROVIDER_NAME: &str = "Anthropic Claude";
+pub const SUPER_ANTHROPIC_DEFAULT_MODEL: &str = "claude-sonnet-4-6";
+const SUPER_ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
+pub const SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW: usize = 200_000;
+pub const SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT: usize = 180_000;
+pub const SUPER_COPILOT_PROVIDER_ID: &str = "prodex-copilot";
+const SUPER_COPILOT_PROVIDER_NAME: &str = "GitHub Copilot";
+pub const SUPER_COPILOT_DEFAULT_MODEL: &str = "gpt-5.1-codex";
+const SUPER_COPILOT_DEFAULT_BASE_URL: &str = "https://api.githubcopilot.com";
+pub const SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW: usize = 200_000;
+pub const SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT: usize = 180_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExternalProvider {
+    Anthropic,
+    Copilot,
     DeepSeek,
     Gemini,
 }
@@ -310,6 +324,8 @@ pub enum SuperExternalProvider {
 impl SuperExternalProvider {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Anthropic => "anthropic",
+            Self::Copilot => "copilot",
             Self::DeepSeek => "deepseek",
             Self::Gemini => "gemini",
         }
@@ -317,6 +333,8 @@ impl SuperExternalProvider {
 
     pub fn model_provider_id(self) -> &'static str {
         match self {
+            Self::Anthropic => SUPER_ANTHROPIC_PROVIDER_ID,
+            Self::Copilot => SUPER_COPILOT_PROVIDER_ID,
             Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_ID,
             Self::Gemini => SUPER_GEMINI_PROVIDER_ID,
         }
@@ -324,6 +342,8 @@ impl SuperExternalProvider {
 
     fn display_name(self) -> &'static str {
         match self {
+            Self::Anthropic => SUPER_ANTHROPIC_PROVIDER_NAME,
+            Self::Copilot => SUPER_COPILOT_PROVIDER_NAME,
             Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_NAME,
             Self::Gemini => SUPER_GEMINI_PROVIDER_NAME,
         }
@@ -331,6 +351,8 @@ impl SuperExternalProvider {
 
     fn default_model(self) -> &'static str {
         match self {
+            Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_MODEL,
+            Self::Copilot => SUPER_COPILOT_DEFAULT_MODEL,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_MODEL,
             Self::Gemini => SUPER_GEMINI_DEFAULT_MODEL,
         }
@@ -338,6 +360,8 @@ impl SuperExternalProvider {
 
     fn default_base_url(self) -> &'static str {
         match self {
+            Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_BASE_URL,
+            Self::Copilot => SUPER_COPILOT_DEFAULT_BASE_URL,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_BASE_URL,
             Self::Gemini => SUPER_GEMINI_DEFAULT_BASE_URL,
         }
@@ -345,6 +369,8 @@ impl SuperExternalProvider {
 
     fn default_context_window(self) -> usize {
         match self {
+            Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
+            Self::Copilot => SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
             Self::Gemini => SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW,
         }
@@ -352,6 +378,8 @@ impl SuperExternalProvider {
 
     fn default_auto_compact_token_limit(self) -> usize {
         match self {
+            Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT,
+            Self::Copilot => SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::Gemini => SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
         }
@@ -362,10 +390,12 @@ fn parse_super_external_provider(
     value: &str,
 ) -> std::result::Result<SuperExternalProvider, String> {
     match value.trim().to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => Ok(SuperExternalProvider::Anthropic),
+        "copilot" | "github-copilot" | "github_copilot" => Ok(SuperExternalProvider::Copilot),
         "deepseek" => Ok(SuperExternalProvider::DeepSeek),
         "gemini" => Ok(SuperExternalProvider::Gemini),
         other => Err(format!(
-            "invalid --provider: supported values are deepseek, gemini, got {other:?}"
+            "invalid --provider: supported values are anthropic, copilot, deepseek, gemini, got {other:?}"
         )),
     }
 }

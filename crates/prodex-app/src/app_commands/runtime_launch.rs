@@ -177,11 +177,24 @@ impl RuntimeLaunchSelection {
         );
         let gemini_external_provider =
             external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("gemini"));
+        let copilot_external_provider = external_provider.is_some_and(|provider| {
+            provider.eq_ignore_ascii_case("copilot")
+                || provider.eq_ignore_ascii_case("github-copilot")
+                || provider.eq_ignore_ascii_case("github_copilot")
+        });
+        let anthropic_external_provider = external_provider.is_some_and(|provider| {
+            provider.eq_ignore_ascii_case("anthropic") || provider.eq_ignore_ascii_case("claude")
+        });
         if requested.is_none()
             && (state.profiles.is_empty()
                 || runtime_launch_should_use_profileless_gemini(
                     state,
                     gemini_external_provider,
+                    external_provider_api_key,
+                )
+                || runtime_launch_should_use_profileless_external_provider(
+                    state,
+                    external_provider,
                     external_provider_api_key,
                 ))
             && profileless_model_provider
@@ -201,6 +214,10 @@ impl RuntimeLaunchSelection {
 
         let profile_name = if gemini_external_provider {
             resolve_gemini_runtime_launch_profile_name(state, requested)?
+        } else if copilot_external_provider {
+            resolve_copilot_runtime_launch_profile_name(state, requested)?
+        } else if anthropic_external_provider {
+            resolve_anthropic_runtime_launch_profile_name(state, requested)?
         } else {
             resolve_runtime_launch_profile_name(state, requested)?
         };

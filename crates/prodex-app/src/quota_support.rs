@@ -96,7 +96,9 @@ pub(crate) fn collect_quota_reports_with_auth_filter(
             ProfileProvider::Openai => read_profile_account_id_from_auth(&job.codex_home)
                 .ok()
                 .flatten(),
-            ProfileProvider::Gemini { .. } | ProfileProvider::Copilot { .. } => None,
+            ProfileProvider::Gemini { .. }
+            | ProfileProvider::Anthropic { .. }
+            | ProfileProvider::Copilot { .. } => None,
         };
         let result = fetch_profile_quota(&job.provider, &job.codex_home, base_url.as_deref())
             .map_err(|err| err.to_string());
@@ -165,6 +167,9 @@ pub(crate) fn fetch_profile_quota(
         ProfileProvider::Gemini { project_id, .. } => Ok(ProviderQuotaSnapshot::Gemini(
             fetch_gemini_quota(codex_home, project_id.as_deref())?,
         )),
+        ProfileProvider::Anthropic { .. } => {
+            bail!("quota is unavailable for Anthropic Claude profiles")
+        }
         ProfileProvider::Copilot { host, login, .. } => Ok(ProviderQuotaSnapshot::Copilot(
             fetch_copilot_user_info_for_account(host, login)?,
         )),
@@ -181,6 +186,9 @@ pub(crate) fn fetch_profile_quota_json(
         ProfileProvider::Openai => fetch_usage_json(codex_home, base_url),
         ProfileProvider::Gemini { project_id, .. } => {
             fetch_gemini_quota_json(codex_home, project_id.as_deref())
+        }
+        ProfileProvider::Anthropic { .. } => {
+            bail!("quota is unavailable for Anthropic Claude profiles")
         }
         ProfileProvider::Copilot { host, login, .. } => {
             fetch_copilot_user_info_json_for_account(host, login)

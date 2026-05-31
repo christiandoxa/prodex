@@ -26,6 +26,11 @@ use prodex_profile_export::{
 
 const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
 
+#[derive(Debug, Clone)]
+pub(crate) struct CopilotRuntimeApiAuth {
+    pub(crate) api_key: String,
+}
+
 #[derive(Debug)]
 struct CopilotImportContext {
     host: String,
@@ -332,9 +337,72 @@ fn resolve_copilot_account_token_from_config(
         ))
 }
 
-fn resolve_copilot_account_token(host: &str, login: &str) -> Result<String> {
+pub(crate) fn resolve_copilot_account_token(host: &str, login: &str) -> Result<String> {
     let config = read_copilot_config()?;
     resolve_copilot_account_token_from_config(&config, host, login)
+}
+
+pub(crate) fn resolve_copilot_runtime_api_auth(
+    host: &str,
+    login: &str,
+) -> Result<CopilotRuntimeApiAuth> {
+    let access_token = resolve_copilot_account_token(host, login)?;
+    refresh_copilot_runtime_api_auth(host, &access_token)
+}
+
+fn refresh_copilot_runtime_api_auth(
+    host: &str,
+    access_token: &str,
+) -> Result<CopilotRuntimeApiAuth> {
+    let client = Client::builder()
+        .connect_timeout(Duration::from_millis(QUOTA_HTTP_CONNECT_TIMEOUT_MS))
+        .timeout(Duration::from_millis(QUOTA_HTTP_READ_TIMEOUT_MS))
+        .build()
+        .context("failed to build Copilot runtime auth HTTP client")?;
+    let token_url = format!(
+        "{}/copilot_internal/v2/token",
+        copilot_user_api_origin(host)?
+    );
+    let response = client
+        .get(&token_url)
+        .header("Authorization", format!("token {access_token}"))
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .header("Editor-Version", "vscode/1.85.1")
+        .header("Editor-Plugin-Version", "copilot/1.155.0")
+        .header("User-Agent", "GithubCopilot/1.155.0")
+        .send()
+        .with_context(|| format!("failed to query {}", token_url))?;
+    let status = response.status();
+    let body = response
+        .bytes()
+        .with_context(|| format!("failed to read {}", token_url))?;
+    if !status.is_success() {
+        let body_text = format_response_body(&body);
+        if body_text.is_empty() {
+            bail!(
+                "Copilot runtime token refresh failed (HTTP {}) at {}",
+                status.as_u16(),
+                token_url
+            );
+        }
+        bail!(
+            "Copilot runtime token refresh failed (HTTP {}) at {}: {}",
+            status.as_u16(),
+            token_url,
+            body_text
+        );
+    }
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).with_context(|| format!("failed to parse {token_url}"))?;
+    let api_key = value
+        .get("token")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .context("Copilot runtime token response did not contain token")?;
+    Ok(CopilotRuntimeApiAuth { api_key })
 }
 
 fn fetch_copilot_user_info(context: &CopilotImportContext) -> Result<CopilotUserInfo> {

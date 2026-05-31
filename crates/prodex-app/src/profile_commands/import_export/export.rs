@@ -67,7 +67,9 @@ pub(in crate::profile_commands) fn build_profile_export_payload(
                     .with_context(|| format!("failed to parse {}", auth_path.display()))?;
                 auth_json
             }
-            ProfileProvider::Gemini { .. } | ProfileProvider::Copilot { .. } => String::new(),
+            ProfileProvider::Gemini { .. }
+            | ProfileProvider::Anthropic { .. }
+            | ProfileProvider::Copilot { .. } => String::new(),
         };
         profiles.push(ExportedProfile {
             name: name.clone(),

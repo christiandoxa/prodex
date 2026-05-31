@@ -357,6 +357,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     return Ok(RuntimeLocalRewriteUpstreamResult {
                         response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
                         gemini_context: None,
+                        copilot_context: None,
                     });
                 }
 
@@ -371,6 +372,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 return Ok(RuntimeLocalRewriteUpstreamResult {
                     response: RuntimeLocalRewriteUpstreamResponse::Live(response),
                     gemini_context,
+                    copilot_context: None,
                 });
             }
         }

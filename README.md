@@ -365,9 +365,10 @@ prodex login
 prodex profile add second
 prodex login --profile second
 prodex login --with-google
+prodex login --with-claude
 ```
 
-Interactive `prodex login` now asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, or Google sign-in for Gemini. For API-key profiles, you can also set an OpenAI-compatible backend URL:
+Interactive `prodex login` now asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, Google sign-in for Gemini, or Claude sign-in through Claude Code OAuth. For API-key profiles, you can also set an OpenAI-compatible backend URL:
 
 ```bash
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
@@ -398,6 +399,18 @@ Or run a one-off prompt:
 ```bash
 prodex exec "review this repo"
 ```
+
+</details>
+
+<details>
+<summary>Import a Claude Code account</summary>
+
+```bash
+prodex profile import claude
+prodex profile import claude --name claude-main --activate
+```
+
+This imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. You can also use `prodex login --with-claude` to sign in through Claude Code directly.
 
 </details>
 
@@ -630,6 +643,9 @@ RTK is still an external binary. Install it separately if `rtk gain` is unavaila
 ```bash
 prodex s
 prodex s exec "review this repo"
+ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6
+prodex profile import copilot
+prodex s --provider copilot --model gpt-5.1-codex
 DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
 prodex s --provider gemini
 prodex super
@@ -658,13 +674,32 @@ prodex super --mem-full
 
 Super also enables Smart Context Autopilot in the runtime proxy.
 
+Use `--provider anthropic` when you want the Codex/Super front end with Anthropic upstream:
+
+```bash
+prodex login --with-claude
+prodex s --provider anthropic --model claude-sonnet-4-6
+prodex s --provider anthropic --model claude-sonnet-4-6 --api-key "$ANTHROPIC_API_KEY"
+```
+
+If `--api-key` is omitted, Prodex uses the Anthropic profile created by `prodex login --with-claude` or `prodex profile import claude`. API-key mode still reads `ANTHROPIC_API_KEY`; `ANTHROPIC_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path injects a temporary `prodex-anthropic` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to Anthropic's OpenAI-compatible chat API, and keeps quota preflight disabled.
+
+Use `--provider copilot` when you want the Codex/Super front end with GitHub Copilot upstream:
+
+```bash
+prodex profile import copilot
+prodex s --provider copilot --model gpt-5.1-codex
+```
+
+Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens from GitHub before launch, rotates fresh native Responses requests across eligible profiles, and binds streaming response IDs back to the owning profile for continuations. `GITHUB_COPILOT_API_KEY` or `--api-key` can be used when you already have a Copilot runtime API token.
+
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 
 ```bash
 prodex s --provider deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KEY"
 ```
 
-If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight/account rotation disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
+If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
 
 Use `--provider gemini` when you want the Codex/Super front end with Gemini upstream:
 

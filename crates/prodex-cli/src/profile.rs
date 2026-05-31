@@ -58,13 +58,13 @@ pub struct ExportProfileArgs {
 
 #[derive(Args, Debug)]
 pub struct ImportProfileArgs {
-    /// Path to a profile export bundle created by `prodex profile export`, or the built-in source `copilot`.
+    /// Path to a profile export bundle created by `prodex profile export`, or a built-in source such as `claude` or `copilot`.
     #[arg(value_name = "PATH_OR_SOURCE")]
     pub path: PathBuf,
-    /// Override the imported profile name when using a built-in source such as `copilot`.
+    /// Override the imported profile name when using a built-in source such as `claude` or `copilot`.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,
-    /// Activate the imported profile immediately when using a built-in source such as `copilot`.
+    /// Activate the imported profile immediately when using a built-in source such as `claude` or `copilot`.
     #[arg(long)]
     pub activate: bool,
 }

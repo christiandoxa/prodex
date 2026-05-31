@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.137.0`:
+The current local version in this repo is `0.138.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.137.0
+npm install -g @christiandoxa/prodex@0.138.0
 ```
 
 Dependency status in this repo:
@@ -80,9 +80,10 @@ If your shared Codex home already contains a login:
 prodex profile import-current main
 ```
 
-If you already use GitHub Copilot CLI on this machine and want Prodex to track that provider identity:
+If you already use Claude Code or GitHub Copilot CLI on this machine and want Prodex to track those provider identities:
 
 ```bash
+prodex profile import claude
 prodex profile import copilot
 prodex profile import copilot --name copilot-main --activate
 ```
@@ -93,10 +94,11 @@ Or create a profile through the normal Codex login flow:
 prodex login
 prodex login --device-auth
 prodex login --with-google
+prodex login --with-claude
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
 ```
 
-Interactive `prodex login` asks for ChatGPT browser login, device-code login, API-key login, or Google sign-in for Gemini before opening any browser.
+Interactive `prodex login` asks for ChatGPT browser login, device-code login, API-key login, Google sign-in for Gemini, or Claude sign-in through Claude Code before opening any browser.
 
 If you want a fixed profile name first:
 
@@ -116,6 +118,7 @@ Codex file-based profiles selected by `--profile` remain Codex-owned shared conf
 ```bash
 prodex profile list
 prodex profile export
+prodex profile import claude
 prodex profile import copilot
 prodex quota --all
 prodex quota --all --auth no-auth --once
@@ -147,7 +150,7 @@ prodex profile remove --all
 
 `prodex profile export` exports all configured profiles by default and asks whether to password-protect the bundle, defaulting to protected. In non-interactive use, pass `--password-protect` with `PRODEX_PROFILE_EXPORT_PASSWORD` set, or pass `--no-password` to explicitly write an unencrypted bundle.
 
-`prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. The imported profile appears in the pool and export/import flow. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s --provider gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot and Gemini provider quota data through their provider APIs. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not quota-compatible in Prodex.
+`prodex profile import claude` imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s --provider gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot and Gemini provider quota data through their provider APIs. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not quota-compatible in Prodex.
 
 ## 3. Run Codex CLI with `prodex`
 
@@ -206,7 +209,26 @@ Use DeepSeek with the Codex/Super front end:
 DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
 ```
 
-`--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota/rotation, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. Remote compact is not implemented for the adapter yet.
+`--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. `DEEPSEEK_API_KEYS` may contain comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota preflight, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. Remote compact is not implemented for the adapter yet.
+
+Use Anthropic with the Codex/Super front end:
+
+```bash
+prodex login --with-claude
+prodex s --provider anthropic --model claude-sonnet-4-6
+ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6
+```
+
+Without `--api-key`, this path uses the Anthropic profile from `prodex login --with-claude` or `prodex profile import claude`. API-key mode starts the same local Responses-to-Anthropic adapter and forwards through Anthropic's OpenAI-compatible chat API. Use `ANTHROPIC_API_KEYS` with comma-, semicolon-, or newline-separated keys for round-robin request rotation.
+
+Use GitHub Copilot with the Codex/Super front end:
+
+```bash
+prodex profile import copilot
+prodex s --provider copilot --model gpt-5.1-codex
+```
+
+Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens before launch, rotates fresh native Responses requests across eligible profiles, and keeps `previous_response_id` continuations on the owning profile. `GITHUB_COPILOT_API_KEY` is also accepted when you already have a Copilot runtime API token.
 
 Use Gemini with Google sign-in or an API key:
 

@@ -1,5 +1,9 @@
 use super::deepseek_rewrite::*;
 use super::gemini_rewrite::*;
+use super::local_rewrite_copilot::{
+    RuntimeCopilotOAuthPool, RuntimeCopilotRequestContext,
+    runtime_copilot_oauth_pool_from_provider, send_runtime_copilot_upstream_request,
+};
 use super::local_rewrite_gemini::{
     RuntimeGeminiOAuthPool, RuntimeGeminiRequestContext, runtime_gemini_oauth_pool_from_provider,
     send_runtime_gemini_upstream_request,
@@ -23,25 +27,35 @@ pub(super) const RUNTIME_LOCAL_REWRITE_PROFILE: &str = "local";
 pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) runtime_shared: RuntimeRotationProxyShared,
     pub(super) upstream_base_url: String,
-    mount_path: String,
+    pub(super) mount_path: String,
     pub(super) provider: RuntimeLocalRewriteProviderOptions,
     pub(super) deepseek_conversations: RuntimeDeepSeekConversationStore,
     pub(super) deepseek_pending_messages: RuntimeDeepSeekPendingMessages,
     pub(super) gemini_conversations: RuntimeDeepSeekConversationStore,
     pub(super) gemini_oauth_pool: Option<RuntimeGeminiOAuthPool>,
+    pub(super) copilot_oauth_pool: Option<RuntimeCopilotOAuthPool>,
+    api_key_cursor: Arc<AtomicUsize>,
     client: reqwest::blocking::Client,
 }
 
 #[derive(Clone)]
 pub(crate) enum RuntimeLocalRewriteProviderOptions {
+    Anthropic { auth: RuntimeAnthropicProviderAuth },
+    Copilot { auth: RuntimeCopilotProviderAuth },
     OpenAiResponses,
-    DeepSeek { api_key: String },
+    DeepSeek { api_keys: Vec<String> },
     Gemini { auth: RuntimeGeminiProviderAuth },
 }
 
 impl RuntimeLocalRewriteProviderOptions {
     pub(super) fn bridge_kind(&self) -> RuntimeProviderBridgeKind {
         match self {
+            RuntimeLocalRewriteProviderOptions::Anthropic { .. } => {
+                RuntimeProviderBridgeKind::Anthropic
+            }
+            RuntimeLocalRewriteProviderOptions::Copilot { .. } => {
+                RuntimeProviderBridgeKind::Copilot
+            }
             RuntimeLocalRewriteProviderOptions::OpenAiResponses => {
                 RuntimeProviderBridgeKind::OpenAiResponses
             }
@@ -157,6 +171,7 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         ),
     );
     let gemini_oauth_pool = runtime_gemini_oauth_pool_from_provider(&provider);
+    let copilot_oauth_pool = runtime_copilot_oauth_pool_from_provider(&provider);
     let shared = RuntimeLocalRewriteProxyShared {
         runtime_shared: runtime_shared.clone(),
         upstream_base_url,
@@ -166,6 +181,8 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
         gemini_conversations: Arc::new(Mutex::new(BTreeMap::new())),
         gemini_oauth_pool,
+        copilot_oauth_pool,
+        api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client()?,
     };
     if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
@@ -316,12 +333,16 @@ fn handle_runtime_local_rewrite_proxy_request(
     }
     if matches!(
         &shared.provider,
-        RuntimeLocalRewriteProviderOptions::DeepSeek { .. }
+        RuntimeLocalRewriteProviderOptions::Anthropic { .. }
+            | RuntimeLocalRewriteProviderOptions::DeepSeek { .. }
             | RuntimeLocalRewriteProviderOptions::Gemini { .. }
+            | RuntimeLocalRewriteProviderOptions::Copilot { .. }
     ) && path_without_query(&captured.path_and_query).ends_with("/responses/compact")
     {
         let provider_name = match &shared.provider {
+            RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
             RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
+            RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
             _ => "DeepSeek",
         };
         let _ = request.respond(build_runtime_proxy_text_response(
@@ -375,6 +396,7 @@ fn handle_runtime_local_rewrite_proxy_request(
 pub(super) struct RuntimeLocalRewriteUpstreamResult {
     pub(super) response: RuntimeLocalRewriteUpstreamResponse,
     pub(super) gemini_context: Option<RuntimeGeminiRequestContext>,
+    pub(super) copilot_context: Option<RuntimeCopilotRequestContext>,
 }
 
 pub(super) enum RuntimeLocalRewriteUpstreamResponse {
@@ -396,6 +418,107 @@ fn send_runtime_local_rewrite_upstream_request(
     )
     .into_owned();
     match &shared.provider {
+        RuntimeLocalRewriteProviderOptions::Anthropic { auth } => {
+            let auth = runtime_local_rewrite_next_anthropic_auth(shared, auth)
+                .context("Anthropic provider has no auth configured")?;
+            if path_without_query(&request.path_and_query).ends_with("/responses") {
+                let requested_model = runtime_provider_model_from_body(&body)
+                    .unwrap_or_else(|| prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL.to_string());
+                let model_chain = runtime_provider_model_fallback_chain(
+                    RuntimeProviderBridgeKind::Anthropic,
+                    &requested_model,
+                );
+                let upstream_url = runtime_chat_completions_upstream_url(
+                    &shared.upstream_base_url,
+                    &shared.mount_path,
+                    &request.path_and_query,
+                );
+                for (model_index, model) in model_chain.iter().enumerate() {
+                    let model_body = runtime_provider_request_body_with_model(&body, model);
+                    let translated = runtime_chat_compatible_request_body(
+                        &model_body,
+                        &shared.deepseek_conversations,
+                        RuntimeProviderBridgeKind::Anthropic,
+                        prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
+                        false,
+                    )?;
+                    if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
+                        pending.insert(request_id, translated.messages);
+                    }
+                    let response = send_runtime_local_rewrite_prepared_request(
+                        request_id,
+                        request,
+                        shared,
+                        &upstream_url,
+                        translated.body,
+                        RuntimeLocalRewritePreparedAuth::Anthropic { auth: &auth },
+                    )?;
+                    let status = response.status().as_u16();
+                    if status >= 400 && model_index + 1 < model_chain.len() {
+                        let parts =
+                            runtime_local_rewrite_buffered_response_from_response(response)?;
+                        let class = runtime_provider_error_class(
+                            RuntimeProviderBridgeKind::Anthropic,
+                            status,
+                            &parts.body,
+                        );
+                        if runtime_provider_should_retry_with_next_model(class) {
+                            runtime_proxy_log(
+                                &shared.runtime_shared,
+                                runtime_proxy_structured_log_message(
+                                    "local_rewrite_provider_model_fallback",
+                                    [
+                                        runtime_proxy_log_field("request", request_id.to_string()),
+                                        runtime_proxy_log_field("provider", "anthropic"),
+                                        runtime_proxy_log_field("from_model", model.as_str()),
+                                        runtime_proxy_log_field(
+                                            "to_model",
+                                            model_chain[model_index + 1].as_str(),
+                                        ),
+                                        runtime_proxy_log_field("status", status.to_string()),
+                                        runtime_proxy_log_field("class", format!("{class:?}")),
+                                    ],
+                                ),
+                            );
+                            continue;
+                        }
+                        return Ok(RuntimeLocalRewriteUpstreamResult {
+                            response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                            gemini_context: None,
+                            copilot_context: None,
+                        });
+                    }
+                    return Ok(RuntimeLocalRewriteUpstreamResult {
+                        response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                        gemini_context: None,
+                        copilot_context: None,
+                    });
+                }
+                anyhow::bail!("no Anthropic model attempts were available");
+            } else {
+                let upstream_url = runtime_local_rewrite_upstream_url(
+                    &shared.upstream_base_url,
+                    &shared.mount_path,
+                    &request.path_and_query,
+                );
+                let response = send_runtime_local_rewrite_prepared_request(
+                    request_id,
+                    request,
+                    shared,
+                    &upstream_url,
+                    body,
+                    RuntimeLocalRewritePreparedAuth::Anthropic { auth: &auth },
+                )?;
+                Ok(RuntimeLocalRewriteUpstreamResult {
+                    response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                    gemini_context: None,
+                    copilot_context: None,
+                })
+            }
+        }
+        RuntimeLocalRewriteProviderOptions::Copilot { auth } => {
+            send_runtime_copilot_upstream_request(request_id, request, shared, body, auth)
+        }
         RuntimeLocalRewriteProviderOptions::OpenAiResponses => {
             let upstream_url = runtime_local_rewrite_upstream_url(
                 &shared.upstream_base_url,
@@ -413,9 +536,12 @@ fn send_runtime_local_rewrite_upstream_request(
             Ok(RuntimeLocalRewriteUpstreamResult {
                 response: RuntimeLocalRewriteUpstreamResponse::Live(response),
                 gemini_context: None,
+                copilot_context: None,
             })
         }
-        RuntimeLocalRewriteProviderOptions::DeepSeek { api_key } => {
+        RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys } => {
+            let api_key = runtime_local_rewrite_next_api_key(shared, api_keys)
+                .context("DeepSeek provider has no API keys configured")?;
             if path_without_query(&request.path_and_query).ends_with("/responses") {
                 let requested_model = runtime_provider_model_from_body(&body)
                     .unwrap_or_else(|| prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL.to_string());
@@ -477,11 +603,13 @@ fn send_runtime_local_rewrite_upstream_request(
                         return Ok(RuntimeLocalRewriteUpstreamResult {
                             response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
                             gemini_context: None,
+                            copilot_context: None,
                         });
                     }
                     return Ok(RuntimeLocalRewriteUpstreamResult {
                         response: RuntimeLocalRewriteUpstreamResponse::Live(response),
                         gemini_context: None,
+                        copilot_context: None,
                     });
                 }
                 anyhow::bail!("no DeepSeek model attempts were available");
@@ -502,6 +630,7 @@ fn send_runtime_local_rewrite_upstream_request(
                 Ok(RuntimeLocalRewriteUpstreamResult {
                     response: RuntimeLocalRewriteUpstreamResponse::Live(response),
                     gemini_context: None,
+                    copilot_context: None,
                 })
             }
         }
@@ -512,6 +641,8 @@ fn send_runtime_local_rewrite_upstream_request(
 }
 
 pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
+    Anthropic { auth: &'a RuntimeAnthropicAuth },
+    Copilot { api_key: &'a str },
     OpenAiResponses,
     DeepSeek { api_key: &'a str },
     Gemini { auth: &'a RuntimeGeminiAuth },
@@ -520,6 +651,10 @@ pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
 impl RuntimeLocalRewritePreparedAuth<'_> {
     fn bridge_kind(&self) -> RuntimeProviderBridgeKind {
         match self {
+            RuntimeLocalRewritePreparedAuth::Anthropic { .. } => {
+                RuntimeProviderBridgeKind::Anthropic
+            }
+            RuntimeLocalRewritePreparedAuth::Copilot { .. } => RuntimeProviderBridgeKind::Copilot,
             RuntimeLocalRewritePreparedAuth::OpenAiResponses => {
                 RuntimeProviderBridgeKind::OpenAiResponses
             }
@@ -548,6 +683,53 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     })?;
     let mut upstream_request = shared.client.request(method, upstream_url);
     match auth {
+        RuntimeLocalRewritePreparedAuth::Anthropic { auth } => {
+            upstream_request = upstream_request
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "text/event-stream, application/json",
+                );
+            match auth {
+                RuntimeAnthropicAuth::ApiKey { api_key } => {
+                    upstream_request = upstream_request.bearer_auth(api_key);
+                }
+                RuntimeAnthropicAuth::OAuth { access_token } => {
+                    upstream_request = upstream_request
+                        .bearer_auth(access_token)
+                        .header("anthropic-beta", "oauth-2025-04-20");
+                }
+            }
+            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+            }
+        }
+        RuntimeLocalRewritePreparedAuth::Copilot { api_key } => {
+            upstream_request = upstream_request
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "text/event-stream, application/json",
+                )
+                .bearer_auth(api_key)
+                .header("copilot-integration-id", "vscode-chat")
+                .header("editor-version", "vscode/1.95.0")
+                .header("editor-plugin-version", "copilot-chat/0.26.7")
+                .header("openai-intent", "conversation-panel")
+                .header("x-github-api-version", "2025-04-01")
+                .header("x-request-id", format!("prodex-{request_id}"))
+                .header("x-vscode-user-agent-library-version", "electron-fetch")
+                .header("X-Initiator", runtime_copilot_initiator_header(request));
+            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+            } else {
+                upstream_request = upstream_request
+                    .header(reqwest::header::USER_AGENT, "GitHubCopilotChat/0.26.7");
+            }
+            if runtime_copilot_request_has_vision_input(&body) {
+                upstream_request = upstream_request.header("copilot-vision-request", "true");
+            }
+        }
         RuntimeLocalRewritePreparedAuth::OpenAiResponses => {
             for (name, value) in &request.headers {
                 if should_skip_runtime_local_rewrite_request_header(name) {
@@ -642,7 +824,7 @@ fn runtime_local_rewrite_route_kind(path_and_query: &str) -> RuntimeRouteKind {
     }
 }
 
-fn runtime_local_rewrite_upstream_url(
+pub(super) fn runtime_local_rewrite_upstream_url(
     base_url: &str,
     mount_path: &str,
     path_and_query: &str,
@@ -674,9 +856,137 @@ fn runtime_local_rewrite_upstream_url(
 fn runtime_deepseek_upstream_url(base_url: &str, mount_path: &str, path_and_query: &str) -> String {
     let path = path_without_query(path_and_query);
     if path.ends_with("/responses") {
+        return runtime_chat_completions_upstream_url(base_url, mount_path, path_and_query);
+    }
+    runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
+}
+
+fn runtime_chat_completions_upstream_url(
+    base_url: &str,
+    mount_path: &str,
+    path_and_query: &str,
+) -> String {
+    let path = path_without_query(path_and_query);
+    if path.ends_with("/responses") {
         return runtime_local_rewrite_upstream_url(base_url, mount_path, "/chat/completions");
     }
     runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
+}
+
+fn runtime_local_rewrite_next_api_key<'a>(
+    shared: &RuntimeLocalRewriteProxyShared,
+    api_keys: &'a [String],
+) -> Option<&'a str> {
+    if api_keys.is_empty() {
+        return None;
+    }
+    if api_keys.len() == 1 {
+        return Some(api_keys[0].as_str());
+    }
+    let index = shared.api_key_cursor.fetch_add(1, Ordering::Relaxed) % api_keys.len();
+    Some(api_keys[index].as_str())
+}
+
+fn runtime_local_rewrite_next_anthropic_auth(
+    shared: &RuntimeLocalRewriteProxyShared,
+    auth: &RuntimeAnthropicProviderAuth,
+) -> Option<RuntimeAnthropicAuth> {
+    match auth {
+        RuntimeAnthropicProviderAuth::ApiKeys { api_keys } => {
+            runtime_local_rewrite_next_api_key(shared, api_keys).map(|api_key| {
+                RuntimeAnthropicAuth::ApiKey {
+                    api_key: api_key.to_string(),
+                }
+            })
+        }
+        RuntimeAnthropicProviderAuth::OAuthProfiles { profiles } => {
+            if profiles.is_empty() {
+                return None;
+            }
+            if profiles.len() == 1 {
+                return Some(profiles[0].auth());
+            }
+            let index = shared.api_key_cursor.fetch_add(1, Ordering::Relaxed) % profiles.len();
+            Some(profiles[index].auth())
+        }
+    }
+}
+
+pub(super) fn runtime_copilot_request_body_with_canonical_model(body: &[u8]) -> Vec<u8> {
+    let Some(model) = runtime_provider_model_from_body(body) else {
+        return body.to_vec();
+    };
+    let canonical =
+        runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, &model)
+            .into_iter()
+            .next()
+            .unwrap_or(model);
+    runtime_provider_request_body_with_model(body, &canonical)
+}
+
+fn runtime_copilot_initiator_header(request: &RuntimeProxyRequest) -> &'static str {
+    if runtime_copilot_request_has_agent_input(&request.body) {
+        "agent"
+    } else {
+        "user"
+    }
+}
+
+fn runtime_copilot_request_has_agent_input(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    value
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.as_object().is_some_and(|object| {
+                    object
+                        .get("role")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|role| !role.is_empty())
+                        .is_none_or(|role| role.eq_ignore_ascii_case("assistant"))
+                })
+            })
+        })
+}
+
+fn runtime_copilot_request_has_vision_input(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    runtime_copilot_value_contains_text(&value, "input_image")
+        || runtime_copilot_value_contains_key(&value, "image_url")
+}
+
+fn runtime_copilot_value_contains_text(value: &serde_json::Value, needle: &str) -> bool {
+    match value {
+        serde_json::Value::String(text) => text.contains(needle),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| runtime_copilot_value_contains_text(value, needle)),
+        serde_json::Value::Object(object) => object
+            .values()
+            .any(|value| runtime_copilot_value_contains_text(value, needle)),
+        _ => false,
+    }
+}
+
+fn runtime_copilot_value_contains_key(value: &serde_json::Value, needle: &str) -> bool {
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| runtime_copilot_value_contains_key(value, needle)),
+        serde_json::Value::Object(object) => {
+            object.contains_key(needle)
+                || object
+                    .values()
+                    .any(|value| runtime_copilot_value_contains_key(value, needle))
+        }
+        _ => false,
+    }
 }
 
 fn runtime_local_rewrite_header<'a>(

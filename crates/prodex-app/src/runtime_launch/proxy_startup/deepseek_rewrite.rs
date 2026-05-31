@@ -43,14 +43,30 @@ pub(super) fn runtime_deepseek_chat_request_body(
     body: &[u8],
     conversations: &RuntimeDeepSeekConversationStore,
 ) -> Result<RuntimeDeepSeekTranslatedRequest> {
+    runtime_chat_compatible_request_body(
+        body,
+        conversations,
+        RuntimeProviderBridgeKind::DeepSeek,
+        SUPER_DEEPSEEK_DEFAULT_MODEL,
+        true,
+    )
+}
+
+pub(super) fn runtime_chat_compatible_request_body(
+    body: &[u8],
+    conversations: &RuntimeDeepSeekConversationStore,
+    provider_kind: RuntimeProviderBridgeKind,
+    default_model: &str,
+    include_reasoning_params: bool,
+) -> Result<RuntimeDeepSeekTranslatedRequest> {
     let value: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
     let mut request = serde_json::Map::new();
     let model = value
         .get("model")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or(SUPER_DEEPSEEK_DEFAULT_MODEL);
-    let model = runtime_provider_canonical_model(RuntimeProviderBridgeKind::DeepSeek, model);
+        .unwrap_or(default_model);
+    let model = runtime_provider_canonical_model(provider_kind, model);
     let stream = value
         .get("stream")
         .and_then(serde_json::Value::as_bool)
@@ -79,7 +95,9 @@ pub(super) fn runtime_deepseek_chat_request_body(
         "messages".to_string(),
         serde_json::Value::Array(messages.clone()),
     );
-    runtime_deepseek_apply_reasoning_from_responses_request(&value, &mut request);
+    if include_reasoning_params {
+        runtime_deepseek_apply_reasoning_from_responses_request(&value, &mut request);
+    }
     if let Some(tools) = runtime_deepseek_tools_from_responses_request(&value) {
         request.insert("tools".to_string(), serde_json::Value::Array(tools));
     }

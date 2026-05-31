@@ -3,10 +3,13 @@ use super::{
     resolve_runtime_launch_profile_name, runtime_launch_profile_home,
 };
 use crate::{
-    AppState, CodexModelProviderSetting, ProfileProvider, RuntimeGeminiOAuthProfileAuth,
-    RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions, SUPER_DEEPSEEK_PROVIDER_ID,
+    AppState, CodexModelProviderSetting, ProfileProvider, RuntimeAnthropicOAuthProfileAuth,
+    RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth,
+    RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions,
+    SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID, SUPER_DEEPSEEK_PROVIDER_ID,
     SUPER_GEMINI_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID, gemini_oauth_project_from_env,
-    refresh_gemini_oauth_secret_if_needed, resolve_profile_name,
+    refresh_claude_oauth_secret_if_needed, refresh_gemini_oauth_secret_if_needed,
+    resolve_copilot_runtime_api_auth, resolve_profile_name,
 };
 use anyhow::{Context, Result, bail};
 use std::env;
@@ -27,6 +30,23 @@ pub(super) fn runtime_launch_should_use_profileless_gemini(
             .profiles
             .values()
             .any(|profile| matches!(profile.provider, ProfileProvider::Gemini { .. }))
+}
+
+pub(super) fn runtime_launch_should_use_profileless_external_provider(
+    state: &AppState,
+    external_provider: Option<&str>,
+    external_provider_api_key: Option<&str>,
+) -> bool {
+    let Some(provider) = external_provider else {
+        return false;
+    };
+    if !runtime_provider_mode_uses_single_api_key(Some(provider), external_provider_api_key) {
+        return false;
+    }
+    !state
+        .profiles
+        .values()
+        .any(|profile| profile.provider.supports_codex_runtime())
 }
 
 pub(super) fn resolve_gemini_runtime_launch_profile_name(
@@ -58,18 +78,87 @@ pub(super) fn resolve_gemini_runtime_launch_profile_name(
         })
 }
 
+pub(super) fn resolve_copilot_runtime_launch_profile_name(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<String> {
+    if let Some(requested) = requested {
+        return resolve_profile_name(state, Some(requested));
+    }
+    if let Some(active) = state.active_profile.as_deref()
+        && state
+            .profiles
+            .get(active)
+            .is_some_and(|profile| matches!(profile.provider, ProfileProvider::Copilot { .. }))
+    {
+        return Ok(active.to_string());
+    }
+    state
+        .profiles
+        .iter()
+        .find_map(|(name, profile)| {
+            matches!(profile.provider, ProfileProvider::Copilot { .. }).then(|| name.clone())
+        })
+        .or_else(|| resolve_runtime_launch_profile_name(state, None).ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "`prodex s --provider copilot` requires an imported Copilot profile from `prodex profile import copilot`, or --api-key / GITHUB_COPILOT_API_KEY"
+            )
+        })
+}
+
+pub(super) fn resolve_anthropic_runtime_launch_profile_name(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<String> {
+    if let Some(requested) = requested {
+        return resolve_profile_name(state, Some(requested));
+    }
+    if let Some(active) = state.active_profile.as_deref()
+        && state
+            .profiles
+            .get(active)
+            .is_some_and(|profile| matches!(profile.provider, ProfileProvider::Anthropic { .. }))
+    {
+        return Ok(active.to_string());
+    }
+    state
+        .profiles
+        .iter()
+        .find_map(|(name, profile)| {
+            matches!(profile.provider, ProfileProvider::Anthropic { .. }).then(|| name.clone())
+        })
+        .or_else(|| resolve_runtime_launch_profile_name(state, None).ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "`prodex s --provider claude` requires a Claude profile from `prodex login --with-claude`, or --api-key / ANTHROPIC_API_KEY"
+            )
+        })
+}
+
 pub(super) fn runtime_launch_profile_home_for_external_provider(
     state: &AppState,
     profile_name: &str,
     external_provider: Option<&str>,
 ) -> Result<PathBuf> {
-    if external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("gemini")) {
+    if external_provider.is_some_and(|provider| {
+        provider.eq_ignore_ascii_case("gemini")
+            || provider.eq_ignore_ascii_case("copilot")
+            || provider.eq_ignore_ascii_case("github-copilot")
+            || provider.eq_ignore_ascii_case("github_copilot")
+            || provider.eq_ignore_ascii_case("anthropic")
+            || provider.eq_ignore_ascii_case("claude")
+    }) {
         let profile = state
             .profiles
             .get(profile_name)
             .with_context(|| format!("profile '{}' is missing", profile_name))?;
-        if matches!(profile.provider, ProfileProvider::Gemini { .. })
-            || profile.provider.supports_codex_runtime()
+        if matches!(
+            profile.provider,
+            ProfileProvider::Gemini { .. }
+                | ProfileProvider::Copilot { .. }
+                | ProfileProvider::Anthropic { .. }
+        ) || profile.provider.supports_codex_runtime()
         {
             return Ok(profile.codex_home.clone());
         }
@@ -89,6 +178,12 @@ pub(super) fn runtime_launch_model_provider_uses_local_rewrite(
         || provider
             .provider_id
             .eq_ignore_ascii_case(SUPER_GEMINI_PROVIDER_ID)
+        || provider
+            .provider_id
+            .eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID)
+        || provider
+            .provider_id
+            .eq_ignore_ascii_case(SUPER_COPILOT_PROVIDER_ID)
 }
 
 pub(super) fn runtime_local_rewrite_model_provider_id<'a>(
@@ -102,6 +197,15 @@ pub(super) fn runtime_local_rewrite_model_provider_id<'a>(
                 Some(SUPER_DEEPSEEK_PROVIDER_ID)
             } else if provider.eq_ignore_ascii_case("gemini") {
                 Some(SUPER_GEMINI_PROVIDER_ID)
+            } else if provider.eq_ignore_ascii_case("anthropic")
+                || provider.eq_ignore_ascii_case("claude")
+            {
+                Some(SUPER_ANTHROPIC_PROVIDER_ID)
+            } else if provider.eq_ignore_ascii_case("copilot")
+                || provider.eq_ignore_ascii_case("github-copilot")
+                || provider.eq_ignore_ascii_case("github_copilot")
+            {
+                Some(SUPER_COPILOT_PROVIDER_ID)
             } else {
                 None
             }
@@ -120,14 +224,58 @@ pub(super) fn runtime_local_rewrite_provider_options(
     request: &RuntimeLaunchRequest<'_>,
 ) -> Result<RuntimeLocalRewriteProviderOptions> {
     match request.external_provider {
+        Some(provider)
+            if provider.eq_ignore_ascii_case("anthropic")
+                || provider.eq_ignore_ascii_case("claude") =>
+        {
+            if let Some(api_keys) =
+                runtime_anthropic_api_keys_from_request_or_env(request.external_provider_api_key)
+            {
+                return Ok(RuntimeLocalRewriteProviderOptions::Anthropic {
+                    auth: RuntimeAnthropicProviderAuth::ApiKeys { api_keys },
+                });
+            }
+            if selection.profileless_local_home {
+                bail!(
+                    "Anthropic provider requires Claude sign-in from `prodex login --with-claude`, or --api-key / ANTHROPIC_API_KEY"
+                );
+            }
+            let profiles =
+                runtime_anthropic_oauth_profiles_for_provider(state, selection, request)?;
+            Ok(RuntimeLocalRewriteProviderOptions::Anthropic {
+                auth: RuntimeAnthropicProviderAuth::OAuthProfiles { profiles },
+            })
+        }
+        Some(provider)
+            if provider.eq_ignore_ascii_case("copilot")
+                || provider.eq_ignore_ascii_case("github-copilot")
+                || provider.eq_ignore_ascii_case("github_copilot") =>
+        {
+            if let Some(api_key) =
+                runtime_copilot_api_key_from_request_or_env(request.external_provider_api_key)
+            {
+                return Ok(RuntimeLocalRewriteProviderOptions::Copilot {
+                    auth: RuntimeCopilotProviderAuth::ApiKey { api_key },
+                });
+            }
+            if selection.profileless_local_home {
+                bail!(
+                    "Copilot provider requires `prodex profile import copilot`, or --api-key / GITHUB_COPILOT_API_KEY"
+                );
+            }
+            let profiles = runtime_copilot_profiles_for_provider(state, selection, request)?;
+            Ok(RuntimeLocalRewriteProviderOptions::Copilot {
+                auth: RuntimeCopilotProviderAuth::Profiles { profiles },
+            })
+        }
         Some(provider) if provider.eq_ignore_ascii_case("deepseek") => {
-            let api_key = runtime_deepseek_api_key_from_request_or_env(
+            let api_keys = runtime_deepseek_api_keys_from_request_or_env(
                 request.external_provider_api_key,
             )
             .context(
                 "DeepSeek provider requires --api-key or DEEPSEEK_API_KEY in the environment",
             )?;
-            Ok(RuntimeLocalRewriteProviderOptions::DeepSeek { api_key })
+            Ok(RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys })
         }
         Some(provider) if provider.eq_ignore_ascii_case("gemini") => {
             if let Some(api_key) =
@@ -157,7 +305,13 @@ pub(super) fn runtime_provider_mode_uses_single_api_key(
     external_provider_api_key: Option<&str>,
 ) -> bool {
     external_provider.is_some_and(|provider| {
-        provider.eq_ignore_ascii_case("deepseek")
+        ((provider.eq_ignore_ascii_case("anthropic") || provider.eq_ignore_ascii_case("claude"))
+            && runtime_anthropic_api_keys_from_request_or_env(external_provider_api_key).is_some())
+            || provider.eq_ignore_ascii_case("deepseek")
+            || ((provider.eq_ignore_ascii_case("copilot")
+                || provider.eq_ignore_ascii_case("github-copilot")
+                || provider.eq_ignore_ascii_case("github_copilot"))
+                && runtime_copilot_api_key_from_request_or_env(external_provider_api_key).is_some())
             || (provider.eq_ignore_ascii_case("gemini")
                 && runtime_gemini_api_key_from_request_or_env(external_provider_api_key).is_some())
     })
@@ -183,6 +337,115 @@ pub(super) fn runtime_gemini_oauth_rotation_summary(
     } else {
         "Using the single available Gemini OAuth profile; account rotation is skipped and quota preflight stays disabled.".to_string()
     }
+}
+
+fn runtime_anthropic_oauth_profiles_for_provider(
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<Vec<RuntimeAnthropicOAuthProfileAuth>> {
+    let selected_profile_name = selection.selected_profile_name.as_str();
+    let selected_profile = state
+        .profiles
+        .get(selected_profile_name)
+        .with_context(|| format!("profile '{}' is missing", selected_profile_name))?;
+    if !matches!(selected_profile.provider, ProfileProvider::Anthropic { .. }) {
+        bail!(
+            "profile '{}' uses {}. Run `prodex login --with-claude`, or pass --api-key / ANTHROPIC_API_KEY.",
+            selected_profile_name,
+            selected_profile.provider.display_name()
+        );
+    }
+
+    let profile_names = if request.allow_auto_rotate {
+        active_profile_selection_order(state, selected_profile_name)
+    } else {
+        vec![selected_profile_name.to_string()]
+    };
+    let mut profiles = Vec::new();
+    let mut errors = Vec::new();
+    for profile_name in profile_names {
+        let Some(profile) = state.profiles.get(&profile_name) else {
+            continue;
+        };
+        let ProfileProvider::Anthropic { .. } = &profile.provider else {
+            continue;
+        };
+        match refresh_claude_oauth_secret_if_needed(&profile.codex_home) {
+            Ok(secret) => {
+                profiles.push(RuntimeAnthropicOAuthProfileAuth {
+                    access_token: secret.access_token,
+                });
+            }
+            Err(err) => {
+                errors.push(format!("{profile_name}: {err:#}"));
+            }
+        }
+    }
+
+    if profiles.is_empty() {
+        let suffix = if errors.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", errors.join("; "))
+        };
+        bail!("no usable Anthropic Claude OAuth profiles found{suffix}");
+    }
+
+    Ok(profiles)
+}
+
+fn runtime_copilot_profiles_for_provider(
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<Vec<RuntimeCopilotProfileAuth>> {
+    let selected_profile_name = selection.selected_profile_name.as_str();
+    let selected_profile = state
+        .profiles
+        .get(selected_profile_name)
+        .with_context(|| format!("profile '{}' is missing", selected_profile_name))?;
+    if !matches!(selected_profile.provider, ProfileProvider::Copilot { .. }) {
+        bail!(
+            "profile '{}' uses {}. Run `prodex profile import copilot`, or pass --api-key / GITHUB_COPILOT_API_KEY.",
+            selected_profile_name,
+            selected_profile.provider.display_name()
+        );
+    }
+
+    let profile_names = if request.allow_auto_rotate {
+        active_profile_selection_order(state, selected_profile_name)
+    } else {
+        vec![selected_profile_name.to_string()]
+    };
+    let mut profiles = Vec::new();
+    let mut errors = Vec::new();
+    for profile_name in profile_names {
+        let Some(profile) = state.profiles.get(&profile_name) else {
+            continue;
+        };
+        let ProfileProvider::Copilot { host, login, .. } = &profile.provider else {
+            continue;
+        };
+        match resolve_copilot_runtime_api_auth(host, login) {
+            Ok(auth) => profiles.push(RuntimeCopilotProfileAuth {
+                profile_name: profile_name.clone(),
+                api_key: auth.api_key,
+            }),
+            Err(err) => errors.push(format!("{profile_name}: {err:#}")),
+        }
+    }
+
+    if profiles.is_empty() {
+        let suffix = if errors.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", errors.join("; "))
+        };
+        bail!("no usable Copilot profiles found{suffix}");
+    }
+
+    Ok(profiles)
 }
 
 fn runtime_gemini_oauth_profiles_for_provider(
@@ -248,13 +511,61 @@ fn runtime_gemini_oauth_profiles_for_provider(
     Ok(profiles)
 }
 
-fn runtime_deepseek_api_key_from_request_or_env(value: Option<&str>) -> Option<String> {
+fn runtime_deepseek_api_keys_from_request_or_env(value: Option<&str>) -> Option<Vec<String>> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| vec![value.to_string()])
+        .or_else(|| {
+            env::var("DEEPSEEK_API_KEYS")
+                .ok()
+                .and_then(|value| runtime_provider_api_keys_from_list(&value))
+                .or_else(|| {
+                    env::var("DEEPSEEK_API_KEY")
+                        .ok()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                        .map(|value| vec![value])
+                })
+        })
+}
+
+fn runtime_anthropic_api_keys_from_request_or_env(value: Option<&str>) -> Option<Vec<String>> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| vec![value.to_string()])
+        .or_else(|| {
+            env::var("ANTHROPIC_API_KEYS")
+                .ok()
+                .and_then(|value| runtime_provider_api_keys_from_list(&value))
+                .or_else(|| {
+                    env::var("ANTHROPIC_API_KEY")
+                        .ok()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                        .map(|value| vec![value])
+                })
+        })
+}
+
+fn runtime_provider_api_keys_from_list(value: &str) -> Option<Vec<String>> {
+    let keys = value
+        .split([',', ';', '\n'])
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    (!keys.is_empty()).then_some(keys)
+}
+
+fn runtime_copilot_api_key_from_request_or_env(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or_else(|| {
-            env::var("DEEPSEEK_API_KEY")
+            env::var("GITHUB_COPILOT_API_KEY")
                 .ok()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
@@ -276,4 +587,34 @@ fn runtime_gemini_api_key_from_request_or_env(value: Option<&str>) -> Option<Str
                         .filter(|value| !value.is_empty())
                 })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_api_key_list_accepts_common_separators() {
+        assert_eq!(
+            runtime_provider_api_keys_from_list(" one, two;three\nfour ").unwrap(),
+            vec!["one", "two", "three", "four"]
+        );
+        assert!(runtime_provider_api_keys_from_list(" , ; \n ").is_none());
+    }
+
+    #[test]
+    fn provider_mode_detects_explicit_api_key_auth() {
+        assert!(runtime_provider_mode_uses_single_api_key(
+            Some("anthropic"),
+            Some("sk-anthropic")
+        ));
+        assert!(runtime_provider_mode_uses_single_api_key(
+            Some("copilot"),
+            Some("copilot-token")
+        ));
+        assert!(!runtime_provider_mode_uses_single_api_key(
+            Some("copilot"),
+            None
+        ));
+    }
 }
