@@ -95,6 +95,7 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         watch: false,
         once: false,
         auth: None,
+        provider: None,
         base_url: None,
     })));
     assert!(!should_emit_update_notice(&Commands::Update(CodexUpdateArgs {

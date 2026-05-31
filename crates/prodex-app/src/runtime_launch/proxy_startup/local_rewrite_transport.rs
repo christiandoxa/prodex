@@ -60,6 +60,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         RuntimeLocalRewritePreparedAuth::Anthropic { auth } => {
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
                 .header(
                     reqwest::header::ACCEPT,
                     "text/event-stream, application/json",
@@ -81,6 +82,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         RuntimeLocalRewritePreparedAuth::Copilot { api_key } => {
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
                 .header(
                     reqwest::header::ACCEPT,
                     "text/event-stream, application/json",
@@ -115,6 +117,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         RuntimeLocalRewritePreparedAuth::DeepSeek { api_key } => {
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
                 .bearer_auth(api_key);
             if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
                 upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
@@ -123,6 +126,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         RuntimeLocalRewritePreparedAuth::Gemini { auth } => {
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
                 .header(
                     reqwest::header::ACCEPT,
                     "text/event-stream, application/json",

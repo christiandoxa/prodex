@@ -1,13 +1,14 @@
 # prodex
 
-`prodex` is a multi-account Codex wrapper with auto-rotation.
+`prodex` is a multi-account, multi-provider Codex wrapper with auto-rotation.
 
-Use multiple Codex accounts from one command line. When the active account runs out of quota, `prodex` can route the next work to another available account.
+Use multiple Codex accounts and supported provider backends from one command line. OpenAI/Codex profiles get quota-aware routing and auto-rotation; provider adapters let `prodex s` launch the Codex front end against Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
 
 ## Contents
 
 - [Why prodex](#why-prodex)
 - [Requirements](#requirements)
+- [Supported providers](#supported-providers)
 - [Installation](#installation)
 - [Optional tools](#optional-tools)
 - [Quick start](#quick-start)
@@ -27,6 +28,7 @@ Use `prodex` if you want to:
 
 - use multiple Codex accounts from one CLI
 - rotate to another account when quota runs out
+- launch Codex/Super against non-OpenAI providers without changing front ends
 - keep profile credentials separated
 - keep sessions attached to the profile that created them
 - run Codex, Caveman mode, Super mode, and Claude Code through the same wrapper
@@ -44,9 +46,33 @@ You need at least one logged-in Prodex profile.
 | Claude-Mem | `mem` variants |
 | RTK | `rtk` variants and `prodex s` / `prodex super` |
 
+## Supported providers
+
+Prodex supports two provider paths:
+
+- **Profile-backed routing**: persisted profiles that Prodex can select, rotate, and inspect where provider APIs allow it.
+- **Runtime provider launch**: `prodex s --provider ...` / `prodex super --provider ...` starts Codex with a temporary provider bridge for that session.
+
+| Provider | Launch to Codex | Auth path | Quota view | Notes |
+|---|---:|---|---:|---|
+| OpenAI / Codex | `prodex`, `prodex run`, `prodex s` | ChatGPT OAuth, device code, or OpenAI/API-compatible key via `prodex login` | Yes | Full quota preflight and profile auto-rotation. |
+| Google Gemini | `prodex s --provider gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY` / `--api-key` | OAuth profiles | OAuth mode can rotate across Gemini profiles; API-key mode is runtime-only. |
+| Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | No | Runs through Prodex's local Responses-to-Anthropic adapter. |
+| GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY` / `--api-key` | Imported profiles | Native Copilot profile mode keeps continuations bound to the owning profile. |
+| DeepSeek | `prodex s --provider deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | No | API-key-only provider; no OAuth login profile in Prodex. |
+| Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | No | Injects a temporary local provider and skips quota preflight. |
+| Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | No | Prodex does not proxy or quota-check these profiles. |
+
+<details>
+<summary>Provider behavior details</summary>
+
+The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth and imported Copilot profiles have provider-specific quota views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, local URLs, and Bedrock/custom Codex providers skip Prodex quota preflight.
+
+</details>
+
 ## Installation
 
-<details open>
+<details>
 <summary>Install from npm</summary>
 
 ```bash
@@ -346,7 +372,7 @@ When you answer `y` to the `prodex super` / `prodex s` Presidio prompt or pass `
 
 ## Quick start
 
-<details open>
+<details>
 <summary>Import your current Codex login</summary>
 
 If your current Codex home is already logged in:
@@ -428,7 +454,7 @@ When you import a Copilot profile, Prodex does not move the Copilot token into P
 
 ## Daily command: `prodex s`
 
-<details open>
+<details>
 <summary>Super mode overview</summary>
 
 For daily work, I use:
@@ -488,7 +514,7 @@ Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_
 
 ## Commands
 
-<details open>
+<details>
 <summary>Most used commands</summary>
 
 ```bash
@@ -535,9 +561,10 @@ prodex super --dry-run
 prodex quota --all
 prodex quota --all --once
 prodex quota --all --auth no-auth --once
+prodex quota --all --detail --provider openai
 ```
 
-The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, and `gemini`.
+The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, and `copilot`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, or `--provider copilot` to start locked to a single provider.
 
 </details>
 
@@ -750,7 +777,7 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 
 ## Profiles
 
-<details open>
+<details>
 <summary>Common profile commands</summary>
 
 ```bash

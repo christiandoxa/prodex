@@ -104,10 +104,16 @@ pub(crate) fn ensure_runtime_profile_precommit_quota_ready(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
     context: &str,
+    force_live_probe: bool,
 ) -> Result<(RuntimeQuotaSummary, Option<RuntimeQuotaSource>)> {
     let (mut quota_summary, mut quota_source) =
         runtime_profile_quota_summary_for_route(shared, profile_name, route_kind)?;
-    if runtime_quota_summary_requires_precommit_live_probe(quota_summary, quota_source, route_kind)
+    if force_live_probe
+        || runtime_quota_summary_requires_precommit_live_probe(
+            quota_summary,
+            quota_source,
+            route_kind,
+        )
     {
         refresh_runtime_profile_quota_inline(shared, profile_name, context)?;
         (quota_summary, quota_source) =
@@ -170,11 +176,17 @@ pub(crate) fn runtime_precommit_quota_gate(
         &BTreeSet::new(),
         route_kind,
     )?;
+    let force_live_probe = runtime_precommit_quota_gate_forces_live_probe(
+        initial_quota_source,
+        route_kind,
+        has_continuation_context,
+    );
     let (quota_summary, quota_source) = ensure_runtime_profile_precommit_quota_ready(
         shared,
         profile_name,
         route_kind,
         reprobe_context,
+        force_live_probe,
     )?;
 
     match prodex_runtime_quota::runtime_precommit_quota_gate_final_decision(
@@ -195,4 +207,55 @@ pub(crate) fn runtime_precommit_quota_gate(
     }
 
     Ok(RuntimePrecommitQuotaGateDecision::Proceed)
+}
+
+fn runtime_precommit_quota_gate_forces_live_probe(
+    source: Option<RuntimeQuotaSource>,
+    route_kind: RuntimeRouteKind,
+    has_continuation_context: bool,
+) -> bool {
+    has_continuation_context
+        && matches!(
+            route_kind,
+            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+        )
+        && !matches!(source, Some(RuntimeQuotaSource::LiveProbe))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn continuation_main_routes_force_live_quota_probe_without_live_source() {
+        assert!(runtime_precommit_quota_gate_forces_live_probe(
+            Some(RuntimeQuotaSource::PersistedSnapshot),
+            RuntimeRouteKind::Websocket,
+            true,
+        ));
+        assert!(runtime_precommit_quota_gate_forces_live_probe(
+            None,
+            RuntimeRouteKind::Responses,
+            true,
+        ));
+    }
+
+    #[test]
+    fn precommit_live_probe_force_skips_fresh_or_non_continuation_routes() {
+        assert!(!runtime_precommit_quota_gate_forces_live_probe(
+            Some(RuntimeQuotaSource::LiveProbe),
+            RuntimeRouteKind::Websocket,
+            true,
+        ));
+        assert!(!runtime_precommit_quota_gate_forces_live_probe(
+            Some(RuntimeQuotaSource::PersistedSnapshot),
+            RuntimeRouteKind::Standard,
+            true,
+        ));
+        assert!(!runtime_precommit_quota_gate_forces_live_probe(
+            Some(RuntimeQuotaSource::PersistedSnapshot),
+            RuntimeRouteKind::Responses,
+            false,
+        ));
+    }
 }

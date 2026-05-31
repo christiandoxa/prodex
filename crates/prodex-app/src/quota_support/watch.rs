@@ -36,39 +36,6 @@ enum QuotaWatchCommandOutcome {
     Quit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QuotaProviderFilter {
-    All,
-    OpenAi,
-    Gemini,
-}
-
-impl QuotaProviderFilter {
-    fn next(self) -> Self {
-        match self {
-            Self::All => Self::OpenAi,
-            Self::OpenAi => Self::Gemini,
-            Self::Gemini => Self::All,
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::All => "all",
-            Self::OpenAi => "openai",
-            Self::Gemini => "gemini",
-        }
-    }
-
-    fn matches(self, provider: &ProfileProvider) -> bool {
-        match self {
-            Self::All => true,
-            Self::OpenAi => matches!(provider, ProfileProvider::Openai),
-            Self::Gemini => matches!(provider, ProfileProvider::Gemini { .. }),
-        }
-    }
-}
-
 struct AllQuotaWatchRefresh {
     receiver: Receiver<AllQuotaWatchSnapshot>,
     sender: mpsc::Sender<AllQuotaWatchSnapshot>,
@@ -211,11 +178,18 @@ pub(crate) fn render_all_quota_watch_output(
     detail: bool,
 ) -> String {
     render_all_quota_watch_snapshot(
-        &collect_all_quota_watch_snapshot(updated, state_result, base_url, &QuotaAuthFilter::All),
+        &collect_all_quota_watch_snapshot(
+            updated,
+            state_result,
+            base_url,
+            &QuotaAuthFilter::All,
+            QuotaProviderFilter::All,
+        ),
         detail,
         0,
         QuotaReportSort::Remaining,
         QuotaProviderFilter::All,
+        false,
     )
 }
 
@@ -224,12 +198,18 @@ fn collect_all_quota_watch_snapshot(
     state_result: std::result::Result<AppState, String>,
     base_url: Option<&str>,
     auth_filter: &QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
 ) -> AllQuotaWatchSnapshot {
     match state_result {
         Ok(state) if !state.profiles.is_empty() => AllQuotaWatchSnapshot::Reports {
             updated: updated.to_string(),
             profile_count: state.profiles.len(),
-            reports: collect_quota_reports_with_auth_filter(&state, base_url, auth_filter),
+            reports: collect_quota_reports_with_filters(
+                &state,
+                base_url,
+                auth_filter,
+                provider_filter,
+            ),
         },
         Ok(_) => AllQuotaWatchSnapshot::Empty {
             updated: updated.to_string(),
@@ -247,6 +227,7 @@ fn render_all_quota_watch_snapshot(
     scroll_offset: usize,
     sort: QuotaReportSort,
     provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
 ) -> String {
     match snapshot {
         AllQuotaWatchSnapshot::Loading { updated: _updated } => {
@@ -262,6 +243,7 @@ fn render_all_quota_watch_snapshot(
             scroll_offset,
             sort,
             provider_filter,
+            provider_filter_locked,
         ),
         AllQuotaWatchSnapshot::Empty { updated: _updated } => {
             render_quota_watch_error_panel("Quota", "No profiles configured")
@@ -279,6 +261,7 @@ fn render_all_quota_watch_report_output(
     scroll_offset: usize,
     sort: QuotaReportSort,
     provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
 ) -> String {
     let filtered_reports = filter_quota_reports_by_provider(reports, provider_filter);
     let mut output = render_quota_reports_window_with_sort(
@@ -292,10 +275,16 @@ fn render_all_quota_watch_report_output(
     )
     .output;
     output.push('\n');
+    let provider_hint = if provider_filter_locked {
+        "provider fixed"
+    } else {
+        "f provider"
+    };
     output.push_str(&format!(
-        "sort: {} | filter: {} | s sort | f provider | j/k/Up/Down scroll | q quit",
+        "sort: {} | filter: {} | s sort | {} | j/k/Up/Down scroll | q quit",
         sort.label(),
-        provider_filter.label()
+        provider_filter.label(),
+        provider_hint
     ));
     output
 }
@@ -347,16 +336,29 @@ pub(crate) fn watch_all_quotas(
     base_url: Option<&str>,
     detail: bool,
     auth_filter: QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
 ) -> Result<()> {
     let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
     let mut sort = QuotaReportSort::Remaining;
-    let mut provider_filter = QuotaProviderFilter::All;
+    let mut provider_filter = provider_filter;
+    let collection_provider_filter = if provider_filter_locked {
+        provider_filter
+    } else {
+        QuotaProviderFilter::All
+    };
     let mut snapshot = AllQuotaWatchSnapshot::Loading {
         updated: quota_watch_updated_at(),
     };
     let mut refresh = AllQuotaWatchRefresh::new();
-    let _ = start_all_quota_watch_refresh(&mut refresh, paths, base_url, &auth_filter);
+    let _ = start_all_quota_watch_refresh(
+        &mut refresh,
+        paths,
+        base_url,
+        &auth_filter,
+        collection_provider_filter,
+    );
     let mut redraw_needed = true;
     let mut next_refresh_at = None;
 
@@ -376,13 +378,20 @@ pub(crate) fn watch_all_quotas(
                 scroll_offset,
                 sort,
                 provider_filter,
+                provider_filter_locked,
             );
             redraw_quota_watch(&output)?;
             redraw_needed = false;
         }
 
         if next_refresh_at.is_some_and(|refresh_at| Instant::now() >= refresh_at)
-            && start_all_quota_watch_refresh(&mut refresh, paths, base_url, &auth_filter)
+            && start_all_quota_watch_refresh(
+                &mut refresh,
+                paths,
+                base_url,
+                &auth_filter,
+                collection_provider_filter,
+            )
         {
             next_refresh_at = None;
             continue;
@@ -406,9 +415,11 @@ pub(crate) fn watch_all_quotas(
                     redraw_needed = true;
                 }
                 QuotaWatchCommandOutcome::Filter => {
-                    provider_filter = provider_filter.next();
-                    scroll_offset = 0;
-                    redraw_needed = true;
+                    if !provider_filter_locked {
+                        provider_filter = provider_filter.next();
+                        scroll_offset = 0;
+                        redraw_needed = true;
+                    }
                 }
                 QuotaWatchCommandOutcome::Quit => return Ok(()),
             }
@@ -423,12 +434,14 @@ fn start_all_quota_watch_refresh(
     paths: &AppPaths,
     base_url: Option<&str>,
     auth_filter: &QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
 ) -> bool {
     let paths = paths.clone();
     let base_url = base_url.map(str::to_string);
     let auth_filter = auth_filter.clone();
-    refresh
-        .try_start(move || load_all_quota_watch_snapshot(&paths, base_url.as_deref(), &auth_filter))
+    refresh.try_start(move || {
+        load_all_quota_watch_snapshot(&paths, base_url.as_deref(), &auth_filter, provider_filter)
+    })
 }
 
 fn quota_watch_updated_at() -> String {
@@ -439,12 +452,14 @@ fn load_all_quota_watch_snapshot(
     paths: &AppPaths,
     base_url: Option<&str>,
     auth_filter: &QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
 ) -> AllQuotaWatchSnapshot {
     collect_all_quota_watch_snapshot(
         &quota_watch_updated_at(),
         AppState::load(paths).map_err(|err| err.to_string()),
         base_url,
         auth_filter,
+        provider_filter,
     )
 }
 
@@ -699,7 +714,62 @@ mod tests {
             QuotaProviderFilter::OpenAi.next(),
             QuotaProviderFilter::Gemini
         );
-        assert_eq!(QuotaProviderFilter::Gemini.next(), QuotaProviderFilter::All);
+        assert_eq!(
+            QuotaProviderFilter::Gemini.next(),
+            QuotaProviderFilter::Anthropic
+        );
+        assert_eq!(
+            QuotaProviderFilter::Anthropic.next(),
+            QuotaProviderFilter::Copilot
+        );
+        assert_eq!(
+            QuotaProviderFilter::Copilot.next(),
+            QuotaProviderFilter::All
+        );
+    }
+
+    #[test]
+    fn quota_provider_filter_parses_aliases_and_matches_all_profile_providers() {
+        assert_eq!(
+            QuotaProviderFilter::parse("openai").unwrap(),
+            QuotaProviderFilter::OpenAi
+        );
+        assert_eq!(
+            QuotaProviderFilter::parse("google-gemini").unwrap(),
+            QuotaProviderFilter::Gemini
+        );
+        assert_eq!(
+            QuotaProviderFilter::parse("claude").unwrap(),
+            QuotaProviderFilter::Anthropic
+        );
+        assert_eq!(
+            QuotaProviderFilter::parse("github-copilot").unwrap(),
+            QuotaProviderFilter::Copilot
+        );
+        assert!(QuotaProviderFilter::parse("deepseek").is_err());
+
+        assert!(QuotaProviderFilter::OpenAi.matches(&ProfileProvider::Openai));
+        assert!(
+            QuotaProviderFilter::Gemini.matches(&ProfileProvider::Gemini {
+                email: "gemini@example.com".to_string(),
+                project_id: None,
+            })
+        );
+        assert!(
+            QuotaProviderFilter::Anthropic.matches(&ProfileProvider::Anthropic {
+                account: Some("claude@example.com".to_string()),
+                auth_method: Some("oauth".to_string()),
+            })
+        );
+        assert!(
+            QuotaProviderFilter::Copilot.matches(&ProfileProvider::Copilot {
+                host: "github.com".to_string(),
+                login: "octo".to_string(),
+                api_url: "https://api.githubcopilot.com".to_string(),
+                access_type_sku: None,
+                copilot_plan: None,
+            })
+        );
     }
 
     #[test]
@@ -726,10 +796,47 @@ mod tests {
             0,
             QuotaReportSort::Remaining,
             QuotaProviderFilter::Gemini,
+            false,
         );
 
         assert!(output.contains("filter: gemini"));
         assert!(output.contains("gemini-main"));
+        assert!(!output.contains("openai-main"));
+    }
+
+    #[test]
+    fn all_quota_watch_output_filters_imported_copilot_profiles() {
+        let reports = vec![
+            test_quota_report_with_provider(
+                "openai-main",
+                ProfileProvider::Openai,
+                Ok(test_usage("main@example.com")),
+            ),
+            test_quota_report_with_provider(
+                "copilot-main",
+                ProfileProvider::Copilot {
+                    host: "github.com".to_string(),
+                    login: "octo".to_string(),
+                    api_url: "https://api.githubcopilot.com".to_string(),
+                    access_type_sku: None,
+                    copilot_plan: None,
+                },
+                Err("quota unavailable in test".to_string()),
+            ),
+        ];
+
+        let output = render_all_quota_watch_report_output(
+            &reports,
+            true,
+            0,
+            QuotaReportSort::Remaining,
+            QuotaProviderFilter::Copilot,
+            true,
+        );
+
+        assert!(output.contains("filter: copilot"));
+        assert!(output.contains("provider fixed"));
+        assert!(output.contains("copilot-main"));
         assert!(!output.contains("openai-main"));
     }
 }

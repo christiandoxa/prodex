@@ -39,12 +39,14 @@ Examples:
   prodex quota
   prodex quota --profile main --detail
   prodex quota --all --detail
+  prodex quota --all --detail --provider openai
   prodex quota --all --once
   prodex quota --all --auth no-auth --once
   prodex quota --raw --profile main
 
 Notes:
   `prodex quota` supports OpenAI/Codex profiles, Google Gemini OAuth profiles, and imported Copilot accounts.
+  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, or `copilot`.
   Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, quota inspection is unavailable for that profile.";
 pub const CLI_RUN_AFTER_HELP: &str = "\

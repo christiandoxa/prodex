@@ -10,6 +10,7 @@ fn quota_watch_respects_once_and_raw_modes() {
         watch: false,
         once: true,
         auth: None,
+        provider: None,
         base_url: None,
     };
     assert!(!quota_watch_enabled(&once_args));
@@ -31,6 +32,16 @@ fn quota_command_accepts_auth_filter_for_all_profiles() {
         panic!("expected quota command");
     };
     assert_eq!(args.auth.as_deref(), Some("no-auth"));
+}
+
+#[test]
+fn quota_command_accepts_provider_filter_for_all_profiles() {
+    let command = parse_cli_command_from(["prodex", "quota", "--all", "--provider", "openai"])
+        .expect("quota command");
+    let Commands::Quota(args) = command else {
+        panic!("expected quota command");
+    };
+    assert_eq!(args.provider.as_deref(), Some("openai"));
 }
 
 #[test]
@@ -234,6 +245,7 @@ fn quota_watch_defaults_to_live_refresh_for_regular_views() {
         watch: false,
         once: false,
         auth: None,
+        provider: None,
         base_url: None,
     };
     assert!(quota_watch_enabled(&profile_args));

@@ -30,6 +30,61 @@ pub(crate) struct QuotaReport {
     pub(crate) fetched_at: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuotaProviderFilter {
+    All,
+    OpenAi,
+    Gemini,
+    Anthropic,
+    Copilot,
+}
+
+impl QuotaProviderFilter {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
+        let normalized = value.trim().to_ascii_lowercase().replace('_', "-");
+        match normalized.as_str() {
+            "" | "all" => Ok(Self::All),
+            "openai" | "chatgpt" | "codex" | "openai-codex" => Ok(Self::OpenAi),
+            "gemini" | "google" | "google-gemini" => Ok(Self::Gemini),
+            "anthropic" | "claude" | "anthropic-claude" => Ok(Self::Anthropic),
+            "copilot" | "github-copilot" | "github" => Ok(Self::Copilot),
+            other => bail!(
+                "invalid quota provider filter '{other}'; supported values are all, openai, gemini, anthropic, claude, copilot"
+            ),
+        }
+    }
+
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Self::All => Self::OpenAi,
+            Self::OpenAi => Self::Gemini,
+            Self::Gemini => Self::Anthropic,
+            Self::Anthropic => Self::Copilot,
+            Self::Copilot => Self::All,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::OpenAi => "openai",
+            Self::Gemini => "gemini",
+            Self::Anthropic => "anthropic",
+            Self::Copilot => "copilot",
+        }
+    }
+
+    pub(crate) fn matches(self, provider: &ProfileProvider) -> bool {
+        match self {
+            Self::All => true,
+            Self::OpenAi => matches!(provider, ProfileProvider::Openai),
+            Self::Gemini => matches!(provider, ProfileProvider::Gemini { .. }),
+            Self::Anthropic => matches!(provider, ProfileProvider::Anthropic { .. }),
+            Self::Copilot => matches!(provider, ProfileProvider::Copilot { .. }),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct QuotaFetchJob {
     name: String,
@@ -75,10 +130,22 @@ pub(crate) fn collect_quota_reports_with_auth_filter(
     base_url: Option<&str>,
     auth_filter: &QuotaAuthFilter,
 ) -> Vec<QuotaReport> {
+    collect_quota_reports_with_filters(state, base_url, auth_filter, QuotaProviderFilter::All)
+}
+
+pub(crate) fn collect_quota_reports_with_filters(
+    state: &AppState,
+    base_url: Option<&str>,
+    auth_filter: &QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
+) -> Vec<QuotaReport> {
     let jobs = state
         .profiles
         .iter()
         .filter_map(|(name, profile)| {
+            if !provider_filter.matches(&profile.provider) {
+                return None;
+            }
             let auth = profile.provider.auth_summary(&profile.codex_home);
             auth_filter.matches(&auth).then(|| QuotaFetchJob {
                 name: name.clone(),
