@@ -7,6 +7,11 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Improve provider quotas and tool routing (`e94fd60`)
+
+## 0.135.0 - 2026-05-31
+
+### Runtime
+
 - Improve Gemini rate-limit retries (`16fcfe8`)
 
 ## 0.134.0 - 2026-05-29
@@ -73,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Replay reasoning before tool output (`43b77d6`)
-
-## 0.124.0 - 2026-05-27
-
-### Runtime
-
-- Support DeepSeek reasoning replay (`d574c65`)
