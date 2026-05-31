@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.141.0 - 2026-06-01
+
+### Runtime
+
+- Harden Gemini tools and speed tests (`c8c43fd`)
+
 ## 0.140.0 - 2026-05-31
 
 ### CLI
@@ -79,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Use temporary home for --profile login to preserve auth.json on failure (`a22daf2`)
-
-## 0.129.0 - 2026-05-28
-
-### Misc
-
-- Repair tool replay and share super history (`7bea070`)
