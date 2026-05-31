@@ -11,7 +11,11 @@ mod local_rewrite_gemini;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_rate_limits;
 mod local_rewrite_response;
+#[cfg(test)]
+mod local_rewrite_tests;
+mod local_rewrite_transport;
 mod provider_bridge;
+mod provider_models;
 mod provider_tools;
 pub(crate) use anthropic_rewrite::{
     RuntimeAnthropicAuth, RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth,

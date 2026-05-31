@@ -1,10 +1,12 @@
 use super::local_rewrite::{
-    RuntimeLocalRewritePreparedAuth, RuntimeLocalRewriteProviderOptions,
-    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult, runtime_copilot_request_body_with_canonical_model,
-    runtime_local_rewrite_upstream_url, send_runtime_local_rewrite_prepared_request,
+    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
+use super::local_rewrite_transport::{
+    RuntimeLocalRewritePreparedAuth, runtime_copilot_request_body_with_canonical_model,
+    runtime_local_rewrite_upstream_url, send_runtime_local_rewrite_prepared_request,
+};
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
 };

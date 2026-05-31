@@ -30,6 +30,19 @@ use runtime_proxy_crate::path_without_query;
 use std::io::Read;
 use std::sync::Arc;
 
+#[derive(Clone, Copy)]
+struct RuntimeChatCompatibleProvider {
+    prefix: &'static str,
+    label: &'static str,
+}
+
+struct RuntimeLocalRewriteLiveResponseParts {
+    status: u16,
+    headers: Vec<(String, Vec<u8>)>,
+    text_headers: Vec<(String, String)>,
+    content_type: String,
+}
+
 pub(super) fn runtime_local_rewrite_buffered_response_from_response(
     response: reqwest::blocking::Response,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
@@ -118,8 +131,10 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             status,
             &content_type,
             shared,
-            "deepseek",
-            "DeepSeek",
+            RuntimeChatCompatibleProvider {
+                prefix: "deepseek",
+                label: "DeepSeek",
+            },
         );
         return;
     }
@@ -132,8 +147,10 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             status,
             &content_type,
             shared,
-            "anthropic",
-            "Anthropic",
+            RuntimeChatCompatibleProvider {
+                prefix: "anthropic",
+                label: "Anthropic",
+            },
         );
         return;
     }
@@ -156,10 +173,12 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             request_id,
             request,
             response,
-            status,
-            headers,
-            text_headers,
-            &content_type,
+            RuntimeLocalRewriteLiveResponseParts {
+                status,
+                headers,
+                text_headers,
+                content_type,
+            },
             shared,
             copilot_context,
         );
@@ -195,16 +214,15 @@ fn respond_runtime_chat_compatible_rewrite(
     status: u16,
     content_type: &str,
     shared: &RuntimeLocalRewriteProxyShared,
-    provider_prefix: &str,
-    provider_label: &str,
+    provider: RuntimeChatCompatibleProvider,
 ) {
-    let rate_limit_headers = if provider_prefix == "deepseek" {
+    let rate_limit_headers = if provider.prefix == "deepseek" {
         runtime_deepseek_codex_rate_limit_headers(response.headers())
     } else {
         runtime_openai_style_codex_rate_limit_headers(
             response.headers(),
-            provider_prefix,
-            provider_label,
+            provider.prefix,
+            provider.label,
         )
     };
     let conversation_messages =
@@ -327,13 +345,16 @@ fn respond_runtime_copilot_passthrough(
     request_id: u64,
     request: tiny_http::Request,
     response: reqwest::blocking::Response,
-    status: u16,
-    headers: Vec<(String, Vec<u8>)>,
-    text_headers: Vec<(String, String)>,
-    content_type: &str,
+    response_parts: RuntimeLocalRewriteLiveResponseParts,
     shared: &RuntimeLocalRewriteProxyShared,
     copilot_context: Option<RuntimeCopilotRequestContext>,
 ) {
+    let RuntimeLocalRewriteLiveResponseParts {
+        status,
+        headers,
+        text_headers,
+        content_type,
+    } = response_parts;
     let RuntimeCopilotRequestContext {
         profile_name,
         binding_recorder,

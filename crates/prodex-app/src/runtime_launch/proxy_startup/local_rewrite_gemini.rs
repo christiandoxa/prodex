@@ -5,9 +5,8 @@ use super::gemini_rewrite::{
 };
 use super::gemini_sse::RuntimeGeminiBindingRecorder;
 use super::local_rewrite::{
-    RuntimeLocalRewritePreparedAuth, RuntimeLocalRewriteProviderOptions,
-    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult, send_runtime_local_rewrite_prepared_request,
+    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_gemini_quota::{
     runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
@@ -15,6 +14,9 @@ use super::local_rewrite_gemini_quota::{
 };
 use super::local_rewrite_rate_limits::runtime_gemini_quota_codex_headers;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
+use super::local_rewrite_transport::{
+    RuntimeLocalRewritePreparedAuth, send_runtime_local_rewrite_prepared_request,
+};
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
     runtime_provider_error_cooldown_ms, runtime_provider_model_fallback_chain,
