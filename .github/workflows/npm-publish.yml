@@ -138,6 +138,7 @@ jobs:
           name: ${{ matrix.artifact-name }}
           path: dist/${{ matrix.artifact-name }}/${{ matrix.binary-name }}
           if-no-files-found: error
+          overwrite: true
           retention-days: 7
 
   publish-npm:
@@ -183,6 +184,7 @@ jobs:
           name: release-sbom
           path: release-sbom.spdx.json
           if-no-files-found: error
+          overwrite: true
 
       - name: Publish staged packages
         run: node scripts/npm/publish.mjs --root release --provenance
@@ -459,4 +461,5 @@ jobs:
             ${{ runner.temp }}/publish-job-durations.txt
             ${{ runner.temp }}/publish-job-durations.json
           if-no-files-found: ignore
+          overwrite: true
           retention-days: 14
