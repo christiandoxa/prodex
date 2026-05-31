@@ -62,6 +62,36 @@ fn gemini_sse_reader_records_response_and_tool_call_bindings() {
 }
 
 #[test]
+fn gemini_sse_reader_preserves_function_call_thought_signature_in_history() {
+    let conversations = conversation_store();
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_sig\",\"candidates\":[{\"content\":{\"parts\":[{\"thoughtSignature\":\"sig-stream-1\",\"functionCall\":{\"id\":\"call_sig\",\"name\":\"shell\",\"args\":{\"cmd\":\"ls\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        vec![serde_json::json!({"role": "user", "content": "list files"})],
+        conversations.clone(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    let store = conversations.lock().unwrap();
+    let history = store
+        .get("resp_sig")
+        .expect("conversation should be stored");
+    let assistant = history.last().expect("assistant message should be stored");
+
+    assert_eq!(
+        assistant["tool_calls"][0]["gemini_thought_signature"],
+        "sig-stream-1"
+    );
+    assert_eq!(assistant["tool_calls"][0]["id"], "call_sig");
+}
+
+#[test]
 fn gemini_sse_reader_accumulates_multiline_json_data() {
     let stream = concat!(
         "data: {\"responseId\":\"resp_1\",\"candidates\":[{\"content\":{\"parts\":[\n",

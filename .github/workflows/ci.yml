@@ -375,42 +375,12 @@ jobs:
         run: node scripts/ci/npm-package-smoke.mjs --binary-dir target/x86_64-unknown-linux-gnu/release
 
   auto-rotate:
-    name: Auto rotate (${{ matrix.label }})
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: run blocked and selection
-            filters: |
-              run::run_auto_rotates_active_profile_when_current_is_blocked
-              run::run_auto_rotate_flag_rotates_active_profile_when_current_is_blocked
-              run::explicit_profile_auto_rotates_by_default
-              run::run_without_profile_keeps_the_active_ready_account
-          - label: run broker and passthrough
-            filters: |
-              run::run_recovers_when_runtime_broker_registry_points_to_a_dead_pid
-              run::update_passthrough_uses_inherited_codex_home_without_quota_or_runtime
-              run::run_exec_preserves_prompt_and_piped_stdin
-              run::explicit_profile_can_disable_auto_rotate
-              run::run_preflight_checks_fallback_profiles_in_parallel
-          - label: login and quota doctor
-            filters: |
-              login::
-              quota_doctor::
-          - label: shared state history and memories
-            filters: |
-              shared_state::run_shares_resume_history_across_managed_profiles
-              shared_state::run_shares_housekeeping_memories_across_managed_profiles
-          - label: shared state behavior and plugins
-            filters: |
-              shared_state::run_shares_native_codex_behavior_state_across_managed_profiles
-              shared_state::run_shares_codex_plugin_and_memory_extension_state_across_managed_profiles
 
     steps:
       - name: Check out repository
@@ -425,16 +395,17 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Run auto-rotate integration tests ${{ matrix.label }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r filter; do
-            if [ -z "${filter}" ]; then
-              continue
-            fi
-            cargo test --test auto_rotate "${filter}" -- --test-threads=1
-          done <<< "${{ matrix.filters }}"
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Prebuild auto-rotate integration tests
+        run: cargo test --test auto_rotate --no-run
+
+      - name: Run auto-rotate integration test shards
+        run: node scripts/ci/auto-rotate-shards.mjs --jobs 6 --timings --timings-json
 
   profile-commands-internal:
     needs: changes

@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   full-test:
-    name: Full serial all-features tests
+    name: Full partitioned all-features tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -34,6 +34,12 @@ jobs:
 
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -58,7 +64,7 @@ jobs:
           run_id=${GITHUB_RUN_ID}
           run_attempt=${GITHUB_RUN_ATTEMPT}
           runner_os=${RUNNER_OS}
-          command=cargo test -q --workspace --all-features -- --test-threads=1
+          command=node scripts/ci/full-rust-test.mjs --jobs 6 --test-threads 4 --timings --timings-json
           started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
 
@@ -66,7 +72,12 @@ jobs:
           cargo -Vv > "${artifact_dir}/cargo-version.txt"
 
           set +e
-          cargo test -q --workspace --all-features -- --test-threads=1 > "${cargo_log}" 2>&1
+          node scripts/ci/full-rust-test.mjs \
+            --jobs 6 \
+            --test-threads 4 \
+            --timings \
+            --timings-json \
+            > "${cargo_log}" 2>&1
           status=$?
           set -e
 

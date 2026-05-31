@@ -89,6 +89,7 @@ fn runtime_provider_tool_from_responses_tool(
     }
     if let Some(parameters) = function_object
         .get("parameters")
+        .or_else(|| function_object.get("parametersJsonSchema"))
         .or_else(|| function_object.get("input_schema"))
         .or_else(|| function_object.get("schema"))
     {
@@ -222,6 +223,7 @@ fn runtime_provider_function_like_tool_object(
         .unwrap_or_default();
     let name = runtime_provider_json_string(object, &["name"])?;
     let has_schema = object.contains_key("parameters")
+        || object.contains_key("parametersJsonSchema")
         || object.contains_key("input_schema")
         || object.contains_key("schema");
     let is_mcp_tool = tool_type.starts_with("mcp") || name.starts_with("mcp__");
@@ -269,5 +271,28 @@ mod tests {
 
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["function"]["name"], "mcp__git_tools__status");
+    }
+
+    #[test]
+    fn provider_tools_accept_parameters_json_schema() {
+        let value = serde_json::json!({
+            "tools": [{
+                "type": "mcp_tool",
+                "name": "mcp__prodex_sqz__compress",
+                "parametersJsonSchema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"}
+                    },
+                    "required": ["text"]
+                }
+            }]
+        });
+
+        let tools = runtime_provider_chat_tools_from_responses_request(&value).unwrap();
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "mcp__prodex_sqz__compress");
+        assert_eq!(tools[0]["function"]["parameters"]["required"][0], "text");
     }
 }

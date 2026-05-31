@@ -22,6 +22,7 @@ fn runtime_doctor_request_timeline_phase(marker: &str) -> Option<&'static str> {
     match marker {
         "selection_keep_affinity"
         | "selection_keep_current"
+        | "selection_plan"
         | "selection_pick"
         | "selection_skip_current"
         | "selection_skip_affinity"

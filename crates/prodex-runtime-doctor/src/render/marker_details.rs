@@ -381,6 +381,24 @@ pub(super) fn runtime_doctor_push_marker_detail_rows(
                 diagnosis::runtime_doctor_sync_probe_skip_next_step(summary),
             );
     }
+    if marker == "selection_plan" && diagnosis::runtime_doctor_marker_count(summary, marker) > 0 {
+        let last_fields = summary.marker_last_fields.get(marker);
+        let field = |name: &str| {
+            last_fields
+                .and_then(|fields| fields.get(name))
+                .cloned()
+                .unwrap_or_else(|| "-".to_string())
+        };
+        fields
+            .push("Selection route", field("route"))
+            .push("Ready candidates", field("ready"))
+            .push("Fallback candidates", field("fallback"))
+            .push("Excluded profiles", field("excluded_count"))
+            .push("Cold-start jobs", field("cold_start_jobs"))
+            .push("Sync-probe jobs", field("sync_probe_jobs"))
+            .push("Sync-probe mode", field("sync_probe_mode"))
+            .push("Pressure mode", field("pressure_mode"));
+    }
     if marker == "profile_probe_refresh_backpressure"
         && diagnosis::runtime_doctor_marker_count(summary, "profile_probe_refresh_backpressure") > 0
     {

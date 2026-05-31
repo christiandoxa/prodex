@@ -233,9 +233,11 @@ Look for:
 - `profile_transport_backoff`
 - `profile_inflight`
 - `profile_health`
+- `selection_plan`
 - `precommit_budget_exhausted`
 - `state_save_*`
 
+If `selection_plan` appears without a later `selection_pick` or `selection_keep_current`, inspect its `ready=`, `fallback=`, `cold_start_jobs=`, and `sync_probe_mode=` fields before changing upstream-facing behavior.
 If `profile_health` appears, inspect its `route=` value before changing selection behavior globally.
 If `runtime_proxy_lane_limit_reached` appears, inspect its `lane=` value before changing upstream-facing behavior.
 Repeated `lane=responses` markers suggest the main model lane is saturated locally; repeated non-`responses` markers suggest a side lane is consuming proxy capacity.
@@ -258,7 +260,7 @@ cargo test -q runtime_proxy_ -- --test-threads=1
 Run the full test suite:
 
 ```bash
-cargo test -q --workspace -- --test-threads=1
+npm run test:full -- --timings
 ```
 
 Summarize the latest runtime log:

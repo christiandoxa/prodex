@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+  cargoFeatureArgs,
   cargoTestStep,
   loadRuntimeManifest,
   manifestArray,
@@ -17,6 +18,7 @@ function parseArgs(argv) {
     timings: false,
     timingsJson: false,
     timingsLimit: 10,
+    allFeatures: false,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -31,6 +33,10 @@ function parseArgs(argv) {
     }
     if (value === "--dry-run") {
       args.dryRun = true;
+      continue;
+    }
+    if (value === "--all-features") {
+      args.allFeatures = true;
       continue;
     }
     if (value === "--timings") {
@@ -67,7 +73,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: node scripts/ci/test-serial.mjs [--suite core|runtime|runtime-smoke|stress|all] [--timings] [--timings-json] [--timings-limit <n>] [--dry-run]",
+      "Usage: node scripts/ci/test-serial.mjs [--suite core|runtime|runtime-smoke|stress|all] [--all-features] [--timings] [--timings-json] [--timings-limit <n>] [--dry-run]",
       "",
       "Runs local serial/quarantine cargo shards with --test-threads=1.",
       "",
@@ -79,6 +85,7 @@ function printHelp() {
       "  all     core, runtime, and stress",
       "",
       "Options:",
+      "  --all-features run cargo test shards with --all-features",
       "  --timings      print a slowest-step duration summary after the selected suite",
       "  --timings-json include a single-line JSON timing payload in the summary",
       "",
@@ -87,29 +94,29 @@ function printHelp() {
   );
 }
 
-function coreSteps(stressSkipTests) {
+function coreSteps(stressSkipTests, options) {
   return [
-    cargoTestStep("serial:profile-commands", "profile_commands_internal_tests::"),
+    cargoTestStep("serial:profile-commands", "profile_commands_internal_tests::", [], options),
     cargoTestStep("serial:main-internal-core", "main_internal_tests::", [
       "--skip",
       "runtime_proxy_",
       ...skipArgs(stressSkipTests),
-    ]),
+    ], options),
   ];
 }
 
-function runtimeSteps(stressSkipTests) {
+function runtimeSteps(stressSkipTests, options) {
   return [
-    cargoTestStep("serial:runtime-proxy-units", "runtime_proxy::"),
-    cargoTestStep("serial:runtime-broker-units", "runtime_broker::"),
-    cargoTestStep("serial:runtime-core-shared-units", "runtime_core_shared::"),
+    cargoTestStep("serial:runtime-proxy-units", "runtime_proxy::", [], options),
+    cargoTestStep("serial:runtime-broker-units", "runtime_broker::", [], options),
+    cargoTestStep("serial:runtime-core-shared-units", "runtime_core_shared::", [], options),
     cargoTestStep("serial:main-internal-runtime-proxy-broad", "main_internal_tests::runtime_proxy_", [
       ...skipArgs(stressSkipTests),
-    ]),
+    ], options),
   ];
 }
 
-function runtimeSmokeSteps(smokeTests) {
+function runtimeSmokeSteps(smokeTests, options) {
   if (smokeTests.length === 0) {
     throw new Error("runtime smoke suite requires RUNTIME_SMOKE_TESTS manifest entries");
   }
@@ -129,24 +136,33 @@ function runtimeSmokeSteps(smokeTests) {
       return {
         label: `serial:runtime-smoke:${label}`,
         command: "cargo",
-        args: ["test", "-p", testCase.package, "--lib", testCase.filter, "--", "--test-threads=1"],
+        args: [
+          "test",
+          "-p",
+          testCase.package,
+          ...cargoFeatureArgs(options),
+          "--lib",
+          testCase.filter,
+          "--",
+          "--test-threads=1",
+        ],
         failOnZeroTests: true,
       };
     }
-    return cargoTestStep(`serial:runtime-smoke:${label}`, testCase.filter);
+    return cargoTestStep(`serial:runtime-smoke:${label}`, testCase.filter, [], options);
   });
 }
 
-function stressSteps(serializedTests, continuationTests) {
+function stressSteps(serializedTests, continuationTests, options) {
   const serializedSteps = serializedTests.map((testName) => ({
-    ...cargoTestStep(`serial:stress:${testName}`, testName),
+    ...cargoTestStep(`serial:stress:${testName}`, testName, [], options),
     attempts: 2,
     retryDelayMs: 5000,
   }));
   const continuationSteps = [];
   for (let iteration = 1; iteration <= 2; iteration += 1) {
     for (const testName of continuationTests) {
-      continuationSteps.push(cargoTestStep(`serial:continuation:${iteration}:${testName}`, testName));
+      continuationSteps.push(cargoTestStep(`serial:continuation:${iteration}:${testName}`, testName, [], options));
     }
   }
   return [...serializedSteps, ...continuationSteps];
@@ -183,10 +199,10 @@ async function main() {
 
   const steps = selectSteps({
     suite: args.suite,
-    core: coreSteps(stressSkipTests),
-    runtime: runtimeSteps(stressSkipTests),
-    runtimeSmoke: args.suite === "runtime-smoke" ? runtimeSmokeSteps(smokeTests) : [],
-    stress: stressSteps(serializedTests, continuationTests),
+    core: coreSteps(stressSkipTests, args),
+    runtime: runtimeSteps(stressSkipTests, args),
+    runtimeSmoke: args.suite === "runtime-smoke" ? runtimeSmokeSteps(smokeTests, args) : [],
+    stress: stressSteps(serializedTests, continuationTests, args),
   });
 
   if (steps.length === 0) {

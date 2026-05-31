@@ -43,6 +43,10 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
         inflight_soft_limit,
         now,
     );
+    let stale_probe_refreshes_count = probe_plan.stale_probe_refreshes.len();
+    let cold_start_jobs_count = probe_plan.cold_start_probe_jobs.len();
+    let sync_probe_jobs_count = probe_plan.sync_probe_jobs.len();
+    let should_sync_probe_cold_start = probe_plan.should_sync_probe_cold_start;
     for refresh in &probe_plan.stale_probe_refreshes {
         schedule_runtime_probe_refresh(shared, &refresh.name, &refresh.codex_home);
     }
@@ -165,6 +169,49 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
             prompt_cache_key,
             runtime_prompt_cache_bound_profile(prompt_cache_key).as_deref(),
             |name| runtime_profile_selection_jitter(shared, name, route_kind),
+        ),
+    );
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "selection_plan",
+            [
+                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                runtime_proxy_log_field("pressure_mode", pressure_mode.to_string()),
+                runtime_proxy_log_field(
+                    "sync_probe_pressure",
+                    sync_probe_pressure_mode.to_string(),
+                ),
+                runtime_proxy_log_field("reports", reports.len().to_string()),
+                runtime_proxy_log_field("ready", candidate_plan.ready_candidates.len().to_string()),
+                runtime_proxy_log_field(
+                    "fallback",
+                    candidate_plan.fallback_candidates.len().to_string(),
+                ),
+                runtime_proxy_log_field("excluded_count", excluded_profiles.len().to_string()),
+                runtime_proxy_log_field("inflight_soft_limit", inflight_soft_limit.to_string()),
+                runtime_proxy_log_field(
+                    "stale_probe_refreshes",
+                    stale_probe_refreshes_count.to_string(),
+                ),
+                runtime_proxy_log_field("cold_start_jobs", cold_start_jobs_count.to_string()),
+                runtime_proxy_log_field("sync_probe_jobs", sync_probe_jobs_count.to_string()),
+                runtime_proxy_log_field(
+                    "sync_probe_mode",
+                    if should_sync_probe_cold_start {
+                        "inline"
+                    } else if cold_start_jobs_count > 0 {
+                        "background"
+                    } else {
+                        "none"
+                    },
+                ),
+                runtime_proxy_log_field(
+                    "prompt_cache_bound",
+                    runtime_prompt_cache_bound_profile(prompt_cache_key)
+                        .unwrap_or_else(|| "none".to_string()),
+                ),
+            ],
         ),
     );
 

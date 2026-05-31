@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+  cargoFeatureArgs,
   cargoIntegrationTestStep,
   cargoTestStep,
   defaultJobCount,
@@ -27,74 +28,52 @@ const CARGO_CHECK_STEP = {
   args: ["check", "--locked", "--workspace", "--all-targets", "--all-features"],
 };
 
-const PREBUILD_STEPS = [
-  {
-    label: "prebuild:lib-tests",
-    command: "cargo",
-    args: ["test", "-p", "prodex-app", "--lib", "--no-run"],
-  },
-  {
-    label: "prebuild:test:auto-rotate",
-    command: "cargo",
-    args: ["test", "--test", "auto_rotate", "--no-run"],
-  },
-];
+function prebuildSteps(options) {
+  return [
+    {
+      label: "prebuild:lib-tests",
+      command: "cargo",
+      args: ["test", "-p", "prodex-app", ...cargoFeatureArgs(options), "--lib", "--no-run"],
+    },
+    {
+      label: "prebuild:test:auto-rotate",
+      command: "cargo",
+      args: ["test", "--test", "auto_rotate", ...cargoFeatureArgs(options), "--no-run"],
+    },
+  ];
+}
 
-const SAFE_CARGO_TEST_STEPS = [
-  {
-    label: "crate:codex-config",
+function packageLibTestStep(label, packageName, options) {
+  return {
+    label,
     command: "cargo",
-    args: ["test", "-p", "prodex-codex-config", "--lib", "--", "--test-threads=1"],
+    args: ["test", "-p", packageName, ...cargoFeatureArgs(options), "--lib", "--", "--test-threads=1"],
     failOnZeroTests: true,
-  },
-  {
-    label: "crate:redaction",
-    command: "cargo",
-    args: ["test", "-p", "prodex-redaction", "--lib", "--", "--test-threads=1"],
-    failOnZeroTests: true,
-  },
-  {
-    label: "crate:runtime-metrics",
-    command: "cargo",
-    args: ["test", "-p", "prodex-runtime-metrics", "--lib", "--", "--test-threads=1"],
-    failOnZeroTests: true,
-  },
-  {
-    label: "crate:secret-store",
-    command: "cargo",
-    args: ["test", "-p", "prodex-secret-store", "--lib", "--", "--test-threads=1"],
-    failOnZeroTests: true,
-  },
-  {
-    label: "crate:terminal-ui",
-    command: "cargo",
-    args: ["test", "-p", "prodex-terminal-ui", "--lib", "--", "--test-threads=1"],
-    failOnZeroTests: true,
-  },
-  {
-    label: "crate:runtime-policy",
-    command: "cargo",
-    args: ["test", "-p", "prodex-runtime-policy", "--lib", "--", "--test-threads=1"],
-    failOnZeroTests: true,
-  },
-  {
-    label: "crate:audit-log",
-    command: "cargo",
-    args: ["test", "-p", "prodex-audit-log", "--lib", "--", "--test-threads=1"],
-    failOnZeroTests: true,
-  },
-  cargoTestStep("lib:app-commands", "app_commands::"),
-  cargoTestStep("lib:compat-replay", "compat_replay_tests::"),
-  cargoTestStep("lib:profile-identity", "profile_identity::"),
-  cargoTestStep("lib:quota-support", "quota_support::"),
-  cargoTestStep("lib:runtime-background", "runtime_background::"),
-  cargoTestStep("lib:runtime-claude", "runtime_claude::"),
-  cargoTestStep("lib:runtime-config", "runtime_config::"),
-  cargoTestStep("lib:runtime-doctor", "runtime_doctor::"),
-  cargoTestStep("lib:runtime-launch", "runtime_launch::"),
-  cargoTestStep("lib:test-env-guard", "test_env_guard_tests::"),
-  cargoIntegrationTestStep("test:auto-rotate", "auto_rotate"),
-];
+  };
+}
+
+function safeCargoTestSteps(options) {
+  return [
+    packageLibTestStep("crate:codex-config", "prodex-codex-config", options),
+    packageLibTestStep("crate:redaction", "prodex-redaction", options),
+    packageLibTestStep("crate:runtime-metrics", "prodex-runtime-metrics", options),
+    packageLibTestStep("crate:secret-store", "prodex-secret-store", options),
+    packageLibTestStep("crate:terminal-ui", "prodex-terminal-ui", options),
+    packageLibTestStep("crate:runtime-policy", "prodex-runtime-policy", options),
+    packageLibTestStep("crate:audit-log", "prodex-audit-log", options),
+    cargoTestStep("lib:app-commands", "app_commands::", [], options),
+    cargoTestStep("lib:compat-replay", "compat_replay_tests::", [], options),
+    cargoTestStep("lib:profile-identity", "profile_identity::", [], options),
+    cargoTestStep("lib:quota-support", "quota_support::", [], options),
+    cargoTestStep("lib:runtime-background", "runtime_background::", [], options),
+    cargoTestStep("lib:runtime-claude", "runtime_claude::", [], options),
+    cargoTestStep("lib:runtime-config", "runtime_config::", [], options),
+    cargoTestStep("lib:runtime-doctor", "runtime_doctor::", [], options),
+    cargoTestStep("lib:runtime-launch", "runtime_launch::", [], options),
+    cargoTestStep("lib:test-env-guard", "test_env_guard_tests::", [], options),
+    cargoIntegrationTestStep("test:auto-rotate", "auto_rotate", [], options),
+  ];
+}
 
 function isCiEnv() {
   const value = process.env.CI;
@@ -112,6 +91,7 @@ function parseArgs(argv) {
     timings: false,
     timingsJson: false,
     timingsLimit: 10,
+    allFeatures: false,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -143,6 +123,10 @@ function parseArgs(argv) {
     }
     if (value === "--no-prebuild") {
       args.prebuild = false;
+      continue;
+    }
+    if (value === "--all-features") {
+      args.allFeatures = true;
       continue;
     }
     if (value === "--dry-run") {
@@ -194,6 +178,7 @@ function printHelp() {
       "Options:",
       "  --prebuild     force prebuild even when CI=true",
       "  --no-prebuild  skip prebuild when measuring cold parallel behavior",
+      "  --all-features run cargo test shards with --all-features",
       "  --timings      print a slowest-step duration summary after each runner phase",
       "  --timings-json include a single-line JSON timing payload in each summary",
       "",
@@ -225,10 +210,10 @@ async function main() {
   }
   if (args.tests && args.prebuild) {
     process.stdout.write("test-fast: prebuilding cargo test binaries before parallel shards\n");
-    await runStepsSerial(PREBUILD_STEPS, { dryRun: args.dryRun, timingSummary });
+    await runStepsSerial(prebuildSteps(args), { dryRun: args.dryRun, timingSummary });
   }
   if (args.tests) {
-    await runStepsParallel(SAFE_CARGO_TEST_STEPS, { jobs: args.jobs, dryRun: args.dryRun, timingSummary });
+    await runStepsParallel(safeCargoTestSteps(args), { jobs: args.jobs, dryRun: args.dryRun, timingSummary });
   }
 }
 

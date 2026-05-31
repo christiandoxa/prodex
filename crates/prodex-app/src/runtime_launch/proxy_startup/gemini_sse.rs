@@ -232,6 +232,7 @@ struct RuntimeGeminiToolCall {
     call_id: Option<String>,
     name: Option<String>,
     arguments: String,
+    thought_signature: Option<String>,
     added: bool,
     done: bool,
 }
@@ -347,7 +348,9 @@ impl RuntimeGeminiSseState {
                 }
             }
             if let Some(function_call) = part.get("functionCall") {
-                events.extend(self.observe_function_call(function_call));
+                let thought_signature = runtime_gemini_thought_signature(part)
+                    .or_else(|| runtime_gemini_thought_signature(function_call));
+                events.extend(self.observe_function_call(function_call, thought_signature));
             }
         }
         if value
@@ -366,7 +369,11 @@ impl RuntimeGeminiSseState {
         events
     }
 
-    fn observe_function_call(&mut self, value: &serde_json::Value) -> Vec<String> {
+    fn observe_function_call(
+        &mut self,
+        value: &serde_json::Value,
+        thought_signature: Option<String>,
+    ) -> Vec<String> {
         let index = self.tool_calls.len();
         let name = value
             .get("name")
@@ -389,6 +396,9 @@ impl RuntimeGeminiSseState {
                 .or_else(|| Some(format!("call_gemini_{}_{}", self.request_id, index)));
             tool_call.name = Some(name.clone());
             tool_call.arguments = args;
+            if thought_signature.is_some() {
+                tool_call.thought_signature = thought_signature;
+            }
             let call_id = tool_call.call_id.clone().unwrap_or_default();
             let should_add = !tool_call.added;
             if should_add {
@@ -624,7 +634,7 @@ impl RuntimeGeminiSseState {
                 self.tool_calls
                     .iter()
                     .map(|(index, tool_call)| {
-                        serde_json::json!({
+                        let mut item = serde_json::json!({
                             "id": tool_call
                                 .call_id
                                 .clone()
@@ -637,7 +647,12 @@ impl RuntimeGeminiSseState {
                                     .unwrap_or_else(|| "tool_call".to_string()),
                                 "arguments": tool_call.arguments,
                             },
-                        })
+                        });
+                        if let Some(signature) = tool_call.thought_signature.as_deref() {
+                            item["gemini_thought_signature"] =
+                                serde_json::Value::String(signature.to_string());
+                        }
+                        item
                     })
                     .collect(),
             );
@@ -716,6 +731,14 @@ fn runtime_gemini_stream_error(value: &serde_json::Value) -> Option<(String, Str
         .unwrap_or("Gemini stream returned an embedded provider error")
         .to_string();
     Some((code, message))
+}
+
+fn runtime_gemini_thought_signature(part: &serde_json::Value) -> Option<String> {
+    part.get("thoughtSignature")
+        .or_else(|| part.get("thought_signature"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|signature| !signature.trim().is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]

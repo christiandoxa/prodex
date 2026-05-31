@@ -133,6 +133,36 @@ fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
 }
 
 #[test]
+fn response_selection_logs_plan_counts_before_pick() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), RuntimeRouteKind::Responses),
+    )
+    .expect("selection should succeed");
+
+    assert_eq!(selected.as_deref(), Some("second"));
+    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains(
+            "selection_plan route=responses pressure_mode=false sync_probe_pressure=false"
+        ),
+        "selection plan should log route and pressure state: {log}"
+    );
+    assert!(
+        log.contains("reports=2 ready=1 fallback=1 excluded_count=0"),
+        "selection plan should log candidate counts: {log}"
+    );
+    assert!(
+        log.contains("selection_pick route=responses profile=second"),
+        "selection pick should still follow the plan: {log}"
+    );
+}
+
+#[test]
 fn quota_blocked_previous_response_fresh_fallback_blocks_session_scoped_requests() {
     assert!(
         !runtime_quota_blocked_previous_response_fresh_fallback_allowed(

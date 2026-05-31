@@ -13,27 +13,54 @@ export function parsePositiveInteger(value, name) {
 
 export function defaultJobCount() {
   const available = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
-  return Math.max(1, Math.min(4, available || 1));
+  return Math.max(1, Math.min(6, available || 1));
 }
 
 export function formatCommand(command, args) {
   return [command, ...args].join(" ");
 }
 
-export function cargoTestStep(label, filter, extraArgs = []) {
+export function cargoFeatureArgs({ allFeatures = false } = {}) {
+  return allFeatures ? ["--all-features"] : [];
+}
+
+export function cargoTestStep(label, filter, extraArgs = [], options = {}) {
   return {
     label,
     command: "cargo",
-    args: ["test", "-p", "prodex-app", "--lib", filter, "--", "--test-threads=1", ...extraArgs],
+    args: ["test", "-p", "prodex-app", ...cargoFeatureArgs(options), "--lib", filter, "--", "--test-threads=1", ...extraArgs],
     failOnZeroTests: true,
   };
 }
 
-export function cargoIntegrationTestStep(label, testName, harnessArgs = []) {
+export function cargoIntegrationTestStep(label, testName, harnessArgs = [], options = {}) {
   return {
     label,
     command: "cargo",
-    args: ["test", "--test", testName, ...(harnessArgs.length > 0 ? ["--", ...harnessArgs] : [])],
+    args: [
+      "test",
+      "--test",
+      testName,
+      ...cargoFeatureArgs(options),
+      ...(harnessArgs.length > 0 ? ["--", ...harnessArgs] : []),
+    ],
+    failOnZeroTests: true,
+  };
+}
+
+export function cargoIntegrationTestFilterStep(label, testName, filter, harnessArgs = [], options = {}) {
+  return {
+    label,
+    command: "cargo",
+    args: [
+      "test",
+      "--test",
+      testName,
+      ...cargoFeatureArgs(options),
+      filter,
+      "--",
+      ...harnessArgs,
+    ],
     failOnZeroTests: true,
   };
 }

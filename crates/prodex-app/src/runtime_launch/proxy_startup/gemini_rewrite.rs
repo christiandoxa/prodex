@@ -267,19 +267,26 @@ pub(super) fn runtime_gemini_chat_assistant_messages_from_generate_value(
                 .get("name")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("tool_call");
+            let call_id = runtime_gemini_function_call_id(function_call, request_id, index);
             let args = function_call
                 .get("args")
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
             let args = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
-            tool_calls.push(serde_json::json!({
-                "id": format!("call_gemini_{request_id}_{index}"),
+            let mut tool_call = serde_json::json!({
+                "id": call_id,
                 "type": "function",
                 "function": {
                     "name": name,
                     "arguments": runtime_deepseek_rtk_wrapped_tool_arguments(name, &args),
                 },
-            }));
+            });
+            if let Some(signature) = runtime_gemini_thought_signature(part)
+                .or_else(|| runtime_gemini_thought_signature(function_call))
+            {
+                tool_call["gemini_thought_signature"] = serde_json::Value::String(signature);
+            }
+            tool_calls.push(tool_call);
         }
     }
     if text.is_empty() && reasoning_content.is_empty() && tool_calls.is_empty() {
@@ -411,8 +418,17 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
                                     serde_json::from_str::<serde_json::Value>(args).ok()
                                 })
                                 .unwrap_or_else(|| serde_json::json!({}));
-                            let function_call =
+                            let mut function_call =
                                 runtime_gemini_function_call_part(call_id, name, args);
+                            if let Some(signature) = tool_call
+                                .get("gemini_thought_signature")
+                                .or_else(|| function.get("gemini_thought_signature"))
+                                .and_then(serde_json::Value::as_str)
+                                .filter(|signature| !signature.trim().is_empty())
+                            {
+                                function_call["thoughtSignature"] =
+                                    serde_json::Value::String(signature.to_string());
+                            }
                             parts.push(serde_json::json!({
                                 "functionCall": function_call,
                             }));
@@ -530,12 +546,11 @@ fn runtime_gemini_function_declaration_from_chat_tool(
 ) -> Option<serde_json::Value> {
     let function = tool.get("function")?;
     let name = function.get("name").and_then(serde_json::Value::as_str)?;
+    let default_parameters = serde_json::json!({"type": "object"});
+    let parameters = function.get("parameters").unwrap_or(&default_parameters);
     let mut declaration = serde_json::json!({
         "name": name,
-        "parameters": function
-            .get("parameters")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({"type": "object"})),
+        "parameters": runtime_gemini_sanitize_function_schema(parameters),
     });
     if let Some(description) = function
         .get("description")
@@ -551,6 +566,20 @@ fn runtime_gemini_tool_config_from_chat(chat: &serde_json::Value) -> Option<serd
     if tool_choice.as_str() == Some("auto") {
         return None;
     }
+    if tool_choice.as_str() == Some("none") {
+        return Some(serde_json::json!({
+            "functionCallingConfig": {
+                "mode": "NONE",
+            }
+        }));
+    }
+    if tool_choice.as_str() == Some("required") {
+        return Some(serde_json::json!({
+            "functionCallingConfig": {
+                "mode": "ANY",
+            }
+        }));
+    }
     let name = tool_choice
         .get("function")
         .and_then(|function| function.get("name"))
@@ -562,6 +591,170 @@ fn runtime_gemini_tool_config_from_chat(chat: &serde_json::Value) -> Option<serd
             "allowedFunctionNames": [name],
         }
     }))
+}
+
+fn runtime_gemini_sanitize_function_schema(schema: &serde_json::Value) -> serde_json::Value {
+    let Some(object) = schema.as_object() else {
+        return serde_json::json!({ "type": "object" });
+    };
+
+    if let Some(collapsed) = runtime_gemini_collapse_schema_union(object) {
+        return collapsed;
+    }
+
+    let mut sanitized = serde_json::Map::new();
+    let mut nullable = object
+        .get("nullable")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if let Some(schema_type) = runtime_gemini_schema_type(object, &mut nullable) {
+        sanitized.insert(
+            "type".to_string(),
+            serde_json::Value::String(schema_type.to_string()),
+        );
+    }
+    if nullable {
+        sanitized.insert("nullable".to_string(), serde_json::Value::Bool(true));
+    }
+    for key in ["description", "format"] {
+        if let Some(value) = object.get(key).and_then(serde_json::Value::as_str)
+            && !value.trim().is_empty()
+        {
+            sanitized.insert(
+                key.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+    }
+    if let Some(enum_values) = runtime_gemini_sanitized_enum(object.get("enum")) {
+        sanitized.insert("enum".to_string(), serde_json::Value::Array(enum_values));
+    }
+    if let Some(properties) = runtime_gemini_sanitized_properties(object.get("properties")) {
+        sanitized.insert("properties".to_string(), properties);
+    }
+    if let Some(required) = runtime_gemini_sanitized_required(object.get("required")) {
+        sanitized.insert("required".to_string(), required);
+    }
+    if let Some(items) = object.get("items") {
+        sanitized.insert(
+            "items".to_string(),
+            runtime_gemini_sanitize_function_schema(items),
+        );
+    }
+    if !sanitized.contains_key("type") {
+        sanitized.insert(
+            "type".to_string(),
+            serde_json::Value::String("object".to_string()),
+        );
+    }
+    serde_json::Value::Object(sanitized)
+}
+
+fn runtime_gemini_collapse_schema_union(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let alternatives = object
+        .get("anyOf")
+        .or_else(|| object.get("oneOf"))
+        .and_then(serde_json::Value::as_array)?;
+    let non_null = alternatives
+        .iter()
+        .filter(|value| {
+            value
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_none_or(|schema_type| schema_type != "null")
+        })
+        .collect::<Vec<_>>();
+    if non_null.len() != 1 {
+        return None;
+    }
+    let mut sanitized = runtime_gemini_sanitize_function_schema(non_null[0]);
+    if alternatives.len() != non_null.len()
+        && let Some(sanitized_object) = sanitized.as_object_mut()
+    {
+        sanitized_object.insert("nullable".to_string(), serde_json::Value::Bool(true));
+    }
+    Some(sanitized)
+}
+
+fn runtime_gemini_schema_type<'a>(
+    object: &'a serde_json::Map<String, serde_json::Value>,
+    nullable: &mut bool,
+) -> Option<&'a str> {
+    match object.get("type") {
+        Some(serde_json::Value::String(schema_type)) => {
+            runtime_gemini_supported_schema_type(schema_type)
+        }
+        Some(serde_json::Value::Array(types)) => {
+            let mut selected = None;
+            for schema_type in types.iter().filter_map(serde_json::Value::as_str) {
+                if schema_type == "null" {
+                    *nullable = true;
+                } else if selected.is_none() {
+                    selected = runtime_gemini_supported_schema_type(schema_type);
+                }
+            }
+            selected
+        }
+        _ if object.contains_key("properties") => Some("object"),
+        _ if object.contains_key("items") => Some("array"),
+        _ if object.contains_key("enum") => Some("string"),
+        _ => None,
+    }
+}
+
+fn runtime_gemini_supported_schema_type(schema_type: &str) -> Option<&'static str> {
+    match schema_type.to_ascii_lowercase().as_str() {
+        "object" => Some("object"),
+        "array" => Some("array"),
+        "string" => Some("string"),
+        "integer" => Some("integer"),
+        "number" => Some("number"),
+        "boolean" => Some("boolean"),
+        _ => None,
+    }
+}
+
+fn runtime_gemini_sanitized_enum(
+    value: Option<&serde_json::Value>,
+) -> Option<Vec<serde_json::Value>> {
+    let values = value?.as_array()?;
+    let strings = values
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(|value| serde_json::Value::String(value.to_string()))
+        .collect::<Vec<_>>();
+    (!strings.is_empty()).then_some(strings)
+}
+
+fn runtime_gemini_sanitized_properties(
+    value: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let properties = value?.as_object()?;
+    let sanitized = properties
+        .iter()
+        .map(|(name, schema)| {
+            (
+                name.clone(),
+                runtime_gemini_sanitize_function_schema(schema),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    Some(serde_json::Value::Object(sanitized))
+}
+
+fn runtime_gemini_sanitized_required(
+    value: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let required = value?.as_array()?;
+    let required = required
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .map(|name| serde_json::Value::String(name.to_string()))
+        .collect::<Vec<_>>();
+    (!required.is_empty()).then_some(serde_json::Value::Array(required))
 }
 
 fn runtime_gemini_generation_config(
@@ -669,6 +862,7 @@ fn runtime_gemini_responses_tool_call_item(
     request_id: u64,
     index: usize,
 ) -> serde_json::Value {
+    let call_id = runtime_gemini_function_call_id(function_call, request_id, index);
     let name = function_call
         .get("name")
         .and_then(serde_json::Value::as_str)
@@ -680,10 +874,31 @@ fn runtime_gemini_responses_tool_call_item(
     let args = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
     serde_json::json!({
         "type": "function_call",
-        "call_id": format!("call_gemini_{request_id}_{index}"),
+        "call_id": call_id,
         "name": name,
         "arguments": runtime_deepseek_rtk_wrapped_tool_arguments(name, &args),
     })
+}
+
+fn runtime_gemini_function_call_id(
+    function_call: &serde_json::Value,
+    request_id: u64,
+    index: usize,
+) -> String {
+    function_call
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("call_gemini_{request_id}_{index}"))
+}
+
+fn runtime_gemini_thought_signature(part: &serde_json::Value) -> Option<String> {
+    part.get("thoughtSignature")
+        .or_else(|| part.get("thought_signature"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|signature| !signature.trim().is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]
