@@ -17,6 +17,7 @@ use self::tools::{
     runtime_deepseek_tools_from_responses_request,
 };
 pub(super) use super::deepseek_sse::RuntimeDeepSeekChatSseReader;
+use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_canonical_model};
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,14 +50,12 @@ pub(super) fn runtime_deepseek_chat_request_body(
         .get("model")
         .and_then(serde_json::Value::as_str)
         .unwrap_or(SUPER_DEEPSEEK_DEFAULT_MODEL);
+    let model = runtime_provider_canonical_model(RuntimeProviderBridgeKind::DeepSeek, model);
     let stream = value
         .get("stream")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    request.insert(
-        "model".to_string(),
-        serde_json::Value::String(model.to_string()),
-    );
+    request.insert("model".to_string(), serde_json::Value::String(model));
     request.insert("stream".to_string(), serde_json::Value::Bool(stream));
     let thinking_enabled = runtime_deepseek_thinking_enabled(&value);
     let mut messages = runtime_deepseek_messages_from_responses_request(&value, conversations)

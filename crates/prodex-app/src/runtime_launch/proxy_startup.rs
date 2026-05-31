@@ -9,6 +9,8 @@ mod local_rewrite_gemini;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_rate_limits;
 mod local_rewrite_response;
+mod provider_bridge;
+mod provider_tools;
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeLocalRewriteProviderOptions,

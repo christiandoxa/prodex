@@ -1,3 +1,6 @@
+use super::provider_bridge::{
+    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
+};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use runtime_proxy_crate::extract_runtime_proxy_quota_message;
 
@@ -15,6 +18,8 @@ pub(super) fn runtime_gemini_buffered_parts_are_quota_blocked(
     runtime_gemini_response_retryable_quota(status)
         && (extract_runtime_proxy_quota_message(&parts.body).is_some()
             || runtime_gemini_google_quota_message(&parts.body).is_some())
+        || runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, status, &parts.body)
+            == RuntimeProviderErrorClass::Quota
 }
 
 pub(super) fn runtime_gemini_retry_delay_ms(
@@ -322,6 +327,12 @@ mod tests {
             runtime_gemini_google_quota_message(&body).as_deref(),
             Some("Quota exceeded for quota metric.")
         );
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 429,
+            headers: Vec::new(),
+            body: body.into(),
+        };
+        assert!(runtime_gemini_buffered_parts_are_quota_blocked(429, &parts));
     }
 
     #[test]

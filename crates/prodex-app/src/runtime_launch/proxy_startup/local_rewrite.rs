@@ -4,7 +4,16 @@ use super::local_rewrite_gemini::{
     RuntimeGeminiOAuthPool, RuntimeGeminiRequestContext, runtime_gemini_oauth_pool_from_provider,
     send_runtime_gemini_upstream_request,
 };
-use super::local_rewrite_response::respond_runtime_local_rewrite_proxy_request;
+use super::local_rewrite_response::{
+    respond_runtime_local_rewrite_proxy_request,
+    runtime_local_rewrite_buffered_response_from_response,
+};
+use super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_error_class, runtime_provider_label,
+    runtime_provider_model_fallback_chain, runtime_provider_model_from_body,
+    runtime_provider_models_buffered_response, runtime_provider_request_body_with_model,
+    runtime_provider_request_ledger_message, runtime_provider_should_retry_with_next_model,
+};
 use super::*;
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
@@ -28,6 +37,20 @@ pub(crate) enum RuntimeLocalRewriteProviderOptions {
     OpenAiResponses,
     DeepSeek { api_key: String },
     Gemini { auth: RuntimeGeminiProviderAuth },
+}
+
+impl RuntimeLocalRewriteProviderOptions {
+    pub(super) fn bridge_kind(&self) -> RuntimeProviderBridgeKind {
+        match self {
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses => {
+                RuntimeProviderBridgeKind::OpenAiResponses
+            }
+            RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => {
+                RuntimeProviderBridgeKind::DeepSeek
+            }
+            RuntimeLocalRewriteProviderOptions::Gemini { .. } => RuntimeProviderBridgeKind::Gemini,
+        }
+    }
 }
 
 pub(crate) struct RuntimeLocalRewriteProxyStartOptions<'a> {
@@ -307,6 +330,26 @@ fn handle_runtime_local_rewrite_proxy_request(
         ));
         return;
     }
+    if let Some(parts) = runtime_provider_models_buffered_response(
+        shared.provider.bridge_kind(),
+        &captured.method,
+        &captured.path_and_query,
+    ) {
+        runtime_proxy_log(
+            runtime_shared,
+            runtime_provider_request_ledger_message(
+                request_id,
+                shared.provider.bridge_kind(),
+                &captured.path_and_query,
+                None,
+                parts.status,
+                0,
+                captured.body.len(),
+            ),
+        );
+        let _ = request.respond(build_runtime_proxy_response_from_parts(parts));
+        return;
+    }
     let response = match send_runtime_local_rewrite_upstream_request(request_id, &captured, shared)
     {
         Ok(response) => response,
@@ -373,33 +416,94 @@ fn send_runtime_local_rewrite_upstream_request(
             })
         }
         RuntimeLocalRewriteProviderOptions::DeepSeek { api_key } => {
-            let body = if path_without_query(&request.path_and_query).ends_with("/responses") {
-                let translated =
-                    runtime_deepseek_chat_request_body(&body, &shared.deepseek_conversations)?;
-                if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                    pending.insert(request_id, translated.messages);
+            if path_without_query(&request.path_and_query).ends_with("/responses") {
+                let requested_model = runtime_provider_model_from_body(&body)
+                    .unwrap_or_else(|| prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL.to_string());
+                let model_chain = runtime_provider_model_fallback_chain(
+                    RuntimeProviderBridgeKind::DeepSeek,
+                    &requested_model,
+                );
+                let upstream_url = runtime_deepseek_upstream_url(
+                    &shared.upstream_base_url,
+                    &shared.mount_path,
+                    &request.path_and_query,
+                );
+                for (model_index, model) in model_chain.iter().enumerate() {
+                    let model_body = runtime_provider_request_body_with_model(&body, model);
+                    let translated = runtime_deepseek_chat_request_body(
+                        &model_body,
+                        &shared.deepseek_conversations,
+                    )?;
+                    if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
+                        pending.insert(request_id, translated.messages);
+                    }
+                    let response = send_runtime_local_rewrite_prepared_request(
+                        request_id,
+                        request,
+                        shared,
+                        &upstream_url,
+                        translated.body,
+                        RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
+                    )?;
+                    let status = response.status().as_u16();
+                    if status >= 400 && model_index + 1 < model_chain.len() {
+                        let parts =
+                            runtime_local_rewrite_buffered_response_from_response(response)?;
+                        let class = runtime_provider_error_class(
+                            RuntimeProviderBridgeKind::DeepSeek,
+                            status,
+                            &parts.body,
+                        );
+                        if runtime_provider_should_retry_with_next_model(class) {
+                            runtime_proxy_log(
+                                &shared.runtime_shared,
+                                runtime_proxy_structured_log_message(
+                                    "local_rewrite_provider_model_fallback",
+                                    [
+                                        runtime_proxy_log_field("request", request_id.to_string()),
+                                        runtime_proxy_log_field("provider", "deepseek"),
+                                        runtime_proxy_log_field("from_model", model.as_str()),
+                                        runtime_proxy_log_field(
+                                            "to_model",
+                                            model_chain[model_index + 1].as_str(),
+                                        ),
+                                        runtime_proxy_log_field("status", status.to_string()),
+                                        runtime_proxy_log_field("class", format!("{class:?}")),
+                                    ],
+                                ),
+                            );
+                            continue;
+                        }
+                        return Ok(RuntimeLocalRewriteUpstreamResult {
+                            response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                            gemini_context: None,
+                        });
+                    }
+                    return Ok(RuntimeLocalRewriteUpstreamResult {
+                        response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                        gemini_context: None,
+                    });
                 }
-                translated.body
+                anyhow::bail!("no DeepSeek model attempts were available");
             } else {
-                body
-            };
-            let upstream_url = runtime_deepseek_upstream_url(
-                &shared.upstream_base_url,
-                &shared.mount_path,
-                &request.path_and_query,
-            );
-            let response = send_runtime_local_rewrite_prepared_request(
-                request_id,
-                request,
-                shared,
-                &upstream_url,
-                body,
-                RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
-            )?;
-            Ok(RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Live(response),
-                gemini_context: None,
-            })
+                let upstream_url = runtime_deepseek_upstream_url(
+                    &shared.upstream_base_url,
+                    &shared.mount_path,
+                    &request.path_and_query,
+                );
+                let response = send_runtime_local_rewrite_prepared_request(
+                    request_id,
+                    request,
+                    shared,
+                    &upstream_url,
+                    body,
+                    RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
+                )?;
+                Ok(RuntimeLocalRewriteUpstreamResult {
+                    response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                    gemini_context: None,
+                })
+            }
         }
         RuntimeLocalRewriteProviderOptions::Gemini { auth } => {
             send_runtime_gemini_upstream_request(request_id, request, shared, body, auth)
@@ -413,6 +517,18 @@ pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
     Gemini { auth: &'a RuntimeGeminiAuth },
 }
 
+impl RuntimeLocalRewritePreparedAuth<'_> {
+    fn bridge_kind(&self) -> RuntimeProviderBridgeKind {
+        match self {
+            RuntimeLocalRewritePreparedAuth::OpenAiResponses => {
+                RuntimeProviderBridgeKind::OpenAiResponses
+            }
+            RuntimeLocalRewritePreparedAuth::DeepSeek { .. } => RuntimeProviderBridgeKind::DeepSeek,
+            RuntimeLocalRewritePreparedAuth::Gemini { .. } => RuntimeProviderBridgeKind::Gemini,
+        }
+    }
+}
+
 pub(super) fn send_runtime_local_rewrite_prepared_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -421,6 +537,9 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     body: Vec<u8>,
     auth: RuntimeLocalRewritePreparedAuth<'_>,
 ) -> Result<reqwest::blocking::Response> {
+    let provider_kind = auth.bridge_kind();
+    let body_bytes = body.len();
+    let model = runtime_provider_model_from_body(&body);
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
         format!(
             "failed to proxy unsupported HTTP method '{}' for runtime local rewrite",
@@ -474,7 +593,9 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("method", request.method.as_str()),
                 runtime_proxy_log_field("url", upstream_url),
-                runtime_proxy_log_field("body_bytes", body.len().to_string()),
+                runtime_proxy_log_field("provider", runtime_provider_label(provider_kind)),
+                runtime_proxy_log_field("model", model.as_deref().unwrap_or("unknown")),
+                runtime_proxy_log_field("body_bytes", body_bytes.to_string()),
             ],
         ),
     );
@@ -493,6 +614,18 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                 runtime_proxy_log_field("status", response.status().as_u16().to_string()),
                 runtime_proxy_log_field("elapsed_ms", started_at.elapsed().as_millis().to_string()),
             ],
+        ),
+    );
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_provider_request_ledger_message(
+            request_id,
+            provider_kind,
+            &request.path_and_query,
+            model.as_deref(),
+            response.status().as_u16(),
+            started_at.elapsed().as_millis(),
+            body_bytes,
         ),
     );
     Ok(response)

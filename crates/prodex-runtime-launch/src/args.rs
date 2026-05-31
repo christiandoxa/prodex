@@ -35,7 +35,10 @@ pub fn runtime_proxy_codex_passthrough_args(
 }
 
 pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
-    let Some(first) = codex_args.first().and_then(|arg| arg.to_str()) else {
+    let Some(index) = first_codex_positional_arg_index(codex_args) else {
+        return codex_args.to_vec();
+    };
+    let Some(first) = codex_args[index].to_str() else {
         return codex_args.to_vec();
     };
     if !looks_like_codex_session_id(first) {
@@ -43,9 +46,94 @@ pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
     }
 
     let mut normalized = Vec::with_capacity(codex_args.len() + 1);
+    normalized.extend(codex_args[..index].iter().cloned());
     normalized.push(OsString::from("resume"));
-    normalized.extend(codex_args.iter().cloned());
+    normalized.extend(codex_args[index..].iter().cloned());
     normalized
+}
+
+fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
+    let mut index = 0;
+    while index < codex_args.len() {
+        let Some(arg) = codex_args[index].to_str() else {
+            return Some(index);
+        };
+        if arg == "--" {
+            return (index + 1 < codex_args.len()).then_some(index + 1);
+        }
+        if codex_option_takes_separate_value(arg) {
+            index += 2;
+            continue;
+        }
+        if codex_option_with_inline_value(arg) || codex_flag_option(arg) || arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return Some(index);
+    }
+    None
+}
+
+fn codex_option_takes_separate_value(arg: &str) -> bool {
+    matches!(
+        arg,
+        "-c" | "--config"
+            | "-i"
+            | "--image"
+            | "-m"
+            | "--model"
+            | "--local-provider"
+            | "-p"
+            | "--profile"
+            | "-s"
+            | "--sandbox"
+            | "-C"
+            | "--cd"
+            | "--add-dir"
+            | "-a"
+            | "--ask-for-approval"
+            | "--enable"
+            | "--disable"
+            | "--remote"
+            | "--remote-auth-token-env"
+            | "--output-schema"
+            | "-o"
+            | "--output-last-message"
+            | "--color"
+    )
+}
+
+fn codex_option_with_inline_value(arg: &str) -> bool {
+    if arg.starts_with("--") {
+        return arg.contains('=');
+    }
+    ["-c", "-i", "-m", "-p", "-s", "-C", "-a", "-o"]
+        .iter()
+        .any(|prefix| arg.starts_with(prefix) && arg.len() > prefix.len())
+}
+
+fn codex_flag_option(arg: &str) -> bool {
+    matches!(
+        arg,
+        "--oss"
+            | "--search"
+            | "--no-alt-screen"
+            | "--dangerously-bypass-approvals-and-sandbox"
+            | "--dangerously-bypass-hook-trust"
+            | "--strict-config"
+            | "--last"
+            | "--all"
+            | "--include-non-interactive"
+            | "--skip-git-repo-check"
+            | "--ephemeral"
+            | "--ignore-user-config"
+            | "--ignore-rules"
+            | "--json"
+            | "-h"
+            | "--help"
+            | "-V"
+            | "--version"
+    )
 }
 
 fn looks_like_codex_session_id(value: &str) -> bool {

@@ -5,11 +5,49 @@ use prodex_cli::{
     SUPER_DEEPSEEK_DEFAULT_MODEL, SUPER_DEEPSEEK_PROVIDER_ID,
 };
 use serde_json::json;
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const DEEPSEEK_MODEL_CATALOG_FILE: &str = "prodex-deepseek-model-catalog.json";
+const DEEPSEEK_CATALOG_MODELS: &[(&str, &str, &str)] = &[
+    (
+        "auto",
+        "DeepSeek Auto",
+        "Prodex DeepSeek fallback chain routed through current DeepSeek models.",
+    ),
+    (
+        "pro",
+        "DeepSeek Pro",
+        "Prodex DeepSeek Pro alias routed through DeepSeek V4 Pro.",
+    ),
+    (
+        "flash",
+        "DeepSeek Flash",
+        "Prodex DeepSeek Flash alias routed through DeepSeek V4 Flash.",
+    ),
+    (
+        "deepseek-v4-pro",
+        "DeepSeek V4 Pro",
+        "DeepSeek V4 Pro routed through the Prodex Responses adapter.",
+    ),
+    (
+        "deepseek-v4-flash",
+        "DeepSeek V4 Flash",
+        "DeepSeek V4 Flash routed through the Prodex Responses adapter.",
+    ),
+    (
+        "deepseek-chat",
+        "DeepSeek Chat",
+        "DeepSeek chat compatibility model routed through the Prodex Responses adapter.",
+    ),
+    (
+        "deepseek-reasoner",
+        "DeepSeek Reasoner",
+        "DeepSeek reasoner compatibility model routed through the Prodex Responses adapter.",
+    ),
+];
 const DEEPSEEK_BASE_INSTRUCTIONS: &str = r#"You are Codex, a coding agent. You and the user share the same workspace.
 
 Focus on the user's software task. Inspect the codebase before changing behavior, make narrow edits, preserve user changes, and verify with relevant tests or commands when feasible.
@@ -108,59 +146,109 @@ fn write_deepseek_model_catalog(
         .with_context(|| format!("failed to create {}", codex_home.display()))?;
     let catalog_path = codex_home.join(DEEPSEEK_MODEL_CATALOG_FILE);
     let catalog = json!({
-        "models": [
-            {
-                "slug": model,
-                "display_name": model,
-                "description": "DeepSeek model routed through the Prodex Responses adapter.",
-                "default_reasoning_level": "high",
-                "supported_reasoning_levels": [
-                    {
-                        "effort": "high",
-                        "description": "DeepSeek high reasoning effort"
-                    },
-                    {
-                        "effort": "xhigh",
-                        "description": "DeepSeek max reasoning effort"
-                    }
-                ],
-                "shell_type": "shell_command",
-                "visibility": "list",
-                "supported_in_api": true,
-                "priority": 1,
-                "additional_speed_tiers": [],
-                "service_tiers": [],
-                "default_service_tier": null,
-                "availability_nux": null,
-                "upgrade": null,
-                "base_instructions": DEEPSEEK_BASE_INSTRUCTIONS,
-                "supports_reasoning_summaries": true,
-                "default_reasoning_summary": "none",
-                "support_verbosity": false,
-                "default_verbosity": null,
-                "apply_patch_tool_type": "freeform",
-                "web_search_tool_type": "text",
-                "truncation_policy": {
-                    "mode": "tokens",
-                    "limit": 10000
-                },
-                "supports_parallel_tool_calls": true,
-                "supports_image_detail_original": false,
-                "context_window": context_window,
-                "max_context_window": context_window,
-                "auto_compact_token_limit": auto_compact_token_limit,
-                "effective_context_window_percent": 95,
-                "experimental_supported_tools": [],
-                "input_modalities": ["text"],
-                "supports_search_tool": false
-            }
-        ]
+        "models": deepseek_catalog_models(model, context_window, auto_compact_token_limit)
     });
     let contents =
         serde_json::to_string_pretty(&catalog).context("failed to serialize DeepSeek catalog")?;
     fs::write(&catalog_path, contents)
         .with_context(|| format!("failed to write {}", catalog_path.display()))?;
     Ok(catalog_path)
+}
+
+fn deepseek_catalog_models(
+    launch_model: &str,
+    context_window: u64,
+    auto_compact_token_limit: u64,
+) -> Vec<serde_json::Value> {
+    let mut models = Vec::with_capacity(DEEPSEEK_CATALOG_MODELS.len() + 1);
+    let mut seen = BTreeSet::new();
+
+    for slug in std::iter::once(launch_model)
+        .chain(DEEPSEEK_CATALOG_MODELS.iter().map(|(slug, _, _)| *slug))
+    {
+        let slug = slug.trim();
+        if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
+            continue;
+        }
+        let priority = models.len() + 1;
+        let (display_name, description) = deepseek_catalog_model_metadata(slug);
+        models.push(deepseek_catalog_model(
+            slug,
+            display_name,
+            description,
+            priority,
+            context_window,
+            auto_compact_token_limit,
+        ));
+    }
+
+    models
+}
+
+fn deepseek_catalog_model_metadata(model: &str) -> (&str, &'static str) {
+    DEEPSEEK_CATALOG_MODELS
+        .iter()
+        .find(|(slug, _, _)| model.eq_ignore_ascii_case(slug))
+        .map(|(_, display_name, description)| (*display_name, *description))
+        .unwrap_or((
+            model,
+            "DeepSeek model routed through the Prodex Responses adapter.",
+        ))
+}
+
+fn deepseek_catalog_model(
+    slug: &str,
+    display_name: &str,
+    description: &str,
+    priority: usize,
+    context_window: u64,
+    auto_compact_token_limit: u64,
+) -> serde_json::Value {
+    json!({
+        "slug": slug,
+        "display_name": display_name,
+        "description": description,
+        "default_reasoning_level": "high",
+        "supported_reasoning_levels": [
+            {
+                "effort": "high",
+                "description": "DeepSeek high reasoning effort"
+            },
+            {
+                "effort": "xhigh",
+                "description": "DeepSeek max reasoning effort"
+            }
+        ],
+        "shell_type": "shell_command",
+        "visibility": "list",
+        "supported_in_api": true,
+        "priority": priority,
+        "additional_speed_tiers": [],
+        "service_tiers": [],
+        "default_service_tier": null,
+        "availability_nux": null,
+        "upgrade": null,
+        "base_instructions": DEEPSEEK_BASE_INSTRUCTIONS,
+        "supports_reasoning_summaries": true,
+        "default_reasoning_summary": "none",
+        "support_verbosity": false,
+        "default_verbosity": null,
+        "apply_patch_tool_type": "freeform",
+        "web_search_tool_type": "text",
+        "truncation_policy": {
+            "mode": "tokens",
+            "limit": 10000
+        },
+        "supports_parallel_tool_calls": true,
+        "supports_image_detail_original": false,
+        "context_window": context_window,
+        "max_context_window": context_window,
+        "auto_compact_token_limit": auto_compact_token_limit,
+        "effective_context_window_percent": 95,
+        "experimental_supported_tools": [],
+        "input_modalities": ["text"],
+        "supports_search_tool": false
+    })
 }
 
 fn toml_string_literal(value: &str) -> String {
@@ -202,8 +290,21 @@ mod tests {
             args.iter()
                 .any(|arg| { arg.to_string_lossy().contains("model_catalog_json=") })
         );
-        assert_eq!(catalog["models"].as_array().unwrap().len(), 1);
         assert_eq!(catalog["models"][0]["slug"], "deepseek-v4-pro");
+        assert!(
+            catalog["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|model| model["slug"] == "deepseek-v4-flash")
+        );
+        assert!(
+            catalog["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|model| model["slug"] == "auto")
+        );
         assert_eq!(
             catalog["models"][0]["supported_reasoning_levels"][1]["effort"],
             "xhigh"

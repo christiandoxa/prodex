@@ -341,6 +341,38 @@ mod tests {
     }
 
     #[test]
+    fn super_provider_normalizes_bare_session_id_after_provider_config() {
+        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
+            "prodex",
+            "s",
+            "--provider",
+            "gemini",
+            "--api-key",
+            "gemini-key",
+            "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+        ]));
+
+        let rendered = strategy
+            .codex_args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let resume_index = rendered
+            .iter()
+            .position(|arg| arg == "resume")
+            .expect("bare session id should be normalized to resume");
+        assert_eq!(
+            rendered.get(resume_index + 1).map(String::as_str),
+            Some("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9")
+        );
+        assert!(
+            rendered[..resume_index]
+                .iter()
+                .any(|arg| arg == "model_provider=\"prodex-gemini\"")
+        );
+    }
+
+    #[test]
     fn super_alias_keeps_optional_stack_for_local_provider() {
         let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
             "prodex",

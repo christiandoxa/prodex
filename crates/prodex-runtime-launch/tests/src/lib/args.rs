@@ -99,6 +99,33 @@ fn prepare_codex_launch_args_extracts_full_access_and_normalizes_resume() {
 }
 
 #[test]
+fn prepare_codex_launch_args_normalizes_resume_after_provider_config_overrides() {
+    let (args, include_code_review) = prepare_codex_launch_args(
+        &[
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-gemini\""),
+            OsString::from("--config=model=\"gemini-2.5-pro\""),
+            OsString::from("-cmodel_context_window=1048576"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        ],
+        false,
+    );
+
+    assert_eq!(
+        args,
+        vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-gemini\""),
+            OsString::from("--config=model=\"gemini-2.5-pro\""),
+            OsString::from("-cmodel_context_window=1048576"),
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        ]
+    );
+    assert!(!include_code_review);
+}
+
+#[test]
 fn prepare_codex_launch_args_extracts_prodex_full_access_passthrough_marker() {
     let (args, include_code_review) = prepare_codex_launch_args(
         &[

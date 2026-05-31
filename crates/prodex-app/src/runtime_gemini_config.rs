@@ -11,9 +11,29 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const GEMINI_MODEL_CATALOG_FILE: &str = "prodex-gemini-model-catalog.json";
-// Mirrors Gemini CLI's visible concrete models. Prodex does not expose Gemini CLI's
-// auto/pro/flash aliases here because it does not implement Gemini's model router.
+// Mirrors Gemini CLI's visible models and aliases. The runtime bridge resolves
+// aliases such as auto/pro/flash into concrete fallback chains before commit.
 const GEMINI_CATALOG_MODELS: &[(&str, &str, &str)] = &[
+    (
+        "auto",
+        "Gemini Auto",
+        "Prodex Gemini fallback chain using Gemini CLI-style model routing.",
+    ),
+    (
+        "pro",
+        "Gemini Pro",
+        "Prodex Gemini Pro alias routed through Gemini preview and stable Pro models.",
+    ),
+    (
+        "flash",
+        "Gemini Flash",
+        "Prodex Gemini Flash alias routed through Gemini preview and stable Flash models.",
+    ),
+    (
+        "flash-lite",
+        "Gemini Flash Lite",
+        "Prodex Gemini Flash-Lite alias routed through Gemini Flash-Lite models.",
+    ),
     (
         "gemini-3.1-pro-preview",
         "Gemini 3.1 Pro Preview",
@@ -23,6 +43,11 @@ const GEMINI_CATALOG_MODELS: &[(&str, &str, &str)] = &[
         "gemini-3-pro-preview",
         "Gemini 3 Pro Preview",
         "Gemini CLI preview Pro model routed through the Prodex Responses adapter.",
+    ),
+    (
+        "gemini-3.1-pro-preview-customtools",
+        "Gemini 3.1 Pro Preview Custom Tools",
+        "Gemini CLI preview Pro model variant for custom tools routed through Prodex.",
     ),
     (
         "gemini-3-flash-preview",
@@ -319,6 +344,8 @@ mod tests {
                 .iter()
                 .any(|model| model["slug"] == "gemini-3.1-pro-preview")
         );
+        assert!(model_slugs.iter().any(|model| model["slug"] == "auto"));
+        assert!(model_slugs.iter().any(|model| model["slug"] == "flash"));
         assert!(
             model_slugs
                 .iter()
