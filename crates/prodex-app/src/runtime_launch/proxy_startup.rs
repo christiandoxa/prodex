@@ -18,7 +18,7 @@ mod provider_bridge;
 mod provider_models;
 mod provider_tools;
 pub(crate) use anthropic_rewrite::{
-    RuntimeAnthropicAuth, RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth,
+    RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth,
 };
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
