@@ -126,6 +126,18 @@ fn rtk_command_wrappers() -> &'static [RtkCommandWrapper] {
             command: "rg",
             subcommands: &[],
         },
+        RtkCommandWrapper {
+            command: "find",
+            subcommands: &[],
+        },
+        RtkCommandWrapper {
+            command: "ls",
+            subcommands: &[],
+        },
+        RtkCommandWrapper {
+            command: "tree",
+            subcommands: &[],
+        },
     ]
 }
 

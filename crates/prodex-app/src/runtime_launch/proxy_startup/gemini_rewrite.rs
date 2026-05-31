@@ -9,6 +9,7 @@ use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::Read;
+use std::path::PathBuf;
 
 #[derive(Clone)]
 pub(crate) enum RuntimeGeminiAuth {
@@ -34,6 +35,8 @@ pub(crate) enum RuntimeGeminiProviderAuth {
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimeGeminiOAuthProfileAuth {
     pub(crate) profile_name: String,
+    pub(crate) codex_home: PathBuf,
+    pub(crate) email: Option<String>,
     pub(crate) access_token: String,
     pub(crate) project_id: Option<String>,
 }
@@ -598,7 +601,7 @@ fn runtime_gemini_thinking_config(
             "thinkingBudget": 0,
         }));
     }
-    if model.contains("gemini-3") || model.contains("gemma-3") {
+    if runtime_gemini_model_uses_thinking_level(model) {
         let level = match effort.as_str() {
             "low" => "LOW",
             "medium" => "MEDIUM",
@@ -619,6 +622,10 @@ fn runtime_gemini_thinking_config(
         "includeThoughts": true,
         "thinkingBudget": budget,
     }))
+}
+
+fn runtime_gemini_model_uses_thinking_level(model: &str) -> bool {
+    model.contains("gemini-3") || model.contains("gemma-3") || model.contains("gemma-4")
 }
 
 fn chat_message_text(message: &serde_json::Value) -> Option<String> {
@@ -680,95 +687,5 @@ fn runtime_gemini_responses_tool_call_item(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-
-    fn conversation_store() -> RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(BTreeMap::new()))
-    }
-
-    #[test]
-    fn gemini_request_translation_maps_tools_and_thinking() {
-        let body = serde_json::json!({
-            "model": "gemini-2.5-pro",
-            "stream": true,
-            "instructions": "Be concise.",
-            "input": "List files",
-            "tools": [{
-                "type": "function",
-                "name": "shell",
-                "description": "Run shell",
-                "parameters": {"type": "object"}
-            }],
-            "reasoning": {"effort": "high"},
-            "max_output_tokens": 123
-        });
-
-        let translated = runtime_gemini_generate_request_body(
-            &serde_json::to_vec(&body).unwrap(),
-            &conversation_store(),
-            false,
-            None,
-        )
-        .expect("request should translate");
-        let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
-
-        assert_eq!(translated.model, "gemini-2.5-pro");
-        assert!(translated.stream);
-        assert_eq!(value["contents"][0]["parts"][0]["text"], "List files");
-        assert_eq!(
-            value["tools"][0]["functionDeclarations"][0]["name"],
-            "shell"
-        );
-        assert_eq!(value["generationConfig"]["maxOutputTokens"], 123);
-        assert_eq!(
-            value["generationConfig"]["thinkingConfig"]["thinkingBudget"],
-            8192
-        );
-    }
-
-    #[test]
-    fn gemini_request_translation_maps_tool_outputs_as_user_function_responses() {
-        let body = serde_json::json!({
-            "model": "gemini-2.5-pro",
-            "input": [
-                {
-                    "type": "function_call",
-                    "call_id": "call_shell_1",
-                    "name": "shell",
-                    "arguments": "{\"cmd\":\"git log -n 5\"}"
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_shell_1",
-                    "output": "commit abc123"
-                }
-            ]
-        });
-
-        let translated = runtime_gemini_generate_request_body(
-            &serde_json::to_vec(&body).unwrap(),
-            &conversation_store(),
-            false,
-            None,
-        )
-        .expect("request should translate");
-        let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
-
-        assert_eq!(value["contents"][0]["role"], "model");
-        assert_eq!(
-            value["contents"][0]["parts"][0]["functionCall"]["id"],
-            "call_shell_1"
-        );
-        assert_eq!(value["contents"][1]["role"], "user");
-        assert_eq!(
-            value["contents"][1]["parts"][0]["functionResponse"]["id"],
-            "call_shell_1"
-        );
-        assert_eq!(
-            value["contents"][1]["parts"][0]["functionResponse"]["response"]["output"],
-            "commit abc123"
-        );
-    }
-}
+#[path = "gemini_rewrite_tests.rs"]
+mod gemini_rewrite_tests;

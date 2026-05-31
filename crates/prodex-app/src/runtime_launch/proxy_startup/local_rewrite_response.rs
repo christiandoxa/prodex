@@ -12,6 +12,10 @@ use super::local_rewrite::{
 use super::local_rewrite_gemini::{
     RuntimeGeminiRequestContext, runtime_gemini_remember_bindings_from_responses_body,
 };
+use super::local_rewrite_rate_limits::{
+    append_binary_rate_limit_headers, append_text_rate_limit_headers,
+    runtime_deepseek_codex_rate_limit_headers, runtime_openai_style_codex_rate_limit_headers,
+};
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeStreamingResponse,
     build_runtime_proxy_response_from_parts, build_runtime_proxy_text_response,
@@ -141,16 +145,19 @@ fn respond_runtime_deepseek_rewrite(
     content_type: &str,
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
+    let rate_limit_headers = runtime_deepseek_codex_rate_limit_headers(response.headers());
     let conversation_messages =
         runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
     if content_type.contains("text/event-stream") {
         let writer = request.into_writer();
+        let mut headers = vec![(
+            "content-type".to_string(),
+            "text/event-stream; charset=utf-8".to_string(),
+        )];
+        append_text_rate_limit_headers(&mut headers, rate_limit_headers);
         let streaming = RuntimeStreamingResponse {
             status,
-            headers: vec![(
-                "content-type".to_string(),
-                "text/event-stream; charset=utf-8".to_string(),
-            )],
+            headers,
             body: Box::new(RuntimeDeepSeekChatSseReader::new(
                 response,
                 request_id,
@@ -174,7 +181,10 @@ fn respond_runtime_deepseek_rewrite(
         conversation_messages,
         &shared.deepseek_conversations,
     )
-    .map(build_runtime_proxy_response_from_parts)
+    .map(|mut parts| {
+        append_binary_rate_limit_headers(&mut parts.headers, rate_limit_headers);
+        build_runtime_proxy_response_from_parts(parts)
+    })
     .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
     let _ = request.respond(response);
 }
@@ -197,14 +207,25 @@ fn respond_runtime_gemini_rewrite(
         conversation_messages: Vec::new(),
         binding_recorder: None,
     });
+    let mut rate_limit_headers = shared
+        .gemini_oauth_pool
+        .as_ref()
+        .map(|pool| pool.quota_headers_for_profile(&profile_name))
+        .unwrap_or_default();
+    if rate_limit_headers.is_empty() {
+        rate_limit_headers =
+            runtime_openai_style_codex_rate_limit_headers(response.headers(), "gemini", "Gemini");
+    }
     if content_type.contains("text/event-stream") {
         let writer = request.into_writer();
+        let mut headers = vec![(
+            "content-type".to_string(),
+            "text/event-stream; charset=utf-8".to_string(),
+        )];
+        append_text_rate_limit_headers(&mut headers, rate_limit_headers);
         let streaming = RuntimeStreamingResponse {
             status,
-            headers: vec![(
-                "content-type".to_string(),
-                "text/event-stream; charset=utf-8".to_string(),
-            )],
+            headers,
             body: Box::new(RuntimeGeminiGenerateSseReader::new(
                 response,
                 request_id,
@@ -229,11 +250,12 @@ fn respond_runtime_gemini_rewrite(
         conversation_messages,
         &shared.gemini_conversations,
     )
-    .map(|parts| {
+    .map(|mut parts| {
         runtime_gemini_remember_bindings_from_responses_body(
             binding_recorder.as_ref(),
             &parts.body,
         );
+        append_binary_rate_limit_headers(&mut parts.headers, rate_limit_headers);
         build_runtime_proxy_response_from_parts(parts)
     })
     .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));

@@ -214,13 +214,15 @@ fn runtime_gemini_oauth_profiles_for_provider(
         let Some(profile) = state.profiles.get(&profile_name) else {
             continue;
         };
-        let ProfileProvider::Gemini { project_id, .. } = &profile.provider else {
+        let ProfileProvider::Gemini { email, project_id } = &profile.provider else {
             continue;
         };
         match refresh_gemini_oauth_secret_if_needed(&profile.codex_home) {
             Ok(secret) => {
                 profiles.push(RuntimeGeminiOAuthProfileAuth {
                     profile_name: profile_name.clone(),
+                    codex_home: profile.codex_home.clone(),
+                    email: Some(email.clone()),
                     access_token: secret.access_token,
                     project_id: secret
                         .project_id

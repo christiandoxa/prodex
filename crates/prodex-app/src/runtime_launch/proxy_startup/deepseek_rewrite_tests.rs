@@ -629,6 +629,19 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_wraps_listing_shell_arguments_with_rtk() {
+        for command in ["find . -maxdepth 2 -type f", "ls -la", "tree -a -L 3"] {
+            let arguments = runtime_deepseek_rtk_wrapped_tool_arguments(
+                "shell",
+                &serde_json::json!({ "cmd": command }).to_string(),
+            );
+            let arguments: serde_json::Value = serde_json::from_str(&arguments).unwrap();
+
+            assert_eq!(arguments["cmd"], format!("rtk {command}"));
+        }
+    }
+
+    #[test]
     fn deepseek_does_not_double_wrap_rtk_shell_arguments() {
         let arguments = runtime_deepseek_rtk_wrapped_tool_arguments(
             "shell",

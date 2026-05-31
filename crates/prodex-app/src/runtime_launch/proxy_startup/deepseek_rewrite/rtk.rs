@@ -199,6 +199,18 @@ const RTK_NOISY_SHELL_COMMANDS: &[RtkNoisyShellCommand] = &[
         subcommands: &[],
     },
     RtkNoisyShellCommand {
+        command: "find",
+        subcommands: &[],
+    },
+    RtkNoisyShellCommand {
+        command: "ls",
+        subcommands: &[],
+    },
+    RtkNoisyShellCommand {
+        command: "tree",
+        subcommands: &[],
+    },
+    RtkNoisyShellCommand {
         command: "claw-compactor",
         subcommands: &["benchmark", "compact", "summarize"],
     },

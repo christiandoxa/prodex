@@ -13,13 +13,18 @@ use super::local_rewrite_gemini_quota::{
     runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
     runtime_gemini_retry_delay_ms,
 };
+use super::local_rewrite_rate_limits::runtime_gemini_quota_codex_headers;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
-use crate::{RuntimeProxyRequest, runtime_proxy_log};
+use crate::{
+    RuntimeProxyRequest, fetch_gemini_quota_with_code_assist_endpoint, gemini_code_assist_endpoint,
+    runtime_proxy_log, runtime_proxy_log_to_path, spawn_runtime_background_worker_or_log,
+};
 use anyhow::{Context, Result, bail};
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -37,6 +42,7 @@ struct RuntimeGeminiOAuthPoolState {
     next_index: usize,
     response_profile_bindings: BTreeMap<String, String>,
     tool_call_profile_bindings: BTreeMap<String, String>,
+    quota_headers: BTreeMap<String, Vec<(String, String)>>,
 }
 
 #[derive(Clone)]
@@ -68,6 +74,7 @@ pub(super) fn runtime_gemini_oauth_pool_from_provider(
             next_index: 0,
             response_profile_bindings: BTreeMap::new(),
             tool_call_profile_bindings: BTreeMap::new(),
+            quota_headers: BTreeMap::new(),
         })),
     })
 }
@@ -228,6 +235,91 @@ fn runtime_gemini_auth_attempts(
 }
 
 impl RuntimeGeminiOAuthPool {
+    pub(super) fn spawn_quota_refresh(&self, log_path: PathBuf) {
+        let profiles = match self.state.lock() {
+            Ok(state) => state.profiles.clone(),
+            Err(_) => return,
+        };
+        if profiles.is_empty() {
+            return;
+        }
+        let pool = self.clone();
+        let code_assist_endpoint = gemini_code_assist_endpoint();
+        spawn_runtime_background_worker_or_log(
+            "prodex-gemini-quota-refresh",
+            Some(log_path.clone()),
+            move || {
+                for profile in profiles {
+                    let result = fetch_gemini_quota_with_code_assist_endpoint(
+                        &profile.codex_home,
+                        profile.project_id.as_deref(),
+                        &code_assist_endpoint,
+                    );
+                    match result {
+                        Ok(info) => {
+                            let headers = runtime_gemini_quota_codex_headers(
+                                &profile.profile_name,
+                                profile.email.as_deref(),
+                                &info,
+                            );
+                            pool.remember_quota_headers(&profile.profile_name, headers);
+                            runtime_proxy_log_to_path(
+                                &log_path,
+                                &runtime_proxy_structured_log_message(
+                                    "local_rewrite_gemini_quota_status_ready",
+                                    [
+                                        runtime_proxy_log_field(
+                                            "profile",
+                                            profile.profile_name.as_str(),
+                                        ),
+                                        runtime_proxy_log_field(
+                                            "buckets",
+                                            info.buckets.len().to_string(),
+                                        ),
+                                    ],
+                                ),
+                            );
+                        }
+                        Err(err) => {
+                            runtime_proxy_log_to_path(
+                                &log_path,
+                                &runtime_proxy_structured_log_message(
+                                    "local_rewrite_gemini_quota_status_unavailable",
+                                    [
+                                        runtime_proxy_log_field(
+                                            "profile",
+                                            profile.profile_name.as_str(),
+                                        ),
+                                        runtime_proxy_log_field("error", err.to_string()),
+                                    ],
+                                ),
+                            );
+                        }
+                    }
+                }
+            },
+        );
+    }
+
+    pub(super) fn quota_headers_for_profile(&self, profile_name: &str) -> Vec<(String, String)> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| state.quota_headers.get(profile_name).cloned())
+            .unwrap_or_default()
+    }
+
+    fn remember_quota_headers(&self, profile_name: &str, headers: Vec<(String, String)>) {
+        if headers.is_empty() {
+            return;
+        }
+        if let Ok(mut state) = self.state.lock() {
+            state
+                .quota_headers
+                .insert(profile_name.to_string(), headers);
+        }
+    }
+
     fn select_attempts(
         &self,
         body: &[u8],
@@ -433,6 +525,8 @@ mod tests {
     fn gemini_profile(profile_name: &str) -> RuntimeGeminiOAuthProfileAuth {
         RuntimeGeminiOAuthProfileAuth {
             profile_name: profile_name.to_string(),
+            codex_home: std::env::temp_dir().join(format!("prodex-gemini-{profile_name}")),
+            email: Some(format!("{profile_name}@example.com")),
             access_token: format!("token-{profile_name}"),
             project_id: Some(format!("project-{profile_name}")),
         }
@@ -448,6 +542,7 @@ mod tests {
                 next_index: 0,
                 response_profile_bindings: BTreeMap::new(),
                 tool_call_profile_bindings: BTreeMap::new(),
+                quota_headers: BTreeMap::new(),
             })),
         }
     }

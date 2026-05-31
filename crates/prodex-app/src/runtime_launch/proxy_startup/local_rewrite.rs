@@ -145,6 +145,9 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         gemini_oauth_pool,
         client: build_runtime_local_rewrite_http_client()?,
     };
+    if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
+        pool.spawn_quota_refresh(shared.runtime_shared.log_path.clone());
+    }
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut worker_threads = Vec::new();
     for _ in 0..worker_count {
@@ -686,7 +689,7 @@ mod tests {
         assert!(output.contains("\"type\":\"response.output_item.added\""));
         assert!(output.contains("\"type\":\"response.function_call_arguments.delta\""));
         assert!(output.contains("\"type\":\"response.output_item.done\""));
-        assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\""));
+        assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\""));
         assert!(output.contains("event: response.completed"));
     }
 }

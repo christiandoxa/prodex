@@ -607,7 +607,7 @@ mod tests {
         assert!(output.contains("\"delta\":\"hi\""));
         assert!(output.contains("\"type\":\"response.output_item.added\""));
         assert!(output.contains("\"type\":\"response.function_call_arguments.delta\""));
-        assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\""));
+        assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\""));
         assert!(output.contains("event: response.completed"));
     }
 

@@ -213,6 +213,34 @@ mod tests {
         args.into_caveman_args_with_presidio(true)
     }
 
+    fn assert_super_optional_stack(strategy: &CavemanLaunchStrategy) {
+        assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
+        assert!(strategy.rtk_enabled);
+        assert!(strategy.presidio_enabled);
+        assert!(strategy.args.super_optimizer_overlay);
+        assert!(strategy.args.smart_context);
+        assert!(strategy.args.full_access);
+        assert!(strategy.codex_args.contains(&OsString::from(
+            "--dangerously-bypass-approvals-and-sandbox"
+        )));
+        for extracted_prefix in [
+            "mem",
+            "mem-super-slim",
+            "rtk",
+            "sqz",
+            "tokensavior",
+            "clawcompactor",
+            "presidio",
+        ] {
+            assert!(
+                !strategy
+                    .codex_args
+                    .contains(&OsString::from(extracted_prefix)),
+                "{extracted_prefix} should be consumed before Codex launch"
+            );
+        }
+    }
+
     #[test]
     fn super_default_mem_uses_super_slim_transcript_mode() {
         let strategy =
@@ -241,6 +269,95 @@ mod tests {
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
+    }
+
+    #[test]
+    fn super_alias_keeps_optional_stack_for_default_openai_provider() {
+        let strategy =
+            CavemanLaunchStrategy::new(super_as_caveman_args(&["prodex", "s", "exec", "hi"]));
+
+        assert_super_optional_stack(&strategy);
+        assert!(!strategy.args.skip_quota_check);
+        assert_eq!(strategy.args.external_provider, None);
+        assert_eq!(strategy.model_provider_override, None);
+    }
+
+    #[test]
+    fn super_alias_keeps_optional_stack_for_deepseek_provider() {
+        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
+            "prodex",
+            "s",
+            "--provider",
+            "deepseek",
+            "--api-key",
+            "deepseek-key",
+            "exec",
+            "hi",
+        ]));
+
+        assert_super_optional_stack(&strategy);
+        assert!(strategy.args.skip_quota_check);
+        assert_eq!(
+            strategy.args.external_provider,
+            Some(SuperExternalProvider::DeepSeek)
+        );
+        assert_eq!(
+            strategy.args.external_provider_api_key.as_deref(),
+            Some("deepseek-key")
+        );
+        assert_eq!(
+            strategy.model_provider_override.as_deref(),
+            Some("prodex-deepseek")
+        );
+    }
+
+    #[test]
+    fn super_alias_keeps_optional_stack_for_gemini_provider() {
+        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
+            "prodex",
+            "s",
+            "--provider",
+            "gemini",
+            "--api-key",
+            "gemini-key",
+            "exec",
+            "hi",
+        ]));
+
+        assert_super_optional_stack(&strategy);
+        assert!(strategy.args.skip_quota_check);
+        assert_eq!(
+            strategy.args.external_provider,
+            Some(SuperExternalProvider::Gemini)
+        );
+        assert_eq!(
+            strategy.args.external_provider_api_key.as_deref(),
+            Some("gemini-key")
+        );
+        assert_eq!(
+            strategy.model_provider_override.as_deref(),
+            Some("prodex-gemini")
+        );
+    }
+
+    #[test]
+    fn super_alias_keeps_optional_stack_for_local_provider() {
+        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
+            "prodex",
+            "s",
+            "--url",
+            "http://127.0.0.1:11434",
+            "exec",
+            "hi",
+        ]));
+
+        assert_super_optional_stack(&strategy);
+        assert!(strategy.args.skip_quota_check);
+        assert_eq!(strategy.args.external_provider, None);
+        assert_eq!(
+            strategy.model_provider_override.as_deref(),
+            Some("prodex-local")
+        );
     }
 
     #[test]

@@ -169,6 +169,23 @@ pub(crate) fn fetch_gemini_quota(
     provider_project_id: Option<&str>,
 ) -> Result<GeminiQuotaInfo> {
     let value = fetch_gemini_quota_json(codex_home, provider_project_id)?;
+    gemini_quota_info_from_value(codex_home, value)
+}
+
+pub(crate) fn fetch_gemini_quota_with_code_assist_endpoint(
+    codex_home: &Path,
+    provider_project_id: Option<&str>,
+    code_assist_endpoint: &str,
+) -> Result<GeminiQuotaInfo> {
+    let value = fetch_gemini_quota_json_with_code_assist_endpoint(
+        codex_home,
+        provider_project_id,
+        code_assist_endpoint,
+    )?;
+    gemini_quota_info_from_value(codex_home, value)
+}
+
+fn gemini_quota_info_from_value(codex_home: &Path, value: Value) -> Result<GeminiQuotaInfo> {
     serde_json::from_value(value).with_context(|| {
         format!(
             "invalid JSON returned by Gemini quota backend for {}",
@@ -181,14 +198,33 @@ pub(crate) fn fetch_gemini_quota_json(
     codex_home: &Path,
     provider_project_id: Option<&str>,
 ) -> Result<Value> {
+    let code_assist_endpoint = gemini_code_assist_endpoint();
+    fetch_gemini_quota_json_with_code_assist_endpoint(
+        codex_home,
+        provider_project_id,
+        &code_assist_endpoint,
+    )
+}
+
+fn fetch_gemini_quota_json_with_code_assist_endpoint(
+    codex_home: &Path,
+    provider_project_id: Option<&str>,
+    code_assist_endpoint: &str,
+) -> Result<Value> {
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
         .context("failed to build Gemini quota HTTP client")?;
     let mut secret = refresh_gemini_oauth_secret_if_needed(codex_home)?;
-    let project_id =
-        resolve_gemini_quota_project_id(&client, codex_home, &mut secret, provider_project_id)?;
-    let mut value = retrieve_gemini_user_quota(&client, &secret, &project_id)?;
+    let project_id = resolve_gemini_quota_project_id(
+        &client,
+        codex_home,
+        &mut secret,
+        provider_project_id,
+        code_assist_endpoint,
+    )?;
+    let mut value =
+        retrieve_gemini_user_quota(&client, &secret, &project_id, code_assist_endpoint)?;
     if let Some(object) = value.as_object_mut() {
         object.insert("email".to_string(), Value::String(secret.email.clone()));
         object.insert("project_id".to_string(), Value::String(project_id));
@@ -201,6 +237,7 @@ fn resolve_gemini_quota_project_id(
     codex_home: &Path,
     secret: &mut GeminiOAuthSecret,
     provider_project_id: Option<&str>,
+    code_assist_endpoint: &str,
 ) -> Result<String> {
     if let Some(project_id) = normalize_gemini_project_id(provider_project_id) {
         return Ok(project_id);
@@ -211,7 +248,9 @@ fn resolve_gemini_quota_project_id(
     if let Some(project_id) = gemini_oauth_project_from_env() {
         return Ok(project_id);
     }
-    if let Some(project_id) = resolve_gemini_code_assist_project(client, secret) {
+    if let Some(project_id) =
+        resolve_gemini_code_assist_project_with_endpoint(client, secret, code_assist_endpoint)
+    {
         secret.project_id = Some(project_id.clone());
         write_gemini_oauth_secret(codex_home, secret)?;
         return Ok(project_id);
@@ -232,12 +271,10 @@ fn retrieve_gemini_user_quota(
     client: &Client,
     secret: &GeminiOAuthSecret,
     project_id: &str,
+    code_assist_endpoint: &str,
 ) -> Result<Value> {
     let response = client
-        .post(format!(
-            "{}:retrieveUserQuota",
-            gemini_code_assist_endpoint()
-        ))
+        .post(format!("{code_assist_endpoint}:retrieveUserQuota"))
         .bearer_auth(&secret.access_token)
         .json(&json!({
             "project": project_id,
@@ -471,9 +508,18 @@ fn resolve_gemini_code_assist_project(
     client: &Client,
     secret: &GeminiOAuthSecret,
 ) -> Option<String> {
+    let code_assist_endpoint = gemini_code_assist_endpoint();
+    resolve_gemini_code_assist_project_with_endpoint(client, secret, &code_assist_endpoint)
+}
+
+fn resolve_gemini_code_assist_project_with_endpoint(
+    client: &Client,
+    secret: &GeminiOAuthSecret,
+    code_assist_endpoint: &str,
+) -> Option<String> {
     let project_id = gemini_oauth_project_from_env();
     let response = client
-        .post(format!("{}:loadCodeAssist", gemini_code_assist_endpoint()))
+        .post(format!("{code_assist_endpoint}:loadCodeAssist"))
         .bearer_auth(&secret.access_token)
         .json(&json!({
             "cloudaicompanionProject": project_id,
