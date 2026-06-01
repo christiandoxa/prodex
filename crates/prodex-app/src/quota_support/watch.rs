@@ -585,6 +585,7 @@ mod tests {
     fn test_gemini_quota(email: &str) -> ProviderQuotaSnapshot {
         ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
             email: Some(email.to_string()),
+            plan: Some("pro".to_string()),
             project_id: Some("test-project".to_string()),
             buckets: Vec::new(),
         })

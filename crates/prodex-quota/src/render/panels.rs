@@ -107,6 +107,10 @@ pub fn render_profile_gemini_quota_with_width(
             display_optional(info.email.as_deref()).to_string(),
         ),
         (
+            "Plan".to_string(),
+            display_optional(info.plan.as_deref()).to_string(),
+        ),
+        (
             "Project".to_string(),
             display_optional(info.project_id.as_deref()).to_string(),
         ),

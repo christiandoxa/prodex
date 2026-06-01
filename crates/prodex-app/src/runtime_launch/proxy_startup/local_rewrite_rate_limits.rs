@@ -317,6 +317,7 @@ mod tests {
     fn gemini_quota_headers_adapt_remaining_fraction_to_codex_limit() {
         let info = GeminiQuotaInfo {
             email: Some("user@example.com".to_string()),
+            plan: Some("pro".to_string()),
             project_id: Some("project".to_string()),
             buckets: vec![GeminiQuotaBucket {
                 remaining_amount: Some("25".to_string()),

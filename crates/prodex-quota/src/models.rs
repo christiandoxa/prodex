@@ -31,6 +31,8 @@ pub struct GeminiQuotaInfo {
     #[serde(default)]
     pub email: Option<String>,
     #[serde(default)]
+    pub plan: Option<String>,
+    #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub buckets: Vec<GeminiQuotaBucket>,

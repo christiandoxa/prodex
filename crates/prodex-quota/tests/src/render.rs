@@ -368,6 +368,7 @@ fn quota_reports_render_gemini_code_assist_buckets() {
         workspace_id: None,
         result: Ok(ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
             email: Some("gemini-user@example.com".to_string()),
+            plan: Some("pro".to_string()),
             project_id: Some("proj-1".to_string()),
             buckets: vec![GeminiQuotaBucket {
                 remaining_amount: Some("50".to_string()),
@@ -384,13 +385,16 @@ fn quota_reports_render_gemini_code_assist_buckets() {
 
     assert!(output.contains("gemini-main"));
     assert!(output.contains("gemini-user@example.com"));
-    assert!(output.contains("proj-1"));
+    assert!(output.contains("pro"));
+    assert!(!output.contains("proj-1"));
     assert!(output.contains("gemini 50% left"));
     assert!(output.contains("status: Ready"));
     assert!(output.contains("resets: 2026-05-09T00:00:00Z"));
 
     let panel = render_profile_quota_snapshot("gemini-main", reports[0].result.as_ref().unwrap());
     assert!(panel.contains("Quota gemini-main"));
+    assert!(panel.contains("Plan"));
+    assert!(panel.contains("pro"));
     assert!(panel.contains("Project"));
     assert!(panel.contains("proj-1"));
     assert!(panel.contains("Main"));
@@ -411,6 +415,7 @@ fn quota_reports_aggregate_gemini_remaining_buckets() {
         workspace_id: None,
         result: Ok(ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
             email: Some("gemini-user@example.com".to_string()),
+            plan: Some("pro".to_string()),
             project_id: Some("proj-1".to_string()),
             buckets: vec![
                 GeminiQuotaBucket {

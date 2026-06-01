@@ -7,9 +7,9 @@ use crate::{
     RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth,
     RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions,
     SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID, SUPER_DEEPSEEK_PROVIDER_ID,
-    SUPER_GEMINI_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID, gemini_oauth_project_from_env,
-    refresh_claude_oauth_secret_if_needed, refresh_gemini_oauth_secret_if_needed,
-    resolve_copilot_runtime_api_auth, resolve_profile_name,
+    SUPER_GEMINI_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID,
+    ensure_gemini_code_assist_project_if_missing, gemini_oauth_project_from_env,
+    refresh_claude_oauth_secret_if_needed, resolve_copilot_runtime_api_auth, resolve_profile_name,
 };
 use anyhow::{Context, Result, bail};
 use std::env;
@@ -480,7 +480,7 @@ fn runtime_gemini_oauth_profiles_for_provider(
         let ProfileProvider::Gemini { email, project_id } = &profile.provider else {
             continue;
         };
-        match refresh_gemini_oauth_secret_if_needed(&profile.codex_home) {
+        match ensure_gemini_code_assist_project_if_missing(&profile.codex_home) {
             Ok(secret) => {
                 profiles.push(RuntimeGeminiOAuthProfileAuth {
                     profile_name: profile_name.clone(),

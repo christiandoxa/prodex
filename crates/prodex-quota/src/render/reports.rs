@@ -170,7 +170,7 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
         },
         Ok(ProviderQuotaSnapshot::Gemini(info)) => QuotaReportViewData {
             email: display_optional(info.email.as_deref()).to_string(),
-            plan: display_optional(info.project_id.as_deref()).to_string(),
+            plan: display_optional(info.plan.as_deref()).to_string(),
             main: format_gemini_main_quota(info),
             status: format_gemini_quota_status(info),
             resets: Some(format_gemini_reset_summary(info).map_or_else(
