@@ -103,7 +103,7 @@ prodex_state = { package = "prodex-state", path = "crates/prodex-state", version
 prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice", version = "0.142.0" }
 redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.142.0" }
 reqwest = { version = "0.13.2", default-features = false }
-rpassword = "7.4.0"
+rpassword = "7.5.4"
 runtime_anthropic = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.142.0" }
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.142.0" }
 runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.142.0" }
