@@ -1133,7 +1133,6 @@ fn open_browser(url: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
     use std::thread;
 
     #[test]
