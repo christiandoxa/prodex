@@ -2,6 +2,26 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.143.0 - 2026-06-03
+
+### Misc
+
+- Stabilize provider launch for Codex 0.136 (`d6cc37f`)
+
+## 0.142.0 - 2026-06-02
+
+### CLI
+
+- Onboard code assist profiles (`cce5f90`)
+
+### Deps
+
+- Bump rpassword to 7.5.4 (`f3662fb`)
+
+### Misc
+
+- Remove unused test import (`4032ec3`)
+
 ## 0.141.0 - 2026-06-01
 
 ### Runtime
@@ -69,19 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Support Codex rust v0.135.0 (`4d7ab9b`)
-
-## 0.131.0 - 2026-05-28
-
-### Misc
-
-- Add google auth provider (`b74ed9b`)
-
-## 0.130.0 - 2026-05-28
-
-### Runtime
-
-- Align deepseek runtime and quota behavior (`01e8955`)
-
-### CLI
-
-- Use temporary home for --profile login to preserve auth.json on failure (`a22daf2`)
