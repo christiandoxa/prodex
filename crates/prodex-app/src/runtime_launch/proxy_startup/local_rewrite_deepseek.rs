@@ -14,7 +14,11 @@ use super::provider_bridge::{
     runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
     runtime_provider_should_rotate_auth_after_response,
 };
-use super::*;
+use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
+use anyhow::Result;
+use runtime_proxy_crate::{
+    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+};
 
 pub(super) fn send_runtime_deepseek_upstream_request(
     request_id: u64,
