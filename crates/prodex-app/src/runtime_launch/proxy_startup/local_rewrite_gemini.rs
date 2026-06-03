@@ -106,7 +106,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
     'auth_attempts: for (attempt_index, mut selected) in attempts.into_iter().enumerate() {
         let requested_model = runtime_provider_model_from_body(&body)
             .unwrap_or_else(|| prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string());
-        let model_chain = if responses_route {
+        let mut model_chain = if responses_route {
             runtime_provider_model_fallback_chain(
                 RuntimeProviderBridgeKind::Gemini,
                 &requested_model,
@@ -114,6 +114,13 @@ pub(super) fn send_runtime_gemini_upstream_request(
         } else {
             vec![prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string()]
         };
+        // Gemini Code Assist (OAuth) does not serve customtools models; filter them from the fallback chain.
+        if matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }) {
+            model_chain.retain(|m| !m.contains("customtools"));
+            if model_chain.is_empty() {
+                model_chain.push(prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string());
+            }
+        }
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = if responses_route {
                 runtime_provider_request_body_with_model(&body, model)
