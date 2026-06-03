@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.144.0 - 2026-06-03
+
+### Misc
+
+- Move thoughtSignature from inside functionCall to part-level sibling (`27d13fa`)
+
 ## 0.143.0 - 2026-06-03
 
 ### Misc
 
+- Filter customtools models from OAuth code-assist fallback chain (`9615363`)
 - Stabilize provider launch for Codex 0.136 (`d6cc37f`)
 
 ## 0.142.0 - 2026-06-02
@@ -83,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Add Gemini provider rotation (`89d3cff`)
-
-## 0.132.0 - 2026-05-29
-
-### Runtime
-
-- Support Codex rust v0.135.0 (`4d7ab9b`)
