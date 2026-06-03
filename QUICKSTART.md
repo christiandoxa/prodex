@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.145.0`:
+The current local version in this repo is `0.146.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.145.0
+npm install -g @christiandoxa/prodex@0.146.0
 ```
 
 Dependency status in this repo:
@@ -212,7 +212,7 @@ Use DeepSeek with the Codex/Super front end:
 DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
 ```
 
-`--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. `DEEPSEEK_API_KEYS` may contain comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota preflight, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` values and fetches DeepSeek `/user/balance`. Remote compact is not implemented for the adapter yet.
+`--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. `DEEPSEEK_API_KEYS` may contain comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota preflight, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` values and fetches DeepSeek `/user/balance`. Remote compact is not implemented for the adapter yet.
 
 Use Anthropic with the Codex/Super front end:
 
@@ -222,7 +222,7 @@ prodex s --provider anthropic --model claude-sonnet-4-6
 ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6
 ```
 
-Without `--api-key`, this path uses the Anthropic profile from `prodex login --with-claude` or `prodex profile import claude`. API-key mode starts the same local Responses-to-Anthropic adapter and forwards through Anthropic's OpenAI-compatible chat API. Use `ANTHROPIC_API_KEYS` with comma-, semicolon-, or newline-separated keys for round-robin request rotation. `prodex quota --all --provider anthropic` shows OAuth readiness; set `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups.
+Without `--api-key`, this path uses the Anthropic profile from `prodex login --with-claude` or `prodex profile import claude`. API-key mode starts the same local Responses-to-Anthropic adapter and forwards through Anthropic's OpenAI-compatible chat API. Use `ANTHROPIC_API_KEYS` with comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. `prodex quota --all --provider anthropic` shows OAuth readiness; set `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups.
 
 Use GitHub Copilot with the Codex/Super front end:
 
@@ -231,7 +231,7 @@ prodex profile import copilot
 prodex s --provider copilot --model gpt-5.1-codex
 ```
 
-Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens before launch, rotates fresh native Responses requests across eligible profiles, and keeps `previous_response_id` continuations on the owning profile. `GITHUB_COPILOT_API_KEY` is also accepted when you already have a Copilot runtime API token.
+Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens before launch, rotates fresh native Responses requests across eligible profiles, and keeps `previous_response_id` continuations on the owning profile. `GITHUB_COPILOT_API_KEY` or `GITHUB_COPILOT_API_KEYS` is also accepted when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures.
 
 Use Gemini with Google sign-in or an API key:
 
@@ -241,7 +241,7 @@ prodex s --provider gemini
 GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
 ```
 
-When no API key is supplied, the Gemini path uses the Google OAuth profile from login. With `--api-key`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`, it uses the public Gemini API. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations and preserves Gemini thought signatures across tool-call followups.
+When no API key is supplied, the Gemini path uses the Google OAuth profile from login. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations and preserves Gemini thought signatures across tool-call followups.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. Check local reachability with `prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once`. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 

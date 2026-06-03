@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.146.0 - 2026-06-04
+
+### Runtime
+
+- Improve multi-provider auth rotation (`f8d6412`)
+
 ## 0.145.0 - 2026-06-03
 
 ### Runtime
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Improve Gemini rate-limit retries (`16fcfe8`)
-
-## 0.134.0 - 2026-05-29
-
-### Runtime
-
-- Harden Gemini rate-limit handling (`0a2447b`)
