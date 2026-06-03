@@ -41,6 +41,7 @@ fn profile_import_updates_existing_profile_when_name_matches() {
                 "fresh-token",
                 "imported-account",
             ),
+            secret_files: Vec::new(),
         }],
     };
 
@@ -118,6 +119,7 @@ fn profile_import_updates_existing_profile_refresh_token() {
                 "main-account",
                 Some("fresh-refresh-token"),
             ),
+            secret_files: Vec::new(),
         }],
     };
 
@@ -132,6 +134,39 @@ fn profile_import_updates_existing_profile_refresh_token() {
         profile_commands_read_refresh_token(&existing_home),
         "fresh-refresh-token"
     );
+}
+
+#[test]
+fn profile_import_rejects_provider_profile_missing_required_secret_file() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-provider-missing-secret");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("gemini-main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "gemini-main".to_string(),
+            email: Some("gemini@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Gemini {
+                email: "gemini@example.com".to_string(),
+                project_id: Some("gemini-project".to_string()),
+            },
+            auth_json: String::new(),
+            secret_files: Vec::new(),
+        }],
+    };
+    let mut state = AppState::default();
+
+    let err = import_profile_export_payload(&target_paths, &mut state, &payload)
+        .expect_err("provider import without secret file should fail");
+    assert!(
+        err.to_string().contains("missing secret file 'gemini_oauth.json'"),
+        "unexpected error: {err:#}"
+    );
+    assert!(state.profiles.is_empty());
 }
 
 #[test]
@@ -174,6 +209,7 @@ fn profile_import_auth_update_journal_is_removed_after_successful_state_save() {
                 "fresh-token",
                 "main-account",
             ),
+            secret_files: Vec::new(),
         }],
     };
 
@@ -240,6 +276,7 @@ fn profile_import_auth_update_journal_recovers_orphaned_auth_overwrite() {
                 "fresh-token",
                 "main-account",
             ),
+            secret_files: Vec::new(),
         }],
     };
 
@@ -333,6 +370,7 @@ fn profile_import_updates_existing_profile_when_email_matches() {
                 "fresh-token",
                 "main-account",
             ),
+            secret_files: Vec::new(),
         }],
     };
 
@@ -403,6 +441,7 @@ fn profile_import_keeps_distinct_workspaces_with_same_email() {
                 "fresh-token",
                 "account-two",
             ),
+            secret_files: Vec::new(),
         }],
     };
 
@@ -443,6 +482,7 @@ fn profile_import_keeps_distinct_profiles_with_same_workspace_and_different_emai
                     "first-token",
                     "shared-account",
                 ),
+                secret_files: Vec::new(),
             },
             ExportedProfile {
                 name: "second-login".to_string(),
@@ -454,6 +494,7 @@ fn profile_import_keeps_distinct_profiles_with_same_workspace_and_different_emai
                     "second-token",
                     "shared-account",
                 ),
+                secret_files: Vec::new(),
             },
         ],
     };
@@ -536,6 +577,7 @@ fn profile_import_save_failure_rolls_back_auth_and_keeps_recoverable_journal() {
                 "fresh-token",
                 "main-account",
             ),
+            secret_files: Vec::new(),
         }],
     };
     let bundle_path = sandbox_dir.path.join("duplicate-import.json");

@@ -7,15 +7,99 @@ on:
       - "0.*.*"
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   attestations: write
   artifact-metadata: write
 
 jobs:
+  verify-ci:
+    name: Verify CI is green
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref_name="${GITHUB_REF_NAME}"
+          ref_type="${GITHUB_REF_TYPE:-branch}"
+          target_sha="${GITHUB_SHA}"
+          if [ "${ref_type}" = "tag" ]; then
+            git fetch origin "refs/tags/${ref_name}:refs/tags/${ref_name}"
+            target_sha="$(git rev-list -n1 "${ref_name}")"
+          elif [ "${ref_name}" != "main" ]; then
+            echo "workflow_dispatch release runs must target main or a matching version tag" >&2
+            exit 1
+          fi
+          echo "target_sha=${target_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Wait for CI success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 30 * 60))
+          while true; do
+            runs_json="$(gh run list --workflow ci.yml --limit 50 --json headSha,status,conclusion,url)"
+            set +e
+            result="$(
+              RUNS_JSON="${runs_json}" python - <<'PY'
+          import json
+          import os
+          import sys
+
+          target = os.environ["TARGET_SHA"]
+          runs = [run for run in json.loads(os.environ["RUNS_JSON"]) if run.get("headSha") == target]
+          if not runs:
+              print("not-found")
+              sys.exit(3)
+          for run in runs:
+              if run.get("status") == "completed":
+                  print(f"{run.get('conclusion')} {run.get('url')}")
+                  sys.exit(0)
+          run = runs[0]
+          print(f"{run.get('status')}/{run.get('conclusion') or 'pending'} {run.get('url')}")
+          sys.exit(2)
+          PY
+            )"
+            status=$?
+            set -e
+
+            if [ "${status}" -eq 0 ]; then
+              conclusion="${result%% *}"
+              url="${result#* }"
+              if [ "${conclusion}" = "success" ]; then
+                echo "CI success for ${TARGET_SHA}: ${url}"
+                exit 0
+              fi
+              echo "CI did not pass for ${TARGET_SHA}: ${result}" >&2
+              exit 1
+            fi
+
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "timed out waiting for CI success for ${TARGET_SHA}: ${result}" >&2
+              exit 1
+            fi
+            echo "CI for ${TARGET_SHA}: ${result}; polling again in 30s"
+            sleep 30
+          done
+
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runs-on }}
+    needs:
+      - verify-ci
     strategy:
       fail-fast: false
       matrix:

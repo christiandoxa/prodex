@@ -285,6 +285,53 @@ pub fn prepare_codex_launch_args(
     (codex_args, include_code_review)
 }
 
+pub fn scope_codex_exec_config_args(codex_args: &[OsString]) -> Vec<OsString> {
+    let Some(exec_index) = first_codex_positional_arg_index(codex_args) else {
+        return codex_args.to_vec();
+    };
+    if codex_args.get(exec_index).and_then(|arg| arg.to_str()) != Some("exec") {
+        return codex_args.to_vec();
+    }
+
+    let mut prefix = Vec::with_capacity(exec_index);
+    let mut config_overrides = Vec::new();
+    let mut index = 0;
+    while index < exec_index {
+        let Some(arg) = codex_args[index].to_str() else {
+            prefix.push(codex_args[index].clone());
+            index += 1;
+            continue;
+        };
+
+        if matches!(arg, "-c" | "--config") && index + 1 < exec_index {
+            config_overrides.push(codex_args[index].clone());
+            config_overrides.push(codex_args[index + 1].clone());
+            index += 2;
+            continue;
+        }
+
+        if is_inline_config_override_arg(arg) {
+            config_overrides.push(codex_args[index].clone());
+            index += 1;
+            continue;
+        }
+
+        prefix.push(codex_args[index].clone());
+        index += 1;
+    }
+
+    if config_overrides.is_empty() {
+        return codex_args.to_vec();
+    }
+
+    let mut args = Vec::with_capacity(codex_args.len());
+    args.extend(prefix);
+    args.push(codex_args[exec_index].clone());
+    args.extend(config_overrides);
+    args.extend(codex_args[(exec_index + 1)..].iter().cloned());
+    args
+}
+
 pub fn normalize_codex_profile_args(codex_args: &[OsString]) -> Vec<OsString> {
     codex_args
         .iter()
@@ -335,6 +382,12 @@ fn extract_prodex_full_access_flag(codex_args: &[OsString]) -> (bool, Vec<OsStri
         filtered.push(arg.clone());
     }
     (full_access, filtered)
+}
+
+fn is_inline_config_override_arg(arg: &str) -> bool {
+    arg.strip_prefix("--config=")
+        .or_else(|| arg.strip_prefix("-c"))
+        .is_some_and(|value| value.contains('='))
 }
 
 fn codex_launch_args_with_full_access(codex_args: &[OsString], full_access: bool) -> Vec<OsString> {

@@ -76,6 +76,54 @@ fn runtime_proxy_passthrough_args_rewrite_local_provider_base_url() {
 }
 
 #[test]
+fn scope_codex_exec_config_args_moves_pre_exec_overrides_into_exec_scope() {
+    let args = scope_codex_exec_config_args(&[
+        OsString::from("-c"),
+        OsString::from("model_catalog_json=\"/tmp/catalog.json\""),
+        OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+        OsString::from("-c"),
+        OsString::from("model_provider=\"prodex-gemini\""),
+        OsString::from("--config=model=\"auto\""),
+        OsString::from("-cmodel_context_window=1048576"),
+        OsString::from("exec"),
+        OsString::from("--json"),
+        OsString::from("-c"),
+        OsString::from("model_reasoning_effort=\"high\""),
+        OsString::from("hello"),
+    ]);
+
+    assert_eq!(
+        args,
+        vec![
+            OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+            OsString::from("exec"),
+            OsString::from("-c"),
+            OsString::from("model_catalog_json=\"/tmp/catalog.json\""),
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-gemini\""),
+            OsString::from("--config=model=\"auto\""),
+            OsString::from("-cmodel_context_window=1048576"),
+            OsString::from("--json"),
+            OsString::from("-c"),
+            OsString::from("model_reasoning_effort=\"high\""),
+            OsString::from("hello"),
+        ]
+    );
+}
+
+#[test]
+fn scope_codex_exec_config_args_leaves_non_exec_commands_unchanged() {
+    let original = vec![
+        OsString::from("-c"),
+        OsString::from("model_provider=\"prodex-gemini\""),
+        OsString::from("resume"),
+        OsString::from("--last"),
+    ];
+
+    assert_eq!(scope_codex_exec_config_args(&original), original);
+}
+
+#[test]
 fn prepare_codex_launch_args_extracts_full_access_and_normalizes_resume() {
     let (args, include_code_review) = prepare_codex_launch_args(
         &[

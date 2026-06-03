@@ -71,12 +71,14 @@ pub(in crate::profile_commands) fn build_profile_export_payload(
             | ProfileProvider::Anthropic { .. }
             | ProfileProvider::Copilot { .. } => String::new(),
         };
+        let secret_files = exported_provider_secret_files(profile)?;
         profiles.push(ExportedProfile {
             name: name.clone(),
             email: profile.email.clone(),
             source_managed: profile.managed,
             provider: profile.provider.clone(),
             auth_json,
+            secret_files,
         });
     }
 
@@ -88,6 +90,46 @@ pub(in crate::profile_commands) fn build_profile_export_payload(
             profile_names.iter().map(String::as_str),
         ),
         profiles,
+    })
+}
+
+fn exported_provider_secret_files(
+    profile: &ProfileEntry,
+) -> Result<Vec<prodex_profile_export::ExportedSecretFile>> {
+    match &profile.provider {
+        ProfileProvider::Openai | ProfileProvider::Copilot { .. } => Ok(Vec::new()),
+        ProfileProvider::Gemini { .. } => {
+            let secret_file =
+                read_exported_secret_file(&profile.codex_home, GEMINI_OAUTH_SECRET_FILE)?;
+            let _: GeminiOAuthSecret =
+                serde_json::from_str(&secret_file.text).with_context(|| {
+                    format!(
+                        "failed to parse {}",
+                        profile.codex_home.join(GEMINI_OAUTH_SECRET_FILE).display()
+                    )
+                })?;
+            Ok(vec![secret_file])
+        }
+        ProfileProvider::Anthropic { .. } => {
+            read_claude_oauth_secret(&profile.codex_home)?;
+            Ok(vec![read_exported_secret_file(
+                &profile.codex_home,
+                CLAUDE_CREDENTIALS_FILE,
+            )?])
+        }
+    }
+}
+
+fn read_exported_secret_file(
+    codex_home: &Path,
+    file_name: &str,
+) -> Result<prodex_profile_export::ExportedSecretFile> {
+    let path = codex_home.join(file_name);
+    let text =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(prodex_profile_export::ExportedSecretFile {
+        path: file_name.to_string(),
+        text,
     })
 }
 

@@ -1,7 +1,8 @@
 use super::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
     runtime_gemini_chat_assistant_messages_from_generate_value,
-    runtime_gemini_generate_request_body, runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_generate_request_body, runtime_gemini_harden_tool_call_thought_signatures,
+    runtime_gemini_responses_value_from_generate_value,
 };
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -357,6 +358,78 @@ fn gemini_preserves_thought_signature_for_tool_followup_history() {
 }
 
 #[test]
+fn gemini_3_hardens_unsigned_first_tool_call_with_synthetic_signature() {
+    let mut body = serde_json::to_vec(&serde_json::json!({
+        "request": {
+            "contents": [{
+                "role": "model",
+                "parts": [
+                    {
+                        "functionCall": {
+                            "id": "call_1",
+                            "name": "shell",
+                            "args": {"cmd": "ls"}
+                        }
+                    },
+                    {
+                        "functionCall": {
+                            "id": "call_2",
+                            "name": "shell",
+                            "args": {"cmd": "pwd"}
+                        }
+                    }
+                ]
+            }]
+        }
+    }))
+    .unwrap();
+
+    let injected =
+        runtime_gemini_harden_tool_call_thought_signatures(&mut body, "gemini-3.1-pro-preview")
+            .expect("request should harden");
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(injected, 1);
+    assert_eq!(
+        value["request"]["contents"][0]["parts"][0]["thoughtSignature"],
+        "skip_thought_signature_validator"
+    );
+    assert!(
+        value["request"]["contents"][0]["parts"][1]
+            .get("thoughtSignature")
+            .is_none()
+    );
+}
+
+#[test]
+fn gemini_25_does_not_harden_unsigned_tool_calls() {
+    let mut body = serde_json::to_vec(&serde_json::json!({
+        "contents": [{
+            "role": "model",
+            "parts": [{
+                "functionCall": {
+                    "id": "call_1",
+                    "name": "shell",
+                    "args": {"cmd": "ls"}
+                }
+            }]
+        }]
+    }))
+    .unwrap();
+
+    let injected = runtime_gemini_harden_tool_call_thought_signatures(&mut body, "gemini-2.5-pro")
+        .expect("request should harden");
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(injected, 0);
+    assert!(
+        value["contents"][0]["parts"][0]
+            .get("thoughtSignature")
+            .is_none()
+    );
+}
+
+#[test]
 fn gemini_response_preserves_optional_mcp_function_call_names_for_codex() {
     let response = serde_json::json!({
         "responseId": "resp_sqz_1",
@@ -364,6 +437,7 @@ fn gemini_response_preserves_optional_mcp_function_call_names_for_codex() {
         "candidates": [{
             "content": {
                 "parts": [{
+                    "thoughtSignature": "sig-response-1",
                     "functionCall": {
                         "id": "call_sqz_1",
                         "name": "mcp__prodex_sqz__compress",
@@ -382,6 +456,10 @@ fn gemini_response_preserves_optional_mcp_function_call_names_for_codex() {
     assert_eq!(
         responses["output"][0]["arguments"],
         "{\"text\":\"large content\"}"
+    );
+    assert_eq!(
+        responses["output"][0]["gemini_thought_signature"],
+        "sig-response-1"
     );
 }
 

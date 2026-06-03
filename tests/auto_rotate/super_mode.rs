@@ -71,13 +71,22 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
     let codex_args =
         fs::read_to_string(&fixture.codex_args_log).expect("failed to read codex args log");
     let args = codex_args.lines().collect::<Vec<_>>();
+    let exec_index = args
+        .iter()
+        .position(|arg| *arg == "exec")
+        .expect("Super should launch Codex exec");
     assert!(
-        args.ends_with(&[
-            "--dangerously-bypass-approvals-and-sandbox",
-            "exec",
-            "hello"
-        ]),
-        "Super should still launch Codex with user args, args: {args:?}"
+        args[..exec_index].contains(&"--dangerously-bypass-approvals-and-sandbox"),
+        "Super should still launch Codex with full access, args: {args:?}"
+    );
+    assert_eq!(
+        args.last(),
+        Some(&"hello"),
+        "Super should preserve the user prompt as the final positional arg, args: {args:?}"
+    );
+    assert!(
+        args[(exec_index + 1)..].contains(&"-c"),
+        "Super should scope runtime config overrides to Codex exec, args: {args:?}"
     );
     let latest_log_pointer = runtime_log_dir.join("prodex-runtime-latest.path");
     let latest_log = crate::test_wait::wait_for_poll(

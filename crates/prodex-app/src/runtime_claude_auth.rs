@@ -66,7 +66,8 @@ pub(crate) fn read_claude_oauth_secret(config_dir: &Path) -> Result<ClaudeOAuthS
     let path = claude_credentials_path(config_dir);
     let text = std::fs::read_to_string(&path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    parse_claude_oauth_secret(&text).with_context(|| format!("failed to parse {}", path.display()))
+    parse_claude_oauth_secret_text(&text)
+        .with_context(|| format!("failed to parse {}", path.display()))
 }
 
 pub(crate) fn copy_claude_oauth_credentials(
@@ -76,7 +77,7 @@ pub(crate) fn copy_claude_oauth_credentials(
     let from_path = claude_credentials_path(from_config_dir);
     let text = std::fs::read_to_string(&from_path)
         .with_context(|| format!("failed to read {}", from_path.display()))?;
-    parse_claude_oauth_secret(&text)
+    parse_claude_oauth_secret_text(&text)
         .with_context(|| format!("failed to parse {}", from_path.display()))?;
     create_codex_home_if_missing(to_config_dir)?;
     let to_path = claude_credentials_path(to_config_dir);
@@ -181,7 +182,7 @@ pub(crate) fn claude_oauth_profile_identity(
     Ok((account, auth_method))
 }
 
-fn parse_claude_oauth_secret(text: &str) -> Result<ClaudeOAuthSecret> {
+pub(crate) fn parse_claude_oauth_secret_text(text: &str) -> Result<ClaudeOAuthSecret> {
     let file: ClaudeCredentialsFile =
         serde_json::from_str(text).context("invalid Claude credentials JSON")?;
     if let Some(token) = file.claude_ai_oauth {
@@ -269,7 +270,7 @@ mod tests {
 
     #[test]
     fn parses_nested_claude_ai_oauth_credentials() {
-        let secret = parse_claude_oauth_secret(
+        let secret = parse_claude_oauth_secret_text(
             r#"{
               "claudeAiOauth": {
                 "accessToken": "oauth-token",
@@ -289,7 +290,7 @@ mod tests {
 
     #[test]
     fn parses_top_level_claude_oauth_credentials() {
-        let secret = parse_claude_oauth_secret(
+        let secret = parse_claude_oauth_secret_text(
             r#"{
               "accessToken": "top-level-token",
               "expiresAt": 1900000000001,

@@ -49,7 +49,7 @@ pub(super) fn runtime_gemini_body_has_terminal_quota(body: &[u8]) -> bool {
         .any(runtime_gemini_value_has_terminal_quota)
 }
 
-fn runtime_gemini_response_retryable_quota(status: u16) -> bool {
+pub(super) fn runtime_gemini_response_retryable_quota(status: u16) -> bool {
     matches!(status, 403 | 429)
 }
 

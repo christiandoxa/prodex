@@ -5,10 +5,12 @@ mod deepseek_rewrite;
 mod deepseek_sse;
 mod gemini_rewrite;
 mod gemini_sse;
+mod gemini_thought_signatures;
 mod local_rewrite;
 mod local_rewrite_copilot;
 mod local_rewrite_gemini;
 mod local_rewrite_gemini_quota;
+mod local_rewrite_gemini_thought_signatures;
 mod local_rewrite_rate_limits;
 mod local_rewrite_response;
 #[cfg(test)]

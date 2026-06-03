@@ -341,6 +341,7 @@ pub(super) fn stage_imported_profiles(
 
     let mut plan_inputs = Vec::with_capacity(payload.profiles.len());
     for exported in &payload.profiles {
+        validate_exported_secret_files(exported)?;
         let supports_codex_runtime = exported.provider.supports_codex_runtime();
         if supports_codex_runtime {
             let _: StoredAuth = serde_json::from_str(&exported.auth_json).with_context(|| {
@@ -438,6 +439,7 @@ pub(super) fn stage_imported_profiles(
                             &exported.auth_json,
                         )?;
                     }
+                    write_exported_secret_files(&staging_home, exported)?;
 
                     staged_profiles.push(StagedImportedProfile {
                         name: exported.name.clone(),
@@ -483,6 +485,101 @@ pub(super) fn stage_imported_profiles(
         auth_updates,
         resolved_profile_names: plan.resolved_profile_names,
     })
+}
+
+fn validate_exported_secret_files(exported: &ExportedProfile) -> Result<()> {
+    let required_file = required_exported_secret_file_name(&exported.provider);
+    let mut seen_paths = BTreeSet::new();
+
+    for secret_file in &exported.secret_files {
+        validate_exported_secret_file_path(&secret_file.path, &exported.name)?;
+        if !seen_paths.insert(secret_file.path.clone()) {
+            bail!(
+                "profile export bundle contains duplicate secret file '{}' for profile '{}'",
+                secret_file.path,
+                exported.name
+            );
+        }
+        if Some(secret_file.path.as_str()) != required_file {
+            bail!(
+                "profile export bundle contains unexpected secret file '{}' for profile '{}'",
+                secret_file.path,
+                exported.name
+            );
+        }
+        validate_exported_secret_file_content(exported, &secret_file.path, &secret_file.text)?;
+    }
+
+    if let Some(required_file) = required_file
+        && !seen_paths.contains(required_file)
+    {
+        bail!(
+            "profile export bundle is missing secret file '{}' for profile '{}'",
+            required_file,
+            exported.name
+        );
+    }
+
+    Ok(())
+}
+
+fn validate_exported_secret_file_path(path: &str, profile_name: &str) -> Result<()> {
+    if path.trim().is_empty()
+        || Path::new(path).is_absolute()
+        || path.contains('/')
+        || path.contains('\\')
+        || matches!(path, "." | "..")
+    {
+        bail!(
+            "profile export bundle contains unsafe secret file path '{}' for profile '{}'",
+            path,
+            profile_name
+        );
+    }
+    Ok(())
+}
+
+fn validate_exported_secret_file_content(
+    exported: &ExportedProfile,
+    path: &str,
+    text: &str,
+) -> Result<()> {
+    match &exported.provider {
+        ProfileProvider::Gemini { .. } => {
+            let _: GeminiOAuthSecret = serde_json::from_str(text).with_context(|| {
+                format!(
+                    "failed to parse exported secret file '{}' for profile '{}'",
+                    path, exported.name
+                )
+            })?;
+        }
+        ProfileProvider::Anthropic { .. } => {
+            parse_claude_oauth_secret_text(text).with_context(|| {
+                format!(
+                    "failed to parse exported secret file '{}' for profile '{}'",
+                    path, exported.name
+                )
+            })?;
+        }
+        ProfileProvider::Openai | ProfileProvider::Copilot { .. } => {}
+    }
+    Ok(())
+}
+
+fn required_exported_secret_file_name(provider: &ProfileProvider) -> Option<&'static str> {
+    match provider {
+        ProfileProvider::Gemini { .. } => Some(GEMINI_OAUTH_SECRET_FILE),
+        ProfileProvider::Anthropic { .. } => Some(CLAUDE_CREDENTIALS_FILE),
+        ProfileProvider::Openai | ProfileProvider::Copilot { .. } => None,
+    }
+}
+
+fn write_exported_secret_files(codex_home: &Path, exported: &ExportedProfile) -> Result<()> {
+    for secret_file in &exported.secret_files {
+        validate_exported_secret_file_path(&secret_file.path, &exported.name)?;
+        write_secret_text_file(&codex_home.join(&secret_file.path), &secret_file.text)?;
+    }
+    Ok(())
 }
 
 fn write_imported_auth_update_journal(

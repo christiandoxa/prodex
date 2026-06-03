@@ -56,6 +56,14 @@ pub struct ExportedProfile<Provider> {
     #[serde(default)]
     pub provider: Provider,
     pub auth_json: String,
+    #[serde(default)]
+    pub secret_files: Vec<ExportedSecretFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExportedSecretFile {
+    pub path: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -397,18 +397,42 @@ fn runtime_deepseek_push_chat_tool_call_message(
 ) {
     let name = runtime_deepseek_tool_call_name(object);
     let arguments = runtime_deepseek_tool_call_arguments(object);
+    let mut tool_call = serde_json::json!({
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": arguments,
+        },
+    });
+    if let Some(signature) = runtime_deepseek_tool_call_thought_signature(object) {
+        tool_call["gemini_thought_signature"] = serde_json::Value::String(signature);
+    }
     messages.push(serde_json::json!({
         "role": "assistant",
         "content": "",
-        "tool_calls": [{
-            "id": call_id,
-            "type": "function",
-            "function": {
-                "name": name,
-                "arguments": arguments,
-            },
-        }],
+        "tool_calls": [tool_call],
     }));
+}
+
+fn runtime_deepseek_tool_call_thought_signature(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    runtime_deepseek_json_string(
+        object,
+        &[
+            "gemini_thought_signature",
+            "thought_signature",
+            "thoughtSignature",
+        ],
+    )
+    .or_else(|| {
+        runtime_deepseek_json_string_at_path(
+            object,
+            &["provider_specific_fields", "thought_signature"],
+        )
+    })
+    .filter(|signature| !signature.trim().is_empty())
 }
 
 fn runtime_deepseek_tool_call_name(object: &serde_json::Map<String, serde_json::Value>) -> String {

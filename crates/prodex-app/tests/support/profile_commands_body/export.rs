@@ -156,6 +156,117 @@ fn profile_export_round_trip_preserves_refresh_token() {
 }
 
 #[test]
+fn profile_export_round_trip_preserves_oauth_provider_secret_files() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let source_dir = ProfileCommandsTestDir::new("provider-export-source");
+    let source_paths = profile_commands_test_paths(&source_dir.path);
+    let gemini_home = source_paths.managed_profiles_root.join("gemini-main");
+    let anthropic_home = source_paths.managed_profiles_root.join("claude-main");
+    create_codex_home_if_missing(&gemini_home).expect("Gemini home should exist");
+    create_codex_home_if_missing(&anthropic_home).expect("Anthropic home should exist");
+
+    let gemini_secret = serde_json::json!({
+        "auth_mode": "gemini_oauth",
+        "access_token": "gemini-access-token",
+        "refresh_token": "gemini-refresh-token",
+        "token_type": "Bearer",
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "expiry_date": 1900000000000_i64,
+        "email": "gemini@example.com",
+        "project_id": "gemini-project"
+    })
+    .to_string();
+    let claude_secret = serde_json::json!({
+        "claudeAiOauth": {
+            "accessToken": "claude-access-token",
+            "expiresAt": 1900000000001_i64,
+            "subscriptionType": "max",
+            "email": "claude@example.com"
+        }
+    })
+    .to_string();
+    write_secret_text_file(&gemini_home.join(GEMINI_OAUTH_SECRET_FILE), &gemini_secret)
+        .expect("Gemini secret should be written");
+    write_secret_text_file(&anthropic_home.join(CLAUDE_CREDENTIALS_FILE), &claude_secret)
+        .expect("Claude secret should be written");
+
+    let source_state = AppState {
+        active_profile: Some("gemini-main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "gemini-main".to_string(),
+                ProfileEntry {
+                    codex_home: gemini_home,
+                    managed: true,
+                    email: Some("gemini@example.com".to_string()),
+                    provider: ProfileProvider::Gemini {
+                        email: "gemini@example.com".to_string(),
+                        project_id: Some("gemini-project".to_string()),
+                    },
+                },
+            ),
+            (
+                "claude-main".to_string(),
+                ProfileEntry {
+                    codex_home: anthropic_home,
+                    managed: true,
+                    email: Some("claude@example.com".to_string()),
+                    provider: ProfileProvider::Anthropic {
+                        account: Some("claude@example.com".to_string()),
+                        auth_method: Some("claude-ai-oauth:max".to_string()),
+                    },
+                },
+            ),
+        ]),
+        ..AppState::default()
+    };
+
+    let selected_names = vec!["gemini-main".to_string(), "claude-main".to_string()];
+    let payload = build_profile_export_payload(&source_state, &selected_names)
+        .expect("provider payload should build");
+    assert_eq!(payload.profiles[0].auth_json, "");
+    assert_eq!(payload.profiles[0].secret_files[0].path, GEMINI_OAUTH_SECRET_FILE);
+    assert_eq!(payload.profiles[1].auth_json, "");
+    assert_eq!(payload.profiles[1].secret_files[0].path, CLAUDE_CREDENTIALS_FILE);
+
+    let encoded =
+        serialize_profile_export_payload(&payload, None).expect("plain export should encode");
+    let decoded = prodex_profile_export::decode_profile_export_envelope(
+        serde_json::from_slice(&encoded).expect("encoded bundle should parse"),
+        || unreachable!("plain export should not request a password"),
+    )
+    .expect("plain export should decode");
+
+    let target_dir = ProfileCommandsTestDir::new("provider-export-target");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let mut target_state = AppState::default();
+    import_profile_export_payload(&target_paths, &mut target_state, &decoded)
+        .expect("provider import should preserve secret files");
+
+    let imported_gemini = target_state
+        .profiles
+        .get("gemini-main")
+        .expect("Gemini profile should exist");
+    let imported_anthropic = target_state
+        .profiles
+        .get("claude-main")
+        .expect("Anthropic profile should exist");
+    assert_eq!(
+        fs::read_to_string(imported_gemini.codex_home.join(GEMINI_OAUTH_SECRET_FILE))
+            .expect("Gemini secret should import"),
+        gemini_secret
+    );
+    assert_eq!(
+        fs::read_to_string(imported_anthropic.codex_home.join(CLAUDE_CREDENTIALS_FILE))
+            .expect("Claude secret should import"),
+        claude_secret
+    );
+    assert!(!imported_gemini.codex_home.join("auth.json").exists());
+    assert!(!imported_anthropic.codex_home.join("auth.json").exists());
+}
+
+#[test]
 fn profile_export_round_trip_encrypted_requires_matching_password() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
@@ -169,6 +280,7 @@ fn profile_export_round_trip_encrypted_requires_matching_password() {
             source_managed: true,
             provider: ProfileProvider::Openai,
             auth_json: profile_commands_sample_auth_json("main"),
+            secret_files: Vec::new(),
         }],
     };
 

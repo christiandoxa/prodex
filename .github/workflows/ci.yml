@@ -167,7 +167,10 @@ jobs:
 
           before="${{ github.event.before }}"
           after="${{ github.sha }}"
-          if [ -n "${before}" ] && [ "${before}" != "0000000000000000000000000000000000000000" ]; then
+          if [ -n "${before}" ] &&
+             [ "${before}" != "0000000000000000000000000000000000000000" ] &&
+             git rev-parse --verify --quiet "${before}^{commit}" >/dev/null &&
+             git rev-parse --verify --quiet "${after}^{commit}" >/dev/null; then
             mapfile -t commits < <(git rev-list --reverse "${before}..${after}")
             if [ "${#commits[@]}" -eq 0 ]; then
               npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"
@@ -194,7 +197,10 @@ jobs:
 
           before="${{ github.event.before }}"
           after="${{ github.sha }}"
-          if [ -n "${before}" ] && [ "${before}" != "0000000000000000000000000000000000000000" ]; then
+          if [ -n "${before}" ] &&
+             [ "${before}" != "0000000000000000000000000000000000000000" ] &&
+             git rev-parse --verify --quiet "${before}^{commit}" >/dev/null &&
+             git rev-parse --verify --quiet "${after}^{commit}" >/dev/null; then
             npm run ci:release-hygiene -- --base "${before}" --head "${after}"
           else
             npm run ci:release-hygiene

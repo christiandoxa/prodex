@@ -3,6 +3,9 @@ use super::deepseek_rewrite::{
     runtime_deepseek_created_at, runtime_deepseek_rtk_wrapped_tool_arguments,
     runtime_deepseek_store_conversation,
 };
+#[cfg(test)]
+use super::gemini_thought_signatures::runtime_gemini_harden_tool_call_thought_signatures;
+use super::gemini_thought_signatures::runtime_gemini_thought_signature;
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
@@ -345,6 +348,7 @@ fn runtime_gemini_responses_value_from_generate_value(
             }
             if let Some(function_call) = part.get("functionCall") {
                 output.push(runtime_gemini_responses_tool_call_item(
+                    part,
                     function_call,
                     request_id,
                     index,
@@ -700,6 +704,7 @@ fn runtime_gemini_model(value: &serde_json::Value) -> String {
 }
 
 fn runtime_gemini_responses_tool_call_item(
+    part: &serde_json::Value,
     function_call: &serde_json::Value,
     request_id: u64,
     index: usize,
@@ -714,12 +719,18 @@ fn runtime_gemini_responses_tool_call_item(
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
     let args = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
-    serde_json::json!({
+    let mut item = serde_json::json!({
         "type": "function_call",
         "call_id": call_id,
         "name": name,
         "arguments": runtime_deepseek_rtk_wrapped_tool_arguments(name, &args),
-    })
+    });
+    if let Some(signature) = runtime_gemini_thought_signature(part)
+        .or_else(|| runtime_gemini_thought_signature(function_call))
+    {
+        item["gemini_thought_signature"] = serde_json::Value::String(signature);
+    }
+    item
 }
 
 fn runtime_gemini_function_call_id(
@@ -733,14 +744,6 @@ fn runtime_gemini_function_call_id(
         .filter(|id| !id.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| format!("call_gemini_{request_id}_{index}"))
-}
-
-fn runtime_gemini_thought_signature(part: &serde_json::Value) -> Option<String> {
-    part.get("thoughtSignature")
-        .or_else(|| part.get("thought_signature"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|signature| !signature.trim().is_empty())
-        .map(str::to_string)
 }
 
 #[cfg(test)]

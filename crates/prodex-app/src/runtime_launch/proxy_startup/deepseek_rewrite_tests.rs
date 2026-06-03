@@ -245,6 +245,44 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_replayed_function_call_preserves_gemini_thought_signature() {
+        let conversations = conversation_store();
+        let request = serde_json::json!({
+            "model": "gemini-3.1-pro-preview",
+            "stream": true,
+            "input": [{
+                "type": "function_call",
+                "call_id": "call_sig_1",
+                "name": "shell",
+                "arguments": "{\"cmd\":\"ls\"}",
+                "gemini_thought_signature": "sig-replay-1"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_sig_1",
+                "output": "README.md"
+            }]
+        });
+
+        let translated = runtime_deepseek_chat_request_body(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversations,
+        )
+        .expect("request should translate");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        let messages = body["messages"].as_array().unwrap();
+        let assistant = messages
+            .iter()
+            .find(|message| message["role"] == "assistant")
+            .expect("assistant tool call should be present");
+
+        assert_eq!(
+            assistant["tool_calls"][0]["gemini_thought_signature"],
+            "sig-replay-1"
+        );
+    }
+
+    #[test]
     fn deepseek_tool_output_skips_duplicate_context_messages_from_codex_replay() {
         let conversations = conversation_store();
         runtime_deepseek_store_conversation(

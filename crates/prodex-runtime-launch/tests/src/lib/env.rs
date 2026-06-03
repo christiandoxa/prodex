@@ -68,6 +68,48 @@ fn codex_child_plan_applies_codex_sandbox_removed_env() {
 }
 
 #[test]
+fn codex_child_plan_scopes_pre_exec_config_overrides() {
+    let args = vec![
+        OsString::from("-c"),
+        OsString::from("model_provider=\"prodex-local\""),
+        OsString::from("-c"),
+        OsString::from("model_providers.prodex-local.base_url=\"http://127.0.0.1:4455/v1\""),
+        OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+        OsString::from("exec"),
+        OsString::from("--json"),
+        OsString::from("hello"),
+    ];
+
+    let plan = codex_child_plan(
+        OsString::from("codex"),
+        PathBuf::from("/tmp/prodex-codex-home"),
+        args,
+        "prodex-local",
+    );
+
+    assert_eq!(
+        plan.args,
+        vec![
+            OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+            OsString::from("exec"),
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-local\""),
+            OsString::from("-c"),
+            OsString::from("model_providers.prodex-local.base_url=\"http://127.0.0.1:4455/v1\""),
+            OsString::from("--json"),
+            OsString::from("hello"),
+        ]
+    );
+    assert!(
+        plan.extra_env
+            .iter()
+            .find(|(key, _)| key == "NO_PROXY")
+            .map(|(_, value)| value.to_string_lossy().contains("127.0.0.1:4455"))
+            .unwrap_or(false)
+    );
+}
+
+#[test]
 fn local_proxy_bypass_env_deduplicates_existing_values() {
     let _env_guard = TestEnvVarGuard::lock();
     let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", " example.com,127.0.0.1 ");

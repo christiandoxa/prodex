@@ -69,6 +69,7 @@ pub fn codex_child_plan(
     args: Vec<OsString>,
     local_provider_id: &str,
 ) -> ChildProcessPlan {
+    let args = crate::scope_codex_exec_config_args(&args);
     let local_provider_hosts = local_proxy_bypass_hosts_from_args(&args, local_provider_id);
     ChildProcessPlan::new(binary, codex_home)
         .with_args(args)

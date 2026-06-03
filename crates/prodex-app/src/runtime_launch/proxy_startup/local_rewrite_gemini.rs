@@ -10,8 +10,9 @@ use super::local_rewrite::{
 };
 use super::local_rewrite_gemini_quota::{
     runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
-    runtime_gemini_retry_delay_ms,
+    runtime_gemini_response_retryable_quota, runtime_gemini_retry_delay_ms,
 };
+use super::local_rewrite_gemini_thought_signatures::runtime_gemini_harden_translated_thoughts as harden_thoughts;
 use super::local_rewrite_rate_limits::runtime_gemini_quota_codex_headers;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_transport::{
@@ -127,7 +128,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
             } else {
                 body.clone()
             };
-            let translated = if responses_route {
+            let mut translated = if responses_route {
                 runtime_gemini_generate_request_body(
                     &model_body,
                     &shared.gemini_conversations,
@@ -142,6 +143,12 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     stream: false,
                 }
             };
+            harden_thoughts(
+                shared,
+                request_id,
+                selected.profile_name.as_str(),
+                &mut translated,
+            )?;
             let upstream_url = runtime_gemini_upstream_url(
                 &shared.upstream_base_url,
                 &selected.auth,
@@ -671,6 +678,17 @@ fn runtime_gemini_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+fn runtime_gemini_should_rotate_after_quota_response(
+    status: u16,
+    hard_affinity: bool,
+    attempt_index: usize,
+    attempt_count: usize,
+) -> bool {
+    runtime_gemini_response_retryable_quota(status)
+        && !hard_affinity
+        && attempt_index + 1 < attempt_count
+}
+
 fn runtime_gemini_tool_output_call_ids_from_request(value: &serde_json::Value) -> Vec<String> {
     value
         .get("input")
@@ -696,21 +714,6 @@ fn runtime_gemini_tool_output_call_ids_from_request(value: &serde_json::Value) -
         })
         .filter(|call_id| !call_id.trim().is_empty())
         .collect()
-}
-
-fn runtime_gemini_response_retryable_quota(status: u16) -> bool {
-    matches!(status, 403 | 429)
-}
-
-fn runtime_gemini_should_rotate_after_quota_response(
-    status: u16,
-    hard_affinity: bool,
-    attempt_index: usize,
-    attempt_count: usize,
-) -> bool {
-    runtime_gemini_response_retryable_quota(status)
-        && !hard_affinity
-        && attempt_index + 1 < attempt_count
 }
 
 pub(super) fn runtime_gemini_remember_bindings_from_responses_body(

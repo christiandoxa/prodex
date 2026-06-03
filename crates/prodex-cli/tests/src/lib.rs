@@ -1,6 +1,9 @@
 use super::*;
 use std::ffi::OsString;
 
+#[path = "cleanup.rs"]
+mod cleanup;
+
 fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
     let Commands::Super(args) = command else {
@@ -39,29 +42,6 @@ fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
         right.external_provider_api_key
     );
     assert_eq!(left.codex_args, right.codex_args);
-}
-
-#[test]
-fn cleanup_parses_explicit_orphan_retention() {
-    let command = parse_cli_command_from(["prodex", "cleanup", "--older-than", "7d"])
-        .expect("cleanup command should parse");
-    let Commands::Cleanup(args) = command else {
-        panic!("expected cleanup command");
-    };
-
-    assert!(!args.aggressive);
-    assert_eq!(
-        args.older_than.map(CleanupOlderThan::seconds),
-        Some(7 * 24 * 60 * 60)
-    );
-}
-
-#[test]
-fn cleanup_aggressive_conflicts_with_older_than() {
-    assert!(
-        parse_cli_command_from(["prodex", "cleanup", "--aggressive", "--older-than", "0d"])
-            .is_err()
-    );
 }
 
 #[test]
