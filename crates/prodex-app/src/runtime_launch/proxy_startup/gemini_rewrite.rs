@@ -423,20 +423,21 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
                                     serde_json::from_str::<serde_json::Value>(args).ok()
                                 })
                                 .unwrap_or_else(|| serde_json::json!({}));
-                            let mut function_call =
+                            let function_call =
                                 runtime_gemini_function_call_part(call_id, name, args);
+                            let mut part = serde_json::json!({
+                                "functionCall": function_call,
+                            });
                             if let Some(signature) = tool_call
                                 .get("gemini_thought_signature")
                                 .or_else(|| function.get("gemini_thought_signature"))
                                 .and_then(serde_json::Value::as_str)
                                 .filter(|signature| !signature.trim().is_empty())
                             {
-                                function_call["thoughtSignature"] =
+                                part["thoughtSignature"] =
                                     serde_json::Value::String(signature.to_string());
                             }
-                            parts.push(serde_json::json!({
-                                "functionCall": function_call,
-                            }));
+                            parts.push(part);
                         }
                     }
                 }

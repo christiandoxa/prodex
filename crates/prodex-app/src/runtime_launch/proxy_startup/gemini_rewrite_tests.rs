@@ -347,7 +347,7 @@ fn gemini_preserves_thought_signature_for_tool_followup_history() {
         "call_google_1"
     );
     assert_eq!(
-        value["contents"][1]["parts"][0]["functionCall"]["thoughtSignature"],
+        value["contents"][1]["parts"][0]["thoughtSignature"],
         "sig-fn-1"
     );
     assert_eq!(
