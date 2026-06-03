@@ -457,6 +457,18 @@ pub(super) fn runtime_provider_should_retry_with_next_model(
     )
 }
 
+pub(super) fn runtime_provider_should_rotate_auth_after_response(
+    class: RuntimeProviderErrorClass,
+) -> bool {
+    matches!(
+        class,
+        RuntimeProviderErrorClass::Auth
+            | RuntimeProviderErrorClass::Quota
+            | RuntimeProviderErrorClass::RateLimit
+            | RuntimeProviderErrorClass::Transient
+    )
+}
+
 enum RuntimeProviderModelsPath<'a> {
     List,
     Single(&'a str),

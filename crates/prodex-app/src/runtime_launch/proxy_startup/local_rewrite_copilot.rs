@@ -5,7 +5,8 @@ use super::local_rewrite::{
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_copilot_request_body_with_canonical_model,
-    runtime_local_rewrite_upstream_url, send_runtime_local_rewrite_prepared_request,
+    runtime_local_rewrite_api_key_attempts, runtime_local_rewrite_upstream_url,
+    send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
@@ -25,8 +26,8 @@ pub(super) type RuntimeCopilotBindingRecorder = Arc<dyn Fn(String) + Send + Sync
 
 #[derive(Clone)]
 pub(crate) enum RuntimeCopilotProviderAuth {
-    ApiKey {
-        api_key: String,
+    ApiKeys {
+        api_keys: Vec<String>,
     },
     Profiles {
         profiles: Vec<RuntimeCopilotProfileAuth>,
@@ -96,7 +97,7 @@ pub(super) fn send_runtime_copilot_upstream_request(
         &request.path_and_query,
     );
     let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
-    let attempts = runtime_copilot_auth_attempts(auth, shared.copilot_oauth_pool.as_ref(), &body)?;
+    let attempts = runtime_copilot_auth_attempts(auth, shared, &body)?;
     let attempt_count = attempts.len();
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
         let response = send_runtime_local_rewrite_prepared_request(
@@ -157,17 +158,29 @@ pub(super) fn send_runtime_copilot_upstream_request(
 
 fn runtime_copilot_auth_attempts(
     auth: &RuntimeCopilotProviderAuth,
-    pool: Option<&RuntimeCopilotOAuthPool>,
+    shared: &RuntimeLocalRewriteProxyShared,
     body: &[u8],
 ) -> Result<Vec<RuntimeCopilotSelectedAuth>> {
     match auth {
-        RuntimeCopilotProviderAuth::ApiKey { api_key } => Ok(vec![RuntimeCopilotSelectedAuth {
-            profile_name: "api-key".to_string(),
-            api_key: api_key.clone(),
-            hard_affinity: true,
-        }]),
+        RuntimeCopilotProviderAuth::ApiKeys { api_keys } => {
+            let attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys)
+                .into_iter()
+                .map(|(label, api_key)| RuntimeCopilotSelectedAuth {
+                    profile_name: label,
+                    api_key: api_key.to_string(),
+                    hard_affinity: api_keys.len() <= 1,
+                })
+                .collect::<Vec<_>>();
+            if attempts.is_empty() {
+                bail!("Copilot API-key pool is empty");
+            }
+            Ok(attempts)
+        }
         RuntimeCopilotProviderAuth::Profiles { profiles } => {
-            let pool = pool.context("Copilot OAuth pool was not initialized")?;
+            let pool = shared
+                .copilot_oauth_pool
+                .as_ref()
+                .context("Copilot OAuth pool was not initialized")?;
             pool.select_attempts(body, profiles)
         }
     }

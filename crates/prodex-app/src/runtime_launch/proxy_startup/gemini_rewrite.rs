@@ -32,8 +32,8 @@ pub(crate) enum RuntimeGeminiAuth {
 
 #[derive(Clone)]
 pub(crate) enum RuntimeGeminiProviderAuth {
-    ApiKey {
-        api_key: String,
+    ApiKeys {
+        api_keys: Vec<String>,
     },
     OAuthProfiles {
         profiles: Vec<RuntimeGeminiOAuthProfileAuth>,

@@ -392,14 +392,19 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             print_wrapped_stderr(&section_header("Runtime Provider"));
             if let Some(provider) = self.request.external_provider {
                 let rotation = if provider.eq_ignore_ascii_case("gemini")
-                    && self.request.allow_auto_rotate
-                    && !runtime_provider_mode_uses_single_api_key(
-                        self.request.external_provider,
-                        self.request.external_provider_api_key,
-                    ) {
-                    runtime_gemini_oauth_rotation_summary(
+                    || provider.eq_ignore_ascii_case("anthropic")
+                    || provider.eq_ignore_ascii_case("claude")
+                    || provider.eq_ignore_ascii_case("copilot")
+                    || provider.eq_ignore_ascii_case("github-copilot")
+                    || provider.eq_ignore_ascii_case("github_copilot")
+                    || provider.eq_ignore_ascii_case("deepseek")
+                {
+                    runtime_external_provider_rotation_summary(
                         &self.state,
                         &self.selection.selected_profile_name,
+                        provider,
+                        self.request.external_provider_api_key,
+                        self.request.allow_auto_rotate,
                     )
                 } else {
                     "Quota preflight and account rotation stay disabled.".to_string()

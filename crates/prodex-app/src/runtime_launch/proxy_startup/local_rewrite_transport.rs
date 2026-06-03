@@ -22,6 +22,11 @@ pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
     Gemini { auth: &'a RuntimeGeminiAuth },
 }
 
+pub(super) struct RuntimeLocalRewriteSelectedAnthropicAuth {
+    pub(super) label: String,
+    pub(super) auth: RuntimeAnthropicAuth,
+}
+
 impl RuntimeLocalRewritePreparedAuth<'_> {
     fn bridge_kind(&self) -> RuntimeProviderBridgeKind {
         match self {
@@ -244,41 +249,75 @@ pub(super) fn runtime_chat_completions_upstream_url(
     runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
 }
 
-pub(super) fn runtime_local_rewrite_next_api_key<'a>(
+pub(super) fn runtime_local_rewrite_api_key_attempts<'a>(
     shared: &RuntimeLocalRewriteProxyShared,
     api_keys: &'a [String],
-) -> Option<&'a str> {
+) -> Vec<(String, &'a str)> {
     if api_keys.is_empty() {
-        return None;
+        return Vec::new();
     }
-    if api_keys.len() == 1 {
-        return Some(api_keys[0].as_str());
-    }
-    let index = shared.api_key_cursor.fetch_add(1, Ordering::Relaxed) % api_keys.len();
-    Some(api_keys[index].as_str())
+    let start = if api_keys.len() == 1 {
+        0
+    } else {
+        shared.api_key_cursor.fetch_add(1, Ordering::Relaxed) % api_keys.len()
+    };
+    runtime_local_rewrite_api_key_attempts_from_start(api_keys, start)
 }
 
-pub(super) fn runtime_local_rewrite_next_anthropic_auth(
+fn runtime_local_rewrite_api_key_attempts_from_start<'a>(
+    api_keys: &'a [String],
+    start: usize,
+) -> Vec<(String, &'a str)> {
+    (0..api_keys.len())
+        .map(|offset| {
+            let index = (start + offset) % api_keys.len();
+            let label = if api_keys.len() == 1 {
+                "api-key".to_string()
+            } else {
+                format!("api-key-{}", index + 1)
+            };
+            (label, api_keys[index].as_str())
+        })
+        .collect()
+}
+
+pub(super) fn runtime_local_rewrite_anthropic_auth_attempts(
     shared: &RuntimeLocalRewriteProxyShared,
     auth: &RuntimeAnthropicProviderAuth,
-) -> Option<RuntimeAnthropicAuth> {
+) -> Vec<RuntimeLocalRewriteSelectedAnthropicAuth> {
     match auth {
         RuntimeAnthropicProviderAuth::ApiKeys { api_keys } => {
-            runtime_local_rewrite_next_api_key(shared, api_keys).map(|api_key| {
-                RuntimeAnthropicAuth::ApiKey {
-                    api_key: api_key.to_string(),
-                }
-            })
+            runtime_local_rewrite_api_key_attempts(shared, api_keys)
+                .into_iter()
+                .map(
+                    |(label, api_key)| RuntimeLocalRewriteSelectedAnthropicAuth {
+                        label,
+                        auth: RuntimeAnthropicAuth::ApiKey {
+                            api_key: api_key.to_string(),
+                        },
+                    },
+                )
+                .collect()
         }
         RuntimeAnthropicProviderAuth::OAuthProfiles { profiles } => {
             if profiles.is_empty() {
-                return None;
+                return Vec::new();
             }
-            if profiles.len() == 1 {
-                return Some(profiles[0].auth());
-            }
-            let index = shared.api_key_cursor.fetch_add(1, Ordering::Relaxed) % profiles.len();
-            Some(profiles[index].auth())
+            let start = if profiles.len() == 1 {
+                0
+            } else {
+                shared.api_key_cursor.fetch_add(1, Ordering::Relaxed) % profiles.len()
+            };
+            (0..profiles.len())
+                .map(|offset| {
+                    let index = (start + offset) % profiles.len();
+                    let profile = profiles[index].clone();
+                    RuntimeLocalRewriteSelectedAnthropicAuth {
+                        label: profile.profile_name.clone(),
+                        auth: profile.auth(),
+                    }
+                })
+                .collect()
         }
     }
 }
@@ -387,4 +426,38 @@ fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
             | "upgrade"
     ) || lower.starts_with("sec-websocket-")
         || lower.starts_with("x-prodex-internal-")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_key_attempts_rotate_start_and_include_all_keys() {
+        let api_keys = vec![
+            "first".to_string(),
+            "second".to_string(),
+            "third".to_string(),
+        ];
+
+        let attempts = runtime_local_rewrite_api_key_attempts_from_start(&api_keys, 1);
+
+        assert_eq!(
+            attempts,
+            vec![
+                ("api-key-2".to_string(), "second"),
+                ("api-key-3".to_string(), "third"),
+                ("api-key-1".to_string(), "first"),
+            ]
+        );
+    }
+
+    #[test]
+    fn single_api_key_attempt_uses_generic_label() {
+        let api_keys = vec!["only".to_string()];
+
+        let attempts = runtime_local_rewrite_api_key_attempts_from_start(&api_keys, 0);
+
+        assert_eq!(attempts, vec![("api-key".to_string(), "only")]);
+    }
 }

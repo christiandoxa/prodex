@@ -258,7 +258,7 @@ fn render_all_quota_watch_report_output(
     provider_filter_locked: bool,
 ) -> String {
     let filtered_reports = filter_quota_reports_by_provider(reports, provider_filter);
-    let mut output = render_quota_reports_window_with_sort(
+    let window = render_quota_reports_window_with_sort(
         &filtered_reports,
         detail,
         quota_watch_available_report_lines(""),
@@ -266,21 +266,54 @@ fn render_all_quota_watch_report_output(
         scroll_offset,
         true,
         sort,
-    )
-    .output;
+    );
+    let mut output = quota_watch_without_interactive_scroll_notice(&window.output);
     output.push('\n');
     let provider_hint = if provider_filter_locked {
         "provider fixed"
     } else {
         "f provider"
     };
+    let range = quota_watch_scroll_range(&window)
+        .map(|range| format!(" | {range}"))
+        .unwrap_or_default();
     output.push_str(&format!(
-        "sort: {} | filter: {} | s sort | {} | j/k/Up/Down scroll | q quit",
+        "sort: {} | filter: {}{} | s sort | {} | j/k/Up/Down scroll | q quit",
         sort.label(),
         provider_filter.label(),
+        range,
         provider_hint
     ));
     output
+}
+
+fn quota_watch_without_interactive_scroll_notice(output: &str) -> String {
+    let mut lines = output.lines().map(str::to_string).collect::<Vec<_>>();
+    if lines
+        .last()
+        .is_some_and(|line| line.starts_with("press Up/Down to scroll profiles "))
+    {
+        lines.pop();
+        if lines.last().is_some_and(|line| line.is_empty()) {
+            lines.pop();
+        }
+    }
+    lines.join("\n")
+}
+
+fn quota_watch_scroll_range(window: &RenderedQuotaReportWindow) -> Option<String> {
+    if window.total_profiles == 0
+        || window.shown_profiles == 0
+        || (window.hidden_before == 0 && window.hidden_after == 0)
+    {
+        return None;
+    }
+    let first_visible = window.start_profile.saturating_add(1);
+    let last_visible = window.start_profile.saturating_add(window.shown_profiles);
+    Some(format!(
+        "{first_visible}-{last_visible}/{}; {} above, {} below",
+        window.total_profiles, window.hidden_before, window.hidden_after
+    ))
 }
 
 fn filter_quota_reports_by_provider(
@@ -364,8 +397,12 @@ pub(crate) fn watch_all_quotas(
         }
 
         if redraw_needed {
-            scroll_offset =
-                scroll_offset.min(quota_watch_max_scroll_offset(&snapshot, provider_filter));
+            scroll_offset = scroll_offset.min(quota_watch_max_scroll_offset(
+                &snapshot,
+                detail,
+                provider_filter,
+                sort,
+            ));
             let output = render_all_quota_watch_snapshot(
                 &snapshot,
                 detail,
@@ -395,7 +432,7 @@ pub(crate) fn watch_all_quotas(
             match apply_quota_watch_command(
                 command,
                 scroll_offset,
-                quota_watch_max_scroll_offset(&snapshot, provider_filter),
+                quota_watch_max_scroll_offset(&snapshot, detail, provider_filter, sort),
             ) {
                 QuotaWatchCommandOutcome::Continue(next_offset) => {
                     if next_offset != scroll_offset {
@@ -463,16 +500,61 @@ fn quota_watch_next_refresh_at() -> Instant {
 
 fn quota_watch_max_scroll_offset(
     snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
     provider_filter: QuotaProviderFilter,
+    sort: QuotaReportSort,
 ) -> usize {
     match snapshot {
-        AllQuotaWatchSnapshot::Reports { reports, .. } => reports
-            .iter()
-            .filter(|report| provider_filter.matches_report(report))
-            .count()
-            .saturating_sub(1),
+        AllQuotaWatchSnapshot::Reports { reports, .. } => {
+            quota_watch_max_scroll_offset_for_reports(reports, detail, provider_filter, sort)
+        }
         _ => 0,
     }
+}
+
+fn quota_watch_max_scroll_offset_for_reports(
+    reports: &[QuotaReport],
+    detail: bool,
+    provider_filter: QuotaProviderFilter,
+    sort: QuotaReportSort,
+) -> usize {
+    quota_watch_max_scroll_offset_for_reports_with_layout(
+        reports,
+        detail,
+        provider_filter,
+        sort,
+        quota_watch_available_report_lines(""),
+        current_cli_width(),
+    )
+}
+
+fn quota_watch_max_scroll_offset_for_reports_with_layout(
+    reports: &[QuotaReport],
+    detail: bool,
+    provider_filter: QuotaProviderFilter,
+    sort: QuotaReportSort,
+    max_lines: Option<usize>,
+    total_width: usize,
+) -> usize {
+    let filtered_reports = filter_quota_reports_by_provider(reports, provider_filter);
+    if filtered_reports.is_empty() {
+        return 0;
+    }
+    for scroll_offset in 0..filtered_reports.len() {
+        let window = render_quota_reports_window_with_sort(
+            &filtered_reports,
+            detail,
+            max_lines,
+            total_width,
+            scroll_offset,
+            true,
+            sort,
+        );
+        if window.hidden_after == 0 {
+            return window.start_profile;
+        }
+    }
+    filtered_reports.len().saturating_sub(1)
 }
 
 fn merge_all_quota_watch_snapshot(
@@ -589,6 +671,62 @@ mod tests {
             project_id: Some("test-project".to_string()),
             buckets: Vec::new(),
         })
+    }
+
+    #[test]
+    fn quota_watch_footer_strips_duplicate_scroll_notice() {
+        let output = quota_watch_without_interactive_scroll_notice(
+            "quota body\n\npress Up/Down to scroll profiles (2-3 of 4; 1 above, 1 below)",
+        );
+
+        assert_eq!(output, "quota body");
+    }
+
+    #[test]
+    fn quota_watch_scroll_range_uses_window_metadata() {
+        let range = quota_watch_scroll_range(&RenderedQuotaReportWindow {
+            output: String::new(),
+            shown_profiles: 3,
+            total_profiles: 12,
+            start_profile: 9,
+            hidden_before: 9,
+            hidden_after: 0,
+        });
+
+        assert_eq!(range.as_deref(), Some("10-12/12; 9 above, 0 below"));
+    }
+
+    #[test]
+    fn quota_watch_max_scroll_offset_stops_at_last_visible_window() {
+        let reports = (0..4)
+            .map(|index| test_quota_report(&format!("profile-{index}"), Ok(test_usage("main"))))
+            .collect::<Vec<_>>();
+
+        let max_scroll = quota_watch_max_scroll_offset_for_reports_with_layout(
+            &reports,
+            false,
+            QuotaProviderFilter::All,
+            QuotaReportSort::Remaining,
+            Some(14),
+            100,
+        );
+        let filtered_reports = filter_quota_reports_by_provider(&reports, QuotaProviderFilter::All);
+        let window = render_quota_reports_window_with_sort(
+            &filtered_reports,
+            false,
+            Some(14),
+            100,
+            max_scroll,
+            true,
+            QuotaReportSort::Remaining,
+        );
+
+        assert_eq!(window.hidden_after, 0);
+        assert!(window.hidden_before > 0);
+        assert!(matches!(
+            apply_quota_watch_command(QuotaWatchCommand::Down, max_scroll, max_scroll),
+            QuotaWatchCommandOutcome::Continue(next) if next == max_scroll
+        ));
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub(crate) enum RuntimeAnthropicProviderAuth {
 
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimeAnthropicOAuthProfileAuth {
+    pub(crate) profile_name: String,
     pub(crate) access_token: String,
 }
 

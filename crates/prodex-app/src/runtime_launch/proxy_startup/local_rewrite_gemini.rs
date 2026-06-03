@@ -16,7 +16,8 @@ use super::local_rewrite_gemini_thought_signatures::runtime_gemini_harden_transl
 use super::local_rewrite_rate_limits::runtime_gemini_quota_codex_headers;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_transport::{
-    RuntimeLocalRewritePreparedAuth, send_runtime_local_rewrite_prepared_request,
+    RuntimeLocalRewritePreparedAuth, runtime_local_rewrite_api_key_attempts,
+    send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
@@ -102,7 +103,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
     auth: &RuntimeGeminiProviderAuth,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
-    let attempts = runtime_gemini_auth_attempts(auth, shared.gemini_oauth_pool.as_ref(), &body)?;
+    let attempts = runtime_gemini_auth_attempts(auth, shared, &body)?;
     let attempt_count = attempts.len();
     'auth_attempts: for (attempt_index, mut selected) in attempts.into_iter().enumerate() {
         let requested_model = runtime_provider_model_from_body(&body)
@@ -399,19 +400,31 @@ pub(super) fn send_runtime_gemini_upstream_request(
 
 fn runtime_gemini_auth_attempts(
     auth: &RuntimeGeminiProviderAuth,
-    pool: Option<&RuntimeGeminiOAuthPool>,
+    shared: &RuntimeLocalRewriteProxyShared,
     body: &[u8],
 ) -> Result<Vec<RuntimeGeminiSelectedAuth>> {
     match auth {
-        RuntimeGeminiProviderAuth::ApiKey { api_key } => Ok(vec![RuntimeGeminiSelectedAuth {
-            profile_name: "api-key".to_string(),
-            auth: RuntimeGeminiAuth::ApiKey {
-                api_key: api_key.clone(),
-            },
-            hard_affinity: true,
-        }]),
+        RuntimeGeminiProviderAuth::ApiKeys { api_keys } => {
+            let attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys)
+                .into_iter()
+                .map(|(label, api_key)| RuntimeGeminiSelectedAuth {
+                    profile_name: label,
+                    auth: RuntimeGeminiAuth::ApiKey {
+                        api_key: api_key.to_string(),
+                    },
+                    hard_affinity: api_keys.len() <= 1,
+                })
+                .collect::<Vec<_>>();
+            if attempts.is_empty() {
+                bail!("Gemini API-key pool is empty");
+            }
+            Ok(attempts)
+        }
         RuntimeGeminiProviderAuth::OAuthProfiles { profiles } => {
-            let pool = pool.context("Gemini OAuth pool was not initialized")?;
+            let pool = shared
+                .gemini_oauth_pool
+                .as_ref()
+                .context("Gemini OAuth pool was not initialized")?;
             pool.select_attempts(body, profiles)
         }
     }

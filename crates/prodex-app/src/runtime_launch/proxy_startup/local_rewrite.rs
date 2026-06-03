@@ -14,8 +14,8 @@ use super::local_rewrite_response::{
 };
 use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_chat_completions_upstream_url,
-    runtime_deepseek_upstream_url, runtime_local_rewrite_next_anthropic_auth,
-    runtime_local_rewrite_next_api_key, runtime_local_rewrite_upstream_url,
+    runtime_deepseek_upstream_url, runtime_local_rewrite_anthropic_auth_attempts,
+    runtime_local_rewrite_api_key_attempts, runtime_local_rewrite_upstream_url,
     send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
@@ -23,6 +23,7 @@ use super::provider_bridge::{
     runtime_provider_model_from_body, runtime_provider_models_buffered_response,
     runtime_provider_request_body_with_model, runtime_provider_request_ledger_message,
     runtime_provider_should_retry_with_next_model,
+    runtime_provider_should_rotate_auth_after_response,
 };
 use super::*;
 
@@ -425,8 +426,11 @@ fn send_runtime_local_rewrite_upstream_request(
     .into_owned();
     match &shared.provider {
         RuntimeLocalRewriteProviderOptions::Anthropic { auth } => {
-            let auth = runtime_local_rewrite_next_anthropic_auth(shared, auth)
-                .context("Anthropic provider has no auth configured")?;
+            let auth_attempts = runtime_local_rewrite_anthropic_auth_attempts(shared, auth);
+            if auth_attempts.is_empty() {
+                anyhow::bail!("Anthropic provider has no auth configured");
+            }
+            let auth_attempt_count = auth_attempts.len();
             if path_without_query(&request.path_and_query).ends_with("/responses") {
                 let requested_model = runtime_provider_model_from_body(&body)
                     .unwrap_or_else(|| prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL.to_string());
@@ -439,28 +443,127 @@ fn send_runtime_local_rewrite_upstream_request(
                     &shared.mount_path,
                     &request.path_and_query,
                 );
-                for (model_index, model) in model_chain.iter().enumerate() {
-                    let model_body = runtime_provider_request_body_with_model(&body, model);
-                    let translated = runtime_chat_compatible_request_body(
-                        &model_body,
-                        &shared.deepseek_conversations,
-                        RuntimeProviderBridgeKind::Anthropic,
-                        prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
-                        false,
-                    )?;
-                    if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                        pending.insert(request_id, translated.messages);
+                for (auth_index, selected_auth) in auth_attempts.into_iter().enumerate() {
+                    for (model_index, model) in model_chain.iter().enumerate() {
+                        let model_body = runtime_provider_request_body_with_model(&body, model);
+                        let translated = runtime_chat_compatible_request_body(
+                            &model_body,
+                            &shared.deepseek_conversations,
+                            RuntimeProviderBridgeKind::Anthropic,
+                            prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
+                            false,
+                        )?;
+                        if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
+                            pending.insert(request_id, translated.messages);
+                        }
+                        let response = send_runtime_local_rewrite_prepared_request(
+                            request_id,
+                            request,
+                            shared,
+                            &upstream_url,
+                            translated.body,
+                            RuntimeLocalRewritePreparedAuth::Anthropic {
+                                auth: &selected_auth.auth,
+                            },
+                        )?;
+                        let status = response.status().as_u16();
+                        if status >= 400 {
+                            let parts =
+                                runtime_local_rewrite_buffered_response_from_response(response)?;
+                            let class = runtime_provider_error_class(
+                                RuntimeProviderBridgeKind::Anthropic,
+                                status,
+                                &parts.body,
+                            );
+                            if model_index + 1 < model_chain.len()
+                                && runtime_provider_should_retry_with_next_model(class)
+                            {
+                                runtime_proxy_log(
+                                    &shared.runtime_shared,
+                                    runtime_proxy_structured_log_message(
+                                        "local_rewrite_provider_model_fallback",
+                                        [
+                                            runtime_proxy_log_field(
+                                                "request",
+                                                request_id.to_string(),
+                                            ),
+                                            runtime_proxy_log_field("provider", "anthropic"),
+                                            runtime_proxy_log_field(
+                                                "auth",
+                                                selected_auth.label.as_str(),
+                                            ),
+                                            runtime_proxy_log_field("from_model", model.as_str()),
+                                            runtime_proxy_log_field(
+                                                "to_model",
+                                                model_chain[model_index + 1].as_str(),
+                                            ),
+                                            runtime_proxy_log_field("status", status.to_string()),
+                                            runtime_proxy_log_field("class", format!("{class:?}")),
+                                        ],
+                                    ),
+                                );
+                                continue;
+                            }
+                            if auth_index + 1 < auth_attempt_count
+                                && runtime_provider_should_rotate_auth_after_response(class)
+                            {
+                                runtime_proxy_log(
+                                    &shared.runtime_shared,
+                                    runtime_proxy_structured_log_message(
+                                        "local_rewrite_provider_auth_rotate",
+                                        [
+                                            runtime_proxy_log_field(
+                                                "request",
+                                                request_id.to_string(),
+                                            ),
+                                            runtime_proxy_log_field("provider", "anthropic"),
+                                            runtime_proxy_log_field(
+                                                "auth",
+                                                selected_auth.label.as_str(),
+                                            ),
+                                            runtime_proxy_log_field("status", status.to_string()),
+                                            runtime_proxy_log_field("class", format!("{class:?}")),
+                                        ],
+                                    ),
+                                );
+                                break;
+                            }
+                            return Ok(RuntimeLocalRewriteUpstreamResult {
+                                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                                gemini_context: None,
+                                copilot_context: None,
+                            });
+                        }
+                        return Ok(RuntimeLocalRewriteUpstreamResult {
+                            response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                            gemini_context: None,
+                            copilot_context: None,
+                        });
                     }
+                    if auth_index + 1 < auth_attempt_count {
+                        continue;
+                    }
+                }
+                anyhow::bail!("no Anthropic model attempts were available");
+            } else {
+                let upstream_url = runtime_local_rewrite_upstream_url(
+                    &shared.upstream_base_url,
+                    &shared.mount_path,
+                    &request.path_and_query,
+                );
+                for (auth_index, selected_auth) in auth_attempts.into_iter().enumerate() {
                     let response = send_runtime_local_rewrite_prepared_request(
                         request_id,
                         request,
                         shared,
                         &upstream_url,
-                        translated.body,
-                        RuntimeLocalRewritePreparedAuth::Anthropic { auth: &auth },
+                        body.clone(),
+                        RuntimeLocalRewritePreparedAuth::Anthropic {
+                            auth: &selected_auth.auth,
+                        },
                     )?;
                     let status = response.status().as_u16();
-                    if status >= 400 && model_index + 1 < model_chain.len() {
+                    if status >= 400 {
                         let parts =
                             runtime_local_rewrite_buffered_response_from_response(response)?;
                         let class = runtime_provider_error_class(
@@ -468,18 +571,19 @@ fn send_runtime_local_rewrite_upstream_request(
                             status,
                             &parts.body,
                         );
-                        if runtime_provider_should_retry_with_next_model(class) {
+                        if auth_index + 1 < auth_attempt_count
+                            && runtime_provider_should_rotate_auth_after_response(class)
+                        {
                             runtime_proxy_log(
                                 &shared.runtime_shared,
                                 runtime_proxy_structured_log_message(
-                                    "local_rewrite_provider_model_fallback",
+                                    "local_rewrite_provider_auth_rotate",
                                     [
                                         runtime_proxy_log_field("request", request_id.to_string()),
                                         runtime_proxy_log_field("provider", "anthropic"),
-                                        runtime_proxy_log_field("from_model", model.as_str()),
                                         runtime_proxy_log_field(
-                                            "to_model",
-                                            model_chain[model_index + 1].as_str(),
+                                            "auth",
+                                            selected_auth.label.as_str(),
                                         ),
                                         runtime_proxy_log_field("status", status.to_string()),
                                         runtime_proxy_log_field("class", format!("{class:?}")),
@@ -500,26 +604,7 @@ fn send_runtime_local_rewrite_upstream_request(
                         copilot_context: None,
                     });
                 }
-                anyhow::bail!("no Anthropic model attempts were available");
-            } else {
-                let upstream_url = runtime_local_rewrite_upstream_url(
-                    &shared.upstream_base_url,
-                    &shared.mount_path,
-                    &request.path_and_query,
-                );
-                let response = send_runtime_local_rewrite_prepared_request(
-                    request_id,
-                    request,
-                    shared,
-                    &upstream_url,
-                    body,
-                    RuntimeLocalRewritePreparedAuth::Anthropic { auth: &auth },
-                )?;
-                Ok(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Live(response),
-                    gemini_context: None,
-                    copilot_context: None,
-                })
+                anyhow::bail!("no Anthropic auth attempts were available")
             }
         }
         RuntimeLocalRewriteProviderOptions::Copilot { auth } => {
@@ -546,8 +631,11 @@ fn send_runtime_local_rewrite_upstream_request(
             })
         }
         RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys } => {
-            let api_key = runtime_local_rewrite_next_api_key(shared, api_keys)
-                .context("DeepSeek provider has no API keys configured")?;
+            let api_key_attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys);
+            if api_key_attempts.is_empty() {
+                anyhow::bail!("DeepSeek provider has no API keys configured");
+            }
+            let api_key_attempt_count = api_key_attempts.len();
             if path_without_query(&request.path_and_query).ends_with("/responses") {
                 let requested_model = runtime_provider_model_from_body(&body)
                     .unwrap_or_else(|| prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL.to_string());
@@ -560,25 +648,118 @@ fn send_runtime_local_rewrite_upstream_request(
                     &shared.mount_path,
                     &request.path_and_query,
                 );
-                for (model_index, model) in model_chain.iter().enumerate() {
-                    let model_body = runtime_provider_request_body_with_model(&body, model);
-                    let translated = runtime_deepseek_chat_request_body(
-                        &model_body,
-                        &shared.deepseek_conversations,
-                    )?;
-                    if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                        pending.insert(request_id, translated.messages);
+                for (api_key_index, (api_key_label, api_key)) in
+                    api_key_attempts.into_iter().enumerate()
+                {
+                    for (model_index, model) in model_chain.iter().enumerate() {
+                        let model_body = runtime_provider_request_body_with_model(&body, model);
+                        let translated = runtime_deepseek_chat_request_body(
+                            &model_body,
+                            &shared.deepseek_conversations,
+                        )?;
+                        if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
+                            pending.insert(request_id, translated.messages);
+                        }
+                        let response = send_runtime_local_rewrite_prepared_request(
+                            request_id,
+                            request,
+                            shared,
+                            &upstream_url,
+                            translated.body,
+                            RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
+                        )?;
+                        let status = response.status().as_u16();
+                        if status >= 400 {
+                            let parts =
+                                runtime_local_rewrite_buffered_response_from_response(response)?;
+                            let class = runtime_provider_error_class(
+                                RuntimeProviderBridgeKind::DeepSeek,
+                                status,
+                                &parts.body,
+                            );
+                            if model_index + 1 < model_chain.len()
+                                && runtime_provider_should_retry_with_next_model(class)
+                            {
+                                runtime_proxy_log(
+                                    &shared.runtime_shared,
+                                    runtime_proxy_structured_log_message(
+                                        "local_rewrite_provider_model_fallback",
+                                        [
+                                            runtime_proxy_log_field(
+                                                "request",
+                                                request_id.to_string(),
+                                            ),
+                                            runtime_proxy_log_field("provider", "deepseek"),
+                                            runtime_proxy_log_field("auth", api_key_label.as_str()),
+                                            runtime_proxy_log_field("from_model", model.as_str()),
+                                            runtime_proxy_log_field(
+                                                "to_model",
+                                                model_chain[model_index + 1].as_str(),
+                                            ),
+                                            runtime_proxy_log_field("status", status.to_string()),
+                                            runtime_proxy_log_field("class", format!("{class:?}")),
+                                        ],
+                                    ),
+                                );
+                                continue;
+                            }
+                            if api_key_index + 1 < api_key_attempt_count
+                                && runtime_provider_should_rotate_auth_after_response(class)
+                            {
+                                runtime_proxy_log(
+                                    &shared.runtime_shared,
+                                    runtime_proxy_structured_log_message(
+                                        "local_rewrite_provider_auth_rotate",
+                                        [
+                                            runtime_proxy_log_field(
+                                                "request",
+                                                request_id.to_string(),
+                                            ),
+                                            runtime_proxy_log_field("provider", "deepseek"),
+                                            runtime_proxy_log_field("auth", api_key_label.as_str()),
+                                            runtime_proxy_log_field("status", status.to_string()),
+                                            runtime_proxy_log_field("class", format!("{class:?}")),
+                                        ],
+                                    ),
+                                );
+                                break;
+                            }
+                            return Ok(RuntimeLocalRewriteUpstreamResult {
+                                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                                gemini_context: None,
+                                copilot_context: None,
+                            });
+                        }
+                        return Ok(RuntimeLocalRewriteUpstreamResult {
+                            response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                            gemini_context: None,
+                            copilot_context: None,
+                        });
                     }
+                    if api_key_index + 1 < api_key_attempt_count {
+                        continue;
+                    }
+                }
+                anyhow::bail!("no DeepSeek model attempts were available");
+            } else {
+                let upstream_url = runtime_deepseek_upstream_url(
+                    &shared.upstream_base_url,
+                    &shared.mount_path,
+                    &request.path_and_query,
+                );
+                for (api_key_index, (api_key_label, api_key)) in
+                    api_key_attempts.into_iter().enumerate()
+                {
                     let response = send_runtime_local_rewrite_prepared_request(
                         request_id,
                         request,
                         shared,
                         &upstream_url,
-                        translated.body,
+                        body.clone(),
                         RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
                     )?;
                     let status = response.status().as_u16();
-                    if status >= 400 && model_index + 1 < model_chain.len() {
+                    if status >= 400 {
                         let parts =
                             runtime_local_rewrite_buffered_response_from_response(response)?;
                         let class = runtime_provider_error_class(
@@ -586,19 +767,17 @@ fn send_runtime_local_rewrite_upstream_request(
                             status,
                             &parts.body,
                         );
-                        if runtime_provider_should_retry_with_next_model(class) {
+                        if api_key_index + 1 < api_key_attempt_count
+                            && runtime_provider_should_rotate_auth_after_response(class)
+                        {
                             runtime_proxy_log(
                                 &shared.runtime_shared,
                                 runtime_proxy_structured_log_message(
-                                    "local_rewrite_provider_model_fallback",
+                                    "local_rewrite_provider_auth_rotate",
                                     [
                                         runtime_proxy_log_field("request", request_id.to_string()),
                                         runtime_proxy_log_field("provider", "deepseek"),
-                                        runtime_proxy_log_field("from_model", model.as_str()),
-                                        runtime_proxy_log_field(
-                                            "to_model",
-                                            model_chain[model_index + 1].as_str(),
-                                        ),
+                                        runtime_proxy_log_field("auth", api_key_label.as_str()),
                                         runtime_proxy_log_field("status", status.to_string()),
                                         runtime_proxy_log_field("class", format!("{class:?}")),
                                     ],
@@ -618,26 +797,7 @@ fn send_runtime_local_rewrite_upstream_request(
                         copilot_context: None,
                     });
                 }
-                anyhow::bail!("no DeepSeek model attempts were available");
-            } else {
-                let upstream_url = runtime_deepseek_upstream_url(
-                    &shared.upstream_base_url,
-                    &shared.mount_path,
-                    &request.path_and_query,
-                );
-                let response = send_runtime_local_rewrite_prepared_request(
-                    request_id,
-                    request,
-                    shared,
-                    &upstream_url,
-                    body,
-                    RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
-                )?;
-                Ok(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Live(response),
-                    gemini_context: None,
-                    copilot_context: None,
-                })
+                anyhow::bail!("no DeepSeek API key attempts were available")
             }
         }
         RuntimeLocalRewriteProviderOptions::Gemini { auth } => {

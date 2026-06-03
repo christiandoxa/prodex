@@ -56,9 +56,9 @@ Prodex supports two provider paths:
 | Provider | Launch to Codex | Auth path | Quota view | Notes |
 |---|---:|---|---:|---|
 | OpenAI / Codex | `prodex`, `prodex run`, `prodex s` | ChatGPT OAuth, device code, or OpenAI/API-compatible key via `prodex login` | Yes | Full quota preflight and profile auto-rotation. |
-| Google Gemini | `prodex s --provider gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY` / `--api-key` | OAuth profiles | OAuth mode can rotate across Gemini profiles; API-key mode is runtime-only. |
+| Google Gemini | `prodex s --provider gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key` | OAuth profiles | OAuth and API-key modes rotate before a request is committed; continuations stay pinned to their owning profile. |
 | Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | OAuth profiles | Shows Claude OAuth readiness; add `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups. |
-| GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY` / `--api-key` | Imported profiles | Native Copilot profile mode keeps continuations bound to the owning profile. |
+| GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Native profile and API-key modes rotate before commit; continuations stay bound to the owning profile. |
 | DeepSeek | `prodex s --provider deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
 | Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
@@ -711,7 +711,7 @@ prodex s --provider anthropic --model claude-sonnet-4-6
 prodex s --provider anthropic --model claude-sonnet-4-6 --api-key "$ANTHROPIC_API_KEY"
 ```
 
-If `--api-key` is omitted, Prodex uses the Anthropic profile created by `prodex login --with-claude` or `prodex profile import claude`. API-key mode still reads `ANTHROPIC_API_KEY`; `ANTHROPIC_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path injects a temporary `prodex-anthropic` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to Anthropic's OpenAI-compatible chat API, and keeps quota preflight disabled. `prodex quota --all --provider anthropic` shows OAuth readiness for Anthropic profiles; set `ANTHROPIC_ADMIN_KEY` when you want Anthropic Admin rate-limit groups included.
+If `--api-key` is omitted, Prodex uses the Anthropic profile created by `prodex login --with-claude` or `prodex profile import claude`. API-key mode still reads `ANTHROPIC_API_KEY`; `ANTHROPIC_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path injects a temporary `prodex-anthropic` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to Anthropic's OpenAI-compatible chat API, and keeps quota preflight disabled. `prodex quota --all --provider anthropic` shows OAuth readiness for Anthropic profiles; set `ANTHROPIC_ADMIN_KEY` when you want Anthropic Admin rate-limit groups included.
 
 Use `--provider copilot` when you want the Codex/Super front end with GitHub Copilot upstream:
 
@@ -720,7 +720,7 @@ prodex profile import copilot
 prodex s --provider copilot --model gpt-5.1-codex
 ```
 
-Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens from GitHub before launch, rotates fresh native Responses requests across eligible profiles, and binds streaming response IDs back to the owning profile for continuations. `GITHUB_COPILOT_API_KEY` or `--api-key` can be used when you already have a Copilot runtime API token.
+Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens from GitHub before launch, rotates fresh native Responses requests across eligible profiles, and binds streaming response IDs back to the owning profile for continuations. `GITHUB_COPILOT_API_KEY`, `GITHUB_COPILOT_API_KEYS`, or `--api-key` can be used when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures.
 
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 
@@ -728,7 +728,7 @@ Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek 
 prodex s --provider deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KEY"
 ```
 
-If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` environment and fetches DeepSeek `/user/balance`. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
+If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` environment and fetches DeepSeek `/user/balance`. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
 
 Use `--provider gemini` when you want the Codex/Super front end with Gemini upstream:
 
@@ -739,7 +739,7 @@ GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
 prodex s --provider gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
 ```
 
-Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. With `--api-key`, or `GEMINI_API_KEY` / `GOOGLE_API_KEY`, Prodex routes through the public Gemini API. The default model is `gemini-2.5-pro`, matching Gemini CLI's current default, and the injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path: Prodex maps Codex/MCP tool schemas to Gemini function declarations, honors `auto` / `none` / `required` tool-choice modes, and preserves Gemini thought signatures across tool-call followups.
+Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex routes through the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. The default model is `gemini-2.5-pro`, matching Gemini CLI's current default, and the injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path: Prodex maps Codex/MCP tool schemas to Gemini function declarations, honors `auto` / `none` / `required` tool-choice modes, and preserves Gemini thought signatures across tool-call followups.
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use.
 
