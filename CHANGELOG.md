@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.145.0 - 2026-06-03
+
+### Runtime
+
+- Harden Gemini provider launch (`438fd90`)
+
 ## 0.144.0 - 2026-06-03
 
 ### Misc
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden Gemini rate-limit handling (`0a2447b`)
-
-## 0.133.0 - 2026-05-29
-
-### Runtime
-
-- Add Gemini provider rotation (`89d3cff`)
