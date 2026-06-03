@@ -438,6 +438,7 @@ fn super_local_provider_codex_args(
         "model_reasoning_summary=\"none\"".to_string(),
         "model_supports_reasoning_summaries=false".to_string(),
         "web_search=\"disabled\"".to_string(),
+        "features.apps=false".to_string(),
         "features.js_repl=false".to_string(),
         "features.image_generation=false".to_string(),
     ];
@@ -487,6 +488,7 @@ fn super_external_provider_codex_args(
         "model_reasoning_summary=\"none\"".to_string(),
         "model_supports_reasoning_summaries=true".to_string(),
         "web_search=\"disabled\"".to_string(),
+        "features.apps=false".to_string(),
         "features.js_repl=false".to_string(),
         "features.image_generation=false".to_string(),
     ];

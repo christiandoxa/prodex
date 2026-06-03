@@ -291,6 +291,39 @@ pub(super) fn runtime_provider_model_fallback_chain(
                 "gemini-3-pro-preview",
                 "gemini-2.5-pro",
             ],
+            "gemini-3.1-pro-preview-customtools" => &[
+                "gemini-3.1-pro-preview-customtools",
+                "gemini-3.1-pro-preview",
+                "gemini-3-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-2.5-flash",
+            ],
+            "gemini-3.1-pro-preview" => &[
+                "gemini-3.1-pro-preview",
+                "gemini-3-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-2.5-flash",
+            ],
+            "gemini-3-pro-preview" => &[
+                "gemini-3-pro-preview",
+                "gemini-3.1-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-2.5-flash",
+            ],
+            "gemini-3.5-flash" => &[
+                "gemini-3.5-flash",
+                "gemini-3-flash-preview",
+                "gemini-2.5-flash",
+            ],
+            "gemini-3-flash-preview" => &["gemini-3-flash-preview", "gemini-2.5-flash"],
+            "gemini-3.1-flash-lite" => &[
+                "gemini-3.1-flash-lite",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash",
+            ],
             "flash" => &["gemini-3-flash-preview", "gemini-2.5-flash"],
             "flash-lite" => &["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"],
             _ => return vec![model.to_string()],
@@ -640,6 +673,27 @@ mod tests {
     fn provider_model_fallback_supports_aliases_and_combo() {
         assert_eq!(
             runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "flash"),
+            vec!["gemini-3-flash-preview", "gemini-2.5-flash"]
+        );
+        assert_eq!(
+            runtime_provider_model_fallback_chain(
+                RuntimeProviderBridgeKind::Gemini,
+                "gemini-3.1-pro-preview-customtools"
+            ),
+            vec![
+                "gemini-3.1-pro-preview-customtools",
+                "gemini-3.1-pro-preview",
+                "gemini-3-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-2.5-flash",
+            ]
+        );
+        assert_eq!(
+            runtime_provider_model_fallback_chain(
+                RuntimeProviderBridgeKind::Gemini,
+                "gemini-3-flash-preview"
+            ),
             vec!["gemini-3-flash-preview", "gemini-2.5-flash"]
         );
         assert_eq!(

@@ -40,6 +40,10 @@ const RUNTIME_PROVIDER_GEMINI_MODELS: &[RuntimeProviderModelSpec] = &[
         owned_by: "google",
     },
     RuntimeProviderModelSpec {
+        id: "gemini-3.5-flash",
+        owned_by: "google",
+    },
+    RuntimeProviderModelSpec {
         id: "gemini-2.5-pro",
         owned_by: "google",
     },

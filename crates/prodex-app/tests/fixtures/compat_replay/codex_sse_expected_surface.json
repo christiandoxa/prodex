@@ -9,6 +9,6 @@
   "continuation": "previous_response+session+turn_state",
   "request_origin": "external",
   "approval": true,
-  "user_agent": "codex-cli/0.135.0",
+  "user_agent": "codex-cli/0.136.0",
   "warnings": []
 }

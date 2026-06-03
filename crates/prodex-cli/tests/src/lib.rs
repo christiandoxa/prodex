@@ -425,6 +425,7 @@ fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
     assert!(
         rendered.contains(&"model_providers.prodex-deepseek.wire_api=\"responses\"".to_string())
     );
+    assert!(rendered.contains(&"features.apps=false".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("ds-test-key")));
 }
 
@@ -463,6 +464,7 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
             .to_string()
     ));
     assert!(rendered.contains(&"model_providers.prodex-gemini.wire_api=\"responses\"".to_string()));
+    assert!(rendered.contains(&"features.apps=false".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("gemini-test-key")));
 }
 
@@ -546,6 +548,31 @@ fn codex_remote_control_defaults_to_managed_run_passthrough() {
     };
 
     assert_eq!(args.codex_args, os_args(&["remote-control", "--help"]));
+}
+
+#[test]
+fn codex_archive_commands_default_to_managed_run_passthrough() {
+    for passthrough in [
+        ["archive", "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"],
+        ["unarchive", "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"],
+    ] {
+        let mut raw_args = vec![OsString::from("prodex")];
+        raw_args.extend(passthrough.iter().map(|value| OsString::from(*value)));
+        assert!(should_default_cli_invocation_to_run(&raw_args));
+
+        let command = parse_cli_command_from(raw_args).expect("codex archive command should parse");
+        let Commands::Run(args) = command else {
+            panic!("expected run command");
+        };
+
+        assert_eq!(
+            args.codex_args,
+            passthrough
+                .iter()
+                .map(|value| OsString::from(*value))
+                .collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]

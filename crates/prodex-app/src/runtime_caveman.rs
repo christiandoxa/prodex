@@ -2,6 +2,8 @@ use super::*;
 #[cfg(test)]
 pub(crate) use prodex_caveman_assets::PRODEX_CAVEMAN_FULL_ASSETS_ENV;
 
+const PRODEX_PROVIDER_CODEX_API_KEY: &str = "prodex-runtime-provider";
+
 pub(crate) struct CavemanLaunchStrategy {
     args: CavemanArgs,
     codex_args: Vec<OsString>,
@@ -76,6 +78,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
+        if self.provider_runtime_uses_local_proxy_auth() {
+            write_provider_runtime_codex_auth(&caveman_home)?;
+        }
         let codex_args = profile_openai_compatible_codex_args(&caveman_home, &self.codex_args);
         let codex_args = prepare_deepseek_provider_codex_args(&caveman_home, &codex_args)?;
         let codex_args = prepare_gemini_provider_codex_args(&caveman_home, &codex_args)?;
@@ -92,6 +97,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             prodex_caveman_assets::trust_claude_mem_codex_plugin_hooks(&caveman_home)?;
         }
         let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
+        if self.provider_runtime_uses_local_proxy_auth() {
+            force_codex_api_key_auth_for_provider_runtime(&mut child);
+        }
         prepend_child_path(&mut child, caveman_home.join("bin"));
         if self.rtk_enabled {
             clear_rtk_auto_wrap_control_env(&mut child);
@@ -107,6 +115,39 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         }
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home))
     }
+}
+
+impl CavemanLaunchStrategy {
+    fn provider_runtime_uses_local_proxy_auth(&self) -> bool {
+        self.args.external_provider.is_some()
+            || self.model_provider_override.as_deref() == Some(SUPER_LOCAL_PROVIDER_ID)
+    }
+}
+
+fn force_codex_api_key_auth_for_provider_runtime(child: &mut ChildProcessPlan) {
+    let key = OsString::from("OPENAI_API_KEY");
+    if let Some((_, value)) = child.extra_env.iter_mut().find(|(name, _)| name == &key) {
+        *value = OsString::from(PRODEX_PROVIDER_CODEX_API_KEY);
+    } else {
+        child
+            .extra_env
+            .push((key, OsString::from(PRODEX_PROVIDER_CODEX_API_KEY)));
+    }
+}
+
+fn write_provider_runtime_codex_auth(codex_home: &std::path::Path) -> Result<()> {
+    let auth_path = codex_home.join("auth.json");
+    let auth_json = serde_json::json!({
+        "auth_mode": "apikey",
+        "OPENAI_API_KEY": PRODEX_PROVIDER_CODEX_API_KEY,
+        "tokens": null,
+        "last_refresh": null,
+        "agent_identity": null
+    });
+    let bytes = serde_json::to_vec_pretty(&auth_json)?;
+    std::fs::write(&auth_path, bytes)
+        .with_context(|| format!("failed to write {}", auth_path.display()))?;
+    Ok(())
 }
 
 fn clear_rtk_auto_wrap_control_env(child: &mut ChildProcessPlan) {
@@ -309,6 +350,7 @@ mod tests {
             strategy.model_provider_override.as_deref(),
             Some("prodex-deepseek")
         );
+        assert!(strategy.provider_runtime_uses_local_proxy_auth());
     }
 
     #[test]
@@ -338,6 +380,7 @@ mod tests {
             strategy.model_provider_override.as_deref(),
             Some("prodex-gemini")
         );
+        assert!(strategy.provider_runtime_uses_local_proxy_auth());
     }
 
     #[test]
@@ -542,5 +585,48 @@ mod tests {
                 .contains(&OsString::from("PRODEX_RTK_DISABLE_AUTO_WRAP"))
         );
         assert!(child.removed_env.contains(&OsString::from("CODEX_SANDBOX")));
+    }
+
+    #[test]
+    fn provider_runtime_auth_sets_codex_api_key_placeholder() {
+        let mut child = ChildProcessPlan {
+            binary: OsString::from("codex"),
+            args: Vec::new(),
+            codex_home: PathBuf::from("/tmp/prodex-caveman-test"),
+            extra_env: vec![(OsString::from("OPENAI_API_KEY"), OsString::from("user-key"))],
+            removed_env: Vec::new(),
+        };
+
+        force_codex_api_key_auth_for_provider_runtime(&mut child);
+
+        let values = child
+            .extra_env
+            .iter()
+            .filter(|(key, _)| key == "OPENAI_API_KEY")
+            .map(|(_, value)| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![PRODEX_PROVIDER_CODEX_API_KEY.to_string()]);
+    }
+
+    #[test]
+    fn provider_runtime_auth_writes_api_key_auth_file() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-provider-auth-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("temp home should be created");
+
+        write_provider_runtime_codex_auth(&root).expect("auth file should be written");
+
+        let auth = std::fs::read_to_string(root.join("auth.json")).expect("auth should be read");
+        let value: serde_json::Value = serde_json::from_str(&auth).expect("auth should be json");
+        assert_eq!(value["auth_mode"], "apikey");
+        assert_eq!(value["OPENAI_API_KEY"], PRODEX_PROVIDER_CODEX_API_KEY);
+        assert!(value["tokens"].is_null());
+        std::fs::remove_dir_all(root).expect("temp home should be removed");
     }
 }

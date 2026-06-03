@@ -902,7 +902,7 @@ In practice, profile `history.jsonl`, `sessions`, `config.toml`, `environments.t
 
 Prodex does not synthesize legacy Codex `[profiles.*]` behavior. File-based Codex profile config selected by `--profile` stays in shared Codex state, while Prodex-owned account selection remains in Prodex profile metadata.
 
-Prodex also leaves packaged Codex runtime resources alone, including Codex 0.135.0's bundled patched zsh helper under the Codex package layout. Do not set `zsh_path` through Prodex unless you are intentionally debugging direct Codex config.
+Prodex also leaves packaged Codex runtime resources alone, including Codex 0.136.0 and newer bundled zsh runtime helpers under the Codex package layout. Do not set `zsh_path` through Prodex unless you are intentionally debugging direct Codex config.
 
 This matches direct Codex behavior: logging out or switching accounts does not hide chat history.
 
