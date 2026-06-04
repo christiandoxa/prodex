@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.150.0 - 2026-06-04
+
+### Runtime
+
+- Retry provider search fallback (`01f076d`)
+- Preserve provider tool calls (`5ba8683`)
+- Advertise provider capability catalogs (`c6542ec`)
+
 ## 0.149.0 - 2026-06-04
 
 ### CLI
@@ -82,10 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Remove wildcard sse test imports (`b6aff72`)
 - Satisfy rust 1.96 clippy (`f304168`)
-
-## 0.138.0 - 2026-05-31
-
-### Runtime
-
-- Add Claude OAuth and Copilot profile rotation (`b94a122`)
-- Refresh Gemini OAuth on auth failures (`0fffe21`)
