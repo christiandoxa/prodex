@@ -15,6 +15,7 @@ mod local_rewrite_gemini_quota;
 mod local_rewrite_gemini_thought_signatures;
 mod local_rewrite_rate_limits;
 mod local_rewrite_response;
+mod local_rewrite_search_fallback;
 #[cfg(test)]
 mod local_rewrite_tests;
 mod local_rewrite_transport;
