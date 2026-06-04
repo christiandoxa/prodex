@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.147.0 - 2026-06-04
+
+### Runtime
+
+- Handle Gemini verification for Codex compatibility (`56b4f4e`)
+
 ## 0.146.0 - 2026-06-04
 
 ### Runtime
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Improve provider quotas and tool routing (`e94fd60`)
-
-## 0.135.0 - 2026-05-31
-
-### Runtime
-
-- Improve Gemini rate-limit retries (`16fcfe8`)

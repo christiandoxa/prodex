@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.146.0`:
+The current local version in this repo is `0.147.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.146.0
+npm install -g @christiandoxa/prodex@0.147.0
 ```
 
 Dependency status in this repo:
@@ -107,7 +107,9 @@ prodex profile add second
 prodex login --profile second
 ```
 
-Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history, session, environment, plugin/app-server, and memory database state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl`, `sessions`, `environments.toml`, plugin cache/state, and Codex SQLite files including `memories_*` aligned with direct Codex, so logout or account switching does not hide prior chats.
+Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history, session, environment, managed config, plugin/app-server, remote-control enrollment, and memory database state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl`, `sessions`, `archived_sessions`, `managed_config.toml`, `environments.toml`, plugin cache/state, and Codex SQLite files including `state_*` and `memories_*` aligned with direct Codex, so logout or account switching does not hide prior chats.
+
+Codex cloud-managed config bundle caches are identity/account scoped and remain profile-local. System-level Codex requirements and managed config files remain owned by upstream Codex and the operating system.
 
 Older Prodex shared state from `$PRODEX_HOME/.codex` is merged into the native Codex home on the next managed-profile launch. Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shared Codex root.
 
@@ -241,7 +243,7 @@ prodex s --provider gemini
 GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
 ```
 
-When no API key is supplied, the Gemini path uses the Google OAuth profile from login. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations and preserves Gemini thought signatures across tool-call followups.
+When no API key is supplied, the Gemini path uses the Google OAuth profile from login. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations and preserves Gemini thought signatures across tool-call followups.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. Check local reachability with `prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once`. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
