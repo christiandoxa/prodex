@@ -42,7 +42,7 @@ fn gemini_bucket_label(bucket: &GeminiQuotaBucket) -> String {
         .unwrap_or_else(|| "gemini".to_string())
 }
 
-fn gemini_bucket_remaining_percent(bucket: &GeminiQuotaBucket) -> Option<i64> {
+pub(super) fn gemini_bucket_remaining_percent(bucket: &GeminiQuotaBucket) -> Option<i64> {
     if let Some(fraction) = bucket.remaining_fraction {
         return Some((fraction * 100.0).round() as i64);
     }

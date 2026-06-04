@@ -379,6 +379,41 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
 }
 
 #[test]
+fn quota_reports_aggregate_copilot_remaining_pool() {
+    let reports = vec![QuotaReport {
+        name: "copilot-main".to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: "copilot".to_string(),
+            quota_compatible: false,
+        },
+        workspace_id: None,
+        result: Ok(ProviderQuotaSnapshot::Copilot(CopilotQuotaInfo {
+            login: Some("copilot-user".to_string()),
+            access_type_sku: Some("free_limited_copilot".to_string()),
+            copilot_plan: Some("individual".to_string()),
+            limited_user_quotas: BTreeMap::from([
+                ("chat".to_string(), 450),
+                ("completions".to_string(), 4_000),
+            ]),
+            monthly_quotas: BTreeMap::from([
+                ("chat".to_string(), 500),
+                ("completions".to_string(), 4_000),
+            ]),
+            limited_user_reset_date: None,
+        })),
+        fetched_at: 1_700_000_101,
+    }];
+
+    let output = render_quota_reports_with_layout(&reports, true, None, 160);
+
+    assert!(output.contains("Remaining pool:"));
+    assert!(output.contains(&format_info_pool_remaining(90, 1, None)));
+    assert!(!output.contains("5h remaining pool:"));
+    assert!(!output.contains("Weekly remaining pool:"));
+}
+
+#[test]
 fn quota_reports_render_gemini_code_assist_buckets() {
     let reports = vec![QuotaReport {
         name: "gemini-main".to_string(),
@@ -468,6 +503,10 @@ fn quota_reports_aggregate_gemini_remaining_buckets() {
 
     let output = render_quota_reports_with_layout(&reports, true, None, 160);
 
+    assert!(output.contains("Remaining pool:"));
+    assert!(output.contains(&format_info_pool_remaining(80, 1, None)));
+    assert!(!output.contains("5h remaining pool:"));
+    assert!(!output.contains("Weekly remaining pool:"));
     assert!(output.contains("gemini 80% left (3 buckets)"));
     assert!(!output.contains("gemini-2.5-flash 100/100 left |"));
 }

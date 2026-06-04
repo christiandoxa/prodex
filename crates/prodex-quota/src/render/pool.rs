@@ -5,10 +5,13 @@ pub(super) struct QuotaPoolAggregate {
     total_profiles: usize,
     available_profiles: usize,
     profiles_with_data: usize,
+    main_profiles_with_data: usize,
     five_hour_pool_remaining: i64,
     weekly_pool_remaining: i64,
+    main_pool_remaining: i64,
     earliest_five_hour_reset_at: Option<i64>,
     earliest_weekly_reset_at: Option<i64>,
+    earliest_main_reset_at: Option<i64>,
     last_updated_at: Option<i64>,
 }
 
@@ -30,35 +33,90 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         if provider_quota_snapshot_is_available(snapshot) {
             aggregate.available_profiles += 1;
         }
-        let ProviderQuotaSnapshot::OpenAi(usage) = snapshot else {
-            continue;
-        };
-        let Some((five_hour, weekly)) = main_window_snapshots(usage) else {
-            continue;
-        };
+        match snapshot {
+            ProviderQuotaSnapshot::OpenAi(usage) => {
+                let Some((five_hour, weekly)) = main_window_snapshots(usage) else {
+                    continue;
+                };
 
-        aggregate.profiles_with_data += 1;
-        aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
-        aggregate.weekly_pool_remaining += weekly.remaining_percent;
-        if five_hour.reset_at != i64::MAX {
-            aggregate.earliest_five_hour_reset_at = Some(
-                aggregate
-                    .earliest_five_hour_reset_at
-                    .map_or(five_hour.reset_at, |current| {
-                        current.min(five_hour.reset_at)
-                    }),
-            );
-        }
-        if weekly.reset_at != i64::MAX {
-            aggregate.earliest_weekly_reset_at = Some(
-                aggregate
-                    .earliest_weekly_reset_at
-                    .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
-            );
+                aggregate.profiles_with_data += 1;
+                aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
+                aggregate.weekly_pool_remaining += weekly.remaining_percent;
+                if five_hour.reset_at != i64::MAX {
+                    aggregate.earliest_five_hour_reset_at = Some(
+                        aggregate
+                            .earliest_five_hour_reset_at
+                            .map_or(five_hour.reset_at, |current| {
+                                current.min(five_hour.reset_at)
+                            }),
+                    );
+                }
+                if weekly.reset_at != i64::MAX {
+                    aggregate.earliest_weekly_reset_at = Some(
+                        aggregate
+                            .earliest_weekly_reset_at
+                            .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
+                    );
+                }
+            }
+            ProviderQuotaSnapshot::Gemini(info) => {
+                let Some(remaining_percent) = gemini_main_remaining_percent(info) else {
+                    continue;
+                };
+                aggregate.main_profiles_with_data += 1;
+                aggregate.main_pool_remaining += remaining_percent;
+                if let Some(reset_at) = gemini_reset_epoch(info) {
+                    aggregate.earliest_main_reset_at = Some(
+                        aggregate
+                            .earliest_main_reset_at
+                            .map_or(reset_at, |current| current.min(reset_at)),
+                    );
+                }
+            }
+            ProviderQuotaSnapshot::Copilot(info) => {
+                let Some(remaining_percent) = copilot_main_remaining_percent(info) else {
+                    continue;
+                };
+                aggregate.main_profiles_with_data += 1;
+                aggregate.main_pool_remaining += remaining_percent;
+                if let Some(reset_at) = copilot_reset_epoch(info) {
+                    aggregate.earliest_main_reset_at = Some(
+                        aggregate
+                            .earliest_main_reset_at
+                            .map_or(reset_at, |current| current.min(reset_at)),
+                    );
+                }
+            }
+            ProviderQuotaSnapshot::External(_) => {}
         }
     }
 
     aggregate
+}
+
+fn gemini_main_remaining_percent(info: &GeminiQuotaInfo) -> Option<i64> {
+    info.buckets
+        .iter()
+        .filter_map(gemini_bucket_remaining_percent)
+        .min()
+}
+
+fn copilot_main_remaining_percent(info: &CopilotQuotaInfo) -> Option<i64> {
+    ["chat", "completions"]
+        .into_iter()
+        .filter_map(|feature| {
+            let total = info.monthly_quotas.get(feature).copied()?;
+            (total > 0).then(|| {
+                let remaining = info
+                    .limited_user_quotas
+                    .get(feature)
+                    .copied()
+                    .or_else(|| info.monthly_quotas.get(feature).copied())
+                    .unwrap_or(0);
+                ((remaining as f64 / total as f64) * 100.0).round() as i64
+            })
+        })
+        .min()
 }
 
 fn provider_quota_snapshot_is_available(snapshot: &ProviderQuotaSnapshot) -> bool {
@@ -74,7 +132,7 @@ pub(super) fn render_quota_pool_summary_lines(
     aggregate: &QuotaPoolAggregate,
     total_width: usize,
 ) -> Vec<String> {
-    let fields = vec![
+    let mut fields = vec![
         (
             "Available".to_string(),
             format!(
@@ -86,23 +144,55 @@ pub(super) fn render_quota_pool_summary_lines(
             "Last Updated".to_string(),
             format_quota_snapshot_time(aggregate.last_updated_at),
         ),
-        (
-            "5h remaining pool".to_string(),
-            format_info_pool_remaining(
-                aggregate.five_hour_pool_remaining,
-                aggregate.profiles_with_data,
-                aggregate.earliest_five_hour_reset_at,
-            ),
-        ),
-        (
-            "Weekly remaining pool".to_string(),
-            format_info_pool_remaining(
-                aggregate.weekly_pool_remaining,
-                aggregate.profiles_with_data,
-                aggregate.earliest_weekly_reset_at,
-            ),
-        ),
     ];
+    if aggregate.profiles_with_data > 0 {
+        fields.extend([
+            (
+                "5h remaining pool".to_string(),
+                format_info_pool_remaining(
+                    aggregate.five_hour_pool_remaining,
+                    aggregate.profiles_with_data,
+                    aggregate.earliest_five_hour_reset_at,
+                ),
+            ),
+            (
+                "Weekly remaining pool".to_string(),
+                format_info_pool_remaining(
+                    aggregate.weekly_pool_remaining,
+                    aggregate.profiles_with_data,
+                    aggregate.earliest_weekly_reset_at,
+                ),
+            ),
+        ]);
+    } else if aggregate.main_profiles_with_data > 0 {
+        fields.push((
+            "Remaining pool".to_string(),
+            format_info_pool_remaining(
+                aggregate.main_pool_remaining,
+                aggregate.main_profiles_with_data,
+                aggregate.earliest_main_reset_at,
+            ),
+        ));
+    } else {
+        fields.extend([
+            (
+                "5h remaining pool".to_string(),
+                format_info_pool_remaining(
+                    aggregate.five_hour_pool_remaining,
+                    aggregate.profiles_with_data,
+                    aggregate.earliest_five_hour_reset_at,
+                ),
+            ),
+            (
+                "Weekly remaining pool".to_string(),
+                format_info_pool_remaining(
+                    aggregate.weekly_pool_remaining,
+                    aggregate.profiles_with_data,
+                    aggregate.earliest_weekly_reset_at,
+                ),
+            ),
+        ]);
+    }
     let label_width = fields
         .iter()
         .map(|(label, _)| text_width(label) + 1)
