@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.149.0 - 2026-06-04
+
+### CLI
+
+- Show provider remaining pools (`edc6b4d`)
+
 ## 0.148.0 - 2026-06-04
 
 ### Misc
@@ -83,10 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Add Claude OAuth and Copilot profile rotation (`b94a122`)
 - Refresh Gemini OAuth on auth failures (`0fffe21`)
-
-## 0.137.0 - 2026-05-31
-
-### Runtime
-
-- Satisfy provider bridge lints (`376432f`)
-- Unify provider bridge routing (`6d9e118`)
