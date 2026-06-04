@@ -285,9 +285,9 @@ pub fn caveman_args_with_optimizer_prefix(mut args: CavemanArgs, prefix: &str) -
 
 pub const SUPER_LOCAL_PROVIDER_ID: &str = "prodex-local";
 const SUPER_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
-const SUPER_DEFAULT_LOCAL_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
-const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 16_384;
-const SUPER_DEFAULT_AUTO_COMPACT_LIMIT: usize = 14_000;
+pub const SUPER_DEFAULT_LOCAL_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
+pub const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 16_384;
+pub const SUPER_DEFAULT_AUTO_COMPACT_LIMIT: usize = 14_000;
 pub const SUPER_DEEPSEEK_PROVIDER_ID: &str = "prodex-deepseek";
 const SUPER_DEEPSEEK_PROVIDER_NAME: &str = "DeepSeek";
 pub const SUPER_DEEPSEEK_DEFAULT_MODEL: &str = "deepseek-v4-pro";
@@ -382,6 +382,12 @@ impl SuperExternalProvider {
             Self::Copilot => SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::Gemini => SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
+        }
+    }
+
+    fn web_search_mode(self) -> &'static str {
+        match self {
+            Self::Anthropic | Self::Copilot | Self::DeepSeek | Self::Gemini => "live",
         }
     }
 }
@@ -487,7 +493,7 @@ fn super_external_provider_codex_args(
         format!("model_auto_compact_token_limit={auto_compact_token_limit}"),
         "model_reasoning_summary=\"none\"".to_string(),
         "model_supports_reasoning_summaries=true".to_string(),
-        "web_search=\"disabled\"".to_string(),
+        format!("web_search=\"{}\"", provider.web_search_mode()),
         "features.apps=false".to_string(),
         "features.js_repl=false".to_string(),
         "features.image_generation=false".to_string(),

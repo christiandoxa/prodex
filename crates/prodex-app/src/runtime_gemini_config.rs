@@ -296,7 +296,7 @@ fn gemini_catalog_model(
         "effective_context_window_percent": 95,
         "experimental_supported_tools": [],
         "input_modalities": ["text"],
-        "supports_search_tool": false
+        "supports_search_tool": true
     })
 }
 
@@ -337,6 +337,7 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
         assert_eq!(catalog["models"][0]["slug"], "gemini-2.5-pro");
         assert_eq!(catalog["models"][0]["default_reasoning_level"], "high");
+        assert_eq!(catalog["models"][0]["supports_search_tool"], true);
         let model_slugs = catalog["models"].as_array().unwrap();
         assert!(model_slugs.len() > 1);
         assert!(

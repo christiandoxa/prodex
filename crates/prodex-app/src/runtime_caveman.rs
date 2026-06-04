@@ -82,6 +82,8 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             write_provider_runtime_codex_auth(&caveman_home)?;
         }
         let codex_args = profile_openai_compatible_codex_args(&caveman_home, &self.codex_args);
+        let codex_args = prepare_local_provider_catalog_codex_args(&caveman_home, &codex_args)?;
+        let codex_args = prepare_external_provider_catalog_codex_args(&caveman_home, &codex_args)?;
         let codex_args = prepare_deepseek_provider_codex_args(&caveman_home, &codex_args)?;
         let codex_args = prepare_gemini_provider_codex_args(&caveman_home, &codex_args)?;
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);

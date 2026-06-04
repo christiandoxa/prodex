@@ -3,6 +3,8 @@ use std::ffi::OsString;
 
 #[path = "cleanup.rs"]
 mod cleanup;
+#[path = "external_provider.rs"]
+mod external_provider;
 
 fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
@@ -405,6 +407,7 @@ fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
     assert!(
         rendered.contains(&"model_providers.prodex-deepseek.wire_api=\"responses\"".to_string())
     );
+    assert!(rendered.contains(&"web_search=\"live\"".to_string()));
     assert!(rendered.contains(&"features.apps=false".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("ds-test-key")));
 }
@@ -444,6 +447,7 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
             .to_string()
     ));
     assert!(rendered.contains(&"model_providers.prodex-gemini.wire_api=\"responses\"".to_string()));
+    assert!(rendered.contains(&"web_search=\"live\"".to_string()));
     assert!(rendered.contains(&"features.apps=false".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("gemini-test-key")));
 }
