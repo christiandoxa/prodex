@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.148.0 - 2026-06-04
+
+### Misc
+
+- Suppress Gemini browser output (`5b8345b`)
+
 ## 0.147.0 - 2026-06-04
 
 ### Runtime
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy provider bridge lints (`376432f`)
 - Unify provider bridge routing (`6d9e118`)
-
-## 0.136.0 - 2026-05-31
-
-### Runtime
-
-- Improve provider quotas and tool routing (`e94fd60`)
