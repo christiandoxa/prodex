@@ -4,7 +4,7 @@ mod quota;
 
 use crate::{create_codex_home_if_missing, print_wrapped_stderr};
 use anyhow::{Context, Result};
-use code_assist::{GeminiCodeAssistSetupMode, resolve_gemini_code_assist_project};
+use code_assist::{GeminiCodeAssistSetupMode, resolve_gemini_code_assist_project_with_endpoint};
 pub(crate) use code_assist::{
     ensure_gemini_code_assist_project_if_missing, gemini_code_assist_endpoint,
 };
@@ -13,6 +13,7 @@ use oauth::{
     gemini_oauth_secret_from_token, open_browser, random_hex, refresh_google_oauth_token,
     wait_for_google_oauth_code,
 };
+use quota::verify_gemini_code_assist_quota_access;
 pub(crate) use quota::{
     fetch_gemini_quota, fetch_gemini_quota_json, fetch_gemini_quota_with_code_assist_endpoint,
 };
@@ -90,22 +91,36 @@ pub(crate) fn login_with_google_oauth(codex_home: &Path) -> Result<GeminiOAuthSe
     let code = wait_for_google_oauth_code(&server, &state)?;
     let token = exchange_google_oauth_code(&client, &code, &redirect_uri)?;
     let email = fetch_google_user_email(&client, &token.access_token)?;
-    let mut secret = gemini_oauth_secret_from_token(email, token, None);
-    match resolve_gemini_code_assist_project(
+    let secret = complete_gemini_oauth_secret(
         &client,
-        &secret,
+        gemini_oauth_secret_from_token(email, token, None),
         GeminiCodeAssistSetupMode::Interactive,
-    ) {
-        Ok(project_id) => {
-            secret.project_id = project_id;
-        }
-        Err(err) => {
-            print_wrapped_stderr(&format!(
-                "Google sign-in succeeded, but Gemini Code Assist setup is incomplete: {err:#}"
-            ));
-        }
-    }
+    )?;
     write_gemini_oauth_secret(codex_home, &secret)?;
+    Ok(secret)
+}
+
+fn complete_gemini_oauth_secret(
+    client: &Client,
+    mut secret: GeminiOAuthSecret,
+    mode: GeminiCodeAssistSetupMode,
+) -> Result<GeminiOAuthSecret> {
+    let code_assist_endpoint = gemini_code_assist_endpoint();
+    let project_id = resolve_gemini_code_assist_project_with_endpoint(
+        client,
+        &secret,
+        &code_assist_endpoint,
+        mode,
+    )?
+    .context("Gemini Code Assist setup did not return a project")?;
+    secret.project_id = Some(project_id.clone());
+    verify_gemini_code_assist_quota_access(
+        client,
+        &secret,
+        &project_id,
+        &code_assist_endpoint,
+        mode,
+    )?;
     Ok(secret)
 }
 
@@ -189,4 +204,79 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use tiny_http::Response as TinyResponse;
+
+    #[test]
+    fn google_login_completion_requires_quota_probe_after_code_assist_setup() {
+        let _env_lock = crate::TestEnvVarGuard::lock();
+        let server = TinyServer::http("127.0.0.1:0").expect("setup test server should bind");
+        let listen_addr = server.server_addr().to_ip().unwrap();
+        let endpoint = format!("http://{listen_addr}/v1internal");
+        let _endpoint_guard =
+            crate::TestEnvVarGuard::set("PRODEX_GEMINI_CODE_ASSIST_ENDPOINT", endpoint.as_str());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("client should build");
+        let secret = GeminiOAuthSecret {
+            auth_mode: "gemini_oauth".to_string(),
+            access_token: "token-123".to_string(),
+            refresh_token: Some("refresh-123".to_string()),
+            token_type: Some("Bearer".to_string()),
+            scope: None,
+            expiry_date: Some(now_ms() + 3_600_000),
+            email: "gemini-user@example.com".to_string(),
+            project_id: None,
+        };
+
+        let handle = thread::spawn(move || {
+            let mut load = server.recv().expect("loadCodeAssist request should arrive");
+            assert_eq!(load.method().as_str(), "POST");
+            assert_eq!(load.url(), "/v1internal:loadCodeAssist");
+            let mut load_body = String::new();
+            load.as_reader()
+                .read_to_string(&mut load_body)
+                .expect("loadCodeAssist body should read");
+            assert!(load_body.contains("\"pluginType\":\"GEMINI\""));
+            load.respond(TinyResponse::from_string(
+                r#"{"currentTier":{"id":"standard-tier"},"cloudaicompanionProject":"gemini-project"}"#,
+            ))
+            .expect("loadCodeAssist response should send");
+
+            let mut quota = server.recv().expect("quota probe should arrive");
+            assert_eq!(quota.method().as_str(), "POST");
+            assert_eq!(quota.url(), "/v1internal:retrieveUserQuota");
+            let mut quota_body = String::new();
+            quota
+                .as_reader()
+                .read_to_string(&mut quota_body)
+                .expect("quota probe body should read");
+            assert!(quota_body.contains("\"project\":\"gemini-project\""));
+            quota
+                .respond(
+                    TinyResponse::from_string(
+                        r#"{"error":{"code":403,"message":"Verify your account to continue.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"VALIDATION_REQUIRED","domain":"cloudcode-pa.googleapis.com","metadata":{"validation_error_message":"Verify your account to continue.","validation_url":"https://accounts.google.com/verify"}},{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Verify your account","url":"https://accounts.google.com/verify"},{"description":"Learn more","url":"https://support.google.com/accounts?p=al_alert"}]}]}}"#,
+                    )
+                    .with_status_code(403),
+                )
+                .expect("validation response should send");
+        });
+
+        let err = complete_gemini_oauth_secret(
+            &client,
+            secret,
+            GeminiCodeAssistSetupMode::NonInteractive,
+        )
+        .expect_err("login completion should not succeed while account validation is required");
+        handle.join().expect("setup test server should finish");
+        let message = format!("{err:#}");
+        assert!(message.contains("Verify your account"));
+        assert!(message.contains("https://accounts.google.com/verify"));
+    }
 }

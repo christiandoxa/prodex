@@ -1,6 +1,6 @@
 use super::code_assist::{
     GeminiCodeAssistSetupMode, fetch_gemini_code_assist_plan, gemini_code_assist_endpoint,
-    gemini_validation_error_message, gemini_validation_from_body,
+    gemini_validation_from_body, handle_gemini_validation,
     resolve_gemini_code_assist_project_with_endpoint,
 };
 use super::{
@@ -33,6 +33,17 @@ pub(crate) fn fetch_gemini_quota_with_code_assist_endpoint(
         code_assist_endpoint,
     )?;
     gemini_quota_info_from_value(codex_home, value)
+}
+
+pub(super) fn verify_gemini_code_assist_quota_access(
+    client: &Client,
+    secret: &GeminiOAuthSecret,
+    project_id: &str,
+    code_assist_endpoint: &str,
+    mode: GeminiCodeAssistSetupMode,
+) -> Result<()> {
+    retrieve_gemini_user_quota(client, secret, project_id, code_assist_endpoint, mode)?;
+    Ok(())
 }
 
 fn gemini_quota_info_from_value(codex_home: &Path, value: Value) -> Result<GeminiQuotaInfo> {
@@ -73,23 +84,34 @@ fn fetch_gemini_quota_json_with_code_assist_endpoint(
         provider_project_id,
         code_assist_endpoint,
     )?;
-    let mut value =
-        match retrieve_gemini_user_quota(&client, &secret, &project_id, code_assist_endpoint) {
-            Ok(value) => value,
-            Err(err) if gemini_error_is_http_401(&err) => {
-                secret = force_refresh_gemini_oauth_secret(codex_home)
-                    .context("Gemini quota auth failed and OAuth token refresh failed")?;
-                project_id = resolve_gemini_quota_project_id(
-                    &client,
-                    codex_home,
-                    &mut secret,
-                    provider_project_id,
-                    code_assist_endpoint,
-                )?;
-                retrieve_gemini_user_quota(&client, &secret, &project_id, code_assist_endpoint)?
-            }
-            Err(err) => return Err(err),
-        };
+    let mut value = match retrieve_gemini_user_quota(
+        &client,
+        &secret,
+        &project_id,
+        code_assist_endpoint,
+        GeminiCodeAssistSetupMode::NonInteractive,
+    ) {
+        Ok(value) => value,
+        Err(err) if gemini_error_is_http_401(&err) => {
+            secret = force_refresh_gemini_oauth_secret(codex_home)
+                .context("Gemini quota auth failed and OAuth token refresh failed")?;
+            project_id = resolve_gemini_quota_project_id(
+                &client,
+                codex_home,
+                &mut secret,
+                provider_project_id,
+                code_assist_endpoint,
+            )?;
+            retrieve_gemini_user_quota(
+                &client,
+                &secret,
+                &project_id,
+                code_assist_endpoint,
+                GeminiCodeAssistSetupMode::NonInteractive,
+            )?
+        }
+        Err(err) => return Err(err),
+    };
     let plan = fetch_gemini_code_assist_plan(&client, &secret, &project_id, code_assist_endpoint)
         .ok()
         .flatten();
@@ -139,29 +161,33 @@ fn retrieve_gemini_user_quota(
     secret: &GeminiOAuthSecret,
     project_id: &str,
     code_assist_endpoint: &str,
+    mode: GeminiCodeAssistSetupMode,
 ) -> Result<Value> {
-    let response = client
-        .post(format!("{code_assist_endpoint}:retrieveUserQuota"))
-        .bearer_auth(&secret.access_token)
-        .json(&json!({
-            "project": project_id,
-        }))
-        .send()
-        .context("failed to fetch Gemini quota")?;
-    let status = response.status();
-    let body = response
-        .text()
-        .context("failed to read Gemini quota response")?;
-    if !status.is_success() {
+    loop {
+        let response = client
+            .post(format!("{code_assist_endpoint}:retrieveUserQuota"))
+            .bearer_auth(&secret.access_token)
+            .json(&json!({
+                "project": project_id,
+            }))
+            .send()
+            .context("failed to fetch Gemini quota")?;
+        let status = response.status();
+        let body = response
+            .text()
+            .context("failed to read Gemini quota response")?;
+        if status.is_success() {
+            return serde_json::from_str(&body).context("failed to parse Gemini quota response");
+        }
         if let Some(validation) = gemini_validation_from_body(&body) {
-            bail!("{}", gemini_validation_error_message(&validation));
+            handle_gemini_validation(&validation, mode)?;
+            continue;
         }
         bail!(
             "Gemini quota request failed (HTTP {}): {body}",
             status.as_u16()
         );
     }
-    serde_json::from_str(&body).context("failed to parse Gemini quota response")
 }
 
 fn gemini_error_is_http_401(err: &anyhow::Error) -> bool {

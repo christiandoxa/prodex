@@ -1,5 +1,5 @@
 use super::*;
-use crate::AuthSummary;
+use crate::{AdditionalRateLimit, AuthSummary};
 use std::collections::BTreeMap;
 
 fn usage_with_main_windows(
@@ -153,6 +153,28 @@ fn profile_quota_render_contains_core_fields() {
     assert!(rendered.contains("Quota main"));
     assert!(rendered.contains("me@example.com"));
     assert!(rendered.contains("5h quota unavailable"));
+}
+
+#[test]
+fn profile_quota_render_shows_monthly_workspace_limits() {
+    let mut usage = usage_with_main_windows(82, 1_700_001_800, 91, 1_700_259_200);
+    usage.additional_rate_limits.push(AdditionalRateLimit {
+        limit_name: Some("Workspace credits".to_string()),
+        metered_feature: Some("codex".to_string()),
+        rate_limit: WindowPair {
+            primary_window: Some(UsageWindow {
+                used_percent: Some(27),
+                reset_at: Some(1_702_592_000),
+                limit_window_seconds: Some(2_592_000),
+            }),
+            secondary_window: None,
+        },
+    });
+
+    let rendered = render_profile_quota_with_width("main", &usage, 120);
+
+    assert!(rendered.contains("Workspace credits monthly"));
+    assert!(rendered.contains("73% left"));
 }
 
 #[test]

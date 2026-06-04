@@ -739,7 +739,7 @@ GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
 prodex s --provider gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
 ```
 
-Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex routes through the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. The default model is `gemini-2.5-pro`, matching Gemini CLI's current default, and the injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path: Prodex maps Codex/MCP tool schemas to Gemini function declarations, honors `auto` / `none` / `required` tool-choice modes, and preserves Gemini thought signatures across tool-call followups.
+Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex routes through the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. The default model is `gemini-2.5-pro`, matching Gemini CLI's current default, and the injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path: Prodex maps Codex/MCP tool schemas to Gemini function declarations, honors `auto` / `none` / `required` tool-choice modes, and preserves Gemini thought signatures across tool-call followups.
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use.
 
@@ -898,7 +898,9 @@ On Unix-like systems, this is usually:
 ~/.codex
 ```
 
-In practice, profile `history.jsonl`, `sessions`, `config.toml`, `environments.toml`, plugins, skills, app-server plugin state, memory-extension state, and Codex runtime SQLite files such as `state_*`, `goals_*`, `logs_*`, and `memories_*` link to the same Codex home that direct Codex uses.
+In practice, profile `history.jsonl`, `sessions`, `archived_sessions`, `config.toml`, `managed_config.toml`, `environments.toml`, plugins, skills, app-server plugin state, memory-extension state, remote-control enrollment, and Codex runtime SQLite files such as `state_*`, `goals_*`, `logs_*`, and `memories_*` link to the same Codex home that direct Codex uses.
+
+Codex cloud-managed config bundle caches are identity/account scoped and remain profile-local. System-level Codex requirements and managed config files remain owned by upstream Codex and the operating system.
 
 Prodex does not synthesize legacy Codex `[profiles.*]` behavior. File-based Codex profile config selected by `--profile` stays in shared Codex state, while Prodex-owned account selection remains in Prodex profile metadata.
 

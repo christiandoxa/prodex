@@ -7,6 +7,11 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
     )
     .expect("failed to seed config");
     fs::write(
+        fixture.main_home.join("managed_config.toml"),
+        "hide_agent_reasoning = true\n",
+    )
+    .expect("failed to seed managed config");
+    fs::write(
         fixture.main_home.join("AGENTS.md"),
         "# Main profile global instructions\n",
     )
@@ -82,6 +87,9 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
         let config = fs::read_to_string(home.join("config.toml"))
             .expect("shared config.toml should be readable");
         assert!(config.contains("model_reasoning_effort = \"xhigh\""));
+        let managed_config = fs::read_to_string(home.join("managed_config.toml"))
+            .expect("shared managed_config.toml should be readable");
+        assert!(managed_config.contains("hide_agent_reasoning = true"));
         let agents = fs::read_to_string(home.join("AGENTS.md"))
             .expect("shared AGENTS.md should be readable");
         assert!(agents.contains("Main profile global instructions"));
@@ -107,6 +115,16 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
             fs::read_link(fixture.second_home.join("config.toml"))
                 .expect("failed to read second config link"),
             fixture.shared_codex_home.join("config.toml")
+        );
+        assert_eq!(
+            fs::read_link(fixture.main_home.join("managed_config.toml"))
+                .expect("failed to read main managed_config.toml link"),
+            fixture.shared_codex_home.join("managed_config.toml")
+        );
+        assert_eq!(
+            fs::read_link(fixture.second_home.join("managed_config.toml"))
+                .expect("failed to read second managed_config.toml link"),
+            fixture.shared_codex_home.join("managed_config.toml")
         );
         assert_eq!(
             fs::read_link(fixture.main_home.join("AGENTS.md"))

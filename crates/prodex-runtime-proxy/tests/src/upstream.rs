@@ -48,7 +48,7 @@ fn request_header_skip_list_preserves_codex_metadata_headers() {
 }
 
 #[test]
-fn request_header_skip_list_preserves_codex_rust_0_131_passthrough_headers() {
+fn request_header_skip_list_preserves_codex_rust_0_131_and_newer_passthrough_headers() {
     for header in [
         "session-id",
         "thread-id",
@@ -60,7 +60,7 @@ fn request_header_skip_list_preserves_codex_rust_0_131_passthrough_headers() {
     ] {
         assert!(
             !should_skip_runtime_request_header(header),
-            "runtime proxy should preserve Codex rust-v0.131.0 passthrough header {header}"
+            "runtime proxy should preserve Codex passthrough header {header}"
         );
     }
 }

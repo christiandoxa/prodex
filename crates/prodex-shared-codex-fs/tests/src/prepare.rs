@@ -43,6 +43,21 @@ fn shared_codex_manifest_includes_environments_toml_as_file() {
 }
 
 #[test]
+fn shared_codex_manifest_includes_managed_config_toml_as_file() {
+    assert!(
+        shared_codex_manifest_entries().contains(&SharedCodexEntry::file("managed_config.toml"))
+    );
+}
+
+#[test]
+fn shared_codex_manifest_keeps_cloud_config_bundle_cache_profile_local() {
+    assert!(
+        !shared_codex_manifest_entries()
+            .contains(&SharedCodexEntry::file("cloud-config-bundle-cache.json"))
+    );
+}
+
+#[test]
 fn profile_v2_config_names_match_plain_ascii_profile_names() {
     assert!(is_shared_codex_profile_v2_config_name(
         "local_1-prod.config.toml"

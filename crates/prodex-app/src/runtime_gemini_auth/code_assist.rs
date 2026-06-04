@@ -478,7 +478,7 @@ fn gemini_code_assist_domain_matches(domain: &str) -> bool {
     sanitized == "cloudcode-pa.googleapis.com"
 }
 
-fn handle_gemini_validation(
+pub(super) fn handle_gemini_validation(
     validation: &GeminiCodeAssistValidation,
     mode: GeminiCodeAssistSetupMode,
 ) -> Result<()> {
