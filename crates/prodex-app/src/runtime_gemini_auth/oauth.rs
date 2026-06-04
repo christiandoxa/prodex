@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::env;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tiny_http::{Response as TinyResponse, Server as TinyServer};
 
 const GEMINI_OAUTH_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -257,33 +257,38 @@ pub(super) fn random_hex(byte_count: usize) -> Result<String> {
 
 pub(super) fn open_browser(url: &str) -> Result<()> {
     if let Some(browser) = env::var_os("BROWSER").filter(|value| !value.is_empty()) {
-        Command::new(browser)
-            .arg(url)
-            .spawn()
-            .context("failed to open browser from BROWSER")?;
+        let mut command = Command::new(browser);
+        command.arg(url);
+        spawn_quiet_browser(command).context("failed to open browser from BROWSER")?;
         return Ok(());
     }
     if cfg!(target_os = "macos") {
-        Command::new("open")
-            .arg(url)
-            .spawn()
-            .context("failed to open browser with open")?;
+        let mut command = Command::new("open");
+        command.arg(url);
+        spawn_quiet_browser(command).context("failed to open browser with open")?;
         return Ok(());
     }
     if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()
-            .context("failed to open browser with start")?;
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", "", url]);
+        spawn_quiet_browser(command).context("failed to open browser with start")?;
         return Ok(());
     }
     if cfg!(all(unix, not(target_os = "macos"))) {
-        Command::new("xdg-open")
-            .arg(url)
-            .spawn()
-            .context("failed to open browser with xdg-open")?;
+        let mut command = Command::new("xdg-open");
+        command.arg(url);
+        spawn_quiet_browser(command).context("failed to open browser with xdg-open")?;
         return Ok(());
     }
+    Ok(())
+}
+
+fn spawn_quiet_browser(mut command: Command) -> Result<()> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
     Ok(())
 }
 
@@ -300,5 +305,53 @@ mod tests {
         assert!(url.contains("state=state-test"));
         assert!(url.contains("access_type=offline"));
         assert!(url.contains("cloud-platform"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn open_browser_suppresses_browser_stdio() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::thread;
+        use std::time::Duration;
+
+        let _env_lock = crate::TestEnvVarGuard::lock();
+        let root = env::temp_dir().join(format!(
+            "prodex-browser-stdio-{}-{}",
+            std::process::id(),
+            random_hex(4).expect("random suffix")
+        ));
+        fs::create_dir_all(&root).expect("test dir should be created");
+        let script = root.join("browser");
+        let report = root.join("stdio-report");
+        fs::write(
+            &script,
+            "#!/bin/sh\npid=$$\nout=$(readlink \"/proc/$pid/fd/1\")\nerr=$(readlink \"/proc/$pid/fd/2\")\nprintf '%s\\n%s\\n' \"$out\" \"$err\" > \"$PRODEX_BROWSER_STDIO_REPORT\"\n",
+        )
+        .expect("browser script should be written");
+        let mut permissions = fs::metadata(&script)
+            .expect("browser script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("browser script should be executable");
+
+        let _browser_guard =
+            crate::TestEnvVarGuard::set("BROWSER", script.to_str().expect("script path utf-8"));
+        let _report_guard = crate::TestEnvVarGuard::set(
+            "PRODEX_BROWSER_STDIO_REPORT",
+            report.to_str().expect("report path utf-8"),
+        );
+
+        open_browser("https://example.test").expect("fake browser should spawn");
+        for _ in 0..50 {
+            if report.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let report = fs::read_to_string(&report).expect("stdio report should be written");
+        assert_eq!(report, "/dev/null\n/dev/null\n");
+        let _ = fs::remove_dir_all(root);
     }
 }
