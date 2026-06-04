@@ -4,6 +4,10 @@ use super::local_rewrite::{
     RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
+use super::local_rewrite_search_fallback::{
+    RuntimeLocalRewritePreparedSendResult, RuntimeLocalRewriteSearchFallbackRequest,
+    send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
+};
 use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_deepseek_upstream_url,
     runtime_local_rewrite_api_key_attempts, send_runtime_local_rewrite_prepared_request,
@@ -80,60 +84,60 @@ fn send_runtime_deepseek_responses_request(
             if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
                 pending.insert(request_id, translated.messages);
             }
-            let response = send_runtime_local_rewrite_prepared_request(
-                request_id,
-                request,
-                shared,
-                &upstream_url,
-                translated.body,
-                RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
-            )?;
-            let status = response.status().as_u16();
-            if status >= 400 {
-                let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
-                let class = runtime_provider_error_class(
-                    RuntimeProviderBridgeKind::DeepSeek,
-                    status,
-                    &parts.body,
-                );
-                if model_index + 1 < model_chain.len()
-                    && runtime_provider_should_retry_with_next_model(class)
-                {
-                    runtime_proxy_log(
-                        &shared.runtime_shared,
-                        runtime_proxy_structured_log_message(
-                            "local_rewrite_provider_model_fallback",
-                            [
-                                runtime_proxy_log_field("request", request_id.to_string()),
-                                runtime_proxy_log_field("provider", "deepseek"),
-                                runtime_proxy_log_field("auth", api_key_label.as_str()),
-                                runtime_proxy_log_field("from_model", model.as_str()),
-                                runtime_proxy_log_field(
-                                    "to_model",
-                                    model_chain[model_index + 1].as_str(),
-                                ),
-                                runtime_proxy_log_field("status", status.to_string()),
-                                runtime_proxy_log_field("class", format!("{class:?}")),
-                            ],
-                        ),
-                    );
-                    continue;
-                }
-                if api_key_index + 1 < api_key_attempt_count
-                    && runtime_provider_should_rotate_auth_after_response(class)
-                {
-                    runtime_deepseek_log_auth_rotate(
-                        shared,
+            let send_result =
+                send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
+                    RuntimeLocalRewriteSearchFallbackRequest {
                         request_id,
-                        &api_key_label,
-                        status,
-                        class,
-                    );
-                    break;
+                        request,
+                        shared,
+                        upstream_url: &upstream_url,
+                        body: translated.body,
+                        provider_kind: RuntimeProviderBridgeKind::DeepSeek,
+                        auth_label: &api_key_label,
+                        model,
+                        auth_factory: || RuntimeLocalRewritePreparedAuth::DeepSeek { api_key },
+                    },
+                )?;
+            let (status, parts, class) = match send_result {
+                RuntimeLocalRewritePreparedSendResult::Live(response) => {
+                    return Ok(runtime_deepseek_live_result(response));
                 }
-                return Ok(runtime_deepseek_buffered_result(parts));
+                RuntimeLocalRewritePreparedSendResult::Error {
+                    status,
+                    parts,
+                    class,
+                } => (status, parts, class),
+            };
+            if model_index + 1 < model_chain.len()
+                && runtime_provider_should_retry_with_next_model(class)
+            {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_provider_model_fallback",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("provider", "deepseek"),
+                            runtime_proxy_log_field("auth", api_key_label.as_str()),
+                            runtime_proxy_log_field("from_model", model.as_str()),
+                            runtime_proxy_log_field(
+                                "to_model",
+                                model_chain[model_index + 1].as_str(),
+                            ),
+                            runtime_proxy_log_field("status", status.to_string()),
+                            runtime_proxy_log_field("class", format!("{class:?}")),
+                        ],
+                    ),
+                );
+                continue;
             }
-            return Ok(runtime_deepseek_live_result(response));
+            if api_key_index + 1 < api_key_attempt_count
+                && runtime_provider_should_rotate_auth_after_response(class)
+            {
+                runtime_deepseek_log_auth_rotate(shared, request_id, &api_key_label, status, class);
+                break;
+            }
+            return Ok(runtime_deepseek_buffered_result(parts));
         }
         if api_key_index + 1 < api_key_attempt_count {
             continue;

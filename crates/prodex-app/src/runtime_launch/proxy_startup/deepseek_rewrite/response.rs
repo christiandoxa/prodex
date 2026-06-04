@@ -1,3 +1,4 @@
+use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use super::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages,
     runtime_deepseek_rtk_wrapped_tool_arguments,
@@ -245,13 +246,28 @@ fn runtime_deepseek_responses_tool_call_item(
         .get("arguments")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("{}");
+    if name == "tool_search" {
+        let arguments = serde_json::from_str::<serde_json::Value>(arguments)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        return Some(serde_json::json!({
+            "type": "tool_search_call",
+            "call_id": call_id,
+            "execution": "client",
+            "arguments": arguments,
+        }));
+    }
     let arguments = runtime_deepseek_rtk_wrapped_tool_arguments(name, arguments);
-    Some(serde_json::json!({
+    let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(name);
+    let mut item = serde_json::json!({
         "type": "function_call",
         "call_id": call_id,
         "name": name,
         "arguments": arguments,
-    }))
+    });
+    if let Some(namespace) = namespace {
+        item["namespace"] = serde_json::Value::String(namespace);
+    }
+    Some(item)
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_usage(

@@ -36,6 +36,59 @@ fn gemini_sse_reader_maps_text_and_function_call_to_responses_events() {
 }
 
 #[test]
+fn gemini_sse_reader_maps_flat_mcp_call_to_namespace_function_call() {
+    let conversations = conversation_store();
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_mcp\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"id\":\"call_sqz\",\"name\":\"mcp__prodex_sqz__compress\",\"args\":{\"text\":\"hello\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversations.clone(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"namespace\":\"mcp__prodex_sqz\""));
+    assert!(output.contains("\"name\":\"compress\""));
+    assert!(output.contains("\"arguments\":\"{\\\"text\\\":\\\"hello\\\"}\""));
+    let store = conversations.lock().unwrap();
+    let assistant = store
+        .get("resp_mcp")
+        .and_then(|messages| messages.last())
+        .expect("conversation should retain provider tool name");
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["name"],
+        "mcp__prodex_sqz__compress"
+    );
+}
+
+#[test]
+fn gemini_sse_reader_maps_tool_search_function_to_tool_search_call() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_search\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"id\":\"call_search\",\"name\":\"tool_search\",\"args\":{\"query\":\"sqz tools\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"tool_search_call\""));
+    assert!(output.contains("\"execution\":\"client\""));
+    assert!(output.contains("\"arguments\":{\"query\":\"sqz tools\"}"));
+    assert!(!output.contains("\"type\":\"response.function_call_arguments.delta\""));
+}
+
+#[test]
 fn gemini_sse_reader_records_response_and_tool_call_bindings() {
     let captured = Arc::new(Mutex::new(None::<(String, Vec<String>)>));
     let captured_for_recorder = Arc::clone(&captured);

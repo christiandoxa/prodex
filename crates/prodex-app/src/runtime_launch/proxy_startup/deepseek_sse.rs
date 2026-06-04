@@ -3,6 +3,7 @@ use super::deepseek_rewrite::{
     runtime_deepseek_responses_usage, runtime_deepseek_rtk_wrapped_tool_arguments,
     runtime_deepseek_store_conversation,
 };
+use super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use std::collections::BTreeMap;
 use std::io::{self, Read};
 
@@ -378,18 +379,23 @@ impl RuntimeDeepSeekSseState {
             }
             (call_id, name, should_add)
         };
-        if should_add {
+        if should_add && name != "tool_search" {
+            let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&name);
+            let mut item = serde_json::json!({
+                "type": "function_call",
+                "call_id": call_id,
+                "name": name,
+            });
+            if let Some(namespace) = namespace {
+                item["namespace"] = serde_json::Value::String(namespace);
+            }
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
                 "response.output_item.added",
                 serde_json::json!({
                     "type": "response.output_item.added",
                     "sequence_number": sequence_number,
-                    "item": {
-                        "type": "function_call",
-                        "call_id": call_id,
-                        "name": name,
-                    },
+                    "item": item,
                 }),
             ));
         }
@@ -421,6 +427,25 @@ impl RuntimeDeepSeekSseState {
             })
             .collect::<Vec<_>>();
         for (call_id, name, arguments) in pending {
+            if name == "tool_search" {
+                let arguments = serde_json::from_str::<serde_json::Value>(&arguments)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                let sequence_number = self.next_sequence_number();
+                events.push(self.event(
+                    "response.output_item.done",
+                    serde_json::json!({
+                        "type": "response.output_item.done",
+                        "sequence_number": sequence_number,
+                        "item": {
+                            "type": "tool_search_call",
+                            "call_id": call_id,
+                            "execution": "client",
+                            "arguments": arguments,
+                        },
+                    }),
+                ));
+                continue;
+            }
             if !arguments.is_empty() {
                 let sequence_number = self.next_sequence_number();
                 events.push(self.event(
@@ -433,18 +458,23 @@ impl RuntimeDeepSeekSseState {
                     }),
                 ));
             }
+            let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&name);
+            let mut item = serde_json::json!({
+                "type": "function_call",
+                "call_id": call_id,
+                "name": name,
+                "arguments": arguments,
+            });
+            if let Some(namespace) = namespace {
+                item["namespace"] = serde_json::Value::String(namespace);
+            }
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
                 "response.output_item.done",
                 serde_json::json!({
                     "type": "response.output_item.done",
                     "sequence_number": sequence_number,
-                    "item": {
-                        "type": "function_call",
-                        "call_id": call_id,
-                        "name": name,
-                        "arguments": arguments,
-                    },
+                    "item": item,
                 }),
             ));
         }
@@ -637,18 +667,36 @@ impl RuntimeDeepSeekSseState {
             }));
         }
         for (index, tool_call) in &self.tool_calls {
-            output.push(serde_json::json!({
+            let call_id = tool_call
+                .call_id
+                .clone()
+                .unwrap_or_else(|| format!("call_deepseek_{}_{}", self.request_id, index));
+            let flat_name = tool_call
+                .name
+                .clone()
+                .unwrap_or_else(|| "tool_call".to_string());
+            if flat_name == "tool_search" {
+                let arguments = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                output.push(serde_json::json!({
+                    "type": "tool_search_call",
+                    "call_id": call_id,
+                    "execution": "client",
+                    "arguments": arguments,
+                }));
+                continue;
+            }
+            let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&flat_name);
+            let mut item = serde_json::json!({
                 "type": "function_call",
-                "call_id": tool_call
-                    .call_id
-                    .clone()
-                    .unwrap_or_else(|| format!("call_deepseek_{}_{}", self.request_id, index)),
-                "name": tool_call
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| "tool_call".to_string()),
+                "call_id": call_id,
+                "name": name,
                 "arguments": tool_call.arguments,
-            }));
+            });
+            if let Some(namespace) = namespace {
+                item["namespace"] = serde_json::Value::String(namespace);
+            }
+            output.push(item);
         }
         output
     }

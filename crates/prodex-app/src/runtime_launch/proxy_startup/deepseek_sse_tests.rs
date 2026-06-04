@@ -162,6 +162,57 @@ fn deepseek_sse_reader_wraps_noisy_shell_call_with_rtk() {
 }
 
 #[test]
+fn deepseek_sse_reader_maps_flat_mcp_call_to_namespace_function_call() {
+    let conversations = conversation_store();
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_mcp\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_sqz\",\"function\":{\"name\":\"mcp__prodex_sqz__compress\",\"arguments\":\"{\\\"text\\\":\\\"hello\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        conversations.clone(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"namespace\":\"mcp__prodex_sqz\""));
+    assert!(output.contains("\"name\":\"compress\""));
+    assert!(output.contains("\"arguments\":\"{\\\"text\\\":\\\"hello\\\"}\""));
+    let store = conversations.lock().unwrap();
+    let assistant = store
+        .get("chatcmpl_mcp")
+        .and_then(|messages| messages.last())
+        .expect("conversation should retain provider tool name");
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["name"],
+        "mcp__prodex_sqz__compress"
+    );
+}
+
+#[test]
+fn deepseek_sse_reader_maps_tool_search_function_to_tool_search_call() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_search\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_search\",\"function\":{\"name\":\"tool_search\",\"arguments\":\"{\\\"query\\\":\\\"sqz tools\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"tool_search_call\""));
+    assert!(output.contains("\"execution\":\"client\""));
+    assert!(output.contains("\"arguments\":{\"query\":\"sqz tools\"}"));
+    assert!(!output.contains("\"type\":\"response.function_call_arguments.delta\""));
+}
+
+#[test]
 fn deepseek_sse_reader_accumulates_multiline_json_data() {
     let stream = concat!(
         "data: {\"id\":\"chatcmpl_4\",\"choices\":[{\"delta\":{\n",

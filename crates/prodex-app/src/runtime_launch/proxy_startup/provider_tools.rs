@@ -23,6 +23,43 @@ pub(super) fn runtime_provider_chat_tools_from_responses_request(
     }
 }
 
+pub(super) fn runtime_provider_chat_web_search_options_from_responses_request(
+    value: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let tool = value
+        .get("tools")?
+        .as_array()?
+        .iter()
+        .find(|tool| runtime_provider_is_web_search_tool(tool))?;
+    let object = tool.as_object()?;
+    let mut options = serde_json::Map::new();
+    if let Some(search_context_size) =
+        runtime_provider_json_string(object, &["search_context_size"])
+            .filter(|size| matches!(size.as_str(), "low" | "medium" | "high"))
+    {
+        options.insert(
+            "search_context_size".to_string(),
+            serde_json::Value::String(search_context_size),
+        );
+    }
+    if let Some(user_location) = object
+        .get("user_location")
+        .filter(|value| value.is_object())
+    {
+        options.insert("user_location".to_string(), user_location.clone());
+    }
+    Some(serde_json::Value::Object(options))
+}
+
+pub(super) fn runtime_provider_chat_request_body_without_web_search_options(
+    body: &[u8],
+) -> Option<Vec<u8>> {
+    let mut value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let object = value.as_object_mut()?;
+    object.remove("web_search_options")?;
+    serde_json::to_vec(&value).ok()
+}
+
 pub(super) fn runtime_provider_chat_tool_choice_from_responses_request(
     value: &serde_json::Value,
     thinking_enabled: bool,
@@ -56,10 +93,25 @@ pub(super) fn runtime_provider_chat_tool_choice_from_responses_request(
 }
 
 fn runtime_provider_tools_from_responses_tool(tool: &serde_json::Value) -> Vec<serde_json::Value> {
+    if runtime_provider_is_web_search_tool(tool) {
+        return Vec::new();
+    }
     runtime_provider_tool_from_responses_tool(tool)
         .into_iter()
+        .chain(runtime_provider_namespace_function_tools(tool))
+        .chain(runtime_provider_tool_search_tool(tool))
         .chain(runtime_provider_mcp_toolset_function_tools(tool))
         .collect()
+}
+
+fn runtime_provider_is_web_search_tool(tool: &serde_json::Value) -> bool {
+    let tool_type = tool
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    tool_type == "web_search"
+        || tool_type == "web_search_preview"
+        || tool_type.starts_with("web_search_preview_")
 }
 
 fn runtime_provider_translated_tool_name(tool: &serde_json::Value) -> Option<String> {
@@ -100,6 +152,125 @@ fn runtime_provider_tool_from_responses_tool(
         "type": "function",
         "function": function,
     }))
+}
+
+fn runtime_provider_namespace_function_tools(tool: &serde_json::Value) -> Vec<serde_json::Value> {
+    let Some(object) = tool.as_object() else {
+        return Vec::new();
+    };
+    if object.get("type").and_then(serde_json::Value::as_str) != Some("namespace") {
+        return Vec::new();
+    }
+    let Some(namespace) =
+        runtime_provider_json_string(object, &["name"]).filter(|name| !name.trim().is_empty())
+    else {
+        return Vec::new();
+    };
+    object
+        .get("tools")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| {
+            let tool = tool.as_object()?;
+            if tool.get("type").and_then(serde_json::Value::as_str) != Some("function") {
+                return None;
+            }
+            let tool_name = runtime_provider_json_string(tool, &["name"])
+                .filter(|name| !name.trim().is_empty())?;
+            let mut function = serde_json::Map::new();
+            function.insert(
+                "name".to_string(),
+                serde_json::Value::String(runtime_provider_flatten_namespace_tool_name(
+                    &namespace, &tool_name,
+                )),
+            );
+            if let Some(description) = runtime_provider_json_string(tool, &["description"])
+                .filter(|description| !description.trim().is_empty())
+            {
+                function.insert(
+                    "description".to_string(),
+                    serde_json::Value::String(description),
+                );
+            }
+            if let Some(parameters) = tool
+                .get("parameters")
+                .or_else(|| tool.get("parametersJsonSchema"))
+                .or_else(|| tool.get("input_schema"))
+                .or_else(|| tool.get("schema"))
+            {
+                function.insert("parameters".to_string(), parameters.clone());
+            }
+            Some(serde_json::json!({
+                "type": "function",
+                "function": function,
+            }))
+        })
+        .collect()
+}
+
+fn runtime_provider_tool_search_tool(tool: &serde_json::Value) -> Option<serde_json::Value> {
+    let object = tool.as_object()?;
+    if object.get("type").and_then(serde_json::Value::as_str) != Some("tool_search") {
+        return None;
+    }
+    let mut function = serde_json::Map::new();
+    function.insert(
+        "name".to_string(),
+        serde_json::Value::String("tool_search".to_string()),
+    );
+    if let Some(description) = runtime_provider_json_string(object, &["description"])
+        .filter(|description| !description.trim().is_empty())
+    {
+        function.insert(
+            "description".to_string(),
+            serde_json::Value::String(description),
+        );
+    }
+    if let Some(parameters) = object.get("parameters") {
+        function.insert("parameters".to_string(), parameters.clone());
+    }
+    Some(serde_json::json!({
+        "type": "function",
+        "function": function,
+    }))
+}
+
+pub(super) fn runtime_provider_flatten_namespace_tool_name(namespace: &str, name: &str) -> String {
+    let namespace = namespace.trim();
+    let name = name.trim();
+    if namespace.starts_with("mcp__")
+        && !namespace.ends_with('_')
+        && !name.starts_with('_')
+        && !name.contains("__")
+    {
+        format!("{namespace}__{name}")
+    } else {
+        format!("{namespace}--{name}")
+    }
+}
+
+pub(super) fn runtime_provider_split_flat_namespace_tool_name(
+    name: &str,
+) -> (Option<String>, String) {
+    if let Some((namespace, tool_name)) = name.rsplit_once("--")
+        && !namespace.trim().is_empty()
+        && !tool_name.trim().is_empty()
+    {
+        return (Some(namespace.to_string()), tool_name.to_string());
+    }
+    let Some(rest) = name.strip_prefix("mcp__") else {
+        return (None, name.to_string());
+    };
+    let Some(index) = rest.rfind("__") else {
+        return (None, name.to_string());
+    };
+    let namespace = format!("mcp__{}", &rest[..index]);
+    let tool_name = rest[index + 2..].to_string();
+    if tool_name.trim().is_empty() {
+        return (None, name.to_string());
+    }
+    (Some(namespace), tool_name)
 }
 
 fn runtime_provider_mcp_toolset_function_tools(tool: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -294,5 +465,153 @@ mod tests {
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["function"]["name"], "mcp__prodex_sqz__compress");
         assert_eq!(tools[0]["function"]["parameters"]["required"][0], "text");
+    }
+
+    #[test]
+    fn provider_tools_flatten_namespace_tools() {
+        let value = serde_json::json!({
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__prodex_sqz",
+                "description": "SQZ tools",
+                "tools": [{
+                    "type": "function",
+                    "name": "sqz_read_file",
+                    "description": "Read a file through SQZ.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"}
+                        },
+                        "required": ["path"]
+                    }
+                }]
+            }]
+        });
+
+        let tools = runtime_provider_chat_tools_from_responses_request(&value).unwrap();
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(
+            tools[0]["function"]["name"],
+            "mcp__prodex_sqz__sqz_read_file"
+        );
+        assert_eq!(tools[0]["function"]["parameters"]["required"][0], "path");
+    }
+
+    #[test]
+    fn provider_tools_map_tool_search_to_function() {
+        let value = serde_json::json!({
+            "tools": [{
+                "type": "tool_search",
+                "execution": "client",
+                "description": "Search deferred tools.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"}
+                    },
+                    "required": ["query"]
+                }
+            }]
+        });
+
+        let tools = runtime_provider_chat_tools_from_responses_request(&value).unwrap();
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "tool_search");
+        assert_eq!(tools[0]["function"]["parameters"]["required"][0], "query");
+    }
+
+    #[test]
+    fn provider_tools_extract_web_search_options_without_function_tool() {
+        let value = serde_json::json!({
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "search_context_size": "high",
+                    "user_location": {
+                        "type": "approximate",
+                        "country": "US"
+                    }
+                },
+                {
+                    "type": "function",
+                    "name": "shell",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cmd": {"type": "string"}
+                        },
+                        "required": ["cmd"]
+                    }
+                }
+            ]
+        });
+
+        let tools = runtime_provider_chat_tools_from_responses_request(&value).unwrap();
+        let options =
+            runtime_provider_chat_web_search_options_from_responses_request(&value).unwrap();
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "shell");
+        assert_eq!(options["search_context_size"], "high");
+        assert_eq!(options["user_location"]["country"], "US");
+    }
+
+    #[test]
+    fn provider_tools_strip_chat_web_search_options_for_fallback() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "provider-model",
+            "messages": [],
+            "web_search_options": {
+                "search_context_size": "medium"
+            },
+            "tools": [{
+                "type": "function",
+                "function": {"name": "shell"}
+            }]
+        }))
+        .unwrap();
+
+        let stripped = runtime_provider_chat_request_body_without_web_search_options(&body)
+            .expect("web search options should be stripped");
+        let value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
+
+        assert!(value.get("web_search_options").is_none());
+        assert_eq!(value["tools"][0]["function"]["name"], "shell");
+    }
+
+    #[test]
+    fn provider_tools_split_flat_mcp_namespace_names() {
+        let (namespace, name) =
+            runtime_provider_split_flat_namespace_tool_name("mcp__prodex_sqz__sqz_read_file");
+
+        assert_eq!(namespace.as_deref(), Some("mcp__prodex_sqz"));
+        assert_eq!(name, "sqz_read_file");
+        assert_eq!(
+            runtime_provider_split_flat_namespace_tool_name("shell"),
+            (None, "shell".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_tools_preserve_namespace_and_tool_underscores() {
+        let flat_name = runtime_provider_flatten_namespace_tool_name("mcp__calendar__", "_create");
+        let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&flat_name);
+
+        assert_eq!(flat_name, "mcp__calendar__--_create");
+        assert_eq!(namespace.as_deref(), Some("mcp__calendar__"));
+        assert_eq!(name, "_create");
+    }
+
+    #[test]
+    fn provider_tools_round_trip_non_mcp_namespaces() {
+        let flat_name = runtime_provider_flatten_namespace_tool_name("agents", "spawn_agent");
+        let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&flat_name);
+
+        assert_eq!(flat_name, "agents--spawn_agent");
+        assert_eq!(namespace.as_deref(), Some("agents"));
+        assert_eq!(name, "spawn_agent");
     }
 }

@@ -1,7 +1,8 @@
 use super::gemini_rewrite::{
     RuntimeGeminiAuth, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
     RuntimeGeminiTranslatedRequest, runtime_gemini_generate_request_body,
-    runtime_gemini_project_id, runtime_gemini_upstream_url,
+    runtime_gemini_project_id, runtime_gemini_request_body_without_google_search,
+    runtime_gemini_upstream_url,
 };
 use super::gemini_sse::RuntimeGeminiBindingRecorder;
 use super::local_rewrite::{
@@ -152,6 +153,8 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 selected.profile_name.as_str(),
                 &mut translated,
             )?;
+            let mut google_search_fallback_body =
+                runtime_gemini_request_body_without_google_search(&translated.body);
             let upstream_url = runtime_gemini_upstream_url(
                 &shared.upstream_base_url,
                 &selected.auth,
@@ -206,6 +209,27 @@ pub(super) fn send_runtime_gemini_upstream_request(
                             &translated.model,
                             delay_ms,
                         );
+                    }
+                    if status == 400
+                        && let Some(fallback_body) = google_search_fallback_body.take()
+                    {
+                        runtime_proxy_log(
+                            &shared.runtime_shared,
+                            runtime_proxy_structured_log_message(
+                                "local_rewrite_gemini_google_search_fallback",
+                                [
+                                    runtime_proxy_log_field("request", request_id.to_string()),
+                                    runtime_proxy_log_field(
+                                        "profile",
+                                        selected.profile_name.as_str(),
+                                    ),
+                                    runtime_proxy_log_field("model", translated.model.as_str()),
+                                    runtime_proxy_log_field("status", status.to_string()),
+                                ],
+                            ),
+                        );
+                        translated.body = fallback_body;
+                        continue;
                     }
                     if runtime_provider_should_retry_with_next_model(class)
                         && model_index + 1 < model_chain.len()

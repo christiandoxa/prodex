@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_response_preserves_optional_mcp_function_call_names_for_codex() {
+    fn deepseek_response_restores_optional_mcp_function_call_names_for_codex() {
         let response = serde_json::json!({
             "id": "chatcmpl_sqz_1",
             "model": "deepseek-v4-pro",
@@ -214,7 +214,8 @@ mod tests {
 
         assert_eq!(responses["output"][0]["type"], "function_call");
         assert_eq!(responses["output"][0]["call_id"], "call_sqz_1");
-        assert_eq!(responses["output"][0]["name"], "mcp__prodex_sqz__compress");
+        assert_eq!(responses["output"][0]["namespace"], "mcp__prodex_sqz");
+        assert_eq!(responses["output"][0]["name"], "compress");
         assert_eq!(
             responses["output"][0]["arguments"],
             "{\"text\":\"large content\"}"

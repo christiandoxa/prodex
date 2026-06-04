@@ -2,6 +2,7 @@ use super::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
     runtime_gemini_chat_assistant_messages_from_generate_value,
     runtime_gemini_generate_request_body, runtime_gemini_harden_tool_call_thought_signatures,
+    runtime_gemini_request_body_without_google_search,
     runtime_gemini_responses_value_from_generate_value,
 };
 use std::collections::BTreeMap;
@@ -48,6 +49,211 @@ fn gemini_request_translation_maps_tools_and_thinking() {
     assert_eq!(
         value["generationConfig"]["thinkingConfig"]["thinkingBudget"],
         8192
+    );
+}
+
+#[test]
+fn gemini_request_translation_maps_codex_web_search_to_google_search() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Search the web",
+        "tools": [
+            {"type": "web_search_preview"},
+            {
+                "type": "function",
+                "name": "shell",
+                "description": "Run shell",
+                "parameters": {"type": "object"}
+            }
+        ]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(value["tools"][0]["googleSearch"], serde_json::json!({}));
+    assert_eq!(
+        value["tools"][1]["functionDeclarations"][0]["name"],
+        "shell"
+    );
+}
+
+#[test]
+fn gemini_request_translation_strips_google_search_for_fallback() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Search the web and use tools",
+        "tools": [
+            {"type": "web_search_preview"},
+            {
+                "type": "function",
+                "name": "shell",
+                "description": "Run shell",
+                "parameters": {"type": "object"}
+            }
+        ]
+    });
+
+    for code_assist in [false, true] {
+        let translated = runtime_gemini_generate_request_body(
+            &serde_json::to_vec(&body).unwrap(),
+            &conversation_store(),
+            code_assist,
+            Some("project-id"),
+        )
+        .expect("request should translate");
+        let stripped = runtime_gemini_request_body_without_google_search(&translated.body)
+            .expect("googleSearch should be stripped");
+        let value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
+        let request = value.get("request").unwrap_or(&value);
+
+        assert_eq!(request["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            request["tools"][0]["functionDeclarations"][0]["name"],
+            "shell"
+        );
+    }
+}
+
+#[test]
+fn gemini_request_translation_maps_namespace_tools_to_function_declarations() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Read README through SQZ",
+        "tools": [{
+            "type": "namespace",
+            "name": "mcp__prodex_sqz",
+            "description": "SQZ tools",
+            "tools": [{
+                "type": "function",
+                "name": "sqz_read_file",
+                "description": "Read a file through SQZ.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"}
+                    },
+                    "required": ["path"]
+                }
+            }]
+        }]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(
+        value["tools"][0]["functionDeclarations"][0]["name"],
+        "mcp__prodex_sqz__sqz_read_file"
+    );
+    assert_eq!(
+        value["tools"][0]["functionDeclarations"][0]["parameters"]["required"][0],
+        "path"
+    );
+}
+
+#[test]
+fn gemini_request_translation_maps_tool_search_to_function_declaration() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Find the SQZ read tool",
+        "tools": [{
+            "type": "tool_search",
+            "execution": "client",
+            "description": "Search deferred tools.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"}
+                },
+                "required": ["query"]
+            }
+        }]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(
+        value["tools"][0]["functionDeclarations"][0]["name"],
+        "tool_search"
+    );
+    assert_eq!(
+        value["tools"][0]["functionDeclarations"][0]["parameters"]["required"][0],
+        "query"
+    );
+}
+
+#[test]
+fn gemini_response_translation_restores_namespace_tool_calls() {
+    let response = serde_json::json!({
+        "responseId": "resp_ns_1",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "functionCall": {
+                        "id": "call_sqz_1",
+                        "name": "mcp__prodex_sqz__sqz_read_file",
+                        "args": {"path": "README.md"}
+                    }
+                }]
+            }
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+
+    assert_eq!(translated["output"][0]["type"], "function_call");
+    assert_eq!(translated["output"][0]["namespace"], "mcp__prodex_sqz");
+    assert_eq!(translated["output"][0]["name"], "sqz_read_file");
+    assert_eq!(translated["output"][0]["call_id"], "call_sqz_1");
+}
+
+#[test]
+fn gemini_response_translation_maps_tool_search_function_calls() {
+    let response = serde_json::json!({
+        "responseId": "resp_search_1",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "functionCall": {
+                        "id": "call_search_1",
+                        "name": "tool_search",
+                        "args": {"query": "sqz read file", "limit": 2}
+                    }
+                }]
+            }
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 45);
+
+    assert_eq!(translated["output"][0]["type"], "tool_search_call");
+    assert_eq!(translated["output"][0]["execution"], "client");
+    assert_eq!(translated["output"][0]["call_id"], "call_search_1");
+    assert_eq!(
+        translated["output"][0]["arguments"]["query"],
+        "sqz read file"
     );
 }
 
@@ -430,7 +636,7 @@ fn gemini_25_does_not_harden_unsigned_tool_calls() {
 }
 
 #[test]
-fn gemini_response_preserves_optional_mcp_function_call_names_for_codex() {
+fn gemini_response_restores_optional_mcp_function_call_names_for_codex() {
     let response = serde_json::json!({
         "responseId": "resp_sqz_1",
         "modelVersion": "gemini-2.5-pro",
@@ -452,7 +658,8 @@ fn gemini_response_preserves_optional_mcp_function_call_names_for_codex() {
 
     assert_eq!(responses["output"][0]["type"], "function_call");
     assert_eq!(responses["output"][0]["call_id"], "call_sqz_1");
-    assert_eq!(responses["output"][0]["name"], "mcp__prodex_sqz__compress");
+    assert_eq!(responses["output"][0]["namespace"], "mcp__prodex_sqz");
+    assert_eq!(responses["output"][0]["name"], "compress");
     assert_eq!(
         responses["output"][0]["arguments"],
         "{\"text\":\"large content\"}"

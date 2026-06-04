@@ -15,6 +15,7 @@ use self::tool_adjacency::runtime_deepseek_repair_tool_call_adjacency;
 use self::tools::{
     runtime_deepseek_tool_choice_from_responses_request,
     runtime_deepseek_tools_from_responses_request,
+    runtime_deepseek_web_search_options_from_responses_request,
 };
 pub(super) use super::deepseek_sse::RuntimeDeepSeekChatSseReader;
 use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_canonical_model};
@@ -100,6 +101,11 @@ pub(super) fn runtime_chat_compatible_request_body(
     }
     if let Some(tools) = runtime_deepseek_tools_from_responses_request(&value) {
         request.insert("tools".to_string(), serde_json::Value::Array(tools));
+    }
+    if let Some(web_search_options) =
+        runtime_deepseek_web_search_options_from_responses_request(&value)
+    {
+        request.insert("web_search_options".to_string(), web_search_options);
     }
     if let Some(tool_choice) =
         runtime_deepseek_tool_choice_from_responses_request(&value, thinking_enabled)
@@ -575,6 +581,10 @@ fn runtime_deepseek_reasoning_effort(effort: &str) -> Option<Option<&'static str
 #[cfg(test)]
 #[path = "deepseek_optional_tools_tests.rs"]
 mod deepseek_optional_tools_tests;
+
+#[cfg(test)]
+#[path = "deepseek_provider_tool_tests.rs"]
+mod deepseek_provider_tool_tests;
 
 #[cfg(test)]
 #[path = "deepseek_rewrite_tests.rs"]
