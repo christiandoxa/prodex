@@ -10,7 +10,7 @@ use super::local_rewrite::{
     RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_copilot::{
-    RuntimeCopilotRequestContext, RuntimeCopilotResponsesSseBindingReader,
+    RuntimeCopilotBindingRecorder, RuntimeCopilotResponsesSseBindingReader,
     runtime_copilot_remember_bindings_from_responses_body,
 };
 use super::local_rewrite_gemini::{
@@ -36,11 +36,13 @@ struct RuntimeChatCompatibleProvider {
     label: &'static str,
 }
 
-struct RuntimeLocalRewriteLiveResponseParts {
+struct RuntimeChatCompatibleRewriteContext<'a> {
     status: u16,
-    headers: Vec<(String, Vec<u8>)>,
-    text_headers: Vec<(String, String)>,
-    content_type: String,
+    content_type: &'a str,
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    provider: RuntimeChatCompatibleProvider,
+    profile_name: Option<String>,
+    binding_recorder: Option<RuntimeCopilotBindingRecorder>,
 }
 
 pub(super) fn runtime_local_rewrite_buffered_response_from_response(
@@ -128,12 +130,16 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             request_id,
             request,
             response,
-            status,
-            &content_type,
-            shared,
-            RuntimeChatCompatibleProvider {
-                prefix: "deepseek",
-                label: "DeepSeek",
+            RuntimeChatCompatibleRewriteContext {
+                status,
+                content_type: &content_type,
+                shared,
+                provider: RuntimeChatCompatibleProvider {
+                    prefix: "deepseek",
+                    label: "DeepSeek",
+                },
+                profile_name: None,
+                binding_recorder: None,
             },
         );
         return;
@@ -144,12 +150,16 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             request_id,
             request,
             response,
-            status,
-            &content_type,
-            shared,
-            RuntimeChatCompatibleProvider {
-                prefix: "anthropic",
-                label: "Anthropic",
+            RuntimeChatCompatibleRewriteContext {
+                status,
+                content_type: &content_type,
+                shared,
+                provider: RuntimeChatCompatibleProvider {
+                    prefix: "anthropic",
+                    label: "Anthropic",
+                },
+                profile_name: None,
+                binding_recorder: None,
             },
         );
         return;
@@ -169,18 +179,27 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
     }
 
     if copilot_responses_route && (200..300).contains(&status) {
-        respond_runtime_copilot_passthrough(
+        let profile_name = copilot_context
+            .as_ref()
+            .map(|context| context.profile_name.clone());
+        let binding_recorder = copilot_context
+            .as_ref()
+            .and_then(|context| context.binding_recorder.clone());
+        respond_runtime_chat_compatible_rewrite(
             request_id,
             request,
             response,
-            RuntimeLocalRewriteLiveResponseParts {
+            RuntimeChatCompatibleRewriteContext {
                 status,
-                headers,
-                text_headers,
-                content_type,
+                content_type: &content_type,
+                shared,
+                provider: RuntimeChatCompatibleProvider {
+                    prefix: "copilot",
+                    label: "GitHub Copilot",
+                },
+                profile_name,
+                binding_recorder,
             },
-            shared,
-            copilot_context,
         );
         return;
     }
@@ -211,11 +230,17 @@ fn respond_runtime_chat_compatible_rewrite(
     request_id: u64,
     request: tiny_http::Request,
     response: reqwest::blocking::Response,
-    status: u16,
-    content_type: &str,
-    shared: &RuntimeLocalRewriteProxyShared,
-    provider: RuntimeChatCompatibleProvider,
+    context: RuntimeChatCompatibleRewriteContext<'_>,
 ) {
+    let RuntimeChatCompatibleRewriteContext {
+        status,
+        content_type,
+        shared,
+        provider,
+        profile_name,
+        binding_recorder,
+    } = context;
+    let profile_name = profile_name.unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
     let rate_limit_headers = if provider.prefix == "deepseek" {
         runtime_deepseek_codex_rate_limit_headers(response.headers())
     } else {
@@ -234,17 +259,26 @@ fn respond_runtime_chat_compatible_rewrite(
             "text/event-stream; charset=utf-8".to_string(),
         )];
         append_text_rate_limit_headers(&mut headers, rate_limit_headers);
+        let reader = RuntimeDeepSeekChatSseReader::new(
+            response,
+            request_id,
+            conversation_messages,
+            Arc::clone(&shared.deepseek_conversations),
+        );
+        let body: Box<dyn Read + Send> = if let Some(binding_recorder) = binding_recorder {
+            Box::new(RuntimeCopilotResponsesSseBindingReader::new(
+                reader,
+                Some(binding_recorder),
+            ))
+        } else {
+            Box::new(reader)
+        };
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
-            body: Box::new(RuntimeDeepSeekChatSseReader::new(
-                response,
-                request_id,
-                conversation_messages,
-                Arc::clone(&shared.deepseek_conversations),
-            )),
+            body,
             request_id,
-            profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
+            profile_name,
             log_path: shared.runtime_shared.log_path.clone(),
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
@@ -261,6 +295,10 @@ fn respond_runtime_chat_compatible_rewrite(
         &shared.deepseek_conversations,
     )
     .map(|mut parts| {
+        runtime_copilot_remember_bindings_from_responses_body(
+            binding_recorder.as_ref(),
+            &parts.body,
+        );
         append_binary_rate_limit_headers(&mut parts.headers, rate_limit_headers);
         build_runtime_proxy_response_from_parts(parts)
     })
@@ -338,58 +376,6 @@ fn respond_runtime_gemini_rewrite(
         build_runtime_proxy_response_from_parts(parts)
     })
     .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
-    let _ = request.respond(response);
-}
-
-fn respond_runtime_copilot_passthrough(
-    request_id: u64,
-    request: tiny_http::Request,
-    response: reqwest::blocking::Response,
-    response_parts: RuntimeLocalRewriteLiveResponseParts,
-    shared: &RuntimeLocalRewriteProxyShared,
-    copilot_context: Option<RuntimeCopilotRequestContext>,
-) {
-    let RuntimeLocalRewriteLiveResponseParts {
-        status,
-        headers,
-        text_headers,
-        content_type,
-    } = response_parts;
-    let RuntimeCopilotRequestContext {
-        profile_name,
-        binding_recorder,
-    } = copilot_context.unwrap_or_else(|| RuntimeCopilotRequestContext {
-        profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
-        binding_recorder: None,
-    });
-    if content_type.contains("text/event-stream") {
-        let writer = request.into_writer();
-        let streaming = RuntimeStreamingResponse {
-            status,
-            headers: text_headers,
-            body: Box::new(RuntimeCopilotResponsesSseBindingReader::new(
-                response,
-                binding_recorder,
-            )),
-            request_id,
-            profile_name,
-            log_path: shared.runtime_shared.log_path.clone(),
-            shared: shared.runtime_shared.clone(),
-            _inflight_guard: None,
-        };
-        let _ = write_runtime_streaming_response(writer, streaming);
-        return;
-    }
-
-    let response = runtime_local_rewrite_buffered_response_parts(status, headers, response)
-        .map(|parts| {
-            runtime_copilot_remember_bindings_from_responses_body(
-                binding_recorder.as_ref(),
-                &parts.body,
-            );
-            build_runtime_proxy_response_from_parts(parts)
-        })
-        .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
     let _ = request.respond(response);
 }
 

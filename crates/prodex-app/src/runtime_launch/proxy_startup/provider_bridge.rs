@@ -163,7 +163,12 @@ pub(super) fn runtime_provider_native_passthrough(
 ) -> bool {
     let path = path_without_query(path_and_query);
     match kind {
-        RuntimeProviderBridgeKind::OpenAiResponses | RuntimeProviderBridgeKind::Copilot => true,
+        RuntimeProviderBridgeKind::OpenAiResponses => true,
+        RuntimeProviderBridgeKind::Copilot => {
+            !(path.ends_with("/responses")
+                || path.ends_with("/responses/compact")
+                || runtime_provider_models_path_suffix(path).is_some())
+        }
         RuntimeProviderBridgeKind::DeepSeek | RuntimeProviderBridgeKind::Gemini => {
             !(path.ends_with("/responses")
                 || path.ends_with("/responses/compact")
@@ -770,9 +775,13 @@ mod tests {
             RuntimeProviderBridgeKind::Anthropic,
             "/v1/responses"
         ));
-        assert!(runtime_provider_native_passthrough(
+        assert!(!runtime_provider_native_passthrough(
             RuntimeProviderBridgeKind::Copilot,
             "/v1/responses"
+        ));
+        assert!(runtime_provider_native_passthrough(
+            RuntimeProviderBridgeKind::Copilot,
+            "/v1/chat/completions"
         ));
     }
 }

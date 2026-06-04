@@ -1,15 +1,25 @@
+use super::deepseek_rewrite::{
+    RuntimeDeepSeekConversationStore, RuntimeDeepSeekTranslatedRequest,
+    runtime_chat_compatible_request_body,
+};
 use super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
+use super::local_rewrite_search_fallback::{
+    RuntimeLocalRewritePreparedSendResult, RuntimeLocalRewriteSearchFallbackRequest,
+    send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
+};
 use super::local_rewrite_transport::{
-    RuntimeLocalRewritePreparedAuth, runtime_copilot_request_body_with_canonical_model,
-    runtime_local_rewrite_api_key_attempts, runtime_local_rewrite_upstream_url,
-    send_runtime_local_rewrite_prepared_request,
+    RuntimeLocalRewritePreparedAuth, runtime_chat_completions_upstream_url,
+    runtime_copilot_request_body_with_canonical_model, runtime_local_rewrite_api_key_attempts,
+    runtime_local_rewrite_upstream_url, send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
+    runtime_provider_model_fallback_chain, runtime_provider_model_from_body,
+    runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result, bail};
@@ -90,13 +100,17 @@ pub(super) fn send_runtime_copilot_upstream_request(
     body: Vec<u8>,
     auth: &RuntimeCopilotProviderAuth,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
+    if responses_route {
+        return send_runtime_copilot_responses_request(request_id, request, shared, body, auth);
+    }
+
     let body = runtime_copilot_request_body_with_canonical_model(&body);
     let upstream_url = runtime_local_rewrite_upstream_url(
         &shared.upstream_base_url,
         &shared.mount_path,
         &request.path_and_query,
     );
-    let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
     let attempts = runtime_copilot_auth_attempts(auth, shared, &body)?;
     let attempt_count = attempts.len();
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
@@ -139,21 +153,153 @@ pub(super) fn send_runtime_copilot_upstream_request(
                 copilot_context: None,
             });
         }
-        let binding_recorder = shared
-            .copilot_oauth_pool
-            .as_ref()
-            .map(|pool| runtime_copilot_binding_recorder(pool, selected.profile_name.clone()));
-        let copilot_context = responses_route.then(|| RuntimeCopilotRequestContext {
-            profile_name: selected.profile_name,
-            binding_recorder,
-        });
         return Ok(RuntimeLocalRewriteUpstreamResult {
             response: RuntimeLocalRewriteUpstreamResponse::Live(response),
             gemini_context: None,
-            copilot_context,
+            copilot_context: None,
         });
     }
     bail!("no Copilot auth attempts were available")
+}
+
+fn send_runtime_copilot_responses_request(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    body: Vec<u8>,
+    auth: &RuntimeCopilotProviderAuth,
+) -> Result<RuntimeLocalRewriteUpstreamResult> {
+    let attempts = runtime_copilot_auth_attempts(auth, shared, &body)?;
+    let attempt_count = attempts.len();
+    let requested_model = runtime_provider_model_from_body(&body)
+        .unwrap_or_else(|| prodex_cli::SUPER_COPILOT_DEFAULT_MODEL.to_string());
+    let model_chain =
+        runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, &requested_model);
+    let upstream_url = runtime_chat_completions_upstream_url(
+        &shared.upstream_base_url,
+        &shared.mount_path,
+        &request.path_and_query,
+    );
+
+    for (attempt_index, selected) in attempts.into_iter().enumerate() {
+        for (model_index, model) in model_chain.iter().enumerate() {
+            let model_body = runtime_provider_request_body_with_model(&body, model);
+            let translated = runtime_copilot_responses_chat_request_body(
+                &model_body,
+                &shared.deepseek_conversations,
+            )?;
+            if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
+                pending.insert(request_id, translated.messages);
+            }
+            let send_result =
+                send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
+                    RuntimeLocalRewriteSearchFallbackRequest {
+                        request_id,
+                        request,
+                        shared,
+                        upstream_url: &upstream_url,
+                        body: translated.body,
+                        provider_kind: RuntimeProviderBridgeKind::Copilot,
+                        auth_label: selected.profile_name.as_str(),
+                        model,
+                        auth_factory: || RuntimeLocalRewritePreparedAuth::Copilot {
+                            api_key: selected.api_key.as_str(),
+                        },
+                    },
+                )?;
+            let (status, parts, class) = match send_result {
+                RuntimeLocalRewritePreparedSendResult::Live(response) => {
+                    return Ok(RuntimeLocalRewriteUpstreamResult {
+                        response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                        gemini_context: None,
+                        copilot_context: Some(runtime_copilot_request_context(
+                            shared,
+                            selected.profile_name.clone(),
+                        )),
+                    });
+                }
+                RuntimeLocalRewritePreparedSendResult::Error {
+                    status,
+                    parts,
+                    class,
+                } => (status, parts, class),
+            };
+            if model_index + 1 < model_chain.len()
+                && runtime_provider_should_retry_with_next_model(class)
+            {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_provider_model_fallback",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("provider", "copilot"),
+                            runtime_proxy_log_field("auth", selected.profile_name.as_str()),
+                            runtime_proxy_log_field("from_model", model.as_str()),
+                            runtime_proxy_log_field(
+                                "to_model",
+                                model_chain[model_index + 1].as_str(),
+                            ),
+                            runtime_proxy_log_field("status", status.to_string()),
+                            runtime_proxy_log_field("class", format!("{class:?}")),
+                        ],
+                    ),
+                );
+                continue;
+            }
+            if !selected.hard_affinity
+                && attempt_index + 1 < attempt_count
+                && runtime_copilot_should_rotate_after_response(class)
+            {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_copilot_profile_rotate",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("profile", selected.profile_name.as_str()),
+                            runtime_proxy_log_field("status", status.to_string()),
+                            runtime_proxy_log_field("class", format!("{class:?}")),
+                        ],
+                    ),
+                );
+                break;
+            }
+            return Ok(RuntimeLocalRewriteUpstreamResult {
+                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                gemini_context: None,
+                copilot_context: None,
+            });
+        }
+    }
+    bail!("no Copilot model attempts were available")
+}
+
+fn runtime_copilot_responses_chat_request_body(
+    body: &[u8],
+    conversations: &RuntimeDeepSeekConversationStore,
+) -> Result<RuntimeDeepSeekTranslatedRequest> {
+    runtime_chat_compatible_request_body(
+        body,
+        conversations,
+        RuntimeProviderBridgeKind::Copilot,
+        prodex_cli::SUPER_COPILOT_DEFAULT_MODEL,
+        false,
+    )
+}
+
+fn runtime_copilot_request_context(
+    shared: &RuntimeLocalRewriteProxyShared,
+    profile_name: String,
+) -> RuntimeCopilotRequestContext {
+    let binding_recorder = shared
+        .copilot_oauth_pool
+        .as_ref()
+        .map(|pool| runtime_copilot_binding_recorder(pool, profile_name.clone()));
+    RuntimeCopilotRequestContext {
+        profile_name,
+        binding_recorder,
+    }
 }
 
 fn runtime_copilot_auth_attempts(
@@ -433,6 +579,96 @@ mod tests {
                 response_profile_bindings: BTreeMap::new(),
             })),
         }
+    }
+
+    fn conversation_store() -> RuntimeDeepSeekConversationStore {
+        Arc::new(Mutex::new(BTreeMap::new()))
+    }
+
+    #[test]
+    fn copilot_responses_bridge_maps_mcp_optional_tools_to_chat_functions() {
+        let conversations = conversation_store();
+        let request = serde_json::json!({
+            "model": "codex",
+            "stream": true,
+            "input": "compress and inspect the workspace",
+            "tools": [
+                {
+                    "type": "mcp_tool",
+                    "name": "mcp__prodex_sqz__sqz_read_file",
+                    "description": "Read a file through SQZ.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"}
+                        },
+                        "required": ["path"]
+                    }
+                },
+                {
+                    "type": "mcp_toolset",
+                    "mcp_server_name": "prodex-sqz",
+                    "default_config": {"enabled": false},
+                    "configs": {
+                        "compress": {"enabled": true},
+                        "sqz_read_file": {"enabled": false}
+                    }
+                }
+            ],
+            "tool_choice": {
+                "type": "mcp_tool",
+                "name": "mcp__prodex_sqz__sqz_read_file"
+            }
+        });
+
+        let translated = runtime_copilot_responses_chat_request_body(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversations,
+        )
+        .expect("Copilot Responses request should translate to chat");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        let tools = body["tools"].as_array().unwrap();
+
+        assert_eq!(body["model"], prodex_cli::SUPER_COPILOT_DEFAULT_MODEL);
+        assert_eq!(tools.len(), 2);
+        assert_eq!(
+            tools[0]["function"]["name"],
+            "mcp__prodex_sqz__sqz_read_file"
+        );
+        assert_eq!(tools[0]["function"]["parameters"]["required"][0], "path");
+        assert_eq!(tools[1]["function"]["name"], "mcp__prodex_sqz__compress");
+        assert_eq!(
+            body["tool_choice"]["function"]["name"],
+            "mcp__prodex_sqz__sqz_read_file"
+        );
+    }
+
+    #[test]
+    fn copilot_bridge_stream_records_response_id_and_restores_mcp_namespace() {
+        let captured = Arc::new(Mutex::new(Vec::<String>::new()));
+        let captured_for_recorder = Arc::clone(&captured);
+        let recorder: RuntimeCopilotBindingRecorder = Arc::new(move |response_id| {
+            captured_for_recorder.lock().unwrap().push(response_id);
+        });
+        let chat_stream = concat!(
+            "data: {\"id\":\"chatcmpl_copilot_1\",\"model\":\"gpt-5.1-codex\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_sqz_1\",\"type\":\"function\",\"function\":{\"name\":\"mcp__prodex_sqz__compress\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_copilot_1\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let chat_reader = super::super::deepseek_rewrite::RuntimeDeepSeekChatSseReader::new(
+            Cursor::new(chat_stream),
+            11,
+            Vec::new(),
+            conversation_store(),
+        );
+        let mut reader = RuntimeCopilotResponsesSseBindingReader::new(chat_reader, Some(recorder));
+        let mut output = String::new();
+
+        reader.read_to_string(&mut output).unwrap();
+
+        assert!(output.contains("\"namespace\":\"mcp__prodex_sqz\""));
+        assert!(output.contains("\"name\":\"compress\""));
+        assert_eq!(captured.lock().unwrap().as_slice(), ["chatcmpl_copilot_1"]);
     }
 
     #[test]

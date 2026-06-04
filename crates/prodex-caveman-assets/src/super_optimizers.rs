@@ -209,6 +209,7 @@ fn token_savior_mcp_env(
     let mut env_vars = vec![
         ("TOKEN_SAVIOR_CLIENT", "codex".to_string()),
         ("TOKEN_SAVIOR_PROFILE", "optimized".to_string()),
+        ("TOKEN_SAVIOR_NO_WARMUP", "1".to_string()),
         ("TS_CAPTURE_DISABLED", "1".to_string()),
         ("TS_MEMORY_DISABLE", "1".to_string()),
         ("TS_AUTO_EXTRACT", "0".to_string()),
@@ -647,6 +648,7 @@ mod tests {
         };
 
         assert_eq!(value_for("WORKSPACE_ROOTS"), Some("/workspace"));
+        assert_eq!(value_for("TOKEN_SAVIOR_NO_WARMUP"), Some("1"));
         assert_eq!(
             value_for("TOKEN_SAVIOR_CACHE_DIR"),
             Some("/tmp/prodex-home/optimizer-state/token-savior/cache")

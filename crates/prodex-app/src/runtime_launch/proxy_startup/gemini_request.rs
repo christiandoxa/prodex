@@ -104,7 +104,9 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
     let Some(messages) = chat.get("messages").and_then(serde_json::Value::as_array) else {
         return contents;
     };
-    for message in messages {
+    let mut index = 0;
+    while index < messages.len() {
+        let message = &messages[index];
         let role = message
             .get("role")
             .and_then(serde_json::Value::as_str)
@@ -166,31 +168,26 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
                 }
             }
             "tool" => {
-                let call_id = message
-                    .get("tool_call_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
-                let name = message
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
-                    .or_else(|| tool_names_by_call_id.get(call_id).cloned())
-                    .unwrap_or_else(|| "tool_call".to_string());
-                let response = chat_message_text(message)
-                    .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                    .unwrap_or_else(|| {
-                        serde_json::json!({
-                            "output": chat_message_text(message).unwrap_or_default()
-                        })
-                    });
-                let function_response =
-                    runtime_gemini_function_response_part(call_id, &name, response);
+                let mut parts = Vec::new();
+                while index < messages.len()
+                    && messages[index]
+                        .get("role")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("tool")
+                {
+                    parts.push(serde_json::json!({
+                        "functionResponse": runtime_gemini_function_response_from_tool_message(
+                            &messages[index],
+                            &tool_names_by_call_id,
+                        ),
+                    }));
+                    index += 1;
+                }
                 contents.push(serde_json::json!({
                     "role": "user",
-                    "parts": [{
-                        "functionResponse": function_response,
-                    }],
+                    "parts": parts,
                 }));
+                continue;
             }
             _ => {
                 contents.push(serde_json::json!({
@@ -199,6 +196,7 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
                 }));
             }
         }
+        index += 1;
     }
     if contents.is_empty() {
         contents.push(serde_json::json!({
@@ -207,6 +205,30 @@ fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json
         }));
     }
     contents
+}
+
+fn runtime_gemini_function_response_from_tool_message(
+    message: &serde_json::Value,
+    tool_names_by_call_id: &BTreeMap<String, String>,
+) -> serde_json::Value {
+    let call_id = message
+        .get("tool_call_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let name = message
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| tool_names_by_call_id.get(call_id).cloned())
+        .unwrap_or_else(|| "tool_call".to_string());
+    let response = chat_message_text(message)
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "output": chat_message_text(message).unwrap_or_default()
+            })
+        });
+    runtime_gemini_function_response_part(call_id, &name, response)
 }
 
 fn runtime_gemini_function_call_part(

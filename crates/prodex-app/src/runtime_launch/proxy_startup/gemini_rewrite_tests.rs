@@ -330,6 +330,73 @@ fn gemini_request_translation_maps_tool_outputs_as_user_function_responses() {
 }
 
 #[test]
+fn gemini_request_translation_groups_multiple_mcp_tool_results_from_history() {
+    let conversations = conversation_store();
+    let calls = [
+        (
+            "call_sqz_1",
+            "mcp__prodex_sqz__compress",
+            "{\"text\":\"large content\"}",
+            "sqz result",
+        ),
+        (
+            "call_ts_1",
+            "mcp__prodex_token_savior__ts_search",
+            "{\"query\":\"MCP tools\"}",
+            "token-savior result",
+        ),
+    ];
+    runtime_deepseek_store_conversation(
+        &conversations,
+        "resp_multi_mcp",
+        vec![serde_json::json!({"role": "user", "content": "use sqz and token-savior"})],
+        vec![serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": calls.iter().map(|(id, name, arguments, _)| serde_json::json!({
+                "id": id,
+                "type": "function",
+                "function": {"name": name, "arguments": arguments}
+            })).collect::<Vec<_>>()
+        })],
+    );
+    let followup = serde_json::json!({
+        "model": "gemini-2.5-flash",
+        "previous_response_id": "resp_multi_mcp",
+        "input": calls.iter().map(|(id, _, _, output)| serde_json::json!({
+            "type": "mcp_tool_result",
+            "call_id": id,
+            "content": [{"type": "output_text", "text": output}]
+        })).collect::<Vec<_>>()
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&followup).unwrap(),
+        &conversations,
+        false,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(value["contents"][0]["role"], "user");
+    assert_eq!(value["contents"][1]["role"], "model");
+    assert_eq!(value["contents"][1]["parts"].as_array().unwrap().len(), 2);
+    assert_eq!(value["contents"][2]["role"], "user");
+    assert_eq!(value["contents"][2]["parts"].as_array().unwrap().len(), 2);
+    for (index, (_, name, _, _)) in calls.iter().enumerate() {
+        assert_eq!(
+            value["contents"][2]["parts"][index]["functionResponse"]["name"],
+            *name
+        );
+    }
+    assert!(
+        value["contents"].as_array().unwrap().get(3).is_none(),
+        "MCP results for one Gemini function-call turn must stay grouped"
+    );
+}
+
+#[test]
 fn gemini_maps_mcp_optional_tools_to_function_declarations() {
     let body = serde_json::json!({
         "model": "gemini-2.5-pro",

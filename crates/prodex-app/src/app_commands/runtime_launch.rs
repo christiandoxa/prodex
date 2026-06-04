@@ -94,6 +94,7 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
             RuntimeLaunchDryRunChild::Codex {
                 codex_args: strategy.codex_args.clone(),
             },
+            None,
         );
     }
     execute_runtime_launch(strategy)

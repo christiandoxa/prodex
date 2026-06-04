@@ -81,9 +81,9 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
 }
 
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
-    let (_mem_mode, _rtk_enabled, _super_optimizer_overlay, codex_args) =
+    let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
         runtime_caveman_extract_launch_prefixes(&args.codex_args);
-    let (_presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
+    let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);
@@ -98,7 +98,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         upstream_no_proxy: args.no_proxy,
         include_code_review,
         smart_context_enabled: args.smart_context,
-        presidio_redaction_enabled: _presidio_enabled,
+        presidio_redaction_enabled: presidio_enabled,
         model_context_window_tokens,
         force_runtime_proxy: false,
         model_provider_override: model_provider_override.as_deref(),
@@ -112,6 +112,18 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         "caveman",
         request,
         RuntimeLaunchDryRunChild::Caveman { codex_args },
+        Some(&format!(
+            "Optimizer overlay: mem={}; rtk={}; super={}",
+            mem_mode
+                .map(|mode| format!("{mode:?}"))
+                .unwrap_or_else(|| "disabled".to_string()),
+            if rtk_enabled { "enabled" } else { "disabled" },
+            if super_optimizer_overlay {
+                "enabled"
+            } else {
+                "disabled"
+            },
+        )),
     )
 }
 
@@ -119,6 +131,7 @@ pub(crate) fn print_runtime_launch_dry_run(
     flow: &str,
     request: RuntimeLaunchRequest<'_>,
     child: RuntimeLaunchDryRunChild,
+    extra_report: Option<&str>,
 ) -> Result<()> {
     let upstream_no_proxy = request.upstream_no_proxy;
     let presidio_redaction_enabled = request.presidio_redaction_enabled;
@@ -140,6 +153,10 @@ pub(crate) fn print_runtime_launch_dry_run(
         runtime_proxy,
         &plan,
     );
+    if let Some(extra_report) = extra_report {
+        output.push_str(extra_report);
+        output.push('\n');
+    }
     output.push_str(&format!(
         "Presidio redaction: {}",
         if presidio_redaction_enabled {
