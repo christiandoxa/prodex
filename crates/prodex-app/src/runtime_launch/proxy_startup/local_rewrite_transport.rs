@@ -264,10 +264,10 @@ pub(super) fn runtime_local_rewrite_api_key_attempts<'a>(
     runtime_local_rewrite_api_key_attempts_from_start(api_keys, start)
 }
 
-fn runtime_local_rewrite_api_key_attempts_from_start<'a>(
-    api_keys: &'a [String],
+fn runtime_local_rewrite_api_key_attempts_from_start(
+    api_keys: &[String],
     start: usize,
-) -> Vec<(String, &'a str)> {
+) -> Vec<(String, &str)> {
     (0..api_keys.len())
         .map(|offset| {
             let index = (start + offset) % api_keys.len();
