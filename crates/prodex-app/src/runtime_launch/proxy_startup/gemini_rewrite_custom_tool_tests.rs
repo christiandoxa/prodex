@@ -1,6 +1,7 @@
 use super::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
-    runtime_gemini_generate_request_body, runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_custom_tool_input_from_arguments, runtime_gemini_generate_request_body,
+    runtime_gemini_responses_value_from_generate_value,
 };
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -70,6 +71,150 @@ fn gemini_response_translation_maps_apply_patch_to_custom_tool_call() {
     assert_eq!(translated["output"][0]["name"], "apply_patch");
     assert_eq!(translated["output"][0]["call_id"], "call_patch_1");
     assert_eq!(translated["output"][0]["input"], patch);
+}
+
+#[test]
+fn gemini_response_translation_normalizes_unified_diff_apply_patch() {
+    let unified_diff = "\
+--- a/crates/prodex-cli/src/presidio.rs
++++ b/crates/prodex-cli/src/presidio.rs
+@@ -1,4 +1,4 @@
+-use clap::{Args, Subcommand, ValueEnum};
++use clap::{Args, Subcommand, ValueEnum, parser::ValueSource};
+ use std::path::PathBuf;";
+    let response = serde_json::json!({
+        "responseId": "resp_patch_2",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "functionCall": {
+                        "id": "call_patch_2",
+                        "name": "apply_patch",
+                        "args": {"input": unified_diff}
+                    }
+                }]
+            }
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 48);
+
+    assert_eq!(translated["output"][0]["type"], "custom_tool_call");
+    assert_eq!(translated["output"][0]["name"], "apply_patch");
+    assert_eq!(
+        translated["output"][0]["input"],
+        "\
+*** Begin Patch
+*** Update File: crates/prodex-cli/src/presidio.rs
+@@
+-use clap::{Args, Subcommand, ValueEnum};
++use clap::{Args, Subcommand, ValueEnum, parser::ValueSource};
+ use std::path::PathBuf;
+*** End Patch"
+    );
+}
+
+#[test]
+fn gemini_apply_patch_input_extracts_fenced_apply_patch_block() {
+    let arguments = serde_json::json!({
+        "input": "Here is the patch:\n```patch\n*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch\n```\n"
+    });
+
+    assert_eq!(
+        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"
+    );
+}
+
+#[test]
+fn gemini_apply_patch_input_normalizes_multifile_git_diff() {
+    let diff = "\
+diff --git a/src/lib.rs b/src/lib.rs
+index 1111111..2222222 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,2 +1,2 @@ pub fn run()
+ keep
+-old
++new
+diff --git a/new file.txt b/new file.txt
+new file mode 100644
+--- /dev/null
++++ \"b/new file.txt\"
+@@ -0,0 +1,2 @@
++alpha
++beta
+diff --git a/gone.txt b/gone.txt
+deleted file mode 100644
+--- a/gone.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-gone";
+    let arguments = serde_json::json!({ "input": diff });
+
+    assert_eq!(
+        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        "\
+*** Begin Patch
+*** Update File: src/lib.rs
+@@ pub fn run()
+ keep
+-old
++new
+*** Add File: new file.txt
++alpha
++beta
+*** Delete File: gone.txt
+*** End Patch"
+    );
+}
+
+#[test]
+fn gemini_apply_patch_input_normalizes_rename_with_changes() {
+    let diff = "\
+diff --git a/old/name.txt b/new/name.txt
+similarity index 60%
+rename from old/name.txt
+rename to new/name.txt
+--- a/old/name.txt
++++ b/new/name.txt
+@@ -1 +1 @@
+-old
++new";
+    let arguments = serde_json::json!({ "input": diff });
+
+    assert_eq!(
+        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        "\
+*** Begin Patch
+*** Update File: old/name.txt
+*** Move to: new/name.txt
+@@
+-old
++new
+*** End Patch"
+    );
+}
+
+#[test]
+fn gemini_apply_patch_input_normalizes_gemini_replace_args() {
+    let arguments = serde_json::json!({
+        "file_path": "src/lib.rs",
+        "old_string": "let value = 1;\n",
+        "new_string": "let value = 2;\n"
+    });
+
+    assert_eq!(
+        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        "\
+*** Begin Patch
+*** Update File: src/lib.rs
+@@
+-let value = 1;
++let value = 2;
+*** End Patch"
+    );
 }
 
 #[test]

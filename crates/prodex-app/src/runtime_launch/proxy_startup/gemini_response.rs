@@ -3,6 +3,7 @@ use super::super::deepseek_rewrite::{
 };
 use super::super::gemini_thought_signatures::runtime_gemini_thought_signature;
 use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
+use super::gemini_apply_patch::runtime_gemini_custom_apply_patch_input;
 use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
 use std::borrow::Cow;
 
@@ -331,15 +332,7 @@ pub(in super::super) fn runtime_gemini_custom_tool_input_from_arguments(argument
 }
 
 fn runtime_gemini_custom_tool_input_from_args_value(args_value: &serde_json::Value) -> String {
-    match args_value {
-        serde_json::Value::String(input) => input.clone(),
-        serde_json::Value::Object(object) => ["input", "patch", "text", "content"]
-            .iter()
-            .find_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
-            .map(str::to_string)
-            .unwrap_or_else(|| args_value.to_string()),
-        _ => args_value.to_string(),
-    }
+    runtime_gemini_custom_apply_patch_input(args_value)
 }
 
 fn runtime_gemini_function_call_id(

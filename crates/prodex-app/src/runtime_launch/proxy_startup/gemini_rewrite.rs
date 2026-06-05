@@ -8,6 +8,8 @@ use anyhow::{Context, Result};
 use std::io::Read;
 use std::path::PathBuf;
 
+#[path = "gemini_apply_patch.rs"]
+mod gemini_apply_patch;
 #[path = "gemini_request.rs"]
 mod gemini_request;
 #[path = "gemini_response.rs"]

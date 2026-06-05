@@ -60,6 +60,39 @@ data: [DONE]\n\n"
 }
 
 #[test]
+fn gemini_sse_reader_normalizes_unified_diff_apply_patch() {
+    let unified_diff = "\
+--- a/crates/prodex-cli/src/presidio.rs
++++ b/crates/prodex-cli/src/presidio.rs
+@@ -1,4 +1,4 @@
+-use clap::{Args, Subcommand, ValueEnum};
++use clap::{Args, Subcommand, ValueEnum, parser::ValueSource};
+ use std::path::PathBuf;";
+    let patch_json = serde_json::to_string(unified_diff).unwrap();
+    let stream = format!(
+        "data: {{\"responseId\":\"resp_patch\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{{\"content\":{{\"parts\":[{{\"functionCall\":{{\"id\":\"call_patch\",\"name\":\"apply_patch\",\"args\":{{\"input\":{patch_json}}}}}}}]}},\"finishReason\":\"STOP\"}}]}}\n\n\
+data: [DONE]\n\n"
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"custom_tool_call\""));
+    assert!(
+        output.contains("*** Begin Patch\\n*** Update File: crates/prodex-cli/src/presidio.rs")
+    );
+    assert!(output.contains("\\n@@\\n-use clap::{Args, Subcommand, ValueEnum};"));
+    assert!(!output.contains("--- a/crates/prodex-cli/src/presidio.rs"));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
 fn gemini_sse_reader_maps_grounding_metadata_to_web_search_call() {
     let stream = concat!(
         "data: {\"responseId\":\"resp_grounded\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"grounded\"}]},\"groundingMetadata\":{\"webSearchQueries\":[\"prodex gemini\"],\"groundingChunks\":[{\"web\":{\"uri\":\"https://example.com/gemini\",\"title\":\"Gemini Source\"}}]}}]}\n\n",
