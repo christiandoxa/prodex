@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.152.0 - Unreleased
+
+Changes after `0.151.0`.
+
+### Misc
+
+- Improve Codex provider parity (`784f648`)
+
 ## 0.151.0 - 2026-06-05
 
 ### Runtime
