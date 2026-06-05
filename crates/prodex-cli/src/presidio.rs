@@ -97,7 +97,9 @@ impl PresidioFailMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, ValueEnum, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum PresidioLanguageMode {
     #[default]

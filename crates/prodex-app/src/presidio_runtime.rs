@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 pub use prodex_cli::PresidioLanguageMode;
 use prodex_core::AppPaths;
-use std::fs;
 use serde::{Deserialize, Deserializer};
+use std::fs;
 
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
 const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
@@ -17,7 +17,10 @@ struct ProdexPresidioRuntimeFileConfig {
     anonymizer_url: String,
     language: Option<String>,
     languages: Option<Vec<String>>,
-    #[serde(default = "default_presidio_language_mode_str", deserialize_with = "deserialize_presidio_language_mode")]
+    #[serde(
+        default = "default_presidio_language_mode_str",
+        deserialize_with = "deserialize_presidio_language_mode"
+    )]
     language_mode: PresidioLanguageMode,
     #[serde(default = "default_presidio_fail_mode")]
     fail_mode: String,
@@ -49,7 +52,9 @@ fn default_presidio_language_mode_str() -> PresidioLanguageMode {
     PresidioLanguageMode::Fixed
 }
 
-fn deserialize_presidio_language_mode<'de, D>(deserializer: D) -> Result<PresidioLanguageMode, D::Error>
+fn deserialize_presidio_language_mode<'de, D>(
+    deserializer: D,
+) -> Result<PresidioLanguageMode, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -92,7 +97,10 @@ pub(crate) fn runtime_presidio_redaction_config(
     };
 
     let languages = file_config.languages.unwrap_or_else(|| {
-        file_config.language.map(|l| vec![l]).unwrap_or_else(|| vec![DEFAULT_PRESIDIO_LANGUAGE.to_string()])
+        file_config
+            .language
+            .map(|l| vec![l])
+            .unwrap_or_else(|| vec![DEFAULT_PRESIDIO_LANGUAGE.to_string()])
     });
 
     let language_mode = file_config.language_mode;

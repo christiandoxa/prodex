@@ -199,18 +199,22 @@ async fn runtime_presidio_redact_body(
 
     match language_mode {
         PresidioLanguageMode::Fixed => {
-            let results = presidio_analyze_async(&client, &config.analyzer_url, &text, &languages[0]).await?;
+            let results =
+                presidio_analyze_async(&client, &config.analyzer_url, &text, &languages[0]).await?;
             all_analyzer_results = results;
         }
         PresidioLanguageMode::Auto => {
-            let detected_lang = detect_presidio_language(&text, &languages)
-                .unwrap_or_else(|| languages[0].clone());
-            let results = presidio_analyze_async(&client, &config.analyzer_url, &text, &detected_lang).await?;
+            let detected_lang =
+                detect_presidio_language(&text, &languages).unwrap_or_else(|| languages[0].clone());
+            let results =
+                presidio_analyze_async(&client, &config.analyzer_url, &text, &detected_lang)
+                    .await?;
             all_analyzer_results = results;
         }
         PresidioLanguageMode::Multi => {
             for lang in &languages {
-                let results = presidio_analyze_async(&client, &config.analyzer_url, &text, lang).await?;
+                let results =
+                    presidio_analyze_async(&client, &config.analyzer_url, &text, lang).await?;
                 all_analyzer_results.extend(results.into_iter().map(|mut r| {
                     r.language = lang.clone();
                     r
@@ -273,8 +277,14 @@ fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String>
         return Some(candidates[0].clone());
     }
 
-    let id_keywords = ["yang", "dan", "di", "ke", "dari", "saya", "kami", "anda", "nomor", "nama", "alamat", "tanggal", "lahir", "dengan", "untuk"];
-    let en_keywords = ["the", "and", "to", "from", "my", "name", "phone", "email", "address", "with", "for", "birth"];
+    let id_keywords = [
+        "yang", "dan", "di", "ke", "dari", "saya", "kami", "anda", "nomor", "nama", "alamat",
+        "tanggal", "lahir", "dengan", "untuk",
+    ];
+    let en_keywords = [
+        "the", "and", "to", "from", "my", "name", "phone", "email", "address", "with", "for",
+        "birth",
+    ];
 
     let mut id_score = 0;
     let mut en_score = 0;
@@ -301,18 +311,28 @@ fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String>
     }
 }
 
-fn merge_presidio_analyzer_results(mut results: Vec<PresidioAnalyzerResult>) -> Vec<PresidioAnalyzerResult> {
+fn merge_presidio_analyzer_results(
+    mut results: Vec<PresidioAnalyzerResult>,
+) -> Vec<PresidioAnalyzerResult> {
     results.sort_by(|a, b| {
-        a.start.cmp(&b.start)
+        a.start
+            .cmp(&b.start)
             .then_with(|| a.end.cmp(&b.end))
-            .then_with(|| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| b.entity_type.cmp(&a.entity_type))
     });
 
     let mut merged: Vec<PresidioAnalyzerResult> = Vec::new();
     for result in results {
         if let Some(last) = merged.last_mut() {
-            if last.start == result.start && last.end == result.end && last.entity_type == result.entity_type {
+            if last.start == result.start
+                && last.end == result.end
+                && last.entity_type == result.entity_type
+            {
                 if result.score > last.score {
                     *last = result;
                 }
@@ -321,9 +341,13 @@ fn merge_presidio_analyzer_results(mut results: Vec<PresidioAnalyzerResult>) -> 
 
             let overlaps = result.start < last.end && result.end > last.start;
             if overlaps {
-                if result.score > last.score || (result.score == last.score && (result.end - result.start) > (last.end - last.start)) {
-                    if (result.start >= last.start && result.end <= last.end) || 
-                       (last.start >= result.start && last.end <= result.end) {
+                if result.score > last.score
+                    || (result.score == last.score
+                        && (result.end - result.start) > (last.end - last.start))
+                {
+                    if (result.start >= last.start && result.end <= last.end)
+                        || (last.start >= result.start && last.end <= result.end)
+                    {
                         if result.score > last.score {
                             *last = result;
                         }
@@ -346,7 +370,9 @@ fn merge_presidio_analyzer_results(mut results: Vec<PresidioAnalyzerResult>) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimePresidioRedactionConfig, runtime_presidio_redact_body, PresidioLanguageMode};
+    use super::{
+        PresidioLanguageMode, RuntimePresidioRedactionConfig, runtime_presidio_redact_body,
+    };
     use std::thread;
     use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
     use tokio::runtime::Builder as TokioRuntimeBuilder;

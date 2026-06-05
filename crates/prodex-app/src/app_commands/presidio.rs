@@ -1,6 +1,6 @@
 use crate::{
-    AppPaths, PresidioCommands, PresidioDoctorArgs, PresidioEnableArgs, PresidioRedactArgs,
-    PresidioLanguageMode,
+    AppPaths, PresidioCommands, PresidioDoctorArgs, PresidioEnableArgs, PresidioLanguageMode,
+    PresidioRedactArgs,
 };
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
@@ -78,8 +78,12 @@ pub(crate) fn handle_presidio(command: PresidioCommands) -> Result<()> {
 fn handle_presidio_doctor(args: PresidioDoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let config = load_presidio_config(&paths)?.unwrap_or_default();
-    let analyzer_url = args.analyzer_url.unwrap_or_else(|| config.analyzer_url.clone());
-    let anonymizer_url = args.anonymizer_url.unwrap_or_else(|| config.anonymizer_url.clone());
+    let analyzer_url = args
+        .analyzer_url
+        .unwrap_or_else(|| config.analyzer_url.clone());
+    let anonymizer_url = args
+        .anonymizer_url
+        .unwrap_or_else(|| config.anonymizer_url.clone());
     validate_presidio_url(&analyzer_url, "analyzer_url")?;
     validate_presidio_url(&anonymizer_url, "anonymizer_url")?;
 
@@ -128,7 +132,10 @@ fn handle_presidio_doctor(args: PresidioDoctorArgs) -> Result<()> {
                 "Anonymizer health".to_string(),
                 presidio_health_label(&anonymizer),
             ),
-            ("Language Mode".to_string(), language_mode.as_str().to_string()),
+            (
+                "Language Mode".to_string(),
+                language_mode.as_str().to_string(),
+            ),
             ("Languages".to_string(), languages.join(", ")),
         ],
     );
@@ -150,7 +157,10 @@ fn handle_presidio_status() -> Result<()> {
             ("Enabled".to_string(), config.enabled.to_string()),
             ("Analyzer".to_string(), config.analyzer_url),
             ("Anonymizer".to_string(), config.anonymizer_url),
-            ("Language Mode".to_string(), language_mode.as_str().to_string()),
+            (
+                "Language Mode".to_string(),
+                language_mode.as_str().to_string(),
+            ),
             ("Languages".to_string(), languages.join(", ")),
             ("Fail mode".to_string(), config.fail_mode),
         ],
@@ -195,7 +205,10 @@ fn handle_presidio_enable(args: PresidioEnableArgs) -> Result<()> {
             ("Enabled".to_string(), "true".to_string()),
             ("Analyzer".to_string(), config.analyzer_url),
             ("Anonymizer".to_string(), config.anonymizer_url),
-            ("Language Mode".to_string(), language_mode.as_str().to_string()),
+            (
+                "Language Mode".to_string(),
+                language_mode.as_str().to_string(),
+            ),
             ("Languages".to_string(), languages.join(", ")),
             ("Fail mode".to_string(), config.fail_mode),
         ],
@@ -224,8 +237,12 @@ fn handle_presidio_disable() -> Result<()> {
 fn handle_presidio_redact(args: PresidioRedactArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let config = load_presidio_config(&paths)?.unwrap_or_default();
-    let analyzer_url = args.analyzer_url.unwrap_or_else(|| config.analyzer_url.clone());
-    let anonymizer_url = args.anonymizer_url.unwrap_or_else(|| config.anonymizer_url.clone());
+    let analyzer_url = args
+        .analyzer_url
+        .unwrap_or_else(|| config.analyzer_url.clone());
+    let anonymizer_url = args
+        .anonymizer_url
+        .unwrap_or_else(|| config.anonymizer_url.clone());
     validate_presidio_url(&analyzer_url, "analyzer_url")?;
     validate_presidio_url(&anonymizer_url, "anonymizer_url")?;
 
@@ -251,20 +268,28 @@ fn handle_presidio_redact(args: PresidioRedactArgs) -> Result<()> {
     }
     validate_language_config(&languages_to_use, language_mode_to_use)?;
 
-
     let all_analyzer_results = match language_mode_to_use {
-        PresidioLanguageMode::Fixed => {
-            presidio_analyze(&presidio_http_client()?, &analyzer_url, &text, &languages_to_use[0])?
-        }
+        PresidioLanguageMode::Fixed => presidio_analyze(
+            &presidio_http_client()?,
+            &analyzer_url,
+            &text,
+            &languages_to_use[0],
+        )?,
         PresidioLanguageMode::Auto => {
             let detected_lang = detect_presidio_language(&text, &languages_to_use)
                 .unwrap_or_else(|| languages_to_use[0].clone());
-            presidio_analyze(&presidio_http_client()?, &analyzer_url, &text, &detected_lang)?
+            presidio_analyze(
+                &presidio_http_client()?,
+                &analyzer_url,
+                &text,
+                &detected_lang,
+            )?
         }
         PresidioLanguageMode::Multi => {
             let mut all_results = Vec::new();
             for lang in &languages_to_use {
-                let results = presidio_analyze(&presidio_http_client()?, &analyzer_url, &text, lang)?;
+                let results =
+                    presidio_analyze(&presidio_http_client()?, &analyzer_url, &text, lang)?;
                 all_results.extend(results.into_iter().map(|mut r| {
                     r.language = lang.clone();
                     r
@@ -274,7 +299,12 @@ fn handle_presidio_redact(args: PresidioRedactArgs) -> Result<()> {
         }
     };
 
-    let anonymized = presidio_anonymize(&presidio_http_client()?, &anonymizer_url, &text, all_analyzer_results)?;
+    let anonymized = presidio_anonymize(
+        &presidio_http_client()?,
+        &anonymizer_url,
+        &text,
+        all_analyzer_results,
+    )?;
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&anonymized)?);
@@ -424,10 +454,7 @@ fn presidio_endpoint(base_url: &str, path: &str) -> String {
 }
 
 fn normalize_languages(langs: Vec<String>) -> Vec<String> {
-    let mut normalized: Vec<String> = langs
-        .into_iter()
-        .map(|s| s.trim().to_lowercase())
-        .collect();
+    let mut normalized: Vec<String> = langs.into_iter().map(|s| s.trim().to_lowercase()).collect();
     normalized.sort_unstable();
     normalized.dedup();
     normalized
@@ -446,9 +473,15 @@ fn validate_language_config(languages: &[String], mode: PresidioLanguageMode) ->
     Ok(())
 }
 
-fn resolve_languages_and_mode(config: &ProdexPresidioConfig) -> (Vec<String>, PresidioLanguageMode) {
+fn resolve_languages_and_mode(
+    config: &ProdexPresidioConfig,
+) -> (Vec<String>, PresidioLanguageMode) {
     let languages = config.languages.clone().unwrap_or_else(|| {
-        config.language.clone().map(|l| vec![l]).unwrap_or_else(|| vec![DEFAULT_PRESIDIO_LANGUAGE.to_string()])
+        config
+            .language
+            .clone()
+            .map(|l| vec![l])
+            .unwrap_or_else(|| vec![DEFAULT_PRESIDIO_LANGUAGE.to_string()])
     });
     (normalize_languages(languages), config.language_mode)
 }
@@ -459,8 +492,14 @@ fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String>
         return Some(candidates[0].clone());
     }
 
-    let id_keywords = ["yang", "dan", "di", "ke", "dari", "saya", "kami", "anda", "nomor", "nama", "alamat", "tanggal", "lahir", "dengan", "untuk"];
-    let en_keywords = ["the", "and", "to", "from", "my", "name", "phone", "email", "address", "with", "for", "birth"];
+    let id_keywords = [
+        "yang", "dan", "di", "ke", "dari", "saya", "kami", "anda", "nomor", "nama", "alamat",
+        "tanggal", "lahir", "dengan", "untuk",
+    ];
+    let en_keywords = [
+        "the", "and", "to", "from", "my", "name", "phone", "email", "address", "with", "for",
+        "birth",
+    ];
 
     let mut id_score = 0;
     let mut en_score = 0;
@@ -488,11 +527,18 @@ fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String>
     }
 }
 
-fn merge_presidio_analyzer_results(mut results: Vec<PresidioAnalyzerResult>) -> Vec<PresidioAnalyzerResult> {
+fn merge_presidio_analyzer_results(
+    mut results: Vec<PresidioAnalyzerResult>,
+) -> Vec<PresidioAnalyzerResult> {
     results.sort_by(|a, b| {
-        a.start.cmp(&b.start)
+        a.start
+            .cmp(&b.start)
             .then_with(|| a.end.cmp(&b.end))
-            .then_with(|| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)) // Higher score first
+            .then_with(|| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }) // Higher score first
             .then_with(|| b.entity_type.cmp(&a.entity_type)) // Consistent tie-breaking
     });
 
@@ -501,7 +547,10 @@ fn merge_presidio_analyzer_results(mut results: Vec<PresidioAnalyzerResult>) -> 
         if let Some(last) = merged.last_mut() {
             // Check for exact duplicates or overlapping results.
             // If they are exactly the same in terms of start, end, and entity type, deduplicate.
-            if last.start == result.start && last.end == result.end && last.entity_type == result.entity_type {
+            if last.start == result.start
+                && last.end == result.end
+                && last.entity_type == result.entity_type
+            {
                 // Keep the one with higher score, or current if scores are equal.
                 if result.score > last.score {
                     *last = result;
@@ -512,7 +561,10 @@ fn merge_presidio_analyzer_results(mut results: Vec<PresidioAnalyzerResult>) -> 
             // If there's an overlap, and current result has higher score or longer span
             let overlaps = result.start < last.end && result.end > last.start;
             if overlaps {
-                if result.score > last.score || (result.score == last.score && (result.end - result.start) > (last.end - last.start)) {
+                if result.score > last.score
+                    || (result.score == last.score
+                        && (result.end - result.start) > (last.end - last.start))
+                {
                     // This logic is tricky. For overlapping, we could:
                     // 1. Keep the higher score, merging spans.
                     // 2. Keep the higher score, replacing the old.
@@ -531,14 +583,16 @@ fn merge_presidio_analyzer_results(mut results: Vec<PresidioAnalyzerResult>) -> 
                     // If they partially overlap, it gets complicated. For MVP, we'll try to
                     // simply replace if the new score is better, or extend the span if needed.
                     if (result.start >= last.start && result.end <= last.end) || // new is contained in old
-                       (last.start >= result.start && last.end <= result.end) { // old is contained in new
+                       (last.start >= result.start && last.end <= result.end)
+                    {
+                        // old is contained in new
                         // if contained, prefer higher score. if scores equal, keep current merged
                         if result.score > last.score {
                             *last = result;
                         }
                         continue;
                     } else if result.score > last.score {
-                         // partially overlapping, and new is better score. merge spans.
+                        // partially overlapping, and new is better score. merge spans.
                         last.start = last.start.min(result.start);
                         last.end = last.end.max(result.end);
                         last.score = result.score;
