@@ -2,13 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.152.0 - Unreleased
+## 0.153.0 - Unreleased
 
-Changes after `0.151.0`.
+Changes after `0.152.0`.
 
 ### Misc
 
-- Improve Codex provider parity (`784f648`)
+- Normalize apply patch input (`d8c6950`)
+
+## 0.152.0 - 2026-06-05
+
+### Misc
+
+- Improve Codex provider parity (`a008693`)
 
 ## 0.151.0 - 2026-06-05
 
@@ -86,9 +92,3 @@ Changes after `0.151.0`.
 ### Runtime
 
 - Harden Gemini tools and speed tests (`c8c43fd`)
-
-## 0.140.0 - 2026-05-31
-
-### CLI
-
-- Add external provider quota views (`c04696f`)
