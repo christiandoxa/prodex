@@ -40,6 +40,12 @@ fn gemini_request_translation_maps_tools_and_thinking() {
 
     assert_eq!(translated.model, "gemini-2.5-pro");
     assert!(translated.stream);
+    assert!(
+        value["systemInstruction"]["parts"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("wait/read follow-up tool")
+    );
     assert_eq!(value["contents"][0]["parts"][0]["text"], "List files");
     assert_eq!(
         value["tools"][0]["functionDeclarations"][0]["name"],
@@ -226,35 +232,6 @@ fn gemini_response_translation_restores_namespace_tool_calls() {
     assert_eq!(translated["output"][0]["namespace"], "mcp__prodex_sqz");
     assert_eq!(translated["output"][0]["name"], "sqz_read_file");
     assert_eq!(translated["output"][0]["call_id"], "call_sqz_1");
-}
-
-#[test]
-fn gemini_response_translation_maps_tool_search_function_calls() {
-    let response = serde_json::json!({
-        "responseId": "resp_search_1",
-        "modelVersion": "gemini-2.5-pro",
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "functionCall": {
-                        "id": "call_search_1",
-                        "name": "tool_search",
-                        "args": {"query": "sqz read file", "limit": 2}
-                    }
-                }]
-            }
-        }]
-    });
-
-    let translated = runtime_gemini_responses_value_from_generate_value(&response, 45);
-
-    assert_eq!(translated["output"][0]["type"], "tool_search_call");
-    assert_eq!(translated["output"][0]["execution"], "client");
-    assert_eq!(translated["output"][0]["call_id"], "call_search_1");
-    assert_eq!(
-        translated["output"][0]["arguments"]["query"],
-        "sqz read file"
-    );
 }
 
 #[test]

@@ -20,8 +20,10 @@ pub(super) use gemini_request::{
 };
 pub(super) use gemini_response::{
     runtime_gemini_chat_assistant_messages_from_generate_value,
+    runtime_gemini_custom_tool_call_item, runtime_gemini_custom_tool_input_from_arguments,
     runtime_gemini_normalized_response_value, runtime_gemini_responses_usage,
     runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_web_search_call_from_grounding,
 };
 
 #[derive(Clone)]
@@ -145,6 +147,10 @@ pub(super) fn runtime_gemini_project_id(auth: &RuntimeGeminiAuth) -> Option<&str
         RuntimeGeminiAuth::OAuth { project_id, .. } => project_id.as_deref(),
     }
 }
+
+#[cfg(test)]
+#[path = "gemini_rewrite_custom_tool_tests.rs"]
+mod gemini_rewrite_custom_tool_tests;
 
 #[cfg(test)]
 #[path = "gemini_rewrite_tests.rs"]

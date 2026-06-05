@@ -4,6 +4,8 @@ use super::*;
 mod provider_rewrite;
 #[path = "runtime_launch/routes.rs"]
 mod routes;
+#[path = "runtime_launch/run_command_strategy.rs"]
+mod run_command_strategy;
 #[path = "runtime_launch/super_runtime.rs"]
 mod super_runtime;
 
@@ -691,86 +693,6 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
         },
     )
     .expect("probe failure should still continue without quota gate");
-}
-
-#[test]
-fn run_command_strategy_keeps_smart_context_autopilot_disabled() {
-    let strategy = RunCommandStrategy::new(RunArgs {
-        profile: None,
-        auto_rotate: false,
-        no_auto_rotate: false,
-        skip_quota_check: false,
-        full_access: false,
-        base_url: None,
-        no_proxy: false,
-        dry_run: false,
-        codex_args: vec![OsString::from("exec"), OsString::from("hello")],
-    });
-
-    assert!(!strategy.runtime_request().smart_context_enabled);
-}
-
-#[test]
-fn run_command_strategy_carries_profile_v2_name() {
-    let strategy = RunCommandStrategy::new(RunArgs {
-        profile: None,
-        auto_rotate: false,
-        no_auto_rotate: false,
-        skip_quota_check: false,
-        full_access: false,
-        base_url: None,
-        no_proxy: false,
-        dry_run: false,
-        codex_args: vec![
-            OsString::from("exec"),
-            OsString::from("--profile"),
-            OsString::from("bedrock"),
-            OsString::from("hello"),
-        ],
-    });
-
-    assert_eq!(strategy.runtime_request().profile_v2_name, Some("bedrock"));
-}
-
-#[test]
-fn runtime_launch_parses_model_context_window_override() {
-    assert_eq!(
-        runtime_launch_cli_model_context_window_tokens(&[
-            OsString::from("-c"),
-            OsString::from("model_context_window=65536"),
-        ]),
-        Some(65_536)
-    );
-}
-
-#[test]
-fn runtime_launch_reads_profile_v2_model_context_window_overlay() {
-    let root = temp_dir("profile-v2-context-window");
-    fs::create_dir_all(&root).unwrap();
-    fs::write(root.join("config.toml"), "model_context_window = 8192\n").unwrap();
-    fs::write(
-        root.join("local.config.toml"),
-        "model_context_window = 65536\n",
-    )
-    .unwrap();
-
-    assert!(
-        codex_profile_v2_config_path(&root, "local")
-            .unwrap()
-            .exists()
-    );
-    assert_eq!(
-        runtime_launch_config_model_context_window_tokens(&root),
-        Some(8192)
-    );
-    assert_eq!(
-        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("local")),
-        Some(65_536)
-    );
-    assert_eq!(
-        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("missing")),
-        Some(8192)
-    );
 }
 
 fn write_state(root: &Path, state: AppState) {

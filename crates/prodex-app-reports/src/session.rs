@@ -10,6 +10,8 @@ pub struct SessionReport {
     pub updated_at: Option<String>,
     pub cwd: Option<String>,
     pub profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_thread_id: Option<String>,
@@ -27,6 +29,7 @@ impl SessionReport {
             updated_at: Some(format_epoch(modified_epoch)),
             cwd: None,
             profile: None,
+            model_provider: None,
             path: path.display().to_string(),
             parent_thread_id: None,
             updated_sort_key: modified_epoch,
@@ -36,6 +39,10 @@ impl SessionReport {
 
     pub fn set_profile(&mut self, profile: Option<String>) {
         self.profile = profile;
+    }
+
+    pub fn set_model_provider(&mut self, model_provider: Option<String>) {
+        self.model_provider = model_provider;
     }
 
     pub fn matches_current_dir(&self, current_dir: &Path) -> bool {
@@ -206,6 +213,18 @@ pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value
         ],
     ) {
         report.parent_thread_id = Some(parent_thread_id);
+    }
+
+    if let Some(model_provider) = first_string_value(
+        value,
+        &[
+            &["payload", "model_provider"],
+            &["payload", "metadata", "model_provider"],
+            &["model_provider"],
+            &["metadata", "model_provider"],
+        ],
+    ) {
+        report.model_provider = Some(model_provider);
     }
 }
 

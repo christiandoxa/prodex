@@ -13,21 +13,52 @@ struct RunCommandStrategy {
     model_provider_override: Option<String>,
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
+    auto_external_provider: Option<SuperExternalProvider>,
+    auto_external_provider_base_url: Option<String>,
 }
 
 impl RunCommandStrategy {
-    fn new(args: RunArgs) -> Self {
+    fn new(args: RunArgs) -> Result<Self> {
         let (mem_mode, codex_args) = runtime_mem_extract_mode_with_detail(&args.codex_args);
         let (dry_run_arg, codex_args) = extract_prodex_dry_run_flag(&codex_args);
-        let (codex_args, include_code_review) =
+        let (mut codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
-        let model_provider_override =
+        let mut model_provider_override =
             codex_cli_config_override_value(&codex_args, "model_provider");
         let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
-        let model_context_window_tokens =
+        let mut model_context_window_tokens =
             runtime_launch_cli_model_context_window_tokens(&codex_args);
+        let auto_external_provider = if model_provider_override.is_none() {
+            runtime_resume_external_provider_from_codex_args(&codex_args)?
+        } else {
+            None
+        };
+        let auto_external_provider_base_url = auto_external_provider.map(|provider| {
+            args.base_url
+                .as_deref()
+                .unwrap_or_else(|| provider.default_base_url())
+                .to_string()
+        });
+        if let Some(provider) = auto_external_provider {
+            let provider_args = super_external_provider_codex_args(
+                provider,
+                auto_external_provider_base_url
+                    .as_deref()
+                    .unwrap_or_else(|| provider.default_base_url()),
+                None,
+                None,
+                None,
+            );
+            let mut next_args = Vec::with_capacity(provider_args.len() + codex_args.len());
+            next_args.extend(provider_args);
+            next_args.extend(codex_args);
+            codex_args = next_args;
+            model_provider_override = Some(provider.model_provider_id().to_string());
+            model_context_window_tokens =
+                runtime_launch_cli_model_context_window_tokens(&codex_args);
+        }
         let dry_run = args.dry_run || dry_run_arg;
-        Self {
+        Ok(Self {
             args,
             codex_args,
             include_code_review,
@@ -36,8 +67,50 @@ impl RunCommandStrategy {
             model_provider_override,
             profile_v2_name,
             model_context_window_tokens,
-        }
+            auto_external_provider,
+            auto_external_provider_base_url,
+        })
     }
+}
+
+fn runtime_resume_external_provider_from_codex_args(
+    codex_args: &[OsString],
+) -> Result<Option<SuperExternalProvider>> {
+    let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(codex_args) else {
+        return Ok(None);
+    };
+    let paths = AppPaths::discover()?;
+    let state = AppState::load(&paths)?;
+    let reports =
+        prodex_session_store::collect_session_reports(&paths.shared_codex_root, None, &state)?;
+    let report = match prodex_session_store::resolve_session_report_by_id(&reports, session_id) {
+        Ok(report) => report,
+        Err(prodex_session_store::SessionResolveError::Missing { .. })
+        | Err(prodex_session_store::SessionResolveError::Ambiguous { .. }) => return Ok(None),
+    };
+    Ok(report
+        .model_provider
+        .as_deref()
+        .and_then(runtime_external_provider_from_model_provider_id))
+}
+
+fn runtime_external_provider_from_model_provider_id(
+    model_provider: &str,
+) -> Option<SuperExternalProvider> {
+    let model_provider = model_provider.trim();
+    if model_provider.eq_ignore_ascii_case(SUPER_GEMINI_PROVIDER_ID) {
+        return Some(SuperExternalProvider::Gemini);
+    }
+    if model_provider.eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID) {
+        return Some(SuperExternalProvider::Anthropic);
+    }
+    if model_provider.eq_ignore_ascii_case(SUPER_COPILOT_PROVIDER_ID) {
+        return Some(SuperExternalProvider::Copilot);
+    }
+    if model_provider.eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID) {
+        return Some(SuperExternalProvider::DeepSeek);
+    }
+    None
 }
 
 impl RuntimeLaunchStrategy for RunCommandStrategy {
@@ -46,16 +119,22 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             profile: self.args.profile.as_deref(),
             allow_auto_rotate: !self.args.no_auto_rotate,
             skip_quota_check: self.args.skip_quota_check,
-            base_url: self.args.base_url.as_deref(),
+            base_url: self
+                .args
+                .base_url
+                .as_deref()
+                .or(self.auto_external_provider_base_url.as_deref()),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: self.include_code_review,
-            smart_context_enabled: false,
+            smart_context_enabled: self.auto_external_provider.is_some(),
             presidio_redaction_enabled: false,
             model_context_window_tokens: self.model_context_window_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
             profile_v2_name: self.profile_v2_name.as_deref(),
-            external_provider: None,
+            external_provider: self
+                .auto_external_provider
+                .map(SuperExternalProvider::as_str),
             external_provider_api_key: None,
         }
     }
@@ -86,7 +165,7 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
         return handle_codex_command_server_direct_passthrough(args);
     }
 
-    let strategy = RunCommandStrategy::new(args);
+    let strategy = RunCommandStrategy::new(args)?;
     if strategy.dry_run {
         return print_runtime_launch_dry_run(
             "run",

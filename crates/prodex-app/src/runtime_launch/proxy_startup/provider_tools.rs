@@ -126,6 +126,9 @@ fn runtime_provider_tool_from_responses_tool(
     tool: &serde_json::Value,
 ) -> Option<serde_json::Value> {
     let object = tool.as_object()?;
+    if let Some(tool) = runtime_provider_custom_tool_from_responses_tool(object) {
+        return Some(tool);
+    }
     let function_object = runtime_provider_function_like_tool_object(object)?;
     let name = runtime_provider_json_string(function_object, &["name"])
         .filter(|name| !name.trim().is_empty())?;
@@ -151,6 +154,39 @@ fn runtime_provider_tool_from_responses_tool(
     Some(serde_json::json!({
         "type": "function",
         "function": function,
+    }))
+}
+
+fn runtime_provider_custom_tool_from_responses_tool(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Option<serde_json::Value> {
+    if object.get("type").and_then(serde_json::Value::as_str) != Some("custom") {
+        return None;
+    }
+    let name =
+        runtime_provider_json_string(object, &["name"]).filter(|name| !name.trim().is_empty())?;
+    let description = runtime_provider_json_string(object, &["description"])
+        .filter(|description| !description.trim().is_empty())
+        .unwrap_or_else(|| "Freeform custom tool input.".to_string());
+    Some(serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": format!(
+                "{description}\n\nCall this custom/freeform tool with the exact raw tool input in the `input` string field."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "Exact raw input for the custom/freeform tool."
+                    }
+                },
+                "required": ["input"],
+                "additionalProperties": false
+            }
+        }
     }))
 }
 
@@ -465,6 +501,32 @@ mod tests {
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["function"]["name"], "mcp__prodex_sqz__compress");
         assert_eq!(tools[0]["function"]["parameters"]["required"][0], "text");
+    }
+
+    #[test]
+    fn provider_tools_map_custom_freeform_tool_to_function() {
+        let value = serde_json::json!({
+            "tools": [{
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Use apply_patch to edit files.",
+                "format": {
+                    "type": "grammar",
+                    "syntax": "lark",
+                    "definition": "start: begin_patch hunk+ end_patch"
+                }
+            }]
+        });
+
+        let tools = runtime_provider_chat_tools_from_responses_request(&value).unwrap();
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["function"]["name"], "apply_patch");
+        assert_eq!(
+            tools[0]["function"]["parameters"]["properties"]["input"]["type"],
+            "string"
+        );
+        assert_eq!(tools[0]["function"]["parameters"]["required"][0], "input");
     }
 
     #[test]

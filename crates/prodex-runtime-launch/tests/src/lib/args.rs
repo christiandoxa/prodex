@@ -174,6 +174,31 @@ fn prepare_codex_launch_args_normalizes_resume_after_provider_config_overrides()
 }
 
 #[test]
+fn codex_resume_session_id_extracts_normalized_resume_target() {
+    let (args, _) = prepare_codex_launch_args(
+        &[
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-gemini\""),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        ],
+        false,
+    );
+
+    assert_eq!(
+        codex_resume_session_id(&args),
+        Some("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9")
+    );
+}
+
+#[test]
+fn codex_resume_session_id_ignores_resume_without_target() {
+    assert_eq!(
+        codex_resume_session_id(&[OsString::from("resume"), OsString::from("--last")]),
+        None
+    );
+}
+
+#[test]
 fn prepare_codex_launch_args_extracts_prodex_full_access_passthrough_marker() {
     let (args, include_code_review) = prepare_codex_launch_args(
         &[

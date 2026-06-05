@@ -89,6 +89,29 @@ fn gemini_oauth_pool_preserves_tool_output_affinity() {
 }
 
 #[test]
+fn gemini_oauth_pool_preserves_custom_tool_output_affinity() {
+    let pool = gemini_pool(&["alpha", "beta"]);
+    pool.state
+        .lock()
+        .unwrap()
+        .remember_bindings("beta", "resp_1", &["call_patch_1".to_string()]);
+    let body = serde_json::to_vec(&serde_json::json!({
+        "input": [{
+            "type": "custom_tool_call_output",
+            "call_id": "call_patch_1",
+            "output": "patched"
+        }]
+    }))
+    .unwrap();
+
+    let attempts = pool.select_attempts(&body, &[]).unwrap();
+
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].profile_name, "beta");
+    assert!(attempts[0].hard_affinity);
+}
+
+#[test]
 fn gemini_oauth_pool_skips_model_scoped_cooldown_for_fresh_requests() {
     let pool = gemini_pool(&["alpha", "beta"]);
     pool.state.lock().unwrap().remember_model_cooldown_until(
@@ -207,6 +230,31 @@ fn gemini_binding_recorder_reads_responses_body() {
     let (response_id, call_ids) = captured.lock().unwrap().clone().unwrap();
     assert_eq!(response_id, "resp_1");
     assert_eq!(call_ids, vec!["call_1"]);
+}
+
+#[test]
+fn gemini_binding_recorder_reads_custom_tool_calls() {
+    let captured = Arc::new(Mutex::new(None::<(String, Vec<String>)>));
+    let captured_for_recorder = Arc::clone(&captured);
+    let recorder: RuntimeGeminiBindingRecorder = Arc::new(move |response_id, call_ids| {
+        *captured_for_recorder.lock().unwrap() = Some((response_id, call_ids));
+    });
+    let body = serde_json::to_vec(&serde_json::json!({
+        "id": "resp_patch_1",
+        "output": [{
+            "type": "custom_tool_call",
+            "call_id": "call_patch_1",
+            "name": "apply_patch",
+            "input": "*** Begin Patch\n*** End Patch"
+        }]
+    }))
+    .unwrap();
+
+    runtime_gemini_remember_bindings_from_responses_body(Some(&recorder), &body);
+
+    let (response_id, call_ids) = captured.lock().unwrap().clone().unwrap();
+    assert_eq!(response_id, "resp_patch_1");
+    assert_eq!(call_ids, vec!["call_patch_1"]);
 }
 
 #[test]

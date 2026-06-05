@@ -36,6 +36,53 @@ fn gemini_sse_reader_maps_text_and_function_call_to_responses_events() {
 }
 
 #[test]
+fn gemini_sse_reader_maps_apply_patch_to_custom_tool_call() {
+    let patch = "*** Begin Patch\\n*** Add File: note.txt\\n+hello\\n*** End Patch";
+    let stream = format!(
+        "data: {{\"responseId\":\"resp_patch\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{{\"content\":{{\"parts\":[{{\"functionCall\":{{\"id\":\"call_patch\",\"name\":\"apply_patch\",\"args\":{{\"input\":\"{patch}\"}}}}}}]}},\"finishReason\":\"STOP\"}}]}}\n\n\
+data: [DONE]\n\n"
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"custom_tool_call\""));
+    assert!(output.contains("\"name\":\"apply_patch\""));
+    assert!(output.contains("\"call_id\":\"call_patch\""));
+    assert!(!output.contains("\"type\":\"function_call\",\"call_id\":\"call_patch\""));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_maps_grounding_metadata_to_web_search_call() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_grounded\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"grounded\"}]},\"groundingMetadata\":{\"webSearchQueries\":[\"prodex gemini\"],\"groundingChunks\":[{\"web\":{\"uri\":\"https://example.com/gemini\",\"title\":\"Gemini Source\"}}]}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"web_search_call\""));
+    assert!(output.contains("\"id\":\"ws_resp_grounded\""));
+    assert!(output.contains("\"queries\":[\"prodex gemini\"]"));
+    assert!(output.contains("\"url\":\"https://example.com/gemini\""));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
 fn gemini_sse_reader_maps_flat_mcp_call_to_namespace_function_call() {
     let conversations = conversation_store();
     let stream = concat!(

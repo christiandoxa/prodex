@@ -126,6 +126,7 @@ pub fn session_report_matches_query(report: &SessionReport, query: &str) -> bool
         report.thread_name.as_deref(),
         report.cwd.as_deref(),
         report.profile.as_deref(),
+        report.model_provider.as_deref(),
         Some(report.path.as_str()),
     ]
     .into_iter()

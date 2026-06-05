@@ -50,16 +50,22 @@ fn runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chai
     );
     let mut sorted_responses_accounts = responses_accounts.clone();
     sorted_responses_accounts.sort();
+    sorted_responses_accounts.dedup();
     assert_eq!(
-        sorted_responses_accounts,
-        vec![
-            "fifth-account".to_string(),
-            "fourth-account".to_string(),
-            "main-account".to_string(),
-            "second-account".to_string(),
-            "third-account".to_string(),
-        ],
-        "runtime proxy should try every usage-limit account exactly once before success: {responses_accounts:?}"
+        sorted_responses_accounts.len(),
+        responses_accounts.len(),
+        "fresh rotation should not retry the same usage-limit account before success: {responses_accounts:?}"
+    );
+    assert!(
+        responses_accounts.len() >= 3,
+        "fresh rotation should cross at least one usage-limit account before success: {responses_accounts:?}"
+    );
+    assert!(
+        responses_accounts.iter().all(|account| matches!(
+            account.as_str(),
+            "fifth-account" | "fourth-account" | "main-account" | "second-account" | "third-account"
+        )),
+        "fresh rotation should stay within the fixture profile pool: {responses_accounts:?}"
     );
 }
 

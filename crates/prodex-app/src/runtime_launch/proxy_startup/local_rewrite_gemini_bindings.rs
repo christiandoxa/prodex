@@ -12,7 +12,12 @@ pub(super) fn runtime_gemini_tool_output_call_ids_from_request(
         .filter(|object| {
             matches!(
                 object.get("type").and_then(serde_json::Value::as_str),
-                Some("function_call_output" | "mcp_call_output" | "mcp_tool_result")
+                Some(
+                    "function_call_output"
+                        | "custom_tool_call_output"
+                        | "mcp_call_output"
+                        | "mcp_tool_result",
+                )
             )
         })
         .filter_map(|object| {
@@ -61,7 +66,7 @@ fn runtime_gemini_tool_call_ids_from_responses_value(value: &serde_json::Value) 
             object
                 .get("type")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|kind| kind == "function_call")
+                .is_some_and(|kind| kind == "function_call" || kind == "custom_tool_call")
         })
         .filter_map(|object| {
             object

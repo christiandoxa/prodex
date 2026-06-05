@@ -211,7 +211,12 @@ fn runtime_deepseek_first_function_call_output_call_id(
         .find_map(|object| {
             matches!(
                 object.get("type").and_then(serde_json::Value::as_str),
-                Some("function_call_output" | "mcp_call_output" | "mcp_tool_result")
+                Some(
+                    "function_call_output"
+                        | "custom_tool_call_output"
+                        | "mcp_call_output"
+                        | "mcp_tool_result",
+                )
             )
             .then(|| runtime_deepseek_json_string(object, &["call_id", "tool_call_id", "id"]))
             .flatten()
@@ -331,7 +336,33 @@ fn runtime_deepseek_push_message_from_responses_item(
             }
             runtime_deepseek_push_chat_tool_call_message(object, call_id, messages);
         }
+        Some("custom_tool_call") => {
+            let call_id = runtime_deepseek_tool_call_id(object);
+            if replayed_tool_call_ids.contains(&call_id) {
+                return;
+            }
+            runtime_deepseek_push_chat_custom_tool_call_message(object, call_id, messages);
+        }
+        Some("local_shell_call") => {
+            let call_id = runtime_deepseek_tool_call_id(object);
+            if replayed_tool_call_ids.contains(&call_id) {
+                return;
+            }
+            runtime_deepseek_push_chat_local_shell_call_message(object, call_id, messages);
+        }
         Some("function_call_output") => {
+            let call_id = runtime_deepseek_tool_output_call_id(object);
+            if replayed_tool_output_call_ids.contains(&call_id) {
+                return;
+            }
+            let output = runtime_deepseek_tool_output_text(object);
+            messages.push(serde_json::json!({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": output,
+            }));
+        }
+        Some("custom_tool_call_output") => {
             let call_id = runtime_deepseek_tool_output_call_id(object);
             if replayed_tool_output_call_ids.contains(&call_id) {
                 return;
@@ -421,6 +452,75 @@ fn runtime_deepseek_push_chat_tool_call_message(
     }));
 }
 
+fn runtime_deepseek_push_chat_custom_tool_call_message(
+    object: &serde_json::Map<String, serde_json::Value>,
+    call_id: String,
+    messages: &mut Vec<serde_json::Value>,
+) {
+    let name = runtime_deepseek_tool_call_name(object);
+    let input = runtime_deepseek_json_string(object, &["input"])
+        .or_else(|| {
+            object
+                .get("input")
+                .map(runtime_deepseek_responses_content_text_value)
+        })
+        .unwrap_or_default();
+    let arguments = serde_json::to_string(&serde_json::json!({ "input": input }))
+        .unwrap_or_else(|_| "{\"input\":\"\"}".to_string());
+    runtime_deepseek_push_chat_tool_call_message_with_arguments(call_id, name, arguments, messages);
+}
+
+fn runtime_deepseek_push_chat_local_shell_call_message(
+    object: &serde_json::Map<String, serde_json::Value>,
+    call_id: String,
+    messages: &mut Vec<serde_json::Value>,
+) {
+    let command = object
+        .get("action")
+        .and_then(|action| action.get("command"))
+        .and_then(|command| {
+            command.as_array().map(|parts| {
+                parts
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+        })
+        .filter(|command| !command.trim().is_empty())
+        .or_else(|| runtime_deepseek_json_string(object, &["command"]))
+        .unwrap_or_default();
+    let arguments = serde_json::to_string(&serde_json::json!({ "command": command }))
+        .unwrap_or_else(|_| "{\"command\":\"\"}".to_string());
+    runtime_deepseek_push_chat_tool_call_message_with_arguments(
+        call_id,
+        "shell_command".to_string(),
+        arguments,
+        messages,
+    );
+}
+
+fn runtime_deepseek_push_chat_tool_call_message_with_arguments(
+    call_id: String,
+    name: String,
+    arguments: String,
+    messages: &mut Vec<serde_json::Value>,
+) {
+    let tool_call = serde_json::json!({
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": arguments,
+        },
+    });
+    messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [tool_call],
+    }));
+}
+
 fn runtime_deepseek_tool_call_thought_signature(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<String> {
@@ -496,6 +596,10 @@ fn runtime_deepseek_responses_content_text(value: Option<&serde_json::Value>) ->
         Some(other) => other.to_string(),
         None => String::new(),
     }
+}
+
+fn runtime_deepseek_responses_content_text_value(value: &serde_json::Value) -> String {
+    runtime_deepseek_responses_content_text(Some(value))
 }
 
 fn runtime_deepseek_responses_content_part_text(value: &serde_json::Value) -> Option<String> {

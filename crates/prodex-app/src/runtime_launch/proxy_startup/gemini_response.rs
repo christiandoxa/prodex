@@ -6,6 +6,8 @@ use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_nam
 use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
 use std::borrow::Cow;
 
+const GEMINI_CUSTOM_APPLY_PATCH_TOOL: &str = "apply_patch";
+
 pub(in super::super) fn runtime_gemini_normalized_response_value(
     value: &serde_json::Value,
 ) -> Cow<'_, serde_json::Value> {
@@ -175,6 +177,10 @@ pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
             );
         }
     }
+    if let Some(grounding_call) = runtime_gemini_web_search_call_from_grounding(value, &response_id)
+    {
+        output.push(grounding_call);
+    }
     let mut response = serde_json::json!({
         "id": response_id,
         "object": "response",
@@ -189,6 +195,54 @@ pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
         response["usage"] = usage;
     }
     response
+}
+
+pub(in super::super) fn runtime_gemini_web_search_call_from_grounding(
+    value: &serde_json::Value,
+    response_id: &str,
+) -> Option<serde_json::Value> {
+    let candidate = value.get("candidates")?.as_array()?.first()?;
+    let metadata = candidate.get("groundingMetadata")?;
+
+    let mut sources = Vec::new();
+    if let Some(chunks) = metadata.get("groundingChunks").and_then(|v| v.as_array()) {
+        for chunk in chunks {
+            if let Some(web) = chunk.get("web") {
+                let Some(uri) = web.get("uri").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let mut source = serde_json::json!({
+                    "type": "url",
+                    "url": uri,
+                });
+                if let Some(title) = web.get("title").and_then(|v| v.as_str()) {
+                    source["title"] = serde_json::Value::String(title.to_string());
+                }
+                sources.push(source);
+            }
+        }
+    }
+
+    let queries = metadata
+        .get("webSearchQueries")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    if sources.is_empty() && queries.is_empty() {
+        return None;
+    }
+
+    Some(serde_json::json!({
+        "type": "web_search_call",
+        "id": format!("ws_{response_id}"),
+        "status": "completed",
+        "action": {
+            "type": "search",
+            "queries": queries,
+            "sources": sources,
+        },
+    }))
 }
 
 fn runtime_gemini_response_id(value: &serde_json::Value, request_id: u64) -> String {
@@ -232,6 +286,9 @@ fn runtime_gemini_responses_tool_call_item(
             "arguments": args_value,
         });
     }
+    if let Some(item) = runtime_gemini_custom_tool_call_item(&call_id, flat_name, &args_value) {
+        return item;
+    }
     let args = serde_json::to_string(&args_value).unwrap_or_else(|_| "{}".to_string());
     let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(flat_name);
     let mut item = serde_json::json!({
@@ -249,6 +306,40 @@ fn runtime_gemini_responses_tool_call_item(
         item["gemini_thought_signature"] = serde_json::Value::String(signature);
     }
     item
+}
+
+pub(in super::super) fn runtime_gemini_custom_tool_call_item(
+    call_id: &str,
+    flat_name: &str,
+    args_value: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    if flat_name != GEMINI_CUSTOM_APPLY_PATCH_TOOL {
+        return None;
+    }
+    Some(serde_json::json!({
+        "type": "custom_tool_call",
+        "call_id": call_id,
+        "name": flat_name,
+        "input": runtime_gemini_custom_tool_input_from_args_value(args_value),
+    }))
+}
+
+pub(in super::super) fn runtime_gemini_custom_tool_input_from_arguments(arguments: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .map(|value| runtime_gemini_custom_tool_input_from_args_value(&value))
+        .unwrap_or_else(|_| arguments.to_string())
+}
+
+fn runtime_gemini_custom_tool_input_from_args_value(args_value: &serde_json::Value) -> String {
+    match args_value {
+        serde_json::Value::String(input) => input.clone(),
+        serde_json::Value::Object(object) => ["input", "patch", "text", "content"]
+            .iter()
+            .find_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
+            .map(str::to_string)
+            .unwrap_or_else(|| args_value.to_string()),
+        _ => args_value.to_string(),
+    }
 }
 
 fn runtime_gemini_function_call_id(

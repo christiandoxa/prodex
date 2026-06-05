@@ -2,7 +2,10 @@ use super::super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_created_at,
     runtime_deepseek_rtk_wrapped_tool_arguments, runtime_deepseek_store_conversation,
 };
-use super::super::gemini_rewrite::runtime_gemini_responses_usage;
+use super::super::gemini_rewrite::{
+    runtime_gemini_custom_tool_call_item, runtime_gemini_custom_tool_input_from_arguments,
+    runtime_gemini_responses_usage, runtime_gemini_web_search_call_from_grounding,
+};
 use super::super::gemini_thought_signatures::runtime_gemini_thought_signature;
 use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use super::RuntimeGeminiBindingRecorder;
@@ -24,6 +27,7 @@ pub(super) struct RuntimeGeminiSseState {
     reasoning_content: String,
     tool_calls: BTreeMap<usize, RuntimeGeminiToolCall>,
     usage: Option<serde_json::Value>,
+    web_search_call: Option<serde_json::Value>,
     conversation_messages: Vec<serde_json::Value>,
     conversations: RuntimeDeepSeekConversationStore,
     binding_recorder: Option<RuntimeGeminiBindingRecorder>,
@@ -61,6 +65,7 @@ impl RuntimeGeminiSseState {
             reasoning_content: String::new(),
             tool_calls: BTreeMap::new(),
             usage: None,
+            web_search_call: None,
             conversation_messages,
             conversations,
             binding_recorder,
@@ -108,6 +113,9 @@ impl RuntimeGeminiSseState {
                 }),
             ));
             self.created = true;
+        }
+        if let Some(event) = self.observe_grounding(value) {
+            events.push(event);
         }
         let Some(parts) = value
             .get("candidates")
@@ -171,6 +179,23 @@ impl RuntimeGeminiSseState {
         events
     }
 
+    fn observe_grounding(&mut self, value: &serde_json::Value) -> Option<String> {
+        if self.web_search_call.is_some() {
+            return None;
+        }
+        let item = runtime_gemini_web_search_call_from_grounding(value, &self.response_id)?;
+        self.web_search_call = Some(item.clone());
+        let sequence_number = self.next_sequence_number();
+        Some(self.event(
+            "response.output_item.done",
+            serde_json::json!({
+                "type": "response.output_item.done",
+                "sequence_number": sequence_number,
+                "item": item,
+            }),
+        ))
+    }
+
     fn observe_function_call(
         &mut self,
         value: &serde_json::Value,
@@ -208,7 +233,7 @@ impl RuntimeGeminiSseState {
             }
             (call_id, should_add)
         };
-        if should_add && name != "tool_search" {
+        if should_add && name != "tool_search" && name != "apply_patch" {
             let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&name);
             let mut item = serde_json::json!({
                 "type": "function_call",
@@ -248,8 +273,11 @@ impl RuntimeGeminiSseState {
                     .name
                     .clone()
                     .unwrap_or_else(|| "tool_call".to_string());
-                let arguments =
-                    runtime_deepseek_rtk_wrapped_tool_arguments(&name, &tool_call.arguments);
+                let arguments = if name == "apply_patch" {
+                    tool_call.arguments.clone()
+                } else {
+                    runtime_deepseek_rtk_wrapped_tool_arguments(&name, &tool_call.arguments)
+                };
                 tool_call.arguments = arguments.clone();
                 Some((call_id, name, arguments))
             })
@@ -270,6 +298,23 @@ impl RuntimeGeminiSseState {
                             "call_id": call_id,
                             "execution": "client",
                             "arguments": arguments,
+                        },
+                    }),
+                ));
+                continue;
+            }
+            if name == "apply_patch" {
+                let sequence_number = self.next_sequence_number();
+                events.push(self.event(
+                    "response.output_item.done",
+                    serde_json::json!({
+                        "type": "response.output_item.done",
+                        "sequence_number": sequence_number,
+                        "item": {
+                            "type": "custom_tool_call",
+                            "call_id": call_id,
+                            "name": name,
+                            "input": runtime_gemini_custom_tool_input_from_arguments(&arguments),
                         },
                     }),
                 ));
@@ -493,6 +538,9 @@ impl RuntimeGeminiSseState {
 
     fn output_items(&self) -> Vec<serde_json::Value> {
         let mut output = Vec::new();
+        if let Some(item) = self.web_search_call.clone() {
+            output.push(item);
+        }
         if !self.output_text.is_empty() {
             output.push(serde_json::json!({
                 "type": "message",
@@ -521,6 +569,13 @@ impl RuntimeGeminiSseState {
                     "execution": "client",
                     "arguments": arguments,
                 }));
+                continue;
+            }
+            if let Ok(args_value) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
+                && let Some(item) =
+                    runtime_gemini_custom_tool_call_item(&call_id, &flat_name, &args_value)
+            {
+                output.push(item);
                 continue;
             }
             let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&flat_name);

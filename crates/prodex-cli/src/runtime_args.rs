@@ -297,7 +297,7 @@ pub const SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
 pub const SUPER_GEMINI_PROVIDER_ID: &str = "prodex-gemini";
 const SUPER_GEMINI_PROVIDER_NAME: &str = "Google Gemini";
 pub const SUPER_GEMINI_DEFAULT_MODEL: &str = "gemini-2.5-pro";
-const SUPER_GEMINI_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
+pub const SUPER_GEMINI_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 pub const SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
 pub const SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
 pub const SUPER_ANTHROPIC_PROVIDER_ID: &str = "prodex-anthropic";
@@ -358,7 +358,7 @@ impl SuperExternalProvider {
         }
     }
 
-    fn default_base_url(self) -> &'static str {
+    pub fn default_base_url(self) -> &'static str {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_BASE_URL,
             Self::Copilot => SUPER_COPILOT_DEFAULT_BASE_URL,
@@ -457,7 +457,7 @@ fn super_local_provider_codex_args(
     args
 }
 
-fn super_external_provider_codex_args(
+pub fn super_external_provider_codex_args(
     provider: SuperExternalProvider,
     base_url: &str,
     model: Option<&str>,

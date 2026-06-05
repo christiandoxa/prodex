@@ -52,6 +52,17 @@ pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
     normalized
 }
 
+pub fn codex_resume_session_id(codex_args: &[OsString]) -> Option<&str> {
+    let index = first_codex_positional_arg_index(codex_args)?;
+    if codex_args.get(index)?.to_str()? != "resume" {
+        return None;
+    }
+    codex_args[(index + 1)..]
+        .iter()
+        .filter_map(|arg| arg.to_str())
+        .find(|arg| !arg.starts_with('-'))
+}
+
 fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
     let mut index = 0;
     while index < codex_args.len() {

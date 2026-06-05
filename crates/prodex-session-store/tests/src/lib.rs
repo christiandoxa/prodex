@@ -10,9 +10,9 @@ fn session_reports_parse_codex_jsonl_metadata() {
     let cwd = root.join("workspace");
     fs::create_dir_all(&cwd).expect("workspace should be created");
     fs::write(
-            sessions.join("session-a.jsonl"),
-            format!(
-                "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"sess-a\",\"thread_name\":\"Issue triage\",\"cwd\":\"{}\"}}}}\n{{\"timestamp\":\"2026-04-29T12:30:00Z\",\"type\":\"event\"}}\n",
+        sessions.join("session-a.jsonl"),
+        format!(
+                "{{\"timestamp\":\"2026-04-29T12:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"sess-a\",\"thread_name\":\"Issue triage\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n{{\"timestamp\":\"2026-04-29T12:30:00Z\",\"type\":\"event\"}}\n",
                 cwd.display()
             ),
         )
@@ -32,6 +32,7 @@ fn session_reports_parse_codex_jsonl_metadata() {
         reports[0].updated_at.as_deref(),
         Some("2026-04-29T12:30:00Z")
     );
+    assert_eq!(reports[0].model_provider.as_deref(), Some("prodex-gemini"));
 
     let _ = fs::remove_dir_all(root);
 }

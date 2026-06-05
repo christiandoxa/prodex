@@ -7,6 +7,13 @@ use anyhow::{Context, Result};
 use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 
+const PRODEX_GEMINI_CODEX_PARITY_INSTRUCTION: &str = "\
+You are running inside Codex through the Prodex Gemini bridge. Match Codex tool workflows exactly: \
+use available edit/apply_patch tools to change files instead of only describing edits; use shell/process tools to run commands; \
+when a command returns a running session id, call the wait/read follow-up tool until the process exits or yields the needed output; \
+when explaining file changes, use unified diff format only as a human-readable summary, not as a substitute for applying edits; \
+use available web_search, tool_search, and MCP tools when the task calls for them.";
+
 pub(in super::super) fn runtime_gemini_generate_request_body(
     body: &[u8],
     conversations: &RuntimeDeepSeekConversationStore,
@@ -263,13 +270,22 @@ fn runtime_gemini_function_response_part(
 
 fn runtime_gemini_system_instruction(chat: &serde_json::Value) -> Option<serde_json::Value> {
     let messages = chat.get("messages")?.as_array()?;
-    let text = messages
+    let mut system_text = messages
         .iter()
         .filter(|message| message.get("role").and_then(serde_json::Value::as_str) == Some("system"))
         .filter_map(chat_message_text)
         .collect::<Vec<_>>()
         .join("\n\n");
-    (!text.trim().is_empty()).then(|| serde_json::json!({ "parts": [{ "text": text }] }))
+
+    if !system_text.is_empty() {
+        system_text.push_str("\n\n");
+        system_text.push_str(PRODEX_GEMINI_CODEX_PARITY_INSTRUCTION);
+    } else {
+        system_text = PRODEX_GEMINI_CODEX_PARITY_INSTRUCTION.to_string();
+    }
+
+    (!system_text.trim().is_empty())
+        .then(|| serde_json::json!({ "parts": [{ "text": system_text }] }))
 }
 
 fn runtime_gemini_tools_from_requests(
