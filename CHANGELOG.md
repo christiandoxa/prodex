@@ -2,9 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.153.0 - Unreleased
+## 0.154.0 - 2026-06-05
 
-Changes after `0.152.0`.
+### Misc
+
+- Add multi-language support (`6ab3073`)
+
+## 0.153.0 - 2026-06-05
 
 ### Misc
 
@@ -72,23 +76,3 @@ Changes after `0.152.0`.
 
 - Filter customtools models from OAuth code-assist fallback chain (`9615363`)
 - Stabilize provider launch for Codex 0.136 (`d6cc37f`)
-
-## 0.142.0 - 2026-06-02
-
-### CLI
-
-- Onboard code assist profiles (`cce5f90`)
-
-### Deps
-
-- Bump rpassword to 7.5.4 (`f3662fb`)
-
-### Misc
-
-- Remove unused test import (`4032ec3`)
-
-## 0.141.0 - 2026-06-01
-
-### Runtime
-
-- Harden Gemini tools and speed tests (`c8c43fd`)
