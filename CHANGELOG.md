@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Update prodex-cli dependency version (`00f81ff`)
 - Add multi-language support (`6ab3073`)
 
 ## 0.153.0 - 2026-06-05
