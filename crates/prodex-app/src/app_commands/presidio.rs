@@ -254,8 +254,8 @@ fn handle_presidio_redact(args: PresidioRedactArgs) -> Result<()> {
     if !args.languages.is_empty() {
         languages_to_use = normalize_languages(args.languages);
     }
-    if args.language.is_some() {
-        languages_to_use = normalize_languages(vec![args.language.unwrap()]);
+    if let Some(language) = args.language {
+        languages_to_use = normalize_languages(vec![language]);
         language_mode_to_use = PresidioLanguageMode::Fixed;
     }
     // If language_mode is provided via CLI, it overrides the config
@@ -560,46 +560,27 @@ fn merge_presidio_analyzer_results(
 
             // If there's an overlap, and current result has higher score or longer span
             let overlaps = result.start < last.end && result.end > last.start;
-            if overlaps {
-                if result.score > last.score
+            if overlaps
+                && (result.score > last.score
                     || (result.score == last.score
-                        && (result.end - result.start) > (last.end - last.start))
+                        && (result.end - result.start) > (last.end - last.start)))
+            {
+                // If the new result completely subsumes the old one, replace.
+                // If the old one subsumes the new one, skip the new one.
+                if (result.start >= last.start && result.end <= last.end)
+                    || (last.start >= result.start && last.end <= result.end)
                 {
-                    // This logic is tricky. For overlapping, we could:
-                    // 1. Keep the higher score, merging spans.
-                    // 2. Keep the higher score, replacing the old.
-                    // 3. Prioritize non-overlapping entities.
-                    // For now, let's keep it simple: if there's an overlap and the current result
-                    // has a strictly higher score, replace the last one.
-                    // If scores are equal, prefer longer span.
-                    // This needs more thought for a robust merging strategy for different entity types.
-                    // For this task, assuming simple replacement for now.
-                    // A more advanced merge would be context-aware.
-                    // For now, if overlap and current is "better", replace. Otherwise, add.
-
-                    // More robust merge logic for overlapping entities:
-                    // If the new result completely subsumes the old one, replace.
-                    // If the old one subsumes the new one, skip the new one.
-                    // If they partially overlap, it gets complicated. For MVP, we'll try to
-                    // simply replace if the new score is better, or extend the span if needed.
-                    if (result.start >= last.start && result.end <= last.end) || // new is contained in old
-                       (last.start >= result.start && last.end <= result.end)
-                    {
-                        // old is contained in new
-                        // if contained, prefer higher score. if scores equal, keep current merged
-                        if result.score > last.score {
-                            *last = result;
-                        }
-                        continue;
-                    } else if result.score > last.score {
-                        // partially overlapping, and new is better score. merge spans.
-                        last.start = last.start.min(result.start);
-                        last.end = last.end.max(result.end);
-                        last.score = result.score;
-                        last.entity_type = result.entity_type; // keep new entity type
-                        last.language = result.language;
-                        continue;
+                    if result.score > last.score {
+                        *last = result;
                     }
+                    continue;
+                } else if result.score > last.score {
+                    last.start = last.start.min(result.start);
+                    last.end = last.end.max(result.end);
+                    last.score = result.score;
+                    last.entity_type = result.entity_type;
+                    last.language = result.language;
+                    continue;
                 }
             }
         }

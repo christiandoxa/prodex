@@ -40,12 +40,12 @@ fn gemini_request_translation_maps_tools_and_thinking() {
 
     assert_eq!(translated.model, "gemini-2.5-pro");
     assert!(translated.stream);
-    assert!(
-        value["systemInstruction"]["parts"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("wait/read follow-up tool")
-    );
+    let system_text = value["systemInstruction"]["parts"][0]["text"]
+        .as_str()
+        .unwrap();
+    assert!(system_text.contains("wait/read follow-up tool"));
+    assert!(system_text.contains("gh run view"));
+    assert!(system_text.contains("CI success"));
     assert_eq!(value["contents"][0]["parts"][0]["text"], "List files");
     assert_eq!(
         value["tools"][0]["functionDeclarations"][0]["name"],

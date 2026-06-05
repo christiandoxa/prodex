@@ -12,7 +12,10 @@ You are running inside Codex through the Prodex Gemini bridge. Match Codex tool 
 use available edit/apply_patch tools to change files instead of only describing edits; use shell/process tools to run commands; \
 when a command returns a running session id, call the wait/read follow-up tool until the process exits or yields the needed output; \
 when explaining file changes, use unified diff format only as a human-readable summary, not as a substitute for applying edits; \
-use available web_search, tool_search, and MCP tools when the task calls for them.";
+use available web_search, tool_search, and MCP tools when the task calls for them. \
+If the user asks you to monitor or fix GitHub Actions, use the local gh CLI with saved credentials when available; \
+gh run watch is only a status view, so on failure inspect logs with gh run view <run-id> --log-failed, gh run view <run-id> --json jobs, or gh run view --job <job-id> --log. \
+If a publish workflow fails while waiting for CI success, read that step log, follow the target CI run URL/SHA, inspect the failed CI job logs, and reproduce the exact failing local command before declaring blocked.";
 
 pub(in super::super) fn runtime_gemini_generate_request_body(
     body: &[u8],

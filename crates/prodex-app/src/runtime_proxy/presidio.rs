@@ -340,26 +340,25 @@ fn merge_presidio_analyzer_results(
             }
 
             let overlaps = result.start < last.end && result.end > last.start;
-            if overlaps {
-                if result.score > last.score
+            if overlaps
+                && (result.score > last.score
                     || (result.score == last.score
-                        && (result.end - result.start) > (last.end - last.start))
+                        && (result.end - result.start) > (last.end - last.start)))
+            {
+                if (result.start >= last.start && result.end <= last.end)
+                    || (last.start >= result.start && last.end <= result.end)
                 {
-                    if (result.start >= last.start && result.end <= last.end)
-                        || (last.start >= result.start && last.end <= result.end)
-                    {
-                        if result.score > last.score {
-                            *last = result;
-                        }
-                        continue;
-                    } else if result.score > last.score {
-                        last.start = last.start.min(result.start);
-                        last.end = last.end.max(result.end);
-                        last.score = result.score;
-                        last.entity_type = result.entity_type;
-                        last.language = result.language;
-                        continue;
+                    if result.score > last.score {
+                        *last = result;
                     }
+                    continue;
+                } else if result.score > last.score {
+                    last.start = last.start.min(result.start);
+                    last.end = last.end.max(result.end);
+                    last.score = result.score;
+                    last.entity_type = result.entity_type;
+                    last.language = result.language;
+                    continue;
                 }
             }
         }
