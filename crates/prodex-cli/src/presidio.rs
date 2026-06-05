@@ -36,9 +36,17 @@ pub struct PresidioRedactArgs {
     /// Text to redact directly.
     #[arg(long, value_name = "TEXT", conflicts_with = "path")]
     pub text: Option<String>,
-    /// Analyzer language code.
-    #[arg(long, default_value = "en", value_name = "LANG")]
-    pub language: String,
+    /// Analyzer language code (for 'fixed' mode, or a fallback for 'auto').
+    /// Deprecated: use --languages instead.
+    #[arg(long, value_name = "LANG", conflicts_with = "languages")]
+    pub language: Option<String>,
+    /// Comma-separated list of analyzer language codes (e.g., "en,id").
+    /// If omitted, defaults to the config file or "en".
+    #[arg(long, value_name = "LANGS", value_delimiter = ',')]
+    pub languages: Vec<String>,
+    /// Language detection mode: fixed (default), auto, multi.
+    #[arg(long, value_enum, value_name = "MODE", default_value_t = PresidioLanguageMode::Fixed)]
+    pub language_mode: PresidioLanguageMode,
     /// Override the Presidio Analyzer service URL.
     #[arg(long, value_name = "URL")]
     pub analyzer_url: Option<String>,
@@ -58,9 +66,17 @@ pub struct PresidioEnableArgs {
     /// Presidio Anonymizer service URL.
     #[arg(long, default_value = "http://localhost:5001", value_name = "URL")]
     pub anonymizer_url: String,
-    /// Default Analyzer language code.
-    #[arg(long, default_value = "en", value_name = "LANG")]
-    pub language: String,
+    /// Default Analyzer language code (for 'fixed' mode, or a fallback for 'auto').
+    /// Deprecated: use --languages instead.
+    #[arg(long, value_name = "LANG", conflicts_with = "languages")]
+    pub language: Option<String>,
+    /// Comma-separated list of analyzer language codes (e.g., "en,id").
+    /// If omitted, defaults to "en".
+    #[arg(long, value_name = "LANGS", value_delimiter = ',')]
+    pub languages: Vec<String>,
+    /// Language detection mode: fixed (default), auto, multi.
+    #[arg(long, value_enum, value_name = "MODE", default_value_t = PresidioLanguageMode::Fixed)]
+    pub language_mode: PresidioLanguageMode,
     /// Runtime failure behavior for future prompt-redaction hooks.
     #[arg(long, default_value = "open", value_enum)]
     pub fail_mode: PresidioFailMode,
@@ -77,6 +93,25 @@ impl PresidioFailMode {
         match self {
             Self::Open => "open",
             Self::Closed => "closed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PresidioLanguageMode {
+    #[default]
+    Fixed,
+    Auto,
+    Multi,
+}
+
+impl PresidioLanguageMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::Auto => "auto",
+            Self::Multi => "multi",
         }
     }
 }

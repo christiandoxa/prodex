@@ -364,6 +364,18 @@ Verify with Prodex:
 prodex presidio doctor
 prodex presidio redact --text "My name is John Smith and my phone is 212-555-1234."
 prodex presidio enable
+prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
+prodex presidio enable --language-mode auto --languages en,id
+prodex presidio status
+prodex presidio doctor --json
+prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
+prodex presidio enable --language-mode auto --languages en,id
+prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
+prodex presidio enable --language-mode auto --languages en,id
+prodex presidio status
+prodex presidio doctor --json
+prodex presidio status
+prodex presidio doctor --json
 ```
 
 When you answer `y` to the `prodex super` / `prodex s` Presidio prompt or pass `--presidio`, Super starts a dedicated runtime proxy that redacts UTF-8 HTTP request bodies and WebSocket text frames through the local Presidio Analyzer and Anonymizer before forwarding them upstream. This is equivalent to adding the `presidio` prefix to the Super stack. Use `--no-presidio` to skip the prompt and keep redaction disabled. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.

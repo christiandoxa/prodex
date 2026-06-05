@@ -1471,7 +1471,9 @@ name = "prodex-cli"
 version = "0.153.0"
 dependencies = [
  "clap",
+ "prodex-shared-types",
  "reqwest",
+ "serde",
 ]
 
 [[package]]

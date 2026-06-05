@@ -1,5 +1,6 @@
 use super::await_runtime_proxy_async_task;
 use crate::RuntimePresidioRedactionConfig;
+use crate::presidio_runtime::PresidioLanguageMode;
 use crate::runtime_core_shared::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use crate::runtime_proxy_log;
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
@@ -23,6 +24,8 @@ struct PresidioAnalyzerResult {
     end: usize,
     score: f64,
     entity_type: String,
+    #[serde(default)]
+    language: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -188,28 +191,44 @@ async fn runtime_presidio_redact_body(
         .timeout(PRESIDIO_HTTP_TIMEOUT)
         .build()
         .context("failed to build Presidio runtime HTTP client")?;
-    let analyzer_results = client
-        .post(presidio_endpoint(&config.analyzer_url, "analyze"))
-        .json(&serde_json::json!({
-            "text": text,
-            "language": config.language,
-        }))
-        .send()
-        .await
-        .context("failed to call Presidio Analyzer")?
-        .error_for_status()
-        .context("Presidio Analyzer returned an error")?
-        .json::<Vec<PresidioAnalyzerResult>>()
-        .await
-        .context("failed to parse Presidio Analyzer response")?;
-    if analyzer_results.is_empty() {
+
+    let languages = config.languages;
+    let language_mode = config.language_mode;
+
+    let mut all_analyzer_results = Vec::new();
+
+    match language_mode {
+        PresidioLanguageMode::Fixed => {
+            let results = presidio_analyze_async(&client, &config.analyzer_url, &text, &languages[0]).await?;
+            all_analyzer_results = results;
+        }
+        PresidioLanguageMode::Auto => {
+            let detected_lang = detect_presidio_language(&text, &languages)
+                .unwrap_or_else(|| languages[0].clone());
+            let results = presidio_analyze_async(&client, &config.analyzer_url, &text, &detected_lang).await?;
+            all_analyzer_results = results;
+        }
+        PresidioLanguageMode::Multi => {
+            for lang in &languages {
+                let results = presidio_analyze_async(&client, &config.analyzer_url, &text, lang).await?;
+                all_analyzer_results.extend(results.into_iter().map(|mut r| {
+                    r.language = lang.clone();
+                    r
+                }));
+            }
+            all_analyzer_results = merge_presidio_analyzer_results(all_analyzer_results);
+        }
+    }
+
+    if all_analyzer_results.is_empty() {
         return Ok(text.into_bytes());
     }
+
     let anonymized = client
         .post(presidio_endpoint(&config.anonymizer_url, "anonymize"))
         .json(&serde_json::json!({
             "text": text,
-            "analyzer_results": analyzer_results,
+            "analyzer_results": all_analyzer_results,
         }))
         .send()
         .await
@@ -222,13 +241,112 @@ async fn runtime_presidio_redact_body(
     Ok(anonymized.text.into_bytes())
 }
 
+async fn presidio_analyze_async(
+    client: &reqwest::Client,
+    analyzer_url: &str,
+    text: &str,
+    language: &str,
+) -> Result<Vec<PresidioAnalyzerResult>> {
+    let results = client
+        .post(presidio_endpoint(analyzer_url, "analyze"))
+        .json(&serde_json::json!({
+            "text": text,
+            "language": language,
+        }))
+        .send()
+        .await
+        .context("failed to call Presidio Analyzer")?
+        .error_for_status()
+        .context("Presidio Analyzer returned an error")?
+        .json::<Vec<PresidioAnalyzerResult>>()
+        .await
+        .context("failed to parse Presidio Analyzer response")?;
+    Ok(results)
+}
+
 fn presidio_endpoint(base_url: &str, path: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
 }
 
+fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String> {
+    if candidates.len() == 1 {
+        return Some(candidates[0].clone());
+    }
+
+    let id_keywords = ["yang", "dan", "di", "ke", "dari", "saya", "kami", "anda", "nomor", "nama", "alamat", "tanggal", "lahir", "dengan", "untuk"];
+    let en_keywords = ["the", "and", "to", "from", "my", "name", "phone", "email", "address", "with", "for", "birth"];
+
+    let mut id_score = 0;
+    let mut en_score = 0;
+
+    let lower_text = text.to_lowercase();
+
+    for keyword in id_keywords.iter() {
+        if lower_text.contains(keyword) {
+            id_score += 1;
+        }
+    }
+    for keyword in en_keywords.iter() {
+        if lower_text.contains(keyword) {
+            en_score += 1;
+        }
+    }
+
+    if id_score > en_score && candidates.contains(&"id".to_string()) {
+        Some("id".to_string())
+    } else if en_score > id_score && candidates.contains(&"en".to_string()) {
+        Some("en".to_string())
+    } else {
+        candidates.first().cloned()
+    }
+}
+
+fn merge_presidio_analyzer_results(mut results: Vec<PresidioAnalyzerResult>) -> Vec<PresidioAnalyzerResult> {
+    results.sort_by(|a, b| {
+        a.start.cmp(&b.start)
+            .then_with(|| a.end.cmp(&b.end))
+            .then_with(|| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| b.entity_type.cmp(&a.entity_type))
+    });
+
+    let mut merged: Vec<PresidioAnalyzerResult> = Vec::new();
+    for result in results {
+        if let Some(last) = merged.last_mut() {
+            if last.start == result.start && last.end == result.end && last.entity_type == result.entity_type {
+                if result.score > last.score {
+                    *last = result;
+                }
+                continue;
+            }
+
+            let overlaps = result.start < last.end && result.end > last.start;
+            if overlaps {
+                if result.score > last.score || (result.score == last.score && (result.end - result.start) > (last.end - last.start)) {
+                    if (result.start >= last.start && result.end <= last.end) || 
+                       (last.start >= result.start && last.end <= result.end) {
+                        if result.score > last.score {
+                            *last = result;
+                        }
+                        continue;
+                    } else if result.score > last.score {
+                        last.start = last.start.min(result.start);
+                        last.end = last.end.max(result.end);
+                        last.score = result.score;
+                        last.entity_type = result.entity_type;
+                        last.language = result.language;
+                        continue;
+                    }
+                }
+            }
+        }
+        merged.push(result);
+    }
+    merged
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RuntimePresidioRedactionConfig, runtime_presidio_redact_body};
+    use super::{RuntimePresidioRedactionConfig, runtime_presidio_redact_body, PresidioLanguageMode};
     use std::thread;
     use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
     use tokio::runtime::Builder as TokioRuntimeBuilder;
@@ -268,7 +386,8 @@ mod tests {
         let config = RuntimePresidioRedactionConfig {
             analyzer_url,
             anonymizer_url,
-            language: "en".to_string(),
+            languages: vec!["en".to_string()],
+            language_mode: PresidioLanguageMode::Fixed,
             fail_closed: true,
         };
         let runtime = TokioRuntimeBuilder::new_current_thread()
