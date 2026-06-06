@@ -1,0 +1,12 @@
+[package]
+name = "prodex-runtime-gemini"
+version.workspace = true
+edition.workspace = true
+description = "Side-effect-free Gemini runtime metadata for the prodex CLI"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_runtime_gemini"
+path = "src/lib.rs"
+doctest = false

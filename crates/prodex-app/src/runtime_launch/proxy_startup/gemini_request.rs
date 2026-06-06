@@ -5,7 +5,7 @@ use super::RuntimeGeminiTranslatedRequest;
 use super::gemini_schema::runtime_gemini_sanitize_function_schema;
 use anyhow::{Context, Result};
 use base64::Engine;
-use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
+use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
@@ -88,7 +88,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
     let model = chat_value
         .get("model")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or(SUPER_GEMINI_DEFAULT_MODEL)
+        .unwrap_or(GEMINI_DEFAULT_MODEL)
         .to_string();
     let stream = chat_value
         .get("stream")
@@ -2673,13 +2673,32 @@ fn runtime_gemini_policy_command_pattern_from_rule(rule: &toml::Value) -> Option
 }
 
 fn runtime_gemini_settings_paths() -> Vec<PathBuf> {
+    runtime_gemini_settings_paths_for(
+        runtime_gemini_home_dir().as_deref(),
+        env::current_dir().ok().as_deref(),
+    )
+}
+
+fn runtime_gemini_settings_paths_for(home: Option<&Path>, cwd: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if let Some(home) = runtime_gemini_home_dir() {
-        paths.push(home.join(".gemini").join("settings.json"));
+    let mut seen = BTreeSet::new();
+    let mut push_unique = |path: PathBuf| {
+        let key = path.to_string_lossy().to_ascii_lowercase();
+        if seen.insert(key) {
+            paths.push(path);
+        }
+    };
+    push_unique(PathBuf::from("/etc/gemini-cli/settings.json"));
+    if let Some(home) = home {
+        push_unique(home.join(".gemini").join("settings.json"));
     }
-    if let Ok(cwd) = env::current_dir() {
-        paths.push(cwd.join(".gemini").join("settings.json"));
-        paths.push(cwd.join(".gemini").join("settings.local.json"));
+    if let Some(cwd) = cwd {
+        let mut ancestors = cwd.ancestors().collect::<Vec<_>>();
+        ancestors.reverse();
+        for directory in ancestors {
+            push_unique(directory.join(".gemini").join("settings.json"));
+        }
+        push_unique(cwd.join(".gemini").join("settings.local.json"));
     }
     paths
 }
@@ -3144,6 +3163,33 @@ mod tests {
         assert!(runtime_gemini_memory_files_enabled(
             &serde_json::json!({"gemini_load_memory": true})
         ));
+    }
+
+    #[test]
+    fn gemini_runtime_settings_paths_follow_cli_precedence() {
+        let home = PathBuf::from("/tmp/prodex-gemini-home");
+        let cwd = PathBuf::from("/tmp/prodex-gemini-workspace/repo/sub");
+        let paths = runtime_gemini_settings_paths_for(Some(&home), Some(&cwd));
+        let repo_settings = PathBuf::from("/tmp/prodex-gemini-workspace/repo")
+            .join(".gemini")
+            .join("settings.json");
+        let sub_settings = cwd.join(".gemini").join("settings.json");
+
+        assert_eq!(paths[0], PathBuf::from("/etc/gemini-cli/settings.json"));
+        assert_eq!(paths[1], home.join(".gemini").join("settings.json"));
+        assert!(
+            paths.iter().position(|path| path == &repo_settings)
+                < paths.iter().position(|path| path == &sub_settings)
+        );
+        assert_eq!(
+            paths.last(),
+            Some(&cwd.join(".gemini").join("settings.local.json"))
+        );
+        assert_eq!(
+            paths.len(),
+            paths.iter().collect::<BTreeSet<_>>().len(),
+            "settings paths should be deduplicated"
+        );
     }
 
     #[test]

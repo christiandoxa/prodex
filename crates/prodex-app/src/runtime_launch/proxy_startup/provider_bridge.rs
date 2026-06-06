@@ -1,5 +1,8 @@
-use super::provider_models::{RuntimeProviderModelSpec, runtime_provider_model_catalog};
+use super::provider_models::{
+    runtime_provider_model_catalog_json, runtime_provider_model_json_for,
+};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use prodex_runtime_gemini::gemini_model_fallback_chain;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -190,7 +193,7 @@ pub(super) fn runtime_provider_models_buffered_response(
     if !method.eq_ignore_ascii_case("GET") {
         return None;
     }
-    let models = runtime_provider_model_catalog(kind);
+    let models = runtime_provider_model_catalog_json(kind);
     if models.is_empty() {
         return None;
     }
@@ -199,19 +202,14 @@ pub(super) fn runtime_provider_models_buffered_response(
         RuntimeProviderModelsPath::List => {
             let body = serde_json::json!({
                 "object": "list",
-                "data": models.iter().map(runtime_provider_model_json).collect::<Vec<_>>(),
+                "data": models,
             });
             Some(runtime_provider_json_response(200, body))
         }
         RuntimeProviderModelsPath::Single(model_id) => {
-            let status = if runtime_provider_model_spec(kind, model_id).is_some() {
-                200
-            } else {
-                404
-            };
-            let body = runtime_provider_model_spec(kind, model_id)
-                .map(runtime_provider_model_json)
-                .unwrap_or_else(|| {
+            let model = runtime_provider_model_json_for(kind, model_id);
+            let status = if model.is_some() { 200 } else { 404 };
+            let body = model.unwrap_or_else(|| {
                     serde_json::json!({
                         "error": {
                             "message": format!("model '{model_id}' is not available for {}", runtime_provider_label(kind)),
@@ -219,7 +217,7 @@ pub(super) fn runtime_provider_models_buffered_response(
                             "code": "model_not_found"
                         }
                     })
-                });
+            });
             Some(runtime_provider_json_response(status, body))
         }
     }
@@ -281,73 +279,7 @@ pub(super) fn runtime_provider_model_fallback_chain(
             "gemini" => &["gemini-3.1-pro-preview", "gpt-5.1-codex"],
             _ => return vec![model.to_string()],
         },
-        RuntimeProviderBridgeKind::Gemini => match lower.as_str() {
-            "" | "auto" | "auto-gemini-3" => &[
-                "gemini-3.1-pro-preview",
-                "gemini-3-pro-preview",
-                "gemini-2.5-pro",
-                "gemini-3-flash-preview",
-                "gemini-3-flash",
-                "gemini-3.5-flash",
-                "gemini-2.5-flash",
-            ],
-            "auto-gemini-2.5" => &["gemini-2.5-pro", "gemini-2.5-flash"],
-            "pro" => &[
-                "gemini-3.1-pro-preview",
-                "gemini-3-pro-preview",
-                "gemini-2.5-pro",
-            ],
-            "gemini-3.1-pro-preview-customtools" => &[
-                "gemini-3.1-pro-preview-customtools",
-                "gemini-3.1-pro-preview",
-                "gemini-3-pro-preview",
-                "gemini-2.5-pro",
-                "gemini-3-flash-preview",
-                "gemini-3-flash",
-                "gemini-2.5-flash",
-            ],
-            "gemini-3.1-pro-preview" => &[
-                "gemini-3.1-pro-preview",
-                "gemini-3-pro-preview",
-                "gemini-2.5-pro",
-                "gemini-3-flash-preview",
-                "gemini-3-flash",
-                "gemini-2.5-flash",
-            ],
-            "gemini-3-pro-preview" => &[
-                "gemini-3-pro-preview",
-                "gemini-3.1-pro-preview",
-                "gemini-2.5-pro",
-                "gemini-3-flash-preview",
-                "gemini-3-flash",
-                "gemini-2.5-flash",
-            ],
-            "gemini-3.5-flash" => &[
-                "gemini-3.5-flash",
-                "gemini-3-flash-preview",
-                "gemini-3-flash",
-                "gemini-2.5-flash",
-            ],
-            "gemini-3-flash-preview" => &[
-                "gemini-3-flash-preview",
-                "gemini-3-flash",
-                "gemini-2.5-flash",
-            ],
-            "gemini-3-flash" => &["gemini-3-flash", "gemini-3.5-flash", "gemini-2.5-flash"],
-            "gemini-3.1-flash-lite" => &[
-                "gemini-3.1-flash-lite",
-                "gemini-2.5-flash-lite",
-                "gemini-2.5-flash",
-            ],
-            "flash" => &[
-                "gemini-3-flash-preview",
-                "gemini-3-flash",
-                "gemini-3.5-flash",
-                "gemini-2.5-flash",
-            ],
-            "flash-lite" => &["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"],
-            _ => return vec![model.to_string()],
-        },
+        RuntimeProviderBridgeKind::Gemini => return gemini_model_fallback_chain(model),
         RuntimeProviderBridgeKind::DeepSeek => match lower.as_str() {
             "" | "auto" => &["deepseek-v4-pro", "deepseek-v4-flash"],
             "pro" => &["deepseek-v4-pro", "deepseek-v4-flash"],
@@ -494,15 +426,6 @@ enum RuntimeProviderModelsPath<'a> {
     Single(&'a str),
 }
 
-fn runtime_provider_model_spec(
-    kind: RuntimeProviderBridgeKind,
-    model_id: &str,
-) -> Option<&'static RuntimeProviderModelSpec> {
-    runtime_provider_model_catalog(kind)
-        .iter()
-        .find(|model| model.id == model_id)
-}
-
 fn runtime_provider_models_path_suffix(path: &str) -> Option<RuntimeProviderModelsPath<'_>> {
     let path = path.trim_end_matches('/');
     for prefix in ["/v1/models", "/models"] {
@@ -516,14 +439,6 @@ fn runtime_provider_models_path_suffix(path: &str) -> Option<RuntimeProviderMode
         }
     }
     None
-}
-
-fn runtime_provider_model_json(model: &RuntimeProviderModelSpec) -> serde_json::Value {
-    serde_json::json!({
-        "id": model.id,
-        "object": "model",
-        "owned_by": model.owned_by,
-    })
 }
 
 fn runtime_provider_json_response(
@@ -644,6 +559,7 @@ mod tests {
                 .iter()
                 .any(|model| model["id"] == "gemini-3.1-pro-preview")
         );
+        assert!(models.iter().any(|model| model["id"] == "gemini-3.5-flash"));
         assert!(models.iter().any(|model| model["id"] == "flash"));
     }
 
@@ -719,9 +635,9 @@ mod tests {
         assert_eq!(
             runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "flash"),
             vec![
+                "gemini-3.5-flash",
                 "gemini-3-flash-preview",
                 "gemini-3-flash",
-                "gemini-3.5-flash",
                 "gemini-2.5-flash"
             ]
         );
@@ -737,6 +653,7 @@ mod tests {
                 "gemini-2.5-pro",
                 "gemini-3-flash-preview",
                 "gemini-3-flash",
+                "gemini-3.5-flash",
                 "gemini-2.5-flash",
             ]
         );
@@ -747,6 +664,7 @@ mod tests {
             ),
             vec![
                 "gemini-3-flash-preview",
+                "gemini-3.5-flash",
                 "gemini-3-flash",
                 "gemini-2.5-flash"
             ]

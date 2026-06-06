@@ -1313,35 +1313,9 @@ struct GeminiSettingsSource {
 }
 
 fn gemini_settings_sources(cwd: Option<&Path>) -> Vec<GeminiSettingsSource> {
-    let mut paths = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        paths.push((
-            "global".to_string(),
-            home.join(".gemini").join("settings.json"),
-        ));
-    }
-    if let Some(cwd) = cwd {
-        let mut ancestors = cwd.ancestors().collect::<Vec<_>>();
-        ancestors.reverse();
-        for directory in ancestors {
-            paths.push((
-                format!("project:{}", directory.display()),
-                directory.join(".gemini").join("settings.json"),
-            ));
-        }
-        paths.push((
-            format!("project-local:{}", cwd.display()),
-            cwd.join(".gemini").join("settings.local.json"),
-        ));
-    }
-
+    let paths = gemini_settings_source_paths(cwd);
     let mut sources = Vec::new();
-    let mut seen = BTreeSet::new();
     for (name, path) in paths {
-        let key = path.to_string_lossy().to_ascii_lowercase();
-        if !seen.insert(key) {
-            continue;
-        }
         let Some(text) = read_text_limited(&path, GEMINI_COMPAT_FILE_LIMIT) else {
             continue;
         };
@@ -1370,6 +1344,49 @@ fn gemini_settings_sources(cwd: Option<&Path>) -> Vec<GeminiSettingsSource> {
         });
     }
     sources
+}
+
+fn gemini_settings_source_paths(cwd: Option<&Path>) -> Vec<(String, PathBuf)> {
+    gemini_settings_source_paths_for(dirs::home_dir().as_deref(), cwd)
+}
+
+fn gemini_settings_source_paths_for(
+    home: Option<&Path>,
+    cwd: Option<&Path>,
+) -> Vec<(String, PathBuf)> {
+    let mut paths = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut push_unique = |name: String, path: PathBuf| {
+        let key = path.to_string_lossy().to_ascii_lowercase();
+        if seen.insert(key) {
+            paths.push((name, path));
+        }
+    };
+    push_unique(
+        "system".to_string(),
+        PathBuf::from("/etc/gemini-cli/settings.json"),
+    );
+    if let Some(home) = home {
+        push_unique(
+            "global".to_string(),
+            home.join(".gemini").join("settings.json"),
+        );
+    }
+    if let Some(cwd) = cwd {
+        let mut ancestors = cwd.ancestors().collect::<Vec<_>>();
+        ancestors.reverse();
+        for directory in ancestors {
+            push_unique(
+                format!("project:{}", directory.display()),
+                directory.join(".gemini").join("settings.json"),
+            );
+        }
+        push_unique(
+            format!("project-local:{}", cwd.display()),
+            cwd.join(".gemini").join("settings.local.json"),
+        );
+    }
+    paths
 }
 
 fn settings_hook_sources(settings: &GeminiSettingsSource) -> Vec<serde_json::Value> {
@@ -2301,6 +2318,52 @@ mod tests {
             ))
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn gemini_cli_compat_settings_paths_follow_gemini_cli_precedence() {
+        let home = PathBuf::from("/tmp/prodex-gemini-home");
+        let cwd = PathBuf::from("/tmp/prodex-gemini-workspace/repo/sub");
+        let paths = gemini_settings_source_paths_for(Some(&home), Some(&cwd));
+        let repo_settings = PathBuf::from("/tmp/prodex-gemini-workspace/repo")
+            .join(".gemini")
+            .join("settings.json");
+        let sub_settings = cwd.join(".gemini").join("settings.json");
+
+        assert_eq!(
+            paths.first(),
+            Some(&(
+                "system".to_string(),
+                PathBuf::from("/etc/gemini-cli/settings.json")
+            ))
+        );
+        assert_eq!(
+            paths.get(1),
+            Some(&(
+                "global".to_string(),
+                home.join(".gemini").join("settings.json")
+            ))
+        );
+        assert!(
+            paths.iter().position(|(_, path)| path == &repo_settings)
+                < paths.iter().position(|(_, path)| path == &sub_settings)
+        );
+        assert_eq!(
+            paths.last(),
+            Some(&(
+                format!("project-local:{}", cwd.display()),
+                cwd.join(".gemini").join("settings.local.json")
+            ))
+        );
+        assert_eq!(
+            paths.len(),
+            paths
+                .iter()
+                .map(|(_, path)| path)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            "settings paths should be deduplicated"
+        );
     }
 
     #[test]

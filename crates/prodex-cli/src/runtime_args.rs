@@ -304,10 +304,12 @@ pub const SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
 pub const SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
 pub const SUPER_GEMINI_PROVIDER_ID: &str = "prodex-gemini";
 const SUPER_GEMINI_PROVIDER_NAME: &str = "Google Gemini";
-pub const SUPER_GEMINI_DEFAULT_MODEL: &str = "auto";
+pub const SUPER_GEMINI_DEFAULT_MODEL: &str = prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 pub const SUPER_GEMINI_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-pub const SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
-pub const SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
+pub const SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW: usize =
+    prodex_runtime_gemini::GEMINI_DEFAULT_CONTEXT_WINDOW;
+pub const SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize =
+    prodex_runtime_gemini::GEMINI_DEFAULT_AUTO_COMPACT_LIMIT;
 pub const SUPER_ANTHROPIC_PROVIDER_ID: &str = "prodex-anthropic";
 const SUPER_ANTHROPIC_PROVIDER_NAME: &str = "Anthropic Claude";
 pub const SUPER_ANTHROPIC_DEFAULT_MODEL: &str = "claude-sonnet-4-6";

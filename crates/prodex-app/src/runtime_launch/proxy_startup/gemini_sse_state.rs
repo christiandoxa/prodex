@@ -14,7 +14,7 @@ use super::super::gemini_rewrite::{
 use super::super::gemini_thought_signatures::runtime_gemini_thought_signature;
 use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use super::RuntimeGeminiBindingRecorder;
-use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
+use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 
 pub(super) struct RuntimeGeminiSseState {
@@ -562,7 +562,7 @@ impl RuntimeGeminiSseState {
         response["model"] = serde_json::Value::String(
             self.model
                 .clone()
-                .unwrap_or_else(|| SUPER_GEMINI_DEFAULT_MODEL.to_string()),
+                .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string()),
         );
         if let Some(usage) = self.usage.clone() {
             response["usage"] = usage;

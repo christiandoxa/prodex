@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { workspace = true }
+prodex_runtime_gemini = { workspace = true }
 prodex_shared_types = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

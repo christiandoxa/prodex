@@ -1,8 +1,9 @@
 use crate::{codex_cli_config_override_value, codex_config_value};
 use anyhow::{Context, Result};
-use prodex_cli::{
-    SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW,
-    SUPER_GEMINI_DEFAULT_MODEL, SUPER_GEMINI_PROVIDER_ID,
+use prodex_cli::SUPER_GEMINI_PROVIDER_ID;
+use prodex_runtime_gemini::{
+    GEMINI_DEFAULT_AUTO_COMPACT_LIMIT, GEMINI_DEFAULT_CONTEXT_WINDOW, GEMINI_DEFAULT_MODEL,
+    gemini_model_catalog,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -11,95 +12,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const GEMINI_MODEL_CATALOG_FILE: &str = "prodex-gemini-model-catalog.json";
-// Mirrors Gemini CLI's visible models and aliases. The runtime bridge resolves
-// aliases such as auto/pro/flash into concrete fallback chains before commit.
-const GEMINI_CATALOG_MODELS: &[(&str, &str, &str)] = &[
-    (
-        "auto",
-        "Gemini Auto",
-        "Prodex Gemini fallback chain using Gemini CLI-style model routing.",
-    ),
-    (
-        "auto-gemini-3",
-        "Gemini 3 Auto",
-        "Gemini CLI preview auto alias routed through Gemini 3 and stable fallback models.",
-    ),
-    (
-        "auto-gemini-2.5",
-        "Gemini 2.5 Auto",
-        "Gemini CLI stable auto alias routed through Gemini 2.5 Pro and Flash models.",
-    ),
-    (
-        "pro",
-        "Gemini Pro",
-        "Prodex Gemini Pro alias routed through Gemini preview and stable Pro models.",
-    ),
-    (
-        "flash",
-        "Gemini Flash",
-        "Prodex Gemini Flash alias routed through Gemini preview and stable Flash models.",
-    ),
-    (
-        "flash-lite",
-        "Gemini Flash Lite",
-        "Prodex Gemini Flash-Lite alias routed through Gemini Flash-Lite models.",
-    ),
-    (
-        "gemini-3.1-pro-preview",
-        "Gemini 3.1 Pro Preview",
-        "Gemini CLI preview Pro model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemini-3-pro-preview",
-        "Gemini 3 Pro Preview",
-        "Gemini CLI preview Pro model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemini-3.1-pro-preview-customtools",
-        "Gemini 3.1 Pro Preview Custom Tools",
-        "Gemini CLI preview Pro model variant for custom tools routed through Prodex.",
-    ),
-    (
-        "gemini-3-flash-preview",
-        "Gemini 3 Flash Preview",
-        "Gemini CLI preview Flash model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemini-3-flash",
-        "Gemini 3 Flash",
-        "Gemini CLI secondary Flash model name routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemini-3.1-flash-lite",
-        "Gemini 3.1 Flash Lite",
-        "Gemini CLI Flash-Lite model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemini-2.5-pro",
-        "Gemini 2.5 Pro",
-        "Gemini CLI stable Pro model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemini-2.5-flash",
-        "Gemini 2.5 Flash",
-        "Gemini CLI stable Flash model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemini-2.5-flash-lite",
-        "Gemini 2.5 Flash Lite",
-        "Gemini CLI Flash-Lite model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemma-4-31b-it",
-        "Gemma 4 31B IT",
-        "Gemini CLI Gemma model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "gemma-4-26b-a4b-it",
-        "Gemma 4 26B A4B IT",
-        "Gemini CLI Gemma model routed through the Prodex Responses adapter.",
-    ),
-];
 const GEMINI_BASE_INSTRUCTIONS: &str = r#"You are Codex, a coding agent. You and the user share the same workspace.
 
 Focus on the user's software task. Inspect the codebase before changing behavior, make narrow edits, preserve user changes, and verify with relevant tests or commands when feasible.
@@ -140,13 +52,13 @@ fn gemini_provider_codex_args(
         codex_home,
         user_args,
         "model_context_window",
-        SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW as u64,
+        GEMINI_DEFAULT_CONTEXT_WINDOW as u64,
     );
     let auto_compact_token_limit = gemini_u64_config_for_launch(
         codex_home,
         user_args,
         "model_auto_compact_token_limit",
-        SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as u64,
+        GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as u64,
     )
     .min(context_window.saturating_sub(1));
 
@@ -177,7 +89,7 @@ fn gemini_model_for_launch(codex_home: &Path, user_args: &[OsString]) -> String 
         .or_else(|| codex_config_value(codex_home, "model"))
         .map(|model| model.trim().to_string())
         .filter(|model| !model.is_empty())
-        .unwrap_or_else(|| SUPER_GEMINI_DEFAULT_MODEL.to_string())
+        .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string())
 }
 
 fn gemini_u64_config_for_launch(
@@ -217,11 +129,11 @@ fn gemini_catalog_models(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Vec<serde_json::Value> {
-    let mut models = Vec::with_capacity(GEMINI_CATALOG_MODELS.len() + 1);
+    let mut models = Vec::with_capacity(gemini_model_catalog().len() + 1);
     let mut seen = BTreeSet::new();
 
     for slug in
-        std::iter::once(launch_model).chain(GEMINI_CATALOG_MODELS.iter().map(|(slug, _, _)| *slug))
+        std::iter::once(launch_model).chain(gemini_model_catalog().iter().map(|spec| spec.id))
     {
         let slug = slug.trim();
         if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
@@ -243,10 +155,10 @@ fn gemini_catalog_models(
 }
 
 fn gemini_catalog_model_metadata(model: &str) -> (&str, &'static str) {
-    GEMINI_CATALOG_MODELS
+    gemini_model_catalog()
         .iter()
-        .find(|(slug, _, _)| model.eq_ignore_ascii_case(slug))
-        .map(|(_, display_name, description)| (*display_name, *description))
+        .find(|spec| model.eq_ignore_ascii_case(spec.id))
+        .map(|spec| (spec.display_name, spec.description))
         .unwrap_or((
             model,
             "Gemini model routed through the Prodex Responses adapter.",
@@ -432,6 +344,11 @@ mod tests {
             model_slugs
                 .iter()
                 .any(|model| model["slug"] == "gemini-3-flash")
+        );
+        assert!(
+            model_slugs
+                .iter()
+                .any(|model| model["slug"] == "gemini-3.5-flash")
         );
         assert!(
             model_slugs

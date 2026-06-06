@@ -6,13 +6,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_gemini_cli_compat.rs",
-    "maxLines": 2330,
-    "reason": "Gemini CLI settings, extension, hook, and MCP compatibility are kept together for the initial parity release."
+    "maxLines": 2393,
+    "reason": "Gemini CLI settings, extension, hook, and MCP compatibility are kept together while system/global/project settings precedence is aligned with Gemini CLI."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
-    "maxLines": 3279,
-    "reason": "The Gemini request translation matrix is capped pending a domain-based module split."
+    "maxLines": 3325,
+    "reason": "The Gemini request translation matrix is capped while Gemini CLI settings precedence and request policy parity remain co-located pending a domain split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_response.rs",
@@ -31,8 +31,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1140,
-    "reason": "Gemini local rewrite authentication and request context remain capped for the parity release."
+    "maxLines": 1141,
+    "reason": "Gemini local rewrite authentication and request context remain capped while default model ownership is shared through the Gemini runtime crate."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs",

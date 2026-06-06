@@ -8,7 +8,7 @@ use super::gemini_request::{
     runtime_gemini_blocked_tool_call_message, runtime_gemini_data_url_parts,
     runtime_gemini_mime_type_for_uri,
 };
-use prodex_cli::SUPER_GEMINI_DEFAULT_MODEL;
+use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::borrow::Cow;
 
 const GEMINI_CUSTOM_APPLY_PATCH_TOOL: &str = "apply_patch";
@@ -757,7 +757,7 @@ fn runtime_gemini_model(value: &serde_json::Value) -> String {
         .get("modelVersion")
         .or_else(|| value.get("model"))
         .and_then(serde_json::Value::as_str)
-        .unwrap_or(SUPER_GEMINI_DEFAULT_MODEL)
+        .unwrap_or(GEMINI_DEFAULT_MODEL)
         .to_string()
 }
 

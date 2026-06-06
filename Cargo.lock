@@ -1396,6 +1396,7 @@ dependencies = [
  "prodex-runtime-claude",
  "prodex-runtime-cookies",
  "prodex-runtime-doctor",
+ "prodex-runtime-gemini",
  "prodex-runtime-launch",
  "prodex-runtime-log",
  "prodex-runtime-mem",
@@ -1471,6 +1472,7 @@ name = "prodex-cli"
 version = "0.156.0"
 dependencies = [
  "clap",
+ "prodex-runtime-gemini",
  "prodex-shared-types",
  "reqwest",
  "serde",
@@ -1630,6 +1632,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "prodex-runtime-gemini"
+version = "0.156.0"
 
 [[package]]
 name = "prodex-runtime-launch"

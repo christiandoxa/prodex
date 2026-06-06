@@ -38,6 +38,7 @@ use crate::{
     runtime_proxy_log, runtime_proxy_log_to_path, spawn_runtime_background_worker_or_log,
 };
 use anyhow::{Context, Result, bail};
+use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -121,20 +122,20 @@ pub(super) fn send_runtime_gemini_upstream_request(
     let attempt_count = attempts.len();
     'auth_attempts: for (attempt_index, mut selected) in attempts.into_iter().enumerate() {
         let requested_model = runtime_provider_model_from_body(&body)
-            .unwrap_or_else(|| prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string());
+            .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
         let mut model_chain = if responses_route {
             runtime_provider_model_fallback_chain(
                 RuntimeProviderBridgeKind::Gemini,
                 &requested_model,
             )
         } else {
-            vec![prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string()]
+            vec![GEMINI_DEFAULT_MODEL.to_string()]
         };
         // Gemini Code Assist (OAuth) does not serve customtools models; filter them from the fallback chain.
         if matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }) {
             model_chain.retain(|m| !m.contains("customtools"));
             if model_chain.is_empty() {
-                model_chain.push(prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string());
+                model_chain.push(GEMINI_DEFAULT_MODEL.to_string());
             }
         }
         for (model_index, model) in model_chain.iter().enumerate() {
@@ -978,7 +979,7 @@ impl RuntimeGeminiOAuthPool {
             bail!("Gemini OAuth pool is empty");
         }
         let requested_model = runtime_provider_model_from_body(body)
-            .unwrap_or_else(|| prodex_cli::SUPER_GEMINI_DEFAULT_MODEL.to_string());
+            .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
         let model_chain = runtime_provider_model_fallback_chain(
             RuntimeProviderBridgeKind::Gemini,
             &requested_model,

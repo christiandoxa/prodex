@@ -1,85 +1,11 @@
 use super::provider_bridge::RuntimeProviderBridgeKind;
+use prodex_runtime_gemini::{gemini_model_catalog, gemini_model_spec};
 
 #[derive(Clone, Copy)]
 pub(super) struct RuntimeProviderModelSpec {
     pub(super) id: &'static str,
     pub(super) owned_by: &'static str,
 }
-
-const RUNTIME_PROVIDER_GEMINI_MODELS: &[RuntimeProviderModelSpec] = &[
-    RuntimeProviderModelSpec {
-        id: "auto",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "auto-gemini-3",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "auto-gemini-2.5",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "pro",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "flash",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "flash-lite",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-3.1-pro-preview",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-3-pro-preview",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-3.1-pro-preview-customtools",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-3-flash-preview",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-3-flash",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-3.5-flash",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-2.5-pro",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-2.5-flash",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-3.1-flash-lite",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemini-2.5-flash-lite",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemma-4-31b-it",
-        owned_by: "google",
-    },
-    RuntimeProviderModelSpec {
-        id: "gemma-4-26b-a4b-it",
-        owned_by: "google",
-    },
-];
 
 const RUNTIME_PROVIDER_DEEPSEEK_MODELS: &[RuntimeProviderModelSpec] = &[
     RuntimeProviderModelSpec {
@@ -180,6 +106,43 @@ pub(super) fn runtime_provider_model_catalog(
         RuntimeProviderBridgeKind::Copilot => RUNTIME_PROVIDER_COPILOT_MODELS,
         RuntimeProviderBridgeKind::OpenAiResponses => RUNTIME_PROVIDER_OPENAI_MODELS,
         RuntimeProviderBridgeKind::DeepSeek => RUNTIME_PROVIDER_DEEPSEEK_MODELS,
-        RuntimeProviderBridgeKind::Gemini => RUNTIME_PROVIDER_GEMINI_MODELS,
+        RuntimeProviderBridgeKind::Gemini => RUNTIME_PROVIDER_OPENAI_MODELS,
     }
+}
+
+pub(super) fn runtime_provider_model_catalog_json(
+    kind: RuntimeProviderBridgeKind,
+) -> Vec<serde_json::Value> {
+    match kind {
+        RuntimeProviderBridgeKind::Gemini => gemini_model_catalog()
+            .iter()
+            .map(|model| runtime_provider_model_json(model.id, model.owned_by))
+            .collect(),
+        _ => runtime_provider_model_catalog(kind)
+            .iter()
+            .map(|model| runtime_provider_model_json(model.id, model.owned_by))
+            .collect(),
+    }
+}
+
+pub(super) fn runtime_provider_model_json_for(
+    kind: RuntimeProviderBridgeKind,
+    model_id: &str,
+) -> Option<serde_json::Value> {
+    match kind {
+        RuntimeProviderBridgeKind::Gemini => gemini_model_spec(model_id)
+            .map(|model| runtime_provider_model_json(model.id, model.owned_by)),
+        _ => runtime_provider_model_catalog(kind)
+            .iter()
+            .find(|model| model.id == model_id)
+            .map(|model| runtime_provider_model_json(model.id, model.owned_by)),
+    }
+}
+
+fn runtime_provider_model_json(id: &str, owned_by: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "object": "model",
+        "owned_by": owned_by,
+    })
 }
