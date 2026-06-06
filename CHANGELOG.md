@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.155.0 - 2026-06-06
+
+### Misc
+
+- Stabilize Gemini provider tool calls (`43c9b92`)
+
 ## 0.154.0 - 2026-06-05
 
 ### Misc
 
+- Resolve CI clippy failures and Gemini triage (`6117586`)
 - Update prodex-cli dependency version (`00f81ff`)
 - Add multi-language support (`6ab3073`)
 
@@ -70,10 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Move thoughtSignature from inside functionCall to part-level sibling (`27d13fa`)
-
-## 0.143.0 - 2026-06-03
-
-### Misc
-
-- Filter customtools models from OAuth code-assist fallback chain (`9615363`)
-- Stabilize provider launch for Codex 0.136 (`d6cc37f`)
