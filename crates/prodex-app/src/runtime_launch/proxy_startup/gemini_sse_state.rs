@@ -26,6 +26,7 @@ pub(super) struct RuntimeGeminiSseState {
     output_text: String,
     reasoning_content: String,
     tool_calls: BTreeMap<usize, RuntimeGeminiToolCall>,
+    tool_call_indices_by_id: BTreeMap<String, usize>,
     usage: Option<serde_json::Value>,
     web_search_call: Option<serde_json::Value>,
     conversation_messages: Vec<serde_json::Value>,
@@ -64,6 +65,7 @@ impl RuntimeGeminiSseState {
             output_text: String::new(),
             reasoning_content: String::new(),
             tool_calls: BTreeMap::new(),
+            tool_call_indices_by_id: BTreeMap::new(),
             usage: None,
             web_search_call: None,
             conversation_messages,
@@ -201,7 +203,15 @@ impl RuntimeGeminiSseState {
         value: &serde_json::Value,
         thought_signature: Option<String>,
     ) -> Vec<String> {
-        let index = self.tool_calls.len();
+        let explicit_call_id = value
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.trim().is_empty())
+            .map(str::to_string);
+        let index = explicit_call_id
+            .as_deref()
+            .and_then(|call_id| self.tool_call_indices_by_id.get(call_id).copied())
+            .unwrap_or_else(|| self.tool_calls.len());
         let name = value
             .get("name")
             .and_then(serde_json::Value::as_str)
@@ -215,16 +225,17 @@ impl RuntimeGeminiSseState {
         let mut events = Vec::new();
         let (call_id, should_add) = {
             let tool_call = self.tool_calls.entry(index).or_default();
-            tool_call.call_id = value
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .filter(|id| !id.trim().is_empty())
-                .map(str::to_string)
+            tool_call.call_id = explicit_call_id
+                .clone()
+                .or_else(|| tool_call.call_id.clone())
                 .or_else(|| Some(format!("call_gemini_{}_{}", self.request_id, index)));
+            if let Some(explicit_call_id) = explicit_call_id {
+                self.tool_call_indices_by_id.insert(explicit_call_id, index);
+            }
             tool_call.name = Some(name.clone());
-            tool_call.arguments = args;
+            tool_call.arguments = args.clone();
             if thought_signature.is_some() {
-                tool_call.thought_signature = thought_signature;
+                tool_call.thought_signature = thought_signature.clone();
             }
             let call_id = tool_call.call_id.clone().unwrap_or_default();
             let should_add = !tool_call.added;
@@ -243,6 +254,11 @@ impl RuntimeGeminiSseState {
             if let Some(namespace) = namespace {
                 item["namespace"] = serde_json::Value::String(namespace);
             }
+            if let Some(tool_call) = self.tool_calls.get(&index) {
+                if let Some(signature) = tool_call.thought_signature.clone() {
+                    item["gemini_thought_signature"] = serde_json::Value::String(signature);
+                }
+            }
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
                 "response.output_item.added",
@@ -252,6 +268,20 @@ impl RuntimeGeminiSseState {
                     "item": item,
                 }),
             ));
+        }
+
+        if name != "tool_search" && name != "apply_patch" {
+            let sequence_number = self.next_sequence_number();
+            let mut delta_event = serde_json::json!({
+                "type": "response.function_call_arguments.delta",
+                "sequence_number": sequence_number,
+                "call_id": call_id,
+                "delta": args,
+            });
+            if let Some(ref signature) = thought_signature.clone() {
+                delta_event["thought_signature"] = serde_json::Value::String(signature.to_string());
+            }
+            events.push(self.event("response.function_call_arguments.delta", delta_event));
         }
         events
     }
@@ -279,11 +309,11 @@ impl RuntimeGeminiSseState {
                     runtime_deepseek_rtk_wrapped_tool_arguments(&name, &tool_call.arguments)
                 };
                 tool_call.arguments = arguments.clone();
-                Some((call_id, name, arguments))
+                Some((call_id, name, arguments, *index))
             })
             .collect::<Vec<_>>();
         let mut events = Vec::new();
-        for (call_id, name, arguments) in pending {
+        for (call_id, name, arguments, index) in pending {
             if name == "tool_search" {
                 let arguments = serde_json::from_str::<serde_json::Value>(&arguments)
                     .unwrap_or_else(|_| serde_json::json!({}));
@@ -320,16 +350,6 @@ impl RuntimeGeminiSseState {
                 ));
                 continue;
             }
-            let sequence_number = self.next_sequence_number();
-            events.push(self.event(
-                "response.function_call_arguments.delta",
-                serde_json::json!({
-                    "type": "response.function_call_arguments.delta",
-                    "sequence_number": sequence_number,
-                    "call_id": call_id,
-                    "delta": arguments,
-                }),
-            ));
             let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&name);
             let mut item = serde_json::json!({
                 "type": "function_call",
@@ -339,6 +359,11 @@ impl RuntimeGeminiSseState {
             });
             if let Some(namespace) = namespace {
                 item["namespace"] = serde_json::Value::String(namespace);
+            }
+            if let Some(tool_call) = self.tool_calls.get(&index) {
+                if let Some(signature) = tool_call.thought_signature.clone() {
+                    item["gemini_thought_signature"] = serde_json::Value::String(signature);
+                }
             }
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
@@ -521,7 +546,7 @@ impl RuntimeGeminiSseState {
                                     .name
                                     .clone()
                                     .unwrap_or_else(|| "tool_call".to_string()),
-                                "arguments": tool_call.arguments,
+                                "arguments": tool_call.arguments.clone(),
                             },
                         });
                         if let Some(signature) = tool_call.thought_signature.as_deref() {
@@ -583,10 +608,15 @@ impl RuntimeGeminiSseState {
                 "type": "function_call",
                 "call_id": call_id,
                 "name": name,
-                "arguments": tool_call.arguments,
+                "arguments": tool_call.arguments.clone(),
             });
             if let Some(namespace) = namespace {
                 item["namespace"] = serde_json::Value::String(namespace);
+            }
+            if let Some(tool_call) = self.tool_calls.get(&index) {
+                if let Some(signature) = tool_call.thought_signature.clone() {
+                    item["gemini_thought_signature"] = serde_json::Value::String(signature);
+                }
             }
             output.push(item);
         }

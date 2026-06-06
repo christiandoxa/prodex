@@ -363,6 +363,8 @@ Verify with Prodex:
 ```bash
 prodex presidio doctor
 prodex presidio redact --text "My name is John Smith and my phone is 212-555-1234."
+prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
+prodex presidio redact --language id --text "Nomor telepon saya adalah 0812-3456-7890."
 prodex presidio enable
 prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
 prodex presidio enable --language-mode auto --languages en,id
@@ -379,7 +381,6 @@ prodex presidio doctor --json
 ```
 
 When you answer `y` to the `prodex super` / `prodex s` Presidio prompt or pass `--presidio`, Super starts a dedicated runtime proxy that redacts UTF-8 HTTP request bodies and WebSocket text frames through the local Presidio Analyzer and Anonymizer before forwarding them upstream. This is equivalent to adding the `presidio` prefix to the Super stack. Use `--no-presidio` to skip the prompt and keep redaction disabled. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
-
 </details>
 
 ## Quick start
@@ -754,6 +755,21 @@ prodex s --provider gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
 Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex routes through the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. The default model is `gemini-2.5-pro`, matching Gemini CLI's current default, and the injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path: Prodex maps Codex/MCP tool schemas to Gemini function declarations, honors `auto` / `none` / `required` tool-choice modes, and preserves Gemini thought signatures across tool-call followups.
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use.
+
+Prodex now supports multi-language Presidio redaction, including automatic detection and multi-language merging. The runtime uses `presidio.toml` endpoints and language configuration when available, falling back to `http://localhost:5002` and `http://localhost:5001` for Analyzer/Anonymizer URLs, and English (`en`) for language if not specified. It honors `fail_mode = "open"` or `"closed"`.
+
+Example `presidio.toml` with multi-language support (English and Indonesian):
+
+```toml
+enabled = true
+analyzer_url = "http://localhost:5002"
+anonymizer_url = "http://localhost:5001"
+language_mode = "auto"
+languages = ["en", "id"]
+fail_mode = "open"
+```
+
+Note that the default Microsoft Presidio Docker images typically only support English (`en`). To support other languages like Indonesian (`id`), you must use a custom Presidio Analyzer image with the necessary language models and recognizers installed. Prodex routing and configuration support the languages, but the actual detection quality depends on your Analyzer.
 
 It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
 

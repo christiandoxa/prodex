@@ -60,6 +60,57 @@ data: [DONE]\n\n"
 }
 
 #[test]
+fn gemini_sse_reader_merges_repeated_function_call_id_with_latest_args() {
+    let partial_patch = "*** Begin Patch\n*** Add File: note.txt\n+hel";
+    let final_patch = "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch";
+    let first = serde_json::json!({
+        "responseId": "resp_patch",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "functionCall": {
+                        "id": "call_patch",
+                        "name": "apply_patch",
+                        "args": {"input": partial_patch}
+                    }
+                }]
+            }
+        }]
+    });
+    let second = serde_json::json!({
+        "responseId": "resp_patch",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "functionCall": {
+                        "id": "call_patch",
+                        "name": "apply_patch",
+                        "args": {"input": final_patch}
+                    }
+                }]
+            },
+            "finishReason": "STOP"
+        }]
+    });
+    let stream = format!("data: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n");
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert_eq!(output.matches("\"type\":\"custom_tool_call\"").count(), 2);
+    assert!(output.contains("*** Begin Patch\\n*** Add File: note.txt\\n+hello\\n*** End Patch"));
+    assert!(!output.contains("*** Begin Patch\\n*** Add File: note.txt\\n+hel\\n*** Begin Patch"));
+}
+
+#[test]
 fn gemini_sse_reader_normalizes_unified_diff_apply_patch() {
     let unified_diff = "\
 --- a/crates/prodex-cli/src/presidio.rs

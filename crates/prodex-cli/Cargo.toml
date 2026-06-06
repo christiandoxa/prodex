@@ -12,6 +12,6 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { workspace = true }
-prodex-shared-types = { version = "0.154.0", path = "../prodex-shared-types" }
+prodex_shared_types = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
