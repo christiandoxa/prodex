@@ -211,7 +211,7 @@ impl RuntimeGeminiSseState {
         let index = explicit_call_id
             .as_deref()
             .and_then(|call_id| self.tool_call_indices_by_id.get(call_id).copied())
-            .unwrap_or_else(|| self.tool_calls.len());
+            .unwrap_or(self.tool_calls.len());
         let name = value
             .get("name")
             .and_then(serde_json::Value::as_str)
@@ -254,10 +254,10 @@ impl RuntimeGeminiSseState {
             if let Some(namespace) = namespace {
                 item["namespace"] = serde_json::Value::String(namespace);
             }
-            if let Some(tool_call) = self.tool_calls.get(&index) {
-                if let Some(signature) = tool_call.thought_signature.clone() {
-                    item["gemini_thought_signature"] = serde_json::Value::String(signature);
-                }
+            if let Some(tool_call) = self.tool_calls.get(&index)
+                && let Some(signature) = tool_call.thought_signature.clone()
+            {
+                item["gemini_thought_signature"] = serde_json::Value::String(signature);
             }
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
@@ -360,10 +360,10 @@ impl RuntimeGeminiSseState {
             if let Some(namespace) = namespace {
                 item["namespace"] = serde_json::Value::String(namespace);
             }
-            if let Some(tool_call) = self.tool_calls.get(&index) {
-                if let Some(signature) = tool_call.thought_signature.clone() {
-                    item["gemini_thought_signature"] = serde_json::Value::String(signature);
-                }
+            if let Some(tool_call) = self.tool_calls.get(&index)
+                && let Some(signature) = tool_call.thought_signature.clone()
+            {
+                item["gemini_thought_signature"] = serde_json::Value::String(signature);
             }
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
@@ -613,10 +613,10 @@ impl RuntimeGeminiSseState {
             if let Some(namespace) = namespace {
                 item["namespace"] = serde_json::Value::String(namespace);
             }
-            if let Some(tool_call) = self.tool_calls.get(&index) {
-                if let Some(signature) = tool_call.thought_signature.clone() {
-                    item["gemini_thought_signature"] = serde_json::Value::String(signature);
-                }
+            if let Some(tool_call) = self.tool_calls.get(index)
+                && let Some(signature) = tool_call.thought_signature.clone()
+            {
+                item["gemini_thought_signature"] = serde_json::Value::String(signature);
             }
             output.push(item);
         }
