@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.156.0 - 2026-06-06
+
+### Misc
+
+- Deliver Codex-native provider parity (`27229c9`)
+
 ## 0.155.0 - 2026-06-06
 
 ### Misc
 
+- Satisfy Gemini provider clippy (`5c1e56f`)
 - Stabilize Gemini provider tool calls (`43c9b92`)
 
 ## 0.154.0 - 2026-06-05
@@ -71,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden Gemini provider launch (`438fd90`)
-
-## 0.144.0 - 2026-06-03
-
-### Misc
-
-- Move thoughtSignature from inside functionCall to part-level sibling (`27d13fa`)

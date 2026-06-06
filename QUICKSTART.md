@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.155.0`:
+The current local version in this repo is `0.156.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.155.0
+npm install -g @christiandoxa/prodex@0.156.0
 ```
 
 Dependency status in this repo:
@@ -243,7 +243,9 @@ prodex s --provider gemini
 GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
 ```
 
-When no API key is supplied, the Gemini path uses the Google OAuth profile from login. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations and preserves Gemini thought signatures across tool-call followups.
+When no API key is supplied, the Gemini path uses the Google OAuth profile from login. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations, preserves Gemini thought signatures across tool-call followups, masks large tool outputs before replaying history, and can import Gemini session/checkpoint context through `gemini_session_file`, `PRODEX_GEMINI_SESSION_FILE`, or `PRODEX_GEMINI_CHECKPOINT_FILE`.
+
+Gemini memory is loaded by default from `~/.gemini/GEMINI.md`, project `GEMINI.md` files, `.gemini/memory/MEMORY.md`, and `.gemini/memory/INBOX.md`; opt out with `PRODEX_GEMINI_DISABLE_MEMORY=1` or request metadata `gemini_load_memory=false`. Gemini global/project settings and extensions are projected into Codex before launch: `mcpServers` become Codex MCP config, hooks go through `/hooks` review, `commands/*.toml` become custom prompts, `skills/*/SKILL.md` become Codex skills, and `agents/*.md` become Codex custom agents. Generated prompts and helper scripts cover refresh, memory, and checkpoint create/restore workflows. Use `PRODEX_GEMINI_EXTENSIONS=none` to disable extension loading or `PRODEX_GEMINI_DISABLE_CLI_COMPAT=1` to skip launch-time surface projection.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. Check local reachability with `prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once`. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
