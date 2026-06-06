@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.157.0 - 2026-06-06
+
+### Runtime
+
+- Add runtime metadata bridge (`3996a18`)
+
 ## 0.156.0 - 2026-06-06
 
 ### Misc
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Improve multi-provider auth rotation (`f8d6412`)
-
-## 0.145.0 - 2026-06-03
-
-### Runtime
-
-- Harden Gemini provider launch (`438fd90`)
