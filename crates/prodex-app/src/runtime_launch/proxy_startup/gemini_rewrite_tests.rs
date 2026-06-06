@@ -1,11 +1,13 @@
+#![cfg(test)]
+
 use super::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
     runtime_gemini_chat_assistant_messages_from_generate_value,
     runtime_gemini_generate_request_body, runtime_gemini_harden_tool_call_thought_signatures,
-    runtime_gemini_request_body_without_google_search,
-    runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_request_body_without_tool, runtime_gemini_responses_value_from_generate_value,
 };
 use std::collections::BTreeMap;
+use std::fs;
 use std::sync::{Arc, Mutex};
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
@@ -34,6 +36,7 @@ fn gemini_request_translation_maps_tools_and_thinking() {
         &conversation_store(),
         false,
         None,
+        None,
     )
     .expect("request should translate");
     let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
@@ -59,6 +62,191 @@ fn gemini_request_translation_maps_tools_and_thinking() {
 }
 
 #[test]
+fn gemini_request_translation_honors_custom_thinking_budget() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Review this diff",
+        "reasoning": {"effort": "high"}
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        Some(1024),
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(
+        value["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+        1024
+    );
+}
+
+#[test]
+fn gemini_request_translation_applies_memory_policy_session_and_gemini3_tool_schema() {
+    let body = serde_json::json!({
+        "model": "gemini-3.1-pro-preview-customtools",
+        "instructions": "Use the repo rules.",
+        "gemini_memory": {
+            "global": "Remember the global Gemini preference.",
+            "project": "Remember the project Gemini preference."
+        },
+        "gemini_policy": {
+            "general": {"defaultApprovalMode": "plan"},
+            "tools": {"exclude": ["grep"]}
+        },
+        "gemini_session": {
+            "contents": [{
+                "role": "model",
+                "parts": [{"text": "previous Gemini answer"}]
+            }]
+        },
+        "input": "Current turn",
+        "tools": [
+            {
+                "type": "function",
+                "name": "shell",
+                "description": "Run shell",
+                "parameters": {"type": "object"}
+            },
+            {
+                "type": "function",
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "start_line": {"type": "integer"},
+                        "end_line": {"type": "integer"}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "name": "grep",
+                "description": "Search files",
+                "parameters": {"type": "object"}
+            }
+        ]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let system_text = value["systemInstruction"]["parts"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert!(system_text.contains("Gemini CLI Memory Compatibility"));
+    assert!(system_text.contains("Remember the global Gemini preference."));
+    assert!(system_text.contains("Remember the project Gemini preference."));
+    assert!(system_text.contains("defaultApprovalMode: plan"));
+    assert!(system_text.contains("excluded tools: grep"));
+    assert_eq!(value["contents"][0]["role"], "model");
+    assert_eq!(
+        value["contents"][0]["parts"][0]["text"],
+        "previous Gemini answer"
+    );
+    assert_eq!(value["contents"][1]["parts"][0]["text"], "Current turn");
+
+    let declarations = value["tools"][0]["functionDeclarations"]
+        .as_array()
+        .unwrap();
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(declarations[0]["name"], "read_file");
+    assert!(
+        declarations[0]["description"]
+            .as_str()
+            .unwrap()
+            .contains("targeted, surgical ranges")
+    );
+    assert!(
+        declarations[0]["parameters"]["properties"]["start_line"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("1-based first line")
+    );
+}
+
+#[test]
+fn gemini_request_translation_preserves_input_image_data_url() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Describe this image"},
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,aGVsbG8="
+                }
+            ]
+        }]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let parts = value["contents"][0]["parts"].as_array().unwrap();
+
+    assert_eq!(parts[0]["text"], "Describe this image");
+    assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+    assert_eq!(parts[1]["inlineData"]["data"], "aGVsbG8=");
+}
+
+#[test]
+fn gemini_request_translation_preserves_remote_input_image_url() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Inspect this screenshot"},
+                {
+                    "type": "input_image",
+                    "image_url": "https://example.com/screenshot.webp?sig=1"
+                }
+            ]
+        }]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let parts = value["contents"][0]["parts"].as_array().unwrap();
+
+    assert_eq!(
+        parts[1]["fileData"]["fileUri"],
+        "https://example.com/screenshot.webp?sig=1"
+    );
+    assert_eq!(parts[1]["fileData"]["mimeType"], "image/webp");
+}
+
+#[test]
 fn gemini_request_translation_maps_codex_web_search_to_google_search() {
     let body = serde_json::json!({
         "model": "gemini-2.5-pro",
@@ -78,6 +266,7 @@ fn gemini_request_translation_maps_codex_web_search_to_google_search() {
         &serde_json::to_vec(&body).unwrap(),
         &conversation_store(),
         false,
+        None,
         None,
     )
     .expect("request should translate");
@@ -112,9 +301,10 @@ fn gemini_request_translation_strips_google_search_for_fallback() {
             &conversation_store(),
             code_assist,
             Some("project-id"),
+            None,
         )
         .expect("request should translate");
-        let stripped = runtime_gemini_request_body_without_google_search(&translated.body)
+        let stripped = runtime_gemini_request_body_without_tool(&translated.body, "googleSearch")
             .expect("googleSearch should be stripped");
         let value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
         let request = value.get("request").unwrap_or(&value);
@@ -125,6 +315,151 @@ fn gemini_request_translation_strips_google_search_for_fallback() {
             "shell"
         );
     }
+}
+
+#[test]
+fn gemini_request_translation_maps_web_fetch_to_url_context() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Fetch https://example.com and summarize it",
+        "tools": [
+            {"type": "web_fetch"},
+            {
+                "type": "function",
+                "name": "shell",
+                "description": "Run shell",
+                "parameters": {"type": "object"}
+            }
+        ]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(value["tools"][0]["urlContext"], serde_json::json!({}));
+    assert_eq!(
+        value["tools"][1]["functionDeclarations"][0]["name"],
+        "shell"
+    );
+
+    let stripped = runtime_gemini_request_body_without_tool(&translated.body, "urlContext")
+        .expect("urlContext should be stripped for fallback");
+    let stripped_value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
+    assert_eq!(
+        stripped_value["tools"][0]["functionDeclarations"][0]["name"],
+        "shell"
+    );
+}
+
+#[test]
+fn gemini_request_translation_preserves_generic_media_parts() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Analyze these files"},
+                {
+                    "type": "input_file",
+                    "file_url": "https://example.com/report.pdf?download=1",
+                    "mime_type": "application/pdf"
+                },
+                {
+                    "type": "input_audio",
+                    "data": "UklGRg==",
+                    "mime_type": "audio/wav"
+                }
+            ]
+        }]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let parts = value["contents"][0]["parts"].as_array().unwrap();
+
+    assert_eq!(parts[0]["text"], "Analyze these files");
+    assert_eq!(
+        parts[1]["fileData"]["fileUri"],
+        "https://example.com/report.pdf?download=1"
+    );
+    assert_eq!(parts[1]["fileData"]["mimeType"], "application/pdf");
+    assert_eq!(parts[2]["inlineData"]["mimeType"], "audio/wav");
+    assert_eq!(parts[2]["inlineData"]["data"], "UklGRg==");
+}
+
+#[test]
+fn gemini_request_translation_preserves_advanced_generation_config() {
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"]
+    });
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Return JSON",
+        "top_k": 32,
+        "candidate_count": 2,
+        "seed": 7,
+        "presence_penalty": 0.2,
+        "frequency_penalty": 0.3,
+        "stop": ["DONE"],
+        "response_modalities": ["TEXT"],
+        "media_resolution": "MEDIA_RESOLUTION_MEDIUM",
+        "speech_config": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Kore"}}},
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "schema": schema
+            }
+        },
+        "safety_settings": [{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}],
+        "cached_content": "cachedContents/abc",
+        "labels": {"source": "prodex-test"}
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let config = &value["generationConfig"];
+
+    assert_eq!(config["topK"], 32);
+    assert_eq!(config["candidateCount"], 2);
+    assert_eq!(config["seed"], 7);
+    assert_eq!(config["presencePenalty"], 0.2);
+    assert_eq!(config["frequencyPenalty"], 0.3);
+    assert_eq!(config["stopSequences"][0], "DONE");
+    assert_eq!(config["responseModalities"][0], "TEXT");
+    assert_eq!(config["mediaResolution"], "MEDIA_RESOLUTION_MEDIUM");
+    assert_eq!(config["responseMimeType"], "application/json");
+    assert_eq!(config["responseJsonSchema"], schema);
+    assert_eq!(
+        config["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"],
+        "Kore"
+    );
+    assert_eq!(value["safetySettings"][0]["threshold"], "BLOCK_ONLY_HIGH");
+    assert_eq!(value["cachedContent"], "cachedContents/abc");
+    assert_eq!(value["labels"]["source"], "prodex-test");
 }
 
 #[test]
@@ -155,6 +490,7 @@ fn gemini_request_translation_maps_namespace_tools_to_function_declarations() {
         &serde_json::to_vec(&body).unwrap(),
         &conversation_store(),
         false,
+        None,
         None,
     )
     .expect("request should translate");
@@ -193,6 +529,7 @@ fn gemini_request_translation_maps_tool_search_to_function_declaration() {
         &serde_json::to_vec(&body).unwrap(),
         &conversation_store(),
         false,
+        None,
         None,
     )
     .expect("request should translate");
@@ -235,6 +572,112 @@ fn gemini_response_translation_restores_namespace_tool_calls() {
 }
 
 #[test]
+fn gemini_response_translation_marks_prompt_feedback_block_as_failed() {
+    let response = serde_json::json!({
+        "responseId": "resp_blocked",
+        "modelVersion": "gemini-2.5-pro",
+        "promptFeedback": {
+            "blockReason": "SAFETY"
+        }
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+
+    assert_eq!(translated["id"], "resp_blocked");
+    assert_eq!(translated["status"], "failed");
+    assert_eq!(translated["error"]["code"], "gemini_prompt_blocked");
+    assert_eq!(translated["output"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn gemini_response_translation_marks_malformed_finish_as_failed() {
+    let response = serde_json::json!({
+        "responseId": "resp_malformed",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": []},
+            "finishReason": "MALFORMED_FUNCTION_CALL"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+
+    assert_eq!(translated["status"], "failed");
+    assert_eq!(
+        translated["error"]["code"],
+        "gemini_malformed_function_call"
+    );
+}
+
+#[test]
+fn gemini_response_translation_marks_max_tokens_as_incomplete() {
+    let response = serde_json::json!({
+        "responseId": "resp_truncated",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [{"text": "partial"}]},
+            "finishReason": "MAX_TOKENS"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+
+    assert_eq!(translated["status"], "incomplete");
+    assert_eq!(
+        translated["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+    assert_eq!(translated["output"][0]["content"][0]["text"], "partial");
+}
+
+#[test]
+fn gemini_response_translation_maps_safety_finish_to_invalid_prompt() {
+    let response = serde_json::json!({
+        "responseId": "resp_safety",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": []},
+            "finishReason": "SAFETY"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+
+    assert_eq!(translated["status"], "failed");
+    assert_eq!(translated["error"]["code"], "invalid_prompt");
+    assert!(
+        translated["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("finishReason=SAFETY")
+    );
+}
+
+#[test]
+fn gemini_response_translation_preserves_image_media_parts() {
+    let response = serde_json::json!({
+        "responseId": "resp_media",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [
+                    {"text": "generated image"},
+                    {"inlineData": {"mimeType": "image/png", "data": "aW1hZ2U="}}
+                ]
+            },
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+    let content = translated["output"][0]["content"].as_array().unwrap();
+
+    assert_eq!(content[0]["type"], "output_text");
+    assert_eq!(content[1]["type"], "input_image");
+    assert_eq!(content[1]["image_url"], "data:image/png;base64,aW1hZ2U=");
+}
+
+#[test]
 fn gemini_request_translation_maps_gemma_4_thinking_level() {
     let body = serde_json::json!({
         "model": "gemma-4-31b-it",
@@ -246,6 +689,7 @@ fn gemini_request_translation_maps_gemma_4_thinking_level() {
         &serde_json::to_vec(&body).unwrap(),
         &conversation_store(),
         false,
+        None,
         None,
     )
     .expect("request should translate");
@@ -286,6 +730,7 @@ fn gemini_request_translation_maps_tool_outputs_as_user_function_responses() {
         &conversation_store(),
         false,
         None,
+        None,
     )
     .expect("request should translate");
     let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
@@ -304,6 +749,45 @@ fn gemini_request_translation_maps_tool_outputs_as_user_function_responses() {
         value["contents"][1]["parts"][0]["functionResponse"]["response"]["output"],
         "commit abc123"
     );
+}
+
+#[test]
+fn gemini_request_translation_masks_large_tool_outputs_in_history() {
+    let large_output = "x".repeat(51_000);
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_shell_large",
+                "name": "shell",
+                "arguments": "{\"cmd\":\"cat huge.log\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_shell_large",
+                "output": large_output
+            }
+        ]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let response = &value["contents"][1]["parts"][0]["functionResponse"]["response"];
+    let masked = response["output"].as_str().unwrap();
+
+    assert_eq!(response["_prodex_masked"], true);
+    assert!(masked.contains("[tool_output_masked]"));
+    assert!(masked.contains("51000 chars"));
+    assert!(masked.contains("Full output saved to:"));
+    assert!(masked.len() < 2_000);
 }
 
 #[test]
@@ -351,6 +835,7 @@ fn gemini_request_translation_groups_multiple_mcp_tool_results_from_history() {
         &serde_json::to_vec(&followup).unwrap(),
         &conversations,
         false,
+        None,
         None,
     )
     .expect("request should translate");
@@ -425,6 +910,7 @@ fn gemini_maps_mcp_optional_tools_to_function_declarations() {
         &conversation_store(),
         false,
         None,
+        None,
     )
     .expect("request should translate");
     let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
@@ -496,6 +982,7 @@ fn gemini_sanitizes_optional_tool_schemas_for_function_declarations() {
         &conversation_store(),
         false,
         None,
+        None,
     )
     .expect("request should translate");
     let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
@@ -536,6 +1023,7 @@ fn gemini_maps_required_and_none_tool_choice_modes() {
             &serde_json::to_vec(&body).unwrap(),
             &conversation_store(),
             false,
+            None,
             None,
         )
         .expect("request should translate");
@@ -588,6 +1076,7 @@ fn gemini_preserves_thought_signature_for_tool_followup_history() {
         &serde_json::to_vec(&followup).unwrap(),
         &conversations,
         false,
+        None,
         None,
     )
     .expect("request should translate");
@@ -739,4 +1228,317 @@ fn gemini_wraps_claw_compactor_shell_benchmarks_with_rtk() {
         arguments["cmd"],
         "rtk claw-compactor benchmark /workspace --json"
     );
+}
+
+#[test]
+fn gemini_request_translation_maps_code_interpreter_to_code_execution() {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Calculate this",
+        "tools": [
+            {"type": "code_interpreter"},
+            {"type": "web_search_preview"}
+        ]
+    }))
+    .unwrap();
+
+    let translated =
+        runtime_gemini_generate_request_body(&body, &conversation_store(), false, None, None)
+            .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(value["tools"][0]["codeExecution"], serde_json::json!({}));
+    assert_eq!(value["tools"][1]["googleSearch"], serde_json::json!({}));
+
+    let stripped = runtime_gemini_request_body_without_tool(&translated.body, "codeExecution")
+        .expect("codeExecution should be removable for unsupported-model fallback");
+    let stripped: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
+    assert!(stripped["tools"][0].get("codeExecution").is_none());
+    assert_eq!(stripped["tools"][0]["googleSearch"], serde_json::json!({}));
+}
+
+#[test]
+fn gemini_request_translation_maps_computer_tool_to_native_computer_use() {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "model": "gemini-2.5-computer-use-preview-10-2025",
+        "input": "Inspect the browser",
+        "tools": [{
+            "type": "computer_use_preview",
+            "environment": "ENVIRONMENT_BROWSER",
+            "excluded_predefined_functions": ["open_web_browser"]
+        }]
+    }))
+    .unwrap();
+
+    let translated =
+        runtime_gemini_generate_request_body(&body, &conversation_store(), false, None, None)
+            .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(
+        value["tools"][0]["computerUse"]["environment"],
+        "ENVIRONMENT_BROWSER"
+    );
+    assert_eq!(
+        value["tools"][0]["computerUse"]["excludedPredefinedFunctions"][0],
+        "open_web_browser"
+    );
+    let stripped = runtime_gemini_request_body_without_tool(&translated.body, "computerUse")
+        .expect("computerUse should be removable for unsupported-model fallback");
+    let stripped: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
+    assert!(stripped.get("tools").is_none());
+}
+
+#[test]
+fn gemini_request_translation_expands_at_paths_and_read_many_files() {
+    let directory =
+        std::env::temp_dir().join(format!("prodex-gemini-context-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let at_path = directory.join("at path.txt");
+    let explicit_path = directory.join("explicit.txt");
+    let excluded_path = directory.join("excluded.txt");
+    fs::write(&at_path, "from at path").unwrap();
+    fs::write(&explicit_path, "from read many files").unwrap();
+    fs::write(&excluded_path, "must stay excluded").unwrap();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": format!("Review @\"{}\"", at_path.display()),
+        "read_many_files": {
+            "include": [format!("{}/**/*.txt", directory.display())],
+            "exclude": [excluded_path],
+            "recursive": true,
+            "useDefaultExcludes": true
+        },
+    }))
+    .unwrap();
+
+    let translated =
+        runtime_gemini_generate_request_body(&body, &conversation_store(), false, None, None)
+            .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let parts = value["contents"][0]["parts"].as_array().unwrap();
+    let text = parts
+        .iter()
+        .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(text.contains("from at path"));
+    assert!(text.contains("from read many files"));
+    assert!(!text.contains("must stay excluded"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn gemini_read_many_files_honors_default_and_ordered_custom_ignore_rules() {
+    let directory =
+        std::env::temp_dir().join(format!("prodex-gemini-ignore-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let ignored_path = directory.join("ignored.txt");
+    let kept_path = directory.join("kept.txt");
+    let env_path = directory.join(".env");
+    let custom_ignore = directory.join("custom.ignore");
+    fs::write(&ignored_path, "must stay ignored").unwrap();
+    fs::write(&kept_path, "must stay visible").unwrap();
+    fs::write(&env_path, "default excluded secret").unwrap();
+    fs::write(&custom_ignore, "*.txt\n!kept.txt\n").unwrap();
+
+    let request = |use_default_excludes| {
+        serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": "Review context",
+            "read_many_files": {
+                "include": [format!("{}/**/*", directory.display())],
+                "useDefaultExcludes": use_default_excludes,
+                "file_filtering_options": {
+                    "custom_ignore_file_paths": [custom_ignore.clone()]
+                }
+            }
+        }))
+        .unwrap()
+    };
+    let translate_text = |body: Vec<u8>| {
+        let translated =
+            runtime_gemini_generate_request_body(&body, &conversation_store(), false, None, None)
+                .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        value["contents"][0]["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let defaults = translate_text(request(true));
+    assert!(!defaults.contains("must stay ignored"));
+    assert!(defaults.contains("must stay visible"));
+    assert!(!defaults.contains("default excluded secret"));
+
+    let no_defaults = translate_text(request(false));
+    assert!(!no_defaults.contains("must stay ignored"));
+    assert!(no_defaults.contains("must stay visible"));
+    assert!(no_defaults.contains("default excluded secret"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn gemini_response_translation_preserves_native_code_media_cache_and_metadata() {
+    let response = serde_json::json!({
+        "responseId": "resp_native",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [
+                {"executableCode": {"language": "PYTHON", "code": "print(2 + 2)"}},
+                {"codeExecutionResult": {"outcome": "OUTCOME_OK", "output": "4"}},
+                {"videoMetadata": {"startOffset": "1s", "endOffset": "3s"}},
+                {"inlineData": {"mimeType": "image/png", "data": "aW1hZ2U="}}
+            ]},
+            "finishReason": "STOP",
+            "safetyRatings": [{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "probability": "NEGLIGIBLE"}],
+            "avgLogprobs": -0.25,
+            "logprobsResult": {"topCandidates": [{"candidates": [{"token": "hello", "logProbability": -0.1}]}]},
+            "citationMetadata": {"citations": [{"uri": "https://citation.example", "title": "Citation"}]},
+            "urlContextMetadata": {"urlMetadata": [{"retrievedUrl": "https://context.example", "urlRetrievalStatus": "URL_RETRIEVAL_STATUS_SUCCESS"}]}
+        }],
+        "usageMetadata": {
+            "promptTokenCount": 20,
+            "candidatesTokenCount": 8,
+            "totalTokenCount": 32,
+            "cachedContentTokenCount": 12,
+            "thoughtsTokenCount": 4,
+            "toolUsePromptTokenCount": 3
+        }
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 7);
+    let output = translated["output"].as_array().unwrap();
+    let message = output
+        .iter()
+        .find(|item| item["type"] == "message")
+        .unwrap();
+    let message_text = message["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item.get("text").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let image = output
+        .iter()
+        .find(|item| item["type"] == "image_generation_call")
+        .unwrap();
+    let web_search = output
+        .iter()
+        .find(|item| item["type"] == "web_search_call")
+        .unwrap();
+    let sources = web_search["action"]["sources"].as_array().unwrap();
+
+    assert!(message_text.contains("Gemini executable code"));
+    assert!(message_text.contains("Gemini code execution result"));
+    assert!(message_text.contains("Gemini video metadata"));
+    assert_eq!(image["result"], "aW1hZ2U=");
+    assert!(
+        sources
+            .iter()
+            .any(|source| source["url"] == "https://citation.example")
+    );
+    assert!(
+        sources
+            .iter()
+            .any(|source| source["url"] == "https://context.example")
+    );
+    assert_eq!(web_search["action"]["type"], "open_page");
+    assert_eq!(web_search["action"]["url"], "https://citation.example");
+    assert_eq!(
+        translated["usage"]["input_tokens_details"]["cached_tokens"],
+        12
+    );
+    assert_eq!(
+        translated["usage"]["output_tokens_details"]["reasoning_tokens"],
+        4
+    );
+    assert_eq!(
+        translated["usage"]["input_tokens_details"]["tool_tokens"],
+        3
+    );
+    assert_eq!(
+        translated["metadata"]["gemini"]["safetyRatings"][0]["probability"],
+        "NEGLIGIBLE"
+    );
+    assert_eq!(
+        translated["metadata"]["gemini"]["urlContextMetadata"]["urlMetadata"][0]["urlRetrievalStatus"],
+        "URL_RETRIEVAL_STATUS_SUCCESS"
+    );
+    assert_eq!(
+        translated["metadata"]["gemini"]["logprobsResult"]["topCandidates"][0]["candidates"][0]["token"],
+        "hello"
+    );
+    assert!(output.iter().any(|item| {
+        item["type"] == "message"
+            && item["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text == "Citations:\n(Citation) https://citation.example")
+    }));
+    let assistant = runtime_gemini_chat_assistant_messages_from_generate_value(&response, 7);
+    assert_eq!(
+        assistant[0]["gemini_native_parts"][0]["videoMetadata"]["startOffset"],
+        "1s"
+    );
+}
+
+#[test]
+fn gemini_response_keeps_non_image_media_in_followup_without_visible_base64_dump() {
+    let store = conversation_store();
+    let response = serde_json::json!({
+        "responseId": "resp_audio",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [{
+                "inlineData": {"mimeType": "audio/wav", "data": "UklGRg=="}
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 7);
+    let visible_text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+    let assistant = runtime_gemini_chat_assistant_messages_from_generate_value(&response, 7);
+
+    assert!(visible_text.contains("audio/wav"));
+    assert!(!visible_text.contains("UklGRg=="));
+    assert_eq!(
+        assistant[0]["gemini_native_parts"][0]["inlineData"]["data"],
+        "UklGRg=="
+    );
+
+    runtime_deepseek_store_conversation(
+        &store,
+        "resp_audio",
+        vec![serde_json::json!({"role": "user", "content": "make audio"})],
+        assistant,
+    );
+    let followup = serde_json::to_vec(&serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "previous_response_id": "resp_audio",
+        "input": "Describe the audio"
+    }))
+    .unwrap();
+    let translated =
+        runtime_gemini_generate_request_body(&followup, &store, false, None, None).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let model_parts = value["contents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|content| content["role"] == "model")
+        .unwrap()["parts"]
+        .as_array()
+        .unwrap();
+
+    assert!(model_parts.iter().any(|part| {
+        part["inlineData"]["mimeType"] == "audio/wav" && part["inlineData"]["data"] == "UklGRg=="
+    }));
 }

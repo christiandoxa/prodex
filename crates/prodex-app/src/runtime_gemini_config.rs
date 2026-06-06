@@ -20,6 +20,16 @@ const GEMINI_CATALOG_MODELS: &[(&str, &str, &str)] = &[
         "Prodex Gemini fallback chain using Gemini CLI-style model routing.",
     ),
     (
+        "auto-gemini-3",
+        "Gemini 3 Auto",
+        "Gemini CLI preview auto alias routed through Gemini 3 and stable fallback models.",
+    ),
+    (
+        "auto-gemini-2.5",
+        "Gemini 2.5 Auto",
+        "Gemini CLI stable auto alias routed through Gemini 2.5 Pro and Flash models.",
+    ),
+    (
         "pro",
         "Gemini Pro",
         "Prodex Gemini Pro alias routed through Gemini preview and stable Pro models.",
@@ -53,6 +63,11 @@ const GEMINI_CATALOG_MODELS: &[(&str, &str, &str)] = &[
         "gemini-3-flash-preview",
         "Gemini 3 Flash Preview",
         "Gemini CLI preview Flash model routed through the Prodex Responses adapter.",
+    ),
+    (
+        "gemini-3-flash",
+        "Gemini 3 Flash",
+        "Gemini CLI secondary Flash model name routed through the Prodex Responses adapter.",
     ),
     (
         "gemini-3.1-flash-lite",
@@ -113,6 +128,9 @@ fn gemini_provider_codex_args(
     if !gemini_provider_enabled(codex_home, user_args) {
         return Ok(user_args.to_vec());
     }
+    if write_catalog {
+        crate::prepare_gemini_cli_compat(codex_home)?;
+    }
     if codex_cli_config_override_value(user_args, "model_catalog_json").is_some() {
         return Ok(user_args.to_vec());
     }
@@ -131,18 +149,20 @@ fn gemini_provider_codex_args(
         SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as u64,
     )
     .min(context_window.saturating_sub(1));
+
     let catalog_path = codex_home.join(GEMINI_MODEL_CATALOG_FILE);
     if write_catalog {
         write_gemini_model_catalog(codex_home, &model, context_window, auto_compact_token_limit)?;
     }
 
+    let user_args = gemini_codex_args_without_consumed_overrides(user_args);
     let mut args = Vec::with_capacity(user_args.len() + 2);
     args.push(OsString::from("-c"));
     args.push(OsString::from(format!(
         "model_catalog_json={}",
         toml_string_literal(&catalog_path.to_string_lossy())
     )));
-    args.extend(user_args.iter().cloned());
+    args.extend(user_args);
     Ok(args)
 }
 
@@ -304,6 +324,50 @@ fn toml_string_literal(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+fn gemini_codex_args_without_consumed_overrides(user_args: &[OsString]) -> Vec<OsString> {
+    let mut args = Vec::with_capacity(user_args.len());
+    let mut index = 0;
+    while index < user_args.len() {
+        let Some(arg) = user_args[index].to_str() else {
+            args.push(user_args[index].clone());
+            index += 1;
+            continue;
+        };
+        if matches!(arg, "-c" | "--config")
+            && let Some(next) = user_args.get(index + 1)
+            && next.to_str().is_some_and(gemini_consumed_config_override)
+        {
+            index += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--config=")
+            && gemini_consumed_config_override(value)
+        {
+            index += 1;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("-c")
+            && !value.is_empty()
+            && value.contains('=')
+            && gemini_consumed_config_override(value)
+        {
+            index += 1;
+            continue;
+        }
+        args.push(user_args[index].clone());
+        index += 1;
+    }
+    args
+}
+
+fn gemini_consumed_config_override(value: &str) -> bool {
+    value
+        .trim_start()
+        .split_once('=')
+        .map(|(key, _)| key.trim() == "model_thinking_budget")
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +401,13 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
         assert_eq!(catalog["models"][0]["slug"], "gemini-2.5-pro");
         assert_eq!(catalog["models"][0]["default_reasoning_level"], "high");
+        assert!(
+            catalog["models"][0]["supported_reasoning_levels"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|level| level["effort"] == "high")
+        );
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
         let model_slugs = catalog["models"].as_array().unwrap();
         assert!(model_slugs.len() > 1);
@@ -346,11 +417,21 @@ mod tests {
                 .any(|model| model["slug"] == "gemini-3.1-pro-preview")
         );
         assert!(model_slugs.iter().any(|model| model["slug"] == "auto"));
+        assert!(
+            model_slugs
+                .iter()
+                .any(|model| model["slug"] == "auto-gemini-3")
+        );
         assert!(model_slugs.iter().any(|model| model["slug"] == "flash"));
         assert!(
             model_slugs
                 .iter()
                 .any(|model| model["slug"] == "gemini-2.5-flash")
+        );
+        assert!(
+            model_slugs
+                .iter()
+                .any(|model| model["slug"] == "gemini-3-flash")
         );
         assert!(
             model_slugs
@@ -387,5 +468,54 @@ mod tests {
                 .iter()
                 .any(|model| model["slug"] == "gemini-2.5-pro")
         );
+    }
+
+    #[test]
+    fn gemini_provider_codex_args_defaults_to_auto_model() {
+        let codex_home = temp_codex_home("default-auto");
+        let user_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-gemini\""),
+        ];
+
+        prepare_gemini_provider_codex_args(&codex_home, &user_args)
+            .expect("Gemini args should prepare");
+
+        let catalog_path = codex_home.join(GEMINI_MODEL_CATALOG_FILE);
+        let catalog: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
+        assert_eq!(catalog["models"][0]["slug"], "auto");
+    }
+
+    #[test]
+    fn gemini_provider_codex_args_consumes_custom_thinking_budget_override() {
+        let codex_home = temp_codex_home("custom-thinking-budget");
+        let user_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-gemini\""),
+            OsString::from("-c"),
+            OsString::from("model=\"gemini-2.5-pro\""),
+            OsString::from("-c"),
+            OsString::from("model_thinking_budget=1024"),
+        ];
+
+        let args = prepare_gemini_provider_codex_args(&codex_home, &user_args)
+            .expect("Gemini args should prepare");
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg.to_string_lossy().contains("model_thinking_budget"))
+        );
+
+        let catalog_path = codex_home.join(GEMINI_MODEL_CATALOG_FILE);
+        let catalog: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
+        let model_slugs = catalog["models"].as_array().unwrap();
+
+        let levels = model_slugs[0]["supported_reasoning_levels"]
+            .as_array()
+            .unwrap();
+        assert!(levels.iter().any(|level| level["effort"] == "low"));
+        assert!(model_slugs[0].get("parameters").is_none());
     }
 }

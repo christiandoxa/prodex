@@ -48,6 +48,8 @@ fn runtime_proxy_passthrough_args_rewrite_local_provider_base_url() {
             listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
             openai_mount_path: "/v1",
             local_model_provider_id: Some("prodex-local"),
+            realtime_ws_base_url: None,
+            realtime_ws_model: None,
         }),
         &[
             OsString::from("mem"),
@@ -73,6 +75,40 @@ fn runtime_proxy_passthrough_args_rewrite_local_provider_base_url() {
             "exec".to_string(),
         ]
     );
+}
+
+#[test]
+fn runtime_proxy_passthrough_args_add_realtime_sidecar_overrides() {
+    let args = runtime_proxy_codex_passthrough_args(
+        Some(RuntimeProxyCodexEndpoint {
+            listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
+            openai_mount_path: "/v1",
+            local_model_provider_id: Some("prodex-gemini"),
+            realtime_ws_base_url: Some("http://127.0.0.1:4555"),
+            realtime_ws_model: Some("gemini-3.1-flash-live-preview"),
+        }),
+        &[
+            OsString::from("-c"),
+            OsString::from("experimental_realtime_ws_model=\"old\""),
+            OsString::from("exec"),
+        ],
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+
+    assert!(args.windows(2).any(|window| {
+        window[0] == "-c"
+            && window[1] == "experimental_realtime_ws_base_url=\"http://127.0.0.1:4555\""
+    }));
+    assert!(args.windows(2).any(|window| {
+        window[0] == "-c"
+            && window[1] == "experimental_realtime_ws_model=\"gemini-3.1-flash-live-preview\""
+    }));
+    assert!(!args.iter().any(|arg| {
+        arg == "experimental_realtime_ws_model=\"old\""
+            || arg == "--config=experimental_realtime_ws_model=\"old\""
+    }));
 }
 
 #[test]

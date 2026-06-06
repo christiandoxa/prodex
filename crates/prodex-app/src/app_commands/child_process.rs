@@ -10,6 +10,7 @@ use crate::{
     preview_external_provider_catalog_codex_args, preview_gemini_provider_codex_args,
     preview_local_provider_catalog_codex_args, profile_openai_compatible_codex_args,
     runtime_caveman_extract_launch_prefixes, runtime_caveman_extract_presidio_prefix,
+    runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens,
 };
 pub(crate) use prodex_runtime_launch::{
@@ -90,6 +91,8 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     let model_provider_override = codex_cli_config_override_value(&codex_args, "model_provider");
     let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
     let model_context_window_tokens = runtime_launch_cli_model_context_window_tokens(&codex_args);
+    let gemini_thinking_budget_tokens =
+        runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
     let request = RuntimeLaunchRequest {
         profile: args.profile.as_deref(),
         allow_auto_rotate: !args.no_auto_rotate,
@@ -100,6 +103,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         smart_context_enabled: args.smart_context,
         presidio_redaction_enabled: presidio_enabled,
         model_context_window_tokens,
+        gemini_thinking_budget_tokens,
         force_runtime_proxy: false,
         model_provider_override: model_provider_override.as_deref(),
         profile_v2_name: profile_v2_name.as_deref(),
@@ -201,5 +205,7 @@ fn runtime_proxy_codex_endpoint(
         listen_addr: proxy.listen_addr,
         openai_mount_path: &proxy.openai_mount_path,
         local_model_provider_id: proxy.local_model_provider_id.as_deref(),
+        realtime_ws_base_url: proxy.realtime_ws_base_url.as_deref(),
+        realtime_ws_model: proxy.realtime_ws_model.as_deref(),
     })
 }

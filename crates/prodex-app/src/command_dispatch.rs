@@ -42,7 +42,10 @@ impl CommandDispatchExt for Commands {
     }
 
     fn should_show_update_notice(&self) -> bool {
-        !matches!(self, Commands::RuntimeBroker(_) | Commands::Update(_))
+        !matches!(
+            self,
+            Commands::RuntimeBroker(_) | Commands::Update(_) | Commands::GeminiCompatRefresh(_)
+        )
     }
 }
 
@@ -135,6 +138,12 @@ impl CommandExecute for DoctorArgs {
 impl CommandExecute for ExportProfileArgs {
     fn execute(self) -> Result<()> {
         handle_export_profiles(self)
+    }
+}
+
+impl CommandExecute for GeminiCompatRefreshArgs {
+    fn execute(self) -> Result<()> {
+        handle_gemini_compat_refresh(self)
     }
 }
 
@@ -261,6 +270,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Super(command) => RoutedCommand::new(command),
         Commands::Claude(command) => RoutedCommand::new(command),
         Commands::RuntimeBroker(command) => RoutedCommand::new(command),
+        Commands::GeminiCompatRefresh(command) => RoutedCommand::new(command),
     }
 }
 

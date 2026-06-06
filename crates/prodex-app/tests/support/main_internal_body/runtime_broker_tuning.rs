@@ -211,6 +211,8 @@ fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
         listen_addr: "127.0.0.1:33475".parse().expect("listen addr should parse"),
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         local_model_provider_id: None,
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
         lease_dir: lease_dir.clone(),
         _lease: None,
         _direct_proxy: None,

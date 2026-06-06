@@ -66,6 +66,7 @@ mod runtime_deepseek_config;
 mod runtime_doctor;
 mod runtime_external_provider_config;
 mod runtime_gemini_auth;
+mod runtime_gemini_cli_compat;
 mod runtime_gemini_config;
 mod runtime_launch;
 mod runtime_launch_shared;
@@ -118,6 +119,7 @@ use runtime_deepseek_config::*;
 use runtime_doctor::*;
 use runtime_external_provider_config::*;
 use runtime_gemini_auth::*;
+use runtime_gemini_cli_compat::*;
 use runtime_gemini_config::*;
 use runtime_launch::*;
 use runtime_launch_shared::*;
@@ -147,6 +149,8 @@ struct RuntimeRotationProxy {
     worker_threads: Vec<thread::JoinHandle<()>>,
     accept_worker_count: usize,
     listen_addr: std::net::SocketAddr,
+    gemini_live_sidecar_addr: Option<std::net::SocketAddr>,
+    gemini_live_sidecar_model: Option<String>,
     log_path: PathBuf,
     active_request_count: Arc<AtomicUsize>,
     owner_lock: Option<StateFileLock>,

@@ -14,6 +14,7 @@ pub(crate) struct CavemanLaunchStrategy {
     model_provider_override: Option<String>,
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
+    gemini_thinking_budget_tokens: Option<u64>,
 }
 
 impl CavemanLaunchStrategy {
@@ -35,6 +36,8 @@ impl CavemanLaunchStrategy {
         let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
         let model_context_window_tokens =
             runtime_launch_cli_model_context_window_tokens(&codex_args);
+        let gemini_thinking_budget_tokens =
+            runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
         Self {
             args,
             codex_args,
@@ -45,6 +48,7 @@ impl CavemanLaunchStrategy {
             model_provider_override,
             profile_v2_name,
             model_context_window_tokens,
+            gemini_thinking_budget_tokens,
         }
     }
 }
@@ -61,6 +65,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             smart_context_enabled: self.args.smart_context,
             presidio_redaction_enabled: self.presidio_enabled,
             model_context_window_tokens: self.model_context_window_tokens,
+            gemini_thinking_budget_tokens: self.gemini_thinking_budget_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
             profile_v2_name: self.profile_v2_name.as_deref(),

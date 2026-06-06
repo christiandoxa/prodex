@@ -12,6 +12,14 @@ const RUNTIME_PROVIDER_GEMINI_MODELS: &[RuntimeProviderModelSpec] = &[
         owned_by: "google",
     },
     RuntimeProviderModelSpec {
+        id: "auto-gemini-3",
+        owned_by: "google",
+    },
+    RuntimeProviderModelSpec {
+        id: "auto-gemini-2.5",
+        owned_by: "google",
+    },
+    RuntimeProviderModelSpec {
         id: "pro",
         owned_by: "google",
     },
@@ -37,6 +45,10 @@ const RUNTIME_PROVIDER_GEMINI_MODELS: &[RuntimeProviderModelSpec] = &[
     },
     RuntimeProviderModelSpec {
         id: "gemini-3-flash-preview",
+        owned_by: "google",
+    },
+    RuntimeProviderModelSpec {
+        id: "gemini-3-flash",
         owned_by: "google",
     },
     RuntimeProviderModelSpec {

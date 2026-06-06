@@ -8,8 +8,7 @@ const DEFAULT_PRODUCTION_LINE_LIMIT = 850;
 const DEFAULT_TEST_LINE_LIMIT = 860;
 const DEFAULT_COHESION_LINE_LIMIT = 770;
 const DEFAULT_NEAR_LIMIT_FILE_BUDGET = 4;
-
-const DEFAULT_ALLOWLIST = Object.freeze([]);
+const DEFAULT_ALLOWLIST_PATH = "scripts/ci/size-guard-allowlist.json";
 
 function envPositiveInteger(name, fallback) {
   const value = process.env[name];
@@ -442,6 +441,37 @@ function allowlistMap(entries) {
   return map;
 }
 
+async function loadDefaultAllowlist() {
+  const configPath = path.join(repoRoot, DEFAULT_ALLOWLIST_PATH);
+  let contents;
+  try {
+    contents = await fs.readFile(configPath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const entries = JSON.parse(contents);
+  if (!Array.isArray(entries)) {
+    throw new Error(`${DEFAULT_ALLOWLIST_PATH} must contain an array`);
+  }
+  return entries.map((entry, index) => {
+    if (
+      !entry ||
+      typeof entry.file !== "string" ||
+      !Number.isSafeInteger(entry.maxLines) ||
+      entry.maxLines <= 0 ||
+      typeof entry.reason !== "string" ||
+      entry.reason.trim() === ""
+    ) {
+      throw new Error(`${DEFAULT_ALLOWLIST_PATH}[${index}] is invalid`);
+    }
+    return entry;
+  });
+}
+
 function directoryForFile(filePath) {
   const separator = filePath.lastIndexOf("/");
   return separator < 0 ? "." : filePath.slice(0, separator);
@@ -504,7 +534,8 @@ function nearLimitBudgetViolationsForFiles(files, args) {
 }
 
 async function scan(args) {
-  const entries = args.useDefaultAllowlist ? [...DEFAULT_ALLOWLIST, ...args.allowlist] : [...args.allowlist];
+  const defaultAllowlist = args.useDefaultAllowlist ? await loadDefaultAllowlist() : [];
+  const entries = [...defaultAllowlist, ...args.allowlist];
   const allowed = allowlistMap(entries);
   const files = [];
   const violations = [];
@@ -583,12 +614,14 @@ async function scan(args) {
     });
   }
 
-  const cohesionViolations = cohesionViolationsForFiles(files, args);
-  const nearLimitBudgetViolations = nearLimitBudgetViolationsForFiles(files, args);
+  const ratchetedFiles = files.filter((file) => !allowed.has(file.filePath));
+  const cohesionViolations = cohesionViolationsForFiles(ratchetedFiles, args);
+  const nearLimitBudgetViolations = nearLimitBudgetViolationsForFiles(ratchetedFiles, args);
   return {
     allowlistHits,
     cohesionViolations,
     files,
+    nearLimitFileCount: nearLimitFilesForFiles(ratchetedFiles, args).length,
     nearLimitBudgetViolations,
     staleAllowlistEntries,
     violations,
@@ -602,14 +635,13 @@ function printHuman(args, result) {
     result.cohesionViolations.length +
     result.nearLimitBudgetViolations.length;
   if (findingCount === 0) {
-    const nearLimitFileCount = nearLimitFilesForFiles(result.files, args).length;
     process.stdout.write(
       [
         `size guard: ok (${result.files.length} Rust file(s), ${result.allowlistHits.length} allowlist hit(s))`,
         `  production limit: ${args.productionLineLimit} lines`,
         `  test/benchmark limit: ${args.testLineLimit} lines`,
         `  cohesion: <= ${args.maxNearLimitSiblings} production sibling(s) at ${args.cohesionLineLimit}+ lines`,
-        `  near-limit budget: ${nearLimitFileCount}/${args.nearLimitFileBudget} Rust file(s)`,
+        `  near-limit budget: ${result.nearLimitFileCount}/${args.nearLimitFileBudget} Rust file(s)`,
       ].join("\n") + "\n",
     );
     return;

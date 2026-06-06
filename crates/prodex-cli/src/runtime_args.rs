@@ -1,5 +1,6 @@
 use clap::{ArgGroup, Args};
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 pub const SUPER_OPTIMIZER_PREFIXES: [&str; 3] = ["sqz", "tokensavior", "clawcompactor"];
 
@@ -185,6 +186,13 @@ pub struct SuperArgs {
     pub codex_args: Vec<OsString>,
 }
 
+#[derive(Args, Debug)]
+pub struct GeminiCompatRefreshArgs {
+    /// CODEX_HOME to refresh Gemini CLI compatibility surfaces into.
+    #[arg(long, value_name = "PATH")]
+    pub codex_home: PathBuf,
+}
+
 impl SuperArgs {
     pub fn presidio_preference(&self) -> Option<bool> {
         if self.presidio {
@@ -296,7 +304,7 @@ pub const SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
 pub const SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
 pub const SUPER_GEMINI_PROVIDER_ID: &str = "prodex-gemini";
 const SUPER_GEMINI_PROVIDER_NAME: &str = "Google Gemini";
-pub const SUPER_GEMINI_DEFAULT_MODEL: &str = "gemini-2.5-pro";
+pub const SUPER_GEMINI_DEFAULT_MODEL: &str = "auto";
 pub const SUPER_GEMINI_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 pub const SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
 pub const SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
@@ -389,6 +397,10 @@ impl SuperExternalProvider {
         match self {
             Self::Anthropic | Self::Copilot | Self::DeepSeek | Self::Gemini => "live",
         }
+    }
+
+    fn image_generation_enabled(self) -> bool {
+        matches!(self, Self::Gemini)
     }
 }
 
@@ -496,7 +508,10 @@ pub fn super_external_provider_codex_args(
         format!("web_search=\"{}\"", provider.web_search_mode()),
         "features.apps=false".to_string(),
         "features.js_repl=false".to_string(),
-        "features.image_generation=false".to_string(),
+        format!(
+            "features.image_generation={}",
+            provider.image_generation_enabled()
+        ),
     ];
 
     let mut args = Vec::with_capacity(overrides.len() * 2);

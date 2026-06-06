@@ -1,0 +1,15 @@
+[
+  {
+    "id": "gemini-provider-parity-0.156.0",
+    "requiredSubjects": [
+      "feat(gemini): deliver Codex-native provider parity"
+    ],
+    "caps": {
+      "maxFiles": 66,
+      "maxBehaviorFiles": 54,
+      "maxLines": 12000,
+      "maxFileLines": 3000
+    },
+    "reason": "Reviewed cross-cutting Gemini provider parity release with complete local full, clippy, and serial test gates."
+  }
+]

@@ -282,12 +282,13 @@ pub(super) fn runtime_provider_model_fallback_chain(
             _ => return vec![model.to_string()],
         },
         RuntimeProviderBridgeKind::Gemini => match lower.as_str() {
-            "" => &[prodex_cli::SUPER_GEMINI_DEFAULT_MODEL],
-            "auto" | "auto-gemini-3" => &[
+            "" | "auto" | "auto-gemini-3" => &[
                 "gemini-3.1-pro-preview",
                 "gemini-3-pro-preview",
                 "gemini-2.5-pro",
                 "gemini-3-flash-preview",
+                "gemini-3-flash",
+                "gemini-3.5-flash",
                 "gemini-2.5-flash",
             ],
             "auto-gemini-2.5" => &["gemini-2.5-pro", "gemini-2.5-flash"],
@@ -302,6 +303,7 @@ pub(super) fn runtime_provider_model_fallback_chain(
                 "gemini-3-pro-preview",
                 "gemini-2.5-pro",
                 "gemini-3-flash-preview",
+                "gemini-3-flash",
                 "gemini-2.5-flash",
             ],
             "gemini-3.1-pro-preview" => &[
@@ -309,6 +311,7 @@ pub(super) fn runtime_provider_model_fallback_chain(
                 "gemini-3-pro-preview",
                 "gemini-2.5-pro",
                 "gemini-3-flash-preview",
+                "gemini-3-flash",
                 "gemini-2.5-flash",
             ],
             "gemini-3-pro-preview" => &[
@@ -316,20 +319,32 @@ pub(super) fn runtime_provider_model_fallback_chain(
                 "gemini-3.1-pro-preview",
                 "gemini-2.5-pro",
                 "gemini-3-flash-preview",
+                "gemini-3-flash",
                 "gemini-2.5-flash",
             ],
             "gemini-3.5-flash" => &[
                 "gemini-3.5-flash",
                 "gemini-3-flash-preview",
+                "gemini-3-flash",
                 "gemini-2.5-flash",
             ],
-            "gemini-3-flash-preview" => &["gemini-3-flash-preview", "gemini-2.5-flash"],
+            "gemini-3-flash-preview" => &[
+                "gemini-3-flash-preview",
+                "gemini-3-flash",
+                "gemini-2.5-flash",
+            ],
+            "gemini-3-flash" => &["gemini-3-flash", "gemini-3.5-flash", "gemini-2.5-flash"],
             "gemini-3.1-flash-lite" => &[
                 "gemini-3.1-flash-lite",
                 "gemini-2.5-flash-lite",
                 "gemini-2.5-flash",
             ],
-            "flash" => &["gemini-3-flash-preview", "gemini-2.5-flash"],
+            "flash" => &[
+                "gemini-3-flash-preview",
+                "gemini-3-flash",
+                "gemini-3.5-flash",
+                "gemini-2.5-flash",
+            ],
             "flash-lite" => &["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"],
             _ => return vec![model.to_string()],
         },
@@ -622,6 +637,7 @@ mod tests {
         let models = body["data"].as_array().unwrap();
 
         assert!(models.len() > 1);
+        assert!(models.iter().any(|model| model["id"] == "auto"));
         assert!(models.iter().any(|model| model["id"] == "gemini-2.5-pro"));
         assert!(
             models
@@ -689,8 +705,25 @@ mod tests {
     #[test]
     fn provider_model_fallback_supports_aliases_and_combo() {
         assert_eq!(
+            runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "auto"),
+            vec![
+                "gemini-3.1-pro-preview",
+                "gemini-3-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3-flash",
+                "gemini-3.5-flash",
+                "gemini-2.5-flash"
+            ]
+        );
+        assert_eq!(
             runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "flash"),
-            vec!["gemini-3-flash-preview", "gemini-2.5-flash"]
+            vec![
+                "gemini-3-flash-preview",
+                "gemini-3-flash",
+                "gemini-3.5-flash",
+                "gemini-2.5-flash"
+            ]
         );
         assert_eq!(
             runtime_provider_model_fallback_chain(
@@ -703,6 +736,7 @@ mod tests {
                 "gemini-3-pro-preview",
                 "gemini-2.5-pro",
                 "gemini-3-flash-preview",
+                "gemini-3-flash",
                 "gemini-2.5-flash",
             ]
         );
@@ -711,7 +745,11 @@ mod tests {
                 RuntimeProviderBridgeKind::Gemini,
                 "gemini-3-flash-preview"
             ),
-            vec!["gemini-3-flash-preview", "gemini-2.5-flash"]
+            vec![
+                "gemini-3-flash-preview",
+                "gemini-3-flash",
+                "gemini-2.5-flash"
+            ]
         );
         assert_eq!(
             runtime_provider_model_fallback_chain(

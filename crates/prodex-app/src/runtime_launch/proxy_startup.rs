@@ -11,6 +11,8 @@ mod local_rewrite_copilot;
 mod local_rewrite_deepseek;
 mod local_rewrite_gemini;
 mod local_rewrite_gemini_bindings;
+mod local_rewrite_gemini_compact;
+mod local_rewrite_gemini_live;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_gemini_thought_signatures;
 mod local_rewrite_rate_limits;
@@ -515,6 +517,8 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         worker_threads,
         accept_worker_count: worker_count,
         listen_addr,
+        gemini_live_sidecar_addr: None,
+        gemini_live_sidecar_model: None,
         log_path,
         active_request_count: Arc::clone(&shared.active_request_count),
         owner_lock,

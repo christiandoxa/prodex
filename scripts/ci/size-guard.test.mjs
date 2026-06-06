@@ -320,3 +320,56 @@ test("near-limit budget fails when global ratchet is exceeded", async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("allowlisted files use exact caps without consuming global cohesion budgets", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-size-guard-"));
+  try {
+    await execFileAsync("git", ["init", "-q"], { cwd: root });
+    await writeLines(root, "src/legacy.rs", 12);
+    await writeLines(root, "src/alpha.rs", 8);
+    await writeLines(root, "src/beta.rs", 8);
+    await writeText(
+      root,
+      "scripts/ci/size-guard-allowlist.json",
+      `${JSON.stringify(
+        [
+          {
+            file: "src/legacy.rs",
+            maxLines: 12,
+            reason: "Legacy module has an exact ratcheted cap.",
+          },
+        ],
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = await runNode(
+      [
+        SCRIPT_PATH,
+        "--production-lines",
+        "10",
+        "--test-lines",
+        "12",
+        "--cohesion-lines",
+        "8",
+        "--max-near-limit-siblings",
+        "2",
+        "--near-limit-files",
+        "2",
+        "--json",
+      ],
+      { env: { ...process.env, PRODEX_REPO_ROOT: root } },
+    );
+
+    assert.equal(result.code, 0);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.allowlistHits.length, 1);
+    assert.equal(payload.allowlistHits[0].filePath, "src/legacy.rs");
+    assert.equal(payload.nearLimitFileCount, 2);
+    assert.deepEqual(payload.cohesionViolations, []);
+    assert.deepEqual(payload.nearLimitBudgetViolations, []);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

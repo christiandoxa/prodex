@@ -3,8 +3,9 @@ use super::deepseek_rewrite::{
     runtime_chat_compatible_request_body,
 };
 use super::local_rewrite::{
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
-    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProviderOptions,
+    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
+    RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_search_fallback::{
@@ -154,7 +155,9 @@ pub(super) fn send_runtime_copilot_upstream_request(
             });
         }
         return Ok(RuntimeLocalRewriteUpstreamResult {
-            response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+            response: RuntimeLocalRewriteUpstreamResponse::Live(
+                RuntimeLocalRewriteLiveResponse::new(response),
+            ),
             gemini_context: None,
             copilot_context: None,
         });
@@ -210,7 +213,9 @@ fn send_runtime_copilot_responses_request(
             let (status, parts, class) = match send_result {
                 RuntimeLocalRewritePreparedSendResult::Live(response) => {
                     return Ok(RuntimeLocalRewriteUpstreamResult {
-                        response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                        response: RuntimeLocalRewriteUpstreamResponse::Live(
+                            RuntimeLocalRewriteLiveResponse::new(response),
+                        ),
                         gemini_context: None,
                         copilot_context: Some(runtime_copilot_request_context(
                             shared,

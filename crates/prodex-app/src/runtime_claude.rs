@@ -40,6 +40,7 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             smart_context_enabled: false,
             presidio_redaction_enabled: false,
             model_context_window_tokens: None,
+            gemini_thinking_budget_tokens: None,
             force_runtime_proxy: true,
             model_provider_override: None,
             profile_v2_name: None,

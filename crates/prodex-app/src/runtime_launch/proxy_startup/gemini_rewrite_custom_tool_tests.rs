@@ -32,6 +32,7 @@ fn gemini_request_translation_maps_custom_apply_patch_to_function_declaration() 
         &conversation_store(),
         false,
         None,
+        None,
     )
     .expect("request should translate");
     let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
@@ -318,6 +319,7 @@ fn gemini_request_translation_replays_custom_tool_output_as_function_response() 
         &serde_json::to_vec(&followup).unwrap(),
         &conversations,
         false,
+        None,
         None,
     )
     .expect("request should translate");

@@ -13,6 +13,7 @@ struct RunCommandStrategy {
     model_provider_override: Option<String>,
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
+    gemini_thinking_budget_tokens: Option<u64>,
     auto_external_provider: Option<SuperExternalProvider>,
     auto_external_provider_base_url: Option<String>,
 }
@@ -28,6 +29,8 @@ impl RunCommandStrategy {
         let profile_v2_name = codex_cli_profile_v2_name(&codex_args);
         let mut model_context_window_tokens =
             runtime_launch_cli_model_context_window_tokens(&codex_args);
+        let mut gemini_thinking_budget_tokens =
+            runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
         let auto_external_provider = if model_provider_override.is_none() {
             runtime_resume_external_provider_from_codex_args(&codex_args)?
         } else {
@@ -56,6 +59,8 @@ impl RunCommandStrategy {
             model_provider_override = Some(provider.model_provider_id().to_string());
             model_context_window_tokens =
                 runtime_launch_cli_model_context_window_tokens(&codex_args);
+            gemini_thinking_budget_tokens =
+                runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
         }
         let dry_run = args.dry_run || dry_run_arg;
         Ok(Self {
@@ -67,6 +72,7 @@ impl RunCommandStrategy {
             model_provider_override,
             profile_v2_name,
             model_context_window_tokens,
+            gemini_thinking_budget_tokens,
             auto_external_provider,
             auto_external_provider_base_url,
         })
@@ -129,6 +135,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
             smart_context_enabled: self.auto_external_provider.is_some(),
             presidio_redaction_enabled: false,
             model_context_window_tokens: self.model_context_window_tokens,
+            gemini_thinking_budget_tokens: self.gemini_thinking_budget_tokens,
             force_runtime_proxy: false,
             model_provider_override: self.model_provider_override.as_deref(),
             profile_v2_name: self.profile_v2_name.as_deref(),
@@ -679,6 +686,8 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
             .context("failed to build dry-run runtime proxy address")?,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         local_model_provider_id: None,
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
         lease_dir: paths.root.join("runtime-broker-dry-run-leases"),
         _lease: None,
         _direct_proxy: None,
@@ -698,6 +707,8 @@ fn runtime_local_rewrite_proxy_dry_run_endpoint(
             .context("failed to build dry-run runtime local rewrite proxy address")?,
         openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         local_model_provider_id: Some(local_model_provider_id.to_string()),
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
         lease_dir: paths.root.join("runtime-local-proxy-dry-run-leases"),
         _lease: None,
         _direct_proxy: None,
@@ -729,6 +740,8 @@ fn start_dedicated_runtime_proxy_endpoint(
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         local_model_provider_id: None,
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
         lease_dir: paths.root.join("runtime-dedicated-proxy-leases"),
         _lease: None,
         _direct_proxy: Some(proxy),
@@ -761,6 +774,8 @@ fn start_fixed_runtime_proxy_endpoint(
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         local_model_provider_id: None,
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
         lease_dir: paths.root.join("runtime-fixed-proxy-leases"),
         _lease: None,
         _direct_proxy: Some(proxy),
@@ -792,6 +807,10 @@ fn start_local_rewrite_proxy_endpoint(
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         local_model_provider_id: Some(local_model_provider_id.to_string()),
+        realtime_ws_base_url: proxy
+            .gemini_live_sidecar_addr
+            .map(|addr| format!("http://{addr}")),
+        realtime_ws_model: proxy.gemini_live_sidecar_model.clone(),
         lease_dir: paths.root.join("runtime-local-proxy-leases"),
         _lease: None,
         _direct_proxy: Some(proxy),
@@ -835,6 +854,18 @@ fn runtime_launch_effective_model_context_window_tokens(
     }
     request.model_context_window_tokens.or_else(|| {
         runtime_launch_config_model_context_window_tokens_with_profile_v2(
+            &selection.codex_home,
+            request.profile_v2_name,
+        )
+    })
+}
+
+fn runtime_launch_effective_gemini_thinking_budget_tokens(
+    request: &RuntimeLaunchRequest<'_>,
+    selection: &RuntimeLaunchSelection,
+) -> Option<u64> {
+    request.gemini_thinking_budget_tokens.or_else(|| {
+        runtime_launch_config_gemini_thinking_budget_tokens_with_profile_v2(
             &selection.codex_home,
             request.profile_v2_name,
         )

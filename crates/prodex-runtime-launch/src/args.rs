@@ -14,7 +14,7 @@ pub fn runtime_proxy_codex_passthrough_args(
 ) -> Vec<OsString> {
     runtime_proxy
         .map(|proxy| {
-            if let Some(local_provider_id) = proxy.local_model_provider_id {
+            let args = if let Some(local_provider_id) = proxy.local_model_provider_id {
                 runtime_proxy_local_model_provider_codex_args(
                     proxy.listen_addr,
                     proxy.openai_mount_path,
@@ -29,7 +29,12 @@ pub fn runtime_proxy_codex_passthrough_args(
                     proxy.openai_mount_path,
                     user_args,
                 )
-            }
+            };
+            runtime_proxy_realtime_codex_args(
+                proxy.realtime_ws_base_url,
+                proxy.realtime_ws_model,
+                &args,
+            )
         })
         .unwrap_or_else(|| user_args.to_vec())
 }
@@ -264,6 +269,109 @@ pub fn runtime_proxy_local_model_provider_codex_args(
         args.push(OsString::from(provider_base_override));
     }
     args
+}
+
+fn runtime_proxy_realtime_codex_args(
+    realtime_ws_base_url: Option<&str>,
+    realtime_ws_model: Option<&str>,
+    user_args: &[OsString],
+) -> Vec<OsString> {
+    let mut overrides = Vec::new();
+    if let Some(base_url) = realtime_ws_base_url.filter(|value| !value.trim().is_empty()) {
+        overrides.push((
+            "experimental_realtime_ws_base_url".to_string(),
+            toml_string_literal(base_url),
+        ));
+    }
+    if let Some(model) = realtime_ws_model.filter(|value| !value.trim().is_empty()) {
+        overrides.push((
+            "experimental_realtime_ws_model".to_string(),
+            toml_string_literal(model),
+        ));
+    }
+    if overrides.is_empty() {
+        return user_args.to_vec();
+    }
+
+    let mut args = Vec::with_capacity(user_args.len() + (overrides.len() * 2));
+    let mut replaced = vec![false; overrides.len()];
+    let mut index = 0;
+    while index < user_args.len() {
+        let Some(arg) = user_args[index].to_str() else {
+            args.push(user_args[index].clone());
+            index += 1;
+            continue;
+        };
+
+        if (arg == "-c" || arg == "--config")
+            && let Some(next) = user_args.get(index + 1)
+        {
+            if let Some((override_index, override_value)) =
+                runtime_proxy_matching_realtime_override(next.to_str(), &overrides)
+            {
+                args.push(user_args[index].clone());
+                args.push(OsString::from(override_value));
+                replaced[override_index] = true;
+            } else {
+                args.push(user_args[index].clone());
+                args.push(next.clone());
+            }
+            index += 2;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("--config=") {
+            if let Some((override_index, override_value)) =
+                runtime_proxy_matching_realtime_override(Some(value), &overrides)
+            {
+                args.push(OsString::from(format!("--config={override_value}")));
+                replaced[override_index] = true;
+            } else {
+                args.push(user_args[index].clone());
+            }
+            index += 1;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("-c")
+            && !value.is_empty()
+            && value.contains('=')
+        {
+            if let Some((override_index, override_value)) =
+                runtime_proxy_matching_realtime_override(Some(value), &overrides)
+            {
+                args.push(OsString::from(format!("-c{override_value}")));
+                replaced[override_index] = true;
+            } else {
+                args.push(user_args[index].clone());
+            }
+            index += 1;
+            continue;
+        }
+
+        args.push(user_args[index].clone());
+        index += 1;
+    }
+
+    for (index, (key, value)) in overrides.iter().enumerate() {
+        if !replaced[index] {
+            args.push(OsString::from("-c"));
+            args.push(OsString::from(format!("{key}={value}")));
+        }
+    }
+    args
+}
+
+fn runtime_proxy_matching_realtime_override(
+    assignment: Option<&str>,
+    overrides: &[(String, String)],
+) -> Option<(usize, String)> {
+    let key = config_assignment_key(assignment)?;
+    overrides
+        .iter()
+        .enumerate()
+        .find(|(_, (override_key, _))| override_key == key)
+        .map(|(index, (key, value))| (index, format!("{key}={value}")))
 }
 
 fn normalize_mount_path(mount_path: &str) -> String {

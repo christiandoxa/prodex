@@ -68,6 +68,82 @@ const ALLOWLIST = Object.freeze([
       "bounded local rewrite worker pool created during launch, outside request commit path",
   },
   {
+    name: "gemini-live-sidecar-launch-thread",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bworker_threads\.push\(thread::spawn\s*\(/,
+    maxHits: 1,
+    reason:
+      "single bounded Gemini Live sidecar acceptor created during launch and owned by the runtime shutdown handle",
+  },
+  {
+    name: "gemini-bounded-context-directory-scans",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::read_dir\s*\(/,
+    maxHits: 5,
+    reason:
+      "Gemini context, ignore, extension, and policy discovery enforce explicit file and scan-count limits",
+  },
+  {
+    name: "gemini-bounded-ignore-file-read",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::read_to_string\s*\(/,
+    maxHits: 1,
+    reason: "bounded .gitignore compatibility read used only for explicit Gemini context collection",
+  },
+  {
+    name: "gemini-bounded-local-file-metadata",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::metadata\s*\(/,
+    maxHits: 1,
+    reason: "metadata check precedes Gemini local-file reads capped by file count and total bytes",
+  },
+  {
+    name: "gemini-bounded-local-file-canonicalize",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::canonicalize\s*\(/,
+    maxHits: 1,
+    reason: "canonicalization deduplicates Gemini local-file reads before consuming the bounded budget",
+  },
+  {
+    name: "gemini-bounded-local-file-read",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::read\s*\(/,
+    maxHits: 1,
+    reason: "Gemini local-file content is capped by explicit per-request file and byte budgets",
+  },
+  {
+    name: "gemini-bounded-text-file-open",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    id: "blocking-file-open",
+    pattern: /\bfs::File::open\s*\(/,
+    maxHits: 1,
+    reason: "Gemini memory and import text reads use a take-limited reader",
+  },
+  {
+    name: "gemini-explicit-output-directory-creation",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::create_dir_all\s*\(/,
+    maxHits: 2,
+    reason:
+      "directory creation is limited to explicit checkpoint export and bounded masked tool-output persistence",
+  },
+  {
+    name: "gemini-explicit-output-write",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::write\s*\(/,
+    maxHits: 2,
+    reason:
+      "writes are limited to explicit checkpoint export and bounded masked tool-output persistence",
+  },
+  {
     name: "runtime-websocket-tcp-dns-bounded-executor-threads",
     file: "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor/executor.rs",
     id: "blocking-thread-builder-spawn",
@@ -203,6 +279,17 @@ function cfgTestLine(line) {
   return /^#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/.test(line.trim());
 }
 
+function fullFileCfgTest(contents) {
+  for (const line of contents.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("//")) {
+      continue;
+    }
+    return /^#!\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/.test(trimmed);
+  }
+  return false;
+}
+
 function scannableLines(contents) {
   const lines = contents.split(/\r?\n/);
   const result = [];
@@ -255,6 +342,9 @@ function allowlistEntryFor(filePath, pattern, code) {
 
 async function scanFile(filePath) {
   const contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
+  if (fullFileCfgTest(contents)) {
+    return { violations: [], allowlistHits: [] };
+  }
   const violations = [];
   const allowlistHits = [];
 

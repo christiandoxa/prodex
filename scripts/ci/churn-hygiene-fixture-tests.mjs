@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_THRESHOLDS,
+  matchingChurnAllowance,
   mechanicalOnlyDeclared,
   structuralExtractionApplies,
   structuralExtractionAcceptedByDeclaration,
@@ -106,6 +107,52 @@ assert.equal(mechanicalOnlyDeclared("refactor: split module\n\nMechanical-only: 
 assert.equal(mechanicalOnlyDeclared("refactor: split module\n\nMechanical-only: true\n"), true);
 assert.equal(mechanicalOnlyDeclared("refactor: split module [mechanical-only]\n"), true);
 assert.equal(mechanicalOnlyDeclared("refactor: split module\n"), false);
+
+{
+  const allowance = {
+    id: "reviewed-large-change",
+    requiredSubjects: ["feat(gemini): parity", "chore(release): release 1.2.3"],
+    caps: {
+      maxFiles: 3,
+      maxBehaviorFiles: 3,
+      maxLines: 20,
+      maxFileLines: 10,
+    },
+    reason: "Reviewed fixture allowance.",
+  };
+  const summary = summarize([
+    row("crates/prodex-app/src/one.rs", 10, 0),
+    row("crates/prodex-app/src/two.rs", 10, 0),
+  ]);
+  const commits = [
+    { subject: "feat(gemini): parity" },
+    { subject: "chore(release): release 1.2.3" },
+  ];
+  assert.equal(
+    matchingChurnAllowance([allowance], summary, commits)?.id,
+    allowance.id,
+    "reviewed allowance matches only inside its caps",
+  );
+  assert.equal(
+    matchingChurnAllowance([allowance], summary, commits.slice(0, 1)),
+    null,
+    "reviewed allowance requires every declared subject",
+  );
+  assert.equal(
+    matchingChurnAllowance(
+      [{ ...allowance, caps: { ...allowance.caps, maxLines: 19 } }],
+      summary,
+      commits,
+    ),
+    null,
+    "reviewed allowance does not hide cap growth",
+  );
+  assert.deepEqual(
+    thresholdIssues(summary, { ...thresholds, maxLines: 1 }, { churnAllowance: allowance }),
+    [],
+    "matched allowance suppresses only generic thresholds",
+  );
+}
 
 assert.equal(structuralGroup("src/foo.rs"), "src/foo");
 assert.equal(structuralGroup("src/foo/bar.rs"), "src/foo");

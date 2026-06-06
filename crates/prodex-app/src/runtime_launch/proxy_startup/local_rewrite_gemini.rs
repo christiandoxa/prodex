@@ -1,19 +1,24 @@
 use super::gemini_rewrite::{
     RuntimeGeminiAuth, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
-    RuntimeGeminiTranslatedRequest, runtime_gemini_generate_request_body,
-    runtime_gemini_project_id, runtime_gemini_request_body_without_google_search,
+    RuntimeGeminiTranslatedRequest, runtime_gemini_finish_reason,
+    runtime_gemini_finish_reason_retryable_invalid, runtime_gemini_generate_request_body,
+    runtime_gemini_media_content_item_from_part, runtime_gemini_normalized_response_value,
+    runtime_gemini_project_id, runtime_gemini_prompt_feedback_failure,
+    runtime_gemini_request_body_without_tool, runtime_gemini_text_from_special_part,
     runtime_gemini_upstream_url,
 };
 use super::gemini_sse::RuntimeGeminiBindingRecorder;
 use super::local_rewrite::{
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
-    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProviderOptions,
+    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
+    RuntimeLocalRewriteUpstreamResult,
 };
 pub(super) use super::local_rewrite_gemini_bindings::runtime_gemini_remember_bindings_from_responses_body;
 use super::local_rewrite_gemini_bindings::runtime_gemini_tool_output_call_ids_from_request;
 use super::local_rewrite_gemini_quota::{
     runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
-    runtime_gemini_response_retryable_quota, runtime_gemini_retry_delay_ms,
+    runtime_gemini_normalized_error_parts, runtime_gemini_response_retryable_quota,
+    runtime_gemini_retry_delay_ms,
 };
 use super::local_rewrite_gemini_thought_signatures::runtime_gemini_harden_translated_thoughts as harden_thoughts;
 use super::local_rewrite_rate_limits::runtime_gemini_quota_codex_headers;
@@ -37,6 +42,7 @@ use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -44,6 +50,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT: usize = 4096;
 const RUNTIME_GEMINI_LOCAL_RETRY_LIMIT: usize = 9;
+const RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT: usize = 3;
+const RUNTIME_GEMINI_INVALID_STREAM_RETRY_BASE_DELAY_MS: u64 = 1_000;
+const RUNTIME_GEMINI_PRECOMMIT_PEEK_LIMIT: usize = 64 * 1024;
 
 #[path = "local_rewrite_gemini_auth.rs"]
 mod local_rewrite_gemini_auth;
@@ -82,6 +91,7 @@ pub(super) fn runtime_gemini_oauth_pool_from_provider(
 ) -> Option<RuntimeGeminiOAuthPool> {
     let RuntimeLocalRewriteProviderOptions::Gemini {
         auth: RuntimeGeminiProviderAuth::OAuthProfiles { profiles },
+        ..
     } = provider
     else {
         return None;
@@ -106,6 +116,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
     auth: &RuntimeGeminiProviderAuth,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
+    let thinking_budget_tokens = runtime_gemini_thinking_budget_tokens(&shared.provider);
     let attempts = runtime_gemini_auth_attempts(auth, shared, &body)?;
     let attempt_count = attempts.len();
     'auth_attempts: for (attempt_index, mut selected) in attempts.into_iter().enumerate() {
@@ -138,6 +149,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     &shared.gemini_conversations,
                     matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }),
                     runtime_gemini_project_id(&selected.auth),
+                    thinking_budget_tokens,
                 )?
             } else {
                 RuntimeGeminiTranslatedRequest {
@@ -153,8 +165,6 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 selected.profile_name.as_str(),
                 &mut translated,
             )?;
-            let mut google_search_fallback_body =
-                runtime_gemini_request_body_without_google_search(&translated.body);
             let upstream_url = runtime_gemini_upstream_url(
                 &shared.upstream_base_url,
                 &selected.auth,
@@ -162,9 +172,10 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 translated.stream,
             );
             let mut rate_limit_retry_index = 0;
+            let mut invalid_stream_retry_index = 0;
             let mut auth_refresh_attempted = false;
             loop {
-                let response = send_runtime_local_rewrite_prepared_request(
+                let mut response = send_runtime_local_rewrite_prepared_request(
                     request_id,
                     request,
                     shared,
@@ -211,12 +222,13 @@ pub(super) fn send_runtime_gemini_upstream_request(
                         );
                     }
                     if status == 400
-                        && let Some(fallback_body) = google_search_fallback_body.take()
+                        && let Some((tool_name, fallback_body)) =
+                            runtime_gemini_unsupported_tool_fallback_body(&translated.body)
                     {
                         runtime_proxy_log(
                             &shared.runtime_shared,
                             runtime_proxy_structured_log_message(
-                                "local_rewrite_gemini_google_search_fallback",
+                                "local_rewrite_gemini_builtin_tool_fallback",
                                 [
                                     runtime_proxy_log_field("request", request_id.to_string()),
                                     runtime_proxy_log_field(
@@ -225,6 +237,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                                     ),
                                     runtime_proxy_log_field("model", translated.model.as_str()),
                                     runtime_proxy_log_field("status", status.to_string()),
+                                    runtime_proxy_log_field("tool", tool_name),
                                 ],
                             ),
                         );
@@ -398,10 +411,102 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     }
 
                     return Ok(RuntimeLocalRewriteUpstreamResult {
-                        response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                        response: RuntimeLocalRewriteUpstreamResponse::Buffered(
+                            runtime_gemini_normalized_error_parts(status, parts),
+                        ),
                         gemini_context: None,
                         copilot_context: None,
                     });
+                }
+
+                let mut stream_prefix = Vec::new();
+                if responses_route && translated.stream && runtime_gemini_response_is_sse(&response)
+                {
+                    match runtime_gemini_peek_stream_for_retry(response)? {
+                        RuntimeGeminiPrecommitPeek::Committed {
+                            response: next_response,
+                            prefix,
+                        } => {
+                            response = next_response;
+                            stream_prefix = prefix;
+                        }
+                        RuntimeGeminiPrecommitPeek::RetryableInvalid {
+                            response: next_response,
+                            prefix,
+                            reason,
+                        } => {
+                            if invalid_stream_retry_index
+                                < RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT
+                            {
+                                let delay_ms = runtime_gemini_invalid_stream_retry_delay_ms(
+                                    invalid_stream_retry_index,
+                                );
+                                runtime_proxy_log(
+                                    &shared.runtime_shared,
+                                    runtime_proxy_structured_log_message(
+                                        "local_rewrite_gemini_invalid_stream_retry",
+                                        [
+                                            runtime_proxy_log_field(
+                                                "request",
+                                                request_id.to_string(),
+                                            ),
+                                            runtime_proxy_log_field(
+                                                "profile",
+                                                selected.profile_name.as_str(),
+                                            ),
+                                            runtime_proxy_log_field(
+                                                "model",
+                                                translated.model.as_str(),
+                                            ),
+                                            runtime_proxy_log_field(
+                                                "retry",
+                                                invalid_stream_retry_index.to_string(),
+                                            ),
+                                            runtime_proxy_log_field("reason", reason.as_str()),
+                                            runtime_proxy_log_field(
+                                                "delay_ms",
+                                                delay_ms.to_string(),
+                                            ),
+                                        ],
+                                    ),
+                                );
+                                invalid_stream_retry_index += 1;
+                                thread::sleep(Duration::from_millis(delay_ms));
+                                continue;
+                            }
+                            if model_index + 1 < model_chain.len() {
+                                runtime_proxy_log(
+                                    &shared.runtime_shared,
+                                    runtime_proxy_structured_log_message(
+                                        "local_rewrite_gemini_invalid_stream_model_fallback",
+                                        [
+                                            runtime_proxy_log_field(
+                                                "request",
+                                                request_id.to_string(),
+                                            ),
+                                            runtime_proxy_log_field(
+                                                "profile",
+                                                selected.profile_name.as_str(),
+                                            ),
+                                            runtime_proxy_log_field(
+                                                "from_model",
+                                                translated.model.as_str(),
+                                            ),
+                                            runtime_proxy_log_field(
+                                                "to_model",
+                                                model_chain[model_index + 1].as_str(),
+                                            ),
+                                            runtime_proxy_log_field("reason", reason.as_str()),
+                                        ],
+                                    ),
+                                );
+                                drop(next_response);
+                                break;
+                            }
+                            response = next_response;
+                            stream_prefix = prefix;
+                        }
+                    }
                 }
 
                 let binding_recorder = shared.gemini_oauth_pool.as_ref().map(|pool| {
@@ -413,7 +518,9 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     binding_recorder,
                 });
                 return Ok(RuntimeLocalRewriteUpstreamResult {
-                    response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                    response: RuntimeLocalRewriteUpstreamResponse::Live(
+                        RuntimeLocalRewriteLiveResponse::with_prefix(response, stream_prefix),
+                    ),
                     gemini_context,
                     copilot_context: None,
                 });
@@ -422,6 +529,288 @@ pub(super) fn send_runtime_gemini_upstream_request(
     }
 
     bail!("no Gemini auth attempts were available")
+}
+
+fn runtime_gemini_thinking_budget_tokens(
+    provider: &RuntimeLocalRewriteProviderOptions,
+) -> Option<u64> {
+    match provider {
+        RuntimeLocalRewriteProviderOptions::Gemini {
+            thinking_budget_tokens,
+            ..
+        } => *thinking_budget_tokens,
+        _ => None,
+    }
+}
+
+fn runtime_gemini_unsupported_tool_fallback_body(body: &[u8]) -> Option<(&'static str, Vec<u8>)> {
+    ["computerUse", "codeExecution", "urlContext", "googleSearch"]
+        .into_iter()
+        .find_map(|tool_name| {
+            runtime_gemini_request_body_without_tool(body, tool_name).map(|body| (tool_name, body))
+        })
+}
+
+enum RuntimeGeminiPrecommitPeek {
+    Committed {
+        response: reqwest::blocking::Response,
+        prefix: Vec<u8>,
+    },
+    RetryableInvalid {
+        response: reqwest::blocking::Response,
+        prefix: Vec<u8>,
+        reason: String,
+    },
+}
+
+#[derive(Default)]
+struct RuntimeGeminiPrecommitProbe {
+    visible_output: bool,
+    reasoning_output: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RuntimeGeminiPrecommitDecision {
+    Continue,
+    Commit,
+    RetryableInvalid(String),
+}
+
+fn runtime_gemini_response_is_sse(response: &reqwest::blocking::Response) -> bool {
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
+}
+
+fn runtime_gemini_peek_stream_for_retry(
+    mut response: reqwest::blocking::Response,
+) -> Result<RuntimeGeminiPrecommitPeek> {
+    let mut prefix = Vec::new();
+    let mut line = Vec::new();
+    let mut data_lines = Vec::new();
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+    let mut byte = [0_u8; 1];
+
+    loop {
+        let read = response
+            .read(&mut byte)
+            .context("failed to read Gemini stream precommit prefix")?;
+        if read == 0 {
+            if !line.is_empty() {
+                let decision =
+                    runtime_gemini_precommit_process_line(&line, &mut data_lines, &mut probe);
+                if let RuntimeGeminiPrecommitDecision::RetryableInvalid(reason) = decision {
+                    return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
+                        response,
+                        prefix,
+                        reason,
+                    });
+                }
+                line.clear();
+            }
+            if !data_lines.is_empty() {
+                match runtime_gemini_precommit_decision_for_data_lines(&data_lines, &mut probe) {
+                    RuntimeGeminiPrecommitDecision::Commit => {
+                        return Ok(RuntimeGeminiPrecommitPeek::Committed { response, prefix });
+                    }
+                    RuntimeGeminiPrecommitDecision::RetryableInvalid(reason) => {
+                        return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
+                            response,
+                            prefix,
+                            reason,
+                        });
+                    }
+                    RuntimeGeminiPrecommitDecision::Continue => {}
+                }
+            }
+            let reason = if probe.visible_output || probe.reasoning_output {
+                return Ok(RuntimeGeminiPrecommitPeek::Committed { response, prefix });
+            } else {
+                "gemini_empty_response".to_string()
+            };
+            return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
+                response,
+                prefix,
+                reason,
+            });
+        }
+
+        prefix.push(byte[0]);
+        line.push(byte[0]);
+        if prefix.len() >= RUNTIME_GEMINI_PRECOMMIT_PEEK_LIMIT {
+            return Ok(RuntimeGeminiPrecommitPeek::Committed { response, prefix });
+        }
+        if byte[0] != b'\n' {
+            continue;
+        }
+
+        match runtime_gemini_precommit_process_line(&line, &mut data_lines, &mut probe) {
+            RuntimeGeminiPrecommitDecision::Commit => {
+                return Ok(RuntimeGeminiPrecommitPeek::Committed { response, prefix });
+            }
+            RuntimeGeminiPrecommitDecision::RetryableInvalid(reason) => {
+                return Ok(RuntimeGeminiPrecommitPeek::RetryableInvalid {
+                    response,
+                    prefix,
+                    reason,
+                });
+            }
+            RuntimeGeminiPrecommitDecision::Continue => {}
+        }
+        line.clear();
+    }
+}
+
+fn runtime_gemini_precommit_process_line(
+    line: &[u8],
+    data_lines: &mut Vec<String>,
+    probe: &mut RuntimeGeminiPrecommitProbe,
+) -> RuntimeGeminiPrecommitDecision {
+    let line = String::from_utf8_lossy(line);
+    let line = line.trim_end_matches(['\r', '\n']);
+    if line.trim().is_empty() {
+        if data_lines.is_empty() {
+            return RuntimeGeminiPrecommitDecision::Continue;
+        }
+        let decision = runtime_gemini_precommit_decision_for_data_lines(data_lines, probe);
+        data_lines.clear();
+        return decision;
+    }
+    let Some(data) = line.strip_prefix("data:") else {
+        return RuntimeGeminiPrecommitDecision::Continue;
+    };
+    data_lines.push(data.trim_start().to_string());
+    RuntimeGeminiPrecommitDecision::Continue
+}
+
+fn runtime_gemini_precommit_decision_for_data_lines(
+    data_lines: &[String],
+    probe: &mut RuntimeGeminiPrecommitProbe,
+) -> RuntimeGeminiPrecommitDecision {
+    let data = data_lines.join("\n");
+    let trimmed = data.trim();
+    if trimmed == "[DONE]" {
+        return if probe.visible_output || probe.reasoning_output {
+            RuntimeGeminiPrecommitDecision::Commit
+        } else {
+            RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+        };
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        return runtime_gemini_precommit_decision_for_value(&value, probe);
+    }
+    let mut parsed_any = false;
+    for line in data_lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        parsed_any = true;
+        match runtime_gemini_precommit_decision_for_value(&value, probe) {
+            RuntimeGeminiPrecommitDecision::Continue => {}
+            decision => return decision,
+        }
+    }
+    if parsed_any {
+        RuntimeGeminiPrecommitDecision::Continue
+    } else {
+        RuntimeGeminiPrecommitDecision::Commit
+    }
+}
+
+fn runtime_gemini_precommit_decision_for_value(
+    value: &serde_json::Value,
+    probe: &mut RuntimeGeminiPrecommitProbe,
+) -> RuntimeGeminiPrecommitDecision {
+    let value = runtime_gemini_normalized_response_value(value);
+    let value = value.as_ref();
+    if value.get("error").is_some() || runtime_gemini_prompt_feedback_failure(value).is_some() {
+        return RuntimeGeminiPrecommitDecision::Commit;
+    }
+    if runtime_gemini_precommit_has_grounding(value) {
+        probe.visible_output = true;
+        return RuntimeGeminiPrecommitDecision::Commit;
+    }
+    runtime_gemini_precommit_apply_parts(value, probe);
+    if probe.visible_output {
+        return RuntimeGeminiPrecommitDecision::Commit;
+    }
+    let Some(reason) = runtime_gemini_finish_reason(value) else {
+        return RuntimeGeminiPrecommitDecision::Continue;
+    };
+    if runtime_gemini_finish_reason_retryable_invalid(&reason) {
+        return RuntimeGeminiPrecommitDecision::RetryableInvalid(reason);
+    }
+    match reason.as_str() {
+        "STOP" if !probe.reasoning_output => {
+            RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+        }
+        _ => RuntimeGeminiPrecommitDecision::Commit,
+    }
+}
+
+fn runtime_gemini_precommit_apply_parts(
+    value: &serde_json::Value,
+    probe: &mut RuntimeGeminiPrecommitProbe,
+) {
+    let Some(parts) = value
+        .get("candidates")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|candidates| candidates.first())
+        .and_then(|candidate| candidate.get("content"))
+        .and_then(|content| content.get("parts"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    for part in parts {
+        if part.get("functionCall").is_some()
+            || runtime_gemini_media_content_item_from_part(part).is_some()
+            || runtime_gemini_text_from_special_part(part).is_some()
+        {
+            probe.visible_output = true;
+            return;
+        }
+        let Some(text) = part.get("text").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if text.is_empty() {
+            continue;
+        }
+        if part
+            .get("thought")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            probe.reasoning_output = true;
+        } else {
+            probe.visible_output = true;
+            return;
+        }
+    }
+}
+
+fn runtime_gemini_precommit_has_grounding(value: &serde_json::Value) -> bool {
+    value
+        .get("candidates")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|candidates| candidates.first())
+        .and_then(|candidate| candidate.get("groundingMetadata"))
+        .is_some_and(|metadata| {
+            metadata
+                .get("webSearchQueries")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|queries| !queries.is_empty())
+                || metadata
+                    .get("groundingChunks")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|chunks| !chunks.is_empty())
+        })
 }
 
 fn runtime_gemini_auth_attempts(
@@ -454,6 +843,16 @@ fn runtime_gemini_auth_attempts(
             pool.select_attempts(body, profiles)
         }
     }
+}
+
+pub(super) fn runtime_gemini_live_auth_attempts(
+    auth: &RuntimeGeminiProviderAuth,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<Vec<(String, RuntimeGeminiAuth)>> {
+    Ok(runtime_gemini_auth_attempts(auth, shared, b"{}")?
+        .into_iter()
+        .map(|selected| (selected.profile_name, selected.auth))
+        .collect())
 }
 
 impl RuntimeGeminiOAuthPool {
@@ -730,6 +1129,10 @@ fn runtime_gemini_should_rotate_after_quota_response(
     runtime_gemini_response_retryable_quota(status)
         && !hard_affinity
         && attempt_index + 1 < attempt_count
+}
+
+fn runtime_gemini_invalid_stream_retry_delay_ms(retry_index: usize) -> u64 {
+    RUNTIME_GEMINI_INVALID_STREAM_RETRY_BASE_DELAY_MS.saturating_mul(1_u64 << retry_index.min(8))
 }
 
 #[cfg(test)]

@@ -42,6 +42,8 @@
     "test:auto-rotate-shards": "node scripts/ci/auto-rotate-shards.mjs",
     "test:timing-balance": "node scripts/ci/timing-auto-balance.mjs",
     "test:runtime-smoke": "node scripts/ci/test-serial.mjs --suite runtime-smoke",
+    "test:gemini-live": "node scripts/ci/gemini-live-smoke.mjs",
+    "test:gemini-schema": "node scripts/ci/gemini-tool-schema-parity.mjs",
     "test:serial": "node scripts/ci/test-serial.mjs",
     "test:serial:timings": "node scripts/ci/test-serial.mjs --timings",
     "ci:changed": "node scripts/ci/changed-tests.mjs",

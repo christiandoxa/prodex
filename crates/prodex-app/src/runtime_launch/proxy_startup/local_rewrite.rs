@@ -9,6 +9,10 @@ use super::local_rewrite_gemini::{
     RuntimeGeminiOAuthPool, RuntimeGeminiRequestContext, runtime_gemini_oauth_pool_from_provider,
     send_runtime_gemini_upstream_request,
 };
+use super::local_rewrite_gemini_compact::runtime_gemini_local_compact_response_parts;
+use super::local_rewrite_gemini_live::{
+    handle_runtime_gemini_live_websocket_request, spawn_runtime_gemini_live_sidecar,
+};
 use super::local_rewrite_response::{
     respond_runtime_local_rewrite_proxy_request,
     runtime_local_rewrite_buffered_response_from_response,
@@ -51,11 +55,20 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
 
 #[derive(Clone)]
 pub(crate) enum RuntimeLocalRewriteProviderOptions {
-    Anthropic { auth: RuntimeAnthropicProviderAuth },
-    Copilot { auth: RuntimeCopilotProviderAuth },
+    Anthropic {
+        auth: RuntimeAnthropicProviderAuth,
+    },
+    Copilot {
+        auth: RuntimeCopilotProviderAuth,
+    },
     OpenAiResponses,
-    DeepSeek { api_keys: Vec<String> },
-    Gemini { auth: RuntimeGeminiProviderAuth },
+    DeepSeek {
+        api_keys: Vec<String>,
+    },
+    Gemini {
+        auth: RuntimeGeminiProviderAuth,
+        thinking_budget_tokens: Option<u64>,
+    },
 }
 
 impl RuntimeLocalRewriteProviderOptions {
@@ -201,6 +214,18 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
     }
     let shutdown = Arc::new(AtomicBool::new(false));
     let mut worker_threads = Vec::new();
+    let gemini_live_sidecar_addr = if matches!(
+        &shared.provider,
+        RuntimeLocalRewriteProviderOptions::Gemini { .. }
+    ) {
+        Some(spawn_runtime_gemini_live_sidecar(
+            shared.clone(),
+            Arc::clone(&shutdown),
+            &mut worker_threads,
+        )?)
+    } else {
+        None
+    };
     for _ in 0..worker_count {
         let server: Arc<TinyServer> = Arc::clone(&server);
         let shutdown = Arc::clone(&shutdown);
@@ -240,6 +265,10 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         worker_threads,
         accept_worker_count: worker_count,
         listen_addr,
+        gemini_live_sidecar_addr,
+        gemini_live_sidecar_model: gemini_live_sidecar_addr.map(|_| {
+            super::local_rewrite_gemini_live::runtime_gemini_live_default_model().to_string()
+        }),
         log_path,
         active_request_count: Arc::clone(&runtime_shared.active_request_count),
         owner_lock: None,
@@ -288,6 +317,14 @@ fn handle_runtime_local_rewrite_proxy_request(
 
     let request_id = runtime_proxy_next_request_id(runtime_shared);
     if websocket {
+        if matches!(
+            &shared.provider,
+            RuntimeLocalRewriteProviderOptions::Gemini { .. }
+        ) && is_runtime_realtime_websocket_path(&request_path)
+        {
+            handle_runtime_gemini_live_websocket_request(request_id, request, shared);
+            return;
+        }
         runtime_proxy_log(
             runtime_shared,
             runtime_proxy_structured_log_message(
@@ -342,18 +379,34 @@ fn handle_runtime_local_rewrite_proxy_request(
         let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
         return;
     }
-    if matches!(
-        &shared.provider,
-        RuntimeLocalRewriteProviderOptions::Anthropic { .. }
-            | RuntimeLocalRewriteProviderOptions::DeepSeek { .. }
-            | RuntimeLocalRewriteProviderOptions::Gemini { .. }
-            | RuntimeLocalRewriteProviderOptions::Copilot { .. }
-    ) && path_without_query(&captured.path_and_query).ends_with("/responses/compact")
-    {
+    if path_without_query(&captured.path_and_query).ends_with("/responses/compact") {
+        if matches!(
+            &shared.provider,
+            RuntimeLocalRewriteProviderOptions::Gemini { .. }
+        ) {
+            runtime_proxy_log(
+                runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "local_rewrite_gemini_compact_fallback",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field(
+                            "path",
+                            path_without_query(&captured.path_and_query),
+                        ),
+                        runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
+                    ],
+                ),
+            );
+            let parts = runtime_gemini_local_compact_response_parts(&captured.body);
+            let _ = request.respond(build_runtime_proxy_response_from_parts(parts));
+            return;
+        }
         let provider_name = match &shared.provider {
             RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
-            RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
             RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
+            RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
             _ => "DeepSeek",
         };
         let _ = request.respond(build_runtime_proxy_text_response(
@@ -411,8 +464,26 @@ pub(super) struct RuntimeLocalRewriteUpstreamResult {
 }
 
 pub(super) enum RuntimeLocalRewriteUpstreamResponse {
-    Live(reqwest::blocking::Response),
+    Live(RuntimeLocalRewriteLiveResponse),
     Buffered(RuntimeHeapTrimmedBufferedResponseParts),
+}
+
+pub(super) struct RuntimeLocalRewriteLiveResponse {
+    pub(super) response: reqwest::blocking::Response,
+    pub(super) prefix: Vec<u8>,
+}
+
+impl RuntimeLocalRewriteLiveResponse {
+    pub(super) fn new(response: reqwest::blocking::Response) -> Self {
+        Self {
+            response,
+            prefix: Vec::new(),
+        }
+    }
+
+    pub(super) fn with_prefix(response: reqwest::blocking::Response, prefix: Vec<u8>) -> Self {
+        Self { response, prefix }
+    }
 }
 
 fn send_runtime_local_rewrite_upstream_request(
@@ -479,7 +550,9 @@ fn send_runtime_local_rewrite_upstream_request(
                         let (status, parts, class) = match send_result {
                             RuntimeLocalRewritePreparedSendResult::Live(response) => {
                                 return Ok(RuntimeLocalRewriteUpstreamResult {
-                                    response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                                    response: RuntimeLocalRewriteUpstreamResponse::Live(
+                                        RuntimeLocalRewriteLiveResponse::new(response),
+                                    ),
                                     gemini_context: None,
                                     copilot_context: None,
                                 });
@@ -602,7 +675,9 @@ fn send_runtime_local_rewrite_upstream_request(
                         });
                     }
                     return Ok(RuntimeLocalRewriteUpstreamResult {
-                        response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                        response: RuntimeLocalRewriteUpstreamResponse::Live(
+                            RuntimeLocalRewriteLiveResponse::new(response),
+                        ),
                         gemini_context: None,
                         copilot_context: None,
                     });
@@ -628,7 +703,9 @@ fn send_runtime_local_rewrite_upstream_request(
                 RuntimeLocalRewritePreparedAuth::OpenAiResponses,
             )?;
             Ok(RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+                response: RuntimeLocalRewriteUpstreamResponse::Live(
+                    RuntimeLocalRewriteLiveResponse::new(response),
+                ),
                 gemini_context: None,
                 copilot_context: None,
             })
@@ -636,7 +713,7 @@ fn send_runtime_local_rewrite_upstream_request(
         RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys } => {
             send_runtime_deepseek_upstream_request(request_id, request, shared, body, api_keys)
         }
-        RuntimeLocalRewriteProviderOptions::Gemini { auth } => {
+        RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } => {
             send_runtime_gemini_upstream_request(request_id, request, shared, body, auth)
         }
     }

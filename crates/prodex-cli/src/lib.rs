@@ -168,6 +168,8 @@ pub enum Commands {
     Claude(ClaudeArgs),
     #[command(name = "__runtime-broker", hide = true)]
     RuntimeBroker(RuntimeBrokerArgs),
+    #[command(name = "__gemini-compat-refresh", hide = true)]
+    GeminiCompatRefresh(GeminiCompatRefreshArgs),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -226,6 +228,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "claude"
             | "help"
             | "__runtime-broker"
+            | "__gemini-compat-refresh"
     )
 }
 

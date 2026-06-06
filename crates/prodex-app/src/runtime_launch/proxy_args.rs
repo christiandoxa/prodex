@@ -16,6 +16,8 @@ pub(crate) fn runtime_proxy_codex_passthrough_args(
             listen_addr: proxy.listen_addr,
             openai_mount_path: &proxy.openai_mount_path,
             local_model_provider_id: proxy.local_model_provider_id.as_deref(),
+            realtime_ws_base_url: proxy.realtime_ws_base_url.as_deref(),
+            realtime_ws_model: proxy.realtime_ws_model.as_deref(),
         }),
         user_args,
     )

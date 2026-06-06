@@ -13,6 +13,7 @@ const DEFAULT_THRESHOLDS = Object.freeze({
   maxFileLines: 500,
 });
 const STRUCTURAL_EXTRACTION_INCIDENTAL_LINE_MULTIPLIER = 2;
+const CHURN_ALLOWANCES_PATH = "scripts/ci/churn-hygiene-allowances.json";
 const MECHANICAL_ONLY_PATTERN =
   /(?:^|\n)\s*Mechanical-only:\s*(?:yes|true)\s*(?:\n|$)|\[mechanical-only\]/i;
 
@@ -431,7 +432,8 @@ function thresholdIssues(summary, thresholds, options = {}) {
   const issues = [];
   const structuralExtractionAccepted =
     options.structuralExtractionAccepted ?? options.structuralExtraction ?? false;
-  const thresholdExempt = summary.releaseMetadataOnly || structuralExtractionAccepted;
+  const thresholdExempt =
+    summary.releaseMetadataOnly || structuralExtractionAccepted || Boolean(options.churnAllowance);
   if (summary.files > thresholds.maxFiles && !thresholdExempt) {
     issues.push(`files changed ${summary.files} > ${thresholds.maxFiles}`);
   }
@@ -446,6 +448,53 @@ function thresholdIssues(summary, thresholds, options = {}) {
     issues.push(`largest file ${largest.filePath} changed ${largest.lines} lines > ${thresholds.maxFileLines}`);
   }
   return issues;
+}
+
+async function loadChurnAllowances() {
+  const configPath = path.join(repoRoot, CHURN_ALLOWANCES_PATH);
+  let contents;
+  try {
+    contents = await fs.readFile(configPath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const allowances = JSON.parse(contents);
+  if (!Array.isArray(allowances)) {
+    throw new Error(`${CHURN_ALLOWANCES_PATH} must contain an array`);
+  }
+  return allowances;
+}
+
+function matchingChurnAllowance(allowances, summary, commits) {
+  const subjects = new Set(commits.map((commit) => commit.subject));
+  return (
+    allowances.find((allowance) => {
+      const caps = allowance?.caps;
+      return (
+        typeof allowance?.id === "string" &&
+        allowance.id.trim() !== "" &&
+        typeof allowance.reason === "string" &&
+        allowance.reason.trim() !== "" &&
+        Array.isArray(allowance.requiredSubjects) &&
+        allowance.requiredSubjects.length > 0 &&
+        allowance.requiredSubjects.every(
+          (subject) => typeof subject === "string" && subjects.has(subject),
+        ) &&
+        Number.isSafeInteger(caps?.maxFiles) &&
+        Number.isSafeInteger(caps?.maxBehaviorFiles) &&
+        Number.isSafeInteger(caps?.maxLines) &&
+        Number.isSafeInteger(caps?.maxFileLines) &&
+        summary.files <= caps.maxFiles &&
+        summary.behaviorFiles <= caps.maxBehaviorFiles &&
+        summary.changedLines <= caps.maxLines &&
+        (summary.largestFiles[0]?.lines ?? 0) <= caps.maxFileLines
+      );
+    }) ?? null
+  );
 }
 
 function mechanicalOnlyDeclared(message) {
@@ -641,6 +690,11 @@ function printHuman(
     const suffix = options.structuralExtractionAccepted ? "accepted" : "needs declaration";
     process.stdout.write(`  structural extraction: yes (${suffix})\n`);
   }
+  if (options.churnAllowance) {
+    process.stdout.write(
+      `  reviewed churn allowance: ${options.churnAllowance.id} (${options.churnAllowance.reason})\n`,
+    );
+  }
   if (summary.largestFiles.length > 0) {
     process.stdout.write("  largest files:\n");
     for (const file of summary.largestFiles) {
@@ -696,6 +750,11 @@ async function main() {
   const summary = summarize(rows);
   const structuralExtraction = structuralExtractionApplies(rows, summary, args.thresholds);
   const commits = await commitsForSelector(plan.selector, args);
+  const churnAllowance = matchingChurnAllowance(
+    await loadChurnAllowances(),
+    summary,
+    commits,
+  );
   const structuralExtractionAccepted = structuralExtractionAcceptedByDeclaration(
     structuralExtraction,
     summary,
@@ -704,6 +763,7 @@ async function main() {
   );
   const issues = thresholdIssues(summary, args.thresholds, {
     structuralExtractionAccepted,
+    churnAllowance,
   });
   const declarationIssues = structuralExtractionDeclarationIssues(
     summary,
@@ -728,6 +788,7 @@ async function main() {
           summary,
           structuralExtraction,
           structuralExtractionAccepted,
+          churnAllowance,
           issues,
           declarationIssues,
           commitSubjects: commits.map((commit) => ({
@@ -746,6 +807,7 @@ async function main() {
     printHuman(plan, summary, args.thresholds, issues, declarationIssues, subjectIssues, args.check, {
       structuralExtraction,
       structuralExtractionAccepted,
+      churnAllowance,
     });
   }
 
@@ -757,6 +819,7 @@ async function main() {
 export {
   DEFAULT_THRESHOLDS,
   mechanicalOnlyDeclared,
+  matchingChurnAllowance,
   structuralExtractionApplies,
   structuralExtractionAcceptedByDeclaration,
   structuralExtractionDeclarationIssues,

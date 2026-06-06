@@ -53,6 +53,131 @@ pub(super) fn runtime_gemini_response_retryable_quota(status: u16) -> bool {
     matches!(status, 403 | 429)
 }
 
+pub(super) fn runtime_gemini_normalized_error_parts(
+    status: u16,
+    mut parts: RuntimeHeapTrimmedBufferedResponseParts,
+) -> RuntimeHeapTrimmedBufferedResponseParts {
+    let Some(body) = runtime_gemini_normalized_error_body(status, &parts.body) else {
+        return parts;
+    };
+    parts.headers.retain(|(name, _)| {
+        !matches!(
+            name.to_ascii_lowercase().as_str(),
+            "content-length" | "content-type"
+        )
+    });
+    parts.headers.push((
+        "content-type".to_string(),
+        b"application/json; charset=utf-8".to_vec(),
+    ));
+    parts.body = body.into();
+    parts
+}
+
+fn runtime_gemini_normalized_error_body(status: u16, body: &[u8]) -> Option<Vec<u8>> {
+    if status < 400 {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        let error = value.get("error").unwrap_or(&value);
+        if error.is_object() {
+            let message = runtime_gemini_error_message(error)
+                .unwrap_or_else(|| format!("Gemini upstream returned HTTP {status}."));
+            let (error_type, code) = runtime_gemini_openai_error_kind(status, &value, body);
+            let normalized = serde_json::json!({
+                "error": {
+                    "message": message,
+                    "type": error_type,
+                    "param": serde_json::Value::Null,
+                    "code": code,
+                    "gemini_error": error,
+                }
+            });
+            return serde_json::to_vec(&normalized).ok();
+        }
+    }
+
+    let message = std::str::from_utf8(body)
+        .ok()
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("Gemini upstream returned HTTP {status}."));
+    let gemini_error = serde_json::json!({
+        "message": message.clone(),
+        "status": status,
+    });
+    let (error_type, code) = runtime_gemini_openai_error_kind(status, &gemini_error, body);
+    let normalized = serde_json::json!({
+        "error": {
+            "message": message,
+            "type": error_type,
+            "param": serde_json::Value::Null,
+            "code": code,
+            "gemini_error": gemini_error,
+        }
+    });
+    serde_json::to_vec(&normalized).ok()
+}
+
+fn runtime_gemini_error_message(value: &serde_json::Value) -> Option<String> {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            serde_json::Value::Object(object) => {
+                for key in ["message", "detail", "error"] {
+                    if let Some(message) = object
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|message| !message.trim().is_empty())
+                    {
+                        return Some(message.to_string());
+                    }
+                }
+                stack.extend(object.values());
+            }
+            serde_json::Value::Array(values) => stack.extend(values),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn runtime_gemini_openai_error_kind(
+    status: u16,
+    value: &serde_json::Value,
+    body: &[u8],
+) -> (&'static str, &'static str) {
+    if runtime_gemini_body_has_terminal_quota(body)
+        || runtime_gemini_value_has_terminal_quota(value)
+        || runtime_gemini_plain_text_has_terminal_quota(body)
+    {
+        return ("insufficient_quota", "insufficient_quota");
+    }
+    if status == 429 || runtime_gemini_value_has_rate_limit(value) {
+        return ("rate_limit_error", "rate_limit_exceeded");
+    }
+    match status {
+        400 => ("invalid_request_error", "bad_request"),
+        401 => ("authentication_error", "invalid_authentication"),
+        403 => ("permission_error", "permission_denied"),
+        404 => ("invalid_request_error", "not_found"),
+        500..=599 => ("server_error", "provider_error"),
+        _ => ("api_error", "provider_error"),
+    }
+}
+
+fn runtime_gemini_plain_text_has_terminal_quota(body: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(body) else {
+        return false;
+    };
+    let lower = text.to_ascii_lowercase();
+    lower.contains("quota")
+        && (lower.contains("exhausted")
+            || lower.contains("exceeded")
+            || lower.contains("insufficient"))
+}
+
 fn runtime_gemini_google_quota_message(body: &[u8]) -> Option<String> {
     runtime_gemini_values_from_body(body)
         .iter()
@@ -196,6 +321,28 @@ fn runtime_gemini_value_has_terminal_quota(value: &serde_json::Value) -> bool {
                 if runtime_gemini_object_mentions_quota_limit(object, "PerDay")
                     || runtime_gemini_object_mentions_quota_limit(object, "Daily")
                 {
+                    return true;
+                }
+                stack.extend(object.values());
+            }
+            serde_json::Value::Array(values) => stack.extend(values),
+            _ => {}
+        }
+    }
+    false
+}
+
+fn runtime_gemini_value_has_rate_limit(value: &serde_json::Value) -> bool {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            serde_json::Value::Object(object) => {
+                if ["status", "code", "reason"].into_iter().any(|key| {
+                    object
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(runtime_gemini_google_rate_limit_code)
+                }) {
                     return true;
                 }
                 stack.extend(object.values());
@@ -422,5 +569,92 @@ mod tests {
         .unwrap();
 
         assert!(runtime_gemini_body_has_terminal_quota(&body));
+    }
+
+    #[test]
+    fn gemini_structured_terminal_quota_error_normalizes_to_openai_shape() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "error": {
+                "code": 429,
+                "message": "Quota exhausted.",
+                "details": [{
+                    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                    "reason": "QUOTA_EXHAUSTED"
+                }]
+            }
+        }))
+        .unwrap();
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 429,
+            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+            body: body.into(),
+        };
+
+        let normalized = runtime_gemini_normalized_error_parts(429, parts);
+        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
+
+        assert_eq!(value["error"]["type"], "insufficient_quota");
+        assert_eq!(value["error"]["code"], "insufficient_quota");
+        assert_eq!(value["error"]["message"], "Quota exhausted.");
+        assert!(value["error"]["gemini_error"].is_object());
+    }
+
+    #[test]
+    fn gemini_structured_rate_limit_error_normalizes_to_openai_shape() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "error": {
+                "code": 429,
+                "message": "Rate limit exceeded.",
+                "details": [{
+                    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                    "reason": "RATE_LIMIT_EXCEEDED"
+                }]
+            }
+        }))
+        .unwrap();
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 429,
+            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+            body: body.into(),
+        };
+
+        let normalized = runtime_gemini_normalized_error_parts(429, parts);
+        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
+
+        assert_eq!(value["error"]["type"], "rate_limit_error");
+        assert_eq!(value["error"]["code"], "rate_limit_exceeded");
+    }
+
+    #[test]
+    fn gemini_plain_text_rate_limit_error_normalizes_to_openai_shape() {
+        let original = b"try later".to_vec();
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 429,
+            headers: vec![("content-type".to_string(), b"text/plain".to_vec())],
+            body: original.clone().into(),
+        };
+
+        let normalized = runtime_gemini_normalized_error_parts(429, parts);
+        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
+
+        assert_eq!(value["error"]["type"], "rate_limit_error");
+        assert_eq!(value["error"]["code"], "rate_limit_exceeded");
+        assert_eq!(value["error"]["message"], "try later");
+        assert_eq!(value["error"]["gemini_error"]["status"], 429);
+    }
+
+    #[test]
+    fn gemini_plain_text_quota_error_normalizes_as_insufficient_quota() {
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 429,
+            headers: vec![("content-type".to_string(), b"text/plain".to_vec())],
+            body: b"Quota exhausted for this account".to_vec().into(),
+        };
+
+        let normalized = runtime_gemini_normalized_error_parts(429, parts);
+        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
+
+        assert_eq!(value["error"]["type"], "insufficient_quota");
+        assert_eq!(value["error"]["code"], "insufficient_quota");
     }
 }

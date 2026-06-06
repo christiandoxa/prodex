@@ -1,6 +1,7 @@
 use super::{
     RuntimeLaunchRequest, RuntimeLaunchSelection, active_profile_selection_order,
-    resolve_runtime_launch_profile_name, runtime_launch_profile_home,
+    resolve_runtime_launch_profile_name, runtime_launch_effective_gemini_thinking_budget_tokens,
+    runtime_launch_profile_home,
 };
 use crate::{
     AppState, CodexModelProviderSetting, ProfileProvider, RuntimeAnthropicOAuthProfileAuth,
@@ -278,11 +279,14 @@ pub(super) fn runtime_local_rewrite_provider_options(
             Ok(RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys })
         }
         Some(provider) if provider.eq_ignore_ascii_case("gemini") => {
+            let thinking_budget_tokens =
+                runtime_launch_effective_gemini_thinking_budget_tokens(request, selection);
             if let Some(api_keys) =
                 runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)
             {
                 return Ok(RuntimeLocalRewriteProviderOptions::Gemini {
                     auth: RuntimeGeminiProviderAuth::ApiKeys { api_keys },
+                    thinking_budget_tokens,
                 });
             }
             if selection.profileless_local_home {
@@ -293,6 +297,7 @@ pub(super) fn runtime_local_rewrite_provider_options(
             let profiles = runtime_gemini_oauth_profiles_for_provider(state, selection, request)?;
             Ok(RuntimeLocalRewriteProviderOptions::Gemini {
                 auth: RuntimeGeminiProviderAuth::OAuthProfiles { profiles },
+                thinking_budget_tokens,
             })
         }
         Some(provider) => bail!("unsupported external provider '{provider}'"),

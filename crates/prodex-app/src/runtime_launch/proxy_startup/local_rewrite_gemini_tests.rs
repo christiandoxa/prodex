@@ -1,6 +1,7 @@
 use super::{
     RuntimeGeminiBindingRecorder, RuntimeGeminiOAuthPool, RuntimeGeminiOAuthPoolState,
-    RuntimeGeminiOAuthProfileAuth, runtime_gemini_now_ms,
+    RuntimeGeminiOAuthProfileAuth, RuntimeGeminiPrecommitDecision, RuntimeGeminiPrecommitProbe,
+    runtime_gemini_now_ms, runtime_gemini_precommit_decision_for_data_lines,
     runtime_gemini_remember_bindings_from_responses_body,
     runtime_gemini_should_rotate_after_quota_response,
 };
@@ -274,4 +275,126 @@ fn gemini_quota_rotation_predicate_respects_affinity_and_attempt_budget() {
     assert!(!runtime_gemini_should_rotate_after_quota_response(
         500, false, 0, 2
     ));
+}
+
+#[test]
+fn gemini_precommit_retries_malformed_stream_before_visible_output() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_bad",
+            "candidates": [{
+                "content": {"parts": []},
+                "finishReason": "MALFORMED_FUNCTION_CALL"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(
+        decision,
+        RuntimeGeminiPrecommitDecision::RetryableInvalid("MALFORMED_FUNCTION_CALL".to_string())
+    );
+}
+
+#[test]
+fn gemini_precommit_commits_once_visible_output_exists() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_text",
+            "candidates": [{
+                "content": {"parts": [{"text": "hi"}]}
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(decision, RuntimeGeminiPrecommitDecision::Commit);
+}
+
+#[test]
+fn gemini_precommit_commits_native_code_execution_output() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_code",
+            "candidates": [{
+                "content": {"parts": [
+                    {"executableCode": {"language": "PYTHON", "code": "print(4)"}},
+                    {"codeExecutionResult": {"outcome": "OUTCOME_OK", "output": "4"}}
+                ]},
+                "finishReason": "STOP"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(decision, RuntimeGeminiPrecommitDecision::Commit);
+}
+
+#[test]
+fn gemini_precommit_commits_thought_only_stop_as_reasoning_output() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_thought",
+            "candidates": [{
+                "content": {"parts": [{"text": "reasoning", "thought": true}]},
+                "finishReason": "STOP"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(decision, RuntimeGeminiPrecommitDecision::Commit);
+}
+
+#[test]
+fn gemini_precommit_commits_max_tokens_for_codex_incomplete_event() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_truncated",
+            "candidates": [{
+                "content": {"parts": []},
+                "finishReason": "MAX_TOKENS"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(decision, RuntimeGeminiPrecommitDecision::Commit);
+}
+
+#[test]
+fn gemini_precommit_retries_empty_stop_before_commit() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_empty",
+            "candidates": [{
+                "content": {"parts": []},
+                "finishReason": "STOP"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(
+        decision,
+        RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+    );
 }

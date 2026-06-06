@@ -441,14 +441,19 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     assert!(rendered.contains(&"model_provider=\"prodex-gemini\"".to_string()));
-    assert!(rendered.contains(&"model=\"gemini-2.5-pro\"".to_string()));
+    assert!(rendered.contains(&"model=\"auto\"".to_string()));
     assert!(rendered.contains(
         &"model_providers.prodex-gemini.base_url=\"https://generativelanguage.googleapis.com/v1beta\""
             .to_string()
     ));
     assert!(rendered.contains(&"model_providers.prodex-gemini.wire_api=\"responses\"".to_string()));
+    assert!(rendered.contains(&"model_context_window=1048576".to_string()));
+    assert!(rendered.contains(&"model_auto_compact_token_limit=900000".to_string()));
+    assert!(rendered.contains(&"model_reasoning_summary=\"none\"".to_string()));
+    assert!(rendered.contains(&"model_supports_reasoning_summaries=true".to_string()));
     assert!(rendered.contains(&"web_search=\"live\"".to_string()));
     assert!(rendered.contains(&"features.apps=false".to_string()));
+    assert!(rendered.contains(&"features.image_generation=true".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("gemini-test-key")));
 }
 

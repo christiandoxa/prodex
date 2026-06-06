@@ -111,6 +111,53 @@ fn gemini_sse_reader_merges_repeated_function_call_id_with_latest_args() {
 }
 
 #[test]
+fn gemini_sse_reader_merges_repeated_function_call_without_id() {
+    let first = serde_json::json!({
+        "responseId": "resp_shell",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "functionCall": {
+                        "name": "shell",
+                        "args": {"cmd": "l"}
+                    }
+                }]
+            }
+        }]
+    });
+    let second = serde_json::json!({
+        "responseId": "resp_shell",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "functionCall": {
+                        "name": "shell",
+                        "args": {"cmd": "ls"}
+                    }
+                }]
+            },
+            "finishReason": "STOP"
+        }]
+    });
+    let stream = format!("data: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n");
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"call_id\":\"call_gemini_9_0\""));
+    assert!(!output.contains("\"call_id\":\"call_gemini_9_1\""));
+    assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\""));
+}
+
+#[test]
 fn gemini_sse_reader_normalizes_unified_diff_apply_patch() {
     let unified_diff = "\
 --- a/crates/prodex-cli/src/presidio.rs
@@ -313,6 +360,242 @@ fn gemini_sse_reader_maps_embedded_error_to_failed_event() {
     assert!(output.contains("event: response.failed"));
     assert!(output.contains("RESOURCE_EXHAUSTED"));
     assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_maps_prompt_feedback_block_to_failed_event() {
+    let stream = "data: {\"responseId\":\"resp_blocked\",\"modelVersion\":\"gemini-2.5-pro\",\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n";
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("\"id\":\"resp_blocked\""));
+    assert!(output.contains("gemini_prompt_blocked"));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_maps_empty_stop_to_failed_event() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_empty\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.created"));
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("gemini_empty_response"));
+    assert!(output.contains("finishReason=STOP"));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_maps_malformed_finish_to_failed_event() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_malformed\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[]},\"finishReason\":\"MALFORMED_FUNCTION_CALL\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("gemini_malformed_function_call"));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_maps_thought_parts_to_reasoning_events() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_thought\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"plan step\",\"thought\":true},{\"text\":\"answer\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"response.reasoning_summary_part.added\""));
+    assert!(output.contains("\"type\":\"response.reasoning_summary_text.delta\""));
+    assert!(output.contains("\"delta\":\"plan step\""));
+    assert!(output.contains("\"type\":\"response.output_text.delta\""));
+    assert!(output.contains("\"delta\":\"answer\""));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_completes_reasoning_only_stop() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_reasoning_only\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"internal summary\",\"thought\":true}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"response.reasoning_summary_text.delta\""));
+    assert!(output.contains("event: response.completed"));
+    assert!(!output.contains("gemini_empty_response"));
+}
+
+#[test]
+fn gemini_sse_reader_maps_max_tokens_to_incomplete_event() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_truncated\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]},\"finishReason\":\"MAX_TOKENS\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"response.output_text.delta\""));
+    assert!(output.contains("event: response.incomplete"));
+    assert!(output.contains("\"reason\":\"max_output_tokens\""));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_preserves_media_parts_as_message_content() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_media\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"aW1hZ2U=\"}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.output_item.done"));
+    assert!(output.contains("\"type\":\"input_image\""));
+    assert!(output.contains("data:image/png;base64,aW1hZ2U="));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_maps_native_code_image_cache_and_metadata() {
+    let chunk = serde_json::json!({
+        "responseId": "resp_native",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [
+                {"executableCode": {"language": "PYTHON", "code": "print(4)"}},
+                {"codeExecutionResult": {"outcome": "OUTCOME_OK", "output": "4"}},
+                {"videoMetadata": {"startOffset": "1s"}},
+                {"inlineData": {"mimeType": "image/png", "data": "aW1hZ2U="}}
+            ]},
+            "finishReason": "STOP",
+            "safetyRatings": [{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "probability": "NEGLIGIBLE"}],
+            "logprobsResult": {"chosenCandidates": [{"token": "done"}]},
+            "citationMetadata": {"citations": [{"uri": "https://citation.example"}]}
+        }],
+        "usageMetadata": {
+            "promptTokenCount": 20,
+            "candidatesTokenCount": 8,
+            "totalTokenCount": 32,
+            "cachedContentTokenCount": 12,
+            "thoughtsTokenCount": 4,
+            "toolUsePromptTokenCount": 3
+        }
+    });
+    let stream = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.metadata"));
+    assert!(output.contains("Gemini executable code"));
+    assert!(output.contains("Gemini code execution result"));
+    assert!(output.contains("Gemini video metadata"));
+    assert!(output.contains("\"type\":\"image_generation_call\""));
+    assert!(output.contains("\"cached_tokens\":12"));
+    assert!(output.contains("\"tool_tokens\":3"));
+    assert!(output.contains("\"reasoning_tokens\":4"));
+    assert!(output.contains("\"logprobsResult\""));
+    assert!(output.contains("Citations:\\nhttps://citation.example"));
+    assert!(output.contains("https://citation.example"));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_emits_enriched_metadata_from_later_chunks() {
+    let first = serde_json::json!({
+        "responseId": "resp_metadata",
+        "usageMetadata": {"promptTokenCount": 10}
+    });
+    let second = serde_json::json!({
+        "responseId": "resp_metadata",
+        "candidates": [{
+            "content": {"parts": [{"text": "done"}]},
+            "finishReason": "STOP",
+            "safetyRatings": [{
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "probability": "NEGLIGIBLE"
+            }]
+        }]
+    });
+    let stream = format!("data: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n");
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert_eq!(output.matches("event: response.metadata").count(), 2);
+    assert!(output.contains("HARM_CATEGORY_DANGEROUS_CONTENT"));
+    assert!(output.contains("event: response.completed"));
 }
 
 struct ErrorAfterDataReader {

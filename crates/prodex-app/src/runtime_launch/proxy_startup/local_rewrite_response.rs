@@ -45,6 +45,14 @@ struct RuntimeChatCompatibleRewriteContext<'a> {
     binding_recorder: Option<RuntimeCopilotBindingRecorder>,
 }
 
+struct RuntimeGeminiRewriteContext<'a> {
+    prefix: Vec<u8>,
+    status: u16,
+    content_type: &'a str,
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    gemini_context: Option<RuntimeGeminiRequestContext>,
+}
+
 pub(super) fn runtime_local_rewrite_buffered_response_from_response(
     response: reqwest::blocking::Response,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
@@ -79,13 +87,15 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                 .map(|context| context.profile_name.clone())
         })
         .unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
-    let response = match response {
-        RuntimeLocalRewriteUpstreamResponse::Live(response) => response,
+    let live_response = match response {
+        RuntimeLocalRewriteUpstreamResponse::Live(live_response) => live_response,
         RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
             let _ = request.respond(build_runtime_proxy_response_from_parts(parts));
             return;
         }
     };
+    let prefix = live_response.prefix;
+    let response = live_response.response;
     let status = response.status().as_u16();
     let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
         response
@@ -170,10 +180,13 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             request_id,
             request,
             response,
-            status,
-            &content_type,
-            shared,
-            gemini_context,
+            RuntimeGeminiRewriteContext {
+                prefix,
+                status,
+                content_type: &content_type,
+                shared,
+                gemini_context,
+            },
         );
         return;
     }
@@ -310,11 +323,15 @@ fn respond_runtime_gemini_rewrite(
     request_id: u64,
     request: tiny_http::Request,
     response: reqwest::blocking::Response,
-    status: u16,
-    content_type: &str,
-    shared: &RuntimeLocalRewriteProxyShared,
-    gemini_context: Option<RuntimeGeminiRequestContext>,
+    context: RuntimeGeminiRewriteContext<'_>,
 ) {
+    let RuntimeGeminiRewriteContext {
+        prefix,
+        status,
+        content_type,
+        shared,
+        gemini_context,
+    } = context;
     let RuntimeGeminiRequestContext {
         profile_name,
         conversation_messages,
@@ -340,11 +357,17 @@ fn respond_runtime_gemini_rewrite(
             "text/event-stream; charset=utf-8".to_string(),
         )];
         append_text_rate_limit_headers(&mut headers, rate_limit_headers);
+        headers.push(("x-reasoning-included".to_string(), "true".to_string()));
+        let body: Box<dyn Read + Send> = if prefix.is_empty() {
+            Box::new(response)
+        } else {
+            Box::new(std::io::Cursor::new(prefix).chain(response))
+        };
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
             body: Box::new(RuntimeGeminiGenerateSseReader::new(
-                response,
+                body,
                 request_id,
                 conversation_messages,
                 Arc::clone(&shared.gemini_conversations),

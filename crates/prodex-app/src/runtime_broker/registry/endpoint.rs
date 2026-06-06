@@ -46,6 +46,8 @@ pub(crate) fn runtime_proxy_endpoint_from_registry(
         listen_addr,
         openai_mount_path: runtime_broker_openai_mount_path(registry)?,
         local_model_provider_id: None,
+        realtime_ws_base_url: None,
+        realtime_ws_model: None,
         lease_dir,
         _lease: Some(lease),
         _direct_proxy: None,

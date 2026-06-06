@@ -1,7 +1,7 @@
 use super::deepseek_rewrite::runtime_deepseek_chat_request_body;
 use super::local_rewrite::{
-    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult,
+    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_search_fallback::{
@@ -225,7 +225,9 @@ fn runtime_deepseek_live_result(
     response: reqwest::blocking::Response,
 ) -> RuntimeLocalRewriteUpstreamResult {
     RuntimeLocalRewriteUpstreamResult {
-        response: RuntimeLocalRewriteUpstreamResponse::Live(response),
+        response: RuntimeLocalRewriteUpstreamResponse::Live(RuntimeLocalRewriteLiveResponse::new(
+            response,
+        )),
         gemini_context: None,
         copilot_context: None,
     }

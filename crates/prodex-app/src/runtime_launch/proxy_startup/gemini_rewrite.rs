@@ -18,14 +18,19 @@ mod gemini_response;
 mod gemini_schema;
 
 pub(super) use gemini_request::{
-    runtime_gemini_generate_request_body, runtime_gemini_request_body_without_google_search,
+    runtime_gemini_blocked_tool_call_message, runtime_gemini_generate_request_body,
+    runtime_gemini_request_body_without_tool,
 };
 pub(super) use gemini_response::{
-    runtime_gemini_chat_assistant_messages_from_generate_value,
+    runtime_gemini_chat_assistant_messages_from_generate_value, runtime_gemini_citation_text,
     runtime_gemini_custom_tool_call_item, runtime_gemini_custom_tool_input_from_arguments,
-    runtime_gemini_normalized_response_value, runtime_gemini_responses_usage,
-    runtime_gemini_responses_value_from_generate_value,
-    runtime_gemini_web_search_call_from_grounding,
+    runtime_gemini_finish_reason, runtime_gemini_finish_reason_failure,
+    runtime_gemini_finish_reason_incomplete, runtime_gemini_finish_reason_retryable_invalid,
+    runtime_gemini_image_generation_call_item_from_part,
+    runtime_gemini_media_content_item_from_part, runtime_gemini_normalized_response_value,
+    runtime_gemini_prompt_feedback_failure, runtime_gemini_response_metadata,
+    runtime_gemini_responses_usage, runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_text_from_special_part, runtime_gemini_web_search_call_from_grounding,
 };
 
 #[derive(Clone)]
@@ -89,7 +94,13 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
         serde_json::from_slice(&body).context("failed to parse Gemini response JSON")?;
     let value = runtime_gemini_normalized_response_value(&value);
     let response = runtime_gemini_responses_value_from_generate_value(&value, request_id);
-    if let Some(response_id) = response.get("id").and_then(serde_json::Value::as_str) {
+    let terminal_without_history = matches!(
+        response.get("status").and_then(serde_json::Value::as_str),
+        Some("failed" | "incomplete")
+    ) || response.get("error").is_some();
+    if !terminal_without_history
+        && let Some(response_id) = response.get("id").and_then(serde_json::Value::as_str)
+    {
         runtime_deepseek_store_conversation(
             conversations,
             response_id,
