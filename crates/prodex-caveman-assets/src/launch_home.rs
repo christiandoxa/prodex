@@ -126,9 +126,42 @@ fn localize_caveman_rollout_state(codex_home: &Path) -> Result<()> {
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
         if is_caveman_rollout_state_file_name(&file_name) {
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
             let path = entry.path();
+            if file_type.is_symlink() {
+                localize_caveman_rollout_state_symlink(&path)?;
+                continue;
+            }
             fs::remove_file(&path)
                 .with_context(|| format!("failed to remove {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn localize_caveman_rollout_state_symlink(path: &Path) -> Result<()> {
+    let target =
+        fs::read_link(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let source = if target.is_absolute() {
+        target
+    } else {
+        path.parent().unwrap_or_else(|| Path::new(".")).join(target)
+    };
+    match fs::read(&source) {
+        Ok(bytes) => {
+            fs::remove_file(path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+            fs::write(path, bytes)
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            fs::remove_file(path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+        }
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", source.display()));
         }
     }
     Ok(())

@@ -1,11 +1,13 @@
 use super::{
     RuntimeGeminiBindingRecorder, RuntimeGeminiOAuthPool, RuntimeGeminiOAuthPoolState,
     RuntimeGeminiOAuthProfileAuth, RuntimeGeminiPrecommitDecision, RuntimeGeminiPrecommitProbe,
-    runtime_gemini_now_ms, runtime_gemini_precommit_decision_for_data_lines,
+    runtime_gemini_initial_oauth_pool_index, runtime_gemini_now_ms,
+    runtime_gemini_precommit_decision_for_data_lines,
     runtime_gemini_remember_bindings_from_responses_body,
+    runtime_gemini_should_inline_rate_limit_retry,
     runtime_gemini_should_rotate_after_quota_response,
 };
-use crate::GeminiOAuthSecret;
+use crate::{GeminiOAuthSecret, gemini_code_assist_endpoint};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -31,6 +33,7 @@ fn gemini_pool(profile_names: &[&str]) -> RuntimeGeminiOAuthPool {
             tool_call_profile_bindings: BTreeMap::new(),
             quota_headers: BTreeMap::new(),
             model_cooldowns_until: BTreeMap::new(),
+            model_unavailable_until: BTreeMap::new(),
         })),
     }
 }
@@ -48,6 +51,13 @@ fn gemini_oauth_pool_rotates_fresh_requests() {
     assert!(!first[0].hard_affinity);
     assert_eq!(second[0].profile_name, "beta");
     assert_eq!(second[1].profile_name, "alpha");
+}
+
+#[test]
+fn gemini_oauth_pool_initial_index_is_bounded() {
+    assert_eq!(runtime_gemini_initial_oauth_pool_index(0), 0);
+    assert_eq!(runtime_gemini_initial_oauth_pool_index(1), 0);
+    assert!(runtime_gemini_initial_oauth_pool_index(6) < 6);
 }
 
 #[test]
@@ -178,6 +188,45 @@ fn gemini_oauth_pool_model_cooldown_is_model_scoped() {
 }
 
 #[test]
+fn gemini_oauth_pool_skips_endpoint_scoped_unavailable_model_for_fresh_requests() {
+    let pool = gemini_pool(&["alpha", "beta"]);
+    pool.state.lock().unwrap().remember_model_unavailable_until(
+        "alpha",
+        &gemini_code_assist_endpoint(),
+        "gemini-2.5-pro",
+        runtime_gemini_now_ms() + 60_000,
+    );
+    let body = serde_json::to_vec(&serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "hi"
+    }))
+    .unwrap();
+
+    let attempts = pool.select_attempts(&body, &[]).unwrap();
+
+    assert_eq!(attempts[0].profile_name, "beta");
+    assert_eq!(attempts.len(), 1);
+}
+
+#[test]
+fn gemini_oauth_pool_model_unavailable_cache_is_endpoint_scoped() {
+    let pool = gemini_pool(&["alpha"]);
+    let endpoint = gemini_code_assist_endpoint();
+    let other_endpoint = "https://generativelanguage.googleapis.com/v1beta";
+    pool.state.lock().unwrap().remember_model_unavailable_until(
+        "alpha",
+        other_endpoint,
+        "gemini-2.5-pro",
+        runtime_gemini_now_ms() + 60_000,
+    );
+    let models = vec!["gemini-2.5-pro".to_string(), "gemini-2.5-flash".to_string()];
+
+    let available = pool.available_model_chain_for_profile("alpha", &endpoint, &models);
+
+    assert_eq!(available, models);
+}
+
+#[test]
 fn gemini_oauth_pool_updates_refreshed_auth() {
     let pool = gemini_pool(&["alpha"]);
     let refreshed = GeminiOAuthSecret {
@@ -275,6 +324,14 @@ fn gemini_quota_rotation_predicate_respects_affinity_and_attempt_budget() {
     assert!(!runtime_gemini_should_rotate_after_quota_response(
         500, false, 0, 2
     ));
+}
+
+#[test]
+fn gemini_rate_limit_inline_retry_is_bounded() {
+    assert!(!runtime_gemini_should_inline_rate_limit_retry(0));
+    assert!(runtime_gemini_should_inline_rate_limit_retry(10_000));
+    assert!(!runtime_gemini_should_inline_rate_limit_retry(10_001));
+    assert!(!runtime_gemini_should_inline_rate_limit_retry(60_000));
 }
 
 #[test]

@@ -7,6 +7,7 @@ use std::sync::Arc;
 mod gemini_sse_state;
 
 use gemini_sse_state::RuntimeGeminiSseState;
+pub(super) use gemini_sse_state::runtime_gemini_forced_command_output;
 
 pub(super) type RuntimeGeminiBindingRecorder = Arc<dyn Fn(String, Vec<String>) + Send + Sync>;
 

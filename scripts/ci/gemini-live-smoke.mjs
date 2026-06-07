@@ -12,7 +12,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const DEFAULT_TIMEOUT_MS = 180_000;
-const DEFAULT_EXTENDED_TIMEOUT_MS = 300_000;
+const DEFAULT_EXTENDED_TIMEOUT_MS = 420_000;
 
 function prodexBinary() {
   if (process.env.PRODEX_BIN) {
@@ -54,9 +54,9 @@ function extendedEditCommand(marker, workspace) {
       "status=tool-edit-ok",
       "",
       "Then run this verification command from the workspace:",
-      "node -e \"const fs=require('fs'); const s=fs.readFileSync('gemini-smoke.txt','utf8'); if(!s.includes('status=tool-edit-ok')) process.exit(2);\"",
+      `node -e "const fs=require('fs'); const s=fs.readFileSync('gemini-smoke.txt','utf8'); if(!s.includes('status=tool-edit-ok')) process.exit(2); process.stdout.write('${marker}');"`,
       "",
-      `Reply with exactly one line containing: ${marker}`,
+      "Answer with only the command output.",
     ].join("\n"),
   );
   return { binary: prodexBinary(), args, cwd: workspace };
@@ -75,17 +75,69 @@ function extendedPatchCommand(marker, workspace) {
   return { binary: prodexBinary(), args, cwd: workspace };
 }
 
-function extendedCompactReadCommand(marker, workspace, runtimeLogDir) {
+function extendedReferenceCloneCommand(marker, workspace) {
+  const args = baseArgs();
+  const command = [
+    "set -e",
+    "rm -rf refs/gemini-cli refs/codex",
+    "mkdir -p refs",
+    "git clone -q --depth=1 https://github.com/google-gemini/gemini-cli.git refs/gemini-cli",
+    "git clone -q --depth=1 https://github.com/openai/codex.git refs/codex",
+    "test -d refs/gemini-cli/.git",
+    "test -d refs/codex/.git",
+    "grep -qi Gemini refs/gemini-cli/README.md",
+    "grep -qi Codex refs/codex/README.md",
+    `printf ${JSON.stringify(marker)}`,
+  ].join(" && ");
+  args.push(
+    "exec",
+    [
+      "Use the shell to run exactly this verification command:",
+      command,
+      "",
+      "If a command returns a running session id, poll or wait for it until the process exits before inspecting files.",
+      "Do not stop after saying that you will inspect files. The command itself must perform the inspections and print the marker.",
+      "Answer with only the command output.",
+    ].join("\n"),
+  );
+  return { binary: prodexBinary(), args, cwd: workspace };
+}
+
+function compactArgs() {
   const args = baseArgs();
   args.push("--context-window", "4096", "--auto-compact-token-limit", "1200");
+  return args;
+}
+
+function extendedCompactSeedCommand(marker, workspace, runtimeLogDir) {
+  const args = compactArgs();
   const filler = "retain compact smoke context ".repeat(900);
   args.push(
     "exec",
     [
       filler,
       "",
-      "Read gemini-smoke.txt from the workspace, run a lightweight verification command if useful, and keep the existing file unchanged.",
-      `Reply with exactly one line containing: ${marker}`,
+      `Answer exactly with this one line and no suffix: ${marker}`,
+    ].join("\n"),
+  );
+  return {
+    binary: prodexBinary(),
+    args,
+    cwd: workspace,
+    env: { PRODEX_RUNTIME_LOG_DIR: runtimeLogDir },
+  };
+}
+
+function extendedCompactReadCommand(marker, workspace, runtimeLogDir, sessionId) {
+  const args = compactArgs();
+  args.push(
+    "exec",
+    "resume",
+    sessionId,
+    [
+      "Read gemini-smoke.txt from the workspace, keep the existing file unchanged, then run this verification command:",
+      `node -e "const fs=require('fs'); const s=fs.readFileSync('gemini-smoke.txt','utf8'); if(!s.includes('status=tool-edit-ok')) process.exit(2); process.stdout.write('${marker}');"`,
+      "Answer with only the command output.",
     ].join("\n"),
   );
   return {
@@ -194,6 +246,27 @@ function runtimeLogsContain(directory, marker) {
     .some((name) => readFileSync(join(directory, name), "utf8").includes(marker));
 }
 
+function assertReferenceCloneWorkspace(workspace) {
+  const geminiDir = join(workspace, "refs", "gemini-cli");
+  const codexDir = join(workspace, "refs", "codex");
+  const requiredPaths = [
+    join(geminiDir, ".git"),
+    join(codexDir, ".git"),
+    join(geminiDir, "README.md"),
+    join(codexDir, "README.md"),
+  ];
+  for (const requiredPath of requiredPaths) {
+    if (!existsSync(requiredPath)) {
+      throw new Error(`extended Gemini reference clone missing ${requiredPath}`);
+    }
+  }
+  const geminiReadme = readFileSync(join(geminiDir, "README.md"), "utf8");
+  const codexReadme = readFileSync(join(codexDir, "README.md"), "utf8");
+  if (!/gemini/i.test(geminiReadme) || !/codex/i.test(codexReadme)) {
+    throw new Error("extended Gemini reference clone did not expose expected README content");
+  }
+}
+
 function codexSessionRoot() {
   return join(homedir(), ".codex", "sessions");
 }
@@ -294,26 +367,23 @@ async function runProdex({ binary, args, cwd, env = {} }, expectedFinal, label, 
         reject(new Error(`prodex exited with code ${code}`));
         return;
       }
-      const final = finalAgentMessage(output);
+      const terminalFinal = finalAgentMessage(output);
+      const sessionId = sessionIdFromOutput(output);
+      const persisted = persistedAgentMessage(sessionId);
+      const final = persisted ?? terminalFinal;
       if (final !== expectedFinal) {
         reject(
           new Error(
-            `Gemini final response mismatch for ${label}: expected ${JSON.stringify(expectedFinal)}, got ${JSON.stringify(final)}`,
+            [
+              `Gemini final response mismatch for ${label}: expected ${JSON.stringify(expectedFinal)}, got ${JSON.stringify(final)}`,
+              `terminal=${JSON.stringify(terminalFinal)}`,
+              `persisted=${JSON.stringify(persisted)}`,
+            ].join(", "),
           ),
         );
         return;
       }
-      const sessionId = sessionIdFromOutput(output);
-      const persisted = persistedAgentMessage(sessionId);
-      if (persisted !== null && persisted !== expectedFinal) {
-        reject(
-          new Error(
-            `Gemini persisted agent response mismatch for ${label}: expected ${JSON.stringify(expectedFinal)}, got ${JSON.stringify(persisted)}`,
-          ),
-        );
-        return;
-      }
-      resolve({ output, final, sessionId });
+      resolve({ output, final, sessionId, terminalFinal, persisted });
     });
   });
 }
@@ -353,9 +423,25 @@ async function run() {
     if (patchFile.trim() !== marker) {
       throw new Error("extended Gemini smoke did not write gemini-patch-smoke.txt exactly");
     }
-    const compactRuntimeLogDir = join(workspace, "compact-runtime-logs");
     await runProdex(
-      extendedCompactReadCommand(marker, workspace, compactRuntimeLogDir),
+      extendedReferenceCloneCommand(marker, workspace),
+      marker,
+      "extended-reference-clone-inspection",
+      timeout,
+    );
+    assertReferenceCloneWorkspace(workspace);
+    const compactRuntimeLogDir = join(workspace, "compact-runtime-logs");
+    const compactSeed = await runProdex(
+      extendedCompactSeedCommand(marker, workspace, compactRuntimeLogDir),
+      marker,
+      "extended-compact-seed",
+      timeout,
+    );
+    if (!compactSeed.sessionId) {
+      throw new Error("extended Gemini compact seed did not expose a session id");
+    }
+    await runProdex(
+      extendedCompactReadCommand(marker, workspace, compactRuntimeLogDir, compactSeed.sessionId),
       marker,
       "extended-compact-read",
       timeout,

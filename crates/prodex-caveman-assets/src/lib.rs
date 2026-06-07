@@ -105,7 +105,7 @@ Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed opt
 
 ## AST Compression
 
-If `claw-compactor` is available, Prodex Super invokes a trusted one-shot SessionStart benchmark probe through `prodex-claw-compactor-sessionstart` so the runtime receives a compact workspace savings signal without replaying the probe after Codex restarts a conversation inside the same launch home. The wrapper delegates to `prodex-claw-compactor-auto "$(pwd)"`. When the current directory has no Markdown memory files, the wrapper generates a temporary shadow workspace with a synthetic `MEMORY.md` summary and leaves the original directory untouched. Use `claw-compactor` only as a manual, reversible code-summary aid for exploration after that. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
+If `claw-compactor` is available, Prodex Super installs a trusted one-shot SessionStart wrapper at `prodex-claw-compactor-sessionstart`. The startup probe is disabled by default so Codex launch is not delayed; opt in with `PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS=<seconds>` when you want the runtime to receive a compact workspace savings signal. The wrapper delegates to `prodex-claw-compactor-auto "$(pwd)"` only when that timeout is greater than zero. When the current directory has no Markdown memory files, the wrapper generates a temporary shadow workspace with a synthetic `MEMORY.md` summary and leaves the original directory untouched. Use `claw-compactor` only as a manual, reversible code-summary aid for exploration after that. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
 
 ## Safety
 

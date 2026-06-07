@@ -268,7 +268,21 @@ if [ -e "$marker" ]; then
   exit 0
 fi
 : > "$marker" 2>/dev/null || exit 0
-exec {AUTO_WRAPPER} "${{1:-$(pwd)}}"
+timeout_seconds="${{PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS:-0}}"
+case "$timeout_seconds" in
+  ''|*[!0-9]*) timeout_seconds=2 ;;
+esac
+if [ "$timeout_seconds" = "0" ]; then
+  exit 0
+fi
+if command -v timeout >/dev/null 2>&1; then
+  timeout_bin=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+  timeout_bin=gtimeout
+else
+  exit 0
+fi
+"$timeout_bin" "${{timeout_seconds}}s" {AUTO_WRAPPER} "${{1:-$(pwd)}}" || true
 "#
     );
     write_executable_script(path, &script)
@@ -321,6 +335,21 @@ mod tests {
             return path.with_extension("exe");
         }
         path
+    }
+
+    #[cfg(unix)]
+    fn command_output_retry_text_file_busy(
+        command: &mut Command,
+    ) -> std::io::Result<std::process::Output> {
+        for attempt in 0..5 {
+            match command.output() {
+                Err(err) if err.raw_os_error() == Some(26) && attempt < 4 => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                result => return result,
+            }
+        }
+        unreachable!("retry loop should always return")
     }
 
     #[test]
@@ -416,6 +445,8 @@ mod tests {
             .expect("session wrapper should exist");
         assert!(session_wrapper.contains(AUTO_WRAPPER));
         assert!(session_wrapper.contains(SESSION_MARKER));
+        assert!(session_wrapper.contains("PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS"));
+        assert!(session_wrapper.contains("timeout"));
 
         let config_path = codex_home.join("config.toml");
         let config = fs::read_to_string(&config_path).expect("config.toml should be written");
@@ -527,6 +558,7 @@ printf 'CLAW_COMPACTOR_ACTIVE {"target":"%s"}\n' "$1"
             .arg(&workspace)
             .env("CODEX_HOME", &codex_home)
             .env("PATH", &path)
+            .env("PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS", "2")
             .output()
             .expect("first session wrapper should run");
         assert!(first.status.success());
@@ -537,12 +569,103 @@ printf 'CLAW_COMPACTOR_ACTIVE {"target":"%s"}\n' "$1"
             .arg(&workspace)
             .env("CODEX_HOME", &codex_home)
             .env("PATH", &path)
+            .env("PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS", "2")
             .output()
             .expect("second session wrapper should run");
         assert!(second.status.success());
         assert!(
             second.stdout.is_empty(),
             "Claw SessionStart wrapper should not replay after marker"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn session_wrapper_skips_probe_by_default() {
+        let root = temp_dir("session-wrapper-default-skip");
+        let codex_home = root.join("codex-home");
+        let workspace = root.join("workspace");
+        let bin_dir = root.join("bin");
+        let fake_auto = bin_dir.join(AUTO_WRAPPER);
+        let wrapper = bin_dir.join(SESSION_WRAPPER);
+        fs::create_dir_all(&codex_home).expect("codex home should exist");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        write_executable_script(
+            &fake_auto,
+            r#"#!/usr/bin/env sh
+printf 'CLAW_COMPACTOR_ACTIVE {"target":"%s"}\n' "$1"
+"#,
+        )
+        .expect("fake auto wrapper should be executable");
+        write_session_wrapper(&wrapper).expect("session wrapper should be written");
+
+        let mut path_entries = vec![bin_dir.clone()];
+        if let Some(existing) = env::var_os("PATH") {
+            path_entries.extend(env::split_paths(&existing));
+        }
+        let path = env::join_paths(path_entries).expect("PATH should join");
+
+        let output = Command::new(&wrapper)
+            .arg(&workspace)
+            .env("CODEX_HOME", &codex_home)
+            .env("PATH", &path)
+            .output()
+            .expect("session wrapper should run");
+        assert!(output.status.success());
+        assert!(
+            output.stdout.is_empty(),
+            "default Claw SessionStart probe should not block or emit output"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn session_wrapper_times_out_slow_auto_wrapper() {
+        let root = temp_dir("session-wrapper-timeout");
+        let codex_home = root.join("codex-home");
+        let workspace = root.join("workspace");
+        let bin_dir = root.join("bin");
+        let fake_auto = bin_dir.join(AUTO_WRAPPER);
+        let wrapper = bin_dir.join(SESSION_WRAPPER);
+        fs::create_dir_all(&codex_home).expect("codex home should exist");
+        fs::create_dir_all(&workspace).expect("workspace should exist");
+        write_executable_script(
+            &fake_auto,
+            r#"#!/usr/bin/env sh
+sleep 5
+printf 'CLAW_COMPACTOR_ACTIVE {"target":"%s"}\n' "$1"
+"#,
+        )
+        .expect("fake auto wrapper should be executable");
+        write_session_wrapper(&wrapper).expect("session wrapper should be written");
+
+        let mut path_entries = vec![bin_dir.clone()];
+        if let Some(existing) = env::var_os("PATH") {
+            path_entries.extend(env::split_paths(&existing));
+        }
+        let path = env::join_paths(path_entries).expect("PATH should join");
+
+        let started = std::time::Instant::now();
+        let output = command_output_retry_text_file_busy(
+            Command::new(&wrapper)
+                .arg(&workspace)
+                .env("CODEX_HOME", &codex_home)
+                .env("PATH", &path)
+                .env("PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS", "1"),
+        )
+        .expect("session wrapper should run");
+        assert!(output.status.success());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(4),
+            "SessionStart wrapper should stop slow claw probes quickly"
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "timed-out claw probe should not emit delayed SessionStart text"
         );
 
         let _ = fs::remove_dir_all(root);

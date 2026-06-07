@@ -575,6 +575,19 @@ impl RuntimeGeminiSseState {
             }
             return Some(events.join(""));
         }
+        if self.tool_calls.is_empty()
+            && let Some(tool_name) = runtime_gemini_tool_intent_without_call(&self.output_text)
+        {
+            if let Some(event) = self.failed_event(
+                "gemini_tool_intent_without_call",
+                &format!(
+                    "Gemini stopped after announcing a `{tool_name}` tool call instead of emitting the tool call."
+                ),
+            ) {
+                events.push(event);
+            }
+            return Some(events.join(""));
+        }
         let mut response = serde_json::json!({
             "id": self.response_id,
             "output": output,
@@ -1061,7 +1074,75 @@ impl RuntimeGeminiSseState {
     }
 }
 
-fn runtime_gemini_forced_command_output(messages: &[serde_json::Value]) -> Option<String> {
+fn runtime_gemini_tool_intent_without_call(text: &str) -> Option<&'static str> {
+    let lower = text.trim().to_ascii_lowercase();
+    if lower.len() < 16 {
+        return None;
+    }
+    let future_tool_intent = [
+        "i'll use",
+        "i will use",
+        "i'll call",
+        "i will call",
+        "i'll run",
+        "i will run",
+        "i'll search",
+        "i will search",
+        "i'll inspect",
+        "i will inspect",
+        "i'll read",
+        "i will read",
+        "i'm going to use",
+        "i am going to use",
+        "now, i'll use",
+        "next, i'll use",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase));
+    if !future_tool_intent {
+        return None;
+    }
+    [
+        "exec_command",
+        "write_stdin",
+        "apply_patch",
+        "sqz_grep",
+        "sqz_read_file",
+        "sqz_list_dir",
+        "read_mcp_resource",
+        "list_mcp_resources",
+        "tool_search",
+        "rg",
+        "grep",
+    ]
+    .into_iter()
+    .find(|tool| runtime_gemini_contains_tool_token(&lower, tool))
+}
+
+fn runtime_gemini_contains_tool_token(text: &str, token: &str) -> bool {
+    let mut offset = 0;
+    while let Some(index) = text[offset..].find(token) {
+        let start = offset + index;
+        let end = start + token.len();
+        let before = text[..start].chars().next_back();
+        let after = text[end..].chars().next();
+        let before_boundary = before.is_none_or(runtime_gemini_tool_token_boundary);
+        let after_boundary = after.is_none_or(runtime_gemini_tool_token_boundary);
+        if before_boundary && after_boundary {
+            return true;
+        }
+        offset = end;
+    }
+    false
+}
+
+fn runtime_gemini_tool_token_boundary(ch: char) -> bool {
+    !(ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+pub(in super::super) fn runtime_gemini_forced_command_output(
+    messages: &[serde_json::Value],
+) -> Option<String> {
     let user_index = messages.iter().rposition(|message| {
         message.get("role").and_then(serde_json::Value::as_str) == Some("user")
     })?;

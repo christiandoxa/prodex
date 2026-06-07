@@ -48,6 +48,48 @@ fn gemini_request_translation_maps_custom_apply_patch_to_function_declaration() 
 }
 
 #[test]
+fn gemini_request_translation_describes_apply_patch_add_file_grammar_for_gemini3() {
+    let body = serde_json::json!({
+        "model": "auto",
+        "input": "Edit a file",
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "description": "Use the apply_patch tool to edit files.",
+            "format": {
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": "start: begin_patch hunk+ end_patch"
+            }
+        }]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let declaration = &value["tools"][0]["functionDeclarations"][0];
+
+    assert!(
+        declaration["description"]
+            .as_str()
+            .unwrap()
+            .contains("Add File")
+    );
+    assert!(
+        declaration["parameters"]["properties"]["input"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("prefix every new file content line")
+    );
+}
+
+#[test]
 fn gemini_response_translation_maps_apply_patch_to_custom_tool_call() {
     let patch = "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch";
     let response = serde_json::json!({
@@ -125,6 +167,18 @@ fn gemini_apply_patch_input_extracts_fenced_apply_patch_block() {
     assert_eq!(
         runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
         "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"
+    );
+}
+
+#[test]
+fn gemini_apply_patch_input_repairs_add_file_lines_without_plus_prefix() {
+    let arguments = serde_json::json!({
+        "input": "*** Begin Patch\n*** Add File: gemini-patch-smoke.txt\nPRODEX_GEMINI_LIVE_OK\n*** End Patch"
+    });
+
+    assert_eq!(
+        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        "*** Begin Patch\n*** Add File: gemini-patch-smoke.txt\n+PRODEX_GEMINI_LIVE_OK\n*** End Patch"
     );
 }
 

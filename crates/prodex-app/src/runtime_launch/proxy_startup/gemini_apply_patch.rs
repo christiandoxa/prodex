@@ -48,7 +48,39 @@ fn runtime_gemini_extract_apply_patch_block(input: &str) -> Option<String> {
         .iter()
         .position(|line| line.trim_start().starts_with("*** End Patch"))?
         + start;
-    Some(lines[start..=end].join("\n"))
+    Some(runtime_gemini_repair_apply_patch_block(
+        &lines[start..=end].join("\n"),
+    ))
+}
+
+fn runtime_gemini_repair_apply_patch_block(input: &str) -> String {
+    let normalized = runtime_gemini_normalized_newlines(input);
+    let mut output = Vec::new();
+    let mut in_add_file = false;
+
+    for line in normalized.lines() {
+        if line.starts_with("*** Add File: ") {
+            in_add_file = true;
+            output.push(line.to_string());
+            continue;
+        }
+        if line.starts_with("*** ") {
+            in_add_file = false;
+            output.push(line.to_string());
+            continue;
+        }
+        if in_add_file && !runtime_gemini_is_apply_patch_add_line(line) {
+            output.push(format!("+{line}"));
+            continue;
+        }
+        output.push(line.to_string());
+    }
+
+    output.join("\n")
+}
+
+fn runtime_gemini_is_apply_patch_add_line(line: &str) -> bool {
+    line.starts_with('+')
 }
 
 fn runtime_gemini_edit_args_to_apply_patch(args_value: &Value) -> Option<String> {

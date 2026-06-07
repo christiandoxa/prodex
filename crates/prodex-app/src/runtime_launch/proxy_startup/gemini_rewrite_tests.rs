@@ -789,6 +789,49 @@ fn gemini_request_translation_maps_tool_outputs_as_user_function_responses() {
 }
 
 #[test]
+fn gemini_request_translation_structures_running_exec_command_output() {
+    let output = "Chunk ID: abc123\nWall time: 1.0000 seconds\nProcess running with session ID 48274\nOriginal token count: 12\nOutput:\nCloning into '/tmp/gemini-cli'...\n";
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_exec_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git clone https://github.com/google-gemini/gemini-cli.git /tmp/gemini-cli\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_exec_1",
+                "output": output
+            }
+        ]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let response = &value["contents"][1]["parts"][0]["functionResponse"]["response"];
+
+    assert_eq!(response["output"], output);
+    assert_eq!(response["status"], "running");
+    assert_eq!(response["codex_tool_status"], "running");
+    assert_eq!(response["running_session_id"], 48274_u64);
+    assert!(
+        response["next_required_action"]
+            .as_str()
+            .unwrap()
+            .contains("write_stdin")
+    );
+}
+
+#[test]
 fn gemini_request_translation_masks_large_tool_outputs_in_history() {
     let large_output = "x".repeat(51_000);
     let body = serde_json::json!({

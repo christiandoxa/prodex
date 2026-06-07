@@ -322,6 +322,61 @@ fn prepare_caveman_home_keeps_rollout_state_local_to_launch_home() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_caveman_home_localizes_shared_rollout_state_symlinks() {
+    let base = temp_dir("state-symlink-base");
+    let shared = temp_dir("state-symlink-shared");
+    let managed_root = temp_dir("state-symlink-managed");
+    fs::create_dir_all(&base).expect("base dir");
+    fs::create_dir_all(&shared).expect("shared dir");
+
+    let state_db = shared.join("state_5.sqlite");
+    let state_shm = shared.join("state_5.sqlite-shm");
+    let state_wal = shared.join("state_5.sqlite-wal");
+    fs::write(&state_db, "shared rollout state").expect("state db");
+    fs::write(&state_shm, "shared rollout shm").expect("state shm");
+    fs::write(&state_wal, "shared rollout wal").expect("state wal");
+    std::os::unix::fs::symlink(&state_db, base.join("state_5.sqlite")).expect("state db symlink");
+    std::os::unix::fs::symlink(&state_shm, base.join("state_5.sqlite-shm"))
+        .expect("state shm symlink");
+    std::os::unix::fs::symlink(&state_wal, base.join("state_5.sqlite-wal"))
+        .expect("state wal symlink");
+
+    let overlay = prepare_caveman_launch_home(&managed_root, &base)
+        .expect("caveman launch home should prepare");
+
+    for (name, target) in [
+        ("state_5.sqlite", state_db),
+        ("state_5.sqlite-shm", state_shm),
+        ("state_5.sqlite-wal", state_wal),
+    ] {
+        let link = overlay.join(name);
+        assert!(
+            !fs::symlink_metadata(&link)
+                .expect("overlay state metadata")
+                .file_type()
+                .is_symlink(),
+            "{name} should be localized from the shared symlink"
+        );
+        assert!(
+            fs::read_to_string(&link)
+                .expect("overlay state should read from local copy")
+                .starts_with("shared rollout")
+        );
+        fs::write(&link, format!("local {name}")).expect("overlay state write");
+        assert!(
+            fs::read_to_string(&target)
+                .expect("shared state should stay untouched")
+                .starts_with("shared rollout")
+        );
+    }
+
+    let _ = fs::remove_dir_all(managed_root);
+    let _ = fs::remove_dir_all(base);
+    let _ = fs::remove_dir_all(shared);
+}
+
+#[cfg(unix)]
+#[test]
 fn caveman_session_start_script_outputs_once_per_launch_home() {
     let codex_home = temp_dir("caveman-sessionstart-once");
     fs::create_dir_all(&codex_home).expect("codex home should exist");

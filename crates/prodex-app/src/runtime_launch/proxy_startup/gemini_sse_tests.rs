@@ -36,6 +36,28 @@ fn gemini_sse_reader_maps_text_and_function_call_to_responses_events() {
 }
 
 #[test]
+fn gemini_sse_reader_fails_tool_intent_text_without_function_call() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_tool_intent\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"I already did this.\\n\\nNow, I'll use `sqz_grep` to find the request builder.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        16,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("\"code\":\"gemini_tool_intent_without_call\""));
+    assert!(output.contains("sqz_grep"));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
 fn gemini_sse_reader_handles_long_text_stream_without_layout_events_drifting() {
     let mut stream = String::new();
     for index in 0..256 {

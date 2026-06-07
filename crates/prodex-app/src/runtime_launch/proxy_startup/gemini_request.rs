@@ -1539,15 +1539,83 @@ fn runtime_gemini_function_response_from_tool_message(
         .map(str::to_string)
         .or_else(|| tool_names_by_call_id.get(call_id).cloned())
         .unwrap_or_else(|| "tool_call".to_string());
-    let response = chat_message_text(message)
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+    let text = chat_message_text(message).unwrap_or_default();
+    let response = runtime_gemini_structured_command_tool_response(&name, &text)
+        .or_else(|| serde_json::from_str::<serde_json::Value>(&text).ok())
         .unwrap_or_else(|| {
             serde_json::json!({
-                "output": chat_message_text(message).unwrap_or_default()
+                "output": text
             })
         });
     let response = runtime_gemini_mask_tool_response_for_history(&name, call_id, response);
     runtime_gemini_function_response_part(call_id, &name, response)
+}
+
+fn runtime_gemini_structured_command_tool_response(
+    tool_name: &str,
+    output: &str,
+) -> Option<serde_json::Value> {
+    if !runtime_gemini_is_command_tool_name(tool_name) || output.trim().is_empty() {
+        return None;
+    }
+    if let Some(session_id) =
+        runtime_gemini_u64_after_marker(output, "Process running with session ID")
+    {
+        return Some(serde_json::json!({
+            "output": output,
+            "status": "running",
+            "codex_tool_status": "running",
+            "running_session_id": session_id,
+            "next_required_action": format!(
+                "Call write_stdin with session_id={session_id} until the process exits or yields the needed output."
+            ),
+        }));
+    }
+    if let Some(exit_code) = runtime_gemini_i64_after_marker(output, "Process exited with code") {
+        return Some(serde_json::json!({
+            "output": output,
+            "status": "exited",
+            "codex_tool_status": "exited",
+            "exit_code": exit_code,
+        }));
+    }
+    None
+}
+
+fn runtime_gemini_is_command_tool_name(tool_name: &str) -> bool {
+    let normalized = tool_name
+        .rsplit(['.', ':'])
+        .next()
+        .unwrap_or(tool_name)
+        .rsplit("__")
+        .next()
+        .unwrap_or(tool_name);
+    matches!(normalized, "exec_command" | "write_stdin" | "shell")
+}
+
+fn runtime_gemini_u64_after_marker(text: &str, marker: &str) -> Option<u64> {
+    let tail = text.split_once(marker)?.1.trim_start();
+    let digits = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    (!digits.is_empty()).then(|| digits.parse::<u64>().ok())?
+}
+
+fn runtime_gemini_i64_after_marker(text: &str, marker: &str) -> Option<i64> {
+    let tail = text.split_once(marker)?.1.trim_start();
+    let mut value = String::new();
+    for (index, ch) in tail.chars().enumerate() {
+        if ch.is_ascii_digit() || (index == 0 && ch == '-') {
+            value.push(ch);
+            continue;
+        }
+        break;
+    }
+    if value == "-" || value.is_empty() {
+        return None;
+    }
+    value.parse::<i64>().ok()
 }
 
 fn runtime_gemini_function_call_part(
@@ -2850,7 +2918,7 @@ fn runtime_gemini_gemini3_tool_description(name: &str) -> Option<&'static str> {
     }
     if aliases.contains("apply_patch") || aliases.contains("replace") || aliases.contains("edit") {
         return Some(
-            "Apply targeted file edits with exact context. Keep edits narrow and use this instead of describing changes.",
+            "Apply targeted file edits with exact context. Keep edits narrow and use this instead of describing changes. For Add File patches, every content line must start with '+', for example: *** Begin Patch\\n*** Add File: note.txt\\n+hello\\n*** End Patch.",
         );
     }
     None
@@ -2879,6 +2947,13 @@ fn runtime_gemini_apply_gemini3_parameter_descriptions(
             "pattern",
             "Literal or regex pattern to search for.",
         );
+    }
+    if aliases.contains("apply_patch") || aliases.contains("replace") || aliases.contains("edit") {
+        declaration["parameters"]["properties"]["input"]["description"] =
+            serde_json::Value::String(
+                "Full apply_patch grammar string. For Add File, prefix every new file content line with '+'."
+                    .to_string(),
+            );
     }
 }
 

@@ -11,8 +11,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
-    "maxLines": 3343,
-    "reason": "The Gemini request translation matrix is capped while Gemini CLI settings precedence, multimodal parity, and request policy parity remain co-located pending a domain split."
+    "maxLines": 3418,
+    "reason": "The Gemini request translation matrix is capped while Gemini CLI settings precedence, multimodal parity, command-output tool responses, and request policy parity remain co-located pending a domain split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_response.rs",
@@ -21,23 +21,23 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_rewrite_tests.rs",
-    "maxLines": 1635,
-    "reason": "Gemini translation regression cases remain consolidated while Codex-native Gemini parity coverage is completed."
+    "maxLines": 1678,
+    "reason": "Gemini translation regression cases remain consolidated while Codex-native Gemini parity coverage, model fallback, and retry-budget coverage are completed."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
-    "maxLines": 1206,
-    "reason": "Gemini SSE state-machine invariants and exact-output reconstruction remain in one capped module until state ownership is split."
+    "maxLines": 1287,
+    "reason": "Gemini SSE state-machine invariants, tool-intent tracking, and exact-output reconstruction remain in one capped module until state ownership is split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs",
-    "maxLines": 898,
-    "reason": "Gemini SSE exact-output and continuity regression cases remain consolidated while the state-machine surface stabilizes."
+    "maxLines": 920,
+    "reason": "Gemini SSE exact-output, tool-intent, and continuity regression cases remain consolidated while the state-machine surface stabilizes."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1131,
-    "reason": "Gemini local rewrite authentication and request context remain capped while default model ownership is shared through the Gemini runtime crate."
+    "maxLines": 1414,
+    "reason": "Gemini local rewrite authentication, model-unavailable caching, retry budgeting, and request context remain capped while default model ownership is shared through the Gemini runtime crate."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs",

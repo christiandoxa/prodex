@@ -6,7 +6,10 @@ use super::gemini_rewrite::{
     runtime_gemini_project_id, runtime_gemini_prompt_feedback_failure,
     runtime_gemini_text_from_special_part, runtime_gemini_upstream_url,
 };
-use super::gemini_sse::RuntimeGeminiBindingRecorder;
+use super::gemini_sse::{
+    RuntimeGeminiBindingRecorder, RuntimeGeminiGenerateSseReader,
+    runtime_gemini_forced_command_output,
+};
 use super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
@@ -36,8 +39,9 @@ use super::provider_bridge::{
     runtime_provider_should_retry_with_next_model,
 };
 use crate::{
-    RuntimeProxyRequest, fetch_gemini_quota_with_code_assist_endpoint, gemini_code_assist_endpoint,
-    runtime_proxy_log, runtime_proxy_log_to_path, spawn_runtime_background_worker_or_log,
+    RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest,
+    fetch_gemini_quota_with_code_assist_endpoint, gemini_code_assist_endpoint, runtime_proxy_log,
+    runtime_proxy_log_to_path, spawn_runtime_background_worker_or_log,
 };
 use anyhow::{Context, Result, bail};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
@@ -53,8 +57,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT: usize = 4096;
 const RUNTIME_GEMINI_LOCAL_RETRY_LIMIT: usize = 9;
+const RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS: u64 = 10_000;
 const RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT: usize = 3;
 const RUNTIME_GEMINI_INVALID_STREAM_RETRY_BASE_DELAY_MS: u64 = 1_000;
+const RUNTIME_GEMINI_MODEL_UNAVAILABLE_TTL_MS: u64 = 60 * 60 * 1_000;
 const RUNTIME_GEMINI_PRECOMMIT_PEEK_LIMIT: usize = 64 * 1024;
 
 #[path = "local_rewrite_gemini_auth.rs"]
@@ -73,6 +79,7 @@ struct RuntimeGeminiOAuthPoolState {
     tool_call_profile_bindings: BTreeMap<String, String>,
     quota_headers: BTreeMap<String, Vec<(String, String)>>,
     model_cooldowns_until: BTreeMap<String, u64>,
+    model_unavailable_until: BTreeMap<String, u64>,
 }
 
 #[derive(Clone)]
@@ -102,11 +109,12 @@ pub(super) fn runtime_gemini_oauth_pool_from_provider(
     Some(RuntimeGeminiOAuthPool {
         state: Arc::new(Mutex::new(RuntimeGeminiOAuthPoolState {
             profiles: profiles.clone(),
-            next_index: 0,
+            next_index: runtime_gemini_initial_oauth_pool_index(profiles.len()),
             response_profile_bindings: BTreeMap::new(),
             tool_call_profile_bindings: BTreeMap::new(),
             quota_headers: BTreeMap::new(),
             model_cooldowns_until: BTreeMap::new(),
+            model_unavailable_until: BTreeMap::new(),
         })),
     })
 }
@@ -137,6 +145,34 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 model_chain.push(GEMINI_DEFAULT_MODEL.to_string());
             }
         }
+        let model_cache_endpoint =
+            runtime_gemini_model_cache_endpoint(&selected.auth, &shared.upstream_base_url);
+        if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
+            let available_chain = pool.available_model_chain_for_profile(
+                &selected.profile_name,
+                &model_cache_endpoint,
+                &model_chain,
+            );
+            if !available_chain.is_empty() && available_chain.len() < model_chain.len() {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_gemini_model_unavailable_skip",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("profile", selected.profile_name.as_str()),
+                            runtime_proxy_log_field("endpoint", model_cache_endpoint.as_str()),
+                            runtime_proxy_log_field("models_before", model_chain.len().to_string()),
+                            runtime_proxy_log_field(
+                                "models_after",
+                                available_chain.len().to_string(),
+                            ),
+                        ],
+                    ),
+                );
+                model_chain = available_chain;
+            }
+        }
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = if responses_route {
                 runtime_provider_request_body_with_model(&body, model)
@@ -165,6 +201,14 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 selected.profile_name.as_str(),
                 &mut translated,
             )?;
+            if let Some(result) = runtime_gemini_exact_output_short_circuit(
+                request_id,
+                shared,
+                &selected,
+                &translated,
+            )? {
+                return Ok(result);
+            }
             let upstream_url = runtime_gemini_upstream_url(
                 &shared.upstream_base_url,
                 &selected.auth,
@@ -219,6 +263,34 @@ pub(super) fn send_runtime_gemini_upstream_request(
                             &selected.profile_name,
                             &translated.model,
                             delay_ms,
+                        );
+                    }
+                    if class == RuntimeProviderErrorClass::NotFound
+                        && let Some(pool) = shared.gemini_oauth_pool.as_ref()
+                    {
+                        pool.remember_model_unavailable(
+                            &selected.profile_name,
+                            &model_cache_endpoint,
+                            &translated.model,
+                        );
+                        runtime_proxy_log(
+                            &shared.runtime_shared,
+                            runtime_proxy_structured_log_message(
+                                "local_rewrite_gemini_model_unavailable",
+                                [
+                                    runtime_proxy_log_field("request", request_id.to_string()),
+                                    runtime_proxy_log_field(
+                                        "profile",
+                                        selected.profile_name.as_str(),
+                                    ),
+                                    runtime_proxy_log_field(
+                                        "endpoint",
+                                        model_cache_endpoint.as_str(),
+                                    ),
+                                    runtime_proxy_log_field("model", translated.model.as_str()),
+                                    runtime_proxy_log_field("status", status.to_string()),
+                                ],
+                            ),
                         );
                     }
                     if status == 400
@@ -385,10 +457,34 @@ pub(super) fn send_runtime_gemini_upstream_request(
                         && delay_ms > 0
                         && rate_limit_retry_index < RUNTIME_GEMINI_LOCAL_RETRY_LIMIT
                     {
+                        if runtime_gemini_should_inline_rate_limit_retry(delay_ms) {
+                            runtime_proxy_log(
+                                &shared.runtime_shared,
+                                runtime_proxy_structured_log_message(
+                                    "local_rewrite_gemini_rate_limit_retry",
+                                    [
+                                        runtime_proxy_log_field("request", request_id.to_string()),
+                                        runtime_proxy_log_field(
+                                            "profile",
+                                            selected.profile_name.as_str(),
+                                        ),
+                                        runtime_proxy_log_field("status", status.to_string()),
+                                        runtime_proxy_log_field(
+                                            "retry",
+                                            rate_limit_retry_index.to_string(),
+                                        ),
+                                        runtime_proxy_log_field("delay_ms", delay_ms.to_string()),
+                                    ],
+                                ),
+                            );
+                            rate_limit_retry_index += 1;
+                            thread::sleep(Duration::from_millis(delay_ms));
+                            continue;
+                        }
                         runtime_proxy_log(
                             &shared.runtime_shared,
                             runtime_proxy_structured_log_message(
-                                "local_rewrite_gemini_rate_limit_retry",
+                                "local_rewrite_gemini_rate_limit_retry_fail_fast",
                                 [
                                     runtime_proxy_log_field("request", request_id.to_string()),
                                     runtime_proxy_log_field(
@@ -401,12 +497,14 @@ pub(super) fn send_runtime_gemini_upstream_request(
                                         rate_limit_retry_index.to_string(),
                                     ),
                                     runtime_proxy_log_field("delay_ms", delay_ms.to_string()),
+                                    runtime_proxy_log_field(
+                                        "max_inline_delay_ms",
+                                        RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS
+                                            .to_string(),
+                                    ),
                                 ],
                             ),
                         );
-                        rate_limit_retry_index += 1;
-                        thread::sleep(Duration::from_millis(delay_ms));
-                        continue;
                     }
 
                     return Ok(RuntimeLocalRewriteUpstreamResult {
@@ -528,6 +626,83 @@ pub(super) fn send_runtime_gemini_upstream_request(
     }
 
     bail!("no Gemini auth attempts were available")
+}
+
+fn runtime_gemini_exact_output_short_circuit(
+    request_id: u64,
+    shared: &RuntimeLocalRewriteProxyShared,
+    selected: &RuntimeGeminiSelectedAuth,
+    translated: &RuntimeGeminiTranslatedRequest,
+) -> Result<Option<RuntimeLocalRewriteUpstreamResult>> {
+    if !translated.stream {
+        return Ok(None);
+    }
+    let Some(output) = runtime_gemini_forced_command_output(&translated.messages) else {
+        return Ok(None);
+    };
+    let binding_recorder = shared
+        .gemini_oauth_pool
+        .as_ref()
+        .map(|pool| runtime_gemini_binding_recorder(pool, selected.profile_name.clone()));
+    let generate_chunk = serde_json::json!({
+        "responseId": format!("resp_gemini_exact_{request_id}"),
+        "modelVersion": translated.model,
+        "candidates": [{
+            "content": {
+                "parts": [{"text": output}]
+            },
+            "finishReason": "STOP"
+        }]
+    });
+    let fake_stream = format!("data: {generate_chunk}\n\ndata: [DONE]\n\n");
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(fake_stream.into_bytes()),
+        request_id,
+        translated.messages.clone(),
+        Arc::clone(&shared.gemini_conversations),
+        binding_recorder,
+    );
+    let mut body = String::new();
+    reader
+        .read_to_string(&mut body)
+        .context("failed to build Gemini exact-output SSE response")?;
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "local_rewrite_gemini_exact_output_short_circuit",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("profile", selected.profile_name.as_str()),
+                runtime_proxy_log_field("model", translated.model.as_str()),
+                runtime_proxy_log_field("bytes", body.len().to_string()),
+            ],
+        ),
+    );
+    let mut headers = vec![
+        (
+            "content-type".to_string(),
+            b"text/event-stream; charset=utf-8".to_vec(),
+        ),
+        ("x-reasoning-included".to_string(), b"true".to_vec()),
+    ];
+    if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
+        headers.extend(
+            pool.quota_headers_for_profile(&selected.profile_name)
+                .into_iter()
+                .map(|(name, value)| (name, value.into_bytes())),
+        );
+    }
+    Ok(Some(RuntimeLocalRewriteUpstreamResult {
+        response: RuntimeLocalRewriteUpstreamResponse::Buffered(
+            RuntimeHeapTrimmedBufferedResponseParts {
+                status: 200,
+                headers,
+                body: body.into_bytes().into(),
+            },
+        ),
+        gemini_context: None,
+        copilot_context: None,
+    }))
 }
 
 fn runtime_gemini_thinking_budget_tokens(
@@ -942,6 +1117,33 @@ impl RuntimeGeminiOAuthPool {
         }
     }
 
+    fn remember_model_unavailable(&self, profile_name: &str, endpoint: &str, model: &str) {
+        if profile_name.trim().is_empty() || endpoint.trim().is_empty() || model.trim().is_empty() {
+            return;
+        }
+        let until = runtime_gemini_now_ms().saturating_add(RUNTIME_GEMINI_MODEL_UNAVAILABLE_TTL_MS);
+        if let Ok(mut state) = self.state.lock() {
+            state.remember_model_unavailable_until(profile_name, endpoint, model, until);
+        }
+    }
+
+    fn available_model_chain_for_profile(
+        &self,
+        profile_name: &str,
+        endpoint: &str,
+        models: &[String],
+    ) -> Vec<String> {
+        let Ok(state) = self.state.lock() else {
+            return models.to_vec();
+        };
+        state.available_model_chain_for_profile(
+            profile_name,
+            endpoint,
+            models,
+            runtime_gemini_now_ms(),
+        )
+    }
+
     fn select_attempts(
         &self,
         body: &[u8],
@@ -974,6 +1176,7 @@ impl RuntimeGeminiOAuthPool {
             RuntimeProviderBridgeKind::Gemini,
             &requested_model,
         );
+        let endpoint = gemini_code_assist_endpoint();
         let now_ms = runtime_gemini_now_ms();
         let start = state.next_index.min(profiles.len().saturating_sub(1));
         state.next_index = (start + 1) % profiles.len();
@@ -984,7 +1187,12 @@ impl RuntimeGeminiOAuthPool {
                 )
             })
             .filter(|selected| {
-                state.profile_has_available_model(&selected.profile_name, &model_chain, now_ms)
+                state.profile_has_available_model(
+                    &selected.profile_name,
+                    &endpoint,
+                    &model_chain,
+                    now_ms,
+                )
             })
             .collect::<Vec<_>>();
         if attempts.is_empty() {
@@ -1008,6 +1216,15 @@ fn runtime_gemini_oauth_attempt_from_profile(
         auth: profile.auth(),
         hard_affinity: false,
     }
+}
+
+fn runtime_gemini_initial_oauth_pool_index(profile_count: usize) -> usize {
+    if profile_count <= 1 {
+        return 0;
+    }
+    let now = runtime_gemini_now_ms() as usize;
+    let pid = std::process::id() as usize;
+    now.wrapping_add(pid).wrapping_rem(profile_count)
 }
 
 impl RuntimeGeminiOAuthPoolState {
@@ -1065,17 +1282,65 @@ impl RuntimeGeminiOAuthPoolState {
             .retain(|_, cooldown_until| *cooldown_until > runtime_gemini_now_ms());
     }
 
+    fn remember_model_unavailable_until(
+        &mut self,
+        profile_name: &str,
+        endpoint: &str,
+        model: &str,
+        until_ms: u64,
+    ) {
+        let key = runtime_gemini_model_unavailable_key(profile_name, endpoint, model);
+        self.model_unavailable_until.insert(key, until_ms);
+        self.model_unavailable_until
+            .retain(|_, unavailable_until| *unavailable_until > runtime_gemini_now_ms());
+    }
+
+    fn available_model_chain_for_profile(
+        &self,
+        profile_name: &str,
+        endpoint: &str,
+        models: &[String],
+        now_ms: u64,
+    ) -> Vec<String> {
+        models
+            .iter()
+            .filter(|model| self.model_is_available(profile_name, endpoint, model, now_ms))
+            .cloned()
+            .collect()
+    }
+
     fn profile_has_available_model(
         &self,
         profile_name: &str,
+        endpoint: &str,
         models: &[String],
         now_ms: u64,
     ) -> bool {
-        models.iter().any(|model| {
-            self.model_cooldowns_until
-                .get(&runtime_gemini_model_cooldown_key(profile_name, model))
-                .is_none_or(|cooldown_until| *cooldown_until <= now_ms)
-        })
+        models
+            .iter()
+            .any(|model| self.model_is_available(profile_name, endpoint, model, now_ms))
+    }
+
+    fn model_is_available(
+        &self,
+        profile_name: &str,
+        endpoint: &str,
+        model: &str,
+        now_ms: u64,
+    ) -> bool {
+        let cooldown_available = self
+            .model_cooldowns_until
+            .get(&runtime_gemini_model_cooldown_key(profile_name, model))
+            .is_none_or(|cooldown_until| *cooldown_until <= now_ms);
+        let endpoint_available = self
+            .model_unavailable_until
+            .get(&runtime_gemini_model_unavailable_key(
+                profile_name,
+                endpoint,
+                model,
+            ))
+            .is_none_or(|unavailable_until| *unavailable_until <= now_ms);
+        cooldown_available && endpoint_available
     }
 }
 
@@ -1104,6 +1369,20 @@ fn runtime_gemini_model_cooldown_key(profile_name: &str, model: &str) -> String 
     format!("{profile_name}\0{model}")
 }
 
+fn runtime_gemini_model_unavailable_key(profile_name: &str, endpoint: &str, model: &str) -> String {
+    format!("{profile_name}\0{endpoint}\0{model}")
+}
+
+fn runtime_gemini_model_cache_endpoint(
+    auth: &RuntimeGeminiAuth,
+    upstream_base_url: &str,
+) -> String {
+    match auth {
+        RuntimeGeminiAuth::ApiKey { .. } => upstream_base_url.trim_end_matches('/').to_string(),
+        RuntimeGeminiAuth::OAuth { .. } => gemini_code_assist_endpoint(),
+    }
+}
+
 fn runtime_gemini_now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1120,6 +1399,10 @@ fn runtime_gemini_should_rotate_after_quota_response(
     runtime_gemini_response_retryable_quota(status)
         && !hard_affinity
         && attempt_index + 1 < attempt_count
+}
+
+fn runtime_gemini_should_inline_rate_limit_retry(delay_ms: u64) -> bool {
+    delay_ms > 0 && delay_ms <= RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS
 }
 
 fn runtime_gemini_invalid_stream_retry_delay_ms(retry_index: usize) -> u64 {
