@@ -24,5 +24,18 @@
       "maxFileLines": 500
     },
     "reason": "Reviewed cross-cutting Gemini bridge hardening with local full, preflight, and credentialed Gemini live smoke gates."
+  },
+  {
+    "id": "gemini-provider-startup-tooling-0.160.0",
+    "requiredSubjects": [
+      "fix: improve gemini provider startup and tool handling"
+    ],
+    "caps": {
+      "maxFiles": 30,
+      "maxBehaviorFiles": 18,
+      "maxLines": 1300,
+      "maxFileLines": 350
+    },
+    "reason": "Reviewed Gemini provider tool-response, retry, live-smoke, and Caveman startup fixes with local full, preflight, schema, and release smoke gates."
   }
 ]
