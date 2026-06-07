@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.160.0 - Unreleased
+
+Changes after `0.159.0`.
+
+### Misc
+
+- Improve gemini provider startup and tool handling (`1d72401`)
+
 ## 0.159.0 - 2026-06-07
 
 ### Misc
