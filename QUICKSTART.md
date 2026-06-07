@@ -2,7 +2,7 @@
 
 One Prodex profile pool for OpenAI-backed routing, plus runtime provider bridges for Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s --provider gemini|anthropic|copilot|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider gemini|anthropic|copilot|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
 
 For contributors: this is a Cargo workspace. `src/main.rs` is the binary entrypoint, `src/lib.rs` is a compatibility shim, application orchestration lives under `crates/prodex-app/`, and reusable leaf crates live under `crates/`.
 
@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.157.0`:
+The current local version in this repo is `0.158.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.157.0
+npm install -g @christiandoxa/prodex@0.158.0
 ```
 
 Dependency status in this repo:
@@ -155,7 +155,7 @@ prodex profile remove --all
 
 `prodex profile export` exports all configured profiles by default and asks whether to password-protect the bundle, defaulting to protected. In non-interactive use, pass `--password-protect` with `PRODEX_PROFILE_EXPORT_PASSWORD` set, or pass `--no-password` to explicitly write an unencrypted bundle.
 
-`prodex profile import claude` imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s --provider gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot, Gemini, Anthropic, DeepSeek, local, and custom provider snapshots. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not OpenAI quota-compatible, but they still render provider metadata in `prodex quota`.
+`prodex profile import claude` imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot, Gemini, Anthropic, DeepSeek, local, and custom provider snapshots. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not OpenAI quota-compatible, but they still render provider metadata in `prodex quota`.
 
 ## 3. Run Codex CLI with `prodex`
 
@@ -211,7 +211,7 @@ Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_
 Use DeepSeek with the Codex/Super front end:
 
 ```bash
-DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
+DEEPSEEK_API_KEY=... prodex s deepseek --model deepseek-v4-pro
 ```
 
 `--api-key` is also accepted, but the environment variable avoids shell-history/process-list exposure. `DEEPSEEK_API_KEYS` may contain comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path starts a local Responses-to-DeepSeek adapter, injects a one-model Codex catalog for the selected DeepSeek model, skips OpenAI quota preflight, and keeps the Super optional tools working as local Codex overlays. `/model` stays on that DeepSeek model and offers `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` values and fetches DeepSeek `/user/balance`. Remote compact is not implemented for the adapter yet.
@@ -239,13 +239,15 @@ Use Gemini with Google sign-in or an API key:
 
 ```bash
 prodex login --with-google
-prodex s --provider gemini
-GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
+prodex s gemini
+GEMINI_API_KEY=... prodex s gemini --model gemini-2.5-pro
 ```
 
 When no API key is supplied, the Gemini path uses the Google OAuth profile from login. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations, preserves Gemini thought signatures across tool-call followups, masks large tool outputs before replaying history, and can import Gemini session/checkpoint context through `gemini_session_file`, `PRODEX_GEMINI_SESSION_FILE`, or `PRODEX_GEMINI_CHECKPOINT_FILE`.
 
 Gemini memory is loaded by default from `~/.gemini/GEMINI.md`, project `GEMINI.md` files, `.gemini/memory/MEMORY.md`, and `.gemini/memory/INBOX.md`; opt out with `PRODEX_GEMINI_DISABLE_MEMORY=1` or request metadata `gemini_load_memory=false`. Gemini system, global, ancestor project, and cwd-local settings plus extensions are projected into Codex before launch: `mcpServers` become Codex MCP config, hooks go through `/hooks` review, `commands/*.toml` become custom prompts, `skills/*/SKILL.md` become Codex skills, and `agents/*.md` become Codex custom agents. Generated prompts and helper scripts cover refresh, memory, and checkpoint create/restore workflows. Use `PRODEX_GEMINI_EXTENSIONS=none` to disable extension loading or `PRODEX_GEMINI_DISABLE_CLI_COMPAT=1` to skip launch-time surface projection.
+
+For Gemini adapter checks, run `npm run test:gemini-schema` after translation/schema changes and `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` for a credentialed live smoke. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` to cover exact command output, file edits, `apply_patch`, compact, and explicit `exec resume`; add `PRODEX_LIVE_GEMINI_MCP=1` or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when that machine should also test MCP or image input.
 
 Use `prodex super --url http://127.0.0.1:8131` to keep Super mode but route Codex directly to a local OpenAI-compatible server such as `llama-server`. Prodex appends `/v1` when the URL has no path, disables non-function native tools that local servers commonly reject, advertises a conservative 16k local context window, and defaults the local model id to `unsloth/qwen3.5-35b-a3b`; override it with `--model`. Use `--context-window` and `--auto-compact-token-limit` if your local server is configured larger. Check local reachability with `prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once`. See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
@@ -395,6 +397,10 @@ Useful markers:
 - `profile_health`
 - `selection_plan`
 - `precommit_budget_exhausted`
+- `local_rewrite_provider_model_fallback`
+- `local_rewrite_gemini_quota_rotate`
+- `local_rewrite_gemini_invalid_stream_retry`
+- `local_rewrite_gemini_live_error`
 - `first_upstream_chunk`
 - `first_local_chunk`
 - `stream_read_error`

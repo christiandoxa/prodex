@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.158.0 - 2026-06-07
+
+### Misc
+
+- Harden Codex-native provider parity (`551e06c`)
+
 ## 0.157.0 - 2026-06-06
 
 ### Runtime
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Handle Gemini verification for Codex compatibility (`56b4f4e`)
-
-## 0.146.0 - 2026-06-04
-
-### Runtime
-
-- Improve multi-provider auth rotation (`f8d6412`)
