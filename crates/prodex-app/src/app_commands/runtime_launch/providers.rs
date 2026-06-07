@@ -6,9 +6,9 @@ use super::{
 use crate::{
     AppState, CodexModelProviderSetting, ProfileProvider, RuntimeAnthropicOAuthProfileAuth,
     RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth,
-    RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions,
-    SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID, SUPER_DEEPSEEK_PROVIDER_ID,
-    SUPER_GEMINI_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID,
+    RuntimeGeminiModelResolution, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
+    RuntimeLocalRewriteProviderOptions, SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID,
+    SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID,
     ensure_gemini_code_assist_project_if_missing, gemini_oauth_project_from_env,
     refresh_claude_oauth_secret_if_needed, resolve_copilot_runtime_api_auth, resolve_profile_name,
 };
@@ -281,12 +281,14 @@ pub(super) fn runtime_local_rewrite_provider_options(
         Some(provider) if provider.eq_ignore_ascii_case("gemini") => {
             let thinking_budget_tokens =
                 runtime_launch_effective_gemini_thinking_budget_tokens(request, selection);
+            let model_resolution = RuntimeGeminiModelResolution::from_current_settings();
             if let Some(api_keys) =
                 runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)
             {
                 return Ok(RuntimeLocalRewriteProviderOptions::Gemini {
                     auth: RuntimeGeminiProviderAuth::ApiKeys { api_keys },
                     thinking_budget_tokens,
+                    model_resolution,
                 });
             }
             if selection.profileless_local_home {
@@ -298,6 +300,7 @@ pub(super) fn runtime_local_rewrite_provider_options(
             Ok(RuntimeLocalRewriteProviderOptions::Gemini {
                 auth: RuntimeGeminiProviderAuth::OAuthProfiles { profiles },
                 thinking_budget_tokens,
+                model_resolution,
             })
         }
         Some(provider) => bail!("unsupported external provider '{provider}'"),

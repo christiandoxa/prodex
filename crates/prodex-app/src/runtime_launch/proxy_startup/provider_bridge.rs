@@ -623,20 +623,20 @@ mod tests {
         assert_eq!(
             runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "auto"),
             vec![
-                "gemini-3.1-pro-preview",
                 "gemini-3-pro-preview",
+                "gemini-3.1-pro-preview",
                 "gemini-2.5-pro",
                 "gemini-3-flash-preview",
-                "gemini-3-flash",
                 "gemini-3.5-flash",
+                "gemini-3-flash",
                 "gemini-2.5-flash"
             ]
         );
         assert_eq!(
             runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "flash"),
             vec![
-                "gemini-3.5-flash",
                 "gemini-3-flash-preview",
+                "gemini-3.5-flash",
                 "gemini-3-flash",
                 "gemini-2.5-flash"
             ]

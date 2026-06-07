@@ -4,8 +4,7 @@ use super::gemini_rewrite::{
     runtime_gemini_finish_reason_retryable_invalid, runtime_gemini_generate_request_body,
     runtime_gemini_media_content_item_from_part, runtime_gemini_normalized_response_value,
     runtime_gemini_project_id, runtime_gemini_prompt_feedback_failure,
-    runtime_gemini_request_body_without_tool, runtime_gemini_text_from_special_part,
-    runtime_gemini_upstream_url,
+    runtime_gemini_text_from_special_part, runtime_gemini_upstream_url,
 };
 use super::gemini_sse::RuntimeGeminiBindingRecorder;
 use super::local_rewrite::{
@@ -15,6 +14,9 @@ use super::local_rewrite::{
 };
 pub(super) use super::local_rewrite_gemini_bindings::runtime_gemini_remember_bindings_from_responses_body;
 use super::local_rewrite_gemini_bindings::runtime_gemini_tool_output_call_ids_from_request;
+use super::local_rewrite_gemini_models::{
+    runtime_gemini_model_fallback_chain, runtime_gemini_unsupported_tool_fallback_body,
+};
 use super::local_rewrite_gemini_quota::{
     runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
     runtime_gemini_normalized_error_parts, runtime_gemini_response_retryable_quota,
@@ -124,10 +126,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
         let requested_model = runtime_provider_model_from_body(&body)
             .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
         let mut model_chain = if responses_route {
-            runtime_provider_model_fallback_chain(
-                RuntimeProviderBridgeKind::Gemini,
-                &requested_model,
-            )
+            runtime_gemini_model_fallback_chain(&shared.provider, &requested_model)
         } else {
             vec![GEMINI_DEFAULT_MODEL.to_string()]
         };
@@ -541,14 +540,6 @@ fn runtime_gemini_thinking_budget_tokens(
         } => *thinking_budget_tokens,
         _ => None,
     }
-}
-
-fn runtime_gemini_unsupported_tool_fallback_body(body: &[u8]) -> Option<(&'static str, Vec<u8>)> {
-    ["computerUse", "codeExecution", "urlContext", "googleSearch"]
-        .into_iter()
-        .find_map(|tool_name| {
-            runtime_gemini_request_body_without_tool(body, tool_name).map(|body| (tool_name, body))
-        })
 }
 
 enum RuntimeGeminiPrecommitPeek {

@@ -3,6 +3,7 @@ use super::gemini_rewrite::{
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result, bail};
+use prodex_runtime_gemini::GEMINI_CHAT_COMPRESSION_MODEL;
 use std::io::Read;
 
 const GEMINI_LOCAL_COMPACT_SUMMARY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
@@ -40,6 +41,10 @@ pub(super) fn runtime_gemini_semantic_compact_request_body(body: &[u8]) -> Resul
     object.insert(
         "instructions".to_string(),
         serde_json::Value::String(GEMINI_SEMANTIC_COMPACT_INSTRUCTIONS.to_string()),
+    );
+    object.insert(
+        "model".to_string(),
+        serde_json::Value::String(GEMINI_CHAT_COMPRESSION_MODEL.to_string()),
     );
     object.insert("stream".to_string(), serde_json::Value::Bool(false));
     object.insert("store".to_string(), serde_json::Value::Bool(false));
@@ -574,6 +579,7 @@ mod tests {
         assert_eq!(value["stream"], false);
         assert_eq!(value["store"], false);
         assert_eq!(value["parallel_tool_calls"], false);
+        assert_eq!(value["model"], GEMINI_CHAT_COMPRESSION_MODEL);
         assert_eq!(value["prodex_gemini_compaction"], true);
         assert!(value.get("tools").is_none());
         assert!(value.get("tool_choice").is_none());

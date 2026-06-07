@@ -7,6 +7,7 @@ pub struct GeminiModelSpec {
 }
 
 pub const GEMINI_DEFAULT_MODEL: &str = "auto";
+pub const GEMINI_CHAT_COMPRESSION_MODEL: &str = "chat-compression-default";
 pub const GEMINI_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
 pub const GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
 
@@ -45,6 +46,12 @@ const GEMINI_MODEL_CATALOG: &[GeminiModelSpec] = &[
         id: "flash-lite",
         display_name: "Gemini Flash Lite",
         description: "Gemini Flash-Lite alias routed through Flash-Lite models.",
+        owned_by: "google",
+    },
+    GeminiModelSpec {
+        id: GEMINI_CHAT_COMPRESSION_MODEL,
+        display_name: "Gemini Chat Compression",
+        description: "Gemini CLI semantic compaction alias routed through chat-compression-default.",
         owned_by: "google",
     },
     GeminiModelSpec {
@@ -134,19 +141,25 @@ pub fn gemini_model_fallback_chain(model: &str) -> Vec<String> {
     let model = model.trim();
     let lower = model.to_ascii_lowercase();
     let chain: &[&str] = match lower.as_str() {
-        "" | "auto" | "auto-gemini-3" => &[
-            "gemini-3.1-pro-preview",
+        "chat-compression-default" => &[
             "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+        ],
+        "" | "auto" | "auto-gemini-3" => &[
+            "gemini-3-pro-preview",
+            "gemini-3.1-pro-preview",
             "gemini-2.5-pro",
             "gemini-3-flash-preview",
-            "gemini-3-flash",
             "gemini-3.5-flash",
+            "gemini-3-flash",
             "gemini-2.5-flash",
         ],
         "auto-gemini-2.5" => &["gemini-2.5-pro", "gemini-2.5-flash"],
         "pro" => &[
-            "gemini-3.1-pro-preview",
             "gemini-3-pro-preview",
+            "gemini-3.1-pro-preview",
             "gemini-2.5-pro",
         ],
         "gemini-3.1-pro-preview-customtools" => &[
@@ -173,8 +186,8 @@ pub fn gemini_model_fallback_chain(model: &str) -> Vec<String> {
             "gemini-3.1-pro-preview",
             "gemini-2.5-pro",
             "gemini-3-flash-preview",
-            "gemini-3-flash",
             "gemini-3.5-flash",
+            "gemini-3-flash",
             "gemini-2.5-flash",
         ],
         "gemini-3.5-flash" => &[
@@ -196,8 +209,8 @@ pub fn gemini_model_fallback_chain(model: &str) -> Vec<String> {
             "gemini-2.5-flash",
         ],
         "flash" => &[
-            "gemini-3.5-flash",
             "gemini-3-flash-preview",
+            "gemini-3.5-flash",
             "gemini-3-flash",
             "gemini-2.5-flash",
         ],
@@ -216,8 +229,8 @@ mod tests {
         assert_eq!(
             gemini_model_fallback_chain("flash"),
             vec![
-                "gemini-3.5-flash",
                 "gemini-3-flash-preview",
+                "gemini-3.5-flash",
                 "gemini-3-flash",
                 "gemini-2.5-flash"
             ]

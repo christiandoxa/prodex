@@ -1,3 +1,6 @@
+use crate::{GeminiSettingsSource, gemini_cli_config_home_for, gemini_settings_sources};
+#[cfg(test)]
+use crate::{gemini_settings_source_paths_for, parse_gemini_settings_json};
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1135,8 +1138,8 @@ fn gemini_extension_roots(cwd: Option<&Path>) -> Vec<PathBuf> {
     if let Some(configured) = env::var_os("PRODEX_GEMINI_EXTENSION_DIRS") {
         roots.extend(env::split_paths(&configured));
     }
-    if let Some(home) = dirs::home_dir() {
-        roots.push(home.join(".gemini").join("extensions"));
+    if let Some(gemini_home) = gemini_cli_config_home_for(dirs::home_dir().as_deref()) {
+        roots.push(gemini_home.join("extensions"));
     }
     if let Some(cwd) = cwd {
         roots.push(cwd.join(".gemini").join("extensions"));
@@ -1302,91 +1305,6 @@ fn normalize_enablement_path(path: &str) -> String {
         value.push('/');
     }
     value
-}
-
-#[derive(Debug)]
-struct GeminiSettingsSource {
-    name: String,
-    directory: PathBuf,
-    value: serde_json::Value,
-    mcp_servers: BTreeMap<String, serde_json::Value>,
-}
-
-fn gemini_settings_sources(cwd: Option<&Path>) -> Vec<GeminiSettingsSource> {
-    let paths = gemini_settings_source_paths(cwd);
-    let mut sources = Vec::new();
-    for (name, path) in paths {
-        let Some(text) = read_text_limited(&path, GEMINI_COMPAT_FILE_LIMIT) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-            continue;
-        };
-        let mcp_servers = value
-            .get("mcpServers")
-            .or_else(|| value.get("mcp_servers"))
-            .and_then(serde_json::Value::as_object)
-            .map(|servers| {
-                servers
-                    .iter()
-                    .map(|(server_name, value)| (server_name.clone(), value.clone()))
-                    .collect::<BTreeMap<_, _>>()
-            })
-            .unwrap_or_default();
-        if mcp_servers.is_empty() && value.get("hooks").is_none() {
-            continue;
-        }
-        sources.push(GeminiSettingsSource {
-            name,
-            directory: path.parent().unwrap_or(Path::new("")).to_path_buf(),
-            value,
-            mcp_servers,
-        });
-    }
-    sources
-}
-
-fn gemini_settings_source_paths(cwd: Option<&Path>) -> Vec<(String, PathBuf)> {
-    gemini_settings_source_paths_for(dirs::home_dir().as_deref(), cwd)
-}
-
-fn gemini_settings_source_paths_for(
-    home: Option<&Path>,
-    cwd: Option<&Path>,
-) -> Vec<(String, PathBuf)> {
-    let mut paths = Vec::new();
-    let mut seen = BTreeSet::new();
-    let mut push_unique = |name: String, path: PathBuf| {
-        let key = path.to_string_lossy().to_ascii_lowercase();
-        if seen.insert(key) {
-            paths.push((name, path));
-        }
-    };
-    push_unique(
-        "system".to_string(),
-        PathBuf::from("/etc/gemini-cli/settings.json"),
-    );
-    if let Some(home) = home {
-        push_unique(
-            "global".to_string(),
-            home.join(".gemini").join("settings.json"),
-        );
-    }
-    if let Some(cwd) = cwd {
-        let mut ancestors = cwd.ancestors().collect::<Vec<_>>();
-        ancestors.reverse();
-        for directory in ancestors {
-            push_unique(
-                format!("project:{}", directory.display()),
-                directory.join(".gemini").join("settings.json"),
-            );
-        }
-        push_unique(
-            format!("project-local:{}", cwd.display()),
-            cwd.join(".gemini").join("settings.local.json"),
-        );
-    }
-    paths
 }
 
 fn settings_hook_sources(settings: &GeminiSettingsSource) -> Vec<serde_json::Value> {
@@ -2322,6 +2240,10 @@ mod tests {
 
     #[test]
     fn gemini_cli_compat_settings_paths_follow_gemini_cli_precedence() {
+        let _env_lock = crate::TestEnvVarGuard::lock();
+        let _home_guard = crate::TestEnvVarGuard::unset("GEMINI_CLI_HOME");
+        let _system_guard = crate::TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_SETTINGS_PATH");
+        let _defaults_guard = crate::TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_DEFAULTS_PATH");
         let home = PathBuf::from("/tmp/prodex-gemini-home");
         let cwd = PathBuf::from("/tmp/prodex-gemini-workspace/repo/sub");
         let paths = gemini_settings_source_paths_for(Some(&home), Some(&cwd));
@@ -2333,8 +2255,8 @@ mod tests {
         assert_eq!(
             paths.first(),
             Some(&(
-                "system".to_string(),
-                PathBuf::from("/etc/gemini-cli/settings.json")
+                "system-defaults".to_string(),
+                PathBuf::from("/etc/gemini-cli/system-defaults.json")
             ))
         );
         assert_eq!(
@@ -2349,10 +2271,17 @@ mod tests {
                 < paths.iter().position(|(_, path)| path == &sub_settings)
         );
         assert_eq!(
-            paths.last(),
+            paths.get(paths.len().saturating_sub(2)),
             Some(&(
                 format!("project-local:{}", cwd.display()),
                 cwd.join(".gemini").join("settings.local.json")
+            ))
+        );
+        assert_eq!(
+            paths.last(),
+            Some(&(
+                "system".to_string(),
+                PathBuf::from("/etc/gemini-cli/settings.json")
             ))
         );
         assert_eq!(
@@ -2364,6 +2293,45 @@ mod tests {
                 .len(),
             "settings paths should be deduplicated"
         );
+    }
+
+    #[test]
+    fn gemini_cli_compat_settings_paths_honor_gemini_cli_home() {
+        let _env_lock = crate::TestEnvVarGuard::lock();
+        let _home_guard = crate::TestEnvVarGuard::set("GEMINI_CLI_HOME", "/tmp/gemini-cli-home");
+        let _system_guard = crate::TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_SETTINGS_PATH");
+        let _defaults_guard = crate::TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_DEFAULTS_PATH");
+
+        let paths = gemini_settings_source_paths_for(
+            Some(Path::new("/tmp/plain-home")),
+            Some(Path::new("/tmp/workspace")),
+        );
+
+        assert!(paths.iter().any(|(_, path)| {
+            path == &PathBuf::from("/tmp/gemini-cli-home")
+                .join(".gemini")
+                .join("settings.json")
+        }));
+        assert!(!paths.iter().any(|(_, path)| {
+            path == &PathBuf::from("/tmp/plain-home")
+                .join(".gemini")
+                .join("settings.json")
+        }));
+    }
+
+    #[test]
+    fn gemini_cli_compat_parses_commented_settings_json() {
+        let value = parse_gemini_settings_json(
+            r#"{
+              // Gemini CLI settings permit comments.
+              "mcpServers": {
+                "ctx": {"command": "server"} /* inline block */
+              }
+            }"#,
+        )
+        .expect("commented settings should parse");
+
+        assert_eq!(value["mcpServers"]["ctx"]["command"], "server");
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod local_rewrite_gemini;
 mod local_rewrite_gemini_bindings;
 mod local_rewrite_gemini_compact;
 mod local_rewrite_gemini_live;
+mod local_rewrite_gemini_models;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_gemini_thought_signatures;
 mod local_rewrite_rate_limits;

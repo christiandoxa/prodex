@@ -71,6 +71,7 @@ pub(crate) enum RuntimeLocalRewriteProviderOptions {
     Gemini {
         auth: RuntimeGeminiProviderAuth,
         thinking_budget_tokens: Option<u64>,
+        model_resolution: crate::RuntimeGeminiModelResolution,
     },
 }
 

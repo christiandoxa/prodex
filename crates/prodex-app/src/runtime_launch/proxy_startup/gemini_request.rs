@@ -1816,16 +1816,16 @@ fn runtime_gemini_memory_files_enabled(original: &serde_json::Value) -> bool {
 }
 
 fn runtime_gemini_collect_standard_memory_files(sections: &mut Vec<String>, budget: &mut usize) {
-    if let Some(home) = runtime_gemini_home_dir() {
+    if let Some(gemini_home) = runtime_gemini_config_dir() {
         runtime_gemini_push_memory_file_section(
             "Global",
-            &home.join(".gemini").join("GEMINI.md"),
+            &gemini_home.join("GEMINI.md"),
             sections,
             budget,
         );
         runtime_gemini_push_memory_file_section(
             "Global Memory Inbox",
-            &home.join(".gemini").join("memory").join("INBOX.md"),
+            &gemini_home.join("memory").join("INBOX.md"),
             sections,
             budget,
         );
@@ -1995,8 +1995,8 @@ fn runtime_gemini_extension_roots() -> Vec<PathBuf> {
     if let Some(configured) = env::var_os("PRODEX_GEMINI_EXTENSION_DIRS") {
         roots.extend(env::split_paths(&configured));
     }
-    if let Some(home) = runtime_gemini_home_dir() {
-        roots.push(home.join(".gemini").join("extensions"));
+    if let Some(gemini_home) = runtime_gemini_config_dir() {
+        roots.push(gemini_home.join("extensions"));
     }
     roots
 }
@@ -2194,6 +2194,10 @@ fn runtime_gemini_home_dir() -> Option<PathBuf> {
     env::var_os("HOME")
         .filter(|home| !home.is_empty())
         .map(PathBuf::from)
+}
+
+fn runtime_gemini_config_dir() -> Option<PathBuf> {
+    crate::gemini_cli_config_home_for(runtime_gemini_home_dir().as_deref())
 }
 
 fn runtime_gemini_env_bool(key: &str) -> Option<bool> {
@@ -2423,7 +2427,7 @@ impl RuntimeGeminiPolicyCompat {
         for path in runtime_gemini_settings_paths() {
             if let Some(text) =
                 runtime_gemini_read_text_limited(&path, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT)
-                && let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
+                && let Some(value) = crate::parse_gemini_settings_json(&text)
             {
                 policy.apply_settings_value(&value);
             }
@@ -2700,27 +2704,10 @@ fn runtime_gemini_settings_paths() -> Vec<PathBuf> {
 }
 
 fn runtime_gemini_settings_paths_for(home: Option<&Path>, cwd: Option<&Path>) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    let mut seen = BTreeSet::new();
-    let mut push_unique = |path: PathBuf| {
-        let key = path.to_string_lossy().to_ascii_lowercase();
-        if seen.insert(key) {
-            paths.push(path);
-        }
-    };
-    push_unique(PathBuf::from("/etc/gemini-cli/settings.json"));
-    if let Some(home) = home {
-        push_unique(home.join(".gemini").join("settings.json"));
-    }
-    if let Some(cwd) = cwd {
-        let mut ancestors = cwd.ancestors().collect::<Vec<_>>();
-        ancestors.reverse();
-        for directory in ancestors {
-            push_unique(directory.join(".gemini").join("settings.json"));
-        }
-        push_unique(cwd.join(".gemini").join("settings.local.json"));
-    }
-    paths
+    crate::gemini_settings_source_paths_for(home, cwd)
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect()
 }
 
 fn runtime_gemini_normalize_tool_name(name: &str) -> String {
@@ -3187,6 +3174,10 @@ mod tests {
 
     #[test]
     fn gemini_runtime_settings_paths_follow_cli_precedence() {
+        let _env_lock = crate::TestEnvVarGuard::lock();
+        let _home_guard = crate::TestEnvVarGuard::unset("GEMINI_CLI_HOME");
+        let _system_guard = crate::TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_SETTINGS_PATH");
+        let _defaults_guard = crate::TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_DEFAULTS_PATH");
         let home = PathBuf::from("/tmp/prodex-gemini-home");
         let cwd = PathBuf::from("/tmp/prodex-gemini-workspace/repo/sub");
         let paths = runtime_gemini_settings_paths_for(Some(&home), Some(&cwd));
@@ -3195,15 +3186,22 @@ mod tests {
             .join("settings.json");
         let sub_settings = cwd.join(".gemini").join("settings.json");
 
-        assert_eq!(paths[0], PathBuf::from("/etc/gemini-cli/settings.json"));
+        assert_eq!(
+            paths[0],
+            PathBuf::from("/etc/gemini-cli/system-defaults.json")
+        );
         assert_eq!(paths[1], home.join(".gemini").join("settings.json"));
         assert!(
             paths.iter().position(|path| path == &repo_settings)
                 < paths.iter().position(|path| path == &sub_settings)
         );
         assert_eq!(
-            paths.last(),
+            paths.get(paths.len().saturating_sub(2)),
             Some(&cwd.join(".gemini").join("settings.local.json"))
+        );
+        assert_eq!(
+            paths.last(),
+            Some(&PathBuf::from("/etc/gemini-cli/settings.json"))
         );
         assert_eq!(
             paths.len(),
