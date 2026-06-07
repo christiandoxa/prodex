@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.159.0 - 2026-06-07
+
+### Misc
+
+- Improve provider parity (`9dfdfb0`)
+
 ## 0.158.0 - 2026-06-07
 
 ### Misc
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Suppress Gemini browser output (`5b8345b`)
-
-## 0.147.0 - 2026-06-04
-
-### Runtime
-
-- Handle Gemini verification for Codex compatibility (`56b4f4e`)

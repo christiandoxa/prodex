@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.158.0`:
+The current local version in this repo is `0.159.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.158.0
+npm install -g @christiandoxa/prodex@0.159.0
 ```
 
 Dependency status in this repo:
@@ -243,9 +243,9 @@ prodex s gemini
 GEMINI_API_KEY=... prodex s gemini --model gemini-2.5-pro
 ```
 
-When no API key is supplied, the Gemini path uses the Google OAuth profile from login. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations, preserves Gemini thought signatures across tool-call followups, masks large tool outputs before replaying history, and can import Gemini session/checkpoint context through `gemini_session_file`, `PRODEX_GEMINI_SESSION_FILE`, or `PRODEX_GEMINI_CHECKPOINT_FILE`.
+When no API key is supplied, the Gemini path uses the Google OAuth profile from login. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations, projects Gemini `modelConfigs` / `modelIdResolutions` / `modelChains` into Codex model selection, preserves Gemini thought signatures across tool-call followups, masks large tool outputs before replaying history, and can import Gemini session/checkpoint context through `gemini_session_file`, `PRODEX_GEMINI_SESSION_FILE`, or `PRODEX_GEMINI_CHECKPOINT_FILE`.
 
-Gemini memory is loaded by default from `~/.gemini/GEMINI.md`, project `GEMINI.md` files, `.gemini/memory/MEMORY.md`, and `.gemini/memory/INBOX.md`; opt out with `PRODEX_GEMINI_DISABLE_MEMORY=1` or request metadata `gemini_load_memory=false`. Gemini system, global, ancestor project, and cwd-local settings plus extensions are projected into Codex before launch: `mcpServers` become Codex MCP config, hooks go through `/hooks` review, `commands/*.toml` become custom prompts, `skills/*/SKILL.md` become Codex skills, and `agents/*.md` become Codex custom agents. Generated prompts and helper scripts cover refresh, memory, and checkpoint create/restore workflows. Use `PRODEX_GEMINI_EXTENSIONS=none` to disable extension loading or `PRODEX_GEMINI_DISABLE_CLI_COMPAT=1` to skip launch-time surface projection.
+Gemini memory is loaded by default from `~/.gemini/GEMINI.md`, project `GEMINI.md` files, `.gemini/memory/MEMORY.md`, and `.gemini/memory/INBOX.md`; opt out with `PRODEX_GEMINI_DISABLE_MEMORY=1` or request metadata `gemini_load_memory=false`. Gemini system-defaults, global, ancestor project, cwd-local, and system override settings plus extensions are projected into Codex before launch, honoring `GEMINI_CLI_HOME` and Gemini CLI system settings env vars: `mcpServers` become Codex MCP config, hooks go through `/hooks` review, `commands/*.toml` become custom prompts, `skills/*/SKILL.md` become Codex skills, and `agents/*.md` become Codex custom agents. Generated prompts and helper scripts cover refresh, memory, and checkpoint create/restore workflows. Use `PRODEX_GEMINI_EXTENSIONS=none` to disable extension loading or `PRODEX_GEMINI_DISABLE_CLI_COMPAT=1` to skip launch-time surface projection.
 
 For Gemini adapter checks, run `npm run test:gemini-schema` after translation/schema changes and `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` for a credentialed live smoke. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` to cover exact command output, file edits, `apply_patch`, compact, and explicit `exec resume`; add `PRODEX_LIVE_GEMINI_MCP=1` or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when that machine should also test MCP or image input.
 
