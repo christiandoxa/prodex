@@ -51,15 +51,15 @@ You need at least one logged-in Prodex profile.
 Prodex supports two provider paths:
 
 - **Profile-backed routing**: persisted profiles that Prodex can select, rotate, and inspect where provider APIs allow it.
-- **Runtime provider launch**: `prodex s --provider ...` / `prodex super --provider ...` starts Codex with a temporary provider bridge for that session.
+- **Runtime provider launch**: `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider ...` starts Codex with a temporary provider bridge for that session.
 
 | Provider | Launch to Codex | Auth path | Quota view | Notes |
 |---|---:|---|---:|---|
 | OpenAI / Codex | `prodex`, `prodex run`, `prodex s` | ChatGPT OAuth, device code, or OpenAI/API-compatible key via `prodex login` | Yes | Full quota preflight and profile auto-rotation. |
-| Google Gemini | `prodex s --provider gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key` | OAuth profiles | OAuth and API-key modes rotate before a request is committed; continuations stay pinned to their owning profile. |
+| Google Gemini | `prodex s gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key` | OAuth profiles | OAuth and API-key modes rotate before a request is committed; continuations stay pinned to their owning profile. |
 | Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | OAuth profiles | Shows Claude OAuth readiness; add `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups. |
 | GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Native profile and API-key modes rotate before commit; continuations stay bound to the owning profile. |
-| DeepSeek | `prodex s --provider deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
+| DeepSeek | `prodex s deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
 | Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
 
@@ -688,8 +688,8 @@ prodex s exec "review this repo"
 ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6
 prodex profile import copilot
 prodex s --provider copilot --model gpt-5.1-codex
-DEEPSEEK_API_KEY=... prodex s --provider deepseek --model deepseek-v4-pro
-prodex s --provider gemini
+DEEPSEEK_API_KEY=... prodex s deepseek --model deepseek-v4-pro
+prodex s gemini
 prodex super
 prodex super --profile main
 prodex super --dry-run
@@ -738,7 +738,7 @@ Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilo
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 
 ```bash
-prodex s --provider deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KEY"
+prodex s deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KEY"
 ```
 
 If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` environment and fetches DeepSeek `/user/balance`. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
@@ -747,24 +747,24 @@ Use `--provider gemini` when you want the Codex/Super front end with Gemini upst
 
 ```bash
 prodex login --with-google
-prodex s --provider gemini
-GEMINI_API_KEY=... prodex s --provider gemini --model gemini-2.5-pro
-prodex s --provider gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
+prodex s gemini
+GEMINI_API_KEY=... prodex s gemini --model gemini-2.5-pro
+prodex s gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
 ```
 
 Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex routes through the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. The default model is `auto`, matching Gemini CLI-style model routing through Gemini 3 and stable fallbacks, and the injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192 where budget mode is used. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path: Prodex maps Codex/MCP tool schemas to Gemini function declarations, honors `auto` / `none` / `required` tool-choice modes, and preserves Gemini thought signatures across tool-call followups.
 
 The bridge also maps native Gemini `computerUse`, code execution, grounding/citation/URL-context metadata, generated images, video metadata, multimodal file inputs, log-probability metadata, tool-use and cached-token accounting, safety metadata, and Gemini finish reasons into Codex-compatible request, response, and SSE shapes. Citations are emitted as a separate completed output item after Gemini supplies a finish reason. Assistant followups retain native Gemini code, media, video, cache, and thought-signature parts without replaying citation display text as model history.
 
-`@path` and bounded `read_many_files` context honor default binary/build/dependency exclusions plus ordered root `.gitignore`, `.geminiignore`, and custom ignore files, including later negation overrides. Large tool outputs are masked before replaying them into Gemini history and are written to `PRODEX_GEMINI_TOOL_OUTPUT_DIR` or the OS temp directory; set `PRODEX_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD=0` to disable this guard. Invalid pre-commit Gemini streams are retried with bounded backoff before model fallback.
+`@path` and bounded `read_many_files` context honor default binary/build/dependency exclusions plus ordered root `.gitignore`, `.geminiignore`, and custom ignore files, including later negation overrides. Large tool outputs are masked before replaying them into Gemini history and are written to `PRODEX_GEMINI_TOOL_OUTPUT_DIR` or the OS temp directory; set `PRODEX_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD=0` to disable this guard. Codex `/responses/compact` requests use a tool-free unary Gemini semantic-compaction turn and return Codex replacement history; a bounded deterministic local summary is used only when semantic compaction fails before commit. Invalid pre-commit Gemini streams are retried with bounded backoff before model fallback.
 
 Gemini CLI compatibility helpers accept inline `gemini_memory` / `gemini_policy` / `gemini_session` request metadata, file-based `gemini_*_file` imports, and `PRODEX_GEMINI_SESSION_FILE` or `PRODEX_GEMINI_CHECKPOINT_FILE` import paths. Gemini memory is loaded by default from `~/.gemini/GEMINI.md`, ancestor `GEMINI.md` files, `.gemini/memory/MEMORY.md`, and `.gemini/memory/INBOX.md`; set `PRODEX_GEMINI_DISABLE_MEMORY=1`, `PRODEX_GEMINI_DISABLE_CONTEXT_FILES=1`, or request metadata `gemini_load_memory=false` to opt out. Gemini settings are read in CLI precedence order from `/etc/gemini-cli/settings.json`, `~/.gemini/settings.json`, ancestor `.gemini/settings.json`, and cwd `.gemini/settings.local.json`; extension manifests and extension policy TOML files are also read when present to apply Gemini tool allow/exclude, hard command-specific tool-call blocking, and `defaultApprovalMode` behavior.
 
 Before Codex launches, the Gemini provider projects Gemini CLI settings and extension surfaces into the active `CODEX_HOME`: system/global/project `mcpServers` and extension `mcpServers` become generated Codex `[mcp_servers.gemini_*]` entries with settings taking precedence over extension servers of the same Gemini name; system/global/project and extension command hooks are merged into `hooks.json` for Codex `/hooks` review; `~/.gemini/commands`, project `.gemini/commands`, and extension `commands/*.toml` become Codex custom prompts with Gemini command aliases preserved where possible; extension `skills/*/SKILL.md` are copied into generated Codex skill folders under `.agents/skills`; and extension `agents/*.md` become generated Codex custom agents under `agents/*.toml`. Built-in `/prompts:gemini-refresh`, `/prompts:gemini-memory-show`, `/prompts:gemini-memory-refresh`, `/prompts:gemini-memory-inbox`, `/prompts:gemini-remember`, `/prompts:gemini-checkpoint-create`, `/prompts:gemini-checkpoint-restore`, `/prompts:gemini-checkpoint-export`, and `/prompts:gemini-rewind` cover reload/admin, memory, and checkpoint workflows. Generated helper scripts in `CODEX_HOME/bin` include `prodex-gemini-refresh`, `prodex-gemini-checkpoint-create`, and `prodex-gemini-checkpoint-restore`. Set `PRODEX_GEMINI_EXTENSIONS=none` or an allow-list of extension names to control extension loading, `PRODEX_GEMINI_EXTENSION_DIRS` to add extension roots, or `PRODEX_GEMINI_DISABLE_CLI_COMPAT=1` to skip the launch-time Codex surface projection.
 
-Gemini Live realtime websocket sessions translate Codex audio, transcript, text, function-call, function-result, interruption, cancellation, housekeeping, and turn-completion events to and from Gemini `BidiGenerateContent`; one Gemini auth/profile is selected before upgrade and remains fixed for the session. `PRODEX_GEMINI_LIVE_MODEL` overrides the default Live model, while `PRODEX_GEMINI_LIVE_URL` is available for a custom or test Live endpoint.
+Gemini Live realtime websocket sessions translate Codex audio, transcript, text, function-call, function-result, interruption, cancellation, housekeeping, and turn-completion events to and from Gemini `BidiGenerateContent`; one Gemini auth/profile is selected before upgrade and remains fixed for the session. `PRODEX_GEMINI_LIVE_MODEL` overrides the default Live model, while `PRODEX_GEMINI_LIVE_URL` is available for a custom or test Live endpoint. `prodex doctor --runtime` recognizes provider bridge and Gemini markers such as `local_rewrite_provider_model_fallback`, `local_rewrite_gemini_quota_rotate`, `local_rewrite_gemini_invalid_stream_retry`, and `local_rewrite_gemini_live_error`.
 
-Run `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` for a credentialed end-to-end Gemini adapter smoke request; set `PRODEX_BIN` or `PRODEX_LIVE_GEMINI_MODEL` to override the binary or model.
+Run `npm run test:gemini-schema` after changing Gemini request, response, SSE, semantic compact, exact-output, tool-schema, or Live translation. Run `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` for a credentialed end-to-end Gemini adapter smoke request; set `PRODEX_BIN` or `PRODEX_LIVE_GEMINI_MODEL` to override the binary or model. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` for command-output-only, file edit, `apply_patch`, semantic compact, and explicit `exec resume` checks. Add `PRODEX_LIVE_GEMINI_MCP=1` and/or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when the local environment should also exercise MCP and image-input paths.
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use.
 

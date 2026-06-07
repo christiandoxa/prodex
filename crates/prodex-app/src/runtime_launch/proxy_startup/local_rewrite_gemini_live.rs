@@ -1620,6 +1620,43 @@ mod tests {
     }
 
     #[test]
+    fn gemini_live_server_interruption_cancels_current_turn_and_recovers() {
+        let mut state = RuntimeGeminiLiveState::new(15);
+        let first = state
+            .translate_server_message(
+                &serde_json::json!({
+                    "serverContent": {
+                        "modelTurn": {"parts": [{"text": "partial"}]},
+                        "interrupted": true,
+                        "turnComplete": true
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+        let serialized = serde_json::to_string(&first.events).unwrap();
+        assert!(serialized.contains("response.created"));
+        assert!(serialized.contains("response.cancelled"));
+        assert!(serialized.contains("response.done"));
+        assert!(first.turn_complete);
+
+        let next = state
+            .translate_server_message(
+                &serde_json::json!({
+                    "serverContent": {
+                        "modelTurn": {"parts": [{"text": "recovered"}]},
+                        "turnComplete": true
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap();
+        let next_serialized = serde_json::to_string(&next.events).unwrap();
+        assert!(next_serialized.contains("resp_gemini_live_15_2"));
+        assert!(next_serialized.contains("recovered"));
+    }
+
+    #[test]
     fn gemini_live_uses_distinct_response_ids_per_turn() {
         let mut state = RuntimeGeminiLiveState::new(13);
         let first = state

@@ -36,6 +36,259 @@ fn gemini_sse_reader_maps_text_and_function_call_to_responses_events() {
 }
 
 #[test]
+fn gemini_sse_reader_handles_long_text_stream_without_layout_events_drifting() {
+    let mut stream = String::new();
+    for index in 0..256 {
+        let chunk = serde_json::json!({
+            "responseId": "resp_long",
+            "modelVersion": "gemini-2.5-pro",
+            "candidates": [{
+                "content": {"parts": [{"text": format!("chunk-{index};")}]}
+            }]
+        });
+        stream.push_str("data: ");
+        stream.push_str(&chunk.to_string());
+        stream.push_str("\n\n");
+    }
+    let final_chunk = serde_json::json!({
+        "responseId": "resp_long",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [{"text": "done"}]},
+            "finishReason": "STOP"
+        }]
+    });
+    stream.push_str("data: ");
+    stream.push_str(&final_chunk.to_string());
+    stream.push_str("\n\ndata: [DONE]\n\n");
+
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        10,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert_eq!(
+        output
+            .matches("\"type\":\"response.output_item.added\"")
+            .count(),
+        1
+    );
+    assert_eq!(
+        output
+            .matches("\"type\":\"response.output_text.delta\"")
+            .count(),
+        257
+    );
+    assert!(output.contains("chunk-0;"));
+    assert!(output.contains("chunk-255;"));
+    assert!(output.contains("\"text\":\"chunk-0;"));
+    assert!(output.contains("done"));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_forces_command_output_only_final_text() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_exact\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"The command output is `forced-ok`.forced-ok\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Run printf forced-ok and answer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: test\nOutput:\nforced-ok\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        10,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(
+        output.contains("\"text\":\"forced-ok\""),
+        "unexpected output: {output}"
+    );
+    assert!(!output.contains("The command output is"));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_forces_command_output_before_patch_diff_suffix() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_exact_patch_diff\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"marker-ok\\ndiff --git a/file b/file\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Create file with apply_patch, run cat file, and answer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: test\nOutput:\nmarker-ok\n\ndiff --git a/file b/file\nnew file mode 100644\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        12,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(
+        output.contains("\"text\":\"marker-ok\""),
+        "unexpected output: {output}"
+    );
+    assert!(!output.contains("diff --git"));
+}
+
+#[test]
+fn gemini_sse_reader_does_not_force_apply_patch_output_as_command_output() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_patch_then_shell\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"exec_command\",\"args\":{\"cmd\":\"cat file.txt\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Create file.txt using apply_patch. Then cat it and answer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Exit code: 0\nOutput:\nSuccess. Updated the following files:\nA file.txt\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        11,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"function_call\""));
+    assert!(output.contains("\"name\":\"exec_command\""));
+    assert!(!output.contains("\"text\":\"Success. Updated the following files:"));
+}
+
+#[test]
+fn gemini_sse_reader_only_uses_latest_user_exact_output_contract() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_latest_user\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"The earlier command printed old-output.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Run printf old-output and answer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: old\nOutput:\nold-output\n"
+        }),
+        serde_json::json!({
+            "role": "user",
+            "content": "Explain what the earlier command did."
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        13,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("The earlier command printed old-output."));
+    assert!(!output.contains("\"text\":\"old-output\""));
+}
+
+#[test]
+fn gemini_sse_reader_only_uses_latest_tool_for_exact_output() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_latest_tool\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"exec_command\",\"args\":{\"cmd\":\"cat file.txt\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Create file.txt, run cat, and answer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: old\nOutput:\nwrong-old-output\n"
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Exit code: 0\nOutput:\nSuccess. Updated the following files:\nA file.txt\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        14,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"function_call\""));
+    assert!(output.contains("\"name\":\"exec_command\""));
+    assert!(!output.contains("wrong-old-output"));
+}
+
+#[test]
+fn gemini_sse_reader_uses_structured_latest_tool_output_for_exact_output() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_structured_output\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"The command succeeded.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Answer with only the command output."}]
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": [{"type": "output_text", "text": "structured-ok"}]
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        15,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"text\":\"structured-ok\""));
+    assert!(!output.contains("The command succeeded."));
+}
+
+#[test]
 fn gemini_sse_reader_maps_apply_patch_to_custom_tool_call() {
     let patch = "*** Begin Patch\\n*** Add File: note.txt\\n+hello\\n*** End Patch";
     let stream = format!(

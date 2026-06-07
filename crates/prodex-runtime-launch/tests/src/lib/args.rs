@@ -148,6 +148,43 @@ fn scope_codex_exec_config_args_moves_pre_exec_overrides_into_exec_scope() {
 }
 
 #[test]
+fn scope_codex_exec_config_args_moves_exec_resume_overrides_into_resume_scope() {
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let args = scope_codex_exec_config_args(&[
+        OsString::from("-c"),
+        OsString::from("model_catalog_json=\"/tmp/catalog.json\""),
+        OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+        OsString::from("exec"),
+        OsString::from("--json"),
+        OsString::from("-c"),
+        OsString::from("model_provider=\"prodex-gemini\""),
+        OsString::from("--config=model=\"auto\""),
+        OsString::from("-cmodel_context_window=1048576"),
+        OsString::from("resume"),
+        OsString::from(session_id),
+        OsString::from("hello"),
+    ]);
+
+    assert_eq!(
+        args,
+        vec![
+            OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+            OsString::from("exec"),
+            OsString::from("--json"),
+            OsString::from("resume"),
+            OsString::from("-c"),
+            OsString::from("model_catalog_json=\"/tmp/catalog.json\""),
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-gemini\""),
+            OsString::from("--config=model=\"auto\""),
+            OsString::from("-cmodel_context_window=1048576"),
+            OsString::from(session_id),
+            OsString::from("hello"),
+        ]
+    );
+}
+
+#[test]
 fn scope_codex_exec_config_args_leaves_non_exec_commands_unchanged() {
     let original = vec![
         OsString::from("-c"),
@@ -227,9 +264,36 @@ fn codex_resume_session_id_extracts_normalized_resume_target() {
 }
 
 #[test]
+fn codex_resume_session_id_extracts_explicit_exec_resume_target() {
+    let args = [
+        OsString::from("exec"),
+        OsString::from("resume"),
+        OsString::from("-c"),
+        OsString::from("model_provider=\"prodex-gemini\""),
+        OsString::from("--config=model=\"auto\""),
+        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        OsString::from("continue"),
+    ];
+
+    assert_eq!(
+        codex_resume_session_id(&args),
+        Some("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9")
+    );
+}
+
+#[test]
 fn codex_resume_session_id_ignores_resume_without_target() {
     assert_eq!(
         codex_resume_session_id(&[OsString::from("resume"), OsString::from("--last")]),
+        None
+    );
+    assert_eq!(
+        codex_resume_session_id(&[
+            OsString::from("exec"),
+            OsString::from("resume"),
+            OsString::from("--last"),
+            OsString::from("continue from latest"),
+        ]),
         None
     );
 }

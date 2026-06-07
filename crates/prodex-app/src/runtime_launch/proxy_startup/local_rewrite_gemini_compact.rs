@@ -1,15 +1,208 @@
+use super::gemini_rewrite::{
+    runtime_gemini_normalized_response_value, runtime_gemini_responses_value_from_generate_value,
+};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use anyhow::{Context, Result, bail};
+use std::io::Read;
 
 const GEMINI_LOCAL_COMPACT_SUMMARY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
+const GEMINI_SEMANTIC_COMPACT_INSTRUCTIONS: &str = "\
+Compact the supplied coding-agent transcript into one durable continuation summary. \
+Preserve the user's goals, repository instructions, decisions, files changed, exact identifiers, \
+commands and test results, unresolved failures, current worktree state, and the next concrete steps. \
+Remove redundant narration and obsolete intermediate reasoning. Do not call tools. \
+Return only the continuation summary, with no preamble or completion claim.";
 const GEMINI_LOCAL_COMPACT_MAX_SNIPPETS: usize = 24;
 const GEMINI_LOCAL_COMPACT_MAX_SNIPPET_BYTES: usize = 768;
 const GEMINI_LOCAL_COMPACT_MAX_SUMMARY_BYTES: usize = 24 * 1024;
+const GEMINI_SEMANTIC_COMPACT_ACTIVE_USER_MAX_BYTES: usize = 2 * 1024;
+const GEMINI_SEMANTIC_COMPACT_LATEST_TOOL_MAX_BYTES: usize = 1024;
+
+pub(super) fn runtime_gemini_semantic_compact_request_body(body: &[u8]) -> Result<Vec<u8>> {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(body).context("failed to parse Gemini compact request JSON")?;
+    let object = value
+        .as_object_mut()
+        .context("Gemini compact request must be a JSON object")?;
+    let input = object
+        .get_mut("input")
+        .and_then(serde_json::Value::as_array_mut)
+        .context("Gemini compact request must contain an input array")?;
+    input.push(serde_json::json!({
+        "type": "message",
+        "role": "user",
+        "content": [{
+            "type": "input_text",
+            "text": GEMINI_SEMANTIC_COMPACT_INSTRUCTIONS,
+        }],
+    }));
+
+    object.insert(
+        "instructions".to_string(),
+        serde_json::Value::String(GEMINI_SEMANTIC_COMPACT_INSTRUCTIONS.to_string()),
+    );
+    object.insert("stream".to_string(), serde_json::Value::Bool(false));
+    object.insert("store".to_string(), serde_json::Value::Bool(false));
+    object.insert(
+        "parallel_tool_calls".to_string(),
+        serde_json::Value::Bool(false),
+    );
+    object.insert(
+        "prodex_gemini_compaction".to_string(),
+        serde_json::Value::Bool(true),
+    );
+    for key in [
+        "include",
+        "previous_response_id",
+        "prompt_cache_key",
+        "text",
+        "tool_choice",
+        "tools",
+    ] {
+        object.remove(key);
+    }
+
+    serde_json::to_vec(&value).context("failed to serialize Gemini semantic compact request")
+}
+
+pub(super) fn runtime_gemini_semantic_compact_response_parts(
+    status: u16,
+    mut response: reqwest::blocking::Response,
+    request_id: u64,
+    compact_request_body: &[u8],
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
+    let mut body = Vec::new();
+    response
+        .read_to_end(&mut body)
+        .context("failed to read Gemini semantic compact response")?;
+    let value: serde_json::Value = serde_json::from_slice(&body)
+        .context("failed to parse Gemini semantic compact response")?;
+    runtime_gemini_semantic_compact_response_parts_from_value(
+        status,
+        &value,
+        request_id,
+        compact_request_body,
+    )
+}
+
+fn runtime_gemini_semantic_compact_response_parts_from_value(
+    status: u16,
+    value: &serde_json::Value,
+    request_id: u64,
+    compact_request_body: &[u8],
+) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
+    if !(200..300).contains(&status) {
+        bail!("Gemini semantic compact returned HTTP {status}");
+    }
+    let value = runtime_gemini_normalized_response_value(value);
+    let response = runtime_gemini_responses_value_from_generate_value(&value, request_id);
+    let summary = response
+        .get("output")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(serde_json::Value::as_str) == Some("message"))
+        .flat_map(|item| {
+            item.get("content")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .filter(|item| {
+            matches!(
+                item.get("type").and_then(serde_json::Value::as_str),
+                Some("output_text" | "input_text")
+            )
+        })
+        .filter_map(|item| item.get("text").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if summary.is_empty() {
+        bail!("Gemini semantic compact returned no summary text");
+    }
+    let summary =
+        runtime_gemini_semantic_compact_continuation_summary(&summary, compact_request_body);
+    Ok(runtime_gemini_compact_response_parts(&summary))
+}
+
+fn runtime_gemini_semantic_compact_continuation_summary(
+    semantic_summary: &str,
+    compact_request_body: &[u8],
+) -> String {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(compact_request_body) else {
+        return semantic_summary.trim().to_string();
+    };
+    let input = value
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let active_user_index = input.iter().rposition(|item| {
+        item.get("type").and_then(serde_json::Value::as_str) == Some("message")
+            && item.get("role").and_then(serde_json::Value::as_str) == Some("user")
+    });
+    let active_user = active_user_index
+        .and_then(|index| {
+            input[index]
+                .get("content")
+                .and_then(runtime_gemini_local_compact_text_from_content)
+        })
+        .filter(|text| !text.trim().is_empty())
+        .map(|text| truncate_utf8_edges(text, GEMINI_SEMANTIC_COMPACT_ACTIVE_USER_MAX_BYTES));
+    let latest_tool = active_user_index
+        .and_then(|index| {
+            input[(index + 1)..].iter().rev().find(|item| {
+                matches!(
+                    item.get("type").and_then(serde_json::Value::as_str),
+                    Some(
+                        "function_call_output"
+                            | "custom_tool_call_output"
+                            | "local_shell_call_output"
+                    )
+                )
+            })
+        })
+        .and_then(|item| {
+            item.get("output")
+                .or_else(|| item.get("content"))
+                .and_then(runtime_gemini_local_compact_text_from_content)
+        })
+        .filter(|text| !text.trim().is_empty())
+        .map(|text| truncate_utf8_edges(text, GEMINI_SEMANTIC_COMPACT_LATEST_TOOL_MAX_BYTES));
+
+    let mut summary = String::new();
+    if let Some(active_user) = active_user {
+        summary.push_str("Active user request that must still be completed:\n");
+        summary.push_str(active_user.trim());
+        summary.push_str("\n\n");
+    }
+    if let Some(latest_tool) = latest_tool {
+        summary.push_str("Latest tool result after the active request:\n");
+        summary.push_str(latest_tool.trim());
+        summary.push_str("\n\n");
+    }
+    summary.push_str("Semantic continuation summary:\n");
+    summary.push_str(semantic_summary.trim());
+    summary.push_str(
+        "\n\nContinue the active user request. Do not merely acknowledge repository, optimizer, or environment instructions.",
+    );
+    truncate_utf8(summary, GEMINI_LOCAL_COMPACT_MAX_SUMMARY_BYTES)
+}
 
 pub(super) fn runtime_gemini_local_compact_response_parts(
     body: &[u8],
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
     let summary = runtime_gemini_local_compact_summary(body);
-    let text = format!("{GEMINI_LOCAL_COMPACT_SUMMARY_PREFIX}\n\n{summary}");
+    runtime_gemini_compact_response_parts(&summary)
+}
+
+fn runtime_gemini_compact_response_parts(summary: &str) -> RuntimeHeapTrimmedBufferedResponseParts {
+    let text = format!(
+        "{GEMINI_LOCAL_COMPACT_SUMMARY_PREFIX}\n\n{}",
+        summary.trim()
+    );
     let body = serde_json::to_vec(&serde_json::json!({
         "output": [{
             "type": "message",
@@ -260,6 +453,27 @@ fn truncate_utf8(mut text: String, max_bytes: usize) -> String {
     text
 }
 
+fn truncate_utf8_edges(text: String, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let head_bytes = max_bytes / 3;
+    let tail_bytes = max_bytes.saturating_sub(head_bytes);
+    let mut head_end = head_bytes.min(text.len());
+    while head_end > 0 && !text.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    let mut tail_start = text.len().saturating_sub(tail_bytes);
+    while tail_start < text.len() && !text.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+    format!(
+        "{}\n[... middle truncated ...]\n{}",
+        &text[..head_end],
+        &text[tail_start..]
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +547,133 @@ mod tests {
         assert!(!text.contains("item 0 "));
         assert!(text.contains("item 39 "));
         assert!(text.contains("[truncated]"));
+    }
+
+    #[test]
+    fn gemini_semantic_compact_request_disables_tools_and_streaming() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "auto",
+            "instructions": "Act as a coding agent.",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Investigate the failure."}]
+            }],
+            "tools": [{"type": "function", "name": "shell"}],
+            "tool_choice": "auto",
+            "parallel_tool_calls": true,
+            "stream": true,
+            "text": {"format": {"type": "json_schema"}},
+        }))
+        .unwrap();
+
+        let translated = runtime_gemini_semantic_compact_request_body(&body).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&translated).unwrap();
+        let input = value["input"].as_array().unwrap();
+
+        assert_eq!(value["stream"], false);
+        assert_eq!(value["store"], false);
+        assert_eq!(value["parallel_tool_calls"], false);
+        assert_eq!(value["prodex_gemini_compaction"], true);
+        assert!(value.get("tools").is_none());
+        assert!(value.get("tool_choice").is_none());
+        assert!(value.get("text").is_none());
+        assert_eq!(input.len(), 2);
+        assert!(
+            input[1]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("durable continuation summary")
+        );
+    }
+
+    #[test]
+    fn gemini_semantic_compact_returns_codex_replacement_history() {
+        let request = serde_json::to_vec(&serde_json::json!({
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Complete the compact fix."}]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_test",
+                    "output": "focused tests passed"
+                }
+            ]
+        }))
+        .unwrap();
+        let value = serde_json::json!({
+            "responseId": "resp_compact",
+            "modelVersion": "gemini-2.5-pro",
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "Goal: fix compact.\nTests: cargo test passed."}]
+                },
+                "finishReason": "STOP"
+            }]
+        });
+
+        let parts =
+            runtime_gemini_semantic_compact_response_parts_from_value(200, &value, 99, &request)
+                .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
+        let text = value["output"][0]["content"][0]["text"].as_str().unwrap();
+
+        assert_eq!(parts.status, 200);
+        assert_eq!(value["output"][0]["role"], "user");
+        assert!(text.contains(GEMINI_LOCAL_COMPACT_SUMMARY_PREFIX));
+        assert!(text.contains("Active user request that must still be completed"));
+        assert!(text.contains("Complete the compact fix."));
+        assert!(text.contains("Latest tool result after the active request"));
+        assert!(text.contains("focused tests passed"));
+        assert!(text.contains("Goal: fix compact."));
+        assert!(text.contains("Tests: cargo test passed."));
+        assert!(text.contains("Continue the active user request."));
+    }
+
+    #[test]
+    fn gemini_semantic_compact_rejects_empty_output() {
+        let value = serde_json::json!({
+            "responseId": "resp_compact_empty",
+            "modelVersion": "gemini-2.5-pro",
+            "candidates": [{
+                "content": {"parts": []},
+                "finishReason": "STOP"
+            }]
+        });
+
+        let error = match runtime_gemini_semantic_compact_response_parts_from_value(
+            200,
+            &value,
+            100,
+            b"{\"input\":[]}",
+        ) {
+            Ok(_) => panic!("empty semantic compact output should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("no summary text"));
+    }
+
+    #[test]
+    fn gemini_semantic_compact_preserves_tail_of_large_active_request() {
+        let active_request = format!("{}FINAL_ACTION_MARKER", "filler ".repeat(1_000));
+        let request = serde_json::to_vec(&serde_json::json!({
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": active_request}]
+            }]
+        }))
+        .unwrap();
+
+        let summary =
+            runtime_gemini_semantic_compact_continuation_summary("Keep working.", &request);
+
+        assert!(summary.contains("[... middle truncated ...]"));
+        assert!(summary.contains("FINAL_ACTION_MARKER"));
+        assert!(summary.contains("Keep working."));
     }
 }

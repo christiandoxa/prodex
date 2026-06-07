@@ -109,8 +109,8 @@ pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
   prodex super
   prodex super --url http://127.0.0.1:8131
-  prodex super --provider deepseek --model deepseek-v4-pro
-  prodex super --provider gemini
+  prodex super deepseek --model deepseek-v4-pro
+  prodex super gemini
   prodex super exec \"review latest diff in super mode\"
   prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
   prodex super --profile main
@@ -125,8 +125,8 @@ Notes:
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Use `--provider anthropic` to route through Anthropic's OpenAI-compatible Chat Completions API. Sign in with `prodex login --with-claude`, or supply `--api-key`, ANTHROPIC_API_KEY, or ANTHROPIC_API_KEYS.
   Use `--provider copilot` to keep Codex/Super and route through a local Responses-to-Copilot adapter. Import Copilot profiles first for account rotation, or supply `--api-key`, GITHUB_COPILOT_API_KEY, or GITHUB_COPILOT_API_KEYS.
-  Use `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
-  Use `--provider gemini` to route through Gemini. Supply `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS; or sign in with Google via `prodex login`.
+  Use `deepseek` or `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
+  Use `gemini` or `--provider gemini` to route through Gemini. Supply `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS; or sign in with Google via `prodex login`.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied optimizer prefixes.";
 pub const CLI_DOCTOR_AFTER_HELP: &str = "\

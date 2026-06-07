@@ -46,6 +46,13 @@ fn gemini_request_translation_maps_tools_and_thinking() {
     let system_text = value["systemInstruction"]["parts"][0]["text"]
         .as_str()
         .unwrap();
+    assert!(system_text.contains("The user must experience native Codex CLI"));
+    assert!(system_text.contains("Do not add closing meta-statements"));
+    assert!(system_text.contains("files changed, tests run, and unresolved blockers"));
+    assert!(system_text.contains("emit only that requested output"));
+    assert!(system_text.contains("previous-turn recaps"));
+    assert!(system_text.contains("must match the tool output"));
+    assert!(system_text.contains("do not call unrelated tools"));
     assert!(system_text.contains("wait/read follow-up tool"));
     assert!(system_text.contains("gh run view"));
     assert!(system_text.contains("CI success"));
@@ -59,6 +66,36 @@ fn gemini_request_translation_maps_tools_and_thinking() {
         value["generationConfig"]["thinkingConfig"]["thinkingBudget"],
         8192
     );
+}
+
+#[test]
+fn gemini_request_translation_keeps_semantic_compaction_instruction_isolated() {
+    let instruction = "Return only a durable continuation summary.";
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "stream": false,
+        "instructions": instruction,
+        "prodex_gemini_compaction": true,
+        "gemini_memory": {"global": "Do not leak this into compaction."},
+        "input": "Transcript to compact"
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let system_text = value["systemInstruction"]["parts"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(system_text, instruction);
+    assert!(!system_text.contains("native Codex CLI"));
+    assert!(!system_text.contains("Gemini CLI Memory Compatibility"));
 }
 
 #[test]
@@ -788,6 +825,60 @@ fn gemini_request_translation_masks_large_tool_outputs_in_history() {
     assert!(masked.contains("51000 chars"));
     assert!(masked.contains("Full output saved to:"));
     assert!(masked.len() < 2_000);
+}
+
+#[test]
+fn gemini_request_translation_masks_large_mcp_tool_error_outputs_in_history() {
+    let conversations = conversation_store();
+    runtime_deepseek_store_conversation(
+        &conversations,
+        "resp_mcp_error",
+        vec![serde_json::json!({"role": "user", "content": "read a huge file through mcp"})],
+        vec![serde_json::json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_mcp_error",
+                "type": "function",
+                "function": {
+                    "name": "mcp__prodex_sqz__sqz_read_file",
+                    "arguments": "{\"path\":\"huge.log\"}"
+                }
+            }]
+        })],
+    );
+    let large_error = format!("mcp error\n{}", "E".repeat(51_000));
+    let followup = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "previous_response_id": "resp_mcp_error",
+        "input": [{
+            "type": "mcp_tool_result",
+            "call_id": "call_mcp_error",
+            "is_error": true,
+            "content": [{"type": "output_text", "text": large_error}]
+        }]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&followup).unwrap(),
+        &conversations,
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let function_response = &value["contents"][2]["parts"][0]["functionResponse"];
+    let response = &function_response["response"];
+    let masked = response["output"].as_str().unwrap();
+
+    assert_eq!(function_response["name"], "mcp__prodex_sqz__sqz_read_file");
+    assert_eq!(function_response["id"], "call_mcp_error");
+    assert_eq!(response["_prodex_masked"], true);
+    assert!(masked.contains("[tool_output_masked]"));
+    assert!(masked.contains("Full output saved to:"));
+    assert!(masked.contains("mcp error"));
+    assert!(!masked.contains(&"E".repeat(2_000)));
 }
 
 #[test]

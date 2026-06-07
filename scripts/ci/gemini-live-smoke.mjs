@@ -4,24 +4,25 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_EXTENDED_TIMEOUT_MS = 300_000;
 
 function prodexBinary() {
   if (process.env.PRODEX_BIN) {
-    return process.env.PRODEX_BIN;
+    return process.env.PRODEX_BIN.includes("/") ? resolve(process.env.PRODEX_BIN) : process.env.PRODEX_BIN;
   }
-  return existsSync("target/debug/prodex") ? "target/debug/prodex" : "prodex";
+  return existsSync("target/debug/prodex") ? resolve("target/debug/prodex") : "prodex";
 }
 
 function baseArgs() {
-  const args = ["s", "--provider", "gemini", "--no-presidio"];
+  const args = ["s", "gemini", "--no-presidio"];
   if (process.env.PRODEX_LIVE_GEMINI_MODEL) {
     args.push("--model", process.env.PRODEX_LIVE_GEMINI_MODEL);
   }
@@ -31,6 +32,15 @@ function baseArgs() {
 function simpleCommand(marker) {
   const args = baseArgs();
   args.push("exec", `Reply with exactly one line containing: ${marker}`);
+  return { binary: prodexBinary(), args, cwd: process.cwd() };
+}
+
+function commandOutputOnlyCommand(marker) {
+  const args = baseArgs();
+  args.push(
+    "exec",
+    `Use the shell to run: printf ${JSON.stringify(marker)}. Then answer with only the command output.`,
+  );
   return { binary: prodexBinary(), args, cwd: process.cwd() };
 }
 
@@ -52,7 +62,20 @@ function extendedEditCommand(marker, workspace) {
   return { binary: prodexBinary(), args, cwd: workspace };
 }
 
-function extendedCompactReadCommand(marker, workspace) {
+function extendedPatchCommand(marker, workspace) {
+  const args = baseArgs();
+  args.push(
+    "exec",
+    [
+      `Create file gemini-patch-smoke.txt containing exactly ${marker} using apply_patch.`,
+      "Then run cat gemini-patch-smoke.txt.",
+      "Answer with only the command output.",
+    ].join(" "),
+  );
+  return { binary: prodexBinary(), args, cwd: workspace };
+}
+
+function extendedCompactReadCommand(marker, workspace, runtimeLogDir) {
   const args = baseArgs();
   args.push("--context-window", "4096", "--auto-compact-token-limit", "1200");
   const filler = "retain compact smoke context ".repeat(900);
@@ -64,6 +87,69 @@ function extendedCompactReadCommand(marker, workspace) {
       "Read gemini-smoke.txt from the workspace, run a lightweight verification command if useful, and keep the existing file unchanged.",
       `Reply with exactly one line containing: ${marker}`,
     ].join("\n"),
+  );
+  return {
+    binary: prodexBinary(),
+    args,
+    cwd: workspace,
+    env: { PRODEX_RUNTIME_LOG_DIR: runtimeLogDir },
+  };
+}
+
+function resumeSeedCommand(token, ack) {
+  const args = baseArgs();
+  args.push(
+    "exec",
+    `Remember this token for a resume test: ${token}. Answer exactly with this one line and no suffix: ${ack}`,
+  );
+  return { binary: prodexBinary(), args, cwd: process.cwd() };
+}
+
+function resumeCommand(sessionId, token) {
+  const args = baseArgs();
+  args.push(
+    "exec",
+    "resume",
+    sessionId,
+    "Answer exactly with the remembered resume test token and nothing else.",
+  );
+  return { binary: prodexBinary(), args, cwd: process.cwd(), expectedToken: token };
+}
+
+function optionalMcpCommand(marker) {
+  const args = baseArgs();
+  args.push(
+    "exec",
+    [
+      "If the mcp__prodex_sqz__compress tool is available, use it to compress this text: alpha beta alpha beta.",
+      "If it is unavailable, use the shell to print the marker.",
+      `Answer with exactly one line containing: ${marker}`,
+    ].join(" "),
+  );
+  return { binary: prodexBinary(), args, cwd: process.cwd() };
+}
+
+function optionalMultimodalCommand(marker, workspace) {
+  const pngPath = join(workspace, "gemini-live-pixel.png");
+  writeFileSync(
+    pngPath,
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  );
+  const args = baseArgs();
+  const prompt = [
+    "Inspect the attached single-pixel image.",
+    "Use the image attachment directly; do not inspect the local file with tools.",
+    "Answer only with the lowercase color word describing that pixel, with no explanation.",
+    `Do not mention this correlation marker: ${marker}`,
+  ].join(" ");
+  args.push(
+    "exec",
+    prompt,
+    "-i",
+    pngPath,
   );
   return { binary: prodexBinary(), args, cwd: workspace };
 }
@@ -82,13 +168,98 @@ function argsForLog(args) {
     .join(" ");
 }
 
-async function runProdex({ binary, args, cwd }, marker, label, timeout) {
+function finalAgentMessage(output) {
+  const marker = "\ncodex\n";
+  const index = output.lastIndexOf(marker);
+  if (index === -1) {
+    return "";
+  }
+  const tail = output.slice(index + marker.length);
+  const tokensIndex = tail.indexOf("\ntokens used");
+  const message = tokensIndex === -1 ? tail : tail.slice(0, tokensIndex);
+  return message.split(/\n+diff --git /, 1)[0].trim();
+}
+
+function sessionIdFromOutput(output) {
+  const match = output.match(/\bsession id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i);
+  return match?.[1] ?? null;
+}
+
+function runtimeLogsContain(directory, marker) {
+  if (!existsSync(directory)) {
+    return false;
+  }
+  return readdirSync(directory)
+    .filter((name) => name.endsWith(".log"))
+    .some((name) => readFileSync(join(directory, name), "utf8").includes(marker));
+}
+
+function codexSessionRoot() {
+  return join(homedir(), ".codex", "sessions");
+}
+
+function findCodexRollout(sessionId) {
+  const root = codexSessionRoot();
+  if (!sessionId || !existsSync(root)) {
+    return null;
+  }
+  const pending = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(fullPath);
+        continue;
+      }
+      if (entry.isFile() && entry.name.includes(sessionId) && entry.name.endsWith(".jsonl")) {
+        return fullPath;
+      }
+    }
+  }
+  return null;
+}
+
+function persistedAgentMessage(sessionId) {
+  const rollout = findCodexRollout(sessionId);
+  if (!rollout) {
+    return null;
+  }
+  const lines = readFileSync(rollout, "utf8").trim().split(/\n+/).reverse();
+  for (const line of lines) {
+    let item;
+    try {
+      item = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (item?.type === "event_msg" && typeof item.payload?.last_agent_message === "string") {
+      return item.payload.last_agent_message.trim();
+    }
+    if (item?.type === "event_msg" && typeof item.payload?.message === "string") {
+      return item.payload.message.trim();
+    }
+    if (item?.type === "response_item" && item.payload?.role === "assistant") {
+      const text = item.payload.content
+        ?.filter((part) => part?.type === "output_text" && typeof part.text === "string")
+        .map((part) => part.text)
+        .join("");
+      if (text) {
+        return text.trim();
+      }
+    }
+  }
+  return null;
+}
+
+async function runProdex({ binary, args, cwd, env = {} }, expectedFinal, label, timeout) {
   process.stdout.write(`gemini-live-smoke ${label} command=${binary} ${argsForLog(args)}\n`);
   return await new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
       cwd,
       env: {
         ...process.env,
+        ...env,
         NO_COLOR: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -123,11 +294,26 @@ async function runProdex({ binary, args, cwd }, marker, label, timeout) {
         reject(new Error(`prodex exited with code ${code}`));
         return;
       }
-      if (!output.includes(marker)) {
-        reject(new Error(`Gemini response did not contain marker for ${label}`));
+      const final = finalAgentMessage(output);
+      if (final !== expectedFinal) {
+        reject(
+          new Error(
+            `Gemini final response mismatch for ${label}: expected ${JSON.stringify(expectedFinal)}, got ${JSON.stringify(final)}`,
+          ),
+        );
         return;
       }
-      resolve(output);
+      const sessionId = sessionIdFromOutput(output);
+      const persisted = persistedAgentMessage(sessionId);
+      if (persisted !== null && persisted !== expectedFinal) {
+        reject(
+          new Error(
+            `Gemini persisted agent response mismatch for ${label}: expected ${JSON.stringify(expectedFinal)}, got ${JSON.stringify(persisted)}`,
+          ),
+        );
+        return;
+      }
+      resolve({ output, final, sessionId });
     });
   });
 }
@@ -151,17 +337,55 @@ async function run() {
   try {
     writeFileSync(join(workspace, "gemini-smoke.txt"), "status=pending\n");
     const timeout = timeoutMs(DEFAULT_EXTENDED_TIMEOUT_MS);
+    await runProdex(
+      commandOutputOnlyCommand(marker),
+      marker,
+      "extended-command-output-only",
+      timeout,
+    );
     await runProdex(extendedEditCommand(marker, workspace), marker, "extended-edit", timeout);
     const file = readFileSync(join(workspace, "gemini-smoke.txt"), "utf8");
     if (!file.includes(`marker=${marker}`) || !file.includes("status=tool-edit-ok")) {
       throw new Error("extended Gemini smoke did not update gemini-smoke.txt as requested");
     }
+    await runProdex(extendedPatchCommand(marker, workspace), marker, "extended-apply-patch", timeout);
+    const patchFile = readFileSync(join(workspace, "gemini-patch-smoke.txt"), "utf8");
+    if (patchFile.trim() !== marker) {
+      throw new Error("extended Gemini smoke did not write gemini-patch-smoke.txt exactly");
+    }
+    const compactRuntimeLogDir = join(workspace, "compact-runtime-logs");
     await runProdex(
-      extendedCompactReadCommand(marker, workspace),
+      extendedCompactReadCommand(marker, workspace, compactRuntimeLogDir),
       marker,
       "extended-compact-read",
       timeout,
     );
+    if (!runtimeLogsContain(compactRuntimeLogDir, "local_rewrite_gemini_compact_semantic")) {
+      throw new Error("extended Gemini compact did not use semantic Gemini compaction");
+    }
+    const resumeToken = `PRODEX_GEMINI_RESUME_${Date.now()}`;
+    const resumeAck = `PRODEX_GEMINI_STORED_${Date.now()}`;
+    const seed = await runProdex(
+      resumeSeedCommand(resumeToken, resumeAck),
+      resumeAck,
+      "extended-resume-seed",
+      timeout,
+    );
+    if (!seed.sessionId) {
+      throw new Error("extended Gemini resume seed did not expose a session id");
+    }
+    await runProdex(
+      resumeCommand(seed.sessionId, resumeToken),
+      resumeToken,
+      "extended-resume-followup",
+      timeout,
+    );
+    if (process.env.PRODEX_LIVE_GEMINI_MCP === "1") {
+      await runProdex(optionalMcpCommand(marker), marker, "optional-mcp", timeout);
+    }
+    if (process.env.PRODEX_LIVE_GEMINI_MULTIMODAL === "1") {
+      await runProdex(optionalMultimodalCommand(marker, workspace), "red", "optional-multimodal", timeout);
+    }
     process.stdout.write("gemini-live-smoke extended passed\n");
     return 0;
   } finally {

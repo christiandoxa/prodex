@@ -129,6 +129,77 @@ fn runtime_doctor_fixture_lane_pressure_surfaces_doctor_json_and_fields() {
 }
 
 #[test]
+fn runtime_doctor_gemini_provider_markers_surface_json_and_fields() {
+    let summary = runtime_doctor_fixture_summary(
+        br#"[2026-05-12 00:00:00.000 +00:00] local_rewrite_provider_model_fallback request=41 provider=gemini profile=google-main from_model=gemini-2.5-pro to_model=gemini-2.5-flash status=429 class=Quota
+[2026-05-12 00:00:01.000 +00:00] local_rewrite_gemini_quota_rotate request=42 profile=google-main status=429 reason=rate_limit
+[2026-05-12 00:00:02.000 +00:00] local_rewrite_gemini_live_error request=43 profile=google-main error="upstream closed"
+[2026-05-12 00:00:03.000 +00:00] local_rewrite_gemini_compact_semantic request=44 profile=google-main body_bytes=2048
+[2026-05-12 00:00:04.000 +00:00] local_rewrite_gemini_compact_fallback request=45 body_bytes=4096 reason="empty semantic output"
+"#,
+    );
+    let fields = runtime_doctor_fixture_fields(&summary);
+    let value = runtime_doctor_json_value(&summary);
+
+    assert_eq!(
+        value["marker_counts"]["local_rewrite_provider_model_fallback"],
+        1
+    );
+    assert_eq!(
+        value["marker_counts"]["local_rewrite_gemini_quota_rotate"],
+        1
+    );
+    assert_eq!(value["marker_counts"]["local_rewrite_gemini_live_error"], 1);
+    assert_eq!(
+        value["marker_counts"]["local_rewrite_gemini_compact_semantic"],
+        1
+    );
+    assert_eq!(
+        value["marker_counts"]["local_rewrite_gemini_compact_fallback"],
+        1
+    );
+    assert_eq!(value["facet_counts"]["provider"]["gemini"], 1);
+    assert_eq!(value["failure_class_counts"]["quota"], 1);
+    assert_eq!(value["failure_class_counts"]["transport"], 1);
+    assert!(
+        fields
+            .get("Provider fallback")
+            .expect("provider fallback detail should be rendered")
+            .contains("gemini gemini-2.5-pro -> gemini-2.5-flash")
+    );
+    assert_eq!(
+        fields
+            .get("Provider model fallback")
+            .expect("provider model fallback count should render"),
+        "1"
+    );
+    assert!(
+        fields
+            .get("Gemini retry scope")
+            .expect("Gemini retry detail should render")
+            .contains("profile=google-main status=429 reason=rate_limit")
+    );
+    assert!(
+        fields
+            .get("Gemini Live error")
+            .expect("Gemini Live error detail should render")
+            .contains("request=43 profile=google-main error=upstream closed")
+    );
+    assert!(
+        fields
+            .get("Gemini compact")
+            .expect("Gemini compact detail should render")
+            .contains("mode=local-fallback")
+    );
+    assert_eq!(
+        fields
+            .get("Gemini semantic compact")
+            .expect("Gemini semantic compact count should render"),
+        "1"
+    );
+}
+
+#[test]
 fn runtime_doctor_incident_explainer_classifies_pressure_fixture_logs() {
     let summary = runtime_doctor_fixture_summary(ACTIVE_REQUEST_PRESSURE_LOG);
     let value = runtime_doctor_json_value(&summary);

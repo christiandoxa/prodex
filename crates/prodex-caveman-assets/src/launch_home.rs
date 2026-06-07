@@ -22,6 +22,7 @@ pub fn prepare_caveman_launch_home(
     let caveman_home = create_temporary_caveman_home(managed_profiles_root)?;
     if let Err(err) = prodex_shared_codex_fs::copy_codex_home(base_codex_home, &caveman_home)
         .and_then(|_| share_caveman_chat_history(base_codex_home, &caveman_home))
+        .and_then(|_| localize_caveman_rollout_state(&caveman_home))
         .and_then(|_| configure_caveman_launch_home(&caveman_home))
     {
         let _ = fs::remove_dir_all(&caveman_home);
@@ -111,6 +112,33 @@ fn link_caveman_shared_chat_file(source: &Path, link: &Path) -> Result<()> {
 fn link_caveman_shared_chat_dir(source: &Path, link: &Path) -> Result<()> {
     fs::create_dir_all(source).with_context(|| format!("failed to create {}", source.display()))?;
     replace_caveman_path_with_symlink(source, link, true)
+}
+
+fn localize_caveman_rollout_state(codex_home: &Path) -> Result<()> {
+    if !codex_home.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(codex_home)
+        .with_context(|| format!("failed to read {}", codex_home.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", codex_home.display()))?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if is_caveman_rollout_state_file_name(&file_name) {
+            let path = entry.path();
+            fs::remove_file(&path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn is_caveman_rollout_state_file_name(file_name: &str) -> bool {
+    file_name.starts_with("state_")
+        && [".sqlite", ".sqlite-shm", ".sqlite-wal"]
+            .iter()
+            .any(|suffix| file_name.ends_with(suffix))
 }
 
 fn replace_caveman_path_with_symlink(target: &Path, link: &Path, is_dir: bool) -> Result<()> {

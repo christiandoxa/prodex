@@ -9,6 +9,7 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/client.rs",
   "codex-rs/core/src/compact_remote.rs",
   "codex-rs/core/src/turn_metadata.rs",
+  "codex-rs/model-provider-info/src/lib.rs",
   "codex-rs/core/src/realtime_conversation.rs",
   "codex-rs/codex-api/src/sse/responses.rs",
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
@@ -79,6 +80,12 @@ const REQUIRED_FILE_CONTAINS = {
     "current_header_value_for_model_request_kind",
     "current_header_value_for_compaction",
     "to_ascii_json_string",
+  ],
+  "codex-rs/model-provider-info/src/lib.rs": [
+    "ModelProviderInfo",
+    "supports_remote_compaction",
+    "is_openai()",
+    "is_azure_responses_provider",
   ],
   "codex-rs/core/src/realtime_conversation.rs": [
     "ConversationStartTransport::Websocket",
@@ -353,6 +360,17 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "current_header_value_for_compaction",
     ],
     expected_headers_all: ["x-codex-turn-metadata"],
+  },
+  {
+    id: "model-provider.remote-compaction-capability",
+    kind: "capability_gate",
+    file: "codex-rs/model-provider-info/src/lib.rs",
+    file_contains_all: [
+      "ModelProviderInfo",
+      "supports_remote_compaction",
+      "is_openai()",
+      "is_azure_responses_provider",
+    ],
   },
   {
     id: "sse.responses-events",

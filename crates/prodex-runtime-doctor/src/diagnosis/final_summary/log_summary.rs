@@ -30,6 +30,7 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
             &[
                 "profile_auth_recovery_failed",
                 "profile_auth_proactive_sync_failed",
+                "local_rewrite_provider_auth_failure",
             ],
         ),
         (
@@ -84,6 +85,9 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "compact_retryable_failure",
                 "compact_overload_conservative_retry",
                 "compact_quota_unclassified",
+                "local_rewrite_gemini_quota_rotate",
+                "local_rewrite_gemini_rate_limit_retry",
+                "local_rewrite_gemini_quota_status_unavailable",
             ],
         ),
         (
@@ -111,6 +115,12 @@ fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeM
                 "websocket_connect_local_pressure",
                 "websocket_connect_overflow_enqueue",
                 "websocket_connect_overflow_dispatch",
+                "local_rewrite_gemini_invalid_stream_retry",
+                "local_rewrite_gemini_invalid_stream_model_fallback",
+                "local_rewrite_gemini_live_error",
+                "local_rewrite_gemini_live_sidecar_error",
+                "local_rewrite_gemini_live_sidecar_accept_error",
+                "local_rewrite_gemini_live_sidecar_session_error",
             ],
         ),
     ];

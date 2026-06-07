@@ -48,6 +48,7 @@ pub(super) struct RuntimeGeminiSseState {
     conversation_messages: Vec<serde_json::Value>,
     conversations: RuntimeDeepSeekConversationStore,
     binding_recorder: Option<RuntimeGeminiBindingRecorder>,
+    forced_output_text: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -68,6 +69,7 @@ impl RuntimeGeminiSseState {
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
     ) -> Self {
+        let forced_output_text = runtime_gemini_forced_command_output(&conversation_messages);
         Self {
             request_id,
             response_id: format!("resp_gemini_{request_id}"),
@@ -99,6 +101,7 @@ impl RuntimeGeminiSseState {
             conversation_messages,
             conversations,
             binding_recorder,
+            forced_output_text,
         }
     }
 
@@ -192,6 +195,9 @@ impl RuntimeGeminiSseState {
                     self.reasoning_content.push_str(text);
                     events.extend(self.reasoning_delta_events(text));
                 } else {
+                    if self.forced_output_text.is_some() {
+                        continue;
+                    }
                     if let Some(event) = self.output_text_item_added_event() {
                         events.push(event);
                     }
@@ -220,7 +226,9 @@ impl RuntimeGeminiSseState {
             if part.get("videoMetadata").is_some() && !self.native_parts.contains(part) {
                 self.native_parts.push(part.clone());
             }
-            if let Some(text) = runtime_gemini_text_from_special_part(part) {
+            if let Some(text) = runtime_gemini_text_from_special_part(part)
+                && self.forced_output_text.is_none()
+            {
                 events.extend(self.observe_output_text(&text));
             }
             if let Some(item) = runtime_gemini_image_generation_call_item_from_part(
@@ -238,6 +246,9 @@ impl RuntimeGeminiSseState {
                 }
             }
             if let Some(function_call) = part.get("functionCall") {
+                if self.forced_output_text.is_some() {
+                    continue;
+                }
                 let thought_signature = runtime_gemini_thought_signature(part)
                     .or_else(|| runtime_gemini_thought_signature(function_call));
                 events.extend(self.observe_function_call(
@@ -377,6 +388,14 @@ impl RuntimeGeminiSseState {
             events.push(self.event("response.function_call_arguments.delta", delta_event));
         }
         events
+    }
+
+    fn apply_forced_output_text(&mut self) {
+        if let Some(text) = self.forced_output_text.clone() {
+            self.output_text = text;
+            self.tool_calls.clear();
+            self.tool_call_indices_by_id.clear();
+        }
     }
 
     fn function_call_index(
@@ -536,6 +555,7 @@ impl RuntimeGeminiSseState {
         if self.completed {
             return None;
         }
+        self.apply_forced_output_text();
         let mut events = self.complete_tool_call_events();
         events.extend(self.complete_output_text_item_events());
         events.extend(self.complete_media_item_events());
@@ -1038,6 +1058,88 @@ impl RuntimeGeminiSseState {
         let next = self.sequence_number;
         self.sequence_number = self.sequence_number.saturating_add(1);
         next
+    }
+}
+
+fn runtime_gemini_forced_command_output(messages: &[serde_json::Value]) -> Option<String> {
+    let user_index = messages.iter().rposition(|message| {
+        message.get("role").and_then(serde_json::Value::as_str) == Some("user")
+    })?;
+    if !runtime_gemini_requests_command_output_only(&messages[user_index]) {
+        return None;
+    }
+    messages
+        .iter()
+        .skip(user_index + 1)
+        .rev()
+        .find(|message| message.get("role").and_then(serde_json::Value::as_str) == Some("tool"))
+        .and_then(runtime_gemini_command_output_from_tool_message)
+}
+
+fn runtime_gemini_requests_command_output_only(message: &serde_json::Value) -> bool {
+    let mut text = String::new();
+    runtime_gemini_collect_payload_text(message.get("content"), &mut text);
+    let lower = text.to_ascii_lowercase();
+    lower.contains("only the command output")
+        || lower.contains("command output only")
+        || lower.contains("only with the command output")
+}
+
+fn runtime_gemini_command_output_from_tool_message(message: &serde_json::Value) -> Option<String> {
+    let mut text = String::new();
+    runtime_gemini_collect_payload_text(
+        message.get("output").or_else(|| message.get("content")),
+        &mut text,
+    );
+    runtime_gemini_extract_command_output(&text)
+}
+
+fn runtime_gemini_extract_command_output(text: &str) -> Option<String> {
+    let marker = "Output:\n";
+    let mut output = text
+        .rfind(marker)
+        .map(|index| &text[index + marker.len()..])
+        .unwrap_or(text)
+        .trim();
+    for delimiter in ["\n\ndiff --git ", "\ndiff --git "] {
+        if let Some(diff_index) = output.find(delimiter) {
+            output = output[..diff_index].trim_end();
+            break;
+        }
+    }
+    if output.starts_with("Success. Updated the following files:")
+        || output.starts_with("Success. No files changed.")
+    {
+        return None;
+    }
+    (!output.is_empty()).then(|| output.to_string())
+}
+
+fn runtime_gemini_collect_payload_text(value: Option<&serde_json::Value>, output: &mut String) {
+    match value {
+        None => {}
+        Some(value) => match value {
+            serde_json::Value::String(text) => {
+                if !output.is_empty() {
+                    output.push('\n');
+                }
+                output.push_str(text);
+            }
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    runtime_gemini_collect_payload_text(Some(value), output);
+                }
+            }
+            serde_json::Value::Object(object) => {
+                for key in ["output", "content", "text"] {
+                    if let Some(value) = object.get(key) {
+                        runtime_gemini_collect_payload_text(Some(value), output);
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        },
     }
 }
 

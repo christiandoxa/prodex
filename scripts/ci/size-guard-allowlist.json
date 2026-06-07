@@ -11,8 +11,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
-    "maxLines": 3325,
-    "reason": "The Gemini request translation matrix is capped while Gemini CLI settings precedence and request policy parity remain co-located pending a domain split."
+    "maxLines": 3345,
+    "reason": "The Gemini request translation matrix is capped while Gemini CLI settings precedence, multimodal parity, and request policy parity remain co-located pending a domain split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_response.rs",
@@ -21,22 +21,27 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_rewrite_tests.rs",
-    "maxLines": 1544,
-    "reason": "Gemini translation regression cases remain consolidated for the initial parity release."
+    "maxLines": 1635,
+    "reason": "Gemini translation regression cases remain consolidated while Codex-native Gemini parity coverage is completed."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
-    "maxLines": 1104,
-    "reason": "Gemini SSE state-machine invariants remain in one capped module until state ownership is split."
+    "maxLines": 1206,
+    "reason": "Gemini SSE state-machine invariants and exact-output reconstruction remain in one capped module until state ownership is split."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs",
+    "maxLines": 898,
+    "reason": "Gemini SSE exact-output and continuity regression cases remain consolidated while the state-machine surface stabilizes."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1141,
+    "maxLines": 1140,
     "reason": "Gemini local rewrite authentication and request context remain capped while default model ownership is shared through the Gemini runtime crate."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs",
-    "maxLines": 1652,
-    "reason": "Gemini Live protocol translation remains capped pending audio and session module extraction."
+    "maxLines": 1689,
+    "reason": "Gemini Live protocol translation and multimodal live smoke coverage remain capped pending audio and session module extraction."
   }
 ]

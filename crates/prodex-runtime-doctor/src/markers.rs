@@ -90,6 +90,31 @@ macro_rules! runtime_doctor_marker_registry {
             QuotaBlocked => "quota_blocked",
             QuotaCriticalFloorBeforeSend => "quota_critical_floor_before_send",
             UpstreamUsageLimitPassthrough => "upstream_usage_limit_passthrough",
+            LocalRewriteUpstreamStart => "local_rewrite_upstream_start",
+            LocalRewriteUpstreamResponse => "local_rewrite_upstream_response",
+            LocalRewriteRequestDetail => "local_rewrite_request_detail",
+            LocalRewriteWebSearchOptionsFallback => "local_rewrite_web_search_options_fallback",
+            LocalRewriteProviderModelFallback => "local_rewrite_provider_model_fallback",
+            LocalRewriteProviderAuthFailure => "local_rewrite_provider_auth_failure",
+            LocalRewriteGeminiBuiltinToolFallback => "local_rewrite_gemini_builtin_tool_fallback",
+            LocalRewriteGeminiQuotaRotate => "local_rewrite_gemini_quota_rotate",
+            LocalRewriteGeminiRateLimitRetry => "local_rewrite_gemini_rate_limit_retry",
+            LocalRewriteGeminiInvalidStreamRetry => "local_rewrite_gemini_invalid_stream_retry",
+            LocalRewriteGeminiInvalidStreamModelFallback => "local_rewrite_gemini_invalid_stream_model_fallback",
+            LocalRewriteGeminiQuotaStatusReady => "local_rewrite_gemini_quota_status_ready",
+            LocalRewriteGeminiQuotaStatusUnavailable => "local_rewrite_gemini_quota_status_unavailable",
+            LocalRewriteGeminiCompactSemantic => "local_rewrite_gemini_compact_semantic",
+            LocalRewriteGeminiCompactFallback => "local_rewrite_gemini_compact_fallback",
+            LocalRewriteGeminiSyntheticThoughtSignature => "local_rewrite_gemini_synthetic_thought_signature",
+            LocalRewriteGeminiLiveSidecarStarted => "local_rewrite_gemini_live_sidecar_started",
+            LocalRewriteGeminiLiveSidecarError => "local_rewrite_gemini_live_sidecar_error",
+            LocalRewriteGeminiLiveSidecarAcceptError => "local_rewrite_gemini_live_sidecar_accept_error",
+            LocalRewriteGeminiLiveConnected => "local_rewrite_gemini_live_connected",
+            LocalRewriteGeminiLiveError => "local_rewrite_gemini_live_error",
+            LocalRewriteGeminiLiveSidecarConnected => "local_rewrite_gemini_live_sidecar_connected",
+            LocalRewriteGeminiLiveSidecarSessionError => "local_rewrite_gemini_live_sidecar_session_error",
+            LocalRewriteGeminiLiveFrame => "local_rewrite_gemini_live_frame",
+            LocalRewriteGeminiLiveDuplexPump => "local_rewrite_gemini_live_duplex_pump",
             CompatRequestSurface => "compat_request_surface",
             CompatWarning => "compat_warning",
             SmartContextAutopilot => "smart_context_autopilot",
@@ -191,6 +216,7 @@ macro_rules! runtime_doctor_facet_registry {
             Profile => "profile",
             Reason => "reason",
             Transport => "transport",
+            Provider => "provider",
             Family => "family",
             Client => "client",
             ToolSurface => "tool_surface",
@@ -296,6 +322,53 @@ pub const RUNTIME_DOCTOR_COUNT_FIELD_ROWS: &[(&str, &str)] = &[
     (
         "Upstream usage-limit passthrough",
         "upstream_usage_limit_passthrough",
+    ),
+    ("Provider requests", "local_rewrite_request_detail"),
+    (
+        "Provider model fallback",
+        "local_rewrite_provider_model_fallback",
+    ),
+    (
+        "Provider auth failures",
+        "local_rewrite_provider_auth_failure",
+    ),
+    ("Gemini quota rotates", "local_rewrite_gemini_quota_rotate"),
+    (
+        "Gemini rate retries",
+        "local_rewrite_gemini_rate_limit_retry",
+    ),
+    (
+        "Gemini invalid stream retry",
+        "local_rewrite_gemini_invalid_stream_retry",
+    ),
+    (
+        "Gemini invalid stream fallback",
+        "local_rewrite_gemini_invalid_stream_model_fallback",
+    ),
+    (
+        "Gemini tool fallback",
+        "local_rewrite_gemini_builtin_tool_fallback",
+    ),
+    (
+        "Gemini semantic compact",
+        "local_rewrite_gemini_compact_semantic",
+    ),
+    (
+        "Gemini compact fallback",
+        "local_rewrite_gemini_compact_fallback",
+    ),
+    (
+        "Gemini quota refresh fail",
+        "local_rewrite_gemini_quota_status_unavailable",
+    ),
+    (
+        "Gemini Live connected",
+        "local_rewrite_gemini_live_connected",
+    ),
+    ("Gemini Live errors", "local_rewrite_gemini_live_error"),
+    (
+        "Gemini Live sidecar errors",
+        "local_rewrite_gemini_live_sidecar_error",
     ),
     ("Retry backoff", "profile_retry_backoff"),
     ("Transport backoff", "profile_transport_backoff"),
@@ -404,6 +477,7 @@ pub const RUNTIME_DOCTOR_SELECTION_PRESSURE_MARKERS: &[&str] = &[
     "compact_precommit_budget_exhausted",
     "compact_candidate_exhausted",
     "compact_transport_failure",
+    "local_rewrite_gemini_quota_rotate",
 ];
 
 pub const RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS: &[&str] = &[
@@ -436,6 +510,12 @@ pub const RUNTIME_DOCTOR_TRANSPORT_PRESSURE_MARKERS: &[&str] = &[
     "websocket_connect_overflow_rejected",
     "websocket_proxy_tunnel_failure",
     "local_writer_error",
+    "local_rewrite_gemini_invalid_stream_retry",
+    "local_rewrite_gemini_invalid_stream_model_fallback",
+    "local_rewrite_gemini_live_error",
+    "local_rewrite_gemini_live_sidecar_error",
+    "local_rewrite_gemini_live_sidecar_accept_error",
+    "local_rewrite_gemini_live_sidecar_session_error",
 ];
 
 pub const RUNTIME_DOCTOR_PERSISTENCE_PRESSURE_MARKERS: &[&str] = &[

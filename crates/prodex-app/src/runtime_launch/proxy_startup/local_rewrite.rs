@@ -9,7 +9,10 @@ use super::local_rewrite_gemini::{
     RuntimeGeminiOAuthPool, RuntimeGeminiRequestContext, runtime_gemini_oauth_pool_from_provider,
     send_runtime_gemini_upstream_request,
 };
-use super::local_rewrite_gemini_compact::runtime_gemini_local_compact_response_parts;
+use super::local_rewrite_gemini_compact::{
+    runtime_gemini_local_compact_response_parts, runtime_gemini_semantic_compact_request_body,
+    runtime_gemini_semantic_compact_response_parts,
+};
 use super::local_rewrite_gemini_live::{
     handle_runtime_gemini_live_websocket_request, spawn_runtime_gemini_live_sidecar,
 };
@@ -380,27 +383,8 @@ fn handle_runtime_local_rewrite_proxy_request(
         return;
     }
     if path_without_query(&captured.path_and_query).ends_with("/responses/compact") {
-        if matches!(
-            &shared.provider,
-            RuntimeLocalRewriteProviderOptions::Gemini { .. }
-        ) {
-            runtime_proxy_log(
-                runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "local_rewrite_gemini_compact_fallback",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field(
-                            "path",
-                            path_without_query(&captured.path_and_query),
-                        ),
-                        runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
-                    ],
-                ),
-            );
-            let parts = runtime_gemini_local_compact_response_parts(&captured.body);
-            let _ = request.respond(build_runtime_proxy_response_from_parts(parts));
+        if let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &shared.provider {
+            respond_runtime_gemini_compact_request(request_id, request, &captured, shared, auth);
             return;
         }
         let provider_name = match &shared.provider {
@@ -455,6 +439,102 @@ fn handle_runtime_local_rewrite_proxy_request(
         }
     };
     respond_runtime_local_rewrite_proxy_request(request_id, request, response, &captured, shared);
+}
+
+fn respond_runtime_gemini_compact_request(
+    request_id: u64,
+    request: tiny_http::Request,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    auth: &RuntimeGeminiProviderAuth,
+) {
+    let semantic = runtime_gemini_semantic_compact_request_body(&captured.body).and_then(|body| {
+        let semantic_request = RuntimeProxyRequest {
+            method: captured.method.clone(),
+            path_and_query: format!("{}/responses", shared.mount_path.trim_end_matches('/')),
+            headers: captured.headers.clone(),
+            body: body.clone(),
+        };
+        let result = send_runtime_gemini_upstream_request(
+            request_id,
+            &semantic_request,
+            shared,
+            body,
+            auth,
+        )?;
+        let RuntimeLocalRewriteUpstreamResult {
+            response,
+            gemini_context,
+            ..
+        } = result;
+        let profile_name = gemini_context
+            .as_ref()
+            .map(|context| context.profile_name.as_str())
+            .unwrap_or(RUNTIME_LOCAL_REWRITE_PROFILE);
+        let parts = match response {
+            RuntimeLocalRewriteUpstreamResponse::Live(live) if live.prefix.is_empty() => {
+                let status = live.response.status().as_u16();
+                runtime_gemini_semantic_compact_response_parts(
+                    status,
+                    live.response,
+                    request_id,
+                    &captured.body,
+                )?
+            }
+            RuntimeLocalRewriteUpstreamResponse::Live(_) => {
+                anyhow::bail!("Gemini semantic compact unexpectedly returned a stream prefix")
+            }
+            RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
+                anyhow::bail!(
+                    "Gemini semantic compact returned buffered HTTP {}",
+                    parts.status
+                )
+            }
+        };
+        Ok((parts, profile_name.to_string()))
+    });
+
+    let parts = match semantic {
+        Ok((parts, profile_name)) => {
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "local_rewrite_gemini_compact_semantic",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("profile", profile_name),
+                        runtime_proxy_log_field(
+                            "path",
+                            path_without_query(&captured.path_and_query),
+                        ),
+                        runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
+                    ],
+                ),
+            );
+            parts
+        }
+        Err(err) => {
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "local_rewrite_gemini_compact_fallback",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field(
+                            "path",
+                            path_without_query(&captured.path_and_query),
+                        ),
+                        runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
+                        runtime_proxy_log_field("reason", format!("{err:#}")),
+                    ],
+                ),
+            );
+            runtime_gemini_local_compact_response_parts(&captured.body)
+        }
+    };
+    let _ = request.respond(build_runtime_proxy_response_from_parts(parts));
 }
 
 pub(super) struct RuntimeLocalRewriteUpstreamResult {

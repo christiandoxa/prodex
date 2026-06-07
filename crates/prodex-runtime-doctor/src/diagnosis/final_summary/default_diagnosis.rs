@@ -104,6 +104,22 @@ pub(super) fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -
             "Recent profile auth recovery failed after an upstream unauthorized response. Next step: {}",
             runtime_doctor_profile_auth_recovery_next_step(summary)
         )
+    } else if runtime_doctor_marker_count(summary, "local_rewrite_provider_auth_failure") > 0 {
+        let provider = runtime_doctor_marker_last_field(
+            summary,
+            "local_rewrite_provider_auth_failure",
+            "provider",
+        )
+        .unwrap_or("provider");
+        let profile = runtime_doctor_marker_last_field(
+            summary,
+            "local_rewrite_provider_auth_failure",
+            "profile",
+        )
+        .unwrap_or("unknown");
+        format!(
+            "Recent {provider} provider auth failure was observed for profile {profile}; refresh that provider login or API key before retrying."
+        )
     } else if runtime_doctor_marker_count(summary, "compact_fresh_fallback_blocked") > 0 {
         "Recent compact lineage guard failed closed so a follow-up stayed owner-first until upstream continuity was proven dead.".to_string()
     } else if runtime_doctor_marker_count(summary, "compact_pressure_shed") > 0 {
@@ -217,6 +233,85 @@ pub(super) fn runtime_doctor_default_diagnosis(summary: &RuntimeDoctorSummary) -
         || runtime_doctor_marker_count(summary, "quota_critical_floor_before_send") > 0
     {
         "Recent quota hardening skipped near-exhausted sends or passed through upstream usage-limit responses.".to_string()
+    } else if runtime_doctor_marker_count(summary, "local_rewrite_gemini_quota_rotate") > 0
+        || runtime_doctor_marker_count(summary, "local_rewrite_gemini_rate_limit_retry") > 0
+    {
+        let profile = runtime_doctor_marker_last_field(
+            summary,
+            "local_rewrite_gemini_quota_rotate",
+            "profile",
+        )
+        .or_else(|| {
+            runtime_doctor_marker_last_field(
+                summary,
+                "local_rewrite_gemini_rate_limit_retry",
+                "profile",
+            )
+        })
+        .unwrap_or("unknown");
+        format!(
+            "Recent Gemini quota or rate-limit recovery was observed for profile {profile} before commit; OAuth profile rotation/retry kept the Codex-facing request recoverable."
+        )
+    } else if runtime_doctor_marker_count(summary, "local_rewrite_provider_model_fallback") > 0 {
+        let provider = runtime_doctor_marker_last_field(
+            summary,
+            "local_rewrite_provider_model_fallback",
+            "provider",
+        )
+        .unwrap_or("provider");
+        let from_model = runtime_doctor_marker_last_field(
+            summary,
+            "local_rewrite_provider_model_fallback",
+            "from_model",
+        )
+        .unwrap_or("-");
+        let to_model = runtime_doctor_marker_last_field(
+            summary,
+            "local_rewrite_provider_model_fallback",
+            "to_model",
+        )
+        .unwrap_or("-");
+        format!(
+            "Recent {provider} model fallback was used before commit ({from_model} -> {to_model})."
+        )
+    } else if runtime_doctor_marker_count(summary, "local_rewrite_gemini_invalid_stream_retry") > 0
+        || runtime_doctor_marker_count(
+            summary,
+            "local_rewrite_gemini_invalid_stream_model_fallback",
+        ) > 0
+    {
+        let reason = runtime_doctor_marker_last_field(
+            summary,
+            "local_rewrite_gemini_invalid_stream_retry",
+            "reason",
+        )
+        .or_else(|| {
+            runtime_doctor_marker_last_field(
+                summary,
+                "local_rewrite_gemini_invalid_stream_model_fallback",
+                "reason",
+            )
+        })
+        .unwrap_or("invalid_stream");
+        format!(
+            "Recent Gemini stream produced an invalid pre-commit prefix ({reason}); Prodex retried or fell back before exposing it to Codex."
+        )
+    } else if runtime_doctor_marker_count(summary, "local_rewrite_gemini_compact_fallback") > 0 {
+        let reason = runtime_doctor_marker_last_field(
+            summary,
+            "local_rewrite_gemini_compact_fallback",
+            "reason",
+        )
+        .unwrap_or("unknown");
+        format!(
+            "Recent Gemini semantic compact failed before commit, so Prodex preserved continuity with the bounded local fallback. Latest reason: {reason}."
+        )
+    } else if runtime_doctor_marker_count(summary, "local_rewrite_gemini_live_error") > 0
+        || runtime_doctor_marker_count(summary, "local_rewrite_gemini_live_sidecar_error") > 0
+        || runtime_doctor_marker_count(summary, "local_rewrite_gemini_live_sidecar_session_error")
+            > 0
+    {
+        "Recent Gemini Live bridge errors were observed; inspect local_rewrite_gemini_live_* markers for the failing profile/request.".to_string()
     } else if runtime_doctor_marker_count(summary, "stream_read_error") > 0 {
         "Recent upstream stream read failure detected after commit.".to_string()
     } else if runtime_doctor_marker_count(summary, "local_writer_error") > 0 {

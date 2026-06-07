@@ -287,6 +287,41 @@ fn prepare_caveman_home_shares_base_chat_history() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_caveman_home_keeps_rollout_state_local_to_launch_home() {
+    let base = temp_dir("state-base");
+    let managed_root = temp_dir("state-managed");
+    fs::create_dir_all(&base).expect("base dir");
+    fs::write(base.join("state_5.sqlite"), "shared rollout state").expect("state db");
+    fs::write(base.join("state_5.sqlite-shm"), "shared rollout shm").expect("state shm");
+    fs::write(base.join("state_5.sqlite-wal"), "shared rollout wal").expect("state wal");
+    fs::write(base.join("logs_5.sqlite"), "shared logs").expect("logs db");
+
+    let overlay = prepare_caveman_launch_home(&managed_root, &base)
+        .expect("caveman launch home should prepare");
+
+    assert!(!overlay.join("state_5.sqlite").exists());
+    assert!(!overlay.join("state_5.sqlite-shm").exists());
+    assert!(!overlay.join("state_5.sqlite-wal").exists());
+    assert_eq!(
+        fs::read_to_string(base.join("state_5.sqlite")).expect("base state should remain"),
+        "shared rollout state"
+    );
+    assert_eq!(
+        fs::read_to_string(overlay.join("logs_5.sqlite"))
+            .expect("non-rollout state remains copied"),
+        "shared logs"
+    );
+    assert_eq!(
+        fs::read_link(overlay.join("sessions")).expect("sessions should stay shared"),
+        base.join("sessions")
+    );
+
+    let _ = fs::remove_dir_all(managed_root);
+    let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+#[test]
 fn caveman_session_start_script_outputs_once_per_launch_home() {
     let codex_home = temp_dir("caveman-sessionstart-once");
     fs::create_dir_all(&codex_home).expect("codex home should exist");

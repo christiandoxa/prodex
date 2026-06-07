@@ -11,5 +11,18 @@
       "maxFileLines": 3000
     },
     "reason": "Reviewed cross-cutting Gemini provider parity release with complete local full, clippy, and serial test gates."
+  },
+  {
+    "id": "gemini-provider-parity-hardening-0.158.0",
+    "requiredSubjects": [
+      "feat(gemini): harden Codex-native provider parity"
+    ],
+    "caps": {
+      "maxFiles": 45,
+      "maxBehaviorFiles": 34,
+      "maxLines": 2700,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed cross-cutting Gemini bridge hardening with local full, preflight, and credentialed Gemini live smoke gates."
   }
 ]

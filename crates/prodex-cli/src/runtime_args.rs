@@ -359,6 +359,15 @@ impl SuperExternalProvider {
         }
     }
 
+    fn codex_provider_name(self) -> &'static str {
+        match self {
+            // Codex currently exposes no configurable remote-compaction capability flag.
+            // It enables /responses/compact only for provider names OpenAI or Azure.
+            Self::Gemini => "Azure",
+            _ => self.display_name(),
+        }
+    }
+
     fn default_model(self) -> &'static str {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_MODEL,
@@ -495,7 +504,7 @@ pub fn super_external_provider_codex_args(
         format!("model={}", toml_string_literal(model)),
         format!(
             "model_providers.{provider_id}.name={}",
-            toml_string_literal(provider.display_name())
+            toml_string_literal(provider.codex_provider_name())
         ),
         format!(
             "model_providers.{provider_id}.base_url={}",

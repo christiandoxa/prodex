@@ -60,6 +60,178 @@ pub(super) fn runtime_doctor_push_marker_detail_rows(
             .to_string(),
         );
     }
+    if let Some(marker_fields) = summary.marker_last_fields.get(marker) {
+        if marker == "local_rewrite_provider_model_fallback" {
+            fields
+                .push(
+                    "Provider fallback",
+                    format!(
+                        "{} {} -> {}",
+                        marker_fields
+                            .get("provider")
+                            .map(String::as_str)
+                            .unwrap_or("provider"),
+                        marker_fields
+                            .get("from_model")
+                            .map(String::as_str)
+                            .unwrap_or("-"),
+                        marker_fields
+                            .get("to_model")
+                            .map(String::as_str)
+                            .unwrap_or("-")
+                    ),
+                )
+                .push(
+                    "Provider fallback class",
+                    marker_fields
+                        .get("class")
+                        .cloned()
+                        .unwrap_or_else(|| "-".to_string()),
+                );
+        }
+        if marker == "local_rewrite_provider_auth_failure" {
+            fields
+                .push(
+                    "Provider auth scope",
+                    format!(
+                        "{} profile={} status={}",
+                        marker_fields
+                            .get("provider")
+                            .map(String::as_str)
+                            .unwrap_or("provider"),
+                        marker_fields
+                            .get("profile")
+                            .map(String::as_str)
+                            .unwrap_or("-"),
+                        marker_fields
+                            .get("status")
+                            .map(String::as_str)
+                            .unwrap_or("-")
+                    ),
+                )
+                .push(
+                    "Provider auth error",
+                    marker_fields
+                        .get("class")
+                        .cloned()
+                        .unwrap_or_else(|| "-".to_string()),
+                );
+        }
+        if marker == "local_rewrite_gemini_quota_rotate"
+            || marker == "local_rewrite_gemini_rate_limit_retry"
+        {
+            fields.push(
+                "Gemini retry scope",
+                format!(
+                    "profile={} status={} reason={} retry={} delay_ms={}",
+                    marker_fields
+                        .get("profile")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("status")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("reason")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("retry")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("delay_ms")
+                        .map(String::as_str)
+                        .unwrap_or("-")
+                ),
+            );
+        }
+        if marker == "local_rewrite_gemini_invalid_stream_retry"
+            || marker == "local_rewrite_gemini_invalid_stream_model_fallback"
+        {
+            fields.push(
+                "Gemini stream retry",
+                format!(
+                    "profile={} model={} from={} to={} reason={}",
+                    marker_fields
+                        .get("profile")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("model")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("from_model")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("to_model")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("reason")
+                        .map(String::as_str)
+                        .unwrap_or("-")
+                ),
+            );
+        }
+        if marker == "local_rewrite_gemini_compact_semantic"
+            || marker == "local_rewrite_gemini_compact_fallback"
+        {
+            fields.push(
+                "Gemini compact",
+                format!(
+                    "mode={} profile={} request={} body_bytes={} reason={}",
+                    if marker == "local_rewrite_gemini_compact_semantic" {
+                        "semantic"
+                    } else {
+                        "local-fallback"
+                    },
+                    marker_fields
+                        .get("profile")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("request")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("body_bytes")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("reason")
+                        .map(String::as_str)
+                        .unwrap_or("-")
+                ),
+            );
+        }
+        if marker == "local_rewrite_gemini_live_error"
+            || marker == "local_rewrite_gemini_live_sidecar_error"
+            || marker == "local_rewrite_gemini_live_sidecar_session_error"
+        {
+            fields.push(
+                "Gemini Live error",
+                format!(
+                    "request={} profile={} error={}",
+                    marker_fields
+                        .get("request")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("profile")
+                        .map(String::as_str)
+                        .unwrap_or("-"),
+                    marker_fields
+                        .get("error")
+                        .map(String::as_str)
+                        .unwrap_or("-")
+                ),
+            );
+        }
+    }
     let has_ws_overflow_rejected =
         diagnosis::runtime_doctor_marker_count(summary, "websocket_connect_overflow_rejected") > 0;
     let has_ws_overflow_reject =

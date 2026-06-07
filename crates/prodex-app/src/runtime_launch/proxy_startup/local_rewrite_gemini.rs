@@ -245,6 +245,37 @@ pub(super) fn send_runtime_gemini_upstream_request(
                         translated.body = fallback_body;
                         continue;
                     }
+                    if runtime_gemini_should_rotate_after_quota_response(
+                        status,
+                        selected.hard_affinity,
+                        attempt_index,
+                        attempt_count,
+                    ) && (status == 429 || quota_blocked)
+                    {
+                        runtime_proxy_log(
+                            &shared.runtime_shared,
+                            runtime_proxy_structured_log_message(
+                                "local_rewrite_gemini_quota_rotate",
+                                [
+                                    runtime_proxy_log_field("request", request_id.to_string()),
+                                    runtime_proxy_log_field(
+                                        "profile",
+                                        selected.profile_name.as_str(),
+                                    ),
+                                    runtime_proxy_log_field("status", status.to_string()),
+                                    runtime_proxy_log_field(
+                                        "reason",
+                                        if status == 429 {
+                                            "rate_limit"
+                                        } else {
+                                            "quota_body"
+                                        },
+                                    ),
+                                ],
+                            ),
+                        );
+                        continue 'auth_attempts;
+                    }
                     if runtime_provider_should_retry_with_next_model(class)
                         && model_index + 1 < model_chain.len()
                     {
@@ -350,38 +381,6 @@ pub(super) fn send_runtime_gemini_upstream_request(
                             continue 'auth_attempts;
                         }
                     }
-                    if runtime_gemini_should_rotate_after_quota_response(
-                        status,
-                        selected.hard_affinity,
-                        attempt_index,
-                        attempt_count,
-                    ) && (status == 429 || quota_blocked)
-                    {
-                        runtime_proxy_log(
-                            &shared.runtime_shared,
-                            runtime_proxy_structured_log_message(
-                                "local_rewrite_gemini_quota_rotate",
-                                [
-                                    runtime_proxy_log_field("request", request_id.to_string()),
-                                    runtime_proxy_log_field(
-                                        "profile",
-                                        selected.profile_name.as_str(),
-                                    ),
-                                    runtime_proxy_log_field("status", status.to_string()),
-                                    runtime_proxy_log_field(
-                                        "reason",
-                                        if status == 429 {
-                                            "rate_limit"
-                                        } else {
-                                            "quota_body"
-                                        },
-                                    ),
-                                ],
-                            ),
-                        );
-                        continue 'auth_attempts;
-                    }
-
                     if status == 429
                         && !runtime_gemini_body_has_terminal_quota(&parts.body)
                         && delay_ms > 0

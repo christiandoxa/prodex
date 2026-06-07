@@ -58,14 +58,30 @@ pub fn normalize_run_codex_args(codex_args: &[OsString]) -> Vec<OsString> {
 }
 
 pub fn codex_resume_session_id(codex_args: &[OsString]) -> Option<&str> {
-    let index = first_codex_positional_arg_index(codex_args)?;
-    if codex_args.get(index)?.to_str()? != "resume" {
+    let resume_index = codex_resume_command_index(codex_args)?;
+    let resume_args = &codex_args[(resume_index + 1)..];
+    let target_index = first_codex_positional_arg_index(resume_args)?;
+    if resume_args[..target_index]
+        .iter()
+        .any(|arg| arg == "--last")
+    {
         return None;
     }
-    codex_args[(index + 1)..]
-        .iter()
-        .filter_map(|arg| arg.to_str())
-        .find(|arg| !arg.starts_with('-'))
+    resume_args.get(target_index)?.to_str()
+}
+
+fn codex_resume_command_index(codex_args: &[OsString]) -> Option<usize> {
+    let command_index = first_codex_positional_arg_index(codex_args)?;
+    match codex_args.get(command_index)?.to_str()? {
+        "resume" => Some(command_index),
+        "exec" => {
+            let after_exec = command_index + 1;
+            let relative_index = first_codex_positional_arg_index(&codex_args[after_exec..])?;
+            let resume_index = after_exec + relative_index;
+            (codex_args.get(resume_index)?.to_str()? == "resume").then_some(resume_index)
+        }
+        _ => None,
+    }
 }
 
 fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
@@ -405,6 +421,11 @@ pub fn prepare_codex_launch_args(
 }
 
 pub fn scope_codex_exec_config_args(codex_args: &[OsString]) -> Vec<OsString> {
+    let codex_args = scope_codex_exec_config_args_to_exec(codex_args);
+    scope_codex_exec_resume_config_args_to_resume(&codex_args)
+}
+
+fn scope_codex_exec_config_args_to_exec(codex_args: &[OsString]) -> Vec<OsString> {
     let Some(exec_index) = first_codex_positional_arg_index(codex_args) else {
         return codex_args.to_vec();
     };
@@ -448,6 +469,64 @@ pub fn scope_codex_exec_config_args(codex_args: &[OsString]) -> Vec<OsString> {
     args.push(codex_args[exec_index].clone());
     args.extend(config_overrides);
     args.extend(codex_args[(exec_index + 1)..].iter().cloned());
+    args
+}
+
+fn scope_codex_exec_resume_config_args_to_resume(codex_args: &[OsString]) -> Vec<OsString> {
+    let Some(exec_index) = first_codex_positional_arg_index(codex_args) else {
+        return codex_args.to_vec();
+    };
+    if codex_args.get(exec_index).and_then(|arg| arg.to_str()) != Some("exec") {
+        return codex_args.to_vec();
+    }
+
+    let after_exec = exec_index + 1;
+    let Some(relative_resume_index) = first_codex_positional_arg_index(&codex_args[after_exec..])
+    else {
+        return codex_args.to_vec();
+    };
+    let resume_index = after_exec + relative_resume_index;
+    if codex_args.get(resume_index).and_then(|arg| arg.to_str()) != Some("resume") {
+        return codex_args.to_vec();
+    }
+
+    let mut exec_options = Vec::with_capacity(resume_index.saturating_sub(after_exec));
+    let mut config_overrides = Vec::new();
+    let mut index = after_exec;
+    while index < resume_index {
+        let Some(arg) = codex_args[index].to_str() else {
+            exec_options.push(codex_args[index].clone());
+            index += 1;
+            continue;
+        };
+
+        if matches!(arg, "-c" | "--config") && index + 1 < resume_index {
+            config_overrides.push(codex_args[index].clone());
+            config_overrides.push(codex_args[index + 1].clone());
+            index += 2;
+            continue;
+        }
+
+        if is_inline_config_override_arg(arg) {
+            config_overrides.push(codex_args[index].clone());
+            index += 1;
+            continue;
+        }
+
+        exec_options.push(codex_args[index].clone());
+        index += 1;
+    }
+
+    if config_overrides.is_empty() {
+        return codex_args.to_vec();
+    }
+
+    let mut args = Vec::with_capacity(codex_args.len());
+    args.extend(codex_args[..=exec_index].iter().cloned());
+    args.extend(exec_options);
+    args.push(codex_args[resume_index].clone());
+    args.extend(config_overrides);
+    args.extend(codex_args[(resume_index + 1)..].iter().cloned());
     args
 }
 

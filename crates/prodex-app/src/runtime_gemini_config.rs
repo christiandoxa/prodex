@@ -227,7 +227,7 @@ fn gemini_catalog_model(
         "auto_compact_token_limit": auto_compact_token_limit,
         "effective_context_window_percent": 95,
         "experimental_supported_tools": [],
-        "input_modalities": ["text"],
+        "input_modalities": ["text", "image"],
         "supports_search_tool": true
     })
 }
@@ -321,6 +321,8 @@ mod tests {
                 .any(|level| level["effort"] == "high")
         );
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
+        assert_eq!(catalog["models"][0]["input_modalities"][0], "text");
+        assert_eq!(catalog["models"][0]["input_modalities"][1], "image");
         let model_slugs = catalog["models"].as_array().unwrap();
         assert!(model_slugs.len() > 1);
         assert!(

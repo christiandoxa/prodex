@@ -442,6 +442,7 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
         .collect::<Vec<_>>();
     assert!(rendered.contains(&"model_provider=\"prodex-gemini\"".to_string()));
     assert!(rendered.contains(&"model=\"auto\"".to_string()));
+    assert!(rendered.contains(&"model_providers.prodex-gemini.name=\"Azure\"".to_string()));
     assert!(rendered.contains(
         &"model_providers.prodex-gemini.base_url=\"https://generativelanguage.googleapis.com/v1beta\""
             .to_string()

@@ -181,12 +181,34 @@ where
     T: Into<OsString>,
 {
     let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let raw_args = rewrite_super_provider_alias_args(&raw_args);
     let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
         rewrite_cli_args_as_run(&raw_args)
     } else {
         raw_args
     };
     Ok(Cli::try_parse_from(parse_args)?.command)
+}
+
+fn rewrite_super_provider_alias_args(args: &[OsString]) -> Vec<OsString> {
+    let Some(command) = args.get(1).and_then(|arg| arg.to_str()) else {
+        return args.to_vec();
+    };
+    if command != "s" && command != "super" {
+        return args.to_vec();
+    }
+    let Some(provider) = args.get(2).and_then(|arg| arg.to_str()) else {
+        return args.to_vec();
+    };
+    if !matches!(provider, "gemini" | "deepseek") {
+        return args.to_vec();
+    }
+
+    let mut rewritten = Vec::with_capacity(args.len() + 1);
+    rewritten.extend(args.iter().take(2).cloned());
+    rewritten.push(OsString::from("--provider"));
+    rewritten.extend(args.iter().skip(2).cloned());
+    rewritten
 }
 
 pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {

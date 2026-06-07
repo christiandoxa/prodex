@@ -84,6 +84,16 @@
           ]
         },
         {
+          "path": "codex-rs/model-provider-info/src/lib.rs",
+          "reason": "Owns remote compaction capability gating for model providers; Prodex Gemini relies on the current OpenAI/Azure capability behavior to activate Codex native /responses/compact.",
+          "required_contains": [
+            "ModelProviderInfo",
+            "supports_remote_compaction",
+            "is_openai()",
+            "is_azure_responses_provider"
+          ]
+        },
+        {
           "path": "codex-rs/core/src/realtime_conversation.rs",
           "reason": "Owns realtime websocket start header construction; v1 websocket sessions require the openai-alpha quicksilver=v1 header.",
           "required_contains": [
@@ -401,6 +411,18 @@
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
+          ]
+        },
+        {
+          "id": "model-provider.remote-compaction-capability",
+          "kind": "capability_gate",
+          "file": "codex-rs/model-provider-info/src/lib.rs",
+          "reason": "Gemini semantic compact depends on Codex continuing to expose remote compaction through the current OpenAI/Azure provider capability gate.",
+          "file_contains_all": [
+            "ModelProviderInfo",
+            "supports_remote_compaction",
+            "is_openai()",
+            "is_azure_responses_provider"
           ]
         },
         {

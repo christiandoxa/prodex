@@ -64,6 +64,8 @@ npm run release:prepare
 npm run changelog:check
 npm run docs:lint
 npm run ci:runtime-manifest
+npm run test:gemini-schema
+npm run test:gemini-live
 npm run test:runtime-smoke
 npm run compat:offline-gate
 npm run compat:check
@@ -96,6 +98,10 @@ npm run test:timing-balance -- --file /tmp/fast.log --file /tmp/serial.log --lim
 The default output ranks labels by average runtime and includes suggested integer second weights. Use `-- --weights-json` for generic rebalance input shaped as `[{ label, weightSeconds, ... }]`. Use `-- --runtime-stress-hints` when the input labels come from `serial:stress:<test>` or `serial:continuation:<iteration>:<test>`; it emits a `RUNTIME_STRESS_WEIGHT_HINTS` snippet compatible with the weighted runtime stress shard planner in `scripts/ci/runtime-stress.mjs`.
 
 Use `npm run test:runtime-smoke` for a small local runtime invariant suite before broad runtime work. It runs curated log JSON/marker, header preservation, selection affinity, stale continuation, websocket local pressure, and tuning snapshot checks from the shared runtime manifest without changing the broad runtime or stress suites.
+
+Use `npm run test:gemini-schema` after changing Gemini request, response, SSE, tool-schema, or Gemini Live translation code. It is offline and guards the Codex-to-Gemini schema snippets, response metadata mapping, SSE event surface, and Live event vocabulary.
+
+Use `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` only on machines with configured Gemini credentials. The default path sends one exact-response smoke request. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` to cover exact shell output, file edits, `apply_patch`, semantic compact, and explicit `exec resume`; add `PRODEX_LIVE_GEMINI_MCP=1` or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when that environment should also exercise MCP or image-input paths. The live smoke compares the final Codex agent message exactly, so Gemini narration or bridge leakage fails the gate.
 
 Use `npm run ci:runtime-load-smoke` for the bounded CI/scheduled load smoke. It reuses the load harness in mock-only baseline mode with low request count, zero tolerated request errors, zero admission pressure, and a strict p95 TTFT threshold. For local end-to-end proxy coverage after `cargo build`, run `npm run ci:runtime-load-smoke -- --mode proxy --prodex ./target/debug/prodex`; proxy mode relaxes the TTFT threshold enough to avoid machine-specific flakes while still checking error and admission gates.
 

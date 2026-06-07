@@ -49,6 +49,72 @@ fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
 }
 
 #[test]
+fn run_strategy_auto_routes_explicit_exec_gemini_resume_sessions_to_provider_bridge() {
+    let root = temp_dir("auto-route-explicit-exec-gemini-resume");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout.jsonl"),
+        format!(
+            "{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        skip_quota_check: false,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args: vec![
+            OsString::from("exec"),
+            OsString::from("resume"),
+            OsString::from(session_id),
+            OsString::from("continue"),
+        ],
+    })
+    .unwrap();
+    let request = strategy.runtime_request();
+    let codex_args = strategy
+        .codex_args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert_eq!(request.external_provider, Some("gemini"));
+    assert_eq!(
+        request.model_provider_override,
+        Some(SUPER_GEMINI_PROVIDER_ID)
+    );
+    assert_eq!(request.base_url, Some(SUPER_GEMINI_DEFAULT_BASE_URL));
+    assert!(request.smart_context_enabled);
+    assert!(codex_args.contains(&"model_provider=\"prodex-gemini\"".to_string()));
+    assert_eq!(
+        codex_args
+            .iter()
+            .filter(|arg| arg.as_str() == "exec")
+            .count(),
+        1
+    );
+    assert_eq!(
+        codex_args
+            .iter()
+            .filter(|arg| arg.as_str() == "resume")
+            .count(),
+        1
+    );
+    assert!(codex_args.contains(&session_id.to_string()));
+}
+
+#[test]
 fn run_command_strategy_keeps_smart_context_autopilot_disabled() {
     let strategy = RunCommandStrategy::new(RunArgs {
         profile: None,
