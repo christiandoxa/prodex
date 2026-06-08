@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.165.0 - 2026-06-08
+
+### Docs
+
+- Clarify Gemini feature parity mapping (`a25b4a2`)
+
+### Misc
+
+- Normalize visible response text (`84d37b8`)
+
 ## 0.164.0 - 2026-06-08
 
 ### Misc
@@ -71,9 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Resolve CI clippy failures and Gemini triage (`6117586`)
 - Update prodex-cli dependency version (`00f81ff`)
 - Add multi-language support (`6ab3073`)
-
-## 0.153.0 - 2026-06-05
-
-### Misc
-
-- Normalize apply patch input (`d8c6950`)
