@@ -2,9 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.160.0 - Unreleased
+## 0.161.0 - 2026-06-08
 
-Changes after `0.159.0`.
+### Runtime
+
+- Rotate replayable continuations on quota (`3168530`)
+
+## 0.160.0 - 2026-06-08
 
 ### Misc
 
@@ -74,15 +78,3 @@ Changes after `0.159.0`.
 - Retry provider search fallback (`01f076d`)
 - Preserve provider tool calls (`5ba8683`)
 - Advertise provider capability catalogs (`c6542ec`)
-
-## 0.149.0 - 2026-06-04
-
-### CLI
-
-- Show provider remaining pools (`edc6b4d`)
-
-## 0.148.0 - 2026-06-04
-
-### Misc
-
-- Suppress Gemini browser output (`5b8345b`)
