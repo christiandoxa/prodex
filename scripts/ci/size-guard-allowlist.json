@@ -11,27 +11,27 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
-    "maxLines": 3471,
+    "maxLines": 3480,
     "reason": "The Gemini request translation matrix is capped while Gemini CLI settings precedence, contextual session instruction promotion, multimodal parity, command-output tool responses, and request policy parity remain co-located pending a domain split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_response.rs",
-    "maxLines": 1036,
+    "maxLines": 1168,
     "reason": "Gemini buffered response translation and internal instruction leak filtering remain capped while response sanitization is split from Codex shape reconstruction."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_rewrite_tests.rs",
-    "maxLines": 1860,
+    "maxLines": 1902,
     "reason": "Gemini translation regression cases remain consolidated while Codex-native Gemini parity coverage, model fallback, retry-budget coverage, and instruction-leak sanitizer coverage are completed."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
-    "maxLines": 1292,
+    "maxLines": 1624,
     "reason": "Gemini SSE state-machine invariants, tool-intent tracking, and exact-output reconstruction remain in one capped module until state ownership is split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs",
-    "maxLines": 1050,
+    "maxLines": 1412,
     "reason": "Gemini SSE exact-output, tool-intent, continuity, and instruction-leak regression cases remain consolidated while the state-machine surface stabilizes."
   },
   {
@@ -41,7 +41,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1750,
+    "maxLines": 1779,
     "reason": "Gemini local rewrite authentication, session model affinity, model-unavailable caching, retry budgeting, and request context remain capped while default model ownership is shared through the Gemini runtime crate."
   },
   {

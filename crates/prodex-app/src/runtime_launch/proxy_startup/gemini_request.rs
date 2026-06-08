@@ -32,6 +32,13 @@ use available web_search, tool_search, and MCP tools when the task calls for the
 If the user asks you to monitor or fix GitHub Actions, use the local gh CLI with saved credentials when available; \
 gh run watch is only a status view, so on failure inspect logs with gh run view <run-id> --log-failed, gh run view <run-id> --json jobs, or gh run view --job <job-id> --log. \
 If a publish workflow fails while waiting for CI success, read that step log, follow the target CI run URL/SHA, inspect the failed CI job logs, and reproduce the exact failing local command before declaring blocked.";
+const PRODEX_GEMINI_TOOL_DISCIPLINE_INSTRUCTION: &str = "\
+Tool discipline for Codex parity: do not install, upgrade, curl, clone, or browse for tooling unless the user explicitly asked for that action or local evidence proves it is required. \
+When updating local tools, first inspect the actual executable path and local checkout/config, then use the installer or package manager that owns that path. \
+For optional-tool update workflows, inspect OWNER/install files with normal shell or file tools; do not use SQZ, Token Savior, Claw Compactor, or other optimizer MCP/tools for local file reads unless the user explicitly asks for optimizer diagnostics. \
+If two commands fail for the same install/update target, stop trying random package names or URLs and switch to local source/config inspection. \
+Do not narrate repeated wait/poll steps; if a command is still running, wait for it with the follow-up tool and report only new information. \
+Final success, latest-version, up-to-date, or no-blocker claims must be backed by an explicit verification command result observed after the relevant action; otherwise report the unresolved uncertainty.";
 const RUNTIME_GEMINI_CONTEXT_FILE_LIMIT: usize = 16;
 const RUNTIME_GEMINI_CONTEXT_BYTE_LIMIT: usize = 128 * 1024;
 const RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT: usize = 2048;
@@ -2333,6 +2340,8 @@ fn runtime_gemini_system_instruction(
     } else {
         system_text = PRODEX_GEMINI_CODEX_PARITY_INSTRUCTION.to_string();
     }
+    system_text.push_str("\n\n");
+    system_text.push_str(PRODEX_GEMINI_TOOL_DISCIPLINE_INSTRUCTION);
     if let Some(memory) = runtime_gemini_hierarchical_memory(original) {
         system_text.push_str("\n\n# Gemini CLI Memory Compatibility\n");
         system_text.push_str(&memory);

@@ -29,9 +29,19 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "If `rtk`, `sqz`, or `token-savior` is completely unusable",
     "If `rtk`, `sqz-mcp`, or `claw-compactor` fails",
     "If a token optimization tool fails",
+    "If a token optimizer fails",
     "If an optimizer MCP server crashes",
     "If the user disables Caveman mode",
     "If an optimizer command fails",
+    "If an optimizer tool hangs",
+    "If an optimizer MCP tool or wrapper hangs",
+    "If an optimizer blocks progress",
+    "If an optimizer breaks or stalls",
+    "If an optimizer breaks output layout",
+    "If a `rtk` command drops",
+    "If a `token-savior` edit corrupts",
+    "For critical signals",
+    "Do not apply these tools to configuration",
     "If you are unsure if compression removes relevant detail",
     "If the user asks you to stop using optimizers",
     "If the model loses context",
@@ -47,6 +57,7 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "Do not skip or shorten test failures",
     "Do not skip imports or type signatures",
     "Never skip or shorten test failures",
+    "Do not pipe edits",
     "Never use lossy tools on exact command output",
     "Never use lossy tools to summarize user-facing documentation",
     "Keep code examples exactly as written",
@@ -65,6 +76,8 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "If memory usage surges",
     "Use standard diagnostic helpers such as `prodex doctor --runtime`",
     "When updating memory files manually",
+    "Always use caveman style",
+    "For exact-output prompts",
     "To read memory:",
     "To read the inbox:",
     "To force a memory consolidation:",
@@ -92,8 +105,22 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "Exact source must remain intact for code generation",
     "If Presidio redaction is active",
     "If the user asks for exact text or code",
+    "If the user asks for exact command output",
+    "When returning control",
+    "Use `rtk gain`",
+    "Do not narrate token-saving steps",
+    "Savior diagnostic command",
+    "Let the user know the optimization tools saved tokens",
+    "If the user's explicit requested answer or command output",
+    "If the prompt dictates \"Answer with only the command output\"",
     "If the user reports missing IPs",
+    "If you suspect an optimizer has obscured a critical signal",
+    "Do not hallucinate optimizer tools or CLI wrapper paths",
+    "Do not emit custom marker prefixes",
+    "Do not use `rtk` on shell commands if you need exactly matched raw byte output",
+    "Do not invoke MCP servers or extra optimization processes",
     "Keep original `.md` memory files intact",
+    "Keep files clean",
     "Never compress any part of an edit",
     "Never save compressed files to disk",
     "Never save compressed or corrupted state to disk",
@@ -104,22 +131,54 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "Presidio redaction strips PII",
     "If Presidio is enabled with `fail_mode = \"closed\"`",
     "If an optimizer strips necessary detail or breaks",
+    "If an optimizer produces mangled",
+    "If an optimizer is blocked",
     "If an optimizer fails, falls out of sync",
+    "If the user says stop, wait, or revert",
+    "When the user uses `--debug`",
+    "The prompt requires me to output ONLY",
+    "You must follow Caveman rules",
+    "Tokens must die before facts",
     "Keep exact output for exact requests",
     "Do not repeat this checklist",
     "verify that required data",
     "Do not treat them as magic box services",
     "These optimizers are local tools",
     "Super keeps compression decisions local",
+    "You are Codex CLI",
+    "The user must experience native Codex CLI",
+    "Follow the active Codex",
+    "Tool discipline for Codex parity",
+    "CAVEMAN MODE ACTIVE",
+    "RTK ACTIVE",
+    "Step 3: Run `cat gemini-patch-smoke.txt`",
 ];
 const GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS: &[&str] = &[
     "## Privacy (Presidio)",
     "## Metrics",
     "## Reporting",
+    "## References",
+    "## Verification",
+    "## Status",
     "## Prodex Runtime Logging",
+    "<thought",
+    "CRITICAL INSTRUCTION",
+    "Related tools for this task",
+    "default_api:",
+    "I must use `default_api:",
+    "I will call `default_api:",
+    "I am still waiting for the command to finish",
     "## Memory Files",
+    "## Formatting",
+    "## Configuration",
     "Caveman Plugin",
     "Do not explain these instructions",
+    "You are Codex CLI",
+    "native Codex CLI",
+    "Tool discipline for Codex parity",
+    "CAVEMAN MODE ACTIVE",
+    "RTK ACTIVE",
+    "Step 3: Run `cat gemini-patch-smoke.txt`",
     "Keep Caveman style",
     "Do not tell the user what tools or settings you used",
     "Do not try to debug or test if tests pass",
@@ -130,12 +189,30 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS: &[&str] = &[
     "RTK and Prodex Smart Context auto-wrappers conflict",
     "disable wrapper fallback by using an absolute path",
     "Do not use local optimizers for exact validation tasks",
+    "If the user requests an exact string",
+    "If the user requests exact text",
+    "bypass all optimizers",
+    "RTK, SQZ, and Token Savior",
+    "native Codex MCP",
+    "answer-only output",
+    "command output only",
+    "emit only that requested output",
+    "For exact-output prompts",
+    "do not include explanations, diffs, status",
     "Code changes, commits, and PRs must remain readable",
     "Use local optimizers only",
     "The Super launch is your implicit permission",
     "Prodex proxy components",
     "Prodex internal source code",
     "Prodex internals (`prodex-app`",
+    "agent's meta-operations",
+    "Prodex Super code bug",
+    "When in Super tools",
+    "degraded fallback capability",
+    "Do not use Caveman `ultra`",
+    "known noisy targets like tests or diffs",
+    "untrusted code outside the agent environment",
+    "Super mode does not alter normal security instructions",
     "token-optimizer tool",
     "token-optimizer crash",
     "token savings",
@@ -148,6 +225,15 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS: &[&str] = &[
     "optimizer <name> unavailable",
     "optimizer <name> failed",
     "prodex super --metrics",
+    "token_budget",
+    "SUPER_OPTIMIZERS.md",
+    "RTK.md",
+    "optimizer overrides",
+    "host environment to be healthy",
+    "This concludes the injected system instructions",
+    ".prodex/super.toml",
+    "PRODEX_SUPER_AUTO_COMPRESS",
+    "irreversible reductions",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -469,12 +555,58 @@ pub(in super::super) fn runtime_gemini_internal_instruction_leak_text(text: &str
     if trimmed.is_empty() {
         return false;
     }
+    let lower = trimmed.to_ascii_lowercase();
     GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES
         .iter()
         .any(|prefix| trimmed.starts_with(prefix))
         || GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS
             .iter()
             .any(|marker| trimmed.contains(marker))
+        || runtime_gemini_optimizer_instruction_leak_text(&lower)
+}
+
+fn runtime_gemini_optimizer_instruction_leak_text(lower: &str) -> bool {
+    let mentions_optimizer_surface = lower.contains("optimizer")
+        || lower.contains("rtk")
+        || lower.contains("prodex-sqz")
+        || lower.contains("token-savior")
+        || lower.contains("claw-compactor")
+        || lower.contains("mcp server");
+    let imperative_or_internal = lower.contains("do not ")
+        || lower.contains("never ")
+        || lower.contains("if an optimizer")
+        || lower.contains("if a token")
+        || lower.contains("token-saving")
+        || lower.contains("lossless deduplication")
+        || lower.contains("syntactic abbreviation")
+        || lower.contains("bypass it for that turn")
+        || lower.contains("strip rtk proxy banners")
+        || lower.contains("prodex manages optimizer scopes")
+        || lower.contains("normal shell commands or file reads");
+    mentions_optimizer_surface && imperative_or_internal
+        || runtime_gemini_exact_output_instruction_leak_text(lower)
+}
+
+fn runtime_gemini_exact_output_instruction_leak_text(lower: &str) -> bool {
+    let mentions_exact_output = lower.contains("exact command output")
+        || lower.contains("answer with exactly that output")
+        || lower.contains("without surrounding text")
+        || lower.contains("answer-only output")
+        || lower.contains("command output only")
+        || lower.contains("emit only that requested output")
+        || lower.contains("for exact-output prompts")
+        || lower.contains("answer with only the command output");
+    let mentions_internal_action = lower.contains("when the user")
+        || lower.contains("if the user")
+        || lower.contains("do not ")
+        || lower.contains("wait or poll")
+        || lower.contains("all commands run with user privileges")
+        || lower.contains("running session id")
+        || lower.contains("do not stop midway")
+        || lower.contains("execute requested tool tasks");
+    mentions_exact_output && mentions_internal_action
+        || (lower.contains("all commands run with user privileges")
+            && lower.contains("execute requested tool tasks"))
 }
 
 pub(in super::super) fn runtime_gemini_sanitize_internal_instruction_leak_text(

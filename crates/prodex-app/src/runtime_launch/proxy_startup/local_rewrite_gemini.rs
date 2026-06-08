@@ -82,6 +82,7 @@ struct RuntimeGeminiOAuthPoolState {
     next_index: usize,
     response_profile_bindings: BTreeMap<String, String>,
     tool_call_profile_bindings: BTreeMap<String, String>,
+    session_profile_bindings: BTreeMap<String, String>,
     response_model_scope_bindings: BTreeMap<String, String>,
     tool_call_model_scope_bindings: BTreeMap<String, String>,
     quota_headers: BTreeMap<String, Vec<(String, String)>>,
@@ -128,6 +129,7 @@ pub(super) fn runtime_gemini_oauth_pool_from_provider(
             next_index: runtime_gemini_initial_oauth_pool_index(profiles.len()),
             response_profile_bindings: BTreeMap::new(),
             tool_call_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
             response_model_scope_bindings: BTreeMap::new(),
             tool_call_model_scope_bindings: BTreeMap::new(),
             quota_headers: BTreeMap::new(),
@@ -148,7 +150,12 @@ pub(super) fn send_runtime_gemini_upstream_request(
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
     let thinking_budget_tokens = runtime_gemini_thinking_budget_tokens(&shared.provider);
-    let attempts = runtime_gemini_auth_attempts(auth, shared, &body)?;
+    let model_scope = shared
+        .gemini_oauth_pool
+        .as_ref()
+        .and_then(|pool| pool.model_scope_for_request(request, &body))
+        .or_else(|| responses_route.then(|| format!("request:{request_id}")));
+    let attempts = runtime_gemini_auth_attempts(auth, shared, &body, model_scope.as_deref())?;
     let common_model_selection = runtime_local_rewrite_model_selection(
         shared,
         RuntimeProviderBridgeKind::Gemini,
@@ -156,11 +163,6 @@ pub(super) fn send_runtime_gemini_upstream_request(
         &body,
         GEMINI_DEFAULT_MODEL,
     );
-    let model_scope = shared
-        .gemini_oauth_pool
-        .as_ref()
-        .and_then(|pool| pool.model_scope_for_request(request, &body))
-        .or_else(|| responses_route.then(|| format!("request:{request_id}")));
     let original_requested_model =
         runtime_provider_model_from_body(&body).unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
     let requested_model = shared
@@ -1090,6 +1092,7 @@ fn runtime_gemini_auth_attempts(
     auth: &RuntimeGeminiProviderAuth,
     shared: &RuntimeLocalRewriteProxyShared,
     body: &[u8],
+    model_scope: Option<&str>,
 ) -> Result<Vec<RuntimeGeminiSelectedAuth>> {
     match auth {
         RuntimeGeminiProviderAuth::ApiKeys { api_keys } => {
@@ -1114,7 +1117,7 @@ fn runtime_gemini_auth_attempts(
                 .gemini_oauth_pool
                 .as_ref()
                 .context("Gemini OAuth pool was not initialized")?;
-            pool.select_attempts(body, profiles)
+            pool.select_attempts(body, profiles, model_scope)
         }
     }
 }
@@ -1123,7 +1126,7 @@ pub(super) fn runtime_gemini_live_auth_attempts(
     auth: &RuntimeGeminiProviderAuth,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<Vec<(String, RuntimeGeminiAuth)>> {
-    Ok(runtime_gemini_auth_attempts(auth, shared, b"{}")?
+    Ok(runtime_gemini_auth_attempts(auth, shared, b"{}", None)?
         .into_iter()
         .map(|selected| (selected.profile_name, selected.auth))
         .collect())
@@ -1339,6 +1342,7 @@ impl RuntimeGeminiOAuthPool {
         &self,
         body: &[u8],
         fallback_profiles: &[RuntimeGeminiOAuthProfileAuth],
+        model_scope: Option<&str>,
     ) -> Result<Vec<RuntimeGeminiSelectedAuth>> {
         let mut state = self
             .state
@@ -1354,6 +1358,13 @@ impl RuntimeGeminiOAuthPool {
         }
         if let Some(profile_name) = state.affinity_profile_for_body(body)
             && let Some(attempts) = runtime_gemini_oauth_affinity_attempts(&profiles, &profile_name)
+        {
+            return Ok(attempts);
+        }
+        if runtime_gemini_sticky_fresh_oauth_enabled()
+            && let Some(scope) = model_scope.filter(|scope| scope.starts_with("session:"))
+            && let Some(profile_name) = state.session_profile_bindings.get(scope)
+            && let Some(attempts) = runtime_gemini_oauth_affinity_attempts(&profiles, profile_name)
         {
             return Ok(attempts);
         }
@@ -1392,6 +1403,16 @@ impl RuntimeGeminiOAuthPool {
                 .collect();
         }
         Ok(attempts)
+    }
+}
+
+fn runtime_gemini_sticky_fresh_oauth_enabled() -> bool {
+    match std::env::var("PRODEX_GEMINI_STICKY_FRESH_OAUTH") {
+        Ok(value) => !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        Err(_) => true,
     }
 }
 
@@ -1483,6 +1504,10 @@ impl RuntimeGeminiOAuthPoolState {
             if let Some(model_scope) = model_scope.filter(|scope| !scope.trim().is_empty()) {
                 self.response_model_scope_bindings
                     .insert(response_id.to_string(), model_scope.to_string());
+                if model_scope.starts_with("session:") {
+                    self.session_profile_bindings
+                        .insert(model_scope.to_string(), profile_name.to_string());
+                }
             }
         }
         for call_id in tool_call_ids {
@@ -1501,6 +1526,10 @@ impl RuntimeGeminiOAuthPoolState {
         );
         runtime_gemini_prune_binding_map(
             &mut self.tool_call_profile_bindings,
+            RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT,
+        );
+        runtime_gemini_prune_binding_map(
+            &mut self.session_profile_bindings,
             RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT,
         );
         runtime_gemini_prune_binding_map(
