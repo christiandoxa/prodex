@@ -323,10 +323,9 @@ pub(super) fn runtime_local_rewrite_model_selection(
         .unwrap_or_else(|| original_model.clone());
     if let (Some(scope), Some(explicit_model)) = (scope.as_deref(), body_model.as_deref())
         && !runtime_local_rewrite_model_allows_session_memory(explicit_model)
+        && let Ok(mut memory) = shared.model_memory.lock()
     {
-        if let Ok(mut memory) = shared.model_memory.lock() {
-            memory.remember_selected_model(scope, explicit_model);
-        }
+        memory.remember_selected_model(scope, explicit_model);
     }
     let body = if model != original_model {
         runtime_provider_request_body_with_model(body, &model)
