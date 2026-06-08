@@ -10,6 +10,10 @@ use std::path::PathBuf;
 
 #[path = "gemini_apply_patch.rs"]
 mod gemini_apply_patch;
+#[path = "gemini_command_output.rs"]
+mod gemini_command_output;
+#[path = "gemini_history_hardening.rs"]
+mod gemini_history_hardening;
 #[path = "gemini_request.rs"]
 mod gemini_request;
 #[path = "gemini_response.rs"]
@@ -165,6 +169,18 @@ pub(super) fn runtime_gemini_project_id(auth: &RuntimeGeminiAuth) -> Option<&str
 #[cfg(test)]
 #[path = "gemini_rewrite_custom_tool_tests.rs"]
 mod gemini_rewrite_custom_tool_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_command_output_tests.rs"]
+mod gemini_rewrite_command_output_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_history_tests.rs"]
+mod gemini_rewrite_history_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_test_support.rs"]
+mod gemini_rewrite_test_support;
 
 #[cfg(test)]
 #[path = "gemini_rewrite_tests.rs"]

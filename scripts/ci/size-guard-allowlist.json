@@ -11,7 +11,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
-    "maxLines": 3480,
+    "maxLines": 3417,
     "reason": "The Gemini request translation matrix is capped while Gemini CLI settings precedence, contextual session instruction promotion, multimodal parity, command-output tool responses, and request policy parity remain co-located pending a domain split."
   },
   {
@@ -21,7 +21,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_rewrite_tests.rs",
-    "maxLines": 1902,
+    "maxLines": 1852,
     "reason": "Gemini translation regression cases remain consolidated while Codex-native Gemini parity coverage, model fallback, retry-budget coverage, and instruction-leak sanitizer coverage are completed."
   },
   {

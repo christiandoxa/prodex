@@ -1,18 +1,15 @@
 #![cfg(test)]
 
+use super::gemini_rewrite_test_support::{
+    conversation_store, gemini_test_function_call, gemini_test_function_response,
+};
 use super::{
-    RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
+    runtime_deepseek_store_conversation,
     runtime_gemini_chat_assistant_messages_from_generate_value,
     runtime_gemini_generate_request_body, runtime_gemini_harden_tool_call_thought_signatures,
     runtime_gemini_request_body_without_tool, runtime_gemini_responses_value_from_generate_value,
 };
-use std::collections::BTreeMap;
 use std::fs;
-use std::sync::{Arc, Mutex};
-
-fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
-}
 
 #[test]
 fn gemini_request_translation_maps_tools_and_thinking() {
@@ -232,12 +229,13 @@ fn gemini_request_translation_applies_memory_policy_session_and_gemini3_tool_sch
     assert!(system_text.contains("Remember the project Gemini preference."));
     assert!(system_text.contains("defaultApprovalMode: plan"));
     assert!(system_text.contains("excluded tools: grep"));
-    assert_eq!(value["contents"][0]["role"], "model");
+    assert_eq!(value["contents"][0]["role"], "user");
+    assert_eq!(value["contents"][1]["role"], "model");
     assert_eq!(
-        value["contents"][0]["parts"][0]["text"],
+        value["contents"][1]["parts"][0]["text"],
         "previous Gemini answer"
     );
-    assert_eq!(value["contents"][1]["parts"][0]["text"], "Current turn");
+    assert_eq!(value["contents"][2]["parts"][0]["text"], "Current turn");
 
     let declarations = value["tools"][0]["functionDeclarations"]
         .as_array()
@@ -995,63 +993,14 @@ fn gemini_request_translation_maps_tool_outputs_as_user_function_responses() {
     )
     .expect("request should translate");
     let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let function_call = gemini_test_function_call(&value, "call_shell_1");
+    let function_response = gemini_test_function_response(&value, "call_shell_1");
 
-    assert_eq!(value["contents"][0]["role"], "model");
+    assert_eq!(function_call["functionCall"]["id"], "call_shell_1");
+    assert_eq!(function_response["functionResponse"]["id"], "call_shell_1");
     assert_eq!(
-        value["contents"][0]["parts"][0]["functionCall"]["id"],
-        "call_shell_1"
-    );
-    assert_eq!(value["contents"][1]["role"], "user");
-    assert_eq!(
-        value["contents"][1]["parts"][0]["functionResponse"]["id"],
-        "call_shell_1"
-    );
-    assert_eq!(
-        value["contents"][1]["parts"][0]["functionResponse"]["response"]["output"],
+        function_response["functionResponse"]["response"]["output"],
         "commit abc123"
-    );
-}
-
-#[test]
-fn gemini_request_translation_structures_running_exec_command_output() {
-    let output = "Chunk ID: abc123\nWall time: 1.0000 seconds\nProcess running with session ID 48274\nOriginal token count: 12\nOutput:\nCloning into '/tmp/gemini-cli'...\n";
-    let body = serde_json::json!({
-        "model": "gemini-2.5-pro",
-        "input": [
-            {
-                "type": "function_call",
-                "call_id": "call_exec_1",
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"git clone https://github.com/google-gemini/gemini-cli.git /tmp/gemini-cli\"}"
-            },
-            {
-                "type": "function_call_output",
-                "call_id": "call_exec_1",
-                "output": output
-            }
-        ]
-    });
-
-    let translated = runtime_gemini_generate_request_body(
-        &serde_json::to_vec(&body).unwrap(),
-        &conversation_store(),
-        false,
-        None,
-        None,
-    )
-    .expect("request should translate");
-    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
-    let response = &value["contents"][1]["parts"][0]["functionResponse"]["response"];
-
-    assert_eq!(response["output"], output);
-    assert_eq!(response["status"], "running");
-    assert_eq!(response["codex_tool_status"], "running");
-    assert_eq!(response["running_session_id"], 48274_u64);
-    assert!(
-        response["next_required_action"]
-            .as_str()
-            .unwrap()
-            .contains("write_stdin")
     );
 }
 
@@ -1084,7 +1033,8 @@ fn gemini_request_translation_masks_large_tool_outputs_in_history() {
     )
     .expect("request should translate");
     let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
-    let response = &value["contents"][1]["parts"][0]["functionResponse"]["response"];
+    let response =
+        &gemini_test_function_response(&value, "call_shell_large")["functionResponse"]["response"];
     let masked = response["output"].as_str().unwrap();
 
     assert_eq!(response["_prodex_masked"], true);

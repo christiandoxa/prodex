@@ -2,6 +2,8 @@ use super::super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_chat_request_body,
 };
 use super::RuntimeGeminiTranslatedRequest;
+use super::gemini_command_output::runtime_gemini_structured_command_tool_response;
+use super::gemini_history_hardening::runtime_gemini_harden_contents;
 use super::gemini_schema::runtime_gemini_sanitize_function_schema;
 use anyhow::{Context, Result};
 use base64::Engine;
@@ -27,6 +29,7 @@ Do not invoke MCP, project, search, or filesystem tools opportunistically; use t
 Match Codex tool workflows exactly: \
 use available edit/apply_patch tools to change files instead of only describing edits; use shell/process tools to run commands; \
 when a command returns a running session id, call the wait/read follow-up tool until the process exits or yields the needed output; \
+when a command/tool result is marked failed, has a non-zero exit code, or reports missing paths, do not use its expected output paths or claim success until a follow-up command verifies the recovered state; \
 when explaining file changes, use unified diff format only as a human-readable summary, not as a substitute for applying edits; \
 use available web_search, tool_search, and MCP tools when the task calls for them. \
 If the user asks you to monitor or fix GitHub Actions, use the local gh CLI with saved credentials when available; \
@@ -359,6 +362,7 @@ fn runtime_gemini_contents_from_chat(
     if !extra_parts.is_empty() {
         runtime_gemini_append_media_parts_to_last_user_content(&mut contents, extra_parts);
     }
+    runtime_gemini_harden_contents(&mut contents);
     contents
 }
 
@@ -1560,73 +1564,6 @@ fn runtime_gemini_function_response_from_tool_message(
         });
     let response = runtime_gemini_mask_tool_response_for_history(&name, call_id, response);
     runtime_gemini_function_response_part(call_id, &name, response)
-}
-
-fn runtime_gemini_structured_command_tool_response(
-    tool_name: &str,
-    output: &str,
-) -> Option<serde_json::Value> {
-    if !runtime_gemini_is_command_tool_name(tool_name) || output.trim().is_empty() {
-        return None;
-    }
-    if let Some(session_id) =
-        runtime_gemini_u64_after_marker(output, "Process running with session ID")
-    {
-        return Some(serde_json::json!({
-            "output": output,
-            "status": "running",
-            "codex_tool_status": "running",
-            "running_session_id": session_id,
-            "next_required_action": format!(
-                "Call write_stdin with session_id={session_id} until the process exits or yields the needed output."
-            ),
-        }));
-    }
-    if let Some(exit_code) = runtime_gemini_i64_after_marker(output, "Process exited with code") {
-        return Some(serde_json::json!({
-            "output": output,
-            "status": "exited",
-            "codex_tool_status": "exited",
-            "exit_code": exit_code,
-        }));
-    }
-    None
-}
-
-fn runtime_gemini_is_command_tool_name(tool_name: &str) -> bool {
-    let normalized = tool_name
-        .rsplit(['.', ':'])
-        .next()
-        .unwrap_or(tool_name)
-        .rsplit("__")
-        .next()
-        .unwrap_or(tool_name);
-    matches!(normalized, "exec_command" | "write_stdin" | "shell")
-}
-
-fn runtime_gemini_u64_after_marker(text: &str, marker: &str) -> Option<u64> {
-    let tail = text.split_once(marker)?.1.trim_start();
-    let digits = tail
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect::<String>();
-    (!digits.is_empty()).then(|| digits.parse::<u64>().ok())?
-}
-
-fn runtime_gemini_i64_after_marker(text: &str, marker: &str) -> Option<i64> {
-    let tail = text.split_once(marker)?.1.trim_start();
-    let mut value = String::new();
-    for (index, ch) in tail.chars().enumerate() {
-        if ch.is_ascii_digit() || (index == 0 && ch == '-') {
-            value.push(ch);
-            continue;
-        }
-        break;
-    }
-    if value == "-" || value.is_empty() {
-        return None;
-    }
-    value.parse::<i64>().ok()
 }
 
 fn runtime_gemini_function_call_part(
