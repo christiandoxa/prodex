@@ -44,6 +44,9 @@ use crate::{
     runtime_proxy_log_to_path, spawn_runtime_background_worker_or_log,
 };
 use anyhow::{Context, Result, bail};
+use local_rewrite_gemini_auth::{
+    runtime_gemini_oauth_affinity_attempts, runtime_gemini_oauth_attempt_from_profile,
+};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
@@ -87,6 +90,7 @@ struct RuntimeGeminiSelectedAuth {
     profile_name: String,
     auth: RuntimeGeminiAuth,
     hard_affinity: bool,
+    quota_fallback_allowed: bool,
 }
 
 #[derive(Clone)]
@@ -319,6 +323,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     if runtime_gemini_should_rotate_after_quota_response(
                         status,
                         selected.hard_affinity,
+                        selected.quota_fallback_allowed,
                         attempt_index,
                         attempt_count,
                     ) && (status == 429 || quota_blocked)
@@ -399,6 +404,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                             match pool.refresh_profile_auth(
                                 &selected.profile_name,
                                 selected.hard_affinity,
+                                selected.quota_fallback_allowed,
                             ) {
                                 Ok(Some(refreshed)) => {
                                     selected = refreshed;
@@ -994,6 +1000,7 @@ fn runtime_gemini_auth_attempts(
                         api_key: api_key.to_string(),
                     },
                     hard_affinity: api_keys.len() <= 1,
+                    quota_fallback_allowed: false,
                 })
                 .collect::<Vec<_>>();
             if attempts.is_empty() {
@@ -1153,15 +1160,6 @@ impl RuntimeGeminiOAuthPool {
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("Gemini OAuth pool lock poisoned"))?;
-        if let Some(profile_name) = state.affinity_profile_for_body(body)
-            && let Some(profile) = state.profile_by_name(&profile_name)
-        {
-            return Ok(vec![RuntimeGeminiSelectedAuth {
-                profile_name,
-                auth: profile.auth(),
-                hard_affinity: true,
-            }]);
-        }
         let profiles = if state.profiles.is_empty() {
             fallback_profiles.to_vec()
         } else {
@@ -1169,6 +1167,11 @@ impl RuntimeGeminiOAuthPool {
         };
         if profiles.is_empty() {
             bail!("Gemini OAuth pool is empty");
+        }
+        if let Some(profile_name) = state.affinity_profile_for_body(body)
+            && let Some(attempts) = runtime_gemini_oauth_affinity_attempts(&profiles, &profile_name)
+        {
+            return Ok(attempts);
         }
         let requested_model = runtime_provider_model_from_body(body)
             .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
@@ -1205,16 +1208,6 @@ impl RuntimeGeminiOAuthPool {
                 .collect();
         }
         Ok(attempts)
-    }
-}
-
-fn runtime_gemini_oauth_attempt_from_profile(
-    profile: &RuntimeGeminiOAuthProfileAuth,
-) -> RuntimeGeminiSelectedAuth {
-    RuntimeGeminiSelectedAuth {
-        profile_name: profile.profile_name.clone(),
-        auth: profile.auth(),
-        hard_affinity: false,
     }
 }
 
@@ -1393,11 +1386,12 @@ fn runtime_gemini_now_ms() -> u64 {
 fn runtime_gemini_should_rotate_after_quota_response(
     status: u16,
     hard_affinity: bool,
+    quota_fallback_allowed: bool,
     attempt_index: usize,
     attempt_count: usize,
 ) -> bool {
     runtime_gemini_response_retryable_quota(status)
-        && !hard_affinity
+        && (!hard_affinity || quota_fallback_allowed)
         && attempt_index + 1 < attempt_count
 }
 

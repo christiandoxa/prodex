@@ -71,9 +71,12 @@ fn gemini_oauth_pool_preserves_previous_response_affinity() {
 
     let attempts = pool.select_attempts(&body, &[]).unwrap();
 
-    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0].profile_name, "beta");
     assert!(attempts[0].hard_affinity);
+    assert!(attempts[0].quota_fallback_allowed);
+    assert_eq!(attempts[1].profile_name, "alpha");
+    assert!(!attempts[1].hard_affinity);
 }
 
 #[test]
@@ -94,9 +97,11 @@ fn gemini_oauth_pool_preserves_tool_output_affinity() {
 
     let attempts = pool.select_attempts(&body, &[]).unwrap();
 
-    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0].profile_name, "beta");
     assert!(attempts[0].hard_affinity);
+    assert!(attempts[0].quota_fallback_allowed);
+    assert_eq!(attempts[1].profile_name, "alpha");
 }
 
 #[test]
@@ -117,9 +122,11 @@ fn gemini_oauth_pool_preserves_custom_tool_output_affinity() {
 
     let attempts = pool.select_attempts(&body, &[]).unwrap();
 
-    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0].profile_name, "beta");
     assert!(attempts[0].hard_affinity);
+    assert!(attempts[0].quota_fallback_allowed);
+    assert_eq!(attempts[1].profile_name, "alpha");
 }
 
 #[test]
@@ -162,9 +169,11 @@ fn gemini_oauth_pool_preserves_affinity_despite_model_cooldown() {
 
     let attempts = pool.select_attempts(&body, &[]).unwrap();
 
-    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0].profile_name, "alpha");
     assert!(attempts[0].hard_affinity);
+    assert!(attempts[0].quota_fallback_allowed);
+    assert_eq!(attempts[1].profile_name, "beta");
 }
 
 #[test]
@@ -241,12 +250,13 @@ fn gemini_oauth_pool_updates_refreshed_auth() {
     };
 
     let selected = pool
-        .remember_refreshed_auth("alpha", refreshed, false)
+        .remember_refreshed_auth("alpha", refreshed, false, true)
         .unwrap()
         .unwrap();
 
     assert_eq!(selected.profile_name, "alpha");
     assert!(!selected.hard_affinity);
+    assert!(selected.quota_fallback_allowed);
     let state = pool.state.lock().unwrap();
     let profile = state.profile_by_name("alpha").unwrap();
     assert_eq!(profile.access_token, "token-refreshed");
@@ -310,19 +320,22 @@ fn gemini_binding_recorder_reads_custom_tool_calls() {
 #[test]
 fn gemini_quota_rotation_predicate_respects_affinity_and_attempt_budget() {
     assert!(runtime_gemini_should_rotate_after_quota_response(
-        429, false, 0, 2
+        429, false, false, 0, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, false, 0, 1
+        429, false, false, 0, 1
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, true, 0, 2
+        429, true, false, 0, 2
+    ));
+    assert!(runtime_gemini_should_rotate_after_quota_response(
+        429, true, true, 0, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, false, 1, 2
+        429, false, false, 1, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        500, false, 0, 2
+        500, false, false, 0, 2
     ));
 }
 

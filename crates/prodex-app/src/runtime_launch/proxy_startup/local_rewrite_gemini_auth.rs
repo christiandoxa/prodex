@@ -1,4 +1,4 @@
-use super::{RuntimeGeminiOAuthPool, RuntimeGeminiSelectedAuth};
+use super::{RuntimeGeminiOAuthPool, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiSelectedAuth};
 use crate::{GeminiOAuthSecret, force_refresh_gemini_oauth_secret};
 use anyhow::Result;
 
@@ -7,6 +7,7 @@ impl RuntimeGeminiOAuthPool {
         &self,
         profile_name: &str,
         hard_affinity: bool,
+        quota_fallback_allowed: bool,
     ) -> Result<Option<RuntimeGeminiSelectedAuth>> {
         let codex_home = {
             let state = self
@@ -19,7 +20,7 @@ impl RuntimeGeminiOAuthPool {
             profile.codex_home
         };
         let secret = force_refresh_gemini_oauth_secret(&codex_home)?;
-        self.remember_refreshed_auth(profile_name, secret, hard_affinity)
+        self.remember_refreshed_auth(profile_name, secret, hard_affinity, quota_fallback_allowed)
     }
 
     pub(super) fn remember_refreshed_auth(
@@ -27,6 +28,7 @@ impl RuntimeGeminiOAuthPool {
         profile_name: &str,
         secret: GeminiOAuthSecret,
         hard_affinity: bool,
+        quota_fallback_allowed: bool,
     ) -> Result<Option<RuntimeGeminiSelectedAuth>> {
         let mut state = self
             .state
@@ -48,6 +50,40 @@ impl RuntimeGeminiOAuthPool {
             profile_name: profile.profile_name.clone(),
             auth: profile.auth(),
             hard_affinity,
+            quota_fallback_allowed,
         }))
+    }
+}
+
+pub(super) fn runtime_gemini_oauth_affinity_attempts(
+    profiles: &[RuntimeGeminiOAuthProfileAuth],
+    profile_name: &str,
+) -> Option<Vec<RuntimeGeminiSelectedAuth>> {
+    let profile = profiles
+        .iter()
+        .find(|profile| profile.profile_name == profile_name)?;
+    let mut attempts = vec![RuntimeGeminiSelectedAuth {
+        profile_name: profile.profile_name.clone(),
+        auth: profile.auth(),
+        hard_affinity: true,
+        quota_fallback_allowed: profiles.len() > 1,
+    }];
+    attempts.extend(
+        profiles
+            .iter()
+            .filter(|candidate| candidate.profile_name != profile.profile_name)
+            .map(runtime_gemini_oauth_attempt_from_profile),
+    );
+    Some(attempts)
+}
+
+pub(super) fn runtime_gemini_oauth_attempt_from_profile(
+    profile: &RuntimeGeminiOAuthProfileAuth,
+) -> RuntimeGeminiSelectedAuth {
+    RuntimeGeminiSelectedAuth {
+        profile_name: profile.profile_name.clone(),
+        auth: profile.auth(),
+        hard_affinity: false,
+        quota_fallback_allowed: false,
     }
 }
