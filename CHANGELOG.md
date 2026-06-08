@@ -2,6 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.163.0 - 2026-06-08
+
+### Misc
+
+- Harden native provider parity (`9dcf320`)
+
+## 0.162.0 - 2026-06-08
+
+### Misc
+
+- Satisfy clippy for model memory (`e69a925`)
+- Remember selected model per session (`2b0a1d2`)
+
 ## 0.161.0 - 2026-06-08
 
 ### Runtime
@@ -64,17 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Improve Codex provider parity (`a008693`)
-
-## 0.151.0 - 2026-06-05
-
-### Runtime
-
-- Invoke optional tools across providers (`eaef27b`)
-
-## 0.150.0 - 2026-06-04
-
-### Runtime
-
-- Retry provider search fallback (`01f076d`)
-- Preserve provider tool calls (`5ba8683`)
-- Advertise provider capability catalogs (`c6542ec`)
