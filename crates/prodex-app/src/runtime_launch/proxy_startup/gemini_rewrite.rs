@@ -30,7 +30,8 @@ pub(super) use gemini_response::{
     runtime_gemini_media_content_item_from_part, runtime_gemini_normalized_response_value,
     runtime_gemini_prompt_feedback_failure, runtime_gemini_response_metadata,
     runtime_gemini_responses_usage, runtime_gemini_responses_value_from_generate_value,
-    runtime_gemini_text_from_special_part, runtime_gemini_web_search_call_from_grounding,
+    runtime_gemini_sanitize_internal_instruction_leak_text, runtime_gemini_text_from_special_part,
+    runtime_gemini_web_search_call_from_grounding,
 };
 
 #[derive(Clone)]

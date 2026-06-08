@@ -4,7 +4,8 @@ use super::gemini_rewrite::{
     runtime_gemini_finish_reason_retryable_invalid, runtime_gemini_generate_request_body,
     runtime_gemini_media_content_item_from_part, runtime_gemini_normalized_response_value,
     runtime_gemini_project_id, runtime_gemini_prompt_feedback_failure,
-    runtime_gemini_text_from_special_part, runtime_gemini_upstream_url,
+    runtime_gemini_sanitize_internal_instruction_leak_text, runtime_gemini_text_from_special_part,
+    runtime_gemini_upstream_url,
 };
 use super::gemini_sse::{
     RuntimeGeminiBindingRecorder, RuntimeGeminiGenerateSseReader,
@@ -13,7 +14,7 @@ use super::gemini_sse::{
 use super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult,
+    RuntimeLocalRewriteUpstreamResult, runtime_local_rewrite_model_selection,
 };
 pub(super) use super::local_rewrite_gemini_bindings::runtime_gemini_remember_bindings_from_responses_body;
 use super::local_rewrite_gemini_bindings::runtime_gemini_tool_output_call_ids_from_request;
@@ -60,10 +61,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT: usize = 4096;
 const RUNTIME_GEMINI_LOCAL_RETRY_LIMIT: usize = 9;
-const RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS: u64 = 10_000;
+const RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS: u64 = 30_000;
 const RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT: usize = 3;
 const RUNTIME_GEMINI_INVALID_STREAM_RETRY_BASE_DELAY_MS: u64 = 1_000;
 const RUNTIME_GEMINI_MODEL_UNAVAILABLE_TTL_MS: u64 = 60 * 60 * 1_000;
+const RUNTIME_GEMINI_MODEL_PREFERENCE_TTL_MS: u64 = 10 * 60 * 1_000;
 const RUNTIME_GEMINI_PRECOMMIT_PEEK_LIMIT: usize = 64 * 1024;
 
 #[path = "local_rewrite_gemini_auth.rs"]
@@ -80,9 +82,19 @@ struct RuntimeGeminiOAuthPoolState {
     next_index: usize,
     response_profile_bindings: BTreeMap<String, String>,
     tool_call_profile_bindings: BTreeMap<String, String>,
+    response_model_scope_bindings: BTreeMap<String, String>,
+    tool_call_model_scope_bindings: BTreeMap<String, String>,
     quota_headers: BTreeMap<String, Vec<(String, String)>>,
     model_cooldowns_until: BTreeMap<String, u64>,
     model_unavailable_until: BTreeMap<String, u64>,
+    model_preferences: BTreeMap<String, RuntimeGeminiModelPreference>,
+    selected_model_preferences: BTreeMap<String, RuntimeGeminiModelPreference>,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeGeminiModelPreference {
+    model: String,
+    until_ms: u64,
 }
 
 #[derive(Clone)]
@@ -116,9 +128,13 @@ pub(super) fn runtime_gemini_oauth_pool_from_provider(
             next_index: runtime_gemini_initial_oauth_pool_index(profiles.len()),
             response_profile_bindings: BTreeMap::new(),
             tool_call_profile_bindings: BTreeMap::new(),
+            response_model_scope_bindings: BTreeMap::new(),
+            tool_call_model_scope_bindings: BTreeMap::new(),
             quota_headers: BTreeMap::new(),
             model_cooldowns_until: BTreeMap::new(),
             model_unavailable_until: BTreeMap::new(),
+            model_preferences: BTreeMap::new(),
+            selected_model_preferences: BTreeMap::new(),
         })),
     })
 }
@@ -133,10 +149,47 @@ pub(super) fn send_runtime_gemini_upstream_request(
     let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
     let thinking_budget_tokens = runtime_gemini_thinking_budget_tokens(&shared.provider);
     let attempts = runtime_gemini_auth_attempts(auth, shared, &body)?;
+    let common_model_selection = runtime_local_rewrite_model_selection(
+        shared,
+        RuntimeProviderBridgeKind::Gemini,
+        request,
+        &body,
+        GEMINI_DEFAULT_MODEL,
+    );
+    let model_scope = shared
+        .gemini_oauth_pool
+        .as_ref()
+        .and_then(|pool| pool.model_scope_for_request(request, &body))
+        .or_else(|| responses_route.then(|| format!("request:{request_id}")));
+    let original_requested_model =
+        runtime_provider_model_from_body(&body).unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
+    let requested_model = shared
+        .gemini_oauth_pool
+        .as_ref()
+        .and_then(|pool| pool.selected_model_for_scope(model_scope.as_deref()))
+        .filter(|_| {
+            matches!(
+                original_requested_model
+                    .trim()
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "" | "auto" | "default"
+            )
+        })
+        .unwrap_or_else(|| common_model_selection.model.clone());
+    if responses_route
+        && let Some(pool) = shared.gemini_oauth_pool.as_ref()
+        && original_requested_model != "auto"
+    {
+        pool.remember_selected_model(model_scope.as_deref(), &original_requested_model);
+    }
+    let base_body = if requested_model != common_model_selection.model {
+        runtime_provider_request_body_with_model(&common_model_selection.body, &requested_model)
+    } else {
+        common_model_selection.body
+    };
     let attempt_count = attempts.len();
     'auth_attempts: for (attempt_index, mut selected) in attempts.into_iter().enumerate() {
-        let requested_model = runtime_provider_model_from_body(&body)
-            .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string());
         let mut model_chain = if responses_route {
             runtime_gemini_model_fallback_chain(&shared.provider, &requested_model)
         } else {
@@ -144,10 +197,18 @@ pub(super) fn send_runtime_gemini_upstream_request(
         };
         // Gemini Code Assist (OAuth) does not serve customtools models; filter them from the fallback chain.
         if matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }) {
-            model_chain.retain(|m| !m.contains("customtools"));
+            runtime_gemini_retain_code_assist_models(&mut model_chain);
             if model_chain.is_empty() {
                 model_chain.push(GEMINI_DEFAULT_MODEL.to_string());
             }
+        }
+        if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
+            model_chain = pool.preferred_model_chain_for_profile(
+                model_scope.as_deref(),
+                &selected.profile_name,
+                &requested_model,
+                &model_chain,
+            );
         }
         let model_cache_endpoint =
             runtime_gemini_model_cache_endpoint(&selected.auth, &shared.upstream_base_url);
@@ -179,9 +240,9 @@ pub(super) fn send_runtime_gemini_upstream_request(
         }
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = if responses_route {
-                runtime_provider_request_body_with_model(&body, model)
+                runtime_provider_request_body_with_model(&base_body, model)
             } else {
-                body.clone()
+                base_body.clone()
             };
             let mut translated = if responses_route {
                 runtime_gemini_generate_request_body(
@@ -613,8 +674,45 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 }
 
                 let binding_recorder = shared.gemini_oauth_pool.as_ref().map(|pool| {
-                    runtime_gemini_binding_recorder(pool, selected.profile_name.clone())
+                    runtime_gemini_binding_recorder(
+                        pool,
+                        selected.profile_name.clone(),
+                        model_scope.clone(),
+                    )
                 });
+                if model_index > 0
+                    && let Some(pool) = shared.gemini_oauth_pool.as_ref()
+                {
+                    pool.remember_model_preference(
+                        model_scope.as_deref(),
+                        &selected.profile_name,
+                        &requested_model,
+                        &translated.model,
+                    );
+                    runtime_proxy_log(
+                        &shared.runtime_shared,
+                        runtime_proxy_structured_log_message(
+                            "local_rewrite_gemini_sticky_model",
+                            [
+                                runtime_proxy_log_field("request", request_id.to_string()),
+                                runtime_proxy_log_field("profile", selected.profile_name.as_str()),
+                                runtime_proxy_log_field(
+                                    "scope",
+                                    model_scope.as_deref().unwrap_or("-"),
+                                ),
+                                runtime_proxy_log_field(
+                                    "requested_model",
+                                    requested_model.as_str(),
+                                ),
+                                runtime_proxy_log_field("model", translated.model.as_str()),
+                                runtime_proxy_log_field(
+                                    "ttl_ms",
+                                    RUNTIME_GEMINI_MODEL_PREFERENCE_TTL_MS.to_string(),
+                                ),
+                            ],
+                        ),
+                    );
+                }
                 let gemini_context = responses_route.then(|| RuntimeGeminiRequestContext {
                     profile_name: selected.profile_name.clone(),
                     conversation_messages: translated.messages,
@@ -649,7 +747,7 @@ fn runtime_gemini_exact_output_short_circuit(
     let binding_recorder = shared
         .gemini_oauth_pool
         .as_ref()
-        .map(|pool| runtime_gemini_binding_recorder(pool, selected.profile_name.clone()));
+        .map(|pool| runtime_gemini_binding_recorder(pool, selected.profile_name.clone(), None));
     let generate_chunk = serde_json::json!({
         "responseId": format!("resp_gemini_exact_{request_id}"),
         "modelVersion": translated.model,
@@ -954,6 +1052,9 @@ fn runtime_gemini_precommit_apply_parts(
         if text.is_empty() {
             continue;
         }
+        if runtime_gemini_sanitize_internal_instruction_leak_text(text).is_none() {
+            continue;
+        }
         if part
             .get("thought")
             .and_then(serde_json::Value::as_bool)
@@ -1134,6 +1235,89 @@ impl RuntimeGeminiOAuthPool {
         }
     }
 
+    fn model_scope_for_request(
+        &self,
+        request: &RuntimeProxyRequest,
+        body: &[u8],
+    ) -> Option<String> {
+        let Ok(state) = self.state.lock() else {
+            return runtime_gemini_explicit_session_scope(request, body);
+        };
+        runtime_gemini_explicit_session_scope(request, body)
+            .or_else(|| state.model_scope_for_body(body))
+    }
+
+    fn remember_selected_model(&self, model_scope: Option<&str>, model: &str) {
+        let Some(model_scope) = model_scope.filter(|scope| !scope.trim().is_empty()) else {
+            return;
+        };
+        if model.trim().is_empty() {
+            return;
+        }
+        let until = runtime_gemini_now_ms().saturating_add(RUNTIME_GEMINI_MODEL_PREFERENCE_TTL_MS);
+        if let Ok(mut state) = self.state.lock() {
+            state.remember_selected_model_until(model_scope, model, until);
+        }
+    }
+
+    fn selected_model_for_scope(&self, model_scope: Option<&str>) -> Option<String> {
+        let model_scope = model_scope.filter(|scope| !scope.trim().is_empty())?;
+        let Ok(mut state) = self.state.lock() else {
+            return None;
+        };
+        state.selected_model_for_scope(model_scope, runtime_gemini_now_ms())
+    }
+
+    fn remember_model_preference(
+        &self,
+        model_scope: Option<&str>,
+        profile_name: &str,
+        requested_model: &str,
+        model: &str,
+    ) {
+        let Some(model_scope) = model_scope.filter(|scope| !scope.trim().is_empty()) else {
+            return;
+        };
+        if profile_name.trim().is_empty()
+            || requested_model.trim().is_empty()
+            || model.trim().is_empty()
+        {
+            return;
+        }
+        let until = runtime_gemini_now_ms().saturating_add(RUNTIME_GEMINI_MODEL_PREFERENCE_TTL_MS);
+        if let Ok(mut state) = self.state.lock() {
+            state.remember_model_preference_until(
+                model_scope,
+                profile_name,
+                requested_model,
+                model,
+                until,
+            );
+        }
+    }
+
+    fn preferred_model_chain_for_profile(
+        &self,
+        model_scope: Option<&str>,
+        profile_name: &str,
+        requested_model: &str,
+        models: &[String],
+    ) -> Vec<String> {
+        let Some(model_scope) = model_scope.filter(|scope| !scope.trim().is_empty()) else {
+            return models.to_vec();
+        };
+        let Ok(mut state) = self.state.lock() else {
+            return models.to_vec();
+        };
+        state.preferred_model_chain_for_profile(
+            model_scope,
+            profile_name,
+            requested_model,
+            models,
+            runtime_gemini_now_ms(),
+        )
+    }
+
     fn available_model_chain_for_profile(
         &self,
         profile_name: &str,
@@ -1220,6 +1404,36 @@ fn runtime_gemini_initial_oauth_pool_index(profile_count: usize) -> usize {
     now.wrapping_add(pid).wrapping_rem(profile_count)
 }
 
+fn runtime_gemini_explicit_session_scope(
+    request: &RuntimeProxyRequest,
+    body: &[u8],
+) -> Option<String> {
+    runtime_gemini_request_session_id(request, body)
+        .map(|session_id| format!("session:{session_id}"))
+}
+
+fn runtime_gemini_request_session_id(request: &RuntimeProxyRequest, body: &[u8]) -> Option<String> {
+    request
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("session_id"))
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            serde_json::from_slice::<serde_json::Value>(body)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("session_id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|session_id| !session_id.is_empty())
+                        .map(str::to_string)
+                })
+        })
+}
+
 impl RuntimeGeminiOAuthPoolState {
     fn profile_by_name(&self, profile_name: &str) -> Option<RuntimeGeminiOAuthProfileAuth> {
         self.profiles
@@ -1242,20 +1456,43 @@ impl RuntimeGeminiOAuthPoolState {
             .find_map(|call_id| self.tool_call_profile_bindings.get(&call_id).cloned())
     }
 
+    fn model_scope_for_body(&self, body: &[u8]) -> Option<String> {
+        let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
+        if let Some(previous_response_id) = value
+            .get("previous_response_id")
+            .and_then(serde_json::Value::as_str)
+            && let Some(scope) = self.response_model_scope_bindings.get(previous_response_id)
+        {
+            return Some(scope.clone());
+        }
+        runtime_gemini_tool_output_call_ids_from_request(&value)
+            .into_iter()
+            .find_map(|call_id| self.tool_call_model_scope_bindings.get(&call_id).cloned())
+    }
+
     fn remember_bindings(
         &mut self,
         profile_name: &str,
+        model_scope: Option<&str>,
         response_id: &str,
         tool_call_ids: &[String],
     ) {
         if !response_id.trim().is_empty() {
             self.response_profile_bindings
                 .insert(response_id.to_string(), profile_name.to_string());
+            if let Some(model_scope) = model_scope.filter(|scope| !scope.trim().is_empty()) {
+                self.response_model_scope_bindings
+                    .insert(response_id.to_string(), model_scope.to_string());
+            }
         }
         for call_id in tool_call_ids {
             if !call_id.trim().is_empty() {
                 self.tool_call_profile_bindings
                     .insert(call_id.clone(), profile_name.to_string());
+                if let Some(model_scope) = model_scope.filter(|scope| !scope.trim().is_empty()) {
+                    self.tool_call_model_scope_bindings
+                        .insert(call_id.clone(), model_scope.to_string());
+                }
             }
         }
         runtime_gemini_prune_binding_map(
@@ -1264,6 +1501,14 @@ impl RuntimeGeminiOAuthPoolState {
         );
         runtime_gemini_prune_binding_map(
             &mut self.tool_call_profile_bindings,
+            RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT,
+        );
+        runtime_gemini_prune_binding_map(
+            &mut self.response_model_scope_bindings,
+            RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT,
+        );
+        runtime_gemini_prune_binding_map(
+            &mut self.tool_call_model_scope_bindings,
             RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT,
         );
     }
@@ -1286,6 +1531,80 @@ impl RuntimeGeminiOAuthPoolState {
         self.model_unavailable_until.insert(key, until_ms);
         self.model_unavailable_until
             .retain(|_, unavailable_until| *unavailable_until > runtime_gemini_now_ms());
+    }
+
+    fn remember_model_preference_until(
+        &mut self,
+        model_scope: &str,
+        profile_name: &str,
+        requested_model: &str,
+        model: &str,
+        until_ms: u64,
+    ) {
+        let key = runtime_gemini_model_preference_key(model_scope, profile_name, requested_model);
+        self.model_preferences.insert(
+            key,
+            RuntimeGeminiModelPreference {
+                model: model.to_string(),
+                until_ms,
+            },
+        );
+        self.model_preferences
+            .retain(|_, preference| preference.until_ms > runtime_gemini_now_ms());
+    }
+
+    fn remember_selected_model_until(&mut self, model_scope: &str, model: &str, until_ms: u64) {
+        self.selected_model_preferences.insert(
+            model_scope.to_string(),
+            RuntimeGeminiModelPreference {
+                model: model.to_string(),
+                until_ms,
+            },
+        );
+        self.selected_model_preferences
+            .retain(|_, preference| preference.until_ms > runtime_gemini_now_ms());
+    }
+
+    fn selected_model_for_scope(&mut self, model_scope: &str, now_ms: u64) -> Option<String> {
+        self.selected_model_preferences
+            .retain(|_, preference| preference.until_ms > now_ms);
+        self.selected_model_preferences
+            .get(model_scope)
+            .map(|preference| preference.model.clone())
+    }
+
+    fn preferred_model_chain_for_profile(
+        &mut self,
+        model_scope: &str,
+        profile_name: &str,
+        requested_model: &str,
+        models: &[String],
+        now_ms: u64,
+    ) -> Vec<String> {
+        self.model_preferences
+            .retain(|_, preference| preference.until_ms > now_ms);
+        let Some(preference) = self
+            .model_preferences
+            .get(&runtime_gemini_model_preference_key(
+                model_scope,
+                profile_name,
+                requested_model,
+            ))
+        else {
+            return models.to_vec();
+        };
+        if !models.iter().any(|model| model == &preference.model) {
+            return models.to_vec();
+        }
+        let mut preferred = Vec::with_capacity(models.len());
+        preferred.push(preference.model.clone());
+        preferred.extend(
+            models
+                .iter()
+                .filter(|model| *model != &preference.model)
+                .cloned(),
+        );
+        preferred
     }
 
     fn available_model_chain_for_profile(
@@ -1340,11 +1659,17 @@ impl RuntimeGeminiOAuthPoolState {
 fn runtime_gemini_binding_recorder(
     pool: &RuntimeGeminiOAuthPool,
     profile_name: String,
+    model_scope: Option<String>,
 ) -> RuntimeGeminiBindingRecorder {
     let pool = pool.clone();
     Arc::new(move |response_id, tool_call_ids| {
         if let Ok(mut state) = pool.state.lock() {
-            state.remember_bindings(&profile_name, &response_id, &tool_call_ids);
+            state.remember_bindings(
+                &profile_name,
+                model_scope.as_deref(),
+                &response_id,
+                &tool_call_ids,
+            );
         }
     })
 }
@@ -1364,6 +1689,14 @@ fn runtime_gemini_model_cooldown_key(profile_name: &str, model: &str) -> String 
 
 fn runtime_gemini_model_unavailable_key(profile_name: &str, endpoint: &str, model: &str) -> String {
     format!("{profile_name}\0{endpoint}\0{model}")
+}
+
+fn runtime_gemini_model_preference_key(
+    model_scope: &str,
+    profile_name: &str,
+    requested_model: &str,
+) -> String {
+    format!("{model_scope}\0{profile_name}\0{requested_model}")
 }
 
 fn runtime_gemini_model_cache_endpoint(
@@ -1397,6 +1730,15 @@ fn runtime_gemini_should_rotate_after_quota_response(
 
 fn runtime_gemini_should_inline_rate_limit_retry(delay_ms: u64) -> bool {
     delay_ms > 0 && delay_ms <= RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS
+}
+
+fn runtime_gemini_retain_code_assist_models(model_chain: &mut Vec<String>) {
+    model_chain.retain(|model| runtime_gemini_code_assist_model_allowed(model));
+}
+
+fn runtime_gemini_code_assist_model_allowed(model: &str) -> bool {
+    let model = model.trim();
+    !model.contains("customtools") && !matches!(model, "gemini-3.5-flash" | "gemini-3-flash")
 }
 
 fn runtime_gemini_invalid_stream_retry_delay_ms(retry_index: usize) -> u64 {

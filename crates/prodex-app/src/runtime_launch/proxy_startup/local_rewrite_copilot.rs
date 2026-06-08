@@ -5,7 +5,7 @@ use super::deepseek_rewrite::{
 use super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult,
+    RuntimeLocalRewriteUpstreamResult, runtime_local_rewrite_model_selection,
 };
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_search_fallback::{
@@ -19,8 +19,8 @@ use super::local_rewrite_transport::{
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
-    runtime_provider_model_fallback_chain, runtime_provider_model_from_body,
-    runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
+    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
+    runtime_provider_should_retry_with_next_model,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result, bail};
@@ -174,10 +174,17 @@ fn send_runtime_copilot_responses_request(
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let attempts = runtime_copilot_auth_attempts(auth, shared, &body)?;
     let attempt_count = attempts.len();
-    let requested_model = runtime_provider_model_from_body(&body)
-        .unwrap_or_else(|| prodex_cli::SUPER_COPILOT_DEFAULT_MODEL.to_string());
-    let model_chain =
-        runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, &requested_model);
+    let model_selection = runtime_local_rewrite_model_selection(
+        shared,
+        RuntimeProviderBridgeKind::Copilot,
+        request,
+        &body,
+        prodex_cli::SUPER_COPILOT_DEFAULT_MODEL,
+    );
+    let model_chain = runtime_provider_model_fallback_chain(
+        RuntimeProviderBridgeKind::Copilot,
+        &model_selection.model,
+    );
     let upstream_url = runtime_chat_completions_upstream_url(
         &shared.upstream_base_url,
         &shared.mount_path,
@@ -186,7 +193,7 @@ fn send_runtime_copilot_responses_request(
 
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
         for (model_index, model) in model_chain.iter().enumerate() {
-            let model_body = runtime_provider_request_body_with_model(&body, model);
+            let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
             let translated = runtime_copilot_responses_chat_request_body(
                 &model_body,
                 &shared.deepseek_conversations,

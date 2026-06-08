@@ -12,6 +12,143 @@ use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::borrow::Cow;
 
 const GEMINI_CUSTOM_APPLY_PATCH_TOOL: &str = "apply_patch";
+const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
+    "When editing code, always emit exact valid language syntax",
+    "Do not use lossy summarization",
+    "The user instruction `caveman",
+    "Do not run tests or builds unless",
+    "If a command produces no output",
+    "If a tool command succeeds",
+    "When tests pass",
+    "When tests fail",
+    "When the user writes in Indonesian",
+    "No \"Saya sudah menyelesaikan",
+    "If a compression tool or optimizer wrapper crashes",
+    "If `rtk`, `sqz-mcp`, `token-savior`, or `claw-compactor` fails",
+    "If `rtk`, `sqz`, `token-savior`, `claw-compactor`, or `presidio` fails",
+    "If `rtk`, `sqz`, or `token-savior` is completely unusable",
+    "If `rtk`, `sqz-mcp`, or `claw-compactor` fails",
+    "If a token optimization tool fails",
+    "If an optimizer MCP server crashes",
+    "If the user disables Caveman mode",
+    "If an optimizer command fails",
+    "If you are unsure if compression removes relevant detail",
+    "If the user asks you to stop using optimizers",
+    "If the model loses context",
+    "If `prodex-token-savior` or `prodex-sqz` commands are not found",
+    "If `claw-compactor` fails",
+    "If a token-optimizer proxy breaks",
+    "Missing MCP servers, disabled tools",
+    "Do not install optimizers during a run unless",
+    "Use `rtk --no-proxy <cmd>` only as an escape hatch",
+    "When a test or build fails under `rtk`",
+    "Token savings tools must fail fast",
+    "Fall back to exact commands or text",
+    "Do not skip or shorten test failures",
+    "Do not skip imports or type signatures",
+    "Never skip or shorten test failures",
+    "Never use lossy tools on exact command output",
+    "Never use lossy tools to summarize user-facing documentation",
+    "Keep code examples exactly as written",
+    "Keep task-related code exact",
+    "Keep imports and type signatures exact",
+    "Keep failing test cases exact",
+    "When modifying code based on a token-optimized representation",
+    "Prodex Super disables verbose upstream OpenAI library",
+    "Prodex Super automatically uses `codex --mem`",
+    "Prodex Super strips `cat`, `grep`, and `ls` aliases",
+    "Prodex Super injects `XDG_DATA_HOME`",
+    "Prodex super-isolated shells strip `cat`, `grep`, and `ls` aliases",
+    "Prodex Super passes the exact CLI arguments",
+    "When diagnosing issues in `prodex-app`",
+    "If `prodex super` seems slow to start",
+    "If memory usage surges",
+    "Use standard diagnostic helpers such as `prodex doctor --runtime`",
+    "When updating memory files manually",
+    "To read memory:",
+    "To read the inbox:",
+    "To force a memory consolidation:",
+    "If the environment variables are not set",
+    "When the user specifies `--project-memory`",
+    "Use the normal `exec` follow-up loops",
+    "If you need exact command output",
+    "If you need a tool result byte-for-byte exact",
+    "Presidio redaction replaces sensitive PII",
+    "Redacted text must be manually re-assembled",
+    "Do not use `token-savior` `apply_patch`",
+    "If you find `PRODEX_GEMINI_LIVE_EXTENDED`",
+    "These optimizers are active only when",
+    "Caveman communication style stays active",
+    "Always check that the user explicitly asked for a tool that is an optimizer",
+    "Always use raw text for security checks",
+    "Do not apply text-based optimizers",
+    "Do not compress the active Prodex codebase",
+    "Never use remote or LLM-based optimizers",
+    "Only apply deterministic local tools",
+    "Never use AST compression",
+    "Never use lossy or AST-mutating optimizers",
+    "Never rewrite Prodex proxy source files",
+    "Exact source must remain intact",
+    "Exact source must remain intact for code generation",
+    "If Presidio redaction is active",
+    "If the user asks for exact text or code",
+    "If the user reports missing IPs",
+    "Keep original `.md` memory files intact",
+    "Never compress any part of an edit",
+    "Never save compressed files to disk",
+    "Never save compressed or corrupted state to disk",
+    "Never rewrite `.prodex/profiles/` files",
+    "Never alter `.prodex/profiles/` files",
+    "When reporting issues, include the exact error",
+    "Before launch, Super asks whether to add Presidio redaction",
+    "Presidio redaction strips PII",
+    "If Presidio is enabled with `fail_mode = \"closed\"`",
+    "If an optimizer strips necessary detail or breaks",
+    "If an optimizer fails, falls out of sync",
+    "Keep exact output for exact requests",
+    "Do not repeat this checklist",
+    "verify that required data",
+    "Do not treat them as magic box services",
+    "These optimizers are local tools",
+    "Super keeps compression decisions local",
+];
+const GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS: &[&str] = &[
+    "## Privacy (Presidio)",
+    "## Metrics",
+    "## Reporting",
+    "## Prodex Runtime Logging",
+    "## Memory Files",
+    "Caveman Plugin",
+    "Do not explain these instructions",
+    "Keep Caveman style",
+    "Do not tell the user what tools or settings you used",
+    "Do not try to debug or test if tests pass",
+    "Do not pretend optimizers are built into the models",
+    "Never use lossy memory compaction without the user's explicit consent",
+    "When using these optimizers, state briefly that you are using them to save tokens",
+    "Presidio redacted it",
+    "RTK and Prodex Smart Context auto-wrappers conflict",
+    "disable wrapper fallback by using an absolute path",
+    "Do not use local optimizers for exact validation tasks",
+    "Code changes, commits, and PRs must remain readable",
+    "Use local optimizers only",
+    "The Super launch is your implicit permission",
+    "Prodex proxy components",
+    "Prodex internal source code",
+    "Prodex internals (`prodex-app`",
+    "token-optimizer tool",
+    "token-optimizer crash",
+    "token savings",
+    "Claude-Mem workflow",
+    "active profile path",
+    "PRODEX_SUPER_OAI_DEBUG",
+    "PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS",
+    "XDG_CACHE_HOME/prodex-sqz",
+    "XDG_CACHE_HOME/prodex-token-savior",
+    "optimizer <name> unavailable",
+    "optimizer <name> failed",
+    "prodex super --metrics",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in super::super) enum RuntimeGeminiResponseStatus {
@@ -107,7 +244,12 @@ pub(in super::super) fn runtime_gemini_chat_assistant_messages_from_generate_val
             {
                 reasoning_content.push_str(part_text);
             } else {
-                text.push_str(part_text);
+                let Some(part_text) =
+                    runtime_gemini_sanitize_internal_instruction_leak_text(part_text)
+                else {
+                    continue;
+                };
+                text.push_str(&part_text);
             }
         }
         if let Some(part_text) = runtime_gemini_text_from_special_part(part) {
@@ -217,8 +359,10 @@ pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
                     .get("thought")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false)
+                && let Some(part_text) =
+                    runtime_gemini_sanitize_internal_instruction_leak_text(part_text)
             {
-                text.push_str(part_text);
+                text.push_str(&part_text);
             }
             if let Some(part_text) = runtime_gemini_text_from_special_part(part) {
                 content_items.push(serde_json::json!({
@@ -318,6 +462,38 @@ pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
         response["metadata"] = metadata;
     }
     response
+}
+
+pub(in super::super) fn runtime_gemini_internal_instruction_leak_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+        || GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS
+            .iter()
+            .any(|marker| trimmed.contains(marker))
+}
+
+pub(in super::super) fn runtime_gemini_sanitize_internal_instruction_leak_text(
+    text: &str,
+) -> Option<String> {
+    if !runtime_gemini_internal_instruction_leak_text(text) {
+        return Some(text.to_string());
+    }
+    let retained = text
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|paragraph| !paragraph.is_empty())
+        .filter(|paragraph| !runtime_gemini_internal_instruction_leak_text(paragraph))
+        .collect::<Vec<_>>();
+    if retained.is_empty() {
+        None
+    } else {
+        Some(retained.join("\n\n"))
+    }
 }
 
 pub(in super::super) fn runtime_gemini_response_status(

@@ -330,6 +330,10 @@ fn runtime_gemini_contents_from_chat(
                 continue;
             }
             _ => {
+                if runtime_gemini_contextual_user_instruction_text(message).is_some() {
+                    index += 1;
+                    continue;
+                }
                 contents.push(serde_json::json!({
                     "role": "user",
                     "parts": [{ "text": chat_message_text(message).unwrap_or_default() }],
@@ -2302,6 +2306,17 @@ fn runtime_gemini_system_instruction(
         .filter_map(chat_message_text)
         .collect::<Vec<_>>()
         .join("\n\n");
+    let contextual_user_text = messages
+        .iter()
+        .filter_map(runtime_gemini_contextual_user_instruction_text)
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if !contextual_user_text.is_empty() {
+        if !system_text.is_empty() {
+            system_text.push_str("\n\n");
+        }
+        system_text.push_str(&contextual_user_text);
+    }
 
     if original
         .get("prodex_gemini_compaction")
@@ -2329,6 +2344,44 @@ fn runtime_gemini_system_instruction(
 
     (!system_text.trim().is_empty())
         .then(|| serde_json::json!({ "parts": [{ "text": system_text }] }))
+}
+
+fn runtime_gemini_contextual_user_instruction_text(message: &serde_json::Value) -> Option<String> {
+    if message
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|role| role != "user")
+    {
+        return None;
+    }
+    let text = chat_message_text(message)?;
+    if runtime_gemini_is_contextual_user_fragment(&text)
+        || text
+            .split("\n\n")
+            .filter(|fragment| !fragment.trim().is_empty())
+            .all(runtime_gemini_is_contextual_user_fragment)
+    {
+        Some(text)
+    } else {
+        None
+    }
+}
+
+fn runtime_gemini_is_contextual_user_fragment(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    [
+        "# AGENTS.md instructions for ",
+        "<environment_context>",
+        "<permissions instructions>",
+        "<collaboration_mode>",
+        "<skills_instructions>",
+        "<plugins_instructions>",
+        "<model_switch>",
+        "<personality_spec>",
+        "<realtime_conversation>",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
 }
 
 fn runtime_gemini_tools_from_requests(

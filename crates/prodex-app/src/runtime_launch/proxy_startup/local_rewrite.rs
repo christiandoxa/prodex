@@ -52,8 +52,21 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gemini_conversations: RuntimeDeepSeekConversationStore,
     pub(super) gemini_oauth_pool: Option<RuntimeGeminiOAuthPool>,
     pub(super) copilot_oauth_pool: Option<RuntimeCopilotOAuthPool>,
+    pub(super) model_memory: RuntimeLocalRewriteModelMemory,
     pub(super) api_key_cursor: Arc<AtomicUsize>,
     pub(super) client: reqwest::blocking::Client,
+}
+
+pub(super) type RuntimeLocalRewriteModelMemory = Arc<Mutex<RuntimeLocalRewriteModelMemoryState>>;
+
+#[derive(Debug, Default)]
+pub(super) struct RuntimeLocalRewriteModelMemoryState {
+    selected_models: BTreeMap<String, String>,
+}
+
+pub(super) struct RuntimeLocalRewriteModelSelection {
+    pub(super) model: String,
+    pub(super) body: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -210,6 +223,7 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         gemini_conversations: Arc::new(Mutex::new(BTreeMap::new())),
         gemini_oauth_pool,
         copilot_oauth_pool,
+        model_memory: Arc::new(Mutex::new(RuntimeLocalRewriteModelMemoryState::default())),
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client()?,
     };
@@ -287,6 +301,80 @@ fn build_runtime_local_rewrite_http_client() -> Result<reqwest::blocking::Client
         .no_proxy()
         .build()
         .context("failed to build runtime local rewrite HTTP client")
+}
+
+pub(super) fn runtime_local_rewrite_model_selection(
+    shared: &RuntimeLocalRewriteProxyShared,
+    provider_kind: RuntimeProviderBridgeKind,
+    request: &RuntimeProxyRequest,
+    body: &[u8],
+    default_model: &str,
+) -> RuntimeLocalRewriteModelSelection {
+    let body_model = runtime_provider_model_from_body(body);
+    let original_model = body_model
+        .clone()
+        .unwrap_or_else(|| default_model.to_string());
+    let scope = runtime_local_rewrite_model_scope(provider_kind, request, body);
+    let remembered_model = scope
+        .as_deref()
+        .and_then(|scope| shared.model_memory.lock().ok()?.selected_model(scope));
+    let model = remembered_model
+        .filter(|_| runtime_local_rewrite_model_allows_session_memory(&original_model))
+        .unwrap_or_else(|| original_model.clone());
+    if let (Some(scope), Some(explicit_model)) = (scope.as_deref(), body_model.as_deref())
+        && !runtime_local_rewrite_model_allows_session_memory(explicit_model)
+    {
+        if let Ok(mut memory) = shared.model_memory.lock() {
+            memory.remember_selected_model(scope, explicit_model);
+        }
+    }
+    let body = if model != original_model {
+        runtime_provider_request_body_with_model(body, &model)
+    } else {
+        body.to_vec()
+    };
+    RuntimeLocalRewriteModelSelection { model, body }
+}
+
+pub(super) fn runtime_local_rewrite_model_allows_session_memory(model: &str) -> bool {
+    matches!(
+        model.trim().to_ascii_lowercase().as_str(),
+        "" | "auto" | "default"
+    )
+}
+
+pub(super) fn runtime_local_rewrite_model_scope(
+    provider_kind: RuntimeProviderBridgeKind,
+    request: &RuntimeProxyRequest,
+    body: &[u8],
+) -> Option<String> {
+    runtime_proxy_crate::runtime_request_explicit_session_id(request)
+        .map(runtime_proxy_crate::RuntimeExplicitSessionId::into_string)
+        .or_else(|| runtime_proxy_crate::runtime_request_session_id_from_turn_metadata(request))
+        .or_else(|| {
+            serde_json::from_slice::<serde_json::Value>(body)
+                .ok()
+                .and_then(|value| {
+                    runtime_proxy_crate::runtime_request_session_id_from_value(&value)
+                })
+        })
+        .map(|session_id| {
+            format!(
+                "{}:session:{session_id}",
+                super::provider_bridge::runtime_provider_label(provider_kind)
+            )
+        })
+}
+
+impl RuntimeLocalRewriteModelMemoryState {
+    pub(super) fn remember_selected_model(&mut self, scope: &str, model: &str) {
+        self.selected_models
+            .insert(scope.to_string(), model.trim().to_string());
+    }
+
+    pub(super) fn selected_model(&self, scope: &str) -> Option<String> {
+        self.selected_models.get(scope).cloned()
+    }
 }
 
 fn handle_runtime_local_rewrite_proxy_request(
@@ -588,11 +676,16 @@ fn send_runtime_local_rewrite_upstream_request(
             }
             let auth_attempt_count = auth_attempts.len();
             if path_without_query(&request.path_and_query).ends_with("/responses") {
-                let requested_model = runtime_provider_model_from_body(&body)
-                    .unwrap_or_else(|| prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL.to_string());
+                let model_selection = runtime_local_rewrite_model_selection(
+                    shared,
+                    RuntimeProviderBridgeKind::Anthropic,
+                    request,
+                    &body,
+                    prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
+                );
                 let model_chain = runtime_provider_model_fallback_chain(
                     RuntimeProviderBridgeKind::Anthropic,
-                    &requested_model,
+                    &model_selection.model,
                 );
                 let upstream_url = runtime_chat_completions_upstream_url(
                     &shared.upstream_base_url,
@@ -601,7 +694,8 @@ fn send_runtime_local_rewrite_upstream_request(
                 );
                 for (auth_index, selected_auth) in auth_attempts.into_iter().enumerate() {
                     for (model_index, model) in model_chain.iter().enumerate() {
-                        let model_body = runtime_provider_request_body_with_model(&body, model);
+                        let model_body =
+                            runtime_provider_request_body_with_model(&model_selection.body, model);
                         let translated = runtime_chat_compatible_request_body(
                             &model_body,
                             &shared.deepseek_conversations,
@@ -775,6 +869,18 @@ fn send_runtime_local_rewrite_upstream_request(
                 &shared.mount_path,
                 &request.path_and_query,
             );
+            let body = if path_without_query(&request.path_and_query).ends_with("/responses") {
+                runtime_local_rewrite_model_selection(
+                    shared,
+                    RuntimeProviderBridgeKind::OpenAiResponses,
+                    request,
+                    &body,
+                    "",
+                )
+                .body
+            } else {
+                body
+            };
             let response = send_runtime_local_rewrite_prepared_request(
                 request_id,
                 request,

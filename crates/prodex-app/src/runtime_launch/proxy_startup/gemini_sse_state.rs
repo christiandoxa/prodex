@@ -9,7 +9,8 @@ use super::super::gemini_rewrite::{
     runtime_gemini_finish_reason_incomplete, runtime_gemini_image_generation_call_item_from_part,
     runtime_gemini_media_content_item_from_part, runtime_gemini_prompt_feedback_failure,
     runtime_gemini_response_metadata, runtime_gemini_responses_usage,
-    runtime_gemini_text_from_special_part, runtime_gemini_web_search_call_from_grounding,
+    runtime_gemini_sanitize_internal_instruction_leak_text, runtime_gemini_text_from_special_part,
+    runtime_gemini_web_search_call_from_grounding,
 };
 use super::super::gemini_thought_signatures::runtime_gemini_thought_signature;
 use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
@@ -195,13 +196,17 @@ impl RuntimeGeminiSseState {
                     self.reasoning_content.push_str(text);
                     events.extend(self.reasoning_delta_events(text));
                 } else {
+                    let Some(text) = runtime_gemini_sanitize_internal_instruction_leak_text(text)
+                    else {
+                        continue;
+                    };
                     if self.forced_output_text.is_some() {
                         continue;
                     }
                     if let Some(event) = self.output_text_item_added_event() {
                         events.push(event);
                     }
-                    self.output_text.push_str(text);
+                    self.output_text.push_str(&text);
                     let sequence_number = self.next_sequence_number();
                     events.push(self.event(
                         "response.output_text.delta",

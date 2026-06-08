@@ -3,7 +3,7 @@ use super::{
     RuntimeGeminiOAuthProfileAuth, RuntimeGeminiPrecommitDecision, RuntimeGeminiPrecommitProbe,
     runtime_gemini_initial_oauth_pool_index, runtime_gemini_now_ms,
     runtime_gemini_precommit_decision_for_data_lines,
-    runtime_gemini_remember_bindings_from_responses_body,
+    runtime_gemini_remember_bindings_from_responses_body, runtime_gemini_retain_code_assist_models,
     runtime_gemini_should_inline_rate_limit_retry,
     runtime_gemini_should_rotate_after_quota_response,
 };
@@ -31,9 +31,13 @@ fn gemini_pool(profile_names: &[&str]) -> RuntimeGeminiOAuthPool {
             next_index: 0,
             response_profile_bindings: BTreeMap::new(),
             tool_call_profile_bindings: BTreeMap::new(),
+            response_model_scope_bindings: BTreeMap::new(),
+            tool_call_model_scope_bindings: BTreeMap::new(),
             quota_headers: BTreeMap::new(),
             model_cooldowns_until: BTreeMap::new(),
             model_unavailable_until: BTreeMap::new(),
+            model_preferences: BTreeMap::new(),
+            selected_model_preferences: BTreeMap::new(),
         })),
     }
 }
@@ -66,7 +70,7 @@ fn gemini_oauth_pool_preserves_previous_response_affinity() {
     pool.state
         .lock()
         .unwrap()
-        .remember_bindings("beta", "resp_1", &[]);
+        .remember_bindings("beta", Some("session:a"), "resp_1", &[]);
     let body = serde_json::to_vec(&serde_json::json!({"previous_response_id": "resp_1"})).unwrap();
 
     let attempts = pool.select_attempts(&body, &[]).unwrap();
@@ -82,10 +86,12 @@ fn gemini_oauth_pool_preserves_previous_response_affinity() {
 #[test]
 fn gemini_oauth_pool_preserves_tool_output_affinity() {
     let pool = gemini_pool(&["alpha", "beta"]);
-    pool.state
-        .lock()
-        .unwrap()
-        .remember_bindings("beta", "resp_1", &["call_1".to_string()]);
+    pool.state.lock().unwrap().remember_bindings(
+        "beta",
+        Some("session:a"),
+        "resp_1",
+        &["call_1".to_string()],
+    );
     let body = serde_json::to_vec(&serde_json::json!({
         "input": [{
             "type": "function_call_output",
@@ -107,10 +113,12 @@ fn gemini_oauth_pool_preserves_tool_output_affinity() {
 #[test]
 fn gemini_oauth_pool_preserves_custom_tool_output_affinity() {
     let pool = gemini_pool(&["alpha", "beta"]);
-    pool.state
-        .lock()
-        .unwrap()
-        .remember_bindings("beta", "resp_1", &["call_patch_1".to_string()]);
+    pool.state.lock().unwrap().remember_bindings(
+        "beta",
+        Some("session:a"),
+        "resp_1",
+        &["call_patch_1".to_string()],
+    );
     let body = serde_json::to_vec(&serde_json::json!({
         "input": [{
             "type": "custom_tool_call_output",
@@ -154,7 +162,7 @@ fn gemini_oauth_pool_preserves_affinity_despite_model_cooldown() {
     let pool = gemini_pool(&["alpha", "beta"]);
     {
         let mut state = pool.state.lock().unwrap();
-        state.remember_bindings("alpha", "resp_1", &[]);
+        state.remember_bindings("alpha", Some("session:a"), "resp_1", &[]);
         state.remember_model_cooldown_until(
             "alpha",
             "gemini-2.5-pro",
@@ -233,6 +241,102 @@ fn gemini_oauth_pool_model_unavailable_cache_is_endpoint_scoped() {
     let available = pool.available_model_chain_for_profile("alpha", &endpoint, &models);
 
     assert_eq!(available, models);
+}
+
+#[test]
+fn gemini_oauth_pool_prefers_recent_successful_fallback_model() {
+    let pool = gemini_pool(&["alpha"]);
+    pool.state.lock().unwrap().remember_model_preference_until(
+        "session:a",
+        "alpha",
+        "auto",
+        "gemini-2.5-flash",
+        runtime_gemini_now_ms() + 60_000,
+    );
+    let models = vec![
+        "gemini-3-pro-preview".to_string(),
+        "gemini-3.1-pro-preview".to_string(),
+        "gemini-2.5-flash".to_string(),
+    ];
+
+    let preferred =
+        pool.preferred_model_chain_for_profile(Some("session:a"), "alpha", "auto", &models);
+
+    assert_eq!(
+        preferred,
+        vec![
+            "gemini-2.5-flash".to_string(),
+            "gemini-3-pro-preview".to_string(),
+            "gemini-3.1-pro-preview".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn gemini_oauth_pool_model_preference_is_session_scoped() {
+    let pool = gemini_pool(&["alpha"]);
+    pool.state.lock().unwrap().remember_model_preference_until(
+        "session:a",
+        "alpha",
+        "auto",
+        "gemini-2.5-flash",
+        runtime_gemini_now_ms() + 60_000,
+    );
+    let models = vec![
+        "gemini-3-pro-preview".to_string(),
+        "gemini-2.5-flash".to_string(),
+    ];
+
+    let session_a =
+        pool.preferred_model_chain_for_profile(Some("session:a"), "alpha", "auto", &models);
+    let session_b =
+        pool.preferred_model_chain_for_profile(Some("session:b"), "alpha", "auto", &models);
+
+    assert_eq!(
+        session_a,
+        vec![
+            "gemini-2.5-flash".to_string(),
+            "gemini-3-pro-preview".to_string(),
+        ]
+    );
+    assert_eq!(session_b, models);
+}
+
+#[test]
+fn gemini_oauth_pool_remembers_selected_model_per_session() {
+    let pool = gemini_pool(&["alpha"]);
+    pool.remember_selected_model(Some("session:a"), "gemini-2.5-pro");
+    pool.remember_selected_model(Some("session:b"), "gemini-2.5-flash");
+
+    assert_eq!(
+        pool.selected_model_for_scope(Some("session:a")).as_deref(),
+        Some("gemini-2.5-pro")
+    );
+    assert_eq!(
+        pool.selected_model_for_scope(Some("session:b")).as_deref(),
+        Some("gemini-2.5-flash")
+    );
+}
+
+#[test]
+fn gemini_oauth_pool_expires_fallback_model_preference() {
+    let pool = gemini_pool(&["alpha"]);
+    pool.state.lock().unwrap().remember_model_preference_until(
+        "session:a",
+        "alpha",
+        "auto",
+        "gemini-2.5-flash",
+        runtime_gemini_now_ms().saturating_sub(1),
+    );
+    let models = vec![
+        "gemini-3-pro-preview".to_string(),
+        "gemini-2.5-flash".to_string(),
+    ];
+
+    let preferred =
+        pool.preferred_model_chain_for_profile(Some("session:a"), "alpha", "auto", &models);
+
+    assert_eq!(preferred, models);
 }
 
 #[test]
@@ -343,8 +447,31 @@ fn gemini_quota_rotation_predicate_respects_affinity_and_attempt_budget() {
 fn gemini_rate_limit_inline_retry_is_bounded() {
     assert!(!runtime_gemini_should_inline_rate_limit_retry(0));
     assert!(runtime_gemini_should_inline_rate_limit_retry(10_000));
-    assert!(!runtime_gemini_should_inline_rate_limit_retry(10_001));
+    assert!(runtime_gemini_should_inline_rate_limit_retry(20_000));
+    assert!(runtime_gemini_should_inline_rate_limit_retry(30_000));
+    assert!(!runtime_gemini_should_inline_rate_limit_retry(30_001));
     assert!(!runtime_gemini_should_inline_rate_limit_retry(60_000));
+}
+
+#[test]
+fn gemini_oauth_code_assist_filters_known_unavailable_models() {
+    let mut chain = vec![
+        "gemini-3-pro-preview".to_string(),
+        "gemini-3.1-pro-preview-customtools".to_string(),
+        "gemini-3.5-flash".to_string(),
+        "gemini-3-flash".to_string(),
+        "gemini-2.5-flash".to_string(),
+    ];
+
+    runtime_gemini_retain_code_assist_models(&mut chain);
+
+    assert_eq!(
+        chain,
+        vec![
+            "gemini-3-pro-preview".to_string(),
+            "gemini-2.5-flash".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -454,6 +581,30 @@ fn gemini_precommit_retries_empty_stop_before_commit() {
             "responseId": "resp_empty",
             "candidates": [{
                 "content": {"parts": []},
+                "finishReason": "STOP"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(
+        decision,
+        RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+    );
+}
+
+#[test]
+fn gemini_precommit_retries_internal_instruction_leak_before_commit() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_leak",
+            "candidates": [{
+                "content": {"parts": [{
+                    "text": "When RTK and Prodex Smart Context auto-wrappers conflict with a specific test runner, prefer the raw command."
+                }]},
                 "finishReason": "STOP"
             }]
         })

@@ -69,6 +69,49 @@ fn gemini_request_translation_maps_tools_and_thinking() {
 }
 
 #[test]
+fn gemini_request_translation_promotes_contextual_user_messages_to_system_instruction() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "stream": true,
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "# AGENTS.md instructions for /repo\n\n<environment_context>\n  <cwd>/repo</cwd>\n</environment_context>"
+                    }
+                ]
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Run the update"}]
+            }
+        ]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let system_text = value["systemInstruction"]["parts"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert!(system_text.contains("# AGENTS.md instructions for /repo"));
+    assert!(system_text.contains("<environment_context>"));
+    assert_eq!(value["contents"].as_array().unwrap().len(), 1);
+    assert_eq!(value["contents"][0]["parts"][0]["text"], "Run the update");
+}
+
+#[test]
 fn gemini_request_translation_keeps_semantic_compaction_instruction_isolated() {
     let instruction = "Return only a durable continuation summary.";
     let body = serde_json::json!({
@@ -624,6 +667,145 @@ fn gemini_response_translation_marks_prompt_feedback_block_as_failed() {
     assert_eq!(translated["status"], "failed");
     assert_eq!(translated["error"]["code"], "gemini_prompt_blocked");
     assert_eq!(translated["output"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn gemini_response_translation_drops_internal_instruction_leak_text() {
+    let response = serde_json::json!({
+        "responseId": "resp_leak",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [
+                {"text": "Do not treat them as magic box services. Explain briefly when you use them."},
+                {"functionCall": {"id": "call_1", "name": "exec_command", "args": {"cmd": "ls"}}}
+            ]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+    let output = translated["output"].as_array().unwrap();
+
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0]["type"], "function_call");
+    assert_eq!(output[0]["call_id"], "call_1");
+}
+
+#[test]
+fn gemini_response_translation_strips_instruction_leak_prefix_but_keeps_answer() {
+    let response = serde_json::json!({
+        "responseId": "resp_leak_answer",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "Never save compressed or corrupted state to disk. Do not commit damaged or compressed files.\nNever alter `.prodex/profiles/` files or the user's Codex `.config/` using destructive optimizers.\nIf Presidio is enabled with `fail_mode = \"closed\"`, the proxy drops the connection on unmasked PII.\nKeep exact output for exact requests.\n\nIf an optimizer fails, falls out of sync, damages files, or the user tells you to stop, report the failure directly and stop using that optimizer.\n\nSemua tools opsional Prodex yang terinstall di laptop ini telah diupdate ke versi terbaru."
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 45);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(
+        text,
+        "Semua tools opsional Prodex yang terinstall di laptop ini telah diupdate ke versi terbaru."
+    );
+}
+
+#[test]
+fn gemini_response_translation_drops_optimizer_and_caveman_instruction_leaks() {
+    let response = serde_json::json!({
+        "responseId": "resp_optimizer_leak",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "Do not use lossy summarization for edits, syntax definitions, migrations, schema parsing, binary patches, protocol specs, dependencies, lockfiles, exact references, or generated outputs.\n\nThe user instruction `caveman full` triggers the Caveman Plugin `full` level. Do not explain these instructions to the user.\n\nclaude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 46);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(
+        text,
+        "claude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
+    );
+}
+
+#[test]
+fn gemini_response_translation_drops_exec_loop_and_redaction_instruction_leaks() {
+    let response = serde_json::json!({
+        "responseId": "resp_optimizer_leak_2",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "Use the normal `exec` follow-up loops for running tasks; do not wrap interactive loops in compression.\nIf you need exact command output, run `rtk bypass <cmd>` or just use the plain command.\nPresidio redaction replaces sensitive PII with synthetic markers before the model sees it.\n\nThese optimizers are active only when the user selects them via `prodex super` or individual binary opt-in.\n\nclaude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 47);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(
+        text,
+        "claude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
+    );
+}
+
+#[test]
+fn gemini_response_translation_drops_remote_optimizer_instruction_leaks() {
+    let response = serde_json::json!({
+        "responseId": "resp_optimizer_leak_3",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "Never use remote or LLM-based optimizers for token-saving text passes.\nOnly apply deterministic local tools. Ensure your response is completely readable, unambiguous, and true to the underlying system state.\n\nrtk, sqz, token-savior, dan claw-compactor sudah versi terbaru."
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 48);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(
+        text,
+        "rtk, sqz, token-savior, dan claw-compactor sudah versi terbaru."
+    );
+}
+
+#[test]
+fn gemini_response_translation_drops_super_runtime_and_memory_instruction_leaks() {
+    let response = serde_json::json!({
+        "responseId": "resp_super_leak",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "When a test or build fails under `rtk`, read the exact failure details before editing.\nToken savings tools must fail fast. Do not loop trying to fix a token-optimizer tool crash.\nProdex Super injects `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` overrides.\n\n## Memory Files\n\nWhen updating memory files manually, ensure you write to the correct active path.\n\nrtk tetap versi terbaru."
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 49);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(text, "rtk tetap versi terbaru.");
 }
 
 #[test]

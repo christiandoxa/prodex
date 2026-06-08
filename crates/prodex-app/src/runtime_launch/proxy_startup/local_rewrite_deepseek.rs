@@ -2,6 +2,7 @@ use super::deepseek_rewrite::runtime_deepseek_chat_request_body;
 use super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+    runtime_local_rewrite_model_selection,
 };
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_search_fallback::{
@@ -14,8 +15,8 @@ use super::local_rewrite_transport::{
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
-    runtime_provider_model_fallback_chain, runtime_provider_model_from_body,
-    runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
+    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
+    runtime_provider_should_retry_with_next_model,
     runtime_provider_should_rotate_auth_after_response,
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
@@ -65,11 +66,16 @@ fn send_runtime_deepseek_responses_request(
     api_key_attempts: Vec<(String, &str)>,
     api_key_attempt_count: usize,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let requested_model = runtime_provider_model_from_body(&body)
-        .unwrap_or_else(|| prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL.to_string());
+    let model_selection = runtime_local_rewrite_model_selection(
+        shared,
+        RuntimeProviderBridgeKind::DeepSeek,
+        request,
+        &body,
+        prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL,
+    );
     let model_chain = runtime_provider_model_fallback_chain(
         RuntimeProviderBridgeKind::DeepSeek,
-        &requested_model,
+        &model_selection.model,
     );
     let upstream_url = runtime_deepseek_upstream_url(
         &shared.upstream_base_url,
@@ -78,7 +84,7 @@ fn send_runtime_deepseek_responses_request(
     );
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         for (model_index, model) in model_chain.iter().enumerate() {
-            let model_body = runtime_provider_request_body_with_model(&body, model);
+            let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
             let translated =
                 runtime_deepseek_chat_request_body(&model_body, &shared.deepseek_conversations)?;
             if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
