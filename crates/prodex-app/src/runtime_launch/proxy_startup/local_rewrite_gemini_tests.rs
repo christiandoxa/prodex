@@ -643,3 +643,27 @@ fn gemini_precommit_retries_internal_instruction_leak_before_commit() {
         RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
     );
 }
+
+#[test]
+fn gemini_precommit_retries_optimizer_fallback_instruction_leak_before_commit() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_optimizer_fallback_leak",
+            "candidates": [{
+                "content": {"parts": [{
+                    "text": "breaks task execution, immediately drop the optimizer tool and use normal file reads/commands to complete the task. updates or basic file reads unless the user explicitly asks for optimizer diagnostics. Use optimizers for their intended job: reducing token usage of large files and deep graphs. Do not overcomplicate targeted reads or basic config debugging."
+                }]},
+                "finishReason": "STOP"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(
+        decision,
+        RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+    );
+}

@@ -4,8 +4,8 @@ use super::gemini_rewrite::{
     runtime_gemini_finish_reason_retryable_invalid, runtime_gemini_generate_request_body,
     runtime_gemini_media_content_item_from_part, runtime_gemini_normalized_response_value,
     runtime_gemini_project_id, runtime_gemini_prompt_feedback_failure,
-    runtime_gemini_sanitize_internal_instruction_leak_text, runtime_gemini_text_from_special_part,
-    runtime_gemini_upstream_url,
+    runtime_gemini_text_from_special_part, runtime_gemini_upstream_url,
+    runtime_gemini_visible_text_from_part,
 };
 use super::gemini_sse::{
     RuntimeGeminiBindingRecorder, RuntimeGeminiGenerateSseReader,
@@ -1054,15 +1054,14 @@ fn runtime_gemini_precommit_apply_parts(
         if text.is_empty() {
             continue;
         }
-        if runtime_gemini_sanitize_internal_instruction_leak_text(text).is_none() {
-            continue;
-        }
         if part
             .get("thought")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
             probe.reasoning_output = true;
+        } else if runtime_gemini_visible_text_from_part(part).is_none() {
+            continue;
         } else {
             probe.visible_output = true;
             return;

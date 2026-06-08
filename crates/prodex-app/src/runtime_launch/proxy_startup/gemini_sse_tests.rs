@@ -194,6 +194,29 @@ fn gemini_sse_reader_drops_optimizer_diagnostic_instruction_leaks() {
 }
 
 #[test]
+fn gemini_sse_reader_drops_optimizer_fallback_instruction_leaks() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_optimizer_fallback_leak\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"breaks task execution, immediately drop the optimizer tool and use normal file reads/commands to complete the task. updates or basic file reads unless the user explicitly asks for optimizer diagnostics. Use optimizers for their intended job: reducing token usage of large files and deep graphs. Do not overcomplicate targeted reads or basic config debugging.\\n\\nSaya cek implementasi Gemini adapter sekarang.\"},{\"functionCall\":{\"name\":\"exec_command\",\"args\":{\"cmd\":\"rg gemini_response crates/prodex-app/src/runtime_launch/proxy_startup\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        25,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(!output.contains("breaks task execution"));
+    assert!(!output.contains("optimizer diagnostics"));
+    assert!(output.contains("Saya cek implementasi Gemini adapter sekarang."));
+    assert!(output.contains("\"type\":\"function_call\""));
+    assert!(output.contains("\"name\":\"exec_command\""));
+}
+
+#[test]
 fn gemini_sse_reader_drops_exact_output_instruction_leak() {
     let stream = concat!(
         "data: {\"responseId\":\"resp_exact_output_leak\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"```\\ncat gemini-patch-smoke.txt\\n```\\nBut the prompt says: \\\"If the user requests an exact string, answer-only output, or command output only, emit only that requested output and nothing else. For exact-output prompts, do not include explanations, diffs, status, previous-turn recaps, or extra sentences before or after the requested output.\\\"\\n\\nWhen the user explicitly asks for exact command output, answer with exactly that output, without surrounding text, summaries, or rates.\\n\\nAll commands run with user privileges. Wait or poll for commands that return a running session ID until they complete. Do not stop midway. Execute requested tool tasks fully.\\n\\nPRODEX_GEMINI_LIVE_OK\"}]},\"finishReason\":\"STOP\"}]}\n\n",

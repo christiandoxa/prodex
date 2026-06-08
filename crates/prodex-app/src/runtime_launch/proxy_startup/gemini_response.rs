@@ -322,21 +322,15 @@ pub(in super::super) fn runtime_gemini_chat_assistant_messages_from_generate_val
     let mut native_parts = Vec::new();
     let mut tool_calls = Vec::new();
     for (index, part) in parts.iter().enumerate() {
-        if let Some(part_text) = part.get("text").and_then(serde_json::Value::as_str) {
-            if part
+        if let Some(part_text) = part.get("text").and_then(serde_json::Value::as_str)
+            && part
                 .get("thought")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
-            {
-                reasoning_content.push_str(part_text);
-            } else {
-                let Some(part_text) =
-                    runtime_gemini_sanitize_internal_instruction_leak_text(part_text)
-                else {
-                    continue;
-                };
-                text.push_str(&part_text);
-            }
+        {
+            reasoning_content.push_str(part_text);
+        } else if let Some(part_text) = runtime_gemini_visible_text_from_part(part) {
+            text.push_str(&part_text);
         }
         if let Some(part_text) = runtime_gemini_text_from_special_part(part) {
             if !text.is_empty() {
@@ -440,14 +434,7 @@ pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
         let mut text = String::new();
         let mut content_items = Vec::new();
         for (index, part) in parts.iter().enumerate() {
-            if let Some(part_text) = part.get("text").and_then(serde_json::Value::as_str)
-                && !part
-                    .get("thought")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-                && let Some(part_text) =
-                    runtime_gemini_sanitize_internal_instruction_leak_text(part_text)
-            {
+            if let Some(part_text) = runtime_gemini_visible_text_from_part(part) {
                 text.push_str(&part_text);
             }
             if let Some(part_text) = runtime_gemini_text_from_special_part(part) {
@@ -575,6 +562,7 @@ fn runtime_gemini_optimizer_instruction_leak_text(lower: &str) -> bool {
     let imperative_or_internal = lower.contains("do not ")
         || lower.contains("never ")
         || lower.contains("if an optimizer")
+        || lower.contains("if a compression tool")
         || lower.contains("if a token")
         || lower.contains("token-saving")
         || lower.contains("lossless deduplication")
@@ -582,7 +570,20 @@ fn runtime_gemini_optimizer_instruction_leak_text(lower: &str) -> bool {
         || lower.contains("bypass it for that turn")
         || lower.contains("strip rtk proxy banners")
         || lower.contains("prodex manages optimizer scopes")
-        || lower.contains("normal shell commands or file reads");
+        || lower.contains("normal shell commands or file reads")
+        || lower.contains("breaks task execution")
+        || lower.contains("immediately drop the optimizer")
+        || lower.contains("drop the optimizer tool")
+        || lower.contains("fall back to plain shell")
+        || lower.contains("fallback to plain shell")
+        || lower.contains("fall back to normal file")
+        || lower.contains("use normal file reads")
+        || lower.contains("use normal file reads/commands")
+        || lower.contains("use normal file reads/commands to complete")
+        || lower.contains("unless the user explicitly asks for optimizer diagnostics")
+        || lower.contains("use optimizers for their intended job")
+        || lower.contains("do not overcomplicate targeted reads")
+        || lower.contains("do not overcomplicate basic config debugging");
     mentions_optimizer_surface && imperative_or_internal
         || runtime_gemini_exact_output_instruction_leak_text(lower)
 }
@@ -626,6 +627,22 @@ pub(in super::super) fn runtime_gemini_sanitize_internal_instruction_leak_text(
     } else {
         Some(retained.join("\n\n"))
     }
+}
+
+pub(in super::super) fn runtime_gemini_visible_text_from_part(
+    part: &serde_json::Value,
+) -> Option<String> {
+    if part
+        .get("thought")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    part.get("text")
+        .and_then(serde_json::Value::as_str)
+        .filter(|text| !text.is_empty())
+        .and_then(runtime_gemini_sanitize_internal_instruction_leak_text)
 }
 
 pub(in super::super) fn runtime_gemini_response_status(

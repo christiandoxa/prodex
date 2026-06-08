@@ -828,6 +828,27 @@ fn gemini_response_translation_drops_optimizer_diagnostic_instruction_leaks() {
 }
 
 #[test]
+fn gemini_response_translation_drops_optimizer_fallback_instruction_leaks() {
+    let response = serde_json::json!({
+        "responseId": "resp_optimizer_fallback_leak",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "breaks task execution, immediately drop the optimizer tool and use normal file reads/commands to complete the task. updates or basic file reads unless the user explicitly asks for optimizer diagnostics. Use optimizers for their intended job: reducing token usage of large files and deep graphs. Do not overcomplicate targeted reads or basic config debugging.\n\nSaya cek implementasi Gemini adapter sekarang."
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 52);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(text, "Saya cek implementasi Gemini adapter sekarang.");
+}
+
+#[test]
 fn gemini_response_translation_drops_exact_output_instruction_leak() {
     let response = serde_json::json!({
         "responseId": "resp_exact_output_leak",
