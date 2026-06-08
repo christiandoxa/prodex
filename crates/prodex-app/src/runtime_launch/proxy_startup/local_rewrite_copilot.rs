@@ -1,3 +1,10 @@
+#[cfg(test)]
+use super::super::copilot_instructions::{
+    RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_HEADER, runtime_copilot_workspace_custom_instructions,
+};
+use super::super::copilot_instructions::{
+    runtime_copilot_apply_custom_instructions, runtime_copilot_cached_workspace_custom_instructions,
+};
 use super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekTranslatedRequest,
     runtime_chat_compatible_request_body,
@@ -291,13 +298,17 @@ fn runtime_copilot_responses_chat_request_body(
     body: &[u8],
     conversations: &RuntimeDeepSeekConversationStore,
 ) -> Result<RuntimeDeepSeekTranslatedRequest> {
-    runtime_chat_compatible_request_body(
+    let mut translated = runtime_chat_compatible_request_body(
         body,
         conversations,
         RuntimeProviderBridgeKind::Copilot,
         prodex_cli::SUPER_COPILOT_DEFAULT_MODEL,
         false,
-    )
+    )?;
+    if let Some(instructions) = runtime_copilot_cached_workspace_custom_instructions() {
+        runtime_copilot_apply_custom_instructions(&mut translated, instructions)?;
+    }
+    Ok(translated)
 }
 
 fn runtime_copilot_request_context(
@@ -595,6 +606,76 @@ mod tests {
 
     fn conversation_store() -> RuntimeDeepSeekConversationStore {
         Arc::new(Mutex::new(BTreeMap::new()))
+    }
+
+    fn temp_copilot_instruction_root(name: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-copilot-instructions-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn copilot_workspace_custom_instructions_reads_github_files_only() {
+        let root = temp_copilot_instruction_root("github-only");
+        std::fs::create_dir_all(root.join(".github/instructions/nested")).unwrap();
+        std::fs::write(
+            root.join(".github/copilot-instructions.md"),
+            "Prefer concise answers.",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".github/instructions/nested/review.instructions.md"),
+            "Review risky diffs first.",
+        )
+        .unwrap();
+        std::fs::write(root.join("AGENTS.md"), "@/home/doxa/.prodex/private/RTK.md").unwrap();
+
+        let instructions = runtime_copilot_workspace_custom_instructions(&root)
+            .unwrap()
+            .unwrap();
+
+        assert!(instructions.contains("## .github/copilot-instructions.md"));
+        assert!(instructions.contains("Prefer concise answers."));
+        assert!(instructions.contains("## .github/instructions/nested/review.instructions.md"));
+        assert!(instructions.contains("Review risky diffs first."));
+        assert!(!instructions.contains("AGENTS.md"));
+        assert!(!instructions.contains(".prodex/private"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn copilot_custom_instructions_merge_into_chat_body() {
+        let mut translated = RuntimeDeepSeekTranslatedRequest {
+            body: serde_json::to_vec(&serde_json::json!({
+                "model": "gpt-5.1-codex",
+                "stream": true,
+                "messages": [
+                    {"role": "system", "content": "Existing system."},
+                    {"role": "user", "content": "Hi"}
+                ]
+            }))
+            .unwrap(),
+            messages: vec![
+                serde_json::json!({"role": "system", "content": "Existing system."}),
+                serde_json::json!({"role": "user", "content": "Hi"}),
+            ],
+        };
+
+        runtime_copilot_apply_custom_instructions(&mut translated, "Prefer Rust tests.").unwrap();
+
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        let system = body["messages"][0]["content"].as_str().unwrap();
+        assert!(system.contains("Existing system."));
+        assert!(system.contains(RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_HEADER));
+        assert!(system.contains("Prefer Rust tests."));
+        assert_eq!(
+            translated.messages,
+            body["messages"].as_array().unwrap().clone()
+        );
     }
 
     #[test]

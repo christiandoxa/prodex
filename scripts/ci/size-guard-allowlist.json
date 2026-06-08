@@ -16,32 +16,32 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_response.rs",
-    "maxLines": 1185,
+    "maxLines": 1286,
     "reason": "Gemini buffered response translation and internal instruction leak filtering remain capped while response sanitization is split from Codex shape reconstruction."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_rewrite_tests.rs",
-    "maxLines": 1873,
+    "maxLines": 1935,
     "reason": "Gemini translation regression cases remain consolidated while Codex-native Gemini parity coverage, model fallback, retry-budget coverage, and instruction-leak sanitizer coverage are completed."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
-    "maxLines": 1620,
+    "maxLines": 1628,
     "reason": "Gemini SSE state-machine invariants, tool-intent tracking, and exact-output reconstruction remain in one capped module until state ownership is split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tests.rs",
-    "maxLines": 1435,
+    "maxLines": 1459,
     "reason": "Gemini SSE exact-output, tool-intent, continuity, and instruction-leak regression cases remain consolidated while the state-machine surface stabilizes."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 917,
-    "reason": "Local rewrite shared routing and provider-scoped session model memory remain capped while provider-specific selection helpers are split out."
+    "maxLines": 924,
+    "reason": "Local rewrite shared routing, provider-scoped session model memory, and Copilot startup instruction cache initialization remain capped while provider-specific selection helpers are split out."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1778,
+    "maxLines": 1791,
     "reason": "Gemini local rewrite authentication, session model affinity, model-unavailable caching, retry budgeting, and request context remain capped while default model ownership is shared through the Gemini runtime crate."
   },
   {

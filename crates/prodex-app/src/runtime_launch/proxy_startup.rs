@@ -1,7 +1,7 @@
 use super::*;
 
 mod anthropic_rewrite;
-mod deepseek_rewrite;
+pub(super) mod deepseek_rewrite;
 mod deepseek_sse;
 mod gemini_rewrite;
 mod gemini_sse;

@@ -1,5 +1,6 @@
 use super::*;
 
+mod copilot_instructions;
 mod execution;
 mod plan;
 mod profile;

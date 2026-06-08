@@ -217,6 +217,30 @@ fn gemini_sse_reader_drops_optimizer_fallback_instruction_leaks() {
 }
 
 #[test]
+fn gemini_sse_reader_hides_super_capabilities_leak_during_native_working_state() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_super_capabilities_leak\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Previously unseen internal prompt wording that must stay hidden.\\n\\n## Interaction\\nUse tools transparently behind the scenes.\"},{\"functionCall\":{\"name\":\"exec_command\",\"args\":{\"cmd\":\"rtk git log --oneline -5\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        26,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(!output.contains("Previously unseen"));
+    assert!(!output.contains("Interaction"));
+    assert!(!output.contains("response.output_text.delta"));
+    assert!(!output.contains("response.reasoning_summary_text.delta"));
+    assert!(output.contains("\"type\":\"function_call\""));
+    assert!(output.contains("\"name\":\"exec_command\""));
+}
+
+#[test]
 fn gemini_sse_reader_drops_exact_output_instruction_leak() {
     let stream = concat!(
         "data: {\"responseId\":\"resp_exact_output_leak\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"```\\ncat gemini-patch-smoke.txt\\n```\\nBut the prompt says: \\\"If the user requests an exact string, answer-only output, or command output only, emit only that requested output and nothing else. For exact-output prompts, do not include explanations, diffs, status, previous-turn recaps, or extra sentences before or after the requested output.\\\"\\n\\nWhen the user explicitly asks for exact command output, answer with exactly that output, without surrounding text, summaries, or rates.\\n\\nAll commands run with user privileges. Wait or poll for commands that return a running session ID until they complete. Do not stop midway. Execute requested tool tasks fully.\\n\\nPRODEX_GEMINI_LIVE_OK\"}]},\"finishReason\":\"STOP\"}]}\n\n",

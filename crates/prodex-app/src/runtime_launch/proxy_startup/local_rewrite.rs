@@ -1,3 +1,4 @@
+use super::super::copilot_instructions::runtime_copilot_init_current_workspace_custom_instructions;
 use super::deepseek_rewrite::*;
 use super::gemini_rewrite::*;
 use super::local_rewrite_copilot::{
@@ -213,6 +214,12 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
     );
     let gemini_oauth_pool = runtime_gemini_oauth_pool_from_provider(&provider);
     let copilot_oauth_pool = runtime_copilot_oauth_pool_from_provider(&provider);
+    if matches!(
+        &provider,
+        RuntimeLocalRewriteProviderOptions::Copilot { .. }
+    ) {
+        runtime_copilot_init_current_workspace_custom_instructions();
+    }
     let shared = RuntimeLocalRewriteProxyShared {
         runtime_shared: runtime_shared.clone(),
         upstream_base_url,

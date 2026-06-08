@@ -2,8 +2,9 @@ use super::gemini_rewrite::{
     RuntimeGeminiAuth, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
     RuntimeGeminiTranslatedRequest, runtime_gemini_finish_reason,
     runtime_gemini_finish_reason_retryable_invalid, runtime_gemini_generate_request_body,
-    runtime_gemini_media_content_item_from_part, runtime_gemini_normalized_response_value,
-    runtime_gemini_project_id, runtime_gemini_prompt_feedback_failure,
+    runtime_gemini_internal_instruction_corpus, runtime_gemini_media_content_item_from_part,
+    runtime_gemini_normalized_response_value, runtime_gemini_project_id,
+    runtime_gemini_prompt_feedback_failure, runtime_gemini_text_echoes_internal_instruction,
     runtime_gemini_text_from_special_part, runtime_gemini_upstream_url,
     runtime_gemini_visible_text_from_part,
 };
@@ -588,7 +589,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 let mut stream_prefix = Vec::new();
                 if responses_route && translated.stream && runtime_gemini_response_is_sse(&response)
                 {
-                    match runtime_gemini_peek_stream_for_retry(response)? {
+                    match runtime_gemini_peek_stream_for_retry(response, &translated.messages)? {
                         RuntimeGeminiPrecommitPeek::Committed {
                             response: next_response,
                             prefix,
@@ -839,6 +840,7 @@ enum RuntimeGeminiPrecommitPeek {
 struct RuntimeGeminiPrecommitProbe {
     visible_output: bool,
     reasoning_output: bool,
+    internal_instruction_corpus: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -858,11 +860,17 @@ fn runtime_gemini_response_is_sse(response: &reqwest::blocking::Response) -> boo
 
 fn runtime_gemini_peek_stream_for_retry(
     mut response: reqwest::blocking::Response,
+    conversation_messages: &[serde_json::Value],
 ) -> Result<RuntimeGeminiPrecommitPeek> {
     let mut prefix = Vec::new();
     let mut line = Vec::new();
     let mut data_lines = Vec::new();
-    let mut probe = RuntimeGeminiPrecommitProbe::default();
+    let mut probe = RuntimeGeminiPrecommitProbe {
+        internal_instruction_corpus: runtime_gemini_internal_instruction_corpus(
+            conversation_messages,
+        ),
+        ..RuntimeGeminiPrecommitProbe::default()
+    };
     let mut byte = [0_u8; 1];
 
     loop {
@@ -1061,6 +1069,11 @@ fn runtime_gemini_precommit_apply_parts(
         {
             probe.reasoning_output = true;
         } else if runtime_gemini_visible_text_from_part(part).is_none() {
+            continue;
+        } else if runtime_gemini_text_echoes_internal_instruction(
+            text,
+            &probe.internal_instruction_corpus,
+        ) {
             continue;
         } else {
             probe.visible_output = true;

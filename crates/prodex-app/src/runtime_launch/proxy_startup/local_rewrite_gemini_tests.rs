@@ -667,3 +667,78 @@ fn gemini_precommit_retries_optimizer_fallback_instruction_leak_before_commit() 
         RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
     );
 }
+
+#[test]
+fn gemini_precommit_retries_super_capabilities_instruction_leak_before_commit() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_super_capabilities_leak",
+            "candidates": [{
+                "content": {"parts": [{
+                    "text": "Never commit AST summary artifacts into source trees or merge diffs containing proxy markers.\n\nFor diagnostics, the runtime provides `prodex super check-optimizers` to verify installed paths and current optimizer integration status.\n\nThe Prodex bridge handles auto-compression of the main runtime system prompt and capabilities during launch; do not manipulate the system prompt yourself.\n\nUse these capabilities only as directed."
+                }]},
+                "finishReason": "STOP"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(
+        decision,
+        RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+    );
+}
+
+#[test]
+fn gemini_precommit_retries_truncated_internal_prompt_fragment_before_commit() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_truncated_internal_fragment",
+            "candidates": [{
+                "content": {"parts": [{
+                    "text": "If reads or basic config debugging. reads or basic config debugging."
+                }]},
+                "finishReason": "STOP"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe::default();
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(
+        decision,
+        RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+    );
+}
+
+#[test]
+fn gemini_precommit_retries_verbatim_system_instruction_echo_before_commit() {
+    let data = vec![
+        serde_json::json!({
+            "responseId": "resp_system_echo",
+            "candidates": [{
+                "content": {"parts": [{
+                    "text": "Prodex Super Mode also runs a quick background probe at startup to check rtk, claw, prodex-token-savior, and prodex-sqz versions."
+                }]},
+                "finishReason": "STOP"
+            }]
+        })
+        .to_string(),
+    ];
+    let mut probe = RuntimeGeminiPrecommitProbe {
+        internal_instruction_corpus: "prodex super mode also runs a quick background probe at startup to check rtk claw prodex-token-savior and prodex-sqz versions".to_string(),
+        ..RuntimeGeminiPrecommitProbe::default()
+    };
+
+    let decision = runtime_gemini_precommit_decision_for_data_lines(&data, &mut probe);
+
+    assert_eq!(
+        decision,
+        RuntimeGeminiPrecommitDecision::RetryableInvalid("gemini_empty_response".to_string())
+    );
+}

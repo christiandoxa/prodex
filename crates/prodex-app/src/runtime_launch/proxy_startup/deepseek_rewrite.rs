@@ -35,9 +35,9 @@ pub(super) type RuntimeDeepSeekConversationStore =
     Arc<Mutex<BTreeMap<String, Vec<serde_json::Value>>>>;
 pub(super) type RuntimeDeepSeekPendingMessages = Arc<Mutex<BTreeMap<u64, Vec<serde_json::Value>>>>;
 
-pub(super) struct RuntimeDeepSeekTranslatedRequest {
-    pub(super) body: Vec<u8>,
-    pub(super) messages: Vec<serde_json::Value>,
+pub(crate) struct RuntimeDeepSeekTranslatedRequest {
+    pub(crate) body: Vec<u8>,
+    pub(crate) messages: Vec<serde_json::Value>,
 }
 
 pub(super) fn runtime_deepseek_chat_request_body(

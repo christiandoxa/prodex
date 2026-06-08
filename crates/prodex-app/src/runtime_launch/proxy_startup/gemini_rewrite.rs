@@ -31,11 +31,12 @@ pub(super) use gemini_response::{
     runtime_gemini_finish_reason, runtime_gemini_finish_reason_failure,
     runtime_gemini_finish_reason_incomplete, runtime_gemini_finish_reason_retryable_invalid,
     runtime_gemini_image_generation_call_item_from_part,
-    runtime_gemini_media_content_item_from_part, runtime_gemini_normalized_response_value,
-    runtime_gemini_prompt_feedback_failure, runtime_gemini_response_metadata,
-    runtime_gemini_responses_usage, runtime_gemini_responses_value_from_generate_value,
-    runtime_gemini_text_from_special_part, runtime_gemini_visible_text_from_part,
-    runtime_gemini_web_search_call_from_grounding,
+    runtime_gemini_internal_instruction_corpus, runtime_gemini_media_content_item_from_part,
+    runtime_gemini_normalized_response_value, runtime_gemini_prompt_feedback_failure,
+    runtime_gemini_response_metadata, runtime_gemini_responses_usage,
+    runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_text_echoes_internal_instruction, runtime_gemini_text_from_special_part,
+    runtime_gemini_visible_text_from_part, runtime_gemini_web_search_call_from_grounding,
 };
 
 #[derive(Clone)]

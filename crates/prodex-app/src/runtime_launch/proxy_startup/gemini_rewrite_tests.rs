@@ -849,6 +849,68 @@ fn gemini_response_translation_drops_optimizer_fallback_instruction_leaks() {
 }
 
 #[test]
+fn gemini_response_translation_drops_super_capabilities_instruction_leak() {
+    let response = serde_json::json!({
+        "responseId": "resp_super_capabilities_leak",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "Never commit AST summary artifacts into source trees or merge diffs containing proxy markers.\n\nFor diagnostics, the runtime provides `prodex super check-optimizers` to verify installed paths and current optimizer integration status.\n\nThe Prodex bridge handles auto-compression of the main runtime system prompt and capabilities during launch; do not manipulate the system prompt yourself.\n\nWhen reviewing diffs of files managed by Prodex Super, expand proxy markers first.\n\nFor queries related to `presidio`, verify that `--presidio` was passed during launch.\n\nOnly use `prodex-sqz` or `token-savior` tools when the optimizer report shows them as available MCP servers.\n\nThe `rtk proxy` fallback allows you to pipe content through `rtk`.\n\nUse these capabilities only as directed.\n\nSaya lanjut memeriksa implementasi Gemini."
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 53);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(text, "Saya lanjut memeriksa implementasi Gemini.");
+}
+
+#[test]
+fn gemini_response_translation_suppresses_all_text_before_tool_call() {
+    let response = serde_json::json!({
+        "responseId": "resp_text_before_tool",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [
+                {"text": "Previously unseen internal prompt wording that must stay hidden."},
+                {"functionCall": {"name": "exec_command", "args": {"cmd": "rtk git log -5"}}}
+            ]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 54);
+
+    assert_eq!(translated["output"].as_array().unwrap().len(), 1);
+    assert_eq!(translated["output"][0]["type"], "function_call");
+    assert!(!translated.to_string().contains("Previously unseen"));
+}
+
+#[test]
+fn gemini_response_translation_drops_truncated_internal_prompt_fragment() {
+    let response = serde_json::json!({
+        "responseId": "resp_truncated_internal_fragment",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "If reads or basic config debugging. reads or basic config debugging."
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 55);
+
+    assert_eq!(translated["status"], "failed");
+    assert_eq!(translated["error"]["code"], "gemini_empty_response");
+    assert!(!translated.to_string().contains("basic config debugging"));
+}
+
+#[test]
 fn gemini_response_translation_drops_exact_output_instruction_leak() {
     let response = serde_json::json!({
         "responseId": "resp_exact_output_leak",

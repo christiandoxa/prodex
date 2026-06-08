@@ -7,8 +7,9 @@ use super::super::gemini_rewrite::{
     runtime_gemini_custom_tool_call_item, runtime_gemini_custom_tool_input_from_arguments,
     runtime_gemini_finish_reason, runtime_gemini_finish_reason_failure,
     runtime_gemini_finish_reason_incomplete, runtime_gemini_image_generation_call_item_from_part,
-    runtime_gemini_media_content_item_from_part, runtime_gemini_prompt_feedback_failure,
-    runtime_gemini_response_metadata, runtime_gemini_responses_usage,
+    runtime_gemini_internal_instruction_corpus, runtime_gemini_media_content_item_from_part,
+    runtime_gemini_prompt_feedback_failure, runtime_gemini_response_metadata,
+    runtime_gemini_responses_usage, runtime_gemini_text_echoes_internal_instruction,
     runtime_gemini_text_from_special_part, runtime_gemini_visible_text_from_part,
     runtime_gemini_web_search_call_from_grounding,
 };
@@ -36,6 +37,8 @@ pub(super) struct RuntimeGeminiSseState {
     model: Option<String>,
     finish_reason: Option<String>,
     output_text: String,
+    pending_output_text: String,
+    internal_instruction_corpus: String,
     reasoning_content: String,
     media_content_items: Vec<serde_json::Value>,
     native_parts: Vec<serde_json::Value>,
@@ -74,6 +77,8 @@ impl RuntimeGeminiSseState {
         let command_output_only =
             runtime_gemini_conversation_requests_command_output_only(&conversation_messages);
         let forced_output_text = runtime_gemini_forced_command_output(&conversation_messages);
+        let internal_instruction_corpus =
+            runtime_gemini_internal_instruction_corpus(&conversation_messages);
         Self {
             request_id,
             response_id: format!("resp_gemini_{request_id}"),
@@ -92,6 +97,8 @@ impl RuntimeGeminiSseState {
             model: None,
             finish_reason: None,
             output_text: String::new(),
+            pending_output_text: String::new(),
+            internal_instruction_corpus,
             reasoning_content: String::new(),
             media_content_items: Vec::new(),
             native_parts: Vec::new(),
@@ -203,21 +210,7 @@ impl RuntimeGeminiSseState {
                     if self.command_output_only || self.forced_output_text.is_some() {
                         continue;
                     }
-                    if let Some(event) = self.output_text_item_added_event() {
-                        events.push(event);
-                    }
-                    self.output_text.push_str(&text);
-                    let sequence_number = self.next_sequence_number();
-                    events.push(self.event(
-                        "response.output_text.delta",
-                        serde_json::json!({
-                            "type": "response.output_text.delta",
-                            "sequence_number": sequence_number,
-                            "created_at": self.created_at,
-                            "response_id": self.response_id,
-                            "delta": text,
-                        }),
-                    ));
+                    self.pending_output_text.push_str(&text);
                 }
             }
             if let Some(content_item) = runtime_gemini_media_content_item_from_part(part) {
@@ -255,6 +248,7 @@ impl RuntimeGeminiSseState {
                 if self.forced_output_text.is_some() {
                     continue;
                 }
+                self.pending_output_text.clear();
                 let thought_signature = runtime_gemini_thought_signature(part)
                     .or_else(|| runtime_gemini_thought_signature(function_call));
                 events.extend(self.observe_function_call(
@@ -562,7 +556,21 @@ impl RuntimeGeminiSseState {
             return None;
         }
         self.apply_forced_output_text();
-        let mut events = self.complete_tool_call_events();
+        let mut events = if self.tool_calls.is_empty() && !self.pending_output_text.is_empty() {
+            let text = std::mem::take(&mut self.pending_output_text);
+            if runtime_gemini_text_echoes_internal_instruction(
+                &text,
+                &self.internal_instruction_corpus,
+            ) {
+                Vec::new()
+            } else {
+                self.observe_output_text(&text)
+            }
+        } else {
+            self.pending_output_text.clear();
+            Vec::new()
+        };
+        events.extend(self.complete_tool_call_events());
         events.extend(self.complete_output_text_item_events());
         events.extend(self.complete_media_item_events());
         events.extend(self.complete_image_generation_item_events());
