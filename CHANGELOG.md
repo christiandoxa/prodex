@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.166.0 - 2026-06-08
+
+### Misc
+
+- Harden super provider bridges (`c8c1d22`)
+
 ## 0.165.0 - 2026-06-08
 
 ### Docs
@@ -73,11 +79,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy Gemini provider clippy (`5c1e56f`)
 - Stabilize Gemini provider tool calls (`43c9b92`)
-
-## 0.154.0 - 2026-06-05
-
-### Misc
-
-- Resolve CI clippy failures and Gemini triage (`6117586`)
-- Update prodex-cli dependency version (`00f81ff`)
-- Add multi-language support (`6ab3073`)
