@@ -166,6 +166,59 @@ fn gemini_sse_reader_drops_super_runtime_and_memory_instruction_leaks() {
 }
 
 #[test]
+fn gemini_sse_reader_drops_optimizer_diagnostic_instruction_leaks() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_optimizer_diagnostic_leak\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"If an optimizer tool hangs, faults, or emits corrupted/binary text, stop using it, say why briefly, and proceed without it.\\nIf the user's explicit requested answer or command output must be an exact string, strip RTK proxy banners and diagnostic noise before returning the final text.\\nIf the prompt dictates \\\"Answer with only the command output\\\", then output only the command output string.\\nIf you suspect an optimizer has obscured a critical signal, bypass it and inspect the raw file or standard command output directly.\\nDo not hallucinate optimizer tools or CLI wrapper paths. Inspect `PRODEX_OPTIMIZERS_HOME` or `~/.local/share/prodex-optimizers` only if the user explicitly asks for optimizer diagnostics.\\nDo not apply lossy formatters/minifiers as a token-saving tactic unless the user requested code minification. Lossless deduplication and syntactic abbreviation (like `rtk`, `prodex-sqz`, `claw-compactor`, `prodex-token-savior`) are allowed and encouraged. If an optimizer crashes or strips critical context, bypass it for that turn and use normal shell commands or file reads.\\nDo not invoke MCP servers or extra optimization processes without matching local files or user instructions.\\n## References\\n[RTK Proxy documentation](https://github.com/doxa-labs/rust-token-killer/blob/main/README.md)\\nThis concludes the injected system instructions.\\n\\nPRODEX_GEMINI_LIVE_OK\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        23,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(!output.contains("optimizer has obscured"));
+    assert!(!output.contains("optimizer tool hangs"));
+    assert!(!output.contains("requested answer or command output"));
+    assert!(!output.contains("hallucinate optimizer tools"));
+    assert!(!output.contains("MCP servers or extra optimization"));
+    assert!(!output.contains("lossy formatters"));
+    assert!(!output.contains("Lossless deduplication"));
+    assert!(!output.contains("RTK Proxy documentation"));
+    assert!(!output.contains("injected system instructions"));
+    assert!(output.contains("PRODEX_GEMINI_LIVE_OK"));
+}
+
+#[test]
+fn gemini_sse_reader_drops_exact_output_instruction_leak() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_exact_output_leak\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"```\\ncat gemini-patch-smoke.txt\\n```\\nBut the prompt says: \\\"If the user requests an exact string, answer-only output, or command output only, emit only that requested output and nothing else. For exact-output prompts, do not include explanations, diffs, status, previous-turn recaps, or extra sentences before or after the requested output.\\\"\\n\\nWhen the user explicitly asks for exact command output, answer with exactly that output, without surrounding text, summaries, or rates.\\n\\nAll commands run with user privileges. Wait or poll for commands that return a running session ID until they complete. Do not stop midway. Execute requested tool tasks fully.\\n\\nPRODEX_GEMINI_LIVE_OK\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        24,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(!output.contains("answer-only output"));
+    assert!(!output.contains("exact command output"));
+    assert!(!output.contains("without surrounding text"));
+    assert!(!output.contains("Execute requested tool tasks"));
+    assert!(!output.contains("For exact-output prompts"));
+    assert!(!output.contains("do not include explanations"));
+    assert!(output.contains("PRODEX_GEMINI_LIVE_OK"));
+}
+
+#[test]
 fn gemini_sse_reader_fails_tool_intent_text_without_function_call() {
     let stream = concat!(
         "data: {\"responseId\":\"resp_tool_intent\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"I already did this.\\n\\nNow, I'll use `sqz_grep` to find the request builder.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
@@ -185,6 +238,82 @@ fn gemini_sse_reader_fails_tool_intent_text_without_function_call() {
     assert!(output.contains("\"code\":\"gemini_tool_intent_without_call\""));
     assert!(output.contains("sqz_grep"));
     assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_fails_wait_poll_narration_without_wait_tool() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_wait\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"`cargo install` is still running. I will poll it.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        161,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("\"code\":\"gemini_non_actionable_wait_or_poll\""));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_fails_unverified_success_after_tool_error() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_unverified\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Semua optional tools berhasil diupdate ke versi terbaru.\\n\\nBlocker/Unresolved: None.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let messages = vec![
+        serde_json::json!({"role": "user", "content": "update optional tools"}),
+        serde_json::json!({
+            "role": "tool",
+            "output": "Chunk ID: bad\nProcess exited with code 127\nOutput:\n/bin/bash: pip: No such file or directory\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        162,
+        messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("\"code\":\"gemini_unverified_success_claim\""));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn gemini_sse_reader_allows_success_after_explicit_version_verification() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_verified\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Semua optional tools berhasil diupdate ke versi terbaru.\\n\\nBlocker/Unresolved: None.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let messages = vec![
+        serde_json::json!({"role": "user", "content": "update optional tools"}),
+        serde_json::json!({
+            "role": "tool",
+            "output": "Chunk ID: ok\nProcess exited with code 0\nOutput:\nrtk 0.42.3\nsqz 1.2.0\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        163,
+        messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.completed"));
+    assert!(!output.contains("gemini_unverified_success_claim"));
 }
 
 #[test]
@@ -438,6 +567,239 @@ fn gemini_sse_reader_uses_structured_latest_tool_output_for_exact_output() {
 
     assert!(output.contains("\"text\":\"structured-ok\""));
     assert!(!output.contains("The command succeeded."));
+}
+
+#[test]
+fn gemini_sse_reader_does_not_force_exploratory_output_before_required_command() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_required_command\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"exec_command\",\"args\":{\"cmd\":\"./demo-optimizer/install.sh && ./bin/demo-optimizer --version\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Update demo-optimizer.\nAfter updating, run exactly: ./bin/demo-optimizer --version\nAnswer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [{
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"cat OWNER.txt\"}"
+                }
+            }]
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: owner\nOutput:\ndemo-optimizer is owned by ./demo-optimizer/install.sh\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        151,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"function_call\""));
+    assert!(output.contains("./demo-optimizer/install.sh"));
+    assert!(!output.contains("\"text\":\"demo-optimizer is owned by"));
+}
+
+#[test]
+fn gemini_sse_reader_drops_command_output_only_text_before_required_tool_call() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_required_command_text_before_tool\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Tool discipline for Codex parity leaked text\"},{\"functionCall\":{\"name\":\"exec_command\",\"args\":{\"cmd\":\"./bin/demo-optimizer --version\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Update demo-optimizer.\nAfter updating, run exactly: ./bin/demo-optimizer --version\nAnswer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [{
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"cat OWNER.txt\"}"
+                }
+            }]
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: owner\nOutput:\ndemo-optimizer is owned by ./demo-optimizer/install.sh\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        154,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"function_call\""));
+    assert!(output.contains("./bin/demo-optimizer --version"));
+    assert!(!output.contains("Tool discipline for Codex parity"));
+}
+
+#[test]
+fn gemini_sse_reader_forces_required_command_output_after_matching_command() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_required_command_done\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Update demo-optimizer.\nAfter updating, run exactly: ./bin/demo-optimizer --version\nAnswer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [{
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"./demo-optimizer/install.sh && ./bin/demo-optimizer --version\"}"
+                }
+            }]
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: version\nOutput:\nPRODEX_GEMINI_LIVE_OK\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        152,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"text\":\"PRODEX_GEMINI_LIVE_OK\""));
+    assert!(!output.contains("\"delta\":\"done\""));
+}
+
+#[test]
+fn gemini_sse_reader_forces_then_run_cat_output_after_matching_command() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_then_run_done\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"You are Codex CLI. Tool discipline for Codex parity. leaked text\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Create file gemini-patch-smoke.txt containing exactly PRODEX_GEMINI_LIVE_OK using apply_patch. Then run cat gemini-patch-smoke.txt. Answer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [{
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"cat gemini-patch-smoke.txt\"}"
+                }
+            }]
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: cat\nOutput:\nPRODEX_GEMINI_LIVE_OK\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        153,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"text\":\"PRODEX_GEMINI_LIVE_OK\""));
+    assert!(!output.contains("You are Codex CLI"));
+    assert!(!output.contains("Tool discipline for Codex parity"));
+}
+
+#[test]
+fn gemini_sse_reader_forces_verification_command_output_by_shared_marker() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_marker_command_done\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Read gemini-smoke.txt from the workspace, keep the existing file unchanged, then run this verification command:\nnode -e \"const fs=require('fs'); process.stdout.write('PRODEX_GEMINI_LIVE_OK_123');\"\nAnswer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [{
+                "type": "function",
+                "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"node -e \\\"process.stdout.write('PRODEX_GEMINI_LIVE_OK_123');\\\"\"}"
+                }
+            }]
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: node\nOutput:\nPRODEX_GEMINI_LIVE_OK_123\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        155,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"text\":\"PRODEX_GEMINI_LIVE_OK_123\""));
+    assert!(!output.contains("\"delta\":\"done\""));
+}
+
+#[test]
+fn gemini_sse_reader_forces_verification_output_when_command_metadata_is_compacted() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_compacted_command_done\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let conversation_messages = vec![
+        serde_json::json!({
+            "role": "user",
+            "content": "Read gemini-smoke.txt from the workspace, keep the existing file unchanged, then run this verification command:\nnode -e \"const fs=require('fs'); process.stdout.write('PRODEX_GEMINI_LIVE_OK_456');\"\nAnswer with only the command output."
+        }),
+        serde_json::json!({
+            "role": "tool",
+            "content": "Chunk ID: node\nOutput:\nPRODEX_GEMINI_LIVE_OK_456\n"
+        }),
+    ];
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        156,
+        conversation_messages,
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"text\":\"PRODEX_GEMINI_LIVE_OK_456\""));
+    assert!(!output.contains("\"delta\":\"done\""));
 }
 
 #[test]

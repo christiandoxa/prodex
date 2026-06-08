@@ -809,6 +809,48 @@ fn gemini_response_translation_drops_super_runtime_and_memory_instruction_leaks(
 }
 
 #[test]
+fn gemini_response_translation_drops_optimizer_diagnostic_instruction_leaks() {
+    let response = serde_json::json!({
+        "responseId": "resp_optimizer_diagnostic_leak",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "If an optimizer tool hangs, faults, or emits corrupted/binary text, stop using it, say why briefly, and proceed without it.\nIf the user's explicit requested answer or command output must be an exact string, strip RTK proxy banners and diagnostic noise before returning the final text.\nIf the prompt dictates \"Answer with only the command output\", then output only the command output string.\nIf you suspect an optimizer has obscured a critical signal, bypass it and inspect the raw file or standard command output directly.\nDo not hallucinate optimizer tools or CLI wrapper paths. Inspect `PRODEX_OPTIMIZERS_HOME` or `~/.local/share/prodex-optimizers` only if the user explicitly asks for optimizer diagnostics.\nDo not apply lossy formatters/minifiers as a token-saving tactic unless the user requested code minification. Lossless deduplication and syntactic abbreviation (like `rtk`, `prodex-sqz`, `claw-compactor`, `prodex-token-savior`) are allowed and encouraged. If an optimizer crashes or strips critical context, bypass it for that turn and use normal shell commands or file reads.\nDo not invoke MCP servers or extra optimization processes without matching local files or user instructions.\n## References\n[RTK Proxy documentation](https://github.com/doxa-labs/rust-token-killer/blob/main/README.md)\nThis concludes the injected system instructions.\n\nPRODEX_GEMINI_LIVE_OK"
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 50);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(text, "PRODEX_GEMINI_LIVE_OK");
+}
+
+#[test]
+fn gemini_response_translation_drops_exact_output_instruction_leak() {
+    let response = serde_json::json!({
+        "responseId": "resp_exact_output_leak",
+        "modelVersion": "gemini-3.1-pro-preview",
+        "candidates": [{
+            "content": {"parts": [{
+                "text": "```\ncat gemini-patch-smoke.txt\n```\nBut the prompt says: \"If the user requests an exact string, answer-only output, or command output only, emit only that requested output and nothing else. For exact-output prompts, do not include explanations, diffs, status, previous-turn recaps, or extra sentences before or after the requested output.\"\n\nWhen the user explicitly asks for exact command output, answer with exactly that output, without surrounding text, summaries, or rates.\n\nAll commands run with user privileges. Wait or poll for commands that return a running session ID until they complete. Do not stop midway. Execute requested tool tasks fully.\n\nPRODEX_GEMINI_LIVE_OK"
+            }]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 51);
+    let text = translated["output"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap();
+
+    assert_eq!(text, "PRODEX_GEMINI_LIVE_OK");
+}
+
+#[test]
 fn gemini_response_translation_marks_malformed_finish_as_failed() {
     let response = serde_json::json!({
         "responseId": "resp_malformed",

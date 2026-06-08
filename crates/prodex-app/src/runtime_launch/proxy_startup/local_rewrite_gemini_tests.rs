@@ -31,6 +31,7 @@ fn gemini_pool(profile_names: &[&str]) -> RuntimeGeminiOAuthPool {
             next_index: 0,
             response_profile_bindings: BTreeMap::new(),
             tool_call_profile_bindings: BTreeMap::new(),
+            session_profile_bindings: BTreeMap::new(),
             response_model_scope_bindings: BTreeMap::new(),
             tool_call_model_scope_bindings: BTreeMap::new(),
             quota_headers: BTreeMap::new(),
@@ -47,8 +48,8 @@ fn gemini_oauth_pool_rotates_fresh_requests() {
     let pool = gemini_pool(&["alpha", "beta"]);
     let body = serde_json::to_vec(&serde_json::json!({"input": "hi"})).unwrap();
 
-    let first = pool.select_attempts(&body, &[]).unwrap();
-    let second = pool.select_attempts(&body, &[]).unwrap();
+    let first = pool.select_attempts(&body, &[], None).unwrap();
+    let second = pool.select_attempts(&body, &[], None).unwrap();
 
     assert_eq!(first[0].profile_name, "alpha");
     assert_eq!(first[1].profile_name, "beta");
@@ -73,7 +74,7 @@ fn gemini_oauth_pool_preserves_previous_response_affinity() {
         .remember_bindings("beta", Some("session:a"), "resp_1", &[]);
     let body = serde_json::to_vec(&serde_json::json!({"previous_response_id": "resp_1"})).unwrap();
 
-    let attempts = pool.select_attempts(&body, &[]).unwrap();
+    let attempts = pool.select_attempts(&body, &[], None).unwrap();
 
     assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0].profile_name, "beta");
@@ -81,6 +82,29 @@ fn gemini_oauth_pool_preserves_previous_response_affinity() {
     assert!(attempts[0].quota_fallback_allowed);
     assert_eq!(attempts[1].profile_name, "alpha");
     assert!(!attempts[1].hard_affinity);
+}
+
+#[test]
+fn gemini_oauth_pool_keeps_fresh_session_on_previous_profile() {
+    let pool = gemini_pool(&["alpha", "beta"]);
+    pool.state
+        .lock()
+        .unwrap()
+        .remember_bindings("beta", Some("session:stable"), "resp_1", &[]);
+    let body = serde_json::to_vec(&serde_json::json!({
+        "input": "fresh turn",
+        "session_id": "stable"
+    }))
+    .unwrap();
+
+    let attempts = pool
+        .select_attempts(&body, &[], Some("session:stable"))
+        .unwrap();
+
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(attempts[0].profile_name, "beta");
+    assert!(attempts[0].hard_affinity);
+    assert!(attempts[0].quota_fallback_allowed);
 }
 
 #[test]
@@ -101,7 +125,7 @@ fn gemini_oauth_pool_preserves_tool_output_affinity() {
     }))
     .unwrap();
 
-    let attempts = pool.select_attempts(&body, &[]).unwrap();
+    let attempts = pool.select_attempts(&body, &[], None).unwrap();
 
     assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0].profile_name, "beta");
@@ -128,7 +152,7 @@ fn gemini_oauth_pool_preserves_custom_tool_output_affinity() {
     }))
     .unwrap();
 
-    let attempts = pool.select_attempts(&body, &[]).unwrap();
+    let attempts = pool.select_attempts(&body, &[], None).unwrap();
 
     assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0].profile_name, "beta");
@@ -151,7 +175,7 @@ fn gemini_oauth_pool_skips_model_scoped_cooldown_for_fresh_requests() {
     }))
     .unwrap();
 
-    let attempts = pool.select_attempts(&body, &[]).unwrap();
+    let attempts = pool.select_attempts(&body, &[], None).unwrap();
 
     assert_eq!(attempts[0].profile_name, "beta");
     assert_eq!(attempts.len(), 1);
@@ -175,7 +199,7 @@ fn gemini_oauth_pool_preserves_affinity_despite_model_cooldown() {
     }))
     .unwrap();
 
-    let attempts = pool.select_attempts(&body, &[]).unwrap();
+    let attempts = pool.select_attempts(&body, &[], None).unwrap();
 
     assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0].profile_name, "alpha");
@@ -198,7 +222,7 @@ fn gemini_oauth_pool_model_cooldown_is_model_scoped() {
     }))
     .unwrap();
 
-    let attempts = pool.select_attempts(&body, &[]).unwrap();
+    let attempts = pool.select_attempts(&body, &[], None).unwrap();
 
     assert_eq!(attempts[0].profile_name, "alpha");
     assert_eq!(attempts[1].profile_name, "beta");
@@ -219,7 +243,7 @@ fn gemini_oauth_pool_skips_endpoint_scoped_unavailable_model_for_fresh_requests(
     }))
     .unwrap();
 
-    let attempts = pool.select_attempts(&body, &[]).unwrap();
+    let attempts = pool.select_attempts(&body, &[], None).unwrap();
 
     assert_eq!(attempts[0].profile_name, "beta");
     assert_eq!(attempts.len(), 1);
