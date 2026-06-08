@@ -1068,12 +1068,12 @@ fn runtime_gemini_precommit_apply_parts(
             .unwrap_or(false)
         {
             probe.reasoning_output = true;
-        } else if runtime_gemini_visible_text_from_part(part).is_none() {
-            continue;
-        } else if runtime_gemini_text_echoes_internal_instruction(
-            text,
-            &probe.internal_instruction_corpus,
-        ) {
+        } else if runtime_gemini_visible_text_from_part(part).is_none()
+            || runtime_gemini_text_echoes_internal_instruction(
+                text,
+                &probe.internal_instruction_corpus,
+            )
+        {
             continue;
         } else {
             probe.visible_output = true;
