@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.164.0 - 2026-06-08
+
+### Misc
+
+- Harden Codex-native tool history (`231f876`)
+
 ## 0.163.0 - 2026-06-08
 
 ### Misc
@@ -71,9 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Normalize apply patch input (`d8c6950`)
-
-## 0.152.0 - 2026-06-05
-
-### Misc
-
-- Improve Codex provider parity (`a008693`)
