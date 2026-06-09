@@ -235,7 +235,11 @@
             QuotaProviderFilter::DeepSeek.next(),
             QuotaProviderFilter::Local
         );
-        assert_eq!(QuotaProviderFilter::Local.next(), QuotaProviderFilter::All);
+        assert_eq!(
+            QuotaProviderFilter::Local.next(),
+            QuotaProviderFilter::Agy
+        );
+        assert_eq!(QuotaProviderFilter::Agy.next(), QuotaProviderFilter::All);
     }
 
     #[test]
@@ -315,6 +319,8 @@
             QuotaProviderFilter::Gemini,
             false,
         );
+
+        println!("DEBUG OUTPUT:\n{}", output);
 
         assert!(output.contains("filter: gemini"));
         assert!(output.contains("gemini-main"));

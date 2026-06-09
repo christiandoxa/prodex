@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "base64",
  "criterion",

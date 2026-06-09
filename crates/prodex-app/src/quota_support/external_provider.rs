@@ -7,6 +7,97 @@ use anyhow::{Context, Result, bail};
 use codex_config::codex_non_openai_model_provider;
 use std::env;
 use std::path::Path;
+use std::process::Command;
+
+pub(super) fn fetch_agy_quota_info(account: Option<&str>) -> Result<ExternalQuotaInfo> {
+    let mut command = Command::new("agy");
+    command.args(["auth", "quota", "--format=json", "--detail"]);
+    if account.is_none() {
+        command.arg("--all-accounts");
+    }
+
+    let output = command.output().context("failed to execute 'agy' CLI. Ensure it is installed and in your PATH.")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("agy quota command failed: {}", stderr.trim());
+    }
+
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .context("failed to parse agy quota JSON output")?;
+
+    parse_agy_quota_json(value, account)
+}
+
+fn parse_agy_quota_json(value: serde_json::Value, preferred_account: Option<&str>) -> Result<ExternalQuotaInfo> {
+    // Handle both single object and array of objects
+    let accounts = if let Some(arr) = value.as_array() {
+        arr.clone()
+    } else {
+        vec![value]
+    };
+
+    let data = if let Some(preferred) = preferred_account {
+        accounts.iter().find(|a| {
+            a.get("account").and_then(|v| v.as_str()) == Some(preferred)
+                || a.get("email").and_then(|v| v.as_str()) == Some(preferred)
+        }).or(accounts.first()).context("no account found in agy output")?
+    } else {
+        accounts.first().context("no account found in agy output")?
+    };
+
+    let account = data.get("account").or_else(|| data.get("email")).and_then(|v| v.as_str()).map(|s| s.to_string());
+    let plan = data.get("plan").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let status = data.get("status").and_then(|v| v.as_str()).unwrap_or("Ready").to_string();
+
+    let credits = data.get("credits").and_then(|v| v.as_f64());
+    let usage = data.get("usage").and_then(|v| v.as_f64());
+    let main = if let Some(c) = credits {
+        format!("{:.2} credits available", c)
+    } else if let Some(u) = usage {
+        format!("{:.2} usage", u)
+    } else {
+        "quota information available".to_string()
+    };
+
+    let mut details = Vec::new();
+    if let Some(obj) = data.as_object() {
+        for (k, v) in obj {
+            if k == "details" || k == "models" || k == "quotas" {
+                if let Some(inner_obj) = v.as_object() {
+                    for (ik, iv) in inner_obj {
+                        details.push(ExternalQuotaDetail {
+                            label: format!("{k}:{ik}"),
+                            value: quota_json_scalar(iv),
+                        });
+                    }
+                } else if let Some(inner_arr) = v.as_array() {
+                    for (i, iv) in inner_arr.iter().enumerate() {
+                        details.push(ExternalQuotaDetail {
+                            label: format!("{k}[{i}]"),
+                            value: quota_json_scalar(iv),
+                        });
+                    }
+                }
+            } else if k != "account" && k != "email" && k != "plan" && k != "status" && k != "credits" && k != "usage" {
+                 details.push(ExternalQuotaDetail {
+                    label: k.clone(),
+                    value: quota_json_scalar(v),
+                });
+            }
+        }
+    }
+
+    Ok(ExternalQuotaInfo {
+        provider: "Anti-Gravity".to_string(),
+        account,
+        plan,
+        status,
+        main,
+        reset: None,
+        available: Some(true),
+        details,
+    })
+}
 
 pub(super) fn custom_model_provider_quota_info(
     provider: &ProfileProvider,

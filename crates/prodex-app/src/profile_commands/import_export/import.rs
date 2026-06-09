@@ -561,7 +561,7 @@ fn validate_exported_secret_file_content(
                 )
             })?;
         }
-        ProfileProvider::Openai | ProfileProvider::Copilot { .. } => {}
+        ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {}
     }
     Ok(())
 }
@@ -570,7 +570,9 @@ fn required_exported_secret_file_name(provider: &ProfileProvider) -> Option<&'st
     match provider {
         ProfileProvider::Gemini { .. } => Some(GEMINI_OAUTH_SECRET_FILE),
         ProfileProvider::Anthropic { .. } => Some(CLAUDE_CREDENTIALS_FILE),
-        ProfileProvider::Openai | ProfileProvider::Copilot { .. } => None,
+        ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
+            None
+        }
     }
 }
 

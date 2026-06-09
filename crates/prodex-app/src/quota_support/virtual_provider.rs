@@ -2,6 +2,7 @@ use super::{
     AuthSummary, ExternalQuotaDetail, ExternalQuotaInfo, ProviderQuotaSnapshot,
     QuotaProviderFilter, QuotaReport, build_upstream_blocking_http_client, format_response_body,
 };
+use super::external_provider::fetch_agy_quota_info;
 use anyhow::{Context, Result, bail};
 use chrono::Local;
 use prodex_state::ProfileProvider;
@@ -17,6 +18,9 @@ pub(super) fn collect_virtual_quota_reports(
     }
     if provider_filter == QuotaProviderFilter::Local {
         reports.push(collect_local_quota_report(base_url));
+    }
+    if provider_filter == QuotaProviderFilter::Agy {
+        reports.extend(collect_agy_quota_reports());
     }
     reports
 }
@@ -61,10 +65,40 @@ fn collect_local_quota_report(base_url: Option<&str>) -> QuotaReport {
     virtual_quota_report("local", "local", result)
 }
 
+fn collect_agy_quota_reports() -> Vec<QuotaReport> {
+    match fetch_agy_quota_info(None) {
+        Ok(info) => vec![virtual_quota_report_with_provider(
+            &info
+                .account
+                .as_deref()
+                .map(|a| format!("agy:{a}"))
+                .unwrap_or_else(|| "agy".to_string()),
+            "agy",
+            Ok(ProviderQuotaSnapshot::External(info)),
+            ProfileProvider::Agy { account: None },
+        )],
+        Err(err) => vec![virtual_quota_report_with_provider(
+            "agy",
+            "agy",
+            Err(err.to_string()),
+            ProfileProvider::Agy { account: None },
+        )],
+    }
+}
+
 fn virtual_quota_report(
     name: &str,
     auth_label: &str,
     result: std::result::Result<ProviderQuotaSnapshot, String>,
+) -> QuotaReport {
+    virtual_quota_report_with_provider(name, auth_label, result, ProfileProvider::Openai)
+}
+
+fn virtual_quota_report_with_provider(
+    name: &str,
+    auth_label: &str,
+    result: std::result::Result<ProviderQuotaSnapshot, String>,
+    provider: ProfileProvider,
 ) -> QuotaReport {
     QuotaReport {
         name: name.to_string(),
@@ -73,7 +107,7 @@ fn virtual_quota_report(
             label: auth_label.to_string(),
             quota_compatible: false,
         },
-        provider: ProfileProvider::Openai,
+        provider,
         workspace_id: None,
         result,
         fetched_at: Local::now().timestamp(),

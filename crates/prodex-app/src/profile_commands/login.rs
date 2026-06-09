@@ -90,7 +90,10 @@ fn login_into_profile(
             .get(&profile_name)
             .with_context(|| format!("profile '{}' is missing", profile_name))?;
         if login_request.method == LoginMethod::Google {
-            if matches!(profile.provider, ProfileProvider::Copilot { .. }) {
+            if matches!(
+                profile.provider,
+                ProfileProvider::Copilot { .. } | ProfileProvider::Anthropic { .. } | ProfileProvider::Agy { .. }
+            ) {
                 bail!(
                     "profile '{}' uses {}. Google sign-in supports OpenAI/Codex placeholders or Google Gemini profiles.",
                     profile_name,
@@ -100,7 +103,7 @@ fn login_into_profile(
         } else if login_request.method == LoginMethod::Claude {
             if matches!(
                 profile.provider,
-                ProfileProvider::Gemini { .. } | ProfileProvider::Copilot { .. }
+                ProfileProvider::Gemini { .. } | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. }
             ) {
                 bail!(
                     "profile '{}' uses {}. Claude sign-in supports OpenAI/Codex placeholders or Anthropic Claude profiles.",
@@ -730,7 +733,8 @@ fn create_temporary_login_home(paths: &AppPaths) -> Result<PathBuf> {
 }
 
 fn run_antigravity_login(paths: &AppPaths) -> Result<ExitStatus> {
-    let plan = ChildProcessPlan::new(agy_bin(), paths.shared_codex_root.clone());
+    let mut plan = ChildProcessPlan::new(agy_bin(), paths.shared_codex_root.clone());
+    plan.args = vec![OsString::from("auth"), OsString::from("login")];
     run_child_plan(&plan, None)
 }
 

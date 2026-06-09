@@ -69,7 +69,8 @@ pub(in crate::profile_commands) fn build_profile_export_payload(
             }
             ProfileProvider::Gemini { .. }
             | ProfileProvider::Anthropic { .. }
-            | ProfileProvider::Copilot { .. } => String::new(),
+            | ProfileProvider::Copilot { .. }
+            | ProfileProvider::Agy { .. } => String::new(),
         };
         let secret_files = exported_provider_secret_files(profile)?;
         profiles.push(ExportedProfile {
@@ -97,7 +98,9 @@ fn exported_provider_secret_files(
     profile: &ProfileEntry,
 ) -> Result<Vec<prodex_profile_export::ExportedSecretFile>> {
     match &profile.provider {
-        ProfileProvider::Openai | ProfileProvider::Copilot { .. } => Ok(Vec::new()),
+        ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
+            Ok(Vec::new())
+        }
         ProfileProvider::Gemini { .. } => {
             let secret_file =
                 read_exported_secret_file(&profile.codex_home, GEMINI_OAUTH_SECRET_FILE)?;

@@ -7,7 +7,9 @@ mod virtual_provider;
 mod watch;
 
 pub(super) use self::auth::*;
-use self::external_provider::{custom_model_provider_quota_info, fetch_anthropic_quota_info};
+use self::external_provider::{
+    custom_model_provider_quota_info, fetch_agy_quota_info, fetch_anthropic_quota_info,
+};
 pub(super) use self::render::*;
 use self::virtual_provider::collect_virtual_quota_reports;
 pub(super) use self::watch::*;
@@ -45,6 +47,7 @@ pub(crate) enum QuotaProviderFilter {
     Copilot,
     DeepSeek,
     Local,
+    Agy,
 }
 
 impl QuotaProviderFilter {
@@ -58,8 +61,9 @@ impl QuotaProviderFilter {
             "copilot" | "github-copilot" | "github" => Ok(Self::Copilot),
             "deepseek" => Ok(Self::DeepSeek),
             "local" | "openai-compatible" | "openai_compatible" => Ok(Self::Local),
+            "agy" | "anti-gravity" => Ok(Self::Agy),
             other => bail!(
-                "invalid quota provider filter '{other}'; supported values are all, openai, gemini, anthropic, claude, copilot, deepseek, local"
+                "invalid quota provider filter '{other}'; supported values are all, openai, gemini, anthropic, claude, copilot, deepseek, local, agy"
             ),
         }
     }
@@ -72,7 +76,8 @@ impl QuotaProviderFilter {
             Self::Anthropic => Self::Copilot,
             Self::Copilot => Self::DeepSeek,
             Self::DeepSeek => Self::Local,
-            Self::Local => Self::All,
+            Self::Local => Self::Agy,
+            Self::Agy => Self::All,
         }
     }
 
@@ -85,6 +90,7 @@ impl QuotaProviderFilter {
             Self::Copilot => "copilot",
             Self::DeepSeek => "deepseek",
             Self::Local => "local",
+            Self::Agy => "agy",
         }
     }
 
@@ -95,6 +101,7 @@ impl QuotaProviderFilter {
             Self::Gemini => matches!(provider, ProfileProvider::Gemini { .. }),
             Self::Anthropic => matches!(provider, ProfileProvider::Anthropic { .. }),
             Self::Copilot => matches!(provider, ProfileProvider::Copilot { .. }),
+            Self::Agy => matches!(provider, ProfileProvider::Agy { .. }),
             Self::DeepSeek | Self::Local => false,
         }
     }
@@ -113,7 +120,9 @@ impl QuotaProviderFilter {
             Self::Local => model_provider
                 .provider_id
                 .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID),
-            Self::All | Self::OpenAi | Self::Gemini | Self::Anthropic | Self::Copilot => false,
+            Self::All | Self::OpenAi | Self::Gemini | Self::Anthropic | Self::Copilot | Self::Agy => {
+                false
+            }
         }
     }
 
@@ -121,16 +130,16 @@ impl QuotaProviderFilter {
         if self.matches(&report.provider) {
             return true;
         }
-        let Ok(ProviderQuotaSnapshot::External(info)) = &report.result else {
-            return false;
-        };
-        match self {
-            Self::DeepSeek => info.provider.eq_ignore_ascii_case("DeepSeek"),
-            Self::Local => info
-                .provider
-                .eq_ignore_ascii_case("Local OpenAI-compatible"),
-            Self::All | Self::OpenAi | Self::Gemini | Self::Anthropic | Self::Copilot => false,
+        if let Ok(ProviderQuotaSnapshot::External(info)) = &report.result {
+             match self {
+                Self::DeepSeek => return info.provider.eq_ignore_ascii_case("DeepSeek"),
+                Self::Local => return info
+                    .provider
+                    .eq_ignore_ascii_case("Local OpenAI-compatible"),
+                _ => {}
+            }
         }
+        false
     }
 }
 
@@ -214,7 +223,8 @@ pub(crate) fn collect_quota_reports_with_filters(
                 .flatten(),
             ProfileProvider::Gemini { .. }
             | ProfileProvider::Anthropic { .. }
-            | ProfileProvider::Copilot { .. } => None,
+            | ProfileProvider::Copilot { .. }
+            | ProfileProvider::Agy { .. } => None,
         };
         let result = fetch_profile_quota(&job.provider, &job.codex_home, base_url.as_deref())
             .map_err(|err| err.to_string());
@@ -301,6 +311,9 @@ pub(crate) fn fetch_profile_quota(
         ProfileProvider::Copilot { host, login, .. } => Ok(ProviderQuotaSnapshot::Copilot(
             fetch_copilot_user_info_for_account(host, login)?,
         )),
+        ProfileProvider::Agy { account } => Ok(ProviderQuotaSnapshot::External(
+            fetch_agy_quota_info(account.as_deref())?,
+        )),
     }
 }
 
@@ -329,6 +342,10 @@ pub(crate) fn fetch_profile_quota_json(
         ProfileProvider::Copilot { host, login, .. } => {
             fetch_copilot_user_info_json_for_account(host, login)
         }
+        ProfileProvider::Agy { account } => serde_json::to_value(fetch_agy_quota_info(
+            account.as_deref(),
+        )?)
+        .context("failed to render Agy quota JSON"),
     }
 }
 

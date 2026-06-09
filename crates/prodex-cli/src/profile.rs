@@ -149,7 +149,7 @@ pub struct QuotaArgs {
     pub auth: Option<String>,
     /// Show only profiles for one provider in --all views.
     ///
-    /// Supported values: all, openai, gemini, anthropic, claude, copilot, deepseek, local.
+    /// Supported values: all, openai, gemini, anthropic, claude, copilot, deepseek, local, agy.
     #[arg(long, value_name = "PROVIDER", requires = "all")]
     pub provider: Option<String>,
     /// Include exact reset timestamps and expanded window details.

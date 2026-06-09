@@ -160,6 +160,7 @@ pub(super) fn runtime_launch_profile_home_for_external_provider(
             ProfileProvider::Gemini { .. }
                 | ProfileProvider::Copilot { .. }
                 | ProfileProvider::Anthropic { .. }
+                | ProfileProvider::Agy { .. }
         ) || profile.provider.supports_codex_runtime()
         {
             return Ok(profile.codex_home.clone());

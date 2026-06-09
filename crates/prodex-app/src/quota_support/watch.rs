@@ -267,6 +267,7 @@ fn render_all_quota_watch_report_output(
         true,
         sort,
     );
+
     let mut output = quota_watch_without_interactive_scroll_notice(&window.output);
     output.push('\n');
     let provider_hint = if provider_filter_locked {

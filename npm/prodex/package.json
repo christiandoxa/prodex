@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex",
-  "version": "0.167.0",
+  "version": "0.168.0",
   "description": "OpenAI profile pooling and safe auto-rotate for Codex CLI and Claude Code",
   "license": "Apache-2.0",
   "bin": {

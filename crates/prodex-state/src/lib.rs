@@ -80,6 +80,10 @@ pub enum ProfileProvider {
         #[serde(default)]
         copilot_plan: Option<String>,
     },
+    Agy {
+        #[serde(default)]
+        account: Option<String>,
+    },
 }
 
 impl ProfileProvider {
@@ -89,6 +93,7 @@ impl ProfileProvider {
             Self::Gemini { .. } => "gemini",
             Self::Anthropic { .. } => "anthropic",
             Self::Copilot { .. } => "copilot",
+            Self::Agy { .. } => "agy",
         }
     }
 
@@ -98,6 +103,7 @@ impl ProfileProvider {
             Self::Gemini { .. } => "Google Gemini",
             Self::Anthropic { .. } => "Anthropic Claude",
             Self::Copilot { .. } => "GitHub Copilot",
+            Self::Agy { .. } => "Anti-Gravity",
         }
     }
 
@@ -108,6 +114,7 @@ impl ProfileProvider {
             Self::Gemini { .. } => 1,
             Self::Anthropic { .. } => 1,
             Self::Copilot { .. } => 1,
+            Self::Agy { .. } => 1,
         }
     }
 
@@ -122,7 +129,10 @@ impl ProfileProvider {
                 login: stored_login,
                 ..
             } => stored_host.trim() == host.trim() && stored_login.trim() == login.trim(),
-            Self::Openai | Self::Gemini { .. } | Self::Anthropic { .. } => false,
+            Self::Openai
+            | Self::Gemini { .. }
+            | Self::Anthropic { .. }
+            | Self::Agy { .. } => false,
         }
     }
 
@@ -132,7 +142,10 @@ impl ProfileProvider {
                 email: stored_email,
                 ..
             } => stored_email.trim().eq_ignore_ascii_case(email.trim()),
-            Self::Openai | Self::Anthropic { .. } | Self::Copilot { .. } => false,
+            Self::Openai
+            | Self::Anthropic { .. }
+            | Self::Copilot { .. }
+            | Self::Agy { .. } => false,
         }
     }
 
@@ -154,7 +167,10 @@ impl ProfileProvider {
                 };
                 account_matches && auth_method_matches
             }
-            Self::Openai | Self::Gemini { .. } | Self::Copilot { .. } => false,
+            Self::Openai
+            | Self::Gemini { .. }
+            | Self::Copilot { .. }
+            | Self::Agy { .. } => false,
         }
     }
 }
