@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.169.0 - 2026-06-09
+
+### Misc
+
+- Preserve Gemini CLI OAuth project routing (`bc88b5e`)
+
 ## 0.167.0 - 2026-06-09
 
 ### Misc
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Add runtime metadata bridge (`3996a18`)
-
-## 0.156.0 - 2026-06-06
-
-### Misc
-
-- Deliver Codex-native provider parity (`27229c9`)
