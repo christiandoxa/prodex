@@ -120,9 +120,12 @@ impl QuotaProviderFilter {
             Self::Local => model_provider
                 .provider_id
                 .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID),
-            Self::All | Self::OpenAi | Self::Gemini | Self::Anthropic | Self::Copilot | Self::Agy => {
-                false
-            }
+            Self::All
+            | Self::OpenAi
+            | Self::Gemini
+            | Self::Anthropic
+            | Self::Copilot
+            | Self::Agy => false,
         }
     }
 
@@ -131,11 +134,13 @@ impl QuotaProviderFilter {
             return true;
         }
         if let Ok(ProviderQuotaSnapshot::External(info)) = &report.result {
-             match self {
+            match self {
                 Self::DeepSeek => return info.provider.eq_ignore_ascii_case("DeepSeek"),
-                Self::Local => return info
-                    .provider
-                    .eq_ignore_ascii_case("Local OpenAI-compatible"),
+                Self::Local => {
+                    return info
+                        .provider
+                        .eq_ignore_ascii_case("Local OpenAI-compatible");
+                }
                 _ => {}
             }
         }
@@ -342,10 +347,10 @@ pub(crate) fn fetch_profile_quota_json(
         ProfileProvider::Copilot { host, login, .. } => {
             fetch_copilot_user_info_json_for_account(host, login)
         }
-        ProfileProvider::Agy { account } => serde_json::to_value(fetch_agy_quota_info(
-            account.as_deref(),
-        )?)
-        .context("failed to render Agy quota JSON"),
+        ProfileProvider::Agy { account } => {
+            serde_json::to_value(fetch_agy_quota_info(account.as_deref())?)
+                .context("failed to render Agy quota JSON")
+        }
     }
 }
 

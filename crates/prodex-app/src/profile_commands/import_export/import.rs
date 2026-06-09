@@ -561,7 +561,8 @@ fn validate_exported_secret_file_content(
                 )
             })?;
         }
-        ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {}
+        ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
+        }
     }
     Ok(())
 }

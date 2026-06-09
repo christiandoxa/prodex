@@ -205,6 +205,56 @@ pub(super) fn runtime_gemini_project_id(auth: &RuntimeGeminiAuth) -> Option<&str
     }
 }
 
+pub(super) fn runtime_gemini_native_request_body(
+    body: &[u8],
+    auth: &RuntimeGeminiAuth,
+) -> Result<Vec<u8>> {
+    let Some(project_id) = runtime_gemini_project_id(auth) else {
+        return Ok(body.to_vec());
+    };
+    let mut value = match serde_json::from_slice::<serde_json::Value>(body) {
+        Ok(value) => value,
+        Err(_) => return Ok(body.to_vec()),
+    };
+    runtime_gemini_stamp_native_project(&mut value, project_id);
+    serde_json::to_vec(&value).context("failed to serialize Gemini native request JSON")
+}
+
+fn runtime_gemini_stamp_native_project(value: &mut serde_json::Value, project_id: &str) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    let project = serde_json::Value::String(project_id.to_string());
+    if object.contains_key("project") {
+        object.insert("project".to_string(), project.clone());
+    }
+    if object.contains_key("projectId") {
+        object.insert("projectId".to_string(), project.clone());
+    }
+    if object.contains_key("cloudaicompanionProject") {
+        object.insert("cloudaicompanionProject".to_string(), project.clone());
+    }
+    runtime_gemini_stamp_native_metadata_project(object.get_mut("metadata"), project_id);
+    if let Some(request) = object.get_mut("request") {
+        runtime_gemini_stamp_native_project(request, project_id);
+    }
+}
+
+fn runtime_gemini_stamp_native_metadata_project(
+    value: Option<&mut serde_json::Value>,
+    project_id: &str,
+) {
+    let Some(metadata) = value.and_then(serde_json::Value::as_object_mut) else {
+        return;
+    };
+    if metadata.contains_key("duetProject") {
+        metadata.insert(
+            "duetProject".to_string(),
+            serde_json::Value::String(project_id.to_string()),
+        );
+    }
+}
+
 #[cfg(test)]
 #[path = "gemini_rewrite_custom_tool_tests.rs"]
 mod gemini_rewrite_custom_tool_tests;
@@ -241,6 +291,36 @@ mod native_url_tests {
                 "/v1beta/models/gemini-test:generateContent",
             ),
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent"
+        );
+    }
+
+    #[test]
+    fn native_oauth_body_uses_selected_profile_project() {
+        let auth = RuntimeGeminiAuth::OAuth {
+            access_token: "token".to_string(),
+            project_id: Some("project-selected".to_string()),
+        };
+        let body = serde_json::to_vec(&serde_json::json!({
+            "project": "project-from-env",
+            "cloudaicompanionProject": "project-from-env",
+            "metadata": {"duetProject": "project-from-env"},
+            "request": {
+                "project": "project-from-env",
+                "metadata": {"duetProject": "project-from-env"}
+            }
+        }))
+        .unwrap();
+
+        let rewritten = runtime_gemini_native_request_body(&body, &auth).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+
+        assert_eq!(value["project"], "project-selected");
+        assert_eq!(value["cloudaicompanionProject"], "project-selected");
+        assert_eq!(value["metadata"]["duetProject"], "project-selected");
+        assert_eq!(value["request"]["project"], "project-selected");
+        assert_eq!(
+            value["request"]["metadata"]["duetProject"],
+            "project-selected"
         );
     }
 }

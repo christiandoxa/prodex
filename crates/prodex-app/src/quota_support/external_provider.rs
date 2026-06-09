@@ -16,19 +16,24 @@ pub(super) fn fetch_agy_quota_info(account: Option<&str>) -> Result<ExternalQuot
         command.arg("--all-accounts");
     }
 
-    let output = command.output().context("failed to execute 'agy' CLI. Ensure it is installed and in your PATH.")?;
+    let output = command
+        .output()
+        .context("failed to execute 'agy' CLI. Ensure it is installed and in your PATH.")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("agy quota command failed: {}", stderr.trim());
     }
 
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .context("failed to parse agy quota JSON output")?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("failed to parse agy quota JSON output")?;
 
     parse_agy_quota_json(value, account)
 }
 
-fn parse_agy_quota_json(value: serde_json::Value, preferred_account: Option<&str>) -> Result<ExternalQuotaInfo> {
+fn parse_agy_quota_json(
+    value: serde_json::Value,
+    preferred_account: Option<&str>,
+) -> Result<ExternalQuotaInfo> {
     // Handle both single object and array of objects
     let accounts = if let Some(arr) = value.as_array() {
         arr.clone()
@@ -37,17 +42,32 @@ fn parse_agy_quota_json(value: serde_json::Value, preferred_account: Option<&str
     };
 
     let data = if let Some(preferred) = preferred_account {
-        accounts.iter().find(|a| {
-            a.get("account").and_then(|v| v.as_str()) == Some(preferred)
-                || a.get("email").and_then(|v| v.as_str()) == Some(preferred)
-        }).or(accounts.first()).context("no account found in agy output")?
+        accounts
+            .iter()
+            .find(|a| {
+                a.get("account").and_then(|v| v.as_str()) == Some(preferred)
+                    || a.get("email").and_then(|v| v.as_str()) == Some(preferred)
+            })
+            .or(accounts.first())
+            .context("no account found in agy output")?
     } else {
         accounts.first().context("no account found in agy output")?
     };
 
-    let account = data.get("account").or_else(|| data.get("email")).and_then(|v| v.as_str()).map(|s| s.to_string());
-    let plan = data.get("plan").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let status = data.get("status").and_then(|v| v.as_str()).unwrap_or("Ready").to_string();
+    let account = data
+        .get("account")
+        .or_else(|| data.get("email"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let plan = data
+        .get("plan")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let status = data
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Ready")
+        .to_string();
 
     let credits = data.get("credits").and_then(|v| v.as_f64());
     let usage = data.get("usage").and_then(|v| v.as_f64());
@@ -78,8 +98,14 @@ fn parse_agy_quota_json(value: serde_json::Value, preferred_account: Option<&str
                         });
                     }
                 }
-            } else if k != "account" && k != "email" && k != "plan" && k != "status" && k != "credits" && k != "usage" {
-                 details.push(ExternalQuotaDetail {
+            } else if k != "account"
+                && k != "email"
+                && k != "plan"
+                && k != "status"
+                && k != "credits"
+                && k != "usage"
+            {
+                details.push(ExternalQuotaDetail {
                     label: k.clone(),
                     value: quota_json_scalar(v),
                 });

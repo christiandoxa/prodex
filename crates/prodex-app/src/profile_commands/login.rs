@@ -92,7 +92,9 @@ fn login_into_profile(
         if login_request.method == LoginMethod::Google {
             if matches!(
                 profile.provider,
-                ProfileProvider::Copilot { .. } | ProfileProvider::Anthropic { .. } | ProfileProvider::Agy { .. }
+                ProfileProvider::Copilot { .. }
+                    | ProfileProvider::Anthropic { .. }
+                    | ProfileProvider::Agy { .. }
             ) {
                 bail!(
                     "profile '{}' uses {}. Google sign-in supports OpenAI/Codex placeholders or Google Gemini profiles.",
@@ -103,7 +105,9 @@ fn login_into_profile(
         } else if login_request.method == LoginMethod::Claude {
             if matches!(
                 profile.provider,
-                ProfileProvider::Gemini { .. } | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. }
+                ProfileProvider::Gemini { .. }
+                    | ProfileProvider::Copilot { .. }
+                    | ProfileProvider::Agy { .. }
             ) {
                 bail!(
                     "profile '{}' uses {}. Claude sign-in supports OpenAI/Codex placeholders or Anthropic Claude profiles.",

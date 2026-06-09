@@ -585,8 +585,8 @@ fn runtime_gemini_oauth_profiles_for_provider(
                     access_token: secret.access_token,
                     project_id: secret
                         .project_id
-                        .or_else(gemini_oauth_project_from_env)
-                        .or_else(|| project_id.clone()),
+                        .or_else(|| project_id.clone())
+                        .or_else(gemini_oauth_project_from_env),
                 });
             }
             Err(err) => {

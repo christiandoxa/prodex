@@ -129,10 +129,7 @@ impl ProfileProvider {
                 login: stored_login,
                 ..
             } => stored_host.trim() == host.trim() && stored_login.trim() == login.trim(),
-            Self::Openai
-            | Self::Gemini { .. }
-            | Self::Anthropic { .. }
-            | Self::Agy { .. } => false,
+            Self::Openai | Self::Gemini { .. } | Self::Anthropic { .. } | Self::Agy { .. } => false,
         }
     }
 
@@ -142,10 +139,9 @@ impl ProfileProvider {
                 email: stored_email,
                 ..
             } => stored_email.trim().eq_ignore_ascii_case(email.trim()),
-            Self::Openai
-            | Self::Anthropic { .. }
-            | Self::Copilot { .. }
-            | Self::Agy { .. } => false,
+            Self::Openai | Self::Anthropic { .. } | Self::Copilot { .. } | Self::Agy { .. } => {
+                false
+            }
         }
     }
 
@@ -167,10 +163,7 @@ impl ProfileProvider {
                 };
                 account_matches && auth_method_matches
             }
-            Self::Openai
-            | Self::Gemini { .. }
-            | Self::Copilot { .. }
-            | Self::Agy { .. } => false,
+            Self::Openai | Self::Gemini { .. } | Self::Copilot { .. } | Self::Agy { .. } => false,
         }
     }
 }
