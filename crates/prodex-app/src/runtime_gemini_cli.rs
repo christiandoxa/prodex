@@ -1,7 +1,7 @@
 use crate::{
     PreparedRuntimeLaunch, RuntimeLaunchRequest, RuntimeLaunchStrategy, RuntimeProxyEndpoint,
     agy_bin, clear_rtk_auto_wrap_control_env, execute_runtime_launch, gemini_bin,
-    prepare_caveman_launch_home, prepend_child_path,
+    prepare_caveman_launch_home, prepend_child_path, refresh_gemini_oauth_secret_if_needed,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -10,8 +10,7 @@ use prodex_cli::{
 };
 use prodex_runtime_launch::{ChildProcessPlan, RuntimeLaunchPlan};
 use std::ffi::OsString;
-
-const PRODEX_GEMINI_PLACEHOLDER_TOKEN: &str = "prodex-runtime-provider";
+use std::path::Path;
 
 struct SuperGeminiCliLaunchStrategy {
     args: SuperArgs,
@@ -64,16 +63,13 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
                 let runtime_proxy =
                     runtime_proxy.context("Gemini CLI launch requires a local runtime proxy")?;
                 let proxy_base_url = format!("http://{}", runtime_proxy.listen_addr);
+                let gemini_auth_env = runtime_super_gemini_cli_oauth_env(&prepared.codex_home)?;
                 ChildProcessPlan::new(gemini_bin(), prepared.codex_home.clone())
                     .with_args(launch_args)
-                    .with_extra_env(vec![
+                    .with_extra_env(gemini_auth_env.into_iter().chain([
                         (
                             OsString::from("GOOGLE_GENAI_USE_GCA"),
                             OsString::from("true"),
-                        ),
-                        (
-                            OsString::from("GOOGLE_CLOUD_ACCESS_TOKEN"),
-                            OsString::from(PRODEX_GEMINI_PLACEHOLDER_TOKEN),
                         ),
                         (
                             OsString::from("CODE_ASSIST_ENDPOINT"),
@@ -83,7 +79,7 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
                             OsString::from("CODE_ASSIST_API_VERSION"),
                             OsString::from("v1internal"),
                         ),
-                    ])
+                    ]))
             }
             SuperCliAgent::Agy => {
                 ChildProcessPlan::new(agy_bin(), prepared.codex_home.clone()).with_args(launch_args)
@@ -100,6 +96,21 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
         }
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home))
     }
+}
+
+fn runtime_super_gemini_cli_oauth_env(codex_home: &Path) -> Result<Vec<(OsString, OsString)>> {
+    let secret = refresh_gemini_oauth_secret_if_needed(codex_home)?;
+    let mut env = vec![(
+        OsString::from("GOOGLE_CLOUD_ACCESS_TOKEN"),
+        OsString::from(secret.access_token),
+    )];
+    if let Some(project_id) = secret.project_id.filter(|value| !value.trim().is_empty()) {
+        env.push((
+            OsString::from("GOOGLE_CLOUD_PROJECT"),
+            OsString::from(project_id),
+        ));
+    }
+    Ok(env)
 }
 
 fn runtime_super_google_cli_launch_args(
@@ -156,6 +167,8 @@ pub(super) fn handle_super_google_cli(args: SuperArgs, presidio_enabled: bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{GeminiOAuthSecret, write_gemini_oauth_secret};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn native_gemini_cli_defaults_to_yolo_and_forwards_model() {
@@ -196,5 +209,44 @@ mod tests {
                 OsString::from("--continue"),
             ]
         );
+    }
+
+    #[test]
+    fn native_gemini_cli_uses_profile_oauth_token_env() {
+        let home = std::env::temp_dir().join(format!(
+            "prodex-native-gemini-cli-oauth-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let secret = GeminiOAuthSecret {
+            auth_mode: "gemini_oauth".to_string(),
+            access_token: "profile-access-token".to_string(),
+            refresh_token: Some("profile-refresh-token".to_string()),
+            token_type: Some("Bearer".to_string()),
+            scope: None,
+            expiry_date: None,
+            email: "gemini-user@example.com".to_string(),
+            project_id: Some("profile-project".to_string()),
+        };
+        write_gemini_oauth_secret(&home, &secret).expect("secret should write");
+
+        let env = runtime_super_gemini_cli_oauth_env(&home).expect("env should build");
+        assert_eq!(
+            env.iter()
+                .find(|(key, _)| key == "GOOGLE_CLOUD_ACCESS_TOKEN")
+                .map(|(_, value)| value.as_os_str()),
+            Some(std::ffi::OsStr::new("profile-access-token"))
+        );
+        assert_eq!(
+            env.iter()
+                .find(|(key, _)| key == "GOOGLE_CLOUD_PROJECT")
+                .map(|(_, value)| value.as_os_str()),
+            Some(std::ffi::OsStr::new("profile-project"))
+        );
+
+        let _ = std::fs::remove_dir_all(home);
     }
 }
