@@ -28,6 +28,7 @@ const FIXTURES = [
       assertHeader(request, "x-codex-turn-state", "<turn_state>");
       assertHeader(request, "x-codex-turn-metadata", "<turn_metadata>");
       assertHeader(request, "x-openai-subagent", "planner");
+      assertHeader(request, "x-openai-internal-codex-responses-lite", "true");
       assert.equal(request.body.previous_response_id, "<previous_response_id>");
       assert.equal(request.body.client_metadata.session_id, "<session_id>");
       assert.equal(request.body.client_metadata["x-codex-window-id"], "<window_id>");
@@ -65,6 +66,10 @@ const FIXTURES = [
       assert.equal(clientMessage.direction, "client_to_upstream");
       assert.equal(clientMessage.message.previous_response_id, "<previous_response_id>");
       assert.equal(clientMessage.message.session_id, "<session_id>");
+      assert.equal(
+        clientMessage.message.client_metadata.ws_request_header_x_openai_internal_codex_responses_lite,
+        true,
+      );
       assert.equal(clientMessage.message.input[1].call_id, "<call_id>");
       assert.deepEqual(clientMessage.message.input[1].arguments, {
         cmd: "pwd",
@@ -94,6 +99,7 @@ const FIXTURES = [
       assertHeader(request, "ChatGPT-Account-Id", "<account_id>");
       assertHeader(request, "session_id", "<session_id>");
       assertHeader(request, "x-codex-turn-metadata", "<turn_metadata>");
+      assertHeader(request, "x-openai-internal-codex-responses-lite", "true");
       assert.equal(request.body.previous_response_id, "<previous_response_id>");
       assert.equal(request.body.session_id, "<session_id>");
       assert.equal(request.body.client_metadata["x-codex-window-id"], "<window_id>");

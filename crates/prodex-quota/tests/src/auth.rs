@@ -37,6 +37,25 @@ fn usage_auth_prefers_jwt_account_id() {
 }
 
 #[test]
+fn usage_auth_accepts_v2_personal_access_token_with_stored_account_id() {
+    let auth = usage_auth_from_auth_text(
+        r#"{
+                "auth_mode": "personalAccessToken",
+                "tokens": {
+                    "access_token": "at-v2-opaque-token",
+                    "account_id": "acct_stored",
+                    "refresh_token": "refresh"
+                }
+            }"#,
+    )
+    .unwrap();
+
+    assert_eq!(auth.access_token, "at-v2-opaque-token");
+    assert_eq!(auth.account_id.as_deref(), Some("acct_stored"));
+    assert_eq!(auth.expires_at, None);
+}
+
+#[test]
 fn refresh_mutates_tokens_and_timestamp() {
     let jwt = test_jwt(r#"{"https://api.openai.com/auth.chatgpt_account_id":"acct_refreshed"}"#);
     let mut value = serde_json::json!({"tokens":{"refresh_token":"old"}});

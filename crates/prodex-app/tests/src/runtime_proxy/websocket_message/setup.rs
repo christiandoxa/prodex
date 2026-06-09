@@ -1,6 +1,5 @@
 use super::super::test_support::{
-    read_runtime_local_websocket_text, test_runtime_local_websocket_pair, test_runtime_shared,
-    test_runtime_websocket_flow,
+    test_runtime_local_websocket_pair, test_runtime_shared, test_runtime_websocket_flow,
 };
 use super::*;
 
@@ -46,11 +45,11 @@ fn should_promote_committed_profile_only_for_fresh_requests() {
 }
 
 #[test]
-fn response_processed_is_forwarded_one_way_on_existing_upstream_session() {
+fn response_processed_is_absorbed_without_touching_existing_upstream_session() {
     let _guard = acquire_test_runtime_lock();
     let shared = test_runtime_shared("setup-response-processed");
     let (mut local_socket, _local_peer) = test_runtime_local_websocket_pair();
-    let (mut upstream_peer, upstream_socket) = test_runtime_local_websocket_pair();
+    let (_upstream_peer, upstream_socket) = test_runtime_local_websocket_pair();
     let mut websocket_session = RuntimeWebsocketSessionState::default();
     websocket_session.store(
         upstream_socket,
@@ -75,12 +74,8 @@ fn response_processed_is_forwarded_one_way_on_existing_upstream_session() {
         shared: &shared,
         websocket_session: &mut websocket_session,
     })
-    .expect("response.processed should be best-effort one-way forwarding");
+    .expect("response.processed should be absorbed as a removed legacy request");
 
-    assert_eq!(
-        read_runtime_local_websocket_text(&mut upstream_peer),
-        request_text
-    );
     assert_eq!(websocket_session.profile_name.as_deref(), Some("alpha"));
     assert_eq!(websocket_session.turn_state.as_deref(), Some("turn-alpha"));
 }

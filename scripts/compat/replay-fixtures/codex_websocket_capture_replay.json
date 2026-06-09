@@ -18,7 +18,7 @@
         },
         {
           "name": "User-Agent",
-          "value": "codex-cli/0.135.0"
+          "value": "codex-cli/0.138.0"
         },
         {
           "name": "session_id",
@@ -51,6 +51,9 @@
         "model": "gpt-5.3-codex",
         "previous_response_id": "<previous_response_id>",
         "session_id": "<session_id>",
+        "client_metadata": {
+          "ws_request_header_x_openai_internal_codex_responses_lite": true
+        },
         "input": [
           {
             "type": "message",

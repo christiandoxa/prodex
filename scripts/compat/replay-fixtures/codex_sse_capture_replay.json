@@ -43,6 +43,10 @@
         {
           "name": "x-codex-beta-features",
           "value": "responses-websocket,compact"
+        },
+        {
+          "name": "x-openai-internal-codex-responses-lite",
+          "value": "true"
         }
       ],
       "body": {

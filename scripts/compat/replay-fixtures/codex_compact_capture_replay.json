@@ -35,6 +35,10 @@
         {
           "name": "x-codex-turn-metadata",
           "value": "<turn_metadata>"
+        },
+        {
+          "name": "x-openai-internal-codex-responses-lite",
+          "value": "true"
         }
       ],
       "body": {

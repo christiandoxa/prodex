@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.135.0 release",
+      "baseline_source": "openai/codex rust-v0.138.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -34,6 +34,10 @@
             "x-openai-subagent",
             "X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER",
             "x-responsesapi-include-timing-metrics",
+            "X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER",
+            "x-openai-internal-codex-responses-lite",
+            "WS_REQUEST_HEADER_RESPONSES_LITE_CLIENT_METADATA_KEY",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
             "x-codex-beta-features",
             "OPENAI_BETA_HEADER",
             "responses_websockets=2026-02-06",
@@ -153,6 +157,8 @@
         "x-client-request-id",
         "x-codex-beta-features",
         "x-responsesapi-include-timing-metrics",
+        "x-openai-internal-codex-responses-lite",
+        "ws_request_header_x_openai_internal_codex_responses_lite",
         "OpenAI-Beta",
         "User-Agent"
       ],
@@ -275,6 +281,8 @@
             "x-openai-memgen-request",
             "x-openai-subagent",
             "x-responsesapi-include-timing-metrics",
+            "x-openai-internal-codex-responses-lite",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
             "x-client-request-id"
           ],
           "expected_headers_all": [
@@ -286,6 +294,8 @@
             "x-openai-memgen-request",
             "x-openai-subagent",
             "x-responsesapi-include-timing-metrics",
+            "x-openai-internal-codex-responses-lite",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
             "x-client-request-id"
           ]
         },
@@ -302,6 +312,8 @@
             "x-codex-turn-state",
             "x-codex-turn-metadata",
             "x-codex-beta-features",
+            "x-openai-internal-codex-responses-lite",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
             "OPENAI_BETA_HEADER"
           ],
           "expected_headers_all": [
@@ -310,6 +322,8 @@
             "x-codex-turn-state",
             "x-codex-turn-metadata",
             "x-codex-beta-features",
+            "x-openai-internal-codex-responses-lite",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
             "User-Agent"
           ]
         },

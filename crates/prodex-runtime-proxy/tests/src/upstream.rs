@@ -37,6 +37,7 @@ fn request_header_skip_list_preserves_codex_metadata_headers() {
         "x-client-request-id",
         "x-codex-beta-features",
         "x-responsesapi-include-timing-metrics",
+        "x-openai-internal-codex-responses-lite",
         "OpenAI-Beta",
         "User-Agent",
     ] {
@@ -57,6 +58,7 @@ fn request_header_skip_list_preserves_codex_rust_0_131_and_newer_passthrough_hea
         "x-codex-inference-call-id",
         "X-OpenAI-Product-Sku",
         "x-codex-ws-stream-request-start-ms",
+        "ws_request_header_x_openai_internal_codex_responses_lite",
     ] {
         assert!(
             !should_skip_runtime_request_header(header),

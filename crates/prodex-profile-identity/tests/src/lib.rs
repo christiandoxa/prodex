@@ -38,6 +38,25 @@ fn parses_access_token_account_before_stored_account() {
 }
 
 #[test]
+fn parses_v2_personal_access_token_identity_from_stored_account() {
+    let identity = parse_identity_from_auth_json(&format!(
+        r#"{{
+                "auth_mode": "personalAccessToken",
+                "tokens": {{
+                    "id_token": "{}",
+                    "access_token": "at-v2-opaque-token",
+                    "account_id": "stored-account"
+                }}
+            }}"#,
+        chatgpt_id_token("user@example.com", None),
+    ))
+    .unwrap();
+
+    assert_eq!(identity.email.as_deref(), Some("user@example.com"));
+    assert_eq!(identity.account_id.as_deref(), Some("stored-account"));
+}
+
+#[test]
 fn parses_access_token_flat_account_claims() {
     let flat_claim = jwt_with_payload(serde_json::json!({
         "https://api.openai.com/auth.chatgpt_account_id": "flat-account",
