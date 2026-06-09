@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.167.0 - 2026-06-09
+
+### Misc
+
+- Add native Google CLI agents (`3a7921f`)
+
 ## 0.166.0 - 2026-06-08
 
 ### Misc
@@ -72,10 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Deliver Codex-native provider parity (`27229c9`)
-
-## 0.155.0 - 2026-06-06
-
-### Misc
-
-- Satisfy Gemini provider clippy (`5c1e56f`)
-- Stabilize Gemini provider tool calls (`43c9b92`)
