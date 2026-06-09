@@ -1,7 +1,9 @@
 use super::*;
 mod preflight;
+mod provider_names;
 mod providers;
 use preflight::*;
+use provider_names::*;
 use providers::*;
 
 struct RunCommandStrategy {
@@ -478,15 +480,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         if local_rewrite_proxy_upstream_base_url(&self.selection, &self.request).is_some() {
             print_wrapped_stderr(&section_header("Runtime Provider"));
             if let Some(provider) = self.request.external_provider {
-                let rotation = if provider.eq_ignore_ascii_case("gemini")
-                    || provider.eq_ignore_ascii_case("gemini-oauth")
-                    || provider.eq_ignore_ascii_case("anthropic")
-                    || provider.eq_ignore_ascii_case("claude")
-                    || provider.eq_ignore_ascii_case("copilot")
-                    || provider.eq_ignore_ascii_case("github-copilot")
-                    || provider.eq_ignore_ascii_case("github_copilot")
-                    || provider.eq_ignore_ascii_case("deepseek")
-                {
+                let rotation = if runtime_external_provider_has_rotation_summary(provider) {
                     runtime_external_provider_rotation_summary(
                         &self.state,
                         &self.selection.selected_profile_name,

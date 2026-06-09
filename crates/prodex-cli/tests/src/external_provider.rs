@@ -99,6 +99,22 @@ fn super_gemini_agy_alias_selects_antigravity_agent() {
 }
 
 #[test]
+fn login_accepts_antigravity_flag_as_passthrough_arg() {
+    let command = parse_cli_command_from(["prodex", "login", "--with-antigravity"])
+        .expect("login command should parse");
+    let Commands::Login(args) = command else {
+        panic!("expected login command");
+    };
+
+    assert_eq!(args.codex_args, vec![OsString::from("--with-antigravity")]);
+}
+
+#[test]
+fn super_deepseek_provider_rejects_unknown_provider() {
+    assert!(parse_cli_command_from(["prodex", "s", "--provider", "unknown", "exec"]).is_err());
+}
+
+#[test]
 fn super_gemini_provider_enables_native_image_generation_only_for_gemini() {
     for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
         let args = parse_super_as_caveman(&[

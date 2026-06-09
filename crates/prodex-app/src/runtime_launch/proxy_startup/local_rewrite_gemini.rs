@@ -3,10 +3,10 @@ use super::gemini_rewrite::{
     RuntimeGeminiTranslatedRequest, runtime_gemini_finish_reason,
     runtime_gemini_finish_reason_retryable_invalid, runtime_gemini_generate_request_body,
     runtime_gemini_internal_instruction_corpus, runtime_gemini_media_content_item_from_part,
-    runtime_gemini_native_upstream_url, runtime_gemini_normalized_response_value,
-    runtime_gemini_project_id, runtime_gemini_prompt_feedback_failure,
+    runtime_gemini_normalized_response_value, runtime_gemini_project_id,
+    runtime_gemini_prompt_feedback_failure, runtime_gemini_request_upstream_url,
     runtime_gemini_text_echoes_internal_instruction, runtime_gemini_text_from_special_part,
-    runtime_gemini_upstream_url, runtime_gemini_visible_text_from_part,
+    runtime_gemini_visible_text_from_part,
 };
 use super::gemini_sse::{
     RuntimeGeminiBindingRecorder, RuntimeGeminiGenerateSseReader,
@@ -20,7 +20,8 @@ use super::local_rewrite::{
 pub(super) use super::local_rewrite_gemini_bindings::runtime_gemini_remember_bindings_from_responses_body;
 use super::local_rewrite_gemini_bindings::runtime_gemini_tool_output_call_ids_from_request;
 use super::local_rewrite_gemini_models::{
-    runtime_gemini_model_fallback_chain, runtime_gemini_unsupported_tool_fallback_body,
+    runtime_gemini_model_fallback_chain, runtime_gemini_retain_code_assist_models,
+    runtime_gemini_unsupported_tool_fallback_body,
 };
 use super::local_rewrite_gemini_quota::{
     runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
@@ -277,20 +278,14 @@ pub(super) fn send_runtime_gemini_upstream_request(
             )? {
                 return Ok(result);
             }
-            let upstream_url = if responses_route {
-                runtime_gemini_upstream_url(
-                    &shared.upstream_base_url,
-                    &selected.auth,
-                    &translated.model,
-                    translated.stream,
-                )
-            } else {
-                runtime_gemini_native_upstream_url(
-                    &shared.upstream_base_url,
-                    &selected.auth,
-                    &request.path_and_query,
-                )
-            };
+            let upstream_url = runtime_gemini_request_upstream_url(
+                &shared.upstream_base_url,
+                &selected.auth,
+                &request.path_and_query,
+                &translated.model,
+                translated.stream,
+                responses_route,
+            );
             let mut rate_limit_retry_index = 0;
             let mut invalid_stream_retry_index = 0;
             let mut auth_refresh_attempted = false;
@@ -1779,15 +1774,6 @@ fn runtime_gemini_should_rotate_after_quota_response(
 
 fn runtime_gemini_should_inline_rate_limit_retry(delay_ms: u64) -> bool {
     delay_ms > 0 && delay_ms <= RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS
-}
-
-fn runtime_gemini_retain_code_assist_models(model_chain: &mut Vec<String>) {
-    model_chain.retain(|model| runtime_gemini_code_assist_model_allowed(model));
-}
-
-fn runtime_gemini_code_assist_model_allowed(model: &str) -> bool {
-    let model = model.trim();
-    !model.contains("customtools") && !matches!(model, "gemini-3.5-flash" | "gemini-3-flash")
 }
 
 fn runtime_gemini_invalid_stream_retry_delay_ms(retry_index: usize) -> u64 {

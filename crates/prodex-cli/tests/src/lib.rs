@@ -459,22 +459,6 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
 }
 
 #[test]
-fn login_accepts_antigravity_flag_as_passthrough_arg() {
-    let command = parse_cli_command_from(["prodex", "login", "--with-antigravity"])
-        .expect("login command should parse");
-    let Commands::Login(args) = command else {
-        panic!("expected login command");
-    };
-
-    assert_eq!(args.codex_args, vec![OsString::from("--with-antigravity")]);
-}
-
-#[test]
-fn super_deepseek_provider_rejects_unknown_provider() {
-    assert!(parse_cli_command_from(["prodex", "s", "--provider", "unknown", "exec"]).is_err());
-}
-
-#[test]
 fn caveman_command_keeps_smart_context_autopilot_disabled() {
     let command = parse_cli_command_from(["prodex", "caveman", "exec", "hello"])
         .expect("caveman command should parse");

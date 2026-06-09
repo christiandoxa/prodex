@@ -183,6 +183,21 @@ pub(super) fn runtime_gemini_native_upstream_url(
     }
 }
 
+pub(super) fn runtime_gemini_request_upstream_url(
+    base_url: &str,
+    auth: &RuntimeGeminiAuth,
+    path_and_query: &str,
+    model: &str,
+    stream: bool,
+    responses_route: bool,
+) -> String {
+    if responses_route {
+        runtime_gemini_upstream_url(base_url, auth, model, stream)
+    } else {
+        runtime_gemini_native_upstream_url(base_url, auth, path_and_query)
+    }
+}
+
 pub(super) fn runtime_gemini_project_id(auth: &RuntimeGeminiAuth) -> Option<&str> {
     match auth {
         RuntimeGeminiAuth::ApiKey { .. } => None,
