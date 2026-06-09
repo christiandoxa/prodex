@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.170.0 - 2026-06-09
+
+### Runtime
+
+- Align runtime proxy with Codex 0.138 (`7bbe7fc`)
+
+### Misc
+
+- Pass Gemini OAuth token to native CLI (`660602b`)
+
 ## 0.169.0 - 2026-06-09
 
 ### Misc
@@ -72,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden Codex-native provider parity (`551e06c`)
-
-## 0.157.0 - 2026-06-06
-
-### Runtime
-
-- Add runtime metadata bridge (`3996a18`)
