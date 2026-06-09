@@ -30,6 +30,7 @@ const FIXTURES = [
       assertHeader(request, "x-openai-subagent", "planner");
       assert.equal(request.body.previous_response_id, "<previous_response_id>");
       assert.equal(request.body.client_metadata.session_id, "<session_id>");
+      assert.equal(request.body.client_metadata["x-codex-window-id"], "<window_id>");
       assert.equal(request.body.input[1].approval_request_id, "<approval_request_id>");
       assert.equal(request.body.input[2].call_id, "<call_id>");
 
@@ -95,6 +96,7 @@ const FIXTURES = [
       assertHeader(request, "x-codex-turn-metadata", "<turn_metadata>");
       assert.equal(request.body.previous_response_id, "<previous_response_id>");
       assert.equal(request.body.session_id, "<session_id>");
+      assert.equal(request.body.client_metadata["x-codex-window-id"], "<window_id>");
       assert.equal(response.status, 429);
       assertHeader(response, "x-request-id", "<request_id>");
       assertHeader(response, "set-cookie", "<redacted>");

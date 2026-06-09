@@ -35,6 +35,8 @@ const VOLATILE_KEY_PLACEHOLDERS = new Map([
   ["response_ids", "<response_id>"],
   ["trace_id", "<trace_id>"],
   ["thread_id", "<thread_id>"],
+  ["window_id", "<window_id>"],
+  ["x-codex-window-id", "<window_id>"],
   ["conversation_id", "<conversation_id>"],
   ["account_id", "<account_id>"],
   ["chatgpt-account-id", "<account_id>"],
@@ -543,6 +545,7 @@ function sampleRecords() {
         previous_response_id: "resp_parent_live_20260428",
         client_metadata: {
           session_id: "sess_body_live_20260428",
+          ["x-codex-window-id"]: "thread_live_20260428:2",
           ["api_" + "key"]: fakeValues.bodyApiKey,
         },
       },
@@ -576,6 +579,7 @@ function assertNoSampleSecrets(rendered) {
     fakeValues.sseToken,
     "resp_parent_live",
     "sess_body_live",
+    "thread_live_20260428:2",
     "turn_live_20260428",
     "call_ws_live",
     "2026-04-28T01:02:03Z",
@@ -584,7 +588,13 @@ function assertNoSampleSecrets(rendered) {
       throw new Error(`scrubbed replay still contains secret or volatile value: ${needle}`);
     }
   }
-  for (const expected of ["<redacted>", "<response_id>", "<session_id>", "<turn_state>"]) {
+  for (const expected of [
+    "<redacted>",
+    "<response_id>",
+    "<session_id>",
+    "<turn_state>",
+    "<window_id>",
+  ]) {
     if (!rendered.includes(expected)) {
       throw new Error(`scrubbed replay is missing expected placeholder: ${expected}`);
     }

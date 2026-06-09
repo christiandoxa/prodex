@@ -66,6 +66,7 @@ mod runtime_deepseek_config;
 mod runtime_doctor;
 mod runtime_external_provider_config;
 mod runtime_gemini_auth;
+mod runtime_gemini_cli;
 mod runtime_gemini_cli_compat;
 mod runtime_gemini_config;
 mod runtime_gemini_settings;
@@ -241,6 +242,14 @@ fn codex_bin() -> OsString {
 
 fn claude_bin() -> OsString {
     env::var_os("PRODEX_CLAUDE_BIN").unwrap_or_else(|| OsString::from("claude"))
+}
+
+fn gemini_bin() -> OsString {
+    env::var_os("PRODEX_GEMINI_BIN").unwrap_or_else(|| OsString::from("gemini"))
+}
+
+fn agy_bin() -> OsString {
+    env::var_os("PRODEX_AGY_BIN").unwrap_or_else(|| OsString::from("agy"))
 }
 
 #[cfg(test)]

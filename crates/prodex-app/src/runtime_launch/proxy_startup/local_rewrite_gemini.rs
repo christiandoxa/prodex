@@ -3,10 +3,10 @@ use super::gemini_rewrite::{
     RuntimeGeminiTranslatedRequest, runtime_gemini_finish_reason,
     runtime_gemini_finish_reason_retryable_invalid, runtime_gemini_generate_request_body,
     runtime_gemini_internal_instruction_corpus, runtime_gemini_media_content_item_from_part,
-    runtime_gemini_normalized_response_value, runtime_gemini_project_id,
-    runtime_gemini_prompt_feedback_failure, runtime_gemini_text_echoes_internal_instruction,
-    runtime_gemini_text_from_special_part, runtime_gemini_upstream_url,
-    runtime_gemini_visible_text_from_part,
+    runtime_gemini_native_upstream_url, runtime_gemini_normalized_response_value,
+    runtime_gemini_project_id, runtime_gemini_prompt_feedback_failure,
+    runtime_gemini_text_echoes_internal_instruction, runtime_gemini_text_from_special_part,
+    runtime_gemini_upstream_url, runtime_gemini_visible_text_from_part,
 };
 use super::gemini_sse::{
     RuntimeGeminiBindingRecorder, RuntimeGeminiGenerateSseReader,
@@ -277,12 +277,20 @@ pub(super) fn send_runtime_gemini_upstream_request(
             )? {
                 return Ok(result);
             }
-            let upstream_url = runtime_gemini_upstream_url(
-                &shared.upstream_base_url,
-                &selected.auth,
-                &translated.model,
-                translated.stream,
-            );
+            let upstream_url = if responses_route {
+                runtime_gemini_upstream_url(
+                    &shared.upstream_base_url,
+                    &selected.auth,
+                    &translated.model,
+                    translated.stream,
+                )
+            } else {
+                runtime_gemini_native_upstream_url(
+                    &shared.upstream_base_url,
+                    &selected.auth,
+                    &request.path_and_query,
+                )
+            };
             let mut rate_limit_retry_index = 0;
             let mut invalid_stream_retry_index = 0;
             let mut auth_refresh_attempted = false;

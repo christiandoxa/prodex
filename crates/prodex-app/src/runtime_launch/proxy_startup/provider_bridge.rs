@@ -308,11 +308,19 @@ pub(super) fn runtime_provider_canonical_model(
 }
 
 pub(super) fn runtime_provider_error_class(
-    _kind: RuntimeProviderBridgeKind,
+    kind: RuntimeProviderBridgeKind,
     status: u16,
     body: &[u8],
 ) -> RuntimeProviderErrorClass {
     let tokens = runtime_provider_error_tokens(body);
+    if kind == RuntimeProviderBridgeKind::Gemini
+        && status == 403
+        && tokens
+            .iter()
+            .any(|token| token == "permission_denied" || token == "iam_permission_denied")
+    {
+        return RuntimeProviderErrorClass::Auth;
+    }
     for rule in RUNTIME_PROVIDER_ERROR_RULES {
         let status_matches = rule.status.is_none_or(|expected| expected == status);
         if !status_matches {
@@ -709,6 +717,19 @@ mod tests {
         );
         assert_eq!(
             runtime_provider_error_class(RuntimeProviderBridgeKind::DeepSeek, 401, b"{}"),
+            RuntimeProviderErrorClass::Auth
+        );
+        let permission_body = serde_json::to_vec(&serde_json::json!({
+            "error": {
+                "code": "permission_denied",
+                "details": [{
+                    "reason": "IAM_PERMISSION_DENIED"
+                }]
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, 403, &permission_body),
             RuntimeProviderErrorClass::Auth
         );
     }

@@ -282,9 +282,31 @@ fn codex_resume_session_id_extracts_explicit_exec_resume_target() {
 }
 
 #[test]
+fn codex_resume_session_id_extracts_target_before_prompt() {
+    let args = [
+        OsString::from("resume"),
+        OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        OsString::from("/compact focus on auth"),
+    ];
+
+    assert_eq!(
+        codex_resume_session_id(&args),
+        Some("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9")
+    );
+}
+
+#[test]
 fn codex_resume_session_id_ignores_resume_without_target() {
     assert_eq!(
         codex_resume_session_id(&[OsString::from("resume"), OsString::from("--last")]),
+        None
+    );
+    assert_eq!(
+        codex_resume_session_id(&[
+            OsString::from("resume"),
+            OsString::from("--last"),
+            OsString::from("/compact focus on auth"),
+        ]),
         None
     );
     assert_eq!(

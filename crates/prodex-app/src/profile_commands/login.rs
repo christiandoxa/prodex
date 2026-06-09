@@ -23,14 +23,16 @@ use self::login_menu::{
 use super::write_secret_text_file;
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, LogoutArgs, ProfileEntry,
-    ProfileProvider, codex_child_plan, create_codex_home_if_missing, ensure_managed_profiles_root,
-    exit_with_status, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
-    login_with_claude_oauth, login_with_google_oauth, managed_profile_home_path,
-    persist_login_home, prepare_managed_codex_home, print_panel, read_auth_summary,
-    read_gemini_oauth_secret, remove_dir_if_exists, required_auth_json_text, resolve_profile_name,
-    run_child_plan, unique_profile_name_for_email, update_existing_profile_auth,
-    write_gemini_oauth_secret, write_profile_openai_compatible_base_url,
+    ProfileProvider, agy_bin, codex_child_plan, create_codex_home_if_missing,
+    ensure_managed_profiles_root, exit_with_status, fetch_profile_email, fetch_profile_identity,
+    find_profile_by_identity, login_with_claude_oauth, login_with_google_oauth,
+    managed_profile_home_path, persist_login_home, prepare_managed_codex_home, print_panel,
+    read_auth_summary, read_gemini_oauth_secret, remove_dir_if_exists, required_auth_json_text,
+    resolve_profile_name, run_child_plan, unique_profile_name_for_email,
+    update_existing_profile_auth, write_gemini_oauth_secret,
+    write_profile_openai_compatible_base_url,
 };
+use prodex_runtime_launch::ChildProcessPlan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LoginMethod {
@@ -40,6 +42,7 @@ enum LoginMethod {
     AccessToken,
     Google,
     Claude,
+    Antigravity,
     Status,
 }
 
@@ -57,6 +60,12 @@ pub(crate) fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
     let login_request = resolve_login_request(args.profile.as_deref(), args.codex_args)?;
+    if login_request.method == LoginMethod::Antigravity {
+        if args.profile.is_some() {
+            bail!("Antigravity login is global to the `agy` CLI and does not use Prodex profiles");
+        }
+        return exit_with_status(run_antigravity_login(&paths)?);
+    }
     let status = if let Some(profile_name) = args.profile.as_deref() {
         login_into_profile(&paths, &mut state, profile_name, &login_request)?
     } else {
@@ -535,6 +544,19 @@ fn login_request_for_method(
                 api_key_profile_name: None,
             })
         }
+        LoginMethod::Antigravity => {
+            if openai_base_url_specified {
+                bail!("--base-url is not supported for Antigravity login");
+            }
+            Ok(LoginRequest {
+                method,
+                codex_args: Vec::new(),
+                api_key: None,
+                openai_base_url: None,
+                openai_base_url_specified: false,
+                api_key_profile_name: None,
+            })
+        }
         LoginMethod::AccessToken | LoginMethod::Status => Ok(LoginRequest {
             method,
             codex_args: Vec::new(),
@@ -665,6 +687,14 @@ fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
     {
         return LoginMethod::Claude;
     }
+    if codex_args.iter().any(|arg| {
+        arg == "--with-antigravity"
+            || arg == "--antigravity"
+            || arg == "--with-agy"
+            || arg == "--agy"
+    }) {
+        return LoginMethod::Antigravity;
+    }
     if codex_args.iter().any(|arg| arg == "--with-access-token") {
         return LoginMethod::AccessToken;
     }
@@ -697,6 +727,11 @@ fn create_temporary_login_home(paths: &AppPaths) -> Result<PathBuf> {
     }
 
     bail!("failed to allocate a temporary CODEX_HOME for login")
+}
+
+fn run_antigravity_login(paths: &AppPaths) -> Result<ExitStatus> {
+    let plan = ChildProcessPlan::new(agy_bin(), paths.shared_codex_root.clone());
+    run_child_plan(&plan, None)
 }
 
 fn default_api_key_profile_name(openai_base_url: Option<&str>) -> String {

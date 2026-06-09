@@ -73,6 +73,32 @@ fn super_command_provider_short_aliases_expand_to_provider_flag() {
 }
 
 #[test]
+fn super_gemini_cli_alias_selects_native_gemini_agent() {
+    let command = parse_cli_command_from(["prodex", "s", "gemini", "--cli", "gemini", "review"])
+        .expect("Gemini CLI super command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+
+    assert_eq!(args.provider, Some(SuperExternalProvider::Gemini));
+    assert_eq!(args.cli, Some(SuperCliAgent::Gemini));
+    assert_eq!(args.codex_args, vec![OsString::from("review")]);
+}
+
+#[test]
+fn super_gemini_agy_alias_selects_antigravity_agent() {
+    let command = parse_cli_command_from(["prodex", "s", "gemini", "--cli", "agy", "--continue"])
+        .expect("Antigravity CLI super command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+
+    assert_eq!(args.provider, Some(SuperExternalProvider::Gemini));
+    assert_eq!(args.cli, Some(SuperCliAgent::Agy));
+    assert_eq!(args.codex_args, vec![OsString::from("--continue")]);
+}
+
+#[test]
 fn super_gemini_provider_enables_native_image_generation_only_for_gemini() {
     for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
         let args = parse_super_as_caveman(&[

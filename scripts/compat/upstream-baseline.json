@@ -571,28 +571,28 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.135.0",
-      "name": "0.135.0",
-      "published_at": "2026-05-28T17:31:35Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.135.0",
+      "tag_name": "rust-v0.138.0",
+      "name": "0.138.0",
+      "published_at": "2026-06-08T23:00:27Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.138.0",
       "body_head": [
         "## New Features",
-        "- `codex doctor` now reports richer environment, Git, terminal, app-server, and thread inventory diagnostics for support cases. (#24261, #24311, #24305)",
-        "- `/status` shows remote connection details and server version when the TUI is connected over a remote transport. (#24420)",
-        "- Vim mode gained text-object editing, improved word/line-end behavior, and a configurable interrupt-turn binding. (#24382, #24380, #24766)",
-        "- `/permissions` now understands named permission profiles and displays configured custom profiles. (#21559)",
-        "- Packaged Codex builds can discover and use the bundled patched zsh helper across supported macOS and Linux targets. (#23756, #24171)",
-        "- The Python SDK now exposes friendly `Sandbox` presets for thread and turn APIs. (#24772)",
-        "## Bug Fixes"
+        "- The `/app` command can now hand off the current CLI thread into Codex Desktop on macOS and native Windows, and Windows workspace launches can open directly into Desktop instead of stopping at a manual prompt. (#25638, #26500)",
+        "- Local image attachments and standalone image generations now expose their saved file paths to the model, which makes follow-up edits and file references more reliable. (#25944, #25947)",
+        "- Reasoning effort selection is more flexible: the TUI adds fallback shortcuts for terminals that miss `Alt` bindings, and model-defined effort levels now flow through in the order advertised by the model. (#25623, #26444, #26446)",
+        "- App-server integrations can now read account token usage, and Codex auth supports v2 personal access tokens in CLI and app-server flows. (#25344, #25731)",
+        "- Plugin automation got richer structured output: add/remove and marketplace commands support `--json`, plugin list JSON includes marketplace source, and plugin detail data now exposes default prompts, remote MCP servers, and unavailable app templates. (#26631, #26417, #25887, #26453, #26317)",
+        "## Bug Fixes",
+        "- Goal workflows are more predictable: multiline paste in `/goal edit` no longer submits early, idle auto-turns stay out of Plan mode, and goals stop auto-continuing after terminal turn failures. (#26047, #26147, #26690)"
       ]
     }
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.133",
-      "name": "v2.1.133",
-      "published_at": "2026-05-07T23:49:04Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.133"
+      "tag_name": "v2.1.169",
+      "name": "v2.1.169",
+      "published_at": "2026-06-08T21:57:18Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.169"
     },
     "docs": [
       {

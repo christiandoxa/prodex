@@ -160,6 +160,29 @@ pub(super) fn runtime_gemini_upstream_url(
     }
 }
 
+pub(super) fn runtime_gemini_native_upstream_url(
+    base_url: &str,
+    auth: &RuntimeGeminiAuth,
+    path_and_query: &str,
+) -> String {
+    match auth {
+        RuntimeGeminiAuth::ApiKey { .. } => format!(
+            "{}{}",
+            base_url.trim_end_matches('/'),
+            path_and_query
+                .strip_prefix("/v1beta")
+                .unwrap_or(path_and_query)
+        ),
+        RuntimeGeminiAuth::OAuth { .. } => {
+            let endpoint = crate::gemini_code_assist_endpoint();
+            let endpoint_root = endpoint
+                .strip_suffix("/v1internal")
+                .unwrap_or(endpoint.as_str());
+            format!("{}{}", endpoint_root.trim_end_matches('/'), path_and_query)
+        }
+    }
+}
+
 pub(super) fn runtime_gemini_project_id(auth: &RuntimeGeminiAuth) -> Option<&str> {
     match auth {
         RuntimeGeminiAuth::ApiKey { .. } => None,
@@ -170,6 +193,42 @@ pub(super) fn runtime_gemini_project_id(auth: &RuntimeGeminiAuth) -> Option<&str
 #[cfg(test)]
 #[path = "gemini_rewrite_custom_tool_tests.rs"]
 mod gemini_rewrite_custom_tool_tests;
+
+#[cfg(test)]
+mod native_url_tests {
+    use super::*;
+
+    #[test]
+    fn native_code_assist_url_preserves_method_and_query() {
+        let auth = RuntimeGeminiAuth::OAuth {
+            access_token: "token".to_string(),
+            project_id: None,
+        };
+        assert_eq!(
+            runtime_gemini_native_upstream_url(
+                "https://generativelanguage.googleapis.com/v1beta",
+                &auth,
+                "/v1internal:streamGenerateContent?alt=sse",
+            ),
+            "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+        );
+    }
+
+    #[test]
+    fn native_api_key_url_preserves_model_path() {
+        let auth = RuntimeGeminiAuth::ApiKey {
+            api_key: "key".to_string(),
+        };
+        assert_eq!(
+            runtime_gemini_native_upstream_url(
+                "https://generativelanguage.googleapis.com/v1beta",
+                &auth,
+                "/v1beta/models/gemini-test:generateContent",
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent"
+        );
+    }
+}
 
 #[cfg(test)]
 #[path = "gemini_rewrite_command_output_tests.rs"]

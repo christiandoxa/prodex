@@ -748,11 +748,17 @@ Use `--provider gemini` when you want the Codex/Super front end with Gemini upst
 ```bash
 prodex login --with-google
 prodex s gemini
+prodex s gemini --cli gemini
+prodex s gemini --cli agy
 GEMINI_API_KEY=... prodex s gemini --model gemini-2.5-pro
 prodex s gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
 ```
 
 Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex routes through the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. OAuth sessions keep fresh Gemini requests sticky to the previous successful profile by default for smoother Codex-style continuity; set `PRODEX_GEMINI_STICKY_FRESH_OAUTH=0` to restore pure fresh-request round robin. The default model is `auto`, matching Gemini CLI-style model routing through Gemini 3 and stable fallbacks; launch-time Gemini `modelConfigs` / `modelIdResolutions` / `modelChains` are projected into the Codex catalog and runtime fallback snapshot when configured. The injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192 where budget mode is used. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path: Prodex maps Codex/MCP tool schemas to Gemini function declarations, honors `auto` / `none` / `required` tool-choice modes, and preserves Gemini thought signatures across tool-call followups.
+
+`prodex s gemini --cli gemini` launches the native Google Gemini CLI instead of Codex, defaults its native tools to YOLO approval mode, and routes Code Assist requests through Prodex OAuth profile rotation. This native CLI path currently requires a Google OAuth profile and does not accept `--api-key`. Set `PRODEX_GEMINI_BIN` to override the `gemini` executable.
+
+`prodex s gemini --cli agy` launches the native Antigravity CLI with `--dangerously-skip-permissions` so tool permission prompts are auto-approved. Antigravity CLI owns its authentication through the system keyring/Google Sign-In and does not expose an endpoint or token override, so Prodex account auto-rotation and Presidio proxying are not available on this path. Set `PRODEX_AGY_BIN` to override the `agy` executable.
 
 The bridge also maps native Gemini `computerUse`, code execution, grounding/citation/URL-context metadata, generated images, video metadata, multimodal file inputs, log-probability metadata, tool-use and cached-token accounting, safety metadata, and Gemini finish reasons into Codex-compatible request, response, and SSE shapes. Citations are emitted as a separate completed output item after Gemini supplies a finish reason. Assistant followups retain native Gemini code, media, video, cache, and thought-signature parts without replaying citation display text as model history.
 

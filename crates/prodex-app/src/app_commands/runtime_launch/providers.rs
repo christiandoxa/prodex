@@ -144,6 +144,7 @@ pub(super) fn runtime_launch_profile_home_for_external_provider(
 ) -> Result<PathBuf> {
     if external_provider.is_some_and(|provider| {
         provider.eq_ignore_ascii_case("gemini")
+            || provider.eq_ignore_ascii_case("gemini-oauth")
             || provider.eq_ignore_ascii_case("copilot")
             || provider.eq_ignore_ascii_case("github-copilot")
             || provider.eq_ignore_ascii_case("github_copilot")
@@ -196,7 +197,9 @@ pub(super) fn runtime_local_rewrite_model_provider_id<'a>(
         .and_then(|provider| {
             if provider.eq_ignore_ascii_case("deepseek") {
                 Some(SUPER_DEEPSEEK_PROVIDER_ID)
-            } else if provider.eq_ignore_ascii_case("gemini") {
+            } else if provider.eq_ignore_ascii_case("gemini")
+                || provider.eq_ignore_ascii_case("gemini-oauth")
+            {
                 Some(SUPER_GEMINI_PROVIDER_ID)
             } else if provider.eq_ignore_ascii_case("anthropic")
                 || provider.eq_ignore_ascii_case("claude")
@@ -278,12 +281,16 @@ pub(super) fn runtime_local_rewrite_provider_options(
             )?;
             Ok(RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys })
         }
-        Some(provider) if provider.eq_ignore_ascii_case("gemini") => {
+        Some(provider)
+            if provider.eq_ignore_ascii_case("gemini")
+                || provider.eq_ignore_ascii_case("gemini-oauth") =>
+        {
             let thinking_budget_tokens =
                 runtime_launch_effective_gemini_thinking_budget_tokens(request, selection);
             let model_resolution = RuntimeGeminiModelResolution::from_current_settings();
-            if let Some(api_keys) =
-                runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)
+            if !provider.eq_ignore_ascii_case("gemini-oauth")
+                && let Some(api_keys) =
+                    runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)
             {
                 return Ok(RuntimeLocalRewriteProviderOptions::Gemini {
                     auth: RuntimeGeminiProviderAuth::ApiKeys { api_keys },

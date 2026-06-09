@@ -148,6 +148,9 @@ pub struct SuperArgs {
     /// External provider preset to use through Codex/Super.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
+    /// Agent CLI to launch. Gemini CLI requires the Gemini provider.
+    #[arg(long, value_name = "CLI", value_enum)]
+    pub cli: Option<SuperCliAgent>,
     /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
     #[arg(long = "api-key", value_name = "KEY", requires = "provider")]
     pub api_key: Option<String>,
@@ -184,6 +187,13 @@ pub struct SuperArgs {
     /// Arguments passed through to `codex` after the implied `mem` prefix.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuperCliAgent {
+    Codex,
+    Gemini,
+    Agy,
 }
 
 #[derive(Args, Debug)]

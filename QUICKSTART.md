@@ -240,10 +240,16 @@ Use Gemini with Google sign-in or an API key:
 ```bash
 prodex login --with-google
 prodex s gemini
+prodex s gemini --cli gemini
+prodex s gemini --cli agy
 GEMINI_API_KEY=... prodex s gemini --model gemini-2.5-pro
 ```
 
 When no API key is supplied, the Gemini path uses the Google OAuth profile from login. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, `GEMINI_API_KEY(S)`, or `GOOGLE_API_KEY(S)`, it uses the public Gemini API. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. OAuth sessions keep fresh Gemini requests sticky to the previous successful profile by default for smoother Codex-style continuity; set `PRODEX_GEMINI_STICKY_FRESH_OAUTH=0` to restore pure fresh-request round robin. `prodex quota` reads the same Google OAuth profile and asks Code Assist for `retrieveUserQuota` bucket data. Super optional tools stay active because they are local Codex overlays; Prodex maps Codex/MCP tool schemas to Gemini function declarations, projects Gemini `modelConfigs` / `modelIdResolutions` / `modelChains` into Codex model selection, preserves Gemini thought signatures across tool-call followups, masks large tool outputs before replaying history, and can import Gemini session/checkpoint context through `gemini_session_file`, `PRODEX_GEMINI_SESSION_FILE`, or `PRODEX_GEMINI_CHECKPOINT_FILE`.
+
+Add `--cli gemini` to launch the native Gemini CLI with its tools in YOLO mode through Prodex OAuth profile rotation. This native path currently requires Google OAuth and does not accept `--api-key`; `PRODEX_GEMINI_BIN` overrides the executable.
+
+Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring/Google Sign-In authentication, so Prodex account rotation and Presidio proxying are unavailable for this native path. `PRODEX_AGY_BIN` overrides the executable.
 
 **Feature Parity Mapping (Codex to Gemini):**
 

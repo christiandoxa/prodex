@@ -22,7 +22,7 @@
         },
         {
           "name": "User-Agent",
-          "value": "codex-cli/0.135.0"
+          "value": "codex-cli/0.138.0"
         },
         {
           "name": "session_id",
@@ -51,7 +51,8 @@
         "previous_response_id": "<previous_response_id>",
         "client_metadata": {
           "session_id": "<session_id>",
-          "request_id": "<request_id>"
+          "request_id": "<request_id>",
+          "x-codex-window-id": "<window_id>"
         },
         "input": [
           {

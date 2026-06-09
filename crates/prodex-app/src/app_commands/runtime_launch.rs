@@ -261,8 +261,9 @@ impl RuntimeLaunchSelection {
             model_provider_override,
             profile_v2_name,
         );
-        let gemini_external_provider =
-            external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("gemini"));
+        let gemini_external_provider = external_provider.is_some_and(|provider| {
+            provider.eq_ignore_ascii_case("gemini") || provider.eq_ignore_ascii_case("gemini-oauth")
+        });
         let copilot_external_provider = external_provider.is_some_and(|provider| {
             provider.eq_ignore_ascii_case("copilot")
                 || provider.eq_ignore_ascii_case("github-copilot")
@@ -478,6 +479,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             print_wrapped_stderr(&section_header("Runtime Provider"));
             if let Some(provider) = self.request.external_provider {
                 let rotation = if provider.eq_ignore_ascii_case("gemini")
+                    || provider.eq_ignore_ascii_case("gemini-oauth")
                     || provider.eq_ignore_ascii_case("anthropic")
                     || provider.eq_ignore_ascii_case("claude")
                     || provider.eq_ignore_ascii_case("copilot")

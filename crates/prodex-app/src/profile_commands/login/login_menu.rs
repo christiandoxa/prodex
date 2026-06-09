@@ -106,6 +106,14 @@ fn login_menu_entries() -> &'static [LoginMenuEntry] {
             action: LoginMenuAction::Method(LoginMethod::Claude),
         },
         LoginMenuEntry {
+            title: "Google Antigravity CLI",
+            provider: "Google Antigravity",
+            auth: "Antigravity CLI keyring / Google Sign-In",
+            usage: "Authenticate the native agy CLI used by prodex s gemini --cli agy.",
+            command: "prodex login --with-antigravity",
+            action: LoginMenuAction::Method(LoginMethod::Antigravity),
+        },
+        LoginMenuEntry {
             title: "Anthropic API key",
             provider: "Anthropic Claude",
             auth: "Runtime API key only",
