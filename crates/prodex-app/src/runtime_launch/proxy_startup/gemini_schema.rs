@@ -48,7 +48,12 @@ pub(super) fn runtime_gemini_sanitize_function_schema(
             runtime_gemini_sanitize_function_schema(items),
         );
     }
-    if !sanitized.contains_key("type") {
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(composition) = runtime_gemini_sanitized_composition(object.get(key)) {
+            sanitized.insert(key.to_string(), composition);
+        }
+    }
+    if !sanitized.contains_key("type") && !runtime_gemini_has_composition(&sanitized) {
         sanitized.insert(
             "type".to_string(),
             serde_json::Value::String("object".to_string()),
@@ -106,7 +111,7 @@ fn runtime_gemini_schema_type<'a>(
         }
         _ if object.contains_key("properties") => Some("object"),
         _ if object.contains_key("items") => Some("array"),
-        _ if object.contains_key("enum") => Some("string"),
+        _ if object.contains_key("enum") || object.contains_key("const") => Some("string"),
         _ => None,
     }
 }
@@ -133,6 +138,23 @@ fn runtime_gemini_sanitized_enum(
         .map(|value| serde_json::Value::String(value.to_string()))
         .collect::<Vec<_>>();
     (!strings.is_empty()).then_some(strings)
+}
+
+fn runtime_gemini_sanitized_composition(
+    value: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let values = value?.as_array()?;
+    let sanitized = values
+        .iter()
+        .map(runtime_gemini_sanitize_function_schema)
+        .collect::<Vec<_>>();
+    (!sanitized.is_empty()).then_some(serde_json::Value::Array(sanitized))
+}
+
+fn runtime_gemini_has_composition(object: &serde_json::Map<String, serde_json::Value>) -> bool {
+    ["anyOf", "oneOf", "allOf"]
+        .iter()
+        .any(|key| object.contains_key(*key))
 }
 
 fn runtime_gemini_sanitized_properties(

@@ -220,6 +220,60 @@ fn prepare_codex_launch_args_extracts_full_access_and_normalizes_resume() {
 }
 
 #[test]
+fn prepare_codex_launch_args_treats_permissions_profile_alias_as_option_value() {
+    let (args, include_code_review) = prepare_codex_launch_args(
+        &[
+            OsString::from("sandbox"),
+            OsString::from("-P"),
+            OsString::from(":workspace"),
+            OsString::from("--"),
+            OsString::from("echo"),
+            OsString::from("ok"),
+        ],
+        false,
+    );
+
+    assert_eq!(
+        args,
+        vec![
+            OsString::from("sandbox"),
+            OsString::from("-P"),
+            OsString::from(":workspace"),
+            OsString::from("--"),
+            OsString::from("echo"),
+            OsString::from("ok"),
+        ]
+    );
+    assert!(!include_code_review);
+}
+
+#[test]
+fn codex_resume_last_prompt_is_not_treated_as_session_id() {
+    let args = vec![
+        OsString::from("resume"),
+        OsString::from("--last"),
+        OsString::from("continue from current context"),
+    ];
+
+    assert_eq!(codex_resume_session_id(&args), None);
+    assert_eq!(normalize_run_codex_args(&args), args);
+}
+
+#[test]
+fn codex_fork_last_prompt_survives_launch_normalization() {
+    let args = vec![
+        OsString::from("fork"),
+        OsString::from("--last"),
+        OsString::from("continue from current context"),
+    ];
+
+    let (normalized, include_code_review) = prepare_codex_launch_args(&args, false);
+
+    assert_eq!(normalized, args);
+    assert!(!include_code_review);
+}
+
+#[test]
 fn prepare_codex_launch_args_normalizes_resume_after_provider_config_overrides() {
     let (args, include_code_review) = prepare_codex_launch_args(
         &[

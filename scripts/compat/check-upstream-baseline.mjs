@@ -13,6 +13,8 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/realtime_conversation.rs",
   "codex-rs/codex-api/src/sse/responses.rs",
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+  "codex-rs/ext/web-search/src/tool.rs",
+  "codex-rs/tools/src/json_schema.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -51,6 +53,7 @@ const REQUIRED_FILE_CONTAINS = {
     "x-client-request-id",
     "stream_responses_websocket",
     "compact_conversation_history",
+    "current_window_id",
     "turn_metadata_header",
     "parse_turn_metadata_header",
   ],
@@ -125,6 +128,18 @@ const REQUIRED_FILE_CONTAINS = {
     "x-models-etag",
     "parse_wrapped_websocket_error_event",
     "websocket_connection_limit_reached",
+  ],
+  "codex-rs/ext/web-search/src/tool.rs": [
+    "ToolExposure::Direct",
+    "SearchOutput",
+    "response.output",
+  ],
+  "codex-rs/tools/src/json_schema.rs": [
+    "anyOf",
+    "oneOf",
+    "allOf",
+    "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
+    "prune_schema_compositions",
   ],
 };
 

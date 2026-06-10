@@ -170,6 +170,102 @@ fn profile_import_rejects_provider_profile_missing_required_secret_file() {
 }
 
 #[test]
+fn profile_import_updates_existing_gemini_profile_when_name_matches() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-existing-gemini");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let existing_home = target_paths.managed_profiles_root.join("gemini-main");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    write_secret_text_file(
+        &existing_home.join(GEMINI_OAUTH_SECRET_FILE),
+        &serde_json::json!({
+            "auth_mode": "gemini_oauth",
+            "access_token": "old-gemini-access-token",
+            "refresh_token": "old-gemini-refresh-token",
+            "token_type": "Bearer",
+            "scope": "https://www.googleapis.com/auth/cloud-platform",
+            "expiry_date": 1800000000000_i64,
+            "email": "old-gemini@example.com",
+            "project_id": "old-project"
+        })
+        .to_string(),
+    )
+    .expect("existing Gemini secret should be written");
+
+    let mut existing_state = AppState {
+        profiles: BTreeMap::from([(
+            "gemini-main".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("old-gemini@example.com".to_string()),
+                provider: ProfileProvider::Gemini {
+                    email: "old-gemini@example.com".to_string(),
+                    project_id: Some("old-project".to_string()),
+                },
+            },
+        )]),
+        ..AppState::default()
+    };
+    let fresh_secret = serde_json::json!({
+        "auth_mode": "gemini_oauth",
+        "access_token": "fresh-gemini-access-token",
+        "refresh_token": "fresh-gemini-refresh-token",
+        "token_type": "Bearer",
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "expiry_date": 1900000000000_i64,
+        "email": "gemini@example.com",
+        "project_id": "fresh-project"
+    })
+    .to_string();
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("gemini-main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "gemini-main".to_string(),
+            email: Some("gemini@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Gemini {
+                email: "gemini@example.com".to_string(),
+                project_id: Some("fresh-project".to_string()),
+            },
+            auth_json: String::new(),
+            secret_files: vec![prodex_profile_export::ExportedSecretFile {
+                path: GEMINI_OAUTH_SECRET_FILE.to_string(),
+                text: fresh_secret.clone(),
+            }],
+        }],
+    };
+
+    let commit = import_profile_export_payload(&target_paths, &mut existing_state, &payload)
+        .expect("import should update same-name Gemini profile");
+
+    assert!(commit.imported_names.is_empty());
+    assert_eq!(commit.updated_existing_names, vec!["gemini-main".to_string()]);
+    assert_eq!(existing_state.active_profile.as_deref(), Some("gemini-main"));
+    assert_eq!(
+        existing_state.profiles.get("gemini-main"),
+        Some(&ProfileEntry {
+            codex_home: existing_home.clone(),
+            managed: true,
+            email: Some("gemini@example.com".to_string()),
+            provider: ProfileProvider::Gemini {
+                email: "gemini@example.com".to_string(),
+                project_id: Some("fresh-project".to_string()),
+            },
+        })
+    );
+    assert_eq!(
+        fs::read_to_string(existing_home.join(GEMINI_OAUTH_SECRET_FILE))
+            .expect("Gemini secret should be replaced"),
+        fresh_secret
+    );
+    assert!(!existing_home.join("auth.json").exists());
+}
+
+#[test]
 fn profile_import_auth_update_journal_is_removed_after_successful_state_save() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);

@@ -1397,6 +1397,77 @@ fn gemini_sanitizes_optional_tool_schemas_for_function_declarations() {
 }
 
 #[test]
+fn gemini_preserves_composed_tool_schemas_for_function_declarations() {
+    let body = serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "use richer schema",
+        "tools": [{
+            "type": "mcp_tool",
+            "name": "mcp__workspace__rich_tool",
+            "description": "Use a composed JSON schema.",
+            "parametersJsonSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "oneOf": [
+                            {"type": "string", "description": "Named target"},
+                            {"type": "integer", "description": "Numeric target"}
+                        ]
+                    },
+                    "metadata": {
+                        "allOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "source": {"type": "string"}
+                                }
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "confidence": {"type": "number"}
+                                }
+                            }
+                        ]
+                    }
+                },
+                "required": ["target"]
+            }
+        }]
+    });
+
+    let translated = runtime_gemini_generate_request_body(
+        &serde_json::to_vec(&body).unwrap(),
+        &conversation_store(),
+        false,
+        None,
+        None,
+    )
+    .expect("request should translate");
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let parameters = &value["tools"][0]["functionDeclarations"][0]["parameters"];
+
+    assert_eq!(parameters["type"], "object");
+    assert_eq!(
+        parameters["properties"]["target"]["oneOf"][0]["type"],
+        "string"
+    );
+    assert_eq!(
+        parameters["properties"]["target"]["oneOf"][1]["type"],
+        "integer"
+    );
+    assert_eq!(
+        parameters["properties"]["metadata"]["allOf"][0]["properties"]["source"]["type"],
+        "string"
+    );
+    assert_eq!(
+        parameters["properties"]["metadata"]["allOf"][1]["properties"]["confidence"]["type"],
+        "number"
+    );
+}
+
+#[test]
 fn gemini_maps_required_and_none_tool_choice_modes() {
     for (choice, mode) in [("required", "ANY"), ("none", "NONE")] {
         let body = serde_json::json!({

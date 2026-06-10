@@ -302,3 +302,46 @@ fn translate_runtime_anthropic_messages_request_compacts_verbose_web_search_tool
     );
 }
 
+#[test]
+fn translate_runtime_anthropic_messages_request_preserves_plaintext_web_search_tool_result() {
+    let plaintext = "Search result: Codex 0.139 adds standalone web search in code mode.";
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/messages?beta=true".to_string(),
+        headers: vec![],
+        body: serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "call_ws_plaintext",
+                        "name": "WebSearch",
+                        "input": {"query": "Codex 0.139"}
+                    }]
+                },
+                {
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "call_ws_plaintext",
+                        "content": plaintext
+                    }]
+                }
+            ]
+        })
+        .to_string()
+        .into_bytes(),
+    };
+
+    let translated =
+        translate_runtime_anthropic_messages_request(&request).expect("translation should succeed");
+    let body: serde_json::Value = serde_json::from_slice(&translated.translated_request.body)
+        .expect("translated body should parse");
+    let output = body["input"][1]["output"]
+        .as_str()
+        .expect("tool result output should stay text");
+
+    assert_eq!(output, plaintext);
+}

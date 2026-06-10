@@ -392,7 +392,7 @@ fn write_doctor_bundle_json(bundle_path: &Path, json: &str) -> Result<()> {
     Ok(())
 }
 
-fn doctor_redact_json_value(value: &mut serde_json::Value) {
+pub(crate) fn doctor_redact_json_value(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(object) => {
             for (key, value) in object.iter_mut() {
@@ -419,7 +419,7 @@ fn doctor_json_key_should_be_redacted(key: &str) -> bool {
     if matches!(key, "secret_backend") {
         return false;
     }
-    redaction_key_looks_sensitive(key)
+    matches!(key, "raw_value") || redaction_key_looks_sensitive(key)
 }
 
 fn doctor_redacted_string(text: &str) -> String {

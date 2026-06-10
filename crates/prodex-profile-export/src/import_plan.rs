@@ -40,13 +40,7 @@ where
         let resolved_identity = profile.import_identity();
         let identity_key = resolved_identity.target_key();
 
-        if let Some(existing_supports_codex_runtime) =
-            existing_profile_supports_codex_runtime(source_profile_name)
-        {
-            if !provider_supports_codex_runtime || !existing_supports_codex_runtime {
-                bail!("profile '{}' already exists", source_profile_name);
-            }
-
+        if existing_profile_supports_codex_runtime(source_profile_name).is_some() {
             actions.push(ProfileImportPlanAction::UpdateExisting {
                 source_index,
                 target_profile_name: source_profile_name.to_string(),

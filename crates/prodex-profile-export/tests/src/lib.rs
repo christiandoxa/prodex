@@ -209,6 +209,35 @@ fn import_plan_updates_same_name_runtime_profile() {
 }
 
 #[test]
+fn import_plan_updates_same_name_non_runtime_profile() {
+    let profiles = [PlanProfile {
+        name: "gemini-main",
+        supports_codex_runtime: false,
+        email: Some("gemini@example.com"),
+        account_id: None,
+    }];
+
+    let plan = plan_profile_import(
+        &profiles,
+        |name| (name == "gemini-main").then_some(false),
+        |_| Ok(None),
+    )
+    .expect("plan should update same-name provider profile");
+
+    assert_eq!(
+        plan.actions,
+        vec![ProfileImportPlanAction::UpdateExisting {
+            source_index: 0,
+            target_profile_name: "gemini-main".to_string(),
+        }]
+    );
+    assert_eq!(
+        plan.resolved_profile_names,
+        BTreeMap::from([("gemini-main".to_string(), "gemini-main".to_string())])
+    );
+}
+
+#[test]
 fn import_plan_rewrites_pending_new_profile_for_duplicate_identity() {
     let profiles = [
         PlanProfile {

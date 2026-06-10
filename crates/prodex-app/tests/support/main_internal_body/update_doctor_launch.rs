@@ -151,6 +151,38 @@ fn doctor_tail_bytes_cli_defaults_and_overrides() {
 }
 
 #[test]
+fn doctor_redaction_tolerates_codex_139_editor_and_pager_environment_fields() {
+    let mut value = serde_json::json!({
+        "codex_doctor": {
+            "environment": {
+                "editor": {
+                    "name": "vim",
+                    "raw_value": "EDITOR=vim"
+                },
+                "pager": {
+                    "name": "less",
+                    "raw_value": "PAGER=less"
+                },
+                "visual": "/usr/bin/code --wait"
+            }
+        }
+    });
+
+    doctor_redact_json_value(&mut value);
+
+    assert_eq!(value["codex_doctor"]["environment"]["editor"]["name"], "vim");
+    assert_eq!(value["codex_doctor"]["environment"]["pager"]["name"], "less");
+    assert_eq!(
+        value["codex_doctor"]["environment"]["editor"]["raw_value"],
+        "<redacted>"
+    );
+    assert_eq!(
+        value["codex_doctor"]["environment"]["pager"]["raw_value"],
+        "<redacted>"
+    );
+}
+
+#[test]
 fn runtime_doctor_summary_uses_configured_tail_bytes() {
     let temp_dir = TestDir::new();
     let prodex_home = temp_dir.path.join("prodex-home");

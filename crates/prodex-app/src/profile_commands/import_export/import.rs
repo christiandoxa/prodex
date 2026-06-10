@@ -98,7 +98,7 @@ pub(in crate::profile_commands) fn import_profile_export_payload(
     let mut transaction = ImportedProfilesTransaction::new(
         state.active_profile.clone(),
         prepared.staged_profiles.len(),
-        prepared.auth_updates.len(),
+        prepared.auth_updates.len() + prepared.existing_profile_updates.len(),
     );
 
     if let Err(err) = apply_imported_profiles(paths, state, payload, &prepared, &mut transaction) {
@@ -117,6 +117,10 @@ fn apply_imported_profiles(
     transaction: &mut ImportedProfilesTransaction,
 ) -> Result<()> {
     apply_imported_existing_auth_updates(paths, state, &prepared.auth_updates, transaction)?;
+    apply_imported_existing_profile_updates(paths, state, &prepared.existing_profile_updates)?;
+    for update in &prepared.existing_profile_updates {
+        transaction.updated_existing_names.push(update.name.clone());
+    }
     finalize_staged_imported_profiles(state, &prepared.staged_profiles, transaction)?;
     activate_imported_profile_from_payload(state, payload, prepared);
     Ok(())
@@ -178,6 +182,38 @@ fn apply_imported_existing_auth_updates(
             previous_email,
             journal_path: Some(journal_path),
         });
+    }
+
+    Ok(())
+}
+
+fn apply_imported_existing_profile_updates(
+    paths: &AppPaths,
+    state: &mut AppState,
+    prepared_updates: &[PreparedExistingProfileUpdate],
+) -> Result<()> {
+    for update in prepared_updates {
+        let profile = state
+            .profiles
+            .get(&update.name)
+            .with_context(|| format!("profile '{}' is missing", update.name))?
+            .clone();
+        if profile.managed {
+            prepare_managed_codex_home(paths, &profile.codex_home)?;
+        } else {
+            create_codex_home_if_missing(&profile.codex_home)?;
+        }
+        for secret_file in &update.secret_files {
+            validate_exported_secret_file_path(&secret_file.path, &update.name)?;
+            write_secret_text_file(
+                &profile.codex_home.join(&secret_file.path),
+                &secret_file.text,
+            )?;
+        }
+        if let Some(profile_entry) = state.profiles.get_mut(&update.name) {
+            profile_entry.email = update.email.clone();
+            profile_entry.provider = update.provider.clone();
+        }
     }
 
     Ok(())
@@ -387,6 +423,7 @@ pub(super) fn stage_imported_profiles(
 
     let mut staged_profiles = Vec::with_capacity(payload.profiles.len());
     let mut auth_updates = Vec::new();
+    let mut existing_profile_updates = Vec::new();
     let result = (|| -> Result<()> {
         for action in &plan.actions {
             match action {
@@ -397,12 +434,21 @@ pub(super) fn stage_imported_profiles(
                     let exported = payload.profiles.get(*source_index).with_context(|| {
                         format!("import plan source index {} is missing", source_index)
                     })?;
-                    prodex_profile_export::queue_profile_import_auth_update(
-                        &mut auth_updates,
-                        target_profile_name,
-                        plan_inputs[*source_index].identity.email.clone(),
-                        exported.auth_json.clone(),
-                    );
+                    if plan_inputs[*source_index].supports_codex_runtime {
+                        prodex_profile_export::queue_profile_import_auth_update(
+                            &mut auth_updates,
+                            target_profile_name,
+                            plan_inputs[*source_index].identity.email.clone(),
+                            exported.auth_json.clone(),
+                        );
+                    } else {
+                        existing_profile_updates.push(PreparedExistingProfileUpdate {
+                            name: target_profile_name.clone(),
+                            email: plan_inputs[*source_index].identity.email.clone(),
+                            provider: exported.provider.clone(),
+                            secret_files: exported.secret_files.clone(),
+                        });
+                    }
                 }
                 ProfileImportPlanAction::StageNew {
                     source_index,
@@ -483,6 +529,7 @@ pub(super) fn stage_imported_profiles(
     Ok(PreparedImportedProfiles {
         staged_profiles,
         auth_updates,
+        existing_profile_updates,
         resolved_profile_names: plan.resolved_profile_names,
     })
 }

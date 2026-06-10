@@ -46,12 +46,26 @@ pub(super) type ProfileExportEnvelope =
     prodex_profile_export::ProfileExportEnvelope<ProfileExportPayload>;
 pub(super) type StagedImportedProfile =
     prodex_profile_export::StagedImportedProfile<ProfileProvider>;
-pub(super) type PreparedImportedProfiles =
-    prodex_profile_export::PreparedImportedProfiles<ProfileProvider>;
 pub(super) type ImportedExistingProfileAuthUpdate =
     prodex_profile_export::ImportedExistingProfileAuthUpdate;
 pub(super) type ImportedProfilesCommit = prodex_profile_export::ImportedProfilesCommit;
 pub(super) type ImportedProfilesTransaction = prodex_profile_export::ImportedProfilesTransaction;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PreparedExistingProfileUpdate {
+    pub name: String,
+    pub email: Option<String>,
+    pub provider: ProfileProvider,
+    pub secret_files: Vec<prodex_profile_export::ExportedSecretFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PreparedImportedProfiles {
+    pub staged_profiles: Vec<StagedImportedProfile>,
+    pub auth_updates: Vec<prodex_profile_export::ProfileImportAuthUpdatePlan>,
+    pub existing_profile_updates: Vec<PreparedExistingProfileUpdate>,
+    pub resolved_profile_names: std::collections::BTreeMap<String, String>,
+}
 
 #[derive(Debug)]
 pub(super) struct ExistingProfileAuthUpdate {

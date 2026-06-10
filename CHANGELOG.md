@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.171.0 - 2026-06-09
+
+- No grouped changes.
+
 ## 0.170.0 - 2026-06-09
 
 ### Runtime
@@ -76,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Improve provider parity (`9dfdfb0`)
-
-## 0.158.0 - 2026-06-07
-
-### Misc
-
-- Harden Codex-native provider parity (`551e06c`)

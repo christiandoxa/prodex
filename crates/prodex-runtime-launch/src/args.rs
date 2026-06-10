@@ -117,6 +117,7 @@ fn codex_option_takes_separate_value(arg: &str) -> bool {
             | "--local-provider"
             | "-p"
             | "--profile"
+            | "-P"
             | "-s"
             | "--sandbox"
             | "-C"
@@ -139,7 +140,7 @@ fn codex_option_with_inline_value(arg: &str) -> bool {
     if arg.starts_with("--") {
         return arg.contains('=');
     }
-    ["-c", "-i", "-m", "-p", "-s", "-C", "-a", "-o"]
+    ["-c", "-i", "-m", "-p", "-P", "-s", "-C", "-a", "-o"]
         .iter()
         .any(|prefix| arg.starts_with(prefix) && arg.len() > prefix.len())
 }
