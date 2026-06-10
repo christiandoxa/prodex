@@ -160,6 +160,8 @@ pub enum Commands {
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),
+    #[command(about = "Expose a protected browser terminal through a Cloudflare quick tunnel.")]
+    Expose(ExposeArgs),
     #[command(
         trailing_var_arg = true,
         about = "Run Claude Code through prodex via an Anthropic-compatible runtime proxy.",
@@ -181,6 +183,7 @@ where
     T: Into<OsString>,
 {
     let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let raw_args = rewrite_super_expose_args(&raw_args);
     let raw_args = rewrite_super_provider_alias_args(&raw_args);
     let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
         rewrite_cli_args_as_run(&raw_args)
@@ -188,6 +191,30 @@ where
         raw_args
     };
     Ok(Cli::try_parse_from(parse_args)?.command)
+}
+
+fn rewrite_super_expose_args(args: &[OsString]) -> Vec<OsString> {
+    let Some(command) = args.get(1).and_then(|arg| arg.to_str()) else {
+        return args.to_vec();
+    };
+    if command != "s" && command != "super" {
+        return args.to_vec();
+    }
+    let Some(subcommand) = args.get(2).and_then(|arg| arg.to_str()) else {
+        return args.to_vec();
+    };
+    if subcommand != "expose" {
+        return args.to_vec();
+    }
+    let mut rewritten = Vec::with_capacity(args.len() - 1);
+    rewritten.push(
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| OsString::from("prodex")),
+    );
+    rewritten.push(OsString::from("expose"));
+    rewritten.extend(args.iter().skip(3).cloned());
+    rewritten
 }
 
 fn rewrite_super_provider_alias_args(args: &[OsString]) -> Vec<OsString> {
@@ -247,6 +274,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "claw-compactor"
             | "super"
             | "s"
+            | "expose"
             | "claude"
             | "help"
             | "__runtime-broker"

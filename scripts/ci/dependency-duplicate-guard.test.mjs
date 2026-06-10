@@ -47,6 +47,18 @@ getrandom v0.4.2
 rand_core v0.6.4 (*)
 
 rand_core v0.9.5 (*)
+
+thiserror v1.0.69
+    filedescriptor v0.8.3
+
+thiserror v2.0.18
+    tungstenite v0.29.0
+
+thiserror-impl v1.0.69
+    thiserror v1.0.69
+
+thiserror-impl v2.0.18
+    thiserror v2.0.18
 `;
 
 test("default budget accepts current duplicate families", () => {
@@ -64,6 +76,8 @@ test("default budget accepts current duplicate families", () => {
       ["digest", 2],
       ["getrandom", 3],
       ["rand_core", 2],
+      ["thiserror", 2],
+      ["thiserror-impl", 2],
     ],
   );
   assert.equal(summary.duplicateFamilyBudget, DEFAULT_DUPLICATE_BUDGET.length);

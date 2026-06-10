@@ -5,8 +5,12 @@ use std::ffi::OsString;
 mod app_server;
 #[path = "cleanup.rs"]
 mod cleanup;
+#[path = "expose.rs"]
+mod expose;
 #[path = "external_provider.rs"]
 mod external_provider;
+#[path = "shortcuts.rs"]
+mod shortcuts;
 fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
     let Commands::Super(args) = command else {
@@ -498,23 +502,6 @@ fn caveman_command_keeps_smart_context_autopilot_disabled() {
 
     assert!(!args.smart_context);
     assert!(!args.super_optimizer_overlay);
-}
-
-#[test]
-fn s_is_recognized_as_super_not_default_run_argument() {
-    assert!(!should_default_cli_invocation_to_run(&os_args(&[
-        "prodex", "super"
-    ])));
-    assert!(!should_default_cli_invocation_to_run(&os_args(&[
-        "prodex", "s"
-    ])));
-
-    let command = parse_cli_command_from(["prodex", "s", "exec", "hello"])
-        .expect("super alias command should parse");
-    let Commands::Super(args) = command else {
-        panic!("expected super command");
-    };
-    assert_eq!(args.codex_args, os_args(&["exec", "hello"]));
 }
 
 #[test]

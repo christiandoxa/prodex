@@ -496,6 +496,7 @@ It combines:
 ```bash
 prodex s
 prodex s exec "review this repo"
+prodex s expose
 ```
 
 `prodex super` expands to:
@@ -513,6 +514,8 @@ prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access
 Use `prodex super --presidio` to enable Presidio without prompting, or `prodex super --no-presidio` to skip the prompt and keep Presidio disabled. Presidio enables runtime request-body and WebSocket text redaction through local Presidio for the session. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
 
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
+
+Use `prodex s expose` when you need to reach the live Super terminal from a browser. Prodex starts a local PTY bridge protected by a high-entropy access token, launches `cloudflared tunnel --protocol http2 --url ...` when `cloudflared` is available, and prints both the loopback and Cloudflare quick-tunnel URLs. The browser tab can close without stopping the session; reopening the same token URL reconnects to the existing PTY and replays recent scrollback. Add `--no-tunnel` for local-only access, `--max-clients N` to cap simultaneous browsers, or `--command 'prodex s --no-presidio'` to choose the initial terminal command.
 
 Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman and Claude-Mem pieces, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction is added to that proxy only when you opt in at the prompt. Prodex passes token-savior cache and stats paths under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions keep generated state out of worktrees.
 
@@ -533,6 +536,7 @@ Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_
 ```bash
 prodex
 prodex s
+prodex s expose
 prodex exec "review this repo"
 prodex quota --all
 prodex profile list

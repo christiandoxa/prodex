@@ -141,6 +141,12 @@ impl CommandExecute for ExportProfileArgs {
     }
 }
 
+impl CommandExecute for ExposeArgs {
+    fn execute(self) -> Result<()> {
+        handle_expose(self)
+    }
+}
+
 impl CommandExecute for GeminiCompatRefreshArgs {
     fn execute(self) -> Result<()> {
         handle_gemini_compat_refresh(self)
@@ -271,6 +277,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
             RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "clawcompactor"))
         }
         Commands::Super(command) => RoutedCommand::new(command),
+        Commands::Expose(command) => RoutedCommand::new(command),
         Commands::Claude(command) => RoutedCommand::new(command),
         Commands::RuntimeBroker(command) => RoutedCommand::new(command),
         Commands::GeminiCompatRefresh(command) => RoutedCommand::new(command),

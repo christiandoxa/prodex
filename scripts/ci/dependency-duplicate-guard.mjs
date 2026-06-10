@@ -35,6 +35,16 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     maxVersions: 2,
     reason: "crypto-common and rand/proptest currently span rand_core 0.6 and 0.9.",
   },
+  {
+    name: "thiserror",
+    maxVersions: 2,
+    reason: "portable PTY support pulls filedescriptor on thiserror 1 while tungstenite uses thiserror 2.",
+  },
+  {
+    name: "thiserror-impl",
+    maxVersions: 2,
+    reason: "thiserror macro versions follow the portable PTY/filedescriptor and tungstenite split.",
+  },
 ]);
 
 function requiredValue(value, name) {

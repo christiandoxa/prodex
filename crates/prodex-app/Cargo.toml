@@ -24,6 +24,7 @@ clap = { workspace = true }
 dirs = { workspace = true }
 fs2 = { workspace = true }
 getrandom = { workspace = true }
+portable-pty = { workspace = true }
 prodex_audit_log = { workspace = true }
 prodex_app_reports = { workspace = true }
 prodex_bench_support = { workspace = true, optional = true }

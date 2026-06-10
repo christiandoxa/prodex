@@ -203,6 +203,25 @@ pub struct GeminiCompatRefreshArgs {
     pub codex_home: PathBuf,
 }
 
+#[derive(Args, Debug)]
+pub struct ExposeArgs {
+    /// Shell command to run inside the exposed PTY. Defaults to $SHELL or sh.
+    #[arg(long, value_name = "COMMAND")]
+    pub command: Option<String>,
+    /// Initial terminal columns.
+    #[arg(long, default_value_t = 100)]
+    pub cols: u16,
+    /// Initial terminal rows.
+    #[arg(long, default_value_t = 32)]
+    pub rows: u16,
+    /// Maximum concurrent browser clients.
+    #[arg(long, default_value_t = 4)]
+    pub max_clients: usize,
+    /// Serve only on loopback and do not launch cloudflared.
+    #[arg(long)]
+    pub no_tunnel: bool,
+}
+
 impl SuperArgs {
     pub fn presidio_preference(&self) -> Option<bool> {
         if self.presidio {
