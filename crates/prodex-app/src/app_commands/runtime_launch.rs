@@ -399,14 +399,21 @@ pub(crate) fn resolve_runtime_launch_profile_name(
             })
         })
         .ok_or_else(|| {
+            let (display_name, route_policy) = state
+                .profiles
+                .get(&profile_name)
+                .map(|profile| {
+                    (
+                        profile.provider.display_name(),
+                        profile.provider.capabilities().runtime_route_policy.label(),
+                    )
+                })
+                .unwrap_or(("an unsupported provider", "unsupported"));
             anyhow::anyhow!(
-                "profile '{}' uses {}. `prodex run` currently supports OpenAI/Codex profiles only.",
+                "profile '{}' uses {} (route {}). `prodex run` currently supports native OpenAI/Codex profiles only; provider adapters are launched through `prodex s --provider <provider>`.",
                 profile_name,
-                state
-                    .profiles
-                    .get(&profile_name)
-                    .map(|profile| profile.provider.display_name())
-                    .unwrap_or("an unsupported provider"),
+                display_name,
+                route_policy,
             )
         })
 }

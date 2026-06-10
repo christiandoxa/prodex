@@ -1,7 +1,7 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 873,
+    "maxLines": 880,
     "reason": "Runtime launch orchestration remains capped while provider-specific setup is extracted."
   },
   {
@@ -16,7 +16,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_response.rs",
-    "maxLines": 1286,
+    "maxLines": 1288,
     "reason": "Gemini buffered response translation and internal instruction leak filtering remain capped while response sanitization is split from Codex shape reconstruction."
   },
   {
@@ -26,7 +26,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
-    "maxLines": 1628,
+    "maxLines": 1635,
     "reason": "Gemini SSE state-machine invariants, tool-intent tracking, and exact-output reconstruction remain in one capped module until state ownership is split."
   },
   {
@@ -36,8 +36,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 924,
+    "maxLines": 932,
     "reason": "Local rewrite shared routing, provider-scoped session model memory, and Copilot startup instruction cache initialization remain capped while provider-specific selection helpers are split out."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs",
+    "maxLines": 881,
+    "reason": "Provider bridge catalog and OpenAI-compatible wire-format contract remain capped while provider metadata is split from transport routing."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",

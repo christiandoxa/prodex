@@ -3,6 +3,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod provider_capabilities;
+pub use provider_capabilities::{ProviderCapabilities, ProviderQuotaShape, RuntimeRoutePolicy};
+
 pub const SESSION_ID_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };
 pub const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 =
     if cfg!(test) { 60 } else { 90 * 24 * 60 * 60 };
@@ -111,15 +114,8 @@ impl ProfileProvider {
         match self {
             // Native OpenAI/Codex pool stays primary; other providers are fallback candidates.
             Self::Openai => 0,
-            Self::Gemini { .. } => 1,
-            Self::Anthropic { .. } => 1,
-            Self::Copilot { .. } => 1,
-            Self::Agy { .. } => 1,
+            _ => 1,
         }
-    }
-
-    pub fn supports_codex_runtime(&self) -> bool {
-        matches!(self, Self::Openai)
     }
 
     pub fn copilot_matches(&self, host: &str, login: &str) -> bool {

@@ -7,7 +7,6 @@ mod app_server;
 mod cleanup;
 #[path = "external_provider.rs"]
 mod external_provider;
-
 fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
     let Commands::Super(args) = command else {
@@ -27,6 +26,12 @@ fn parse_super_as_caveman_with_presidio_preference(args: &[&str]) -> CavemanArgs
 
 fn os_args(args: &[&str]) -> Vec<OsString> {
     args.iter().map(OsString::from).collect()
+}
+fn rendered_codex_args(args: &CavemanArgs) -> Vec<String> {
+    args.codex_args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
@@ -383,6 +388,26 @@ fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
 }
 
 #[test]
+fn super_url_local_provider_uses_openai_responses_wire_api() {
+    let args = parse_super_as_caveman(&[
+        "prodex",
+        "super",
+        "--url",
+        "http://127.0.0.1:8131",
+        "--model",
+        "qwen3-coder",
+    ]);
+    let rendered = rendered_codex_args(&args);
+
+    assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
+    assert!(rendered.contains(&"model=\"qwen3-coder\"".to_string()));
+    assert!(rendered.contains(&"model_providers.prodex-local.wire_api=\"responses\"".to_string()));
+    assert!(
+        rendered.contains(&"model_providers.prodex-local.supports_websockets=false".to_string())
+    );
+}
+
+#[test]
 fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
     let args = parse_super_as_caveman(&[
         "prodex",
@@ -407,11 +432,7 @@ fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
     );
     assert_eq!(args.base_url.as_deref(), Some("https://api.deepseek.com"));
     assert!(args.skip_quota_check);
-    let rendered = args
-        .codex_args
-        .iter()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
+    let rendered = rendered_codex_args(&args);
     assert!(rendered.contains(&"model_provider=\"prodex-deepseek\"".to_string()));
     assert!(rendered.contains(&"model=\"deepseek-v4-pro\"".to_string()));
     assert!(rendered.contains(
@@ -448,11 +469,7 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
         Some("https://generativelanguage.googleapis.com/v1beta")
     );
     assert!(args.skip_quota_check);
-    let rendered = args
-        .codex_args
-        .iter()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
+    let rendered = rendered_codex_args(&args);
     assert!(rendered.contains(&"model_provider=\"prodex-gemini\"".to_string()));
     assert!(rendered.contains(&"model=\"auto\"".to_string()));
     assert!(rendered.contains(&"model_providers.prodex-gemini.name=\"Azure\"".to_string()));

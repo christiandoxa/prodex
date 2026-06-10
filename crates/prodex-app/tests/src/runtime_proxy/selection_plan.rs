@@ -116,6 +116,61 @@ fn candidate_plan_reuses_supplied_ready_candidates_without_rebuilding() {
     );
 }
 
+#[test]
+fn candidate_plan_excludes_failed_profiles_from_ready_and_fallback_candidates() {
+    let state = RuntimeRouteSelectionCatalog {
+        current_profile: "alpha".to_string(),
+        include_code_review: false,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        entries: vec![
+            selection_entry("alpha", SelectionEntryFixture::default()),
+            selection_entry("beta", SelectionEntryFixture::default()),
+        ],
+    };
+    let ready_candidates = vec![
+        ReadyProfileCandidate {
+            name: "alpha".to_string(),
+            usage: test_usage_with_unbounded_main_windows(90, 95),
+            order_index: 0,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+        ReadyProfileCandidate {
+            name: "beta".to_string(),
+            usage: test_usage_with_unbounded_main_windows(88, 94),
+            order_index: 1,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+    ];
+
+    let plan = build_runtime_response_candidate_execution_plan(
+        &state,
+        &BTreeSet::from(["alpha".to_string()]),
+        RuntimeRouteKind::Responses,
+        3,
+        ready_candidates,
+        runtime_response_candidate_execution_options(None, None, |_| 0),
+    );
+
+    assert_eq!(
+        plan.ready_candidates
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["beta"]
+    );
+    assert_eq!(
+        plan.fallback_candidates
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["beta"]
+    );
+}
+
 #[derive(Default)]
 struct SelectionEntryFixture {
     cached_probe_entry: Option<RuntimeProfileProbeCacheEntry>,

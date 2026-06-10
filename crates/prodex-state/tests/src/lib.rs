@@ -26,6 +26,43 @@ fn external_profile(name: &str) -> (String, ProfileEntry) {
 }
 
 #[test]
+fn provider_capabilities_define_route_policy_and_quota_shape() {
+    let openai = ProfileProvider::Openai.capabilities();
+    assert_eq!(openai.runtime_route_policy, RuntimeRoutePolicy::NativeCodex);
+    assert_eq!(openai.quota_shape, ProviderQuotaShape::OpenAiWindows);
+    assert!(openai.uses_openai_client_format);
+    assert!(openai.supports_runtime_rotation);
+    assert!(ProfileProvider::Openai.supports_codex_runtime());
+
+    let gemini = ProfileProvider::Gemini {
+        email: "gemini@example.com".to_string(),
+        project_id: None,
+    }
+    .capabilities();
+    assert_eq!(
+        gemini.runtime_route_policy,
+        RuntimeRoutePolicy::ResponsesAdapter
+    );
+    assert_eq!(gemini.quota_shape, ProviderQuotaShape::GeminiBuckets);
+    assert!(gemini.uses_openai_client_format);
+    assert!(!gemini.supports_runtime_rotation);
+
+    let copilot = ProfileProvider::Copilot {
+        host: "github.com".to_string(),
+        login: "octo".to_string(),
+        api_url: "https://api.githubcopilot.com".to_string(),
+        access_type_sku: None,
+        copilot_plan: None,
+    }
+    .capabilities();
+    assert_eq!(copilot.quota_shape, ProviderQuotaShape::CopilotMonthly);
+
+    let agy = ProfileProvider::Agy { account: None }.capabilities();
+    assert_eq!(agy.runtime_route_policy, RuntimeRoutePolicy::ExternalCli);
+    assert!(!agy.uses_openai_client_format);
+}
+
+#[test]
 fn merge_profile_bindings_prefers_newer_known_profile_binding() {
     let profiles = BTreeMap::from([profile("p1"), profile("p2")]);
     let existing = BTreeMap::from([

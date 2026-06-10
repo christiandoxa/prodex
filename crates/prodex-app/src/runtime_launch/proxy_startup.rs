@@ -22,6 +22,8 @@ mod local_rewrite_search_fallback;
 #[cfg(test)]
 mod local_rewrite_tests;
 mod local_rewrite_transport;
+#[cfg(test)]
+mod openai_responses_contract_tests;
 mod provider_bridge;
 mod provider_models;
 mod provider_tools;

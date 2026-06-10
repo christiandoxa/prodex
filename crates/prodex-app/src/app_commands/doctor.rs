@@ -213,6 +213,26 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                 "Provider".to_string(),
                 report.summary.provider.display_name().to_string(),
             ),
+            (
+                "Runtime route".to_string(),
+                report
+                    .summary
+                    .provider
+                    .capabilities()
+                    .runtime_route_policy
+                    .label()
+                    .to_string(),
+            ),
+            (
+                "Quota shape".to_string(),
+                report
+                    .summary
+                    .provider
+                    .capabilities()
+                    .quota_shape
+                    .label()
+                    .to_string(),
+            ),
             ("Auth".to_string(), report.summary.auth.label),
             (
                 "Identity".to_string(),
@@ -361,6 +381,12 @@ fn doctor_profile_summaries_json_value(state: &AppState) -> serde_json::Value {
                 "provider": {
                     "label": profile.provider.label(),
                     "display_name": profile.provider.display_name(),
+                    "runtime_route_policy": profile.provider.capabilities().runtime_route_policy.label(),
+                    "quota_shape": profile.provider.capabilities().quota_shape.label(),
+                    "uses_openai_client_format": profile.provider.capabilities().uses_openai_client_format,
+                    "supports_runtime_rotation": profile.provider.capabilities().supports_runtime_rotation,
+                    "supports_remote_compact_affinity": profile.provider.capabilities().supports_remote_compact_affinity,
+                    "supports_websocket_reuse": profile.provider.capabilities().supports_websocket_reuse,
                 },
                 "auth": {
                     "label": profile.auth.label,

@@ -2,8 +2,9 @@ use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAut
 use super::gemini_rewrite::RuntimeGeminiAuth;
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_model_fallback_chain,
-    runtime_provider_model_from_body, runtime_provider_request_body_with_model,
+    RuntimeProviderBridgeKind, RuntimeProviderWireFormat, runtime_provider_label,
+    runtime_provider_model_fallback_chain, runtime_provider_model_from_body,
+    runtime_provider_openai_contract, runtime_provider_request_body_with_model,
     runtime_provider_request_ledger_message,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
@@ -230,20 +231,28 @@ pub(super) fn runtime_deepseek_upstream_url(
     mount_path: &str,
     path_and_query: &str,
 ) -> String {
-    let path = path_without_query(path_and_query);
-    if path.ends_with("/responses") {
-        return runtime_chat_completions_upstream_url(base_url, mount_path, path_and_query);
-    }
-    runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
+    runtime_openai_standard_provider_upstream_url(
+        RuntimeProviderBridgeKind::DeepSeek,
+        base_url,
+        mount_path,
+        path_and_query,
+    )
 }
 
-pub(super) fn runtime_chat_completions_upstream_url(
+pub(super) fn runtime_openai_standard_provider_upstream_url(
+    provider_kind: RuntimeProviderBridgeKind,
     base_url: &str,
     mount_path: &str,
     path_and_query: &str,
 ) -> String {
+    let contract = runtime_provider_openai_contract(provider_kind);
     let path = path_without_query(path_and_query);
-    if path.ends_with("/responses") {
+    if path.ends_with("/responses")
+        && matches!(
+            contract.upstream_request_format,
+            RuntimeProviderWireFormat::OpenAiChatCompletions
+        )
+    {
         return runtime_local_rewrite_upstream_url(base_url, mount_path, "/chat/completions");
     }
     runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
@@ -431,6 +440,37 @@ fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openai_standard_provider_upstream_url_uses_contract_formats() {
+        assert_eq!(
+            runtime_openai_standard_provider_upstream_url(
+                RuntimeProviderBridgeKind::OpenAiResponses,
+                "https://upstream.test/v1",
+                "/v1",
+                "/v1/responses"
+            ),
+            "https://upstream.test/v1/responses"
+        );
+        assert_eq!(
+            runtime_openai_standard_provider_upstream_url(
+                RuntimeProviderBridgeKind::DeepSeek,
+                "https://upstream.test/v1",
+                "/v1",
+                "/v1/responses"
+            ),
+            "https://upstream.test/v1/chat/completions"
+        );
+        assert_eq!(
+            runtime_openai_standard_provider_upstream_url(
+                RuntimeProviderBridgeKind::Copilot,
+                "https://upstream.test/v1",
+                "/v1",
+                "/v1/chat/completions"
+            ),
+            "https://upstream.test/v1/chat/completions"
+        );
+    }
 
     #[test]
     fn api_key_attempts_rotate_start_and_include_all_keys() {

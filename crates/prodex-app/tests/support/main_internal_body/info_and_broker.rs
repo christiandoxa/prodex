@@ -63,6 +63,144 @@ fn build_info_quota_aggregate_uses_live_and_snapshot_data() {
 }
 
 #[test]
+fn format_info_provider_summary_counts_all_provider_kinds() {
+    let profiles = BTreeMap::from([
+        (
+            "openai".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/tmp/openai"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Openai,
+            },
+        ),
+        (
+            "gemini".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/tmp/gemini"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Gemini {
+                    email: "gemini@example.com".to_string(),
+                    project_id: None,
+                },
+            },
+        ),
+        (
+            "claude".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/tmp/claude"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Anthropic {
+                    account: None,
+                    auth_method: None,
+                },
+            },
+        ),
+    ]);
+
+    assert_eq!(
+        format_info_provider_summary(&profiles),
+        "anthropic=1, gemini=1, openai=1"
+    );
+}
+
+#[test]
+fn format_info_provider_capabilities_summary_reports_routes_and_quota_shapes() {
+    let profiles = BTreeMap::from([
+        (
+            "openai".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/tmp/openai"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Openai,
+            },
+        ),
+        (
+            "gemini".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/tmp/gemini"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Gemini {
+                    email: "gemini@example.com".to_string(),
+                    project_id: None,
+                },
+            },
+        ),
+        (
+            "agy".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/tmp/agy"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Agy { account: None },
+            },
+        ),
+        (
+            "copilot".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/tmp/copilot"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Copilot {
+                    host: "github.com".to_string(),
+                    login: "octo".to_string(),
+                    api_url: "https://api.githubcopilot.com".to_string(),
+                    access_type_sku: None,
+                    copilot_plan: None,
+                },
+            },
+        ),
+    ]);
+
+    assert_eq!(
+        format_info_provider_capabilities_summary(&profiles),
+        "routes native=1, adapter=2, external-cli=1, unsupported=0; openai-format=3; quota copilot-monthly=1, external-status=1, gemini-buckets=1, openai-windows=1"
+    );
+}
+
+#[test]
+fn collect_info_quota_aggregate_ignores_non_codex_runtime_providers() {
+    let temp_dir = TestDir::new();
+    let gemini_home = temp_dir.path.join("homes/gemini");
+    fs::create_dir_all(&gemini_home).expect("create gemini home");
+    let state = AppState {
+        active_profile: Some("gemini".to_string()),
+        profiles: BTreeMap::from([(
+            "gemini".to_string(),
+            ProfileEntry {
+                codex_home: gemini_home,
+                managed: true,
+                email: Some("gemini@example.com".to_string()),
+                provider: ProfileProvider::Gemini {
+                    email: "gemini@example.com".to_string(),
+                    project_id: None,
+                },
+            },
+        )]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+
+    let aggregate = collect_info_quota_aggregate(&paths, &state, Local::now().timestamp());
+
+    assert_eq!(aggregate.quota_compatible_profiles, 0);
+    assert_eq!(aggregate.profiles_with_data(), 0);
+    assert_eq!(aggregate.unavailable_profiles, 0);
+}
+
+#[test]
 fn parse_ps_process_rows_and_classify_runtime_prodex_process() {
     let rows = parse_ps_process_rows(
         "  111 prodex /usr/local/bin/prodex run --profile main\n  222 bash bash\n",

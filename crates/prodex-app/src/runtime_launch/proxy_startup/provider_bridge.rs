@@ -17,6 +17,34 @@ pub(super) enum RuntimeProviderBridgeKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RuntimeProviderWireFormat {
+    OpenAiResponses,
+    OpenAiChatCompletions,
+    GeminiGenerateContent,
+}
+
+impl RuntimeProviderWireFormat {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::OpenAiResponses => "openai-responses",
+            Self::OpenAiChatCompletions => "openai-chat-completions",
+            Self::GeminiGenerateContent => "gemini-generate-content",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RuntimeProviderOpenAiContract {
+    pub(super) client_request_format: RuntimeProviderWireFormat,
+    pub(super) upstream_request_format: RuntimeProviderWireFormat,
+    pub(super) response_format: RuntimeProviderWireFormat,
+    pub(super) canonical_client_endpoint: &'static str,
+    pub(super) model_list_endpoint: &'static str,
+    pub(super) supports_streaming: bool,
+    pub(super) supports_model_fallback: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RuntimeProviderErrorClass {
     Auth,
     Quota,
@@ -157,6 +185,42 @@ pub(super) fn runtime_provider_label(kind: RuntimeProviderBridgeKind) -> &'stati
         RuntimeProviderBridgeKind::OpenAiResponses => "openai",
         RuntimeProviderBridgeKind::DeepSeek => "deepseek",
         RuntimeProviderBridgeKind::Gemini => "gemini",
+    }
+}
+
+pub(super) fn runtime_provider_openai_contract(
+    kind: RuntimeProviderBridgeKind,
+) -> RuntimeProviderOpenAiContract {
+    match kind {
+        RuntimeProviderBridgeKind::OpenAiResponses => RuntimeProviderOpenAiContract {
+            client_request_format: RuntimeProviderWireFormat::OpenAiResponses,
+            upstream_request_format: RuntimeProviderWireFormat::OpenAiResponses,
+            response_format: RuntimeProviderWireFormat::OpenAiResponses,
+            canonical_client_endpoint: "/v1/responses",
+            model_list_endpoint: "/v1/models",
+            supports_streaming: true,
+            supports_model_fallback: false,
+        },
+        RuntimeProviderBridgeKind::Anthropic
+        | RuntimeProviderBridgeKind::Copilot
+        | RuntimeProviderBridgeKind::DeepSeek => RuntimeProviderOpenAiContract {
+            client_request_format: RuntimeProviderWireFormat::OpenAiResponses,
+            upstream_request_format: RuntimeProviderWireFormat::OpenAiChatCompletions,
+            response_format: RuntimeProviderWireFormat::OpenAiResponses,
+            canonical_client_endpoint: "/v1/responses",
+            model_list_endpoint: "/v1/models",
+            supports_streaming: true,
+            supports_model_fallback: true,
+        },
+        RuntimeProviderBridgeKind::Gemini => RuntimeProviderOpenAiContract {
+            client_request_format: RuntimeProviderWireFormat::OpenAiResponses,
+            upstream_request_format: RuntimeProviderWireFormat::GeminiGenerateContent,
+            response_format: RuntimeProviderWireFormat::OpenAiResponses,
+            canonical_client_endpoint: "/v1/responses",
+            model_list_endpoint: "/v1/models",
+            supports_streaming: true,
+            supports_model_fallback: true,
+        },
     }
 }
 
@@ -381,6 +445,7 @@ pub(super) fn runtime_provider_request_ledger_message(
     elapsed_ms: u128,
     body_bytes: usize,
 ) -> String {
+    let contract = runtime_provider_openai_contract(kind);
     runtime_proxy_structured_log_message(
         "local_rewrite_request_detail",
         [
@@ -401,6 +466,9 @@ pub(super) fn runtime_provider_request_ledger_message(
                 "native_passthrough",
                 runtime_provider_native_passthrough(kind, path_and_query).to_string(),
             ),
+            runtime_proxy_log_field("client_format", contract.client_request_format.label()),
+            runtime_proxy_log_field("upstream_format", contract.upstream_request_format.label()),
+            runtime_proxy_log_field("response_format", contract.response_format.label()),
         ],
     )
 }
@@ -624,6 +692,55 @@ mod tests {
                 .any(|model| model["id"] == prodex_cli::SUPER_COPILOT_DEFAULT_MODEL)
         );
         assert!(copilot_models.iter().any(|model| model["id"] == "codex"));
+    }
+
+    #[test]
+    fn every_provider_bridge_exposes_openai_client_contract() {
+        for kind in [
+            RuntimeProviderBridgeKind::OpenAiResponses,
+            RuntimeProviderBridgeKind::Anthropic,
+            RuntimeProviderBridgeKind::Copilot,
+            RuntimeProviderBridgeKind::DeepSeek,
+            RuntimeProviderBridgeKind::Gemini,
+        ] {
+            let contract = runtime_provider_openai_contract(kind);
+            assert_eq!(
+                contract.client_request_format,
+                RuntimeProviderWireFormat::OpenAiResponses
+            );
+            assert_eq!(
+                contract.response_format,
+                RuntimeProviderWireFormat::OpenAiResponses
+            );
+            assert_eq!(contract.canonical_client_endpoint, "/v1/responses");
+            assert_eq!(contract.model_list_endpoint, "/v1/models");
+            assert!(contract.supports_streaming);
+        }
+    }
+
+    #[test]
+    fn provider_bridge_contract_records_translation_boundary() {
+        assert_eq!(
+            runtime_provider_openai_contract(RuntimeProviderBridgeKind::OpenAiResponses)
+                .upstream_request_format,
+            RuntimeProviderWireFormat::OpenAiResponses
+        );
+        for kind in [
+            RuntimeProviderBridgeKind::Anthropic,
+            RuntimeProviderBridgeKind::Copilot,
+            RuntimeProviderBridgeKind::DeepSeek,
+        ] {
+            assert_eq!(
+                runtime_provider_openai_contract(kind).upstream_request_format,
+                RuntimeProviderWireFormat::OpenAiChatCompletions
+            );
+            assert!(runtime_provider_openai_contract(kind).supports_model_fallback);
+        }
+        assert_eq!(
+            runtime_provider_openai_contract(RuntimeProviderBridgeKind::Gemini)
+                .upstream_request_format,
+            RuntimeProviderWireFormat::GeminiGenerateContent
+        );
     }
 
     #[test]

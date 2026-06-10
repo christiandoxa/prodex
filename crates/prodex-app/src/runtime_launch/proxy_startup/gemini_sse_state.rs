@@ -210,7 +210,12 @@ impl RuntimeGeminiSseState {
                     if self.command_output_only || self.forced_output_text.is_some() {
                         continue;
                     }
-                    self.pending_output_text.push_str(&text);
+                    if !runtime_gemini_text_echoes_internal_instruction(
+                        &text,
+                        &self.internal_instruction_corpus,
+                    ) {
+                        events.extend(self.observe_output_text(&text));
+                    }
                 }
             }
             if let Some(content_item) = runtime_gemini_media_content_item_from_part(part) {
@@ -248,7 +253,7 @@ impl RuntimeGeminiSseState {
                 if self.forced_output_text.is_some() {
                     continue;
                 }
-                self.pending_output_text.clear();
+                events.extend(self.flush_pending_output_text_events());
                 let thought_signature = runtime_gemini_thought_signature(part)
                     .or_else(|| runtime_gemini_thought_signature(function_call));
                 events.extend(self.observe_function_call(
@@ -263,6 +268,7 @@ impl RuntimeGeminiSseState {
                 events.extend(self.observe_citation_text(text));
             }
             if let Some((reason, message)) = runtime_gemini_finish_reason_incomplete(&reason) {
+                events.extend(self.flush_pending_output_text_events());
                 events.extend(self.complete_tool_call_events());
                 events.extend(self.complete_output_text_item_events());
                 events.extend(self.complete_media_item_events());
@@ -273,6 +279,7 @@ impl RuntimeGeminiSseState {
                 return events;
             }
             if let Some((code, message)) = runtime_gemini_finish_reason_failure(&reason) {
+                events.extend(self.flush_pending_output_text_events());
                 if let Some(event) = self.failed_event(&code, &message) {
                     events.push(event);
                 }
@@ -556,20 +563,7 @@ impl RuntimeGeminiSseState {
             return None;
         }
         self.apply_forced_output_text();
-        let mut events = if self.tool_calls.is_empty() && !self.pending_output_text.is_empty() {
-            let text = std::mem::take(&mut self.pending_output_text);
-            if runtime_gemini_text_echoes_internal_instruction(
-                &text,
-                &self.internal_instruction_corpus,
-            ) {
-                Vec::new()
-            } else {
-                self.observe_output_text(&text)
-            }
-        } else {
-            self.pending_output_text.clear();
-            Vec::new()
-        };
+        let mut events = self.flush_pending_output_text_events();
         events.extend(self.complete_tool_call_events());
         events.extend(self.complete_output_text_item_events());
         events.extend(self.complete_media_item_events());
@@ -665,6 +659,19 @@ impl RuntimeGeminiSseState {
         }
         self.completed = true;
         Some(events.join(""))
+    }
+
+    fn flush_pending_output_text_events(&mut self) -> Vec<String> {
+        if self.pending_output_text.is_empty() {
+            return Vec::new();
+        }
+        let text = std::mem::take(&mut self.pending_output_text);
+        if runtime_gemini_text_echoes_internal_instruction(&text, &self.internal_instruction_corpus)
+        {
+            Vec::new()
+        } else {
+            self.observe_output_text(&text)
+        }
     }
 
     pub(super) fn incomplete_event(&mut self, reason: &str, message: &str) -> Option<String> {

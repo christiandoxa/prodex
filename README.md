@@ -915,7 +915,7 @@ git diff | prodex context compact-output --kind git-diff
 
 | Command | Description |
 |---|---|
-| `prodex info` | Shows effective runtime tuning values after environment, policy, and default resolution. |
+| `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |

@@ -270,9 +270,10 @@ pub(super) fn runtime_launch_profile_home(state: &AppState, profile_name: &str) 
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
     if !profile.provider.supports_codex_runtime() {
         bail!(
-            "profile '{}' uses {}. `prodex run` currently supports OpenAI/Codex profiles only.",
+            "profile '{}' uses {} (route {}). `prodex run` currently supports native OpenAI/Codex profiles only; provider adapters are launched through `prodex s --provider <provider>`.",
             profile_name,
-            profile.provider.display_name()
+            profile.provider.display_name(),
+            profile.provider.capabilities().runtime_route_policy.label()
         );
     }
     Ok(profile.codex_home.clone())

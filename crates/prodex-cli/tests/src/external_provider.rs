@@ -27,6 +27,45 @@ fn super_external_providers_enable_live_web_search() {
 }
 
 #[test]
+fn super_external_providers_use_openai_responses_wire_api() {
+    for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
+        let args = parse_super_as_caveman(&[
+            "prodex",
+            "s",
+            "--provider",
+            provider,
+            "--api-key",
+            "test-key",
+            "exec",
+            "review",
+        ]);
+        let rendered = args
+            .codex_args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let provider_id = args.external_provider.unwrap().model_provider_id();
+
+        assert!(
+            rendered.contains(&format!("model_provider=\"{provider_id}\"")),
+            "{provider} should set its model_provider"
+        );
+        assert!(
+            rendered.contains(&format!(
+                "model_providers.{provider_id}.wire_api=\"responses\""
+            )),
+            "{provider} should expose OpenAI Responses wire API to Codex"
+        );
+        assert!(
+            rendered.contains(&format!(
+                "model_providers.{provider_id}.supports_websockets=false"
+            )),
+            "{provider} should disable websocket transport at the OpenAI bridge boundary"
+        );
+    }
+}
+
+#[test]
 fn super_provider_short_aliases_expand_to_provider_flag() {
     for provider in ["deepseek", "gemini"] {
         let alias_args = parse_super_as_caveman(&[

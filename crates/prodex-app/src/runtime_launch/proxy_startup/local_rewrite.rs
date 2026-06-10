@@ -26,15 +26,15 @@ use super::local_rewrite_search_fallback::{
     send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
 };
 use super::local_rewrite_transport::{
-    RuntimeLocalRewritePreparedAuth, runtime_chat_completions_upstream_url,
-    runtime_local_rewrite_anthropic_auth_attempts, runtime_local_rewrite_upstream_url,
+    RuntimeLocalRewritePreparedAuth, runtime_local_rewrite_anthropic_auth_attempts,
+    runtime_local_rewrite_upstream_url, runtime_openai_standard_provider_upstream_url,
     send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_error_class, runtime_provider_model_fallback_chain,
     runtime_provider_model_from_body, runtime_provider_models_buffered_response,
-    runtime_provider_request_body_with_model, runtime_provider_request_ledger_message,
-    runtime_provider_should_retry_with_next_model,
+    runtime_provider_openai_contract, runtime_provider_request_body_with_model,
+    runtime_provider_request_ledger_message, runtime_provider_should_retry_with_next_model,
     runtime_provider_should_rotate_auth_after_response,
 };
 use super::*;
@@ -205,11 +205,18 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
             None
         },
     );
+    let bridge_kind = provider.bridge_kind();
+    let openai_contract = runtime_provider_openai_contract(bridge_kind);
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime local rewrite proxy started listen_addr={listen_addr} smart_context_enabled={smart_context_enabled} presidio_redaction_enabled={presidio_redaction_enabled} upstream_base_url={upstream_base_url} upstream_proxy_mode={}",
-            runtime_upstream_proxy_mode_label(true)
+            "runtime local rewrite proxy started listen_addr={listen_addr} smart_context_enabled={smart_context_enabled} presidio_redaction_enabled={presidio_redaction_enabled} upstream_base_url={upstream_base_url} upstream_proxy_mode={} provider={} client_format={} upstream_format={} response_format={} endpoint={}",
+            runtime_upstream_proxy_mode_label(true),
+            super::provider_bridge::runtime_provider_label(bridge_kind),
+            openai_contract.client_request_format.label(),
+            openai_contract.upstream_request_format.label(),
+            openai_contract.response_format.label(),
+            openai_contract.canonical_client_endpoint
         ),
     );
     let gemini_oauth_pool = runtime_gemini_oauth_pool_from_provider(&provider);
@@ -693,7 +700,8 @@ fn send_runtime_local_rewrite_upstream_request(
                     RuntimeProviderBridgeKind::Anthropic,
                     &model_selection.model,
                 );
-                let upstream_url = runtime_chat_completions_upstream_url(
+                let upstream_url = runtime_openai_standard_provider_upstream_url(
+                    RuntimeProviderBridgeKind::Anthropic,
                     &shared.upstream_base_url,
                     &shared.mount_path,
                     &request.path_and_query,

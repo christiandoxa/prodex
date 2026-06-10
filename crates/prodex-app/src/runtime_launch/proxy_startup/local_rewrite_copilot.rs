@@ -20,9 +20,9 @@ use super::local_rewrite_search_fallback::{
     send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
 };
 use super::local_rewrite_transport::{
-    RuntimeLocalRewritePreparedAuth, runtime_chat_completions_upstream_url,
-    runtime_copilot_request_body_with_canonical_model, runtime_local_rewrite_api_key_attempts,
-    runtime_local_rewrite_upstream_url, send_runtime_local_rewrite_prepared_request,
+    RuntimeLocalRewritePreparedAuth, runtime_copilot_request_body_with_canonical_model,
+    runtime_local_rewrite_api_key_attempts, runtime_local_rewrite_upstream_url,
+    runtime_openai_standard_provider_upstream_url, send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
@@ -192,7 +192,8 @@ fn send_runtime_copilot_responses_request(
         RuntimeProviderBridgeKind::Copilot,
         &model_selection.model,
     );
-    let upstream_url = runtime_chat_completions_upstream_url(
+    let upstream_url = runtime_openai_standard_provider_upstream_url(
+        RuntimeProviderBridgeKind::Copilot,
         &shared.upstream_base_url,
         &shared.mount_path,
         &request.path_and_query,

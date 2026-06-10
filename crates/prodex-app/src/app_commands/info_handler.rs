@@ -7,11 +7,13 @@ use crate::{
     collect_info_token_usage_summary, collect_prodex_processes, collect_recent_runtime_log_paths,
     collect_runtime_broker_metrics_targets, collect_runtime_tuning_snapshot, estimate_info_runway,
     format_audit_logs_summary, format_info_load_summary, format_info_pool_remaining,
-    format_info_process_summary, format_info_prodex_version, format_info_quota_data_summary,
-    format_info_runway, format_info_token_usage_summary, format_runtime_broker_metrics_targets,
-    format_runtime_logs_summary, format_runtime_policy_summary, format_runtime_proxy_preset,
-    format_runtime_tuning_budgets, format_runtime_tuning_transport, format_runtime_tuning_workers,
-    format_secret_backend_summary, print_panel, runtime_policy_summary,
+    format_info_process_summary, format_info_prodex_version,
+    format_info_provider_capabilities_summary, format_info_provider_summary,
+    format_info_quota_data_summary, format_info_runway, format_info_token_usage_summary,
+    format_runtime_broker_metrics_targets, format_runtime_logs_summary,
+    format_runtime_policy_summary, format_runtime_proxy_preset, format_runtime_tuning_budgets,
+    format_runtime_tuning_transport, format_runtime_tuning_workers, format_secret_backend_summary,
+    print_panel, runtime_policy_summary,
 };
 
 pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
@@ -51,6 +53,14 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             state.active_profile.as_deref().unwrap_or("-").to_string(),
         ),
         (
+            "Providers".to_string(),
+            format_info_provider_summary(&state.profiles),
+        ),
+        (
+            "Provider routes".to_string(),
+            format_info_provider_capabilities_summary(&state.profiles),
+        ),
+        (
             "Runtime policy".to_string(),
             format_runtime_policy_summary(policy_summary.as_ref()),
         ),
@@ -87,11 +97,11 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             format_info_load_summary(&runtime_load, runtime_process_count),
         ),
         (
-            "Quota data".to_string(),
+            "Codex quota data".to_string(),
             format_info_quota_data_summary(&quota),
         ),
         (
-            "5h remaining pool".to_string(),
+            "Codex 5h pool".to_string(),
             format_info_pool_remaining(
                 quota.five_hour_pool_remaining,
                 quota.profiles_with_data(),
@@ -99,7 +109,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             ),
         ),
         (
-            "Weekly remaining pool".to_string(),
+            "Codex weekly pool".to_string(),
             format_info_pool_remaining(
                 quota.weekly_pool_remaining,
                 quota.profiles_with_data(),
@@ -107,7 +117,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             ),
         ),
         (
-            "5h runway".to_string(),
+            "Codex 5h runway".to_string(),
             format_info_runway(
                 quota.profiles_with_data(),
                 quota.five_hour_pool_remaining,
@@ -117,7 +127,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             ),
         ),
         (
-            "Weekly runway".to_string(),
+            "Codex weekly runway".to_string(),
             format_info_runway(
                 quota.profiles_with_data(),
                 quota.weekly_pool_remaining,
