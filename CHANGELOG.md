@@ -2,9 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.171.0 - 2026-06-09
+## 0.172.0 - 2026-06-10
 
-- No grouped changes.
+### CLI
+
+- Retry precommit quota and preserve images (`27c3c9e`)
+
+## 0.171.0 - 2026-06-10
+
+### CLI
+
+- Allow responses with ready short-term quota (`98a26ed`)
 
 ## 0.170.0 - 2026-06-09
 
@@ -74,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Improve gemini provider startup and tool handling (`1d72401`)
-
-## 0.159.0 - 2026-06-07
-
-### Misc
-
-- Improve provider parity (`9dfdfb0`)
