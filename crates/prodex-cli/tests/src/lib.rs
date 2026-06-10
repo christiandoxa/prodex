@@ -180,6 +180,17 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
 }
 
 #[test]
+fn s_profile_shortcut_selects_profile() {
+    let command = parse_cli_command_from(["prodex", "s", "--profile", "nama_profile"])
+        .expect("s profile command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+
+    assert_eq!(args.profile.as_deref(), Some("nama_profile"));
+}
+
+#[test]
 fn super_mem_super_slim_expands_to_all_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "--mem-super-slim", "exec", "review"]);
 

@@ -1,14 +1,13 @@
 use super::*;
 
 #[test]
-fn websocket_precommit_hold_response_created_commits_before_terminal_event() {
+fn websocket_precommit_hold_response_created_commits_at_terminal_event() {
     let _guard = acquire_test_runtime_lock();
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("upstream websocket listener should bind");
     let upstream_addr = listener
         .local_addr()
         .expect("upstream websocket listener should expose address");
-    let (allow_completed_tx, allow_completed_rx) = mpsc::channel::<()>();
     let upstream = thread::spawn(move || {
         let (stream, _) = listener
             .accept()
@@ -24,9 +23,6 @@ fn websocket_precommit_hold_response_created_commits_before_terminal_event() {
                     .into(),
             ))
             .expect("upstream should send response.created");
-        allow_completed_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("test should allow terminal event after response.created is forwarded");
         socket
             .send(WsMessage::Text(
                 r#"{"type":"response.completed","response":{"id":"resp-hold"}}"#
@@ -68,9 +64,6 @@ fn websocket_precommit_hold_response_created_commits_before_terminal_event() {
     let created = client_socket
         .read()
         .expect("client should receive promoted response.created before terminal event");
-    allow_completed_tx
-        .send(())
-        .expect("test should allow upstream terminal event");
     let completed = client_socket
         .read()
         .expect("client should receive response.completed");
@@ -91,14 +84,96 @@ fn websocket_precommit_hold_response_created_commits_before_terminal_event() {
         .join()
         .expect("upstream websocket thread should finish");
 
-    let log =
-        read_websocket_test_log_after_marker(&shared.log_path, "websocket_precommit_hold_promoted");
+    let log = read_websocket_test_log_after_marker(
+        &shared.log_path,
+        "request=31 transport=websocket committed profile=main",
+    );
     assert!(
-        log.contains("websocket_precommit_hold_promoted")
-            && log.contains("request=31")
-            && log.contains("event=response_created")
+        log.contains("request=31 transport=websocket committed profile=main")
+            && !log.contains("websocket_precommit_hold_promoted")
             && !log.contains("websocket_precommit_hold_timeout"),
-        "response.created should commit and forward without timeout promotion: {log}"
+        "response.created should stay buffered until terminal commit: {log}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
+fn websocket_quota_after_response_created_stays_precommit_retryable() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.created","response":{"id":"resp-quota-hold"}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send response.created");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.failed","status":429,"error":{"type":"usage_limit_reached","message":"You've hit your usage limit. Upgrade to Pro or try again later."}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send quota failure");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("precommit-hold-quota", upstream_addr);
+    let (mut local_socket, _client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 37,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("quota after response.created should be retryable before commit");
+
+    assert!(matches!(
+        attempt,
+        RuntimeWebsocketAttempt::QuotaBlocked {
+            profile_name,
+            ..
+        } if profile_name == "main"
+    ));
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "precommit_hold");
+    assert!(
+        log.contains("request=37")
+            && log.contains("precommit_hold")
+            && !log.contains("request=37 transport=websocket committed profile=main")
+            && !log.contains("websocket_precommit_hold_promoted"),
+        "quota after response.created must stay precommit-retryable: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);
 }
@@ -262,7 +337,6 @@ fn websocket_precommit_hold_response_created_commits_previous_response_affinity(
     let upstream_addr = listener
         .local_addr()
         .expect("upstream websocket listener should expose address");
-    let (allow_completed_tx, allow_completed_rx) = mpsc::channel::<()>();
     let upstream = thread::spawn(move || {
         let (stream, _) = listener
             .accept()
@@ -278,9 +352,6 @@ fn websocket_precommit_hold_response_created_commits_previous_response_affinity(
                     .into(),
             ))
             .expect("upstream should send response.created");
-        allow_completed_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("test should allow terminal event after response.created is forwarded");
         socket
             .send(WsMessage::Text(
                 r#"{"type":"response.completed","response":{"id":"resp-affinity-hold"}}"#
@@ -321,9 +392,6 @@ fn websocket_precommit_hold_response_created_commits_previous_response_affinity(
     let created = client_socket
         .read()
         .expect("client should receive hard-affinity response.created");
-    allow_completed_tx
-        .send(())
-        .expect("test should allow upstream terminal event");
     let completed = client_socket
         .read()
         .expect("client should receive hard-affinity response.completed");
@@ -338,15 +406,16 @@ fn websocket_precommit_hold_response_created_commits_previous_response_affinity(
         .join()
         .expect("upstream websocket thread should finish");
 
-    let log =
-        read_websocket_test_log_after_marker(&shared.log_path, "websocket_precommit_hold_promoted");
+    let log = read_websocket_test_log_after_marker(
+        &shared.log_path,
+        "request=32 transport=websocket committed profile=main",
+    );
     assert!(
-        log.contains("websocket_precommit_hold_promoted")
-            && log.contains("request=32")
-            && log.contains("profile_promotion_allowed=false")
+        log.contains("request=32")
             && log.contains("transport=websocket committed profile=main")
+            && !log.contains("websocket_precommit_hold_promoted")
             && !log.contains("websocket_precommit_hold_timeout"),
-        "hard-affinity response.created should commit without active-profile promotion: {log}"
+        "hard-affinity response.created should stay buffered until terminal commit: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);
 }
@@ -359,7 +428,6 @@ fn websocket_precommit_hold_response_created_commits_reused_session() {
     let upstream_addr = listener
         .local_addr()
         .expect("upstream websocket listener should expose address");
-    let (allow_reused_completed_tx, allow_reused_completed_rx) = mpsc::channel::<()>();
     let upstream = thread::spawn(move || {
         let (stream, _) = listener
             .accept()
@@ -392,9 +460,6 @@ fn websocket_precommit_hold_response_created_commits_reused_session() {
                     .into(),
             ))
             .expect("upstream should send reused response.created");
-        allow_reused_completed_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("test should allow reused terminal event after response.created is forwarded");
         socket
             .send(WsMessage::Text(
                 r#"{"type":"response.completed","response":{"id":"resp-reuse-hold"}}"#
@@ -459,9 +524,6 @@ fn websocket_precommit_hold_response_created_commits_reused_session() {
     let reused_created = client_socket
         .read()
         .expect("client should receive reused response.created");
-    allow_reused_completed_tx
-        .send(())
-        .expect("test should allow reused terminal event");
     let reused_completed = client_socket
         .read()
         .expect("client should receive reused response.completed");
@@ -476,15 +538,16 @@ fn websocket_precommit_hold_response_created_commits_reused_session() {
         .join()
         .expect("upstream websocket thread should finish");
 
-    let log =
-        read_websocket_test_log_after_marker(&shared.log_path, "websocket_precommit_hold_promoted");
+    let log = read_websocket_test_log_after_marker(
+        &shared.log_path,
+        "request=34 transport=websocket committed profile=main",
+    );
     assert!(
-        log.contains("websocket_precommit_hold_promoted")
-            && log.contains("request=34")
-            && log.contains("profile_promotion_allowed=false")
+        log.contains("request=34")
             && log.contains("request=34 transport=websocket committed profile=main")
+            && !log.contains("websocket_precommit_hold_promoted")
             && !log.contains("websocket_precommit_hold_timeout"),
-        "reused-session response.created should commit without timeout: {log}"
+        "reused-session response.created should stay buffered until terminal commit: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);
 }

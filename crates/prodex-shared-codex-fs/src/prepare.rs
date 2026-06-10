@@ -9,6 +9,7 @@ pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result
     for entry in shared_codex_entries(paths, codex_home)? {
         ensure_shared_codex_entry(paths, codex_home, &entry)?;
     }
+    persist_codex_session_image_attachments(&paths.shared_codex_root)?;
 
     Ok(())
 }

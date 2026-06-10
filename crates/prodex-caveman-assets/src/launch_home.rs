@@ -95,7 +95,8 @@ fn share_caveman_chat_history(base_codex_home: &Path, caveman_home: &Path) -> Re
     link_caveman_shared_chat_dir(
         &base_codex_home.join("archived_sessions"),
         &caveman_home.join("archived_sessions"),
-    )
+    )?;
+    prodex_shared_codex_fs::persist_codex_session_image_attachments(base_codex_home)
 }
 
 fn link_caveman_shared_chat_file(source: &Path, link: &Path) -> Result<()> {

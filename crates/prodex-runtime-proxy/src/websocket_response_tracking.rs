@@ -33,8 +33,8 @@ pub fn runtime_websocket_precommit_transport_retry_allowed(
 pub fn runtime_websocket_precommit_hold_promotion_event_seen(
     inspected: &RuntimeInspectedWebsocketTextFrame,
 ) -> bool {
-    inspected.event_type.as_deref() == Some("response.created")
-        && !inspected.response_ids.is_empty()
+    let _ = inspected;
+    false
 }
 
 #[cfg(test)]

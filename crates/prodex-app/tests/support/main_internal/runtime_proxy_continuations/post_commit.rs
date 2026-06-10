@@ -45,8 +45,8 @@ fn runtime_proxy_websocket_previous_response_not_found_after_prelude_surfaces_st
     assert!(
         frames
             .iter()
-            .any(|frame| frame.contains("\"type\":\"response.created\"")),
-        "response.created is an upstream commit signal and should be forwarded before later continuation failure: {frames:?}"
+            .all(|frame| !frame.contains("\"type\":\"response.created\"")),
+        "response.created should stay buffered when pre-output continuation failure is retryable: {frames:?}"
     );
 
     let websocket_requests = fixture.backend.websocket_requests();

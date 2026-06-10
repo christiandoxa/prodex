@@ -80,13 +80,13 @@ fn precommit_transport_retry_requires_replayable_fresh_request() {
 }
 
 #[test]
-fn precommit_hold_promotion_event_requires_response_created_with_id() {
+fn precommit_hold_promotion_event_does_not_commit_response_created() {
     let mut inspected = RuntimeInspectedWebsocketTextFrame {
         event_type: Some("response.created".to_string()),
         response_ids: vec!["resp_1".to_string()],
         ..RuntimeInspectedWebsocketTextFrame::default()
     };
-    assert!(runtime_websocket_precommit_hold_promotion_event_seen(
+    assert!(!runtime_websocket_precommit_hold_promotion_event_seen(
         &inspected
     ));
 
