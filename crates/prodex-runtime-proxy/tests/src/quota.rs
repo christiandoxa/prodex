@@ -72,7 +72,29 @@ fn precommit_block_reason_keeps_response_floor_only_for_main_lanes() {
 }
 
 #[test]
-fn precommit_quota_gate_blocks_continuation_snapshot_before_reprobe() {
+fn precommit_block_reason_allows_weekly_critical_when_five_hour_is_ready() {
+    let summary = RuntimeProxyQuotaSummary {
+        five_hour: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Ready,
+            remaining_percent: 85,
+            reset_at: 200,
+        },
+        weekly: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Critical,
+            remaining_percent: 1,
+            reset_at: 300,
+        },
+        route_band: RuntimeSelectionQuotaPressureBand::Critical,
+    };
+
+    assert_eq!(
+        runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Responses, 2,),
+        None
+    );
+}
+
+#[test]
+fn precommit_block_reason_allows_weekly_exhausted_when_five_hour_is_ready() {
     let summary = RuntimeProxyQuotaSummary {
         five_hour: RuntimeProxyQuotaWindowSummary {
             status: RuntimeSelectionQuotaWindowStatus::Ready,
@@ -83,6 +105,28 @@ fn precommit_quota_gate_blocks_continuation_snapshot_before_reprobe() {
             status: RuntimeSelectionQuotaWindowStatus::Exhausted,
             remaining_percent: 0,
             reset_at: 300,
+        },
+        route_band: RuntimeSelectionQuotaPressureBand::Exhausted,
+    };
+
+    assert_eq!(
+        runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Responses, 2,),
+        None
+    );
+}
+
+#[test]
+fn precommit_quota_gate_blocks_five_hour_exhausted_continuation_snapshot_before_reprobe() {
+    let summary = RuntimeProxyQuotaSummary {
+        five_hour: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Exhausted,
+            remaining_percent: 0,
+            reset_at: 300,
+        },
+        weekly: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Ready,
+            remaining_percent: 80,
+            reset_at: i64::MAX,
         },
         route_band: RuntimeSelectionQuotaPressureBand::Exhausted,
     };

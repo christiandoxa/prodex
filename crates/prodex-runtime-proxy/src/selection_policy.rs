@@ -373,15 +373,17 @@ pub fn runtime_quota_precommit_guard_reason(
         route_kind,
         responses_critical_floor_percent,
     );
-    if summary.route_band == RuntimeSelectionQuotaPressureBand::Exhausted {
+    if matches!(
+        summary.five_hour.status,
+        RuntimeSelectionQuotaWindowStatus::Exhausted
+    ) {
         return Some("quota_exhausted_before_send");
     }
 
     if matches!(
         route_kind,
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) && (runtime_quota_window_precommit_guard(summary.five_hour, floor_percent)
-        || runtime_quota_window_precommit_guard(summary.weekly, floor_percent))
+    ) && runtime_quota_window_precommit_guard(summary.five_hour, floor_percent)
     {
         return Some("quota_critical_floor_before_send");
     }

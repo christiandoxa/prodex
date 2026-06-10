@@ -484,15 +484,17 @@ pub fn runtime_proxy_precommit_quota_block_reason(
         route_kind,
         responses_critical_floor_percent,
     );
-    if summary.route_band == RuntimeSelectionQuotaPressureBand::Exhausted {
+    if matches!(
+        summary.five_hour.status,
+        RuntimeSelectionQuotaWindowStatus::Exhausted
+    ) {
         return Some(RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend);
     }
 
     if matches!(
         route_kind,
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) && (runtime_proxy_quota_window_precommit_guard(summary.five_hour, floor_percent)
-        || runtime_proxy_quota_window_precommit_guard(summary.weekly, floor_percent))
+    ) && runtime_proxy_quota_window_precommit_guard(summary.five_hour, floor_percent)
     {
         return Some(RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend);
     }

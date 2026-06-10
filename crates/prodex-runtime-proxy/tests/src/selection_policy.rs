@@ -400,6 +400,67 @@ fn soft_affinity_blocks_response_on_critical_floor() {
     );
 }
 
+#[test]
+fn soft_affinity_allows_response_when_only_weekly_is_critical() {
+    let mut summary = healthy_summary();
+    summary.weekly = RuntimeSelectionQuotaWindowSummary {
+        status: RuntimeSelectionQuotaWindowStatus::Critical,
+        remaining_percent: 1,
+    };
+    summary.route_band = RuntimeSelectionQuotaPressureBand::Critical;
+
+    let input = RuntimeSoftAffinityPolicyInput {
+        affinity_kind: RuntimeAffinitySelectionKind::Pinned,
+        route_kind: RuntimeRouteKind::Responses,
+        quota_summary: summary,
+        quota_source: Some(RuntimeSelectionQuotaSource::LiveProbe),
+        current_profile_matches_candidate: false,
+        has_route_eligible_quota_fallback: true,
+        responses_critical_floor_percent: 2,
+    };
+
+    assert!(runtime_soft_affinity_allowed(input));
+    assert_eq!(
+        runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Responses, 2),
+        None
+    );
+}
+
+#[test]
+fn soft_affinity_blocks_fallback_when_weekly_is_exhausted() {
+    let mut summary = healthy_summary();
+    summary.weekly = RuntimeSelectionQuotaWindowSummary {
+        status: RuntimeSelectionQuotaWindowStatus::Exhausted,
+        remaining_percent: 0,
+    };
+    summary.route_band = RuntimeSelectionQuotaPressureBand::Exhausted;
+
+    let input = RuntimeSoftAffinityPolicyInput {
+        affinity_kind: RuntimeAffinitySelectionKind::Pinned,
+        route_kind: RuntimeRouteKind::Responses,
+        quota_summary: summary,
+        quota_source: Some(RuntimeSelectionQuotaSource::LiveProbe),
+        current_profile_matches_candidate: false,
+        has_route_eligible_quota_fallback: true,
+        responses_critical_floor_percent: 2,
+    };
+
+    assert!(!runtime_soft_affinity_allowed(input));
+    assert_eq!(
+        runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Responses, 2),
+        None
+    );
+    assert_eq!(
+        runtime_quota_soft_affinity_rejection_reason(
+            summary,
+            Some(RuntimeSelectionQuotaSource::LiveProbe),
+            RuntimeRouteKind::Responses,
+            2
+        ),
+        "quota_exhausted"
+    );
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AffinityProfileCase {
     None,

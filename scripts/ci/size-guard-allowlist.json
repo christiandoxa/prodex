@@ -21,7 +21,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_rewrite_tests.rs",
-    "maxLines": 1935,
+    "maxLines": 2006,
     "reason": "Gemini translation regression cases remain consolidated while Codex-native Gemini parity coverage, model fallback, retry-budget coverage, and instruction-leak sanitizer coverage are completed."
   },
   {

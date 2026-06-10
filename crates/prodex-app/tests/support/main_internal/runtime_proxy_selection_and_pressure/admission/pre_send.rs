@@ -2,12 +2,14 @@ use super::helpers::*;
 use super::*;
 
 #[test]
-fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
+fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send() {
+    let backend = RuntimeProxyBackend::start();
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",
         "main-account",
         "main@example.com",
     )
+    .upstream_base_url(backend.base_url())
     .profile_usage_snapshot(
         "main",
         runtime_usage_snapshot(quota_window_ready(81, 3600), quota_window_exhausted(300)),
@@ -26,12 +28,23 @@ fn attempt_runtime_responses_request_skips_exhausted_profile_before_send() {
         RuntimeResponsesAttempt::LocalSelectionBlocked {
             profile_name,
             reason,
-        } => {
+        } => panic!(
+            "weekly exhausted should not pre-send block profile {profile_name}: {reason}"
+        ),
+        RuntimeResponsesAttempt::Success { profile_name, .. } => {
             assert_eq!(profile_name, "main");
-            assert_eq!(reason, "quota_exhausted_before_send");
         }
-        _ => panic!("expected exhausted pre-send responses skip"),
+        RuntimeResponsesAttempt::QuotaBlocked { profile_name, .. } => {
+            assert_eq!(profile_name, "main");
+        }
+        RuntimeResponsesAttempt::AuthFailed { profile_name, .. } => {
+            assert_eq!(profile_name, "main");
+        }
+        RuntimeResponsesAttempt::PreviousResponseNotFound { profile_name, .. } => {
+            assert_eq!(profile_name, "main");
+        }
     }
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
 }
 
 #[test]
@@ -69,7 +82,7 @@ fn scripted_backend_fault_plain_429_passes_through_without_rotation() {
 }
 
 #[test]
-fn precommit_quota_gate_skips_websocket_continuation_from_persisted_snapshot() {
+fn precommit_quota_gate_allows_weekly_exhausted_continuation_from_persisted_snapshot() {
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",
         "main-account",
@@ -90,20 +103,9 @@ fn precommit_quota_gate_skips_websocket_continuation_from_persisted_snapshot() {
     })
     .expect("websocket quota gate should succeed")
     {
-        RuntimePrecommitQuotaGateDecision::Block {
-            reason,
-            summary,
-            source,
-        } => {
-            assert_eq!(
-                reason,
-                RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend
-            );
-            assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted);
-            assert_eq!(source, Some(RuntimeQuotaSource::PersistedSnapshot));
-        }
-        RuntimePrecommitQuotaGateDecision::Proceed => {
-            panic!("expected websocket precommit gate to block exhausted snapshot")
+        RuntimePrecommitQuotaGateDecision::Proceed => {}
+        RuntimePrecommitQuotaGateDecision::Block { reason, .. } => {
+            panic!("weekly exhausted snapshot should not pre-send block: {reason:?}")
         }
     }
 }
