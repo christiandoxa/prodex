@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.172.0`:
+The current local version in this repo is `0.173.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.172.0
+npm install -g @christiandoxa/prodex@0.173.0
 ```
 
 Dependency status in this repo:
@@ -141,7 +141,7 @@ In the live `prodex quota --all --detail` view, press `f` to cycle provider filt
 
 Use `prodex session list` to inspect shared Codex parent sessions, or `prodex session current` to show parent sessions started from the current directory. Add `--include-subagents` only when you explicitly need spawned agent sessions for diagnostics.
 
-`prodex info` includes the effective runtime worker, admission, websocket, lane, and inflight tuning values after environment, policy, and default resolution.
+`prodex info` includes provider route/quota-shape summaries plus the effective runtime worker, admission, websocket, lane, and inflight tuning values after environment, policy, and default resolution.
 For the full policy key reference, see [docs/runtime-policy.md](./docs/runtime-policy.md).
 
 Backup or move profiles:

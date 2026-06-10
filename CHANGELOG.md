@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.173.0 - 2026-06-10
+
+### Misc
+
+- Standardize OpenAI-compatible adapters (`d956122`)
+
 ## 0.172.0 - 2026-06-10
 
 ### CLI
@@ -76,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Rotate replayable continuations on quota (`3168530`)
-
-## 0.160.0 - 2026-06-08
-
-### Misc
-
-- Improve gemini provider startup and tool handling (`1d72401`)
