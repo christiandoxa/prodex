@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.174.0 - 2026-06-10
+
+### Misc
+
+- Add browser terminal expose (`b1ee6da`)
+
 ## 0.173.0 - 2026-06-10
 
 ### Misc
@@ -76,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy clippy for model memory (`e69a925`)
 - Remember selected model per session (`2b0a1d2`)
-
-## 0.161.0 - 2026-06-08
-
-### Runtime
-
-- Rotate replayable continuations on quota (`3168530`)
