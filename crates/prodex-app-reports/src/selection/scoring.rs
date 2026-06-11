@@ -4,7 +4,10 @@ use super::{
 };
 use crate::info::required_main_window_snapshot_at;
 use chrono::Local;
-use prodex_quota::{RuntimeQuotaPressureBand, UsageResponse};
+use prodex_quota::{
+    RuntimeQuotaPressureBand, UsageResponse, scale_quota_pressure_for_plan,
+    usage_plan_capacity_pressure_scale_bps,
+};
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::{ReadyProfileCandidate, ReadyProfileScore, RuntimeQuotaSource};
 use std::cmp::Reverse;
@@ -156,6 +159,11 @@ pub fn ready_profile_score_for_route_at(
 
     let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
     let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
+    let plan_pressure_scale_bps = usage_plan_capacity_pressure_scale_bps(usage);
+    let scaled_weekly_pressure =
+        scale_quota_pressure_for_plan(weekly_pressure, plan_pressure_scale_bps);
+    let scaled_five_hour_pressure =
+        scale_quota_pressure_for_plan(five_hour_pressure, plan_pressure_scale_bps);
     let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
     let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
     let weekly_weight = match route_kind {
@@ -171,10 +179,10 @@ pub fn ready_profile_score_for_route_at(
 
     ReadyProfileScore {
         total_pressure: reserve_bias
-            .saturating_add(weekly_pressure.saturating_mul(weekly_weight))
-            .saturating_add(five_hour_pressure),
-        weekly_pressure,
-        five_hour_pressure,
+            .saturating_add(scaled_weekly_pressure.saturating_mul(weekly_weight))
+            .saturating_add(scaled_five_hour_pressure),
+        weekly_pressure: scaled_weekly_pressure,
+        five_hour_pressure: scaled_five_hour_pressure,
         reserve_floor: weekly_remaining.min(five_hour_remaining),
         weekly_remaining,
         five_hour_remaining,

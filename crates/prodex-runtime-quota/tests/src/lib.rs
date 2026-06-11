@@ -58,6 +58,22 @@ fn quota_summary_for_route_matches_usage_windows() {
 }
 
 #[test]
+fn quota_pressure_sort_key_applies_plan_capacity_weight() {
+    let now = Local::now().timestamp();
+    let mut plus = usage_response(20, 20, now);
+    plus.plan_type = Some("plus".to_string());
+    let mut pro = usage_response(30, 30, now);
+    pro.plan_type = Some("prolite".to_string());
+
+    let plus_key = runtime_quota_pressure_sort_key_for_route(&plus, RuntimeRouteKind::Responses);
+    let pro_key = runtime_quota_pressure_sort_key_for_route(&pro, RuntimeRouteKind::Responses);
+
+    assert!(pro_key.1 < plus_key.1);
+    assert!(pro_key.2 < plus_key.2);
+    assert!(pro_key.3 < plus_key.3);
+}
+
+#[test]
 fn cold_start_probe_block_respects_snapshot_guard() {
     let now = Local::now().timestamp();
     let snapshot = RuntimeProfileUsageSnapshot {

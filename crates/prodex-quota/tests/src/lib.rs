@@ -19,6 +19,15 @@ fn response_body_pretty_prints_json() {
 }
 
 #[test]
+fn plan_capacity_pressure_scale_normalizes_known_plan_names() {
+    assert_eq!(plan_capacity_pressure_scale_bps("plus"), 10_000);
+    assert_eq!(plan_capacity_pressure_scale_bps("Pro Lite"), 5_000);
+    assert_eq!(plan_capacity_pressure_scale_bps("pro-20x"), 2_000);
+    assert_eq!(plan_capacity_pressure_scale_bps("free"), 12_000);
+    assert_eq!(plan_capacity_pressure_scale_bps("enterprise"), 10_000);
+}
+
+#[test]
 fn quota_auth_filter_matches_labels_and_compatibility() {
     let no_auth = AuthSummary {
         label: "no-auth".to_string(),

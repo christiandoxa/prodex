@@ -55,6 +55,36 @@ fn ready_profile_ranking_uses_order_index_as_final_deterministic_tiebreaker() {
 }
 
 #[test]
+fn ready_profile_ranking_applies_plan_capacity_pressure_weight() {
+    let mut pro_usage = usage_with_main_windows(70, 18_000, 70, 604_800);
+    pro_usage.plan_type = Some("prolite".to_string());
+    let mut plus_usage = usage_with_main_windows(80, 18_000, 80, 604_800);
+    plus_usage.plan_type = Some("plus".to_string());
+    let candidates = vec![
+        ReadyProfileCandidate {
+            name: "plus".to_string(),
+            usage: plus_usage,
+            order_index: 0,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+        ReadyProfileCandidate {
+            name: "pro".to_string(),
+            usage: pro_usage,
+            order_index: 1,
+            preferred: false,
+            provider_priority: 0,
+            quota_source: RuntimeQuotaSource::LiveProbe,
+        },
+    ];
+
+    let mut ranked = candidates;
+    ranked.sort_by_key(ready_profile_sort_key);
+    assert_eq!(ranked[0].name, "pro");
+}
+
+#[test]
 fn ready_profile_candidates_prefer_openai_pool_before_other_providers() {
     let state = AppState {
         active_profile: Some("copilot".to_string()),

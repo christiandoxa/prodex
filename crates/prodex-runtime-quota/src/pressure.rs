@@ -1,7 +1,10 @@
 use crate::route::runtime_route_kind_to_proxy;
 use crate::summary::runtime_quota_summary_to_proxy;
 use crate::window::runtime_quota_window_observation;
-use prodex_quota::{RuntimeQuotaPressureBand, RuntimeQuotaSummary, UsageResponse};
+use prodex_quota::{
+    RuntimeQuotaPressureBand, RuntimeQuotaSummary, UsageResponse, scale_quota_pressure_for_plan,
+    usage_plan_capacity_pressure_scale_bps,
+};
 use prodex_runtime_state::RuntimeRouteKind;
 use std::cmp::Reverse;
 
@@ -131,13 +134,18 @@ pub fn runtime_quota_pressure_sort_key_for_route(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeQuotaPressureSortKey {
-    runtime_quota_sort_key_from_proxy(
+    let mut sort_key = runtime_quota_sort_key_from_proxy(
         runtime_proxy::runtime_proxy_quota_pressure_sort_key_for_route(
             runtime_quota_window_observation(usage, "5h"),
             runtime_quota_window_observation(usage, "weekly"),
             runtime_route_kind_to_proxy(route_kind),
         ),
-    )
+    );
+    let scale_bps = usage_plan_capacity_pressure_scale_bps(usage);
+    sort_key.1 = scale_quota_pressure_for_plan(sort_key.1, scale_bps);
+    sort_key.2 = scale_quota_pressure_for_plan(sort_key.2, scale_bps);
+    sort_key.3 = scale_quota_pressure_for_plan(sort_key.3, scale_bps);
+    sort_key
 }
 
 pub fn runtime_quota_pressure_sort_key_for_route_from_summary(

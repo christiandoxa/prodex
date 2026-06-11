@@ -207,6 +207,41 @@ pub struct UsageResponse {
     pub additional_rate_limits: Vec<AdditionalRateLimit>,
 }
 
+pub fn usage_plan_capacity_pressure_scale_bps(usage: &UsageResponse) -> i64 {
+    usage
+        .plan_type
+        .as_deref()
+        .map(plan_capacity_pressure_scale_bps)
+        .unwrap_or(10_000)
+}
+
+pub fn plan_capacity_pressure_scale_bps(plan_type: &str) -> i64 {
+    let normalized = plan_type
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| !matches!(ch, ' ' | '-' | '_'))
+        .collect::<String>();
+
+    match normalized.as_str() {
+        "pro20x" | "pro20" | "20x" | "ultra" | "max" => 2_000,
+        "pro" | "prolite" | "pro5x" | "5x" => 5_000,
+        "free" | "basic" => 12_000,
+        _ => 10_000,
+    }
+}
+
+pub fn scale_quota_pressure_for_plan(pressure: i64, scale_bps: i64) -> i64 {
+    if pressure == i64::MAX {
+        return i64::MAX;
+    }
+
+    pressure
+        .saturating_mul(scale_bps.max(0))
+        .checked_div(10_000)
+        .unwrap_or(i64::MAX)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowPair {
     pub primary_window: Option<UsageWindow>,
