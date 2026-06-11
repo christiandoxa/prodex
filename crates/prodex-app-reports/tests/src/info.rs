@@ -98,6 +98,11 @@ fn runtime_info_summary_parts_preserve_display_and_json_shapes() {
         runtime_policy_json_value(None, None),
         serde_json::Value::Null
     );
+    assert!(format_runtime_proxy_contract_summary().contains("bounded precommit retry"));
+    assert_eq!(
+        runtime_proxy_contract_json_value()["quota_transport_split"],
+        serde_json::Value::Bool(true)
+    );
     assert_eq!(
         format_runtime_logs_summary("/tmp/prodex", "json"),
         "/tmp/prodex (json)"

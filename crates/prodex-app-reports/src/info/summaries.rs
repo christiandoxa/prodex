@@ -32,6 +32,33 @@ pub fn format_runtime_policy_summary(path: Option<&str>, version: Option<u32>) -
     terminal_ui::format_runtime_policy_summary_display(path, version)
 }
 
+pub fn format_runtime_proxy_contract_summary() -> String {
+    [
+        "scoped gateway",
+        "policy-visible selection",
+        "bounded precommit retry",
+        "cheap hot path",
+        "quota/transport split",
+        "structured observability",
+        "connection reuse",
+        "profile-isolated secrets",
+    ]
+    .join(", ")
+}
+
+pub fn runtime_proxy_contract_json_value() -> serde_json::Value {
+    serde_json::json!({
+        "scoped_gateway": true,
+        "policy_visible_selection": true,
+        "bounded_precommit_retry": true,
+        "cheap_hot_path": true,
+        "quota_transport_split": true,
+        "structured_observability": true,
+        "connection_reuse": true,
+        "profile_isolated_secrets": true,
+    })
+}
+
 pub fn runtime_policy_json_value(path: Option<&str>, version: Option<u32>) -> serde_json::Value {
     path.zip(version)
         .map(|(path, version)| {

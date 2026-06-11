@@ -22,21 +22,30 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
 
     let bundle_path = absolutize(args.path)?;
     let (payload, encrypted) = read_profile_export_payload(&bundle_path)?;
+    print_stderr_line(&format!(
+        "Importing {} profile(s)...",
+        payload.profiles.len()
+    ));
     let source_active_profile = payload.active_profile.clone();
 
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
+    print_stderr_line("Checking existing profiles...");
     let recovered_auth_updates = recover_imported_auth_update_journals(&paths, &mut state)?;
     if recovered_auth_updates > 0 {
+        print_stderr_line("Recovering interrupted profile import...");
         state
             .save(&paths)
             .context("failed to save recovered import auth rollback state")?;
     }
+    print_stderr_line("Staging imported profiles...");
     let commit = import_profile_export_payload(&paths, &mut state, &payload)?;
+    print_stderr_line("Saving imported profiles...");
     if let Err(err) = state.save(&paths) {
         rollback_imported_profiles(&mut state, &commit);
         return Err(err);
     }
+    print_stderr_line("Profile import complete.");
     prodex_profile_export::cleanup_imported_auth_update_journals(&commit);
     audit_log_event_best_effort(
         "profile",

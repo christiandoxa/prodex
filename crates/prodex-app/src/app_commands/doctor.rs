@@ -143,6 +143,10 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             format_runtime_policy_summary(policy_summary.as_ref()),
         ),
         (
+            "Runtime proxy contract".to_string(),
+            format_runtime_proxy_contract_summary(),
+        ),
+        (
             "Secret backend".to_string(),
             format_secret_backend_summary(),
         ),

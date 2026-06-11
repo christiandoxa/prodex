@@ -10,7 +10,7 @@ pub const PROFILE_EXPORT_KDF: &str = "pbkdf2_sha256";
 pub(crate) const PROFILE_EXPORT_NONCE_BYTES: usize = 12;
 pub(crate) const PROFILE_EXPORT_SALT_BYTES: usize = 16;
 pub(crate) const PROFILE_EXPORT_KEY_BYTES: usize = 32;
-pub(crate) const PROFILE_EXPORT_PBKDF2_ITERATIONS: u32 = if cfg!(test) { 1_000 } else { 600_000 };
+pub(crate) const PROFILE_EXPORT_PBKDF2_ITERATIONS: u32 = if cfg!(test) { 1_000 } else { 100_000 };
 pub const IMPORT_AUTH_UPDATE_JOURNAL_DIR: &str = "profile-import-auth-journal";
 pub const IMPORT_AUTH_UPDATE_JOURNAL_VERSION: u32 = 1;
 

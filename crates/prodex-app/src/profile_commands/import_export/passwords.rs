@@ -94,8 +94,12 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
 }
 
 pub(super) fn read_profile_export_payload(path: &Path) -> Result<(ProfileExportPayload, bool)> {
+    print_stderr_line("Reading profile export bundle...");
     let (envelope, encrypted) = prodex_profile_export::read_profile_export_envelope(path)?;
-    let payload =
-        prodex_profile_export::decode_profile_export_envelope(envelope, resolve_import_password)?;
+    let payload = prodex_profile_export::decode_profile_export_envelope(envelope, || {
+        let password = resolve_import_password()?;
+        print_stderr_line("Decrypting encrypted profile export...");
+        Ok(password)
+    })?;
     Ok((payload, encrypted))
 }

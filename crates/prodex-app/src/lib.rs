@@ -145,6 +145,9 @@ pub(crate) use test_support::*;
 use update_notice::*;
 
 #[cfg(test)]
+#[path = "../tests/src/runtime_proxy_contract.rs"]
+mod runtime_proxy_contract_tests;
+#[cfg(test)]
 #[path = "../tests/src/lib.rs"]
 mod test_env_guard_tests;
 

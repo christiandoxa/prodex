@@ -29,6 +29,19 @@ Specific environment overrides for individual keys still have highest priority.
 Unknown policy preset values are rejected when `policy.toml` is parsed. Unknown environment preset values are ignored so the configured policy or built-in defaults still apply.
 The preset changes only local concurrency and admission tuning; transport timeouts remain on their normal defaults unless configured directly.
 
+## Runtime Proxy Contract
+
+`runtime_proxy` tuning must preserve these invariants:
+
+- Prodex stays a scoped Codex gateway, not a general-purpose LLM SDK.
+- Profile selection must be visible through policy, `prodex info`, `prodex doctor`, and runtime logs.
+- Pre-commit retry and fallback paths must stay bounded per request.
+- Runtime hot paths must avoid broad disk reads, quota probes, or blocking state saves.
+- Quota, budget, transport, and local pressure signals must stay classified separately.
+- Selection, admission, affinity, backoff, and first-chunk events must be structured in runtime logs.
+- Upstream HTTP/WebSocket connection reuse should be preserved where it does not change Codex semantics.
+- Secrets remain profile-isolated, redacted in diagnostics, and covered by audit events for Prodex-owned mutations.
+
 <!-- BEGIN GENERATED RUNTIME_PROXY_KEYS -->
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |

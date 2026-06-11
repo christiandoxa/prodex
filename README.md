@@ -68,6 +68,17 @@ Prodex supports two provider paths:
 
 The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers now have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, local URLs, and Bedrock/custom Codex providers still skip OpenAI quota preflight.
 
+Runtime proxy design contract:
+
+- Prodex stays a scoped Codex gateway, not a general-purpose LLM SDK.
+- Profile selection must be visible through policy, `prodex info`, `prodex doctor`, and runtime logs.
+- Pre-commit retry and fallback paths must stay bounded per request.
+- Runtime hot paths must avoid broad disk reads, quota probes, or blocking state saves.
+- Quota, budget, transport, and local pressure signals must stay classified separately.
+- Selection, admission, affinity, backoff, and first-chunk events must be structured in runtime logs.
+- Upstream HTTP/WebSocket connection reuse should be preserved where it does not change Codex semantics.
+- Secrets remain profile-isolated, redacted in diagnostics, and covered by audit events for Prodex-owned mutations.
+
 </details>
 
 ## Installation

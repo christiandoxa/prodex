@@ -11,9 +11,10 @@ use crate::{
     format_info_provider_capabilities_summary, format_info_provider_summary,
     format_info_quota_data_summary, format_info_runway, format_info_token_usage_summary,
     format_runtime_broker_metrics_targets, format_runtime_logs_summary,
-    format_runtime_policy_summary, format_runtime_proxy_preset, format_runtime_tuning_budgets,
-    format_runtime_tuning_transport, format_runtime_tuning_workers, format_secret_backend_summary,
-    print_panel, runtime_policy_summary,
+    format_runtime_policy_summary, format_runtime_proxy_contract_summary,
+    format_runtime_proxy_preset, format_runtime_tuning_budgets, format_runtime_tuning_transport,
+    format_runtime_tuning_workers, format_secret_backend_summary, print_panel,
+    runtime_policy_summary,
 };
 
 pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
@@ -65,6 +66,10 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             format_runtime_policy_summary(policy_summary.as_ref()),
         ),
         ("Runtime preset".to_string(), format_runtime_proxy_preset()),
+        (
+            "Runtime proxy contract".to_string(),
+            format_runtime_proxy_contract_summary(),
+        ),
         (
             "Secret backend".to_string(),
             format_secret_backend_summary(),
