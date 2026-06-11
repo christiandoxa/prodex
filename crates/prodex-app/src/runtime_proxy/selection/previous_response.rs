@@ -70,7 +70,7 @@ pub(crate) fn next_runtime_previous_response_candidate(
                 && runtime_previous_response_negative_cache_active(
                     &runtime.profile_health,
                     previous_response_id,
-                    &name,
+                    name,
                     route_kind,
                     now,
                 )
@@ -93,7 +93,7 @@ pub(crate) fn next_runtime_previous_response_candidate(
             if runtime_profile_auth_failure_active_with_auth_cache(
                 &runtime.profile_health,
                 &runtime.profile_usage_auth,
-                &name,
+                name,
                 now,
             ) {
                 runtime_proxy_log(
@@ -110,9 +110,8 @@ pub(crate) fn next_runtime_previous_response_candidate(
                 );
                 continue;
             }
-            let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route_from_state(
-                &runtime, &name, route_kind, now,
-            );
+            let (quota_summary, quota_source) =
+                runtime_profile_quota_summary_for_route_from_state(&runtime, name, route_kind, now);
             if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
                 || runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
             {
@@ -149,7 +148,7 @@ pub(crate) fn next_runtime_previous_response_candidate(
                 continue;
             }
             match runtime_profile_cached_auth_summary_from_maps_for_selection(
-                &name,
+                name,
                 &runtime.profile_usage_auth,
                 &runtime.profile_probe_cache,
             ) {

@@ -356,6 +356,29 @@ fn responses_stream_compaction_v2_sse_is_not_retry_failure() {
 }
 
 #[test]
+fn inspect_sse_buffer_extracts_turn_state_from_headers_array() {
+    let body = concat!(
+        "event: response.created\r\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-second\",\"headers\":[[\"x-codex-turn-state\",\"turn-second\"]]}}\r\n",
+        "\r\n",
+        "event: response.completed\r\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-second\"}}\r\n",
+        "\r\n",
+    );
+
+    match inspect_runtime_sse_buffer(body.as_bytes()) {
+        RuntimeSseInspectionProgress::Commit {
+            response_ids,
+            turn_state,
+        } => {
+            assert_eq!(response_ids, vec!["resp-second".to_string()]);
+            assert_eq!(turn_state.as_deref(), Some("turn-second"));
+        }
+        other => panic!("headers-array turn_state stream should be commit-ready, got {other:?}"),
+    }
+}
+
+#[test]
 fn runtime_sse_helpers_preserve_events_across_split_boundaries() {
     let body = concat!(
             ": keep-alive\r\n",

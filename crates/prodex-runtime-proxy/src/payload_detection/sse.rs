@@ -303,6 +303,7 @@ fn runtime_sse_payload_needs_full_inspection(payload: &str) -> bool {
         || payload.contains("rate_limit_exceeded")
         || payload.contains("previous_response_not_found")
         || payload.contains("\"usage\"")
+        || payload.contains("x-codex-turn-state")
         || payload.contains("\\\"")
         || payload.contains("\\u")
 }
