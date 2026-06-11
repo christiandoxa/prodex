@@ -1637,7 +1637,6 @@ version = "0.178.0"
 dependencies = [
  "anyhow",
  "base64",
- "prodex-runtime-proxy",
  "serde_json",
 ]
 
