@@ -70,10 +70,29 @@ pub fn runtime_mem_super_slim_shadow_codex_events<'a>(
     events: impl IntoIterator<Item = &'a Value>,
 ) -> Vec<Value> {
     let mut dedupe_state = RuntimeMemEventDedupeState::default();
-    let events = events.into_iter().collect::<Vec<_>>();
+    let events = events.into_iter();
+    let (lower_bound, upper_bound) = events.size_hint();
+    if upper_bound == Some(lower_bound) {
+        let mut elision_state = RuntimeMemConversationElisionState::new(lower_bound);
+        return events
+            .enumerate()
+            .map(|(index, event)| {
+                elision_state.remember_event(event);
+                let mut shadow = runtime_mem_super_slim_shadow_codex_event_with_dedupe(
+                    event,
+                    index,
+                    &mut dedupe_state,
+                );
+                runtime_mem_elide_old_conversation_event(event, &mut shadow, index, &elision_state);
+                shadow
+            })
+            .collect();
+    }
+
+    let events = events.collect::<Vec<_>>();
     let mut elision_state = RuntimeMemConversationElisionState::new(events.len());
     events
-        .iter()
+        .into_iter()
         .enumerate()
         .map(|(index, event)| {
             elision_state.remember_event(event);

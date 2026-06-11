@@ -2,7 +2,7 @@ use super::{
     RuntimeTokenUsage, extract_runtime_proxy_previous_response_message_from_value,
     extract_runtime_proxy_quota_message_from_value, extract_runtime_response_ids_from_value,
     extract_runtime_token_usage_from_value, extract_runtime_turn_state_from_value,
-    runtime_response_event_type_from_value,
+    push_runtime_response_id, runtime_response_event_type_from_value,
 };
 
 const RUNTIME_SSE_INVALID_DATA_MARKER: &str = "\u{0}prodex-invalid-sse-data";
@@ -144,6 +144,81 @@ pub fn runtime_sse_finish_pending<F>(
     runtime_sse_emit_event(data_lines, &mut on_event);
 }
 
+fn runtime_sse_emit_inspection_event<F>(data_lines: &mut Vec<String>, on_event: &mut F)
+where
+    F: FnMut(RuntimeParsedSseEvent),
+{
+    if data_lines.is_empty() {
+        return;
+    }
+    if runtime_sse_event_marked_invalid(data_lines) {
+        data_lines.clear();
+        return;
+    }
+    on_event(runtime_sse_inspection_event(data_lines));
+    data_lines.clear();
+}
+
+fn runtime_sse_finish_inspection_line<F>(
+    line: &mut Vec<u8>,
+    data_lines: &mut Vec<String>,
+    on_event: &mut F,
+) where
+    F: FnMut(RuntimeParsedSseEvent),
+{
+    let trimmed = runtime_sse_trimmed_line_bytes(line);
+    if trimmed.is_empty() {
+        runtime_sse_emit_inspection_event(data_lines, on_event);
+        line.clear();
+        return;
+    }
+
+    if trimmed.starts_with(b":") {
+        line.clear();
+        return;
+    }
+
+    let (field, value) = runtime_sse_split_field(trimmed);
+    if field == b"data" {
+        match value {
+            Some(bytes) => match std::str::from_utf8(bytes) {
+                Ok(text) => {
+                    if !runtime_sse_event_marked_invalid(data_lines) {
+                        data_lines.push(text.to_owned());
+                    }
+                }
+                Err(_) => runtime_sse_mark_invalid(data_lines),
+            },
+            None => {
+                if !runtime_sse_event_marked_invalid(data_lines) {
+                    data_lines.push(String::new());
+                }
+            }
+        }
+    }
+    line.clear();
+}
+
+fn runtime_sse_consume_inspection_buffer<F>(
+    line: &mut Vec<u8>,
+    data_lines: &mut Vec<String>,
+    chunk: &[u8],
+    mut on_event: F,
+) where
+    F: FnMut(RuntimeParsedSseEvent),
+{
+    for byte in chunk {
+        line.push(*byte);
+        if *byte == b'\n' {
+            runtime_sse_finish_inspection_line(line, data_lines, &mut on_event);
+        }
+    }
+    if !line.is_empty() {
+        runtime_sse_finish_inspection_line(line, data_lines, &mut on_event);
+    }
+    runtime_sse_emit_inspection_event(data_lines, &mut on_event);
+}
+
 pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgress {
     let mut line = Vec::new();
     let mut data_lines = Vec::new();
@@ -171,18 +246,11 @@ pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgre
         None
     };
     let mut terminal = None;
-    runtime_sse_consume_chunk(&mut line, &mut data_lines, buffered, |event| {
+    runtime_sse_consume_inspection_buffer(&mut line, &mut data_lines, buffered, |event| {
         if terminal.is_none() {
             terminal = process_event(event);
         }
     });
-    if terminal.is_none() {
-        runtime_sse_finish_pending(&mut line, &mut data_lines, |event| {
-            if terminal.is_none() {
-                terminal = process_event(event);
-            }
-        });
-    }
     if let Some(progress) = terminal {
         return progress;
     }
@@ -198,6 +266,57 @@ pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgre
             turn_state,
         }
     }
+}
+
+fn runtime_sse_inspection_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
+    if data_lines.len() != 1 {
+        return parse_runtime_sse_event(data_lines);
+    }
+
+    let payload = data_lines[0].trim_start_matches('\u{feff}');
+    if runtime_sse_payload_needs_full_inspection(payload) {
+        return parse_runtime_sse_event(data_lines);
+    }
+
+    let mut response_ids = Vec::new();
+    if let Some(response_id) = runtime_json_string_field(payload, "\"response_id\":\"") {
+        response_ids.push(response_id);
+    }
+    if let Some(response_id) = runtime_json_nested_response_id(payload) {
+        push_runtime_response_id(&mut response_ids, Some(&response_id));
+    }
+
+    RuntimeParsedSseEvent {
+        quota_blocked: false,
+        previous_response_not_found: false,
+        response_ids,
+        event_type: runtime_json_string_field(payload, "\"type\":\""),
+        turn_state: runtime_json_string_field(payload, "\"turn_state\":\"")
+            .or_else(|| runtime_json_string_field(payload, "\"x-codex-turn-state\":\"")),
+        token_usage: None,
+    }
+}
+
+fn runtime_sse_payload_needs_full_inspection(payload: &str) -> bool {
+    payload.contains("\"error\"")
+        || payload.contains("insufficient_quota")
+        || payload.contains("rate_limit_exceeded")
+        || payload.contains("previous_response_not_found")
+        || payload.contains("\"usage\"")
+        || payload.contains("\\\"")
+        || payload.contains("\\u")
+}
+
+fn runtime_json_nested_response_id(payload: &str) -> Option<String> {
+    let response_index = payload.find("\"response\"")?;
+    runtime_json_string_field(&payload[response_index..], "\"id\":\"")
+}
+
+fn runtime_json_string_field(payload: &str, pattern: &str) -> Option<String> {
+    let start = payload.find(pattern)? + pattern.len();
+    let rest = &payload[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 pub fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Value> {

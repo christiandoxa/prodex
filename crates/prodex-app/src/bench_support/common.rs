@@ -118,7 +118,7 @@ pub(super) fn bench_runtime_shared(
     state: RuntimeRotationState,
     active_request_limit: usize,
 ) -> RuntimeRotationProxyShared {
-    RuntimeRotationProxyShared {
+    let shared = RuntimeRotationProxyShared {
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder()
             .build()
@@ -148,5 +148,7 @@ pub(super) fn bench_runtime_shared(
             1,
             1,
         )),
-    }
+    };
+    register_runtime_proxy_persistence_mode(&shared.log_path, false);
+    shared
 }

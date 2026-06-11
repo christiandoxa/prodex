@@ -7,12 +7,16 @@
 mod admission;
 mod background;
 mod continuations;
+mod lineage;
 mod quota;
+mod route;
 
 pub use admission::*;
 pub use background::*;
 pub use continuations::*;
+pub use lineage::*;
 pub use quota::*;
+pub use route::*;
 
 #[cfg(test)]
 #[path = "../tests/src/lib.rs"]

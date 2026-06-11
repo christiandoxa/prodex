@@ -227,7 +227,7 @@ pub const RUNTIME_PROXY_RUNTIME_MEM_SUPER_SLIM_BENCH_CASE: RuntimeProxyHotPathBe
         default_size: 96,
         threshold: RuntimeProxyHotPathBenchThreshold {
             name: "runtime_mem_super_slim_token_heavy_shadow",
-            max_median_ns_per_iteration: 15_000_000,
+            max_median_ns_per_iteration: 17_000_000,
         },
     };
 

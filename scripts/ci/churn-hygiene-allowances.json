@@ -1,5 +1,18 @@
 [
   {
+    "id": "runtime-hot-path-optimization-0.178.0",
+    "requiredSubjects": [
+      "perf(runtime): optimize hot paths"
+    ],
+    "caps": {
+      "maxFiles": 40,
+      "maxBehaviorFiles": 26,
+      "maxLines": 1800,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed runtime hot-path optimization with local full test suite and runtime proxy bench guard."
+  },
+  {
     "id": "gemini-provider-parity-0.156.0",
     "requiredSubjects": [
       "feat(gemini): deliver Codex-native provider parity"

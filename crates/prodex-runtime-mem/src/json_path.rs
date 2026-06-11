@@ -7,6 +7,20 @@ enum RuntimeMemJsonPathPart {
 }
 
 pub(crate) fn runtime_mem_lookup_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    if !path.as_bytes().contains(&b'[') {
+        if !path.as_bytes().contains(&b'.') {
+            return value.get(path);
+        }
+        let mut current = value;
+        for key in path.split('.') {
+            if key.is_empty() {
+                return None;
+            }
+            current = current.get(key)?;
+        }
+        return Some(current);
+    }
+
     let mut current = value;
     for part in runtime_mem_json_path_parts(path)? {
         match part {

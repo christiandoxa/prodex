@@ -14,7 +14,7 @@ use crate::{
     runtime_mem_lookup_json_path,
 };
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 mod artifact_ref_dedupe;
 mod intern;
@@ -93,15 +93,26 @@ pub(super) struct RuntimeMemSuperSlimV2DictionaryRef<'a> {
 pub(crate) fn runtime_mem_super_slim_v2_compact_dictionary_events(
     mut events: Vec<Value>,
 ) -> Vec<Value> {
-    while let Some(candidate) = runtime_mem_super_slim_v2_best_dictionary_candidate(&events) {
-        let compacted =
-            runtime_mem_super_slim_v2_apply_dictionary_candidate(events.clone(), &candidate);
-        if runtime_mem_jsonl_events_len(&compacted) >= runtime_mem_jsonl_events_len(&events) {
+    const MAX_DICTIONARY_EVENTS_PER_SHADOW: usize = 32;
+    while runtime_mem_super_slim_v2_dictionary_event_count(&events)
+        < MAX_DICTIONARY_EVENTS_PER_SHADOW
+    {
+        let Some(candidate) = runtime_mem_super_slim_v2_best_dictionary_candidate(&events) else {
             break;
-        }
-        events = compacted;
+        };
+        events = runtime_mem_super_slim_v2_apply_dictionary_candidate(events, &candidate);
     }
     events
+}
+
+fn runtime_mem_super_slim_v2_dictionary_event_count(events: &[Value]) -> usize {
+    events
+        .iter()
+        .filter(|event| {
+            event.get("t").and_then(Value::as_str)
+                == Some(RUNTIME_MEM_SUPER_SLIM_V2_DICTIONARY_EVENT_TYPE)
+        })
+        .count()
 }
 
 fn runtime_mem_super_slim_v2_best_dictionary_candidate(
@@ -167,12 +178,9 @@ pub(crate) fn runtime_mem_super_slim_v2_candidate_savings(
         };
 
         let original_len = runtime_mem_json_value_len(event).saturating_add(1);
-        let mut compacted_event = event.clone();
-        let Some(object) = compacted_event.as_object_mut() else {
-            continue;
-        };
-        object.insert(candidate.field.clone(), Value::String(compacted));
-        let compacted_len = runtime_mem_json_value_len(&compacted_event).saturating_add(1);
+        let compacted_len = original_len
+            .saturating_sub(runtime_mem_json_string_len(value))
+            .saturating_add(runtime_mem_json_string_len(&compacted));
         if compacted_len < original_len {
             field_savings = field_savings.saturating_add(original_len - compacted_len);
         }
@@ -233,7 +241,7 @@ fn runtime_mem_super_slim_v2_prefix_dictionary_candidates(
     field: &str,
 ) -> Vec<RuntimeMemSuperSlimV2DictionaryCandidate> {
     let values = runtime_mem_super_slim_v2_field_strings(events, field);
-    let mut prefixes = Vec::<String>::new();
+    let mut prefixes = HashSet::<String>::new();
     for left_index in 0..values.len() {
         for right_index in (left_index + 1)..values.len() {
             let Some(prefix) =
@@ -241,9 +249,7 @@ fn runtime_mem_super_slim_v2_prefix_dictionary_candidates(
             else {
                 continue;
             };
-            if !prefixes.iter().any(|candidate| candidate == &prefix) {
-                prefixes.push(prefix);
-            }
+            prefixes.insert(prefix);
         }
     }
 
@@ -493,6 +499,7 @@ pub(super) fn runtime_mem_super_slim_v2_dictionary_index(value: &Value) -> Optio
         .or_else(|| value.as_u64().and_then(|value| usize::try_from(value).ok()))
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_mem_jsonl_events_len(events: &[Value]) -> usize {
     events
         .iter()
@@ -537,6 +544,19 @@ pub(super) fn runtime_mem_common_char_prefix(left: &str, right: &str) -> Option<
 
 fn runtime_mem_json_value_len(value: &Value) -> usize {
     serde_json::to_string(value).map_or(usize::MAX, |value| value.len())
+}
+
+fn runtime_mem_json_string_len(value: &str) -> usize {
+    let mut len = 2usize;
+    for ch in value.chars() {
+        len = len.saturating_add(match ch {
+            '"' | '\\' => 2,
+            '\u{08}' | '\u{0c}' | '\n' | '\r' | '\t' => 2,
+            '\u{00}'..='\u{1f}' => 6,
+            _ => ch.len_utf8(),
+        });
+    }
+    len
 }
 
 pub(crate) fn runtime_mem_value_is_text_or_v2_intern_marker(value: &Value) -> bool {

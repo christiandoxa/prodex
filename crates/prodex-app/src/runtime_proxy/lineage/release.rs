@@ -85,14 +85,18 @@ pub(crate) fn clear_runtime_dead_response_bindings(
     response_ids: &[String],
     reason: &str,
 ) -> Result<bool> {
-    let response_ids = response_ids
+    let mut response_ids = response_ids
         .iter()
         .map(String::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .collect::<BTreeSet<_>>();
+        .collect::<Vec<_>>();
     if response_ids.is_empty() {
         return Ok(false);
+    }
+    if response_ids.len() > 1 {
+        response_ids.sort_unstable();
+        response_ids.dedup();
     }
 
     let mut runtime = shared

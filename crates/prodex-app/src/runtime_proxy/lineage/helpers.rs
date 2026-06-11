@@ -48,21 +48,33 @@ pub(super) fn drain_runtime_response_turn_state_lineage(
     previous_response_id: &str,
     bound_profile: Option<&str>,
 ) -> BTreeSet<String> {
-    let plan = runtime_proxy_crate::runtime_response_turn_state_lineage_drain_plan(
-        bindings.iter().map(|(key, binding)| {
-            runtime_proxy_crate::RuntimeResponseTurnStateLineageBinding {
-                key,
-                profile_name: &binding.profile_name,
-                bound_at: binding.bound_at,
-            }
-        }),
-        previous_response_id,
-        bound_profile,
-    );
-    for key in plan.keys {
+    let prefix = runtime_response_turn_state_lineage_prefix(previous_response_id);
+    let mut removed_turn_states = BTreeSet::new();
+    let keys = bindings
+        .range(prefix.clone()..)
+        .take_while(|(key, _)| key.starts_with(&prefix))
+        .filter(|(_, binding)| {
+            bound_profile.is_none_or(|profile_name| binding.profile_name == profile_name)
+        })
+        .filter_map(|(key, _)| {
+            let (_, turn_state) =
+                runtime_proxy_crate::runtime_response_turn_state_lineage_parts(key)?;
+            removed_turn_states.insert(turn_state.to_string());
+            Some(key.clone())
+        })
+        .collect::<Vec<_>>();
+    for key in keys {
         bindings.remove(&key);
     }
-    plan.removed_turn_states
+    removed_turn_states
+}
+
+fn runtime_response_turn_state_lineage_prefix(previous_response_id: &str) -> String {
+    format!(
+        "{}{}:{previous_response_id}:",
+        runtime_proxy_crate::RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX,
+        previous_response_id.len()
+    )
 }
 
 pub(super) fn runtime_previous_response_turn_state_from_bindings(

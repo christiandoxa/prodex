@@ -16,10 +16,10 @@ pub(crate) use prodex_app_reports::ready_profile_sort_key;
 pub(crate) use prodex_app_reports::schedule_ready_profile_candidates_with_view;
 pub(crate) use prodex_app_reports::{
     ProfileSelectionRead, ProfileSelectionView, RuntimeProfileSelectionCatalog,
-    RuntimeProfileSelectionCatalogView, RuntimeRouteSelectionCatalog,
-    RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry, RuntimeSelectionProfileEntry,
-    active_profile_selection_order_with_view, merge_run_preflight_reports_with_current_first,
-    profile_rotation_order_with_view, run_profile_probe_is_ready,
+    RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry,
+    RuntimeSelectionProfileEntry, active_profile_selection_order_with_view,
+    merge_run_preflight_reports_with_current_first, profile_rotation_order_with_view,
+    run_profile_probe_is_ready,
 };
 
 pub(crate) fn app_state_profile_selection_view(

@@ -298,9 +298,25 @@ pub fn runtime_mark_continuation_status_dead(
     now: i64,
     policy: RuntimeContinuationStatusPolicy,
 ) -> bool {
-    let status = runtime_continuation_status_map_mut(statuses, kind)
-        .entry(key.to_string())
-        .or_default();
+    use std::collections::btree_map::Entry;
+
+    let status = match runtime_continuation_status_map_mut(statuses, kind).entry(key.to_string()) {
+        Entry::Vacant(entry) => {
+            entry.insert(RuntimeContinuationBindingStatus {
+                state: RuntimeContinuationBindingLifecycle::Dead,
+                confidence: 0,
+                last_touched_at: Some(now),
+                last_verified_at: None,
+                last_verified_route: None,
+                last_not_found_at: Some(now),
+                not_found_streak: policy.suspect_not_found_streak_limit,
+                success_count: 0,
+                failure_count: 1,
+            });
+            return true;
+        }
+        Entry::Occupied(entry) => entry.into_mut(),
+    };
     let previous = status.clone();
     let event_at = runtime_continuation_next_event_at(&previous, now);
     status.state = RuntimeContinuationBindingLifecycle::Dead;

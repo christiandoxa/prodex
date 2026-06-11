@@ -1,10 +1,10 @@
 use super::{
-    RuntimeProfileSelectionCatalog, RuntimeProfileSelectionCatalogView, RuntimeRotationState,
-    RuntimeRouteKind, RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView,
-    RuntimeRouteSelectionEntry, RuntimeSelectionProfileEntry,
-    runtime_profile_auth_failure_active_with_auth_cache, runtime_profile_backoff_sort_key,
-    runtime_profile_cached_auth_summary_from_maps_for_selection, runtime_profile_health_sort_key,
-    runtime_profile_inflight_sort_key, runtime_profile_name_in_selection_backoff,
+    RuntimeProfileSelectionCatalog, RuntimeRotationState, RuntimeRouteKind,
+    RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry,
+    RuntimeSelectionProfileEntry, runtime_profile_auth_failure_active_with_auth_cache,
+    runtime_profile_backoff_sort_key, runtime_profile_cached_auth_summary_from_maps_for_selection,
+    runtime_profile_health_sort_key, runtime_profile_inflight_sort_key,
+    runtime_profile_name_in_selection_backoff,
 };
 
 pub(crate) fn runtime_profile_selection_catalog(
@@ -22,14 +22,6 @@ pub(crate) fn runtime_profile_selection_catalog(
                 last_run_selected_at: runtime.state.last_run_selected_at.get(name).copied(),
             })
             .collect(),
-    }
-}
-
-pub(crate) fn runtime_profile_selection_view(
-    catalog: &RuntimeProfileSelectionCatalog,
-) -> RuntimeProfileSelectionCatalogView<'_> {
-    RuntimeProfileSelectionCatalogView {
-        entries: &catalog.entries,
     }
 }
 

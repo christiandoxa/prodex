@@ -17,21 +17,20 @@ pub(crate) enum RuntimeMemCodexPayloadKind {
 }
 
 pub(crate) fn runtime_mem_codex_payload_kind(event: &Value) -> RuntimeMemCodexPayloadKind {
-    let Some(payload_type) =
-        runtime_mem_lookup_json_path(event, "payload.type").and_then(Value::as_str)
-    else {
+    let Some(payload) = event.get("payload") else {
+        return RuntimeMemCodexPayloadKind::Other;
+    };
+    let Some(payload_type) = payload.get("type").and_then(Value::as_str) else {
         return RuntimeMemCodexPayloadKind::Other;
     };
     match payload_type {
         "user_message" => RuntimeMemCodexPayloadKind::UserMessage,
         "agent_message" => RuntimeMemCodexPayloadKind::AssistantMessage,
-        "message" => {
-            match runtime_mem_lookup_json_path(event, "payload.role").and_then(Value::as_str) {
-                Some("user") => RuntimeMemCodexPayloadKind::UserMessage,
-                Some("assistant") => RuntimeMemCodexPayloadKind::AssistantMessage,
-                _ => RuntimeMemCodexPayloadKind::Other,
-            }
-        }
+        "message" => match payload.get("role").and_then(Value::as_str) {
+            Some("user") => RuntimeMemCodexPayloadKind::UserMessage,
+            Some("assistant") => RuntimeMemCodexPayloadKind::AssistantMessage,
+            _ => RuntimeMemCodexPayloadKind::Other,
+        },
         "function_call" | "custom_tool_call" | "web_search_call" | "exec_command"
         | "local_shell_call" => RuntimeMemCodexPayloadKind::ToolUse,
         "function_call_output" | "custom_tool_call_output" | "exec_command_output" => {

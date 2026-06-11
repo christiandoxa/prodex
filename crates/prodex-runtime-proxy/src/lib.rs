@@ -6,6 +6,22 @@
 
 use std::borrow::Cow;
 
+pub use prodex_runtime_state::{
+    RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX, RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX,
+    RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX, RuntimeRouteKind,
+    runtime_compact_session_lineage_key, runtime_compact_turn_state_lineage_key,
+    runtime_is_compact_session_lineage_key, runtime_is_response_turn_state_lineage_key,
+    runtime_profile_route_bad_pairing_key, runtime_profile_route_circuit_health_key,
+    runtime_profile_route_circuit_key, runtime_profile_route_circuit_profile_name,
+    runtime_profile_route_circuit_reopen_key, runtime_profile_route_health_key,
+    runtime_profile_route_key_parts, runtime_profile_route_performance_key,
+    runtime_profile_route_success_streak_key, runtime_profile_transport_backoff_key,
+    runtime_profile_transport_backoff_key_parts, runtime_profile_transport_backoff_key_valid,
+    runtime_profile_transport_backoff_profile_name, runtime_response_turn_state_lineage_key,
+    runtime_response_turn_state_lineage_parts, runtime_route_coupled_kinds,
+    runtime_route_kind_from_label, runtime_route_kind_label,
+};
+
 mod admission;
 mod attempt_outcome;
 mod buffered_response;
@@ -79,33 +95,6 @@ pub struct RuntimeProxyRequest {
     pub path_and_query: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum RuntimeRouteKind {
-    Responses,
-    Compact,
-    Websocket,
-    Standard,
-}
-
-pub fn runtime_route_kind_label(route_kind: RuntimeRouteKind) -> &'static str {
-    match route_kind {
-        RuntimeRouteKind::Responses => "responses",
-        RuntimeRouteKind::Compact => "compact",
-        RuntimeRouteKind::Websocket => "websocket",
-        RuntimeRouteKind::Standard => "standard",
-    }
-}
-
-pub fn runtime_route_kind_from_label(label: &str) -> Option<RuntimeRouteKind> {
-    match label {
-        "responses" => Some(RuntimeRouteKind::Responses),
-        "compact" => Some(RuntimeRouteKind::Compact),
-        "websocket" => Some(RuntimeRouteKind::Websocket),
-        "standard" => Some(RuntimeRouteKind::Standard),
-        _ => None,
-    }
 }
 
 pub fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static str {
