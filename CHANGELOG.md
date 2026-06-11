@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.177.0 - 2026-06-11
+
+### Runtime
+
+- Surface proxy contract and import progress (`9a59ca0`)
+
 ## 0.176.0 - 2026-06-11
 
 ### Misc
@@ -76,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Normalize visible response text (`84d37b8`)
-
-## 0.164.0 - 2026-06-08
-
-### Misc
-
-- Harden Codex-native tool history (`231f876`)
