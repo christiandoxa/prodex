@@ -99,9 +99,32 @@ fn runtime_gemini_semantic_compact_response_parts_from_value(
     if !(200..300).contains(&status) {
         bail!("Gemini semantic compact returned HTTP {status}");
     }
+    let summary = runtime_gemini_semantic_compact_summary(value, request_id);
+    if summary.is_empty() {
+        bail!("Gemini semantic compact returned no summary text");
+    }
+    let summary =
+        runtime_gemini_semantic_compact_continuation_summary(&summary, compact_request_body);
+    Ok(runtime_gemini_compact_response_parts(&summary))
+}
+
+fn runtime_gemini_semantic_compact_summary(value: &serde_json::Value, request_id: u64) -> String {
+    if let Some(content) = value
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return content.to_string();
+    }
+
     let value = runtime_gemini_normalized_response_value(value);
     let response = runtime_gemini_responses_value_from_generate_value(&value, request_id);
-    let summary = response
+    response
         .get("output")
         .and_then(serde_json::Value::as_array)
         .into_iter()
@@ -123,13 +146,7 @@ fn runtime_gemini_semantic_compact_response_parts_from_value(
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
-        .join("\n");
-    if summary.is_empty() {
-        bail!("Gemini semantic compact returned no summary text");
-    }
-    let summary =
-        runtime_gemini_semantic_compact_continuation_summary(&summary, compact_request_body);
-    Ok(runtime_gemini_compact_response_parts(&summary))
+        .join("\n")
 }
 
 fn runtime_gemini_semantic_compact_continuation_summary(
@@ -661,6 +678,34 @@ mod tests {
         };
 
         assert!(error.to_string().contains("no summary text"));
+    }
+
+    #[test]
+    fn gemini_semantic_compact_accepts_openai_chat_completion_output() {
+        let value = serde_json::json!({
+            "id": "chatcmpl_compact",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Goal: keep the Gemini OpenAI-compatible adapter working."
+                },
+                "finish_reason": "stop"
+            }]
+        });
+
+        let parts = runtime_gemini_semantic_compact_response_parts_from_value(
+            200,
+            &value,
+            101,
+            b"{\"input\":[]}",
+        )
+        .unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
+        let text = response["output"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+
+        assert!(text.contains("Gemini OpenAI-compatible adapter"));
     }
 
     #[test]

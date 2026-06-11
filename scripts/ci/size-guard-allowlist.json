@@ -46,7 +46,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1785,
+    "maxLines": 1775,
     "reason": "Gemini local rewrite authentication, session model affinity, model-unavailable caching, retry budgeting, and request context remain capped while default model ownership is shared through the Gemini runtime crate."
   },
   {

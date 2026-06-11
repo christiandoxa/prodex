@@ -25,8 +25,12 @@ use super::local_rewrite_gemini_models::{
 };
 use super::local_rewrite_gemini_quota::{
     runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
-    runtime_gemini_normalized_error_parts, runtime_gemini_response_retryable_quota,
-    runtime_gemini_retry_delay_ms,
+    runtime_gemini_normalized_error_parts, runtime_gemini_retry_delay_ms,
+};
+use super::local_rewrite_gemini_retry::{
+    RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
+    runtime_gemini_invalid_stream_retry_delay_ms, runtime_gemini_should_inline_rate_limit_retry,
+    runtime_gemini_should_rotate_after_quota_response,
 };
 use super::local_rewrite_gemini_thought_signatures::runtime_gemini_harden_translated_thoughts as harden_thoughts;
 use super::local_rewrite_rate_limits::runtime_gemini_quota_codex_headers;
@@ -63,15 +67,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RUNTIME_GEMINI_PROVIDER_BINDING_LIMIT: usize = 4096;
 const RUNTIME_GEMINI_LOCAL_RETRY_LIMIT: usize = 9;
-const RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS: u64 = 30_000;
 const RUNTIME_GEMINI_INVALID_STREAM_RETRY_LIMIT: usize = 3;
-const RUNTIME_GEMINI_INVALID_STREAM_RETRY_BASE_DELAY_MS: u64 = 1_000;
 const RUNTIME_GEMINI_MODEL_UNAVAILABLE_TTL_MS: u64 = 60 * 60 * 1_000;
 const RUNTIME_GEMINI_MODEL_PREFERENCE_TTL_MS: u64 = 10 * 60 * 1_000;
 const RUNTIME_GEMINI_PRECOMMIT_PEEK_LIMIT: usize = 64 * 1024;
 
 #[path = "local_rewrite_gemini_auth.rs"]
 mod local_rewrite_gemini_auth;
+#[path = "local_rewrite_gemini_openai.rs"]
+mod local_rewrite_gemini_openai;
+use local_rewrite_gemini_openai::send_runtime_gemini_openai_compatible_request;
 
 #[derive(Clone)]
 pub(super) struct RuntimeGeminiOAuthPool {
@@ -151,6 +156,11 @@ pub(super) fn send_runtime_gemini_upstream_request(
     auth: &RuntimeGeminiProviderAuth,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let responses_route = path_without_query(&request.path_and_query).ends_with("/responses");
+    if responses_route && let RuntimeGeminiProviderAuth::ApiKeys { api_keys } = auth {
+        return send_runtime_gemini_openai_compatible_request(
+            request_id, request, shared, body, api_keys,
+        );
+    }
     let thinking_budget_tokens = runtime_gemini_thinking_budget_tokens(&shared.provider);
     let model_scope = shared
         .gemini_oauth_pool
@@ -1758,26 +1768,6 @@ fn runtime_gemini_now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
-}
-
-fn runtime_gemini_should_rotate_after_quota_response(
-    status: u16,
-    hard_affinity: bool,
-    quota_fallback_allowed: bool,
-    attempt_index: usize,
-    attempt_count: usize,
-) -> bool {
-    runtime_gemini_response_retryable_quota(status)
-        && (!hard_affinity || quota_fallback_allowed)
-        && attempt_index + 1 < attempt_count
-}
-
-fn runtime_gemini_should_inline_rate_limit_retry(delay_ms: u64) -> bool {
-    delay_ms > 0 && delay_ms <= RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS
-}
-
-fn runtime_gemini_invalid_stream_retry_delay_ms(retry_index: usize) -> u64 {
-    RUNTIME_GEMINI_INVALID_STREAM_RETRY_BASE_DELAY_MS.saturating_mul(1_u64 << retry_index.min(8))
 }
 
 #[cfg(test)]

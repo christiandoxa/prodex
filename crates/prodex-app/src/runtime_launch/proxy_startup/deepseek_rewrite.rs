@@ -1,11 +1,12 @@
 use self::json_helpers::{runtime_deepseek_json_string, runtime_deepseek_json_string_at_path};
 #[cfg(test)]
-use self::response::{
+pub(in crate::runtime_launch::proxy_startup) use self::response::{
     runtime_deepseek_chat_assistant_messages_from_response_value,
     runtime_deepseek_responses_value_from_chat_value,
 };
-pub(super) use self::response::{
-    runtime_deepseek_chat_buffered_response_parts, runtime_deepseek_created_at,
+pub(in crate::runtime_launch::proxy_startup) use self::response::{
+    runtime_deepseek_chat_buffered_response_parts,
+    runtime_deepseek_chat_tool_call_thought_signature, runtime_deepseek_created_at,
     runtime_deepseek_normalize_assistant_tool_call_content, runtime_deepseek_responses_usage,
     runtime_deepseek_store_conversation, runtime_deepseek_take_pending_messages,
 };
@@ -83,6 +84,9 @@ pub(super) fn runtime_chat_compatible_request_body(
             })]
         });
     runtime_deepseek_repair_tool_call_adjacency(&mut messages);
+    if provider_kind == RuntimeProviderBridgeKind::Gemini {
+        runtime_gemini_openai_preserve_tool_call_signatures(&mut messages);
+    }
     if messages.is_empty() {
         messages.push(serde_json::json!({
             "role": "user",
@@ -97,7 +101,11 @@ pub(super) fn runtime_chat_compatible_request_body(
         serde_json::Value::Array(messages.clone()),
     );
     if include_reasoning_params {
-        runtime_deepseek_apply_reasoning_from_responses_request(&value, &mut request);
+        runtime_deepseek_apply_reasoning_from_responses_request(
+            &value,
+            &mut request,
+            provider_kind,
+        );
     }
     if let Some(tools) = runtime_deepseek_tools_from_responses_request(&value) {
         request.insert("tools".to_string(), serde_json::Value::Array(tools));
@@ -124,6 +132,36 @@ pub(super) fn runtime_chat_compatible_request_body(
     let body = serde_json::to_vec(&serde_json::Value::Object(request))
         .context("failed to serialize DeepSeek chat request JSON")?;
     Ok(RuntimeDeepSeekTranslatedRequest { body, messages })
+}
+
+fn runtime_gemini_openai_preserve_tool_call_signatures(messages: &mut [serde_json::Value]) {
+    for message in messages {
+        let Some(tool_calls) = message
+            .get_mut("tool_calls")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            let Some(object) = tool_call.as_object_mut() else {
+                continue;
+            };
+            let Some(signature) = runtime_deepseek_tool_call_thought_signature(object) else {
+                continue;
+            };
+            object.remove("gemini_thought_signature");
+            object.remove("thought_signature");
+            object.remove("thoughtSignature");
+            object.insert(
+                "extra_content".to_string(),
+                serde_json::json!({
+                    "google": {
+                        "thought_signature": signature,
+                    }
+                }),
+            );
+        }
+    }
 }
 
 fn runtime_deepseek_messages_from_responses_request(
@@ -538,6 +576,12 @@ fn runtime_deepseek_tool_call_thought_signature(
             &["provider_specific_fields", "thought_signature"],
         )
     })
+    .or_else(|| {
+        runtime_deepseek_json_string_at_path(
+            object,
+            &["extra_content", "google", "thought_signature"],
+        )
+    })
     .filter(|signature| !signature.trim().is_empty())
 }
 
@@ -622,6 +666,7 @@ fn runtime_deepseek_responses_content_part_text(value: &serde_json::Value) -> Op
 fn runtime_deepseek_apply_reasoning_from_responses_request(
     value: &serde_json::Value,
     request: &mut serde_json::Map<String, serde_json::Value>,
+    provider_kind: RuntimeProviderBridgeKind,
 ) {
     let effort = value
         .get("reasoning")
@@ -632,6 +677,15 @@ fn runtime_deepseek_apply_reasoning_from_responses_request(
                 .get("reasoning_effort")
                 .and_then(serde_json::Value::as_str)
         });
+    if provider_kind == RuntimeProviderBridgeKind::Gemini {
+        if let Some(effort) = effort.and_then(runtime_gemini_openai_reasoning_effort) {
+            request.insert(
+                "reasoning_effort".to_string(),
+                serde_json::Value::String(effort.to_string()),
+            );
+        }
+        return;
+    }
     match effort.and_then(runtime_deepseek_reasoning_effort) {
         Some(Some(effort)) => {
             request.insert(
@@ -650,6 +704,17 @@ fn runtime_deepseek_apply_reasoning_from_responses_request(
             );
         }
         None => {}
+    }
+}
+
+fn runtime_gemini_openai_reasoning_effort(effort: &str) -> Option<&'static str> {
+    match effort.trim().to_ascii_lowercase().as_str() {
+        "xhigh" | "max" | "high" => Some("high"),
+        "medium" => Some("medium"),
+        "low" => Some("low"),
+        "minimal" => Some("minimal"),
+        "none" => Some("none"),
+        _ => None,
     }
 }
 

@@ -176,18 +176,37 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
     }
 
     if gemini_responses_route && (200..300).contains(&status) {
-        respond_runtime_gemini_rewrite(
-            request_id,
-            request,
-            response,
-            RuntimeGeminiRewriteContext {
-                prefix,
-                status,
-                content_type: &content_type,
-                shared,
-                gemini_context,
-            },
-        );
+        if gemini_context.is_none() {
+            respond_runtime_chat_compatible_rewrite(
+                request_id,
+                request,
+                response,
+                RuntimeChatCompatibleRewriteContext {
+                    status,
+                    content_type: &content_type,
+                    shared,
+                    provider: RuntimeChatCompatibleProvider {
+                        prefix: "gemini",
+                        label: "Google Gemini",
+                    },
+                    profile_name: None,
+                    binding_recorder: None,
+                },
+            );
+        } else {
+            respond_runtime_gemini_rewrite(
+                request_id,
+                request,
+                response,
+                RuntimeGeminiRewriteContext {
+                    prefix,
+                    status,
+                    content_type: &content_type,
+                    shared,
+                    gemini_context,
+                },
+            );
+        }
         return;
     }
 

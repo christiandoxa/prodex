@@ -1,7 +1,7 @@
 use super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, runtime_deepseek_created_at,
-    runtime_deepseek_responses_usage, runtime_deepseek_rtk_wrapped_tool_arguments,
-    runtime_deepseek_store_conversation,
+    RuntimeDeepSeekConversationStore, runtime_deepseek_chat_tool_call_thought_signature,
+    runtime_deepseek_created_at, runtime_deepseek_responses_usage,
+    runtime_deepseek_rtk_wrapped_tool_arguments, runtime_deepseek_store_conversation,
 };
 use super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use std::collections::BTreeMap;
@@ -216,6 +216,7 @@ struct RuntimeDeepSeekToolCall {
     call_id: Option<String>,
     name: Option<String>,
     arguments: String,
+    thought_signature: Option<String>,
     added: bool,
     done: bool,
 }
@@ -357,6 +358,9 @@ impl RuntimeDeepSeekSseState {
             if let Some(id) = value.get("id").and_then(serde_json::Value::as_str) {
                 tool_call.call_id = Some(id.to_string());
             }
+            if let Some(signature) = runtime_deepseek_chat_tool_call_thought_signature(value) {
+                tool_call.thought_signature = Some(signature);
+            }
             if let Some(function) = value.get("function") {
                 if let Some(name) = function.get("name").and_then(serde_json::Value::as_str) {
                     tool_call.name = Some(name.to_string());
@@ -423,10 +427,15 @@ impl RuntimeDeepSeekSseState {
                 let arguments =
                     runtime_deepseek_rtk_wrapped_tool_arguments(&name, &tool_call.arguments);
                 tool_call.arguments = arguments.clone();
-                Some((call_id, name, arguments))
+                Some((
+                    call_id,
+                    name,
+                    arguments,
+                    tool_call.thought_signature.clone(),
+                ))
             })
             .collect::<Vec<_>>();
-        for (call_id, name, arguments) in pending {
+        for (call_id, name, arguments, thought_signature) in pending {
             if name == "tool_search" {
                 let arguments = serde_json::from_str::<serde_json::Value>(&arguments)
                     .unwrap_or_else(|_| serde_json::json!({}));
@@ -467,6 +476,9 @@ impl RuntimeDeepSeekSseState {
             });
             if let Some(namespace) = namespace {
                 item["namespace"] = serde_json::Value::String(namespace);
+            }
+            if let Some(signature) = thought_signature {
+                item["gemini_thought_signature"] = serde_json::Value::String(signature);
             }
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
@@ -633,7 +645,7 @@ impl RuntimeDeepSeekSseState {
                 self.tool_calls
                     .iter()
                     .map(|(index, tool_call)| {
-                        serde_json::json!({
+                        let mut tool_call_value = serde_json::json!({
                             "id": tool_call
                                 .call_id
                                 .clone()
@@ -646,7 +658,15 @@ impl RuntimeDeepSeekSseState {
                                     .unwrap_or_else(|| "tool_call".to_string()),
                                 "arguments": tool_call.arguments,
                             },
-                        })
+                        });
+                        if let Some(signature) = tool_call.thought_signature.as_deref() {
+                            tool_call_value["extra_content"] = serde_json::json!({
+                                "google": {
+                                    "thought_signature": signature,
+                                }
+                            });
+                        }
+                        tool_call_value
                     })
                     .collect(),
             );
@@ -695,6 +715,9 @@ impl RuntimeDeepSeekSseState {
             });
             if let Some(namespace) = namespace {
                 item["namespace"] = serde_json::Value::String(namespace);
+            }
+            if let Some(signature) = tool_call.thought_signature.as_deref() {
+                item["gemini_thought_signature"] = serde_json::Value::String(signature.to_string());
             }
             output.push(item);
         }

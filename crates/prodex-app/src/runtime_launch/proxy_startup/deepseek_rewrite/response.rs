@@ -267,7 +267,22 @@ fn runtime_deepseek_responses_tool_call_item(
     if let Some(namespace) = namespace {
         item["namespace"] = serde_json::Value::String(namespace);
     }
+    if let Some(signature) = runtime_deepseek_chat_tool_call_thought_signature(tool_call) {
+        item["gemini_thought_signature"] = serde_json::Value::String(signature.to_string());
+    }
     Some(item)
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_tool_call_thought_signature(
+    tool_call: &serde_json::Value,
+) -> Option<String> {
+    tool_call
+        .get("extra_content")
+        .and_then(|value| value.get("google"))
+        .and_then(|value| value.get("thought_signature"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|signature| !signature.trim().is_empty())
+        .map(str::to_string)
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_usage(

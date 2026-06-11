@@ -21,6 +21,7 @@ pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
     OpenAiResponses,
     DeepSeek { api_key: &'a str },
     Gemini { auth: &'a RuntimeGeminiAuth },
+    GeminiOpenAi { api_key: &'a str },
 }
 
 pub(super) struct RuntimeLocalRewriteSelectedAnthropicAuth {
@@ -39,7 +40,10 @@ impl RuntimeLocalRewritePreparedAuth<'_> {
                 RuntimeProviderBridgeKind::OpenAiResponses
             }
             RuntimeLocalRewritePreparedAuth::DeepSeek { .. } => RuntimeProviderBridgeKind::DeepSeek,
-            RuntimeLocalRewritePreparedAuth::Gemini { .. } => RuntimeProviderBridgeKind::Gemini,
+            RuntimeLocalRewritePreparedAuth::Gemini { .. }
+            | RuntimeLocalRewritePreparedAuth::GeminiOpenAi { .. } => {
+                RuntimeProviderBridgeKind::Gemini
+            }
         }
     }
 }
@@ -145,6 +149,19 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                     upstream_request = upstream_request.bearer_auth(access_token);
                 }
             }
+            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
+                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
+            }
+        }
+        RuntimeLocalRewritePreparedAuth::GeminiOpenAi { api_key } => {
+            upstream_request = upstream_request
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "text/event-stream, application/json",
+                )
+                .bearer_auth(api_key);
             if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
                 upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
             }
@@ -256,6 +273,15 @@ pub(super) fn runtime_openai_standard_provider_upstream_url(
         return runtime_local_rewrite_upstream_url(base_url, mount_path, "/chat/completions");
     }
     runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
+}
+
+pub(super) fn runtime_gemini_openai_compatible_upstream_url(base_url: &str) -> String {
+    let base_url = base_url.trim_end_matches('/');
+    if base_url.ends_with("/openai") {
+        format!("{base_url}/chat/completions")
+    } else {
+        format!("{base_url}/openai/chat/completions")
+    }
 }
 
 pub(super) fn runtime_local_rewrite_api_key_attempts<'a>(
@@ -469,6 +495,22 @@ mod tests {
                 "/v1/chat/completions"
             ),
             "https://upstream.test/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn gemini_openai_compatible_url_uses_documented_chat_completions_endpoint() {
+        assert_eq!(
+            runtime_gemini_openai_compatible_upstream_url(
+                "https://generativelanguage.googleapis.com/v1beta"
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        assert_eq!(
+            runtime_gemini_openai_compatible_upstream_url(
+                "https://generativelanguage.googleapis.com/v1beta/openai/"
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         );
     }
 
