@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.178.0 - 2026-06-12
+
+### Runtime
+
+- Optimize hot paths (`3039952`)
+
 ## 0.177.0 - 2026-06-11
 
 ### Runtime
@@ -72,13 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden super provider bridges (`c8c1d22`)
-
-## 0.165.0 - 2026-06-08
-
-### Docs
-
-- Clarify Gemini feature parity mapping (`a25b4a2`)
-
-### Misc
-
-- Normalize visible response text (`84d37b8`)
