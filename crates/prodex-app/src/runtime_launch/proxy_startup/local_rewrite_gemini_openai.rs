@@ -1,11 +1,26 @@
 use super::super::deepseek_rewrite::runtime_chat_compatible_request_body;
+use super::super::local_rewrite::{
+    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+    runtime_local_rewrite_model_selection,
+};
 use super::super::local_rewrite_search_fallback::{
     RuntimeLocalRewritePreparedSendResult, RuntimeLocalRewriteSearchFallbackRequest,
     send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
 };
-use super::super::local_rewrite_transport::runtime_gemini_openai_compatible_upstream_url;
-use super::super::provider_bridge::runtime_provider_should_rotate_auth_after_response;
-use super::*;
+use super::super::local_rewrite_transport::{
+    RuntimeLocalRewritePreparedAuth, runtime_gemini_openai_compatible_upstream_url,
+    runtime_local_rewrite_api_key_attempts,
+};
+use super::super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_model_fallback_chain,
+    runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
+    runtime_provider_should_rotate_auth_after_response,
+};
+use crate::{RuntimeProxyRequest, runtime_proxy_log};
+use anyhow::{Result, bail};
+use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
+use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 
 pub(super) fn send_runtime_gemini_openai_compatible_request(
     request_id: u64,
