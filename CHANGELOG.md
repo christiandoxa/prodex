@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.175.0 - 2026-06-11
+
+### Misc
+
+- Use OpenAI-compatible API for API keys (`1d3f8f1`)
+
 ## 0.174.0 - 2026-06-10
 
 ### Misc
@@ -75,10 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden native provider parity (`9dcf320`)
-
-## 0.162.0 - 2026-06-08
-
-### Misc
-
-- Satisfy clippy for model memory (`e69a925`)
-- Remember selected model per session (`2b0a1d2`)
