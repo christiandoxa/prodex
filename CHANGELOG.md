@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.176.0 - 2026-06-11
+
+### Misc
+
+- Add plan-aware auto-rotate scoring (`297fe59`)
+
 ## 0.175.0 - 2026-06-11
 
 ### Misc
 
+- Replace super wildcard import (`80ba5e6`)
 - Use OpenAI-compatible API for API keys (`1d3f8f1`)
 
 ## 0.174.0 - 2026-06-10
@@ -75,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden Codex-native tool history (`231f876`)
-
-## 0.163.0 - 2026-06-08
-
-### Misc
-
-- Harden native provider parity (`9dcf320`)
