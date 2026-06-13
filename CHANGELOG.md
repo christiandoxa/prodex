@@ -2,12 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.179.0 - Unreleased
+## 0.180.0 - 2026-06-13
 
-Changes after `0.178.0`.
+### CLI
+
+- Add profile dashboard (`f4e2f87`)
+
+## 0.179.0 - 2026-06-13
 
 ### Misc
 
+- Satisfy optimizer discovery clippy (`0ad238b`)
+- Use explicit resume repair imports (`269c5ea`)
+- 0.179.0 (`e354890`)
 - Repair corrupt resume sessions (`00b09ae`)
 
 ## 0.178.0 - 2026-06-12
@@ -76,15 +83,3 @@ Changes after `0.178.0`.
 ### Misc
 
 - Preserve Gemini CLI OAuth project routing (`bc88b5e`)
-
-## 0.167.0 - 2026-06-09
-
-### Misc
-
-- Add native Google CLI agents (`3a7921f`)
-
-## 0.166.0 - 2026-06-08
-
-### Misc
-
-- Harden super provider bridges (`c8c1d22`)

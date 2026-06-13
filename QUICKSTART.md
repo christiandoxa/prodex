@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.179.0`:
+The current local version in this repo is `0.180.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.179.0
+npm install -g @christiandoxa/prodex@0.180.0
 ```
 
 Dependency status in this repo:
@@ -127,6 +127,7 @@ prodex quota --all --auth no-auth --once
 prodex quota --all --detail --provider openai
 prodex quota --all --provider deepseek --once
 prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
+prodex dashboard
 prodex session list
 prodex info
 ```
@@ -138,6 +139,8 @@ prodex quota --all --once
 ```
 
 In the live `prodex quota --all --detail` view, press `f` to cycle provider filters: `all`, `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider deepseek`, or `--provider local` to start locked to one provider.
+
+`prodex dashboard` starts a localhost browser dashboard, defaulting to `http://127.0.0.1:8765`. It shows configured profiles, active account controls, and live quota usage using the same quota collectors as `prodex quota`. Use `prodex dashboard --port 0` to bind a free port, or `--base-url` to point quota checks at a custom Codex-compatible backend. The dashboard has no password auth, so keep it bound to localhost unless the network is trusted.
 
 Use `prodex session list` to inspect shared Codex parent sessions, or `prodex session current` to show parent sessions started from the current directory. Add `--include-subagents` only when you explicitly need spawned agent sessions for diagnostics.
 
