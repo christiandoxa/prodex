@@ -1,4 +1,8 @@
-use super::*;
+use std::ffi::OsString;
+
+use anyhow::{Result, bail};
+
+use crate::AppPaths;
 
 pub(super) fn repair_resume_session_metadata_prefix_from_codex_args(
     codex_args: &[OsString],
