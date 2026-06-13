@@ -2,10 +2,20 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.179.0 - Unreleased
+
+Changes after `0.178.0`.
+
+### Misc
+
+- Repair corrupt resume sessions (`00b09ae`)
+
 ## 0.178.0 - 2026-06-12
 
 ### Runtime
 
+- Preserve SSE header-array turn state (`8478bfb`)
+- Respect anthropic crate boundaries (`9f9ef08`)
 - Optimize hot paths (`3039952`)
 
 ## 0.177.0 - 2026-06-11
