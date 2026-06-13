@@ -464,6 +464,7 @@ fn executable_file(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::slice::from_ref;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -696,10 +697,8 @@ mod tests {
         fs::write(&path_command, "").expect("path command should be written");
         fs::write(&command, "").expect("fake command should be written");
 
-        assert_eq!(
-            find_optimizer_command("sqz-mcp", &[path_root.clone()], &[root.clone()]),
-            Some(command)
-        );
+        let found = find_optimizer_command("sqz-mcp", from_ref(&path_root), from_ref(&root));
+        assert_eq!(found, Some(command));
 
         let _ = fs::remove_dir_all(path_root);
         let _ = fs::remove_dir_all(root);
