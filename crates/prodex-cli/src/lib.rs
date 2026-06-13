@@ -114,6 +114,10 @@ pub enum Commands {
     )]
     Quota(QuotaArgs),
     #[command(
+        about = "Serve a local browser dashboard for profiles, active account, and quota usage."
+    )]
+    Dashboard(DashboardArgs),
+    #[command(
         trailing_var_arg = true,
         about = "Run codex through prodex with quota preflight and safe auto-rotate.",
         after_help = CLI_RUN_AFTER_HELP
@@ -264,6 +268,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "logout"
             | "update"
             | "quota"
+            | "dashboard"
             | "run"
             | "caveman"
             | "rtk"

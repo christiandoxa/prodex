@@ -5,6 +5,8 @@ use std::ffi::OsString;
 mod app_server;
 #[path = "cleanup.rs"]
 mod cleanup;
+#[path = "dashboard.rs"]
+mod dashboard;
 #[path = "expose.rs"]
 mod expose;
 #[path = "external_provider.rs"]

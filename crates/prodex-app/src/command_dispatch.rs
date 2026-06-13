@@ -129,6 +129,12 @@ impl CommandExecute for CurrentCommand {
     }
 }
 
+impl CommandExecute for DashboardArgs {
+    fn execute(self) -> Result<()> {
+        handle_dashboard(self)
+    }
+}
+
 impl CommandExecute for DoctorArgs {
     fn execute(self) -> Result<()> {
         handle_doctor(self)
@@ -262,6 +268,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Logout(command) => RoutedCommand::new(command),
         Commands::Update(command) => RoutedCommand::new(command),
         Commands::Quota(command) => RoutedCommand::new(command),
+        Commands::Dashboard(command) => RoutedCommand::new(command),
         Commands::Run(command) => RoutedCommand::new(command),
         Commands::Caveman(command) => RoutedCommand::new(command),
         Commands::Rtk(command) => {

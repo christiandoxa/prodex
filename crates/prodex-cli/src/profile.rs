@@ -167,3 +167,16 @@ pub struct QuotaArgs {
     #[arg(long, value_name = "URL")]
     pub base_url: Option<String>,
 }
+
+#[derive(Args, Debug)]
+pub struct DashboardArgs {
+    /// Interface to bind. Defaults to localhost only.
+    #[arg(long, default_value = "127.0.0.1", value_name = "HOST")]
+    pub host: String,
+    /// Port to bind. Use 0 to ask the OS for a free port.
+    #[arg(long, default_value_t = 8765, value_name = "PORT")]
+    pub port: u16,
+    /// Override the ChatGPT backend base URL used for quota requests.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+}
