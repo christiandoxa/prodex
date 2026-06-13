@@ -2,9 +2,11 @@ use super::*;
 mod preflight;
 mod provider_names;
 mod providers;
+mod resume_repair;
 use preflight::*;
 use provider_names::*;
 use providers::*;
+use resume_repair::*;
 
 struct RunCommandStrategy {
     args: RunArgs,
@@ -33,6 +35,10 @@ impl RunCommandStrategy {
             runtime_launch_cli_model_context_window_tokens(&codex_args);
         let mut gemini_thinking_budget_tokens =
             runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
+        let dry_run = args.dry_run || dry_run_arg;
+        if !dry_run {
+            repair_resume_session_metadata_prefix_from_codex_args(&codex_args)?;
+        }
         let auto_external_provider = if model_provider_override.is_none() {
             runtime_resume_external_provider_from_codex_args(&codex_args)?
         } else {
@@ -64,7 +70,6 @@ impl RunCommandStrategy {
             gemini_thinking_budget_tokens =
                 runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
         }
-        let dry_run = args.dry_run || dry_run_arg;
         Ok(Self {
             args,
             codex_args,

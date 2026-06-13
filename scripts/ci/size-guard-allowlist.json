@@ -1,8 +1,8 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 880,
-    "reason": "Runtime launch orchestration remains capped while provider-specific setup is extracted."
+    "maxLines": 885,
+    "reason": "Runtime launch orchestration remains capped while resume repair and provider-specific setup are extracted."
   },
   {
     "file": "crates/prodex-app/src/runtime_gemini_cli_compat.rs",

@@ -38,6 +38,152 @@ fn session_reports_parse_codex_jsonl_metadata() {
 }
 
 #[test]
+fn session_reports_skip_jsonl_without_resume_metadata_at_start() {
+    let root = test_temp_dir("session-corrupt-jsonl");
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    fs::write(
+        sessions.join("rollout-2026-06-13T02-04-31-019ebd01.jsonl"),
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial after restart\"}}\n{\"timestamp\":\"2026-06-13T02:04:32Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"019ebd01-c881-74c0-b01d-7fdf5bd4dd32\"}}\n",
+    )
+    .expect("corrupt session should be written");
+
+    let reports =
+        collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+
+    assert!(reports.is_empty());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_reports_keep_legacy_jsonl_when_first_line_has_id_without_type() {
+    let root = test_temp_dir("session-legacy-jsonl");
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    fs::write(
+        sessions.join("legacy.jsonl"),
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"payload\":{\"id\":\"legacy-session\",\"cwd\":\"/tmp/workspace\"}}\n{\"timestamp\":\"2026-06-13T02:05:00Z\",\"type\":\"event\"}\n",
+    )
+    .expect("legacy session should be written");
+
+    let reports =
+        collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].id, "legacy-session");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_resume_session_metadata_prefix_moves_late_metadata_to_start() {
+    let root = test_temp_dir("session-repair-prefix");
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_path = sessions.join("rollout-2026-06-13T02-04-31-019ebd01.jsonl");
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial after restart\"}}\n{\"timestamp\":\"2026-06-13T02:04:32Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"019ebd01-c881-74c0-b01d-7fdf5bd4dd32\",\"cwd\":\"/tmp/workspace\"}}\n{\"timestamp\":\"2026-06-13T02:04:33Z\",\"type\":\"event\",\"payload\":{\"message\":\"after metadata\"}}\n",
+    )
+    .expect("session should be written");
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, "019ebd01-c881-74c0-b01d-7fdf5bd4dd32")
+            .expect("session repair should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
+    assert!(
+        repaired_raw
+            .lines()
+            .next()
+            .expect("session should have first line")
+            .contains(r#""type":"session_meta""#)
+    );
+    assert!(
+        session_path
+            .with_extension("jsonl.prodex-repair-bak")
+            .is_file()
+    );
+
+    let reports =
+        collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].id, "019ebd01-c881-74c0-b01d-7fdf5bd4dd32");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn unrepairable_resume_session_detects_rollout_named_file_without_metadata() {
+    let root = test_temp_dir("session-unrepairable-rollout");
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_path =
+        sessions.join("rollout-2026-06-13T02-04-31-019ebd01-c881-74c0-b01d-7fdf5bd4dd32.jsonl");
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial only\"}}\n",
+    )
+    .expect("session should be written");
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, "019ebd01-c881-74c0-b01d-7fdf5bd4dd32")
+            .expect("repair check should succeed");
+    let unrepairable =
+        find_unrepairable_resume_session(&root, "019ebd01-c881-74c0-b01d-7fdf5bd4dd32")
+            .expect("unrepairable check should succeed");
+
+    assert_eq!(repaired, None);
+    assert_eq!(unrepairable.as_deref(), Some(session_path.as_path()));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_resume_session_metadata_prefix_does_not_repair_ambiguous_prefix() {
+    let root = test_temp_dir("session-repair-ambiguous-prefix");
+    let sessions = root.join("sessions");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let first = sessions.join("first.jsonl");
+    let second = sessions.join("second.jsonl");
+    fs::write(
+        &first,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\"}\n{\"timestamp\":\"2026-06-13T02:04:32Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"019ebd01-c881-74c0-b01d-7fdf5bd4dd32\"}}\n",
+    )
+    .expect("first session should be written");
+    fs::write(
+        &second,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\"}\n{\"timestamp\":\"2026-06-13T02:04:32Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"019ebd01-c881-74c0-b01d-7fdf5bd4dd33\"}}\n",
+    )
+    .expect("second session should be written");
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, "019ebd01").expect("repair should succeed");
+
+    assert_eq!(repaired, None);
+    assert!(
+        fs::read_to_string(first)
+            .expect("first should be readable")
+            .lines()
+            .next()
+            .expect("first line should exist")
+            .contains(r#""type":"event""#)
+    );
+    assert!(
+        fs::read_to_string(second)
+            .expect("second should be readable")
+            .lines()
+            .next()
+            .expect("first line should exist")
+            .contains(r#""type":"event""#)
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn session_current_filters_by_cwd() {
     let root = test_temp_dir("session-current");
     let sessions = root.join("sessions");

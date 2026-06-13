@@ -151,6 +151,19 @@ fn print_session_lines(lines: impl IntoIterator<Item = String>) {
 fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
+    let _ = prodex_session_store::repair_resume_session_metadata_prefix(
+        &paths.shared_codex_root,
+        &args.id,
+    )?;
+    if let Some(path) =
+        prodex_session_store::find_unrepairable_resume_session(&paths.shared_codex_root, &args.id)?
+    {
+        anyhow::bail!(
+            "session '{}' cannot be resumed because {} does not contain session metadata; the file is too incomplete to repair",
+            args.id,
+            path.display()
+        );
+    }
     let reports =
         prodex_session_store::collect_session_reports(&paths.shared_codex_root, None, &state)?;
     let report = prodex_session_store::resolve_session_report_by_id(&reports, &args.id)

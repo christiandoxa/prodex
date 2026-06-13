@@ -4,6 +4,11 @@ use super::*;
 fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
     let root = temp_dir("auto-route-gemini-resume");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
     let paths = AppPaths::discover().unwrap();
     let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
     let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
@@ -49,9 +54,98 @@ fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
 }
 
 #[test]
+fn run_strategy_repairs_resume_session_metadata_prefix_before_provider_detection() {
+    let root = temp_dir("repair-resume-prefix-before-provider-detection");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let paths = AppPaths::discover().unwrap();
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
+    fs::create_dir_all(&sessions).unwrap();
+    let session_path = sessions.join("rollout.jsonl");
+    fs::write(
+        &session_path,
+        format!(
+            "{{\"timestamp\":\"2026-06-05T00:59:00Z\",\"type\":\"event\",\"payload\":{{\"message\":\"partial\"}}}}\n{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        skip_quota_check: false,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args: vec![OsString::from(session_id)],
+    })
+    .unwrap();
+
+    let repaired = fs::read_to_string(session_path).unwrap();
+    assert!(
+        repaired
+            .lines()
+            .next()
+            .unwrap()
+            .contains(r#""type":"session_meta""#)
+    );
+    assert_eq!(strategy.runtime_request().external_provider, Some("gemini"));
+}
+
+#[test]
+fn run_strategy_rejects_unrepairable_resume_session_before_codex_launch() {
+    let root = temp_dir("reject-unrepairable-resume-session");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let paths = AppPaths::discover().unwrap();
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join(format!("rollout-2026-06-05T01-00-00-{session_id}.jsonl")),
+        "{\"timestamp\":\"2026-06-05T00:59:00Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial only\"}}\n",
+    )
+    .unwrap();
+
+    let result = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        skip_quota_check: false,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args: vec![OsString::from(session_id)],
+    });
+
+    let Err(err) = result else {
+        panic!("unrepairable resume session should fail before Codex launch");
+    };
+    assert!(format!("{err:#}").contains("does not contain session metadata"));
+}
+
+#[test]
 fn run_strategy_auto_routes_explicit_exec_gemini_resume_sessions_to_provider_bridge() {
     let root = temp_dir("auto-route-explicit-exec-gemini-resume");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
     let paths = AppPaths::discover().unwrap();
     let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
     let sessions = paths.shared_codex_root.join("sessions/2026/06/05");

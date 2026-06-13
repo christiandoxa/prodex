@@ -282,7 +282,10 @@ fn find_optimizer_command(
 }
 
 fn prefer_managed_optimizer(command: &str) -> bool {
-    matches!(command, "token-savior")
+    matches!(
+        command,
+        "sqz" | "sqz-mcp" | "token-savior" | "claw-compactor"
+    )
 }
 
 fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
@@ -683,22 +686,22 @@ mod tests {
 
     #[test]
     fn managed_optimizer_discovery_finds_sqz_workspace_release_binary() {
+        let path_root = temp_dir("sqz-path-root");
         let root = temp_dir("sqz-root");
-        let command = command_path(
-            root.join("sqz")
-                .join("target")
-                .join("release")
-                .join("sqz-mcp"),
-        );
+        let path_command = command_path(path_root.join("sqz-mcp"));
+        let command = command_path(root.join("sqz/target/release/sqz-mcp"));
+        fs::create_dir_all(path_root.as_path()).expect("path root should be created");
         fs::create_dir_all(command.parent().expect("command parent should exist"))
             .expect("command parent should be created");
+        fs::write(&path_command, "").expect("path command should be written");
         fs::write(&command, "").expect("fake command should be written");
 
         assert_eq!(
-            find_managed_optimizer_command("sqz-mcp", std::slice::from_ref(&root)),
+            find_optimizer_command("sqz-mcp", &[path_root.clone()], &[root.clone()]),
             Some(command)
         );
 
+        let _ = fs::remove_dir_all(path_root);
         let _ = fs::remove_dir_all(root);
     }
 
