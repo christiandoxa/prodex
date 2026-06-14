@@ -2,10 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.182.0 - 2026-06-14
+
+### CLI
+
+- Repair matching resume sessions across profiles (`85ea1ef`)
+- Repair resume sessions in selected profiles (`3be54d0`)
+
 ## 0.181.0 - 2026-06-14
 
 ### Misc
 
+- Satisfy session repair clippy gate (`2ee6f1e`)
 - Repair incomplete resume sessions (`5f99366`)
 
 ## 0.180.0 - 2026-06-13
@@ -73,13 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Allow responses with ready short-term quota (`98a26ed`)
-
-## 0.170.0 - 2026-06-09
-
-### Runtime
-
-- Align runtime proxy with Codex 0.138 (`7bbe7fc`)
-
-### Misc
-
-- Pass Gemini OAuth token to native CLI (`660602b`)
