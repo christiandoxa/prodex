@@ -466,9 +466,7 @@ fn session_path_id_matches_selector(path: &Path, selector: &str, exact: bool) ->
 }
 
 fn session_path_id_matching_selector(path: &Path, selector: &str, exact: bool) -> Option<String> {
-    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-        return None;
-    };
+    let stem = path.file_stem().and_then(|stem| stem.to_str())?;
     if session_id_matches_selector(stem, selector, exact) {
         return Some(stem.to_string());
     }
