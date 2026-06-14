@@ -116,8 +116,8 @@ fn repair_resume_session_metadata_prefix_moves_late_metadata_to_start() {
 }
 
 #[test]
-fn unrepairable_resume_session_detects_rollout_named_file_without_metadata() {
-    let root = test_temp_dir("session-unrepairable-rollout");
+fn repair_resume_session_metadata_prefix_synthesizes_missing_rollout_metadata() {
+    let root = test_temp_dir("session-synthetic-rollout");
     let sessions = root.join("sessions/2026/06/13");
     fs::create_dir_all(&sessions).expect("session dir should be created");
     let session_path =
@@ -135,8 +135,51 @@ fn unrepairable_resume_session_detects_rollout_named_file_without_metadata() {
         find_unrepairable_resume_session(&root, "019ebd01-c881-74c0-b01d-7fdf5bd4dd32")
             .expect("unrepairable check should succeed");
 
-    assert_eq!(repaired, None);
-    assert_eq!(unrepairable.as_deref(), Some(session_path.as_path()));
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    assert_eq!(unrepairable, None);
+    let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
+    assert_eq!(
+        repaired_raw.lines().next(),
+        Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
+    );
+    assert!(
+        session_path
+            .with_extension("jsonl.prodex-repair-bak")
+            .is_file()
+    );
+
+    let reports =
+        collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].id, "019ebd01-c881-74c0-b01d-7fdf5bd4dd32");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_resume_session_metadata_prefix_synthesizes_unique_prefix_match() {
+    let root = test_temp_dir("session-synthetic-prefix-rollout");
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_path =
+        sessions.join("rollout-2026-06-13T02-04-31-019ebd01-c881-74c0-b01d-7fdf5bd4dd32.jsonl");
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"cwd\":\"/tmp/workspace\",\"message\":\"legacy session\"}}\n",
+    )
+    .expect("session should be written");
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, "019ebd01").expect("repair should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
+    assert_eq!(
+        repaired_raw.lines().next(),
+        Some(
+            r#"{"payload":{"cwd":"/tmp/workspace","id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#
+        )
+    );
 
     let _ = fs::remove_dir_all(root);
 }

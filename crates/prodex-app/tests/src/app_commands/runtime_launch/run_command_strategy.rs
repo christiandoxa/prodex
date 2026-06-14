@@ -101,8 +101,8 @@ fn run_strategy_repairs_resume_session_metadata_prefix_before_provider_detection
 }
 
 #[test]
-fn run_strategy_rejects_unrepairable_resume_session_before_codex_launch() {
-    let root = temp_dir("reject-unrepairable-resume-session");
+fn run_strategy_repairs_resume_session_missing_metadata_before_codex_launch() {
+    let root = temp_dir("repair-missing-resume-session-metadata");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let shared_codex_home = root.join("shared-codex-home");
     let _shared_env = TestEnvVarGuard::set(
@@ -119,7 +119,7 @@ fn run_strategy_rejects_unrepairable_resume_session_before_codex_launch() {
     )
     .unwrap();
 
-    let result = RunCommandStrategy::new(RunArgs {
+    let strategy = RunCommandStrategy::new(RunArgs {
         profile: None,
         auto_rotate: false,
         no_auto_rotate: false,
@@ -129,12 +129,28 @@ fn run_strategy_rejects_unrepairable_resume_session_before_codex_launch() {
         no_proxy: false,
         dry_run: false,
         codex_args: vec![OsString::from(session_id)],
-    });
+    })
+    .unwrap();
 
-    let Err(err) = result else {
-        panic!("unrepairable resume session should fail before Codex launch");
-    };
-    assert!(format!("{err:#}").contains("does not contain session metadata"));
+    let codex_args = strategy
+        .codex_args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(codex_args.contains(&"resume".to_string()));
+    assert!(codex_args.contains(&session_id.to_string()));
+
+    let repaired = fs::read_to_string(
+        sessions.join(format!("rollout-2026-06-05T01-00-00-{session_id}.jsonl")),
+    )
+    .unwrap();
+    assert!(
+        repaired
+            .lines()
+            .next()
+            .unwrap()
+            .contains(r#""type":"session_meta""#)
+    );
 }
 
 #[test]

@@ -199,7 +199,7 @@ pub fn repair_resume_session_metadata_prefix(
         }
     }
     for path in exact_paths {
-        if repair_session_file_metadata_prefix(&path, selector)? {
+        if repair_session_file_metadata_prefix(&path, selector, true)? {
             return Ok(Some(path));
         }
     }
@@ -210,7 +210,9 @@ pub fn repair_resume_session_metadata_prefix(
             prefix_paths.push(path);
         }
     }
-    if prefix_paths.len() == 1 && repair_session_file_metadata_prefix(&prefix_paths[0], selector)? {
+    if prefix_paths.len() == 1
+        && repair_session_file_metadata_prefix(&prefix_paths[0], selector, true)?
+    {
         return Ok(Some(prefix_paths[0].clone()));
     }
 
@@ -341,7 +343,11 @@ fn session_value_starts_resume_metadata(value: &serde_json::Value) -> bool {
         .is_none_or(|kind| kind == "session_meta")
 }
 
-fn repair_session_file_metadata_prefix(path: &Path, selector: &str) -> Result<bool> {
+fn repair_session_file_metadata_prefix(
+    path: &Path,
+    selector: &str,
+    synthesize_missing_metadata: bool,
+) -> Result<bool> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read session {}", path.display()))?;
     let mut lines = raw.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
@@ -355,7 +361,7 @@ fn repair_session_file_metadata_prefix(path: &Path, selector: &str) -> Result<bo
         return Ok(false);
     }
 
-    let Some(metadata_index) = lines
+    let metadata_index = lines
         .iter()
         .enumerate()
         .skip(first_content_index + 1)
@@ -363,12 +369,16 @@ fn repair_session_file_metadata_prefix(path: &Path, selector: &str) -> Result<bo
             (session_line_starts_resume_metadata(line)
                 && session_line_resume_id_matches(line, selector))
             .then_some(index)
-        })
-    else {
+        });
+
+    let Some(metadata_line) = metadata_index.map(|index| lines.remove(index)).or_else(|| {
+        synthesize_missing_metadata
+            .then(|| synthetic_session_metadata_line(path, selector, &lines))
+            .flatten()
+    }) else {
         return Ok(false);
     };
 
-    let metadata_line = lines.remove(metadata_index);
     let mut repaired = String::new();
     repaired.push_str(&metadata_line);
     repaired.push('\n');
@@ -429,10 +439,14 @@ fn session_line_resume_id_matches(line: &str, selector: &str) -> bool {
 }
 
 fn session_line_resume_id_matches_mode(line: &str, selector: &str, exact: bool) -> bool {
+    session_line_resume_id_matching_mode(line, selector, exact).is_some()
+}
+
+fn session_line_resume_id_matching_mode(line: &str, selector: &str, exact: bool) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(line)
         .ok()
         .and_then(|value| session_value_resume_id(&value))
-        .is_some_and(|id| session_id_matches_selector(&id, selector, exact))
+        .filter(|id| session_id_matches_selector(id, selector, exact))
 }
 
 fn session_value_resume_id(value: &serde_json::Value) -> Option<String> {
@@ -448,17 +462,21 @@ fn session_value_resume_id(value: &serde_json::Value) -> Option<String> {
 }
 
 fn session_path_id_matches_selector(path: &Path, selector: &str, exact: bool) -> bool {
+    session_path_id_matching_selector(path, selector, exact).is_some()
+}
+
+fn session_path_id_matching_selector(path: &Path, selector: &str, exact: bool) -> Option<String> {
     let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-        return false;
+        return None;
     };
     if session_id_matches_selector(stem, selector, exact) {
-        return true;
+        return Some(stem.to_string());
     }
     stem.split('-')
         .collect::<Vec<_>>()
         .windows(5)
         .map(|parts| parts.join("-"))
-        .any(|candidate| session_id_matches_selector(&candidate, selector, exact))
+        .find(|candidate| session_id_matches_selector(candidate, selector, exact))
 }
 
 fn session_id_matches_selector(id: &str, selector: &str, exact: bool) -> bool {
@@ -466,6 +484,35 @@ fn session_id_matches_selector(id: &str, selector: &str, exact: bool) -> bool {
         return true;
     }
     !exact && id.to_lowercase().starts_with(&selector.to_lowercase())
+}
+
+fn synthetic_session_metadata_line(
+    path: &Path,
+    selector: &str,
+    lines: &[String],
+) -> Option<String> {
+    let session_id = lines
+        .iter()
+        .find_map(|line| session_line_resume_id_matching_mode(line, selector, false))
+        .or_else(|| session_path_id_matching_selector(path, selector, false))?;
+    let cwd = lines.iter().find_map(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .and_then(|value| first_string_value(&value, &[&["payload", "cwd"], &["cwd"]]))
+    });
+    let mut payload = serde_json::Map::new();
+    payload.insert("id".to_string(), serde_json::Value::String(session_id));
+    if let Some(cwd) = cwd {
+        payload.insert("cwd".to_string(), serde_json::Value::String(cwd));
+    }
+
+    Some(
+        serde_json::json!({
+            "type": "session_meta",
+            "payload": payload,
+        })
+        .to_string(),
+    )
 }
 
 fn file_modified_epoch(path: &Path) -> Option<i64> {
