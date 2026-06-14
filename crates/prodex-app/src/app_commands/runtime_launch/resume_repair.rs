@@ -1,4 +1,6 @@
+use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::fs;
 use std::path::Path;
 
 use anyhow::{Result, bail};
@@ -59,16 +61,62 @@ fn repair_resume_session_in_other_profile_homes(primary_home: &Path, session_id:
     let Ok(paths) = AppPaths::discover() else {
         return;
     };
+    let mut repaired_homes = BTreeSet::new();
     let Ok(state) = AppState::load(&paths) else {
+        repair_resume_session_in_profile_root_dirs(
+            &paths,
+            primary_home,
+            session_id,
+            &mut repaired_homes,
+        );
         return;
     };
     for profile in state.profiles.values() {
-        if prodex_core::same_path(primary_home, &profile.codex_home) {
-            continue;
-        }
-        let _ = prodex_session_store::repair_resume_session_metadata_prefix(
+        repair_resume_session_in_profile_home(
+            primary_home,
             &profile.codex_home,
             session_id,
+            &mut repaired_homes,
         );
     }
+    repair_resume_session_in_profile_root_dirs(
+        &paths,
+        primary_home,
+        session_id,
+        &mut repaired_homes,
+    );
+}
+
+fn repair_resume_session_in_profile_root_dirs(
+    paths: &AppPaths,
+    primary_home: &Path,
+    session_id: &str,
+    repaired_homes: &mut BTreeSet<String>,
+) {
+    let Ok(entries) = fs::read_dir(&paths.managed_profiles_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        repair_resume_session_in_profile_home(primary_home, &path, session_id, repaired_homes);
+    }
+}
+
+fn repair_resume_session_in_profile_home(
+    primary_home: &Path,
+    profile_home: &Path,
+    session_id: &str,
+    repaired_homes: &mut BTreeSet<String>,
+) {
+    if prodex_core::same_path(primary_home, profile_home) {
+        return;
+    }
+    let key = profile_home.display().to_string();
+    if !repaired_homes.insert(key) {
+        return;
+    }
+    let _ = prodex_session_store::repair_resume_session_metadata_prefix(profile_home, session_id);
 }

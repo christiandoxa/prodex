@@ -164,10 +164,13 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
     );
     let profile_home = root.join("profiles").join("em2");
     let other_profile_home = root.join("profiles").join("157");
+    let orphan_profile_home = root.join("profiles").join("orphan");
     let sessions = profile_home.join("sessions/2026/06/13");
     let other_sessions = other_profile_home.join("sessions/2026/06/13");
+    let orphan_sessions = orphan_profile_home.join("sessions/2026/06/13");
     fs::create_dir_all(&sessions).unwrap();
     fs::create_dir_all(&other_sessions).unwrap();
+    fs::create_dir_all(&orphan_sessions).unwrap();
     fs::write(
         secret_store::auth_json_path(&profile_home),
         r#"{"tokens":{"access_token":"profile-token"}}"#,
@@ -185,6 +188,13 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
     fs::write(
         &other_session_path,
         "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial in other profile\"}}\n",
+    )
+    .unwrap();
+    let orphan_session_path =
+        orphan_sessions.join(format!("rollout-2026-06-13T02-04-31-{session_id}.jsonl"));
+    fs::write(
+        &orphan_session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial in orphan profile\"}}\n",
     )
     .unwrap();
     write_state(
@@ -241,6 +251,11 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
     let other_repaired = fs::read_to_string(other_session_path).unwrap();
     assert_eq!(
         other_repaired.lines().next(),
+        Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
+    );
+    let orphan_repaired = fs::read_to_string(orphan_session_path).unwrap();
+    assert_eq!(
+        orphan_repaired.lines().next(),
         Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
     );
 }

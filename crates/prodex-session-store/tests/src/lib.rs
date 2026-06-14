@@ -157,6 +157,89 @@ fn repair_resume_session_metadata_prefix_synthesizes_missing_rollout_metadata() 
 }
 
 #[test]
+fn repair_resume_session_metadata_prefix_recovers_readable_chat_after_corrupt_lines() {
+    let root = test_temp_dir("session-repair-readable-chat");
+    let sessions = root.join("sessions/2026/06/14");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let session_path = sessions.join(format!("rollout-2026-06-14T23-32-19-{session_id}.jsonl"));
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-14T23:32:19Z\",\"type\":\"event\",\"payload\":{\"message\":\"first readable chat\"}}\n{not-json\n{\"timestamp\":\"2026-06-14T23:32:20Z\",\"type\":\"event\",\"payload\":{\"message\":\"second readable chat\"}}\n",
+    )
+    .expect("session should be written");
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
+    let lines = repaired_raw.lines().collect::<Vec<_>>();
+    assert_eq!(
+        lines.first().copied(),
+        Some(r#"{"payload":{"id":"019ec6c3-28a4-79f0-91f9-74a2f34b0928"},"type":"session_meta"}"#)
+    );
+    assert_eq!(lines.len(), 3);
+    assert!(lines[1].contains("first readable chat"));
+    assert!(lines[2].contains("second readable chat"));
+    assert!(!repaired_raw.contains("{not-json"));
+
+    let reports =
+        collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].id, session_id);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_resume_session_metadata_prefix_uses_state_db_rollout_path() {
+    let root = test_temp_dir("session-repair-state-db-rollout");
+    fs::create_dir_all(&root).expect("root should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let rollout_dir = root.join("state-db-rollouts");
+    fs::create_dir_all(&rollout_dir).expect("rollout dir should be created");
+    let session_path = rollout_dir.join("rollout-from-state-db.jsonl");
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-14T23:32:19Z\",\"type\":\"event\",\"payload\":{\"message\":\"chat from state db path\"}}\n",
+    )
+    .expect("session should be written");
+    let db_path = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![session_id, session_path.display().to_string()],
+        )
+        .expect("thread row should be created");
+    drop(connection);
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
+    assert_eq!(
+        repaired_raw.lines().next(),
+        Some(r#"{"payload":{"id":"019ec6c3-28a4-79f0-91f9-74a2f34b0928"},"type":"session_meta"}"#)
+    );
+    assert!(
+        session_path
+            .with_extension("jsonl.prodex-repair-bak")
+            .is_file()
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_synthesizes_unique_prefix_match() {
     let root = test_temp_dir("session-synthetic-prefix-rollout");
     let sessions = root.join("sessions/2026/06/13");

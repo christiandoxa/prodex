@@ -4,6 +4,7 @@ use prodex_app_reports::{
     first_string_value, is_session_metadata_file, sort_session_reports,
 };
 use prodex_state::AppState;
+use rusqlite::{Connection, OpenFlags};
 use std::fmt;
 use std::fs;
 use std::io::{self, BufRead};
@@ -44,6 +45,12 @@ impl fmt::Display for SessionResolveError {
 }
 
 impl std::error::Error for SessionResolveError {}
+
+#[derive(Debug, Clone)]
+struct SessionRepairCandidate {
+    path: PathBuf,
+    state_db_exact_match: bool,
+}
 
 pub fn collect_session_reports(
     shared_codex_root: &Path,
@@ -187,14 +194,15 @@ pub fn repair_resume_session_metadata_prefix(
         return Ok(None);
     }
 
-    let sessions_root = shared_codex_root.join("sessions");
-    let mut session_paths = Vec::new();
-    collect_session_paths(&sessions_root, &mut session_paths)?;
-    session_paths.sort();
+    let session_paths = collect_resume_repair_candidate_paths(shared_codex_root, selector)?;
 
     let mut exact_paths = Vec::new();
-    for path in &session_paths {
-        if let Some(path) = session_file_repair_match(path, selector, true)? {
+    for candidate in &session_paths {
+        if candidate.state_db_exact_match {
+            exact_paths.push(candidate.path.clone());
+            continue;
+        }
+        if let Some(path) = session_file_repair_match(&candidate.path, selector, true)? {
             exact_paths.push(path);
         }
     }
@@ -205,8 +213,8 @@ pub fn repair_resume_session_metadata_prefix(
     }
 
     let mut prefix_paths = Vec::new();
-    for path in &session_paths {
-        if let Some(path) = session_file_repair_match(path, selector, false)? {
+    for candidate in &session_paths {
+        if let Some(path) = session_file_repair_match(&candidate.path, selector, false)? {
             prefix_paths.push(path);
         }
     }
@@ -228,14 +236,16 @@ pub fn find_unrepairable_resume_session(
         return Ok(None);
     }
 
-    let sessions_root = shared_codex_root.join("sessions");
-    let mut session_paths = Vec::new();
-    collect_session_paths(&sessions_root, &mut session_paths)?;
-    session_paths.sort();
+    let session_paths = collect_resume_repair_candidate_paths(shared_codex_root, selector)?;
 
-    for path in session_paths {
-        let Some(path) = session_file_repair_match(&path, selector, true)? else {
-            continue;
+    for candidate in session_paths {
+        let path = if candidate.state_db_exact_match {
+            candidate.path
+        } else {
+            let Some(path) = session_file_repair_match(&candidate.path, selector, true)? else {
+                continue;
+            };
+            path
         };
         if session_file_has_resume_metadata_for_selector(&path, selector)? {
             continue;
@@ -269,6 +279,134 @@ fn collect_session_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn collect_resume_repair_candidate_paths(
+    root: &Path,
+    selector: &str,
+) -> Result<Vec<SessionRepairCandidate>> {
+    let mut paths = Vec::new();
+    let mut session_paths = Vec::new();
+    collect_session_paths(&root.join("sessions"), &mut session_paths)?;
+    paths.extend(
+        session_paths
+            .into_iter()
+            .map(|path| SessionRepairCandidate {
+                path,
+                state_db_exact_match: false,
+            }),
+    );
+    collect_state_db_rollout_paths(root, selector, &mut paths);
+    paths.sort_by(|left, right| left.path.cmp(&right.path));
+
+    let mut deduped: Vec<SessionRepairCandidate> = Vec::with_capacity(paths.len());
+    for candidate in paths {
+        if let Some(existing) = deduped.last_mut()
+            && existing.path == candidate.path
+        {
+            existing.state_db_exact_match |= candidate.state_db_exact_match;
+            continue;
+        }
+        deduped.push(candidate);
+    }
+    Ok(deduped)
+}
+
+fn collect_state_db_rollout_paths(
+    root: &Path,
+    selector: &str,
+    paths: &mut Vec<SessionRepairCandidate>,
+) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_codex_state_db_path(&path) {
+            continue;
+        }
+        if let Ok(mut rollout_paths) = state_db_rollout_paths_for_selector(root, &path, selector) {
+            paths.append(&mut rollout_paths);
+        }
+    }
+}
+
+fn is_codex_state_db_path(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    file_name.starts_with("state_") && file_name.ends_with(".sqlite") && path.is_file()
+}
+
+fn state_db_rollout_paths_for_selector(
+    codex_home: &Path,
+    db_path: &Path,
+    selector: &str,
+) -> Result<Vec<SessionRepairCandidate>> {
+    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("failed to open state db {}", db_path.display()))?;
+    let mut statement = connection
+        .prepare("SELECT id, rollout_path FROM threads")
+        .with_context(|| format!("failed to query state db {}", db_path.display()))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .with_context(|| format!("failed to read state db {}", db_path.display()))?;
+
+    let mut paths = Vec::new();
+    for row in rows {
+        let (thread_id, rollout_path) =
+            row.with_context(|| format!("failed to read state db {}", db_path.display()))?;
+        let Some(match_kind) = state_db_rollout_row_match_kind(&thread_id, &rollout_path, selector)
+        else {
+            continue;
+        };
+        let path = resolve_state_db_rollout_path(codex_home, &rollout_path);
+        if path.is_file() && is_session_metadata_file(&path) {
+            paths.push(SessionRepairCandidate {
+                path,
+                state_db_exact_match: match_kind == SessionRepairMatchKind::Exact,
+            });
+        }
+    }
+    Ok(paths)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionRepairMatchKind {
+    Exact,
+    Prefix,
+}
+
+fn state_db_rollout_row_match_kind(
+    thread_id: &str,
+    rollout_path: &str,
+    selector: &str,
+) -> Option<SessionRepairMatchKind> {
+    let normalized_thread_id = thread_id.strip_prefix("thread_").unwrap_or(thread_id);
+    if session_id_matches_selector(thread_id, selector, true)
+        || session_id_matches_selector(normalized_thread_id, selector, true)
+        || session_path_id_matches_selector(Path::new(rollout_path), selector, true)
+    {
+        return Some(SessionRepairMatchKind::Exact);
+    }
+    if session_id_matches_selector(thread_id, selector, false)
+        || session_id_matches_selector(normalized_thread_id, selector, false)
+        || session_path_id_matches_selector(Path::new(rollout_path), selector, false)
+    {
+        return Some(SessionRepairMatchKind::Prefix);
+    }
+    None
+}
+
+fn resolve_state_db_rollout_path(codex_home: &Path, rollout_path: &str) -> PathBuf {
+    let path = PathBuf::from(rollout_path);
+    if path.is_absolute() {
+        path
+    } else {
+        codex_home.join(path)
+    }
 }
 
 fn read_session_report(path: &Path, state: &AppState) -> Result<Option<SessionReport>> {
@@ -350,14 +488,19 @@ fn repair_session_file_metadata_prefix(
 ) -> Result<bool> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read session {}", path.display()))?;
-    let mut lines = raw.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
+    let lines = raw.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
     let Some(first_content_index) = lines.iter().position(|line| !line.trim().is_empty()) else {
         return Ok(false);
     };
 
-    if session_line_resume_id_matches(&lines[first_content_index], selector)
-        && session_line_starts_resume_metadata(&lines[first_content_index])
-    {
+    let first_line_is_matching_metadata =
+        session_line_resume_id_matches(&lines[first_content_index], selector)
+            && session_line_starts_resume_metadata(&lines[first_content_index]);
+    let has_unreadable_lines = lines
+        .iter()
+        .any(|line| !line.trim().is_empty() && !session_line_is_valid_json(line));
+
+    if first_line_is_matching_metadata && !has_unreadable_lines {
         return Ok(false);
     }
 
@@ -371,19 +514,38 @@ fn repair_session_file_metadata_prefix(
             .then_some(index)
         });
 
-    let Some(metadata_line) = metadata_index.map(|index| lines.remove(index)).or_else(|| {
-        synthesize_missing_metadata
-            .then(|| synthetic_session_metadata_line(path, selector, &lines))
-            .flatten()
-    }) else {
+    let metadata_line = if first_line_is_matching_metadata {
+        lines[first_content_index].clone()
+    } else if let Some(index) = metadata_index {
+        lines[index].clone()
+    } else if synthesize_missing_metadata {
+        let Some(line) = synthetic_session_metadata_line(path, selector, &lines) else {
+            return Ok(false);
+        };
+        line
+    } else {
         return Ok(false);
     };
 
     let mut repaired = String::new();
     repaired.push_str(&metadata_line);
     repaired.push('\n');
-    for line in lines {
-        repaired.push_str(&line);
+    for (index, line) in lines.iter().enumerate() {
+        if first_line_is_matching_metadata && index == first_content_index {
+            continue;
+        }
+        if metadata_index == Some(index) {
+            continue;
+        }
+        if line.trim().is_empty() || !session_line_is_valid_json(line) {
+            continue;
+        }
+        if session_line_starts_resume_metadata(line)
+            && session_line_resume_id_matches(line, selector)
+        {
+            continue;
+        }
+        repaired.push_str(line);
         repaired.push('\n');
     }
 
@@ -436,6 +598,10 @@ fn session_file_has_resume_metadata_for_selector(path: &Path, selector: &str) ->
 
 fn session_line_resume_id_matches(line: &str, selector: &str) -> bool {
     session_line_resume_id_matches_mode(line, selector, false)
+}
+
+fn session_line_is_valid_json(line: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(line).is_ok()
 }
 
 fn session_line_resume_id_matches_mode(line: &str, selector: &str, exact: bool) -> bool {
@@ -492,7 +658,8 @@ fn synthetic_session_metadata_line(
     let session_id = lines
         .iter()
         .find_map(|line| session_line_resume_id_matching_mode(line, selector, false))
-        .or_else(|| session_path_id_matching_selector(path, selector, false))?;
+        .or_else(|| session_path_id_matching_selector(path, selector, false))
+        .or_else(|| full_codex_session_id(selector).map(ToOwned::to_owned))?;
     let cwd = lines.iter().find_map(|line| {
         serde_json::from_str::<serde_json::Value>(line)
             .ok()
@@ -511,6 +678,16 @@ fn synthetic_session_metadata_line(
         })
         .to_string(),
     )
+}
+
+fn full_codex_session_id(selector: &str) -> Option<&str> {
+    let bytes = selector.as_bytes();
+    let valid = bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        });
+    valid.then_some(selector)
 }
 
 fn file_modified_epoch(path: &Path) -> Option<i64> {

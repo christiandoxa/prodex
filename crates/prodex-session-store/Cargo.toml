@@ -15,4 +15,5 @@ anyhow = { workspace = true }
 prodex_app_reports = { workspace = true }
 prodex_core = { workspace = true }
 prodex_state = { workspace = true }
+rusqlite = { workspace = true }
 serde_json = { workspace = true }
