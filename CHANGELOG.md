@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.181.0 - 2026-06-14
+
+### Misc
+
+- Repair incomplete resume sessions (`5f99366`)
+
 ## 0.180.0 - 2026-06-13
 
 ### CLI
@@ -77,9 +83,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Pass Gemini OAuth token to native CLI (`660602b`)
-
-## 0.169.0 - 2026-06-09
-
-### Misc
-
-- Preserve Gemini CLI OAuth project routing (`bc88b5e`)
