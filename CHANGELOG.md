@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.183.0 - 2026-06-15
+
+### Misc
+
+- Recover resume sessions from readable rollouts (`c4a355e`)
+
 ## 0.182.0 - 2026-06-14
 
 ### CLI
@@ -75,9 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Retry precommit quota and preserve images (`27c3c9e`)
-
-## 0.171.0 - 2026-06-10
-
-### CLI
-
-- Allow responses with ready short-term quota (`98a26ed`)
