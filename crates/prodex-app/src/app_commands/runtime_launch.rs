@@ -3,10 +3,7 @@ mod preflight;
 mod provider_names;
 mod providers;
 mod resume_repair;
-use preflight::*;
-use provider_names::*;
-use providers::*;
-use resume_repair::*;
+use {preflight::*, provider_names::*, providers::*, resume_repair::*};
 
 struct RunCommandStrategy {
     args: RunArgs,
@@ -158,6 +155,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
+        repair_resume_session_in_home(&prepared.codex_home, &self.codex_args)?;
         if let Some(mem_mode) = self.mem_mode {
             ensure_runtime_mem_prodex_observer(&prepared.paths)?;
             ensure_runtime_mem_codex_watch_for_home_with_mode(&prepared.codex_home, mem_mode)?;
@@ -236,6 +234,7 @@ fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildPr
     }
 
     let codex_args = prodex_runtime_launch::normalize_codex_profile_args(&args.codex_args);
+    repair_resume_session_in_home(&selection.codex_home, &codex_args)?;
     let mut child = codex_child_plan(selection.codex_home, codex_args);
     if args.no_proxy {
         remove_upstream_proxy_env(&mut child);

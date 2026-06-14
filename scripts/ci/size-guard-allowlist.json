@@ -1,7 +1,7 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 885,
+    "maxLines": 884,
     "reason": "Runtime launch orchestration remains capped while resume repair and provider-specific setup are extracted."
   },
   {

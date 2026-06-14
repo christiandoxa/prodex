@@ -154,6 +154,72 @@ fn run_strategy_repairs_resume_session_missing_metadata_before_codex_launch() {
 }
 
 #[test]
+fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_launch() {
+    let root = temp_dir("repair-resume-selected-profile-home");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let profile_home = root.join("profiles").join("em2");
+    let sessions = profile_home.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        secret_store::auth_json_path(&profile_home),
+        r#"{"tokens":{"access_token":"profile-token"}}"#,
+    )
+    .unwrap();
+    let session_id = "019ebd01-c881-74c0-b01d-7fdf5bd4dd32";
+    let session_path = sessions.join(format!("rollout-2026-06-13T02-04-31-{session_id}.jsonl"));
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial only\"}}\n",
+    )
+    .unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("em2".to_string()),
+            profiles: BTreeMap::from([(
+                "em2".to_string(),
+                ProfileEntry {
+                    codex_home: profile_home.clone(),
+                    managed: false,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: Some("em2".to_string()),
+        auto_rotate: false,
+        no_auto_rotate: true,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args: vec![OsString::from(session_id)],
+    })
+    .unwrap();
+    let prepared = prepare_runtime_launch(strategy.runtime_request()).unwrap();
+
+    strategy
+        .build_plan(&prepared, prepared.runtime_proxy.as_ref())
+        .unwrap();
+
+    let repaired = fs::read_to_string(session_path).unwrap();
+    assert_eq!(
+        repaired.lines().next(),
+        Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
+    );
+}
+
+#[test]
 fn run_strategy_auto_routes_explicit_exec_gemini_resume_sessions_to_provider_bridge() {
     let root = temp_dir("auto-route-explicit-exec-gemini-resume");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
