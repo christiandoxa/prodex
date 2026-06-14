@@ -163,8 +163,11 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
         shared_codex_home.to_str().unwrap(),
     );
     let profile_home = root.join("profiles").join("em2");
+    let other_profile_home = root.join("profiles").join("157");
     let sessions = profile_home.join("sessions/2026/06/13");
+    let other_sessions = other_profile_home.join("sessions/2026/06/13");
     fs::create_dir_all(&sessions).unwrap();
+    fs::create_dir_all(&other_sessions).unwrap();
     fs::write(
         secret_store::auth_json_path(&profile_home),
         r#"{"tokens":{"access_token":"profile-token"}}"#,
@@ -177,19 +180,37 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
         "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial only\"}}\n",
     )
     .unwrap();
+    let other_session_path =
+        other_sessions.join(format!("rollout-2026-06-13T02-04-31-{session_id}.jsonl"));
+    fs::write(
+        &other_session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial in other profile\"}}\n",
+    )
+    .unwrap();
     write_state(
         &root,
         AppState {
             active_profile: Some("em2".to_string()),
-            profiles: BTreeMap::from([(
-                "em2".to_string(),
-                ProfileEntry {
-                    codex_home: profile_home.clone(),
-                    managed: false,
-                    email: None,
-                    provider: ProfileProvider::Openai,
-                },
-            )]),
+            profiles: BTreeMap::from([
+                (
+                    "157".to_string(),
+                    ProfileEntry {
+                        codex_home: other_profile_home,
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+                (
+                    "em2".to_string(),
+                    ProfileEntry {
+                        codex_home: profile_home.clone(),
+                        managed: false,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+            ]),
             ..AppState::default()
         },
     );
@@ -215,6 +236,11 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
     let repaired = fs::read_to_string(session_path).unwrap();
     assert_eq!(
         repaired.lines().next(),
+        Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
+    );
+    let other_repaired = fs::read_to_string(other_session_path).unwrap();
+    assert_eq!(
+        other_repaired.lines().next(),
         Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
     );
 }
