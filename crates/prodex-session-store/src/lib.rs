@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono::{SecondsFormat, Utc};
 use prodex_app_reports::{
     SessionReport, apply_session_json_line, apply_session_json_lines, apply_session_value,
     first_string_value, is_session_metadata_file, sort_session_reports,
@@ -545,11 +546,13 @@ fn repair_session_file_metadata_prefix(
     let first_line_is_matching_metadata =
         session_line_resume_id_matches(&lines[first_content_index], selector)
             && session_line_starts_resume_metadata(&lines[first_content_index]);
+    let first_line_is_matching_codex_metadata = first_line_is_matching_metadata
+        && session_line_starts_codex_rollout_metadata(&lines[first_content_index]);
     let has_unreadable_lines = lines
         .iter()
         .any(|line| !line.trim().is_empty() && !session_line_is_valid_json(line));
 
-    if first_line_is_matching_metadata && !has_unreadable_lines {
+    if first_line_is_matching_codex_metadata && !has_unreadable_lines {
         return Ok(false);
     }
 
@@ -558,12 +561,12 @@ fn repair_session_file_metadata_prefix(
         .enumerate()
         .skip(first_content_index + 1)
         .find_map(|(index, line)| {
-            (session_line_starts_resume_metadata(line)
+            (session_line_starts_codex_rollout_metadata(line)
                 && session_line_resume_id_matches(line, selector))
             .then_some(index)
         });
 
-    let metadata_line = if first_line_is_matching_metadata {
+    let metadata_line = if first_line_is_matching_codex_metadata {
         lines[first_content_index].clone()
     } else if let Some(index) = metadata_index {
         lines[index].clone()
@@ -641,7 +644,8 @@ fn session_file_has_resume_metadata_for_selector(path: &Path, selector: &str) ->
     let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read session {}", path.display()))?;
     Ok(raw.lines().any(|line| {
-        session_line_starts_resume_metadata(line) && session_line_resume_id_matches(line, selector)
+        session_line_starts_codex_rollout_metadata(line)
+            && session_line_resume_id_matches(line, selector)
     }))
 }
 
@@ -651,6 +655,43 @@ fn session_line_resume_id_matches(line: &str, selector: &str) -> bool {
 
 fn session_line_is_valid_json(line: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(line).is_ok()
+}
+
+fn session_line_starts_codex_rollout_metadata(line: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()
+        .is_some_and(|value| session_value_starts_codex_rollout_metadata(&value))
+}
+
+fn session_value_starts_codex_rollout_metadata(value: &serde_json::Value) -> bool {
+    if value
+        .get("timestamp")
+        .and_then(serde_json::Value::as_str)
+        .is_none()
+    {
+        return false;
+    }
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
+        return false;
+    }
+    let Some(payload) = value.get("payload").and_then(serde_json::Value::as_object) else {
+        return false;
+    };
+    [
+        "id",
+        "timestamp",
+        "cwd",
+        "originator",
+        "cli_version",
+        "source",
+    ]
+    .iter()
+    .all(|field| {
+        payload
+            .get(*field)
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    })
 }
 
 fn session_line_resume_id_matches_mode(line: &str, selector: &str, exact: bool) -> bool {
@@ -709,24 +750,81 @@ fn synthetic_session_metadata_line(
         .find_map(|line| session_line_resume_id_matching_mode(line, selector, false))
         .or_else(|| session_path_id_matching_selector(path, selector, false))
         .or_else(|| full_codex_session_id(selector).map(ToOwned::to_owned))?;
-    let cwd = lines.iter().find_map(|line| {
+    let timestamp = synthetic_session_timestamp(lines);
+    let cwd = synthetic_session_cwd(lines);
+    let model_provider = lines.iter().find_map(|line| {
         serde_json::from_str::<serde_json::Value>(line)
             .ok()
-            .and_then(|value| first_string_value(&value, &[&["payload", "cwd"], &["cwd"]]))
+            .and_then(|value| {
+                first_string_value(
+                    &value,
+                    &[&["payload", "model_provider"], &["model_provider"]],
+                )
+            })
     });
     let mut payload = serde_json::Map::new();
     payload.insert("id".to_string(), serde_json::Value::String(session_id));
-    if let Some(cwd) = cwd {
-        payload.insert("cwd".to_string(), serde_json::Value::String(cwd));
+    payload.insert(
+        "timestamp".to_string(),
+        serde_json::Value::String(timestamp.clone()),
+    );
+    payload.insert("cwd".to_string(), serde_json::Value::String(cwd));
+    payload.insert(
+        "originator".to_string(),
+        serde_json::Value::String("prodex-repair".to_string()),
+    );
+    payload.insert(
+        "cli_version".to_string(),
+        serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()),
+    );
+    payload.insert(
+        "source".to_string(),
+        serde_json::Value::String("cli".to_string()),
+    );
+    if let Some(model_provider) = model_provider {
+        payload.insert(
+            "model_provider".to_string(),
+            serde_json::Value::String(model_provider),
+        );
     }
 
     Some(
         serde_json::json!({
+            "timestamp": timestamp,
             "type": "session_meta",
             "payload": payload,
         })
         .to_string(),
     )
+}
+
+fn synthetic_session_timestamp(lines: &[String]) -> String {
+    lines
+        .iter()
+        .find_map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| {
+                    first_string_value(&value, &[&["timestamp"], &["payload", "timestamp"]])
+                })
+        })
+        .unwrap_or_else(|| Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
+fn synthetic_session_cwd(lines: &[String]) -> String {
+    lines
+        .iter()
+        .find_map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| first_string_value(&value, &[&["payload", "cwd"], &["cwd"]]))
+        })
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| ".".to_string())
 }
 
 fn full_codex_session_id(selector: &str) -> Option<&str> {

@@ -1,6 +1,38 @@
 use super::*;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn assert_codex_session_meta_line(
+    line: &str,
+    session_id: &str,
+    expected_timestamp: Option<&str>,
+) -> serde_json::Value {
+    let value: serde_json::Value =
+        serde_json::from_str(line).expect("synthetic metadata should be valid JSON");
+    assert_eq!(value["type"], "session_meta");
+    assert_eq!(value["payload"]["id"], session_id);
+    let outer_timestamp = value["timestamp"]
+        .as_str()
+        .expect("synthetic metadata should include rollout timestamp");
+    let payload_timestamp = value["payload"]["timestamp"]
+        .as_str()
+        .expect("synthetic metadata should include session timestamp");
+    assert_eq!(outer_timestamp, payload_timestamp);
+    if let Some(expected_timestamp) = expected_timestamp {
+        assert_eq!(outer_timestamp, expected_timestamp);
+    }
+    assert_eq!(value["payload"]["originator"], "prodex-repair");
+    assert_eq!(value["payload"]["cli_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(value["payload"]["source"], "cli");
+    let cwd = value["payload"]["cwd"]
+        .as_str()
+        .expect("synthetic metadata should include cwd");
+    let _: PathBuf = serde_json::from_value(value["payload"]["cwd"].clone())
+        .expect("synthetic cwd should deserialize as a Codex PathBuf");
+    assert!(!cwd.is_empty());
+    value
+}
 
 #[test]
 fn session_reports_parse_codex_jsonl_metadata() {
@@ -138,9 +170,13 @@ fn repair_resume_session_metadata_prefix_synthesizes_missing_rollout_metadata() 
     assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
     assert_eq!(unrepairable, None);
     let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
-    assert_eq!(
-        repaired_raw.lines().next(),
-        Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
+    assert_codex_session_meta_line(
+        repaired_raw
+            .lines()
+            .next()
+            .expect("session should have first line"),
+        "019ebd01-c881-74c0-b01d-7fdf5bd4dd32",
+        Some("2026-06-13T02:04:31Z"),
     );
     assert!(
         session_path
@@ -175,9 +211,13 @@ fn repair_resume_session_metadata_prefix_recovers_readable_chat_after_corrupt_li
     assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
     let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
     let lines = repaired_raw.lines().collect::<Vec<_>>();
-    assert_eq!(
-        lines.first().copied(),
-        Some(r#"{"payload":{"id":"019ec6c3-28a4-79f0-91f9-74a2f34b0928"},"type":"session_meta"}"#)
+    assert_codex_session_meta_line(
+        lines
+            .first()
+            .copied()
+            .expect("session should have first line"),
+        "019ec6c3-28a4-79f0-91f9-74a2f34b0928",
+        Some("2026-06-14T23:32:19Z"),
     );
     assert_eq!(lines.len(), 3);
     assert!(lines[1].contains("first readable chat"));
@@ -188,6 +228,44 @@ fn repair_resume_session_metadata_prefix_recovers_readable_chat_after_corrupt_li
         collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].id, session_id);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_resume_session_metadata_prefix_upgrades_minimal_repair_metadata() {
+    let root = test_temp_dir("session-repair-upgrade-minimal-metadata");
+    let sessions = root.join("sessions/2026/06/14");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let session_path = sessions.join(format!("rollout-2026-06-14T23-32-19-{session_id}.jsonl"));
+    fs::write(
+        &session_path,
+        format!(
+            "{{\"payload\":{{\"id\":\"{session_id}\"}},\"type\":\"session_meta\"}}\n{{\"timestamp\":\"2026-06-14T23:32:19Z\",\"type\":\"event\",\"payload\":{{\"message\":\"first readable chat\"}}}}\n"
+        ),
+    )
+    .expect("session should be written");
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+    let unrepairable =
+        find_unrepairable_resume_session(&root, session_id).expect("unrepairable check");
+
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    assert_eq!(unrepairable, None);
+    let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
+    let lines = repaired_raw.lines().collect::<Vec<_>>();
+    assert_codex_session_meta_line(
+        lines
+            .first()
+            .copied()
+            .expect("session should have first line"),
+        session_id,
+        Some("2026-06-14T23:32:19Z"),
+    );
+    assert_eq!(lines.len(), 2);
+    assert!(lines[1].contains("first readable chat"));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -226,9 +304,13 @@ fn repair_resume_session_metadata_prefix_uses_state_db_rollout_path() {
 
     assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
     let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
-    assert_eq!(
-        repaired_raw.lines().next(),
-        Some(r#"{"payload":{"id":"019ec6c3-28a4-79f0-91f9-74a2f34b0928"},"type":"session_meta"}"#)
+    assert_codex_session_meta_line(
+        repaired_raw
+            .lines()
+            .next()
+            .expect("session should have first line"),
+        "019ec6c3-28a4-79f0-91f9-74a2f34b0928",
+        Some("2026-06-14T23:32:19Z"),
     );
     assert!(
         session_path
@@ -279,9 +361,13 @@ fn repair_resume_session_metadata_prefix_uses_state_db_prefix_rollout_path() {
     assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
     assert_eq!(unrepairable, None);
     let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
-    assert_eq!(
-        repaired_raw.lines().next(),
-        Some(r#"{"payload":{"id":"019ec6c3-28a4-79f0-91f9-74a2f34b0928"},"type":"session_meta"}"#)
+    assert_codex_session_meta_line(
+        repaired_raw
+            .lines()
+            .next()
+            .expect("session should have first line"),
+        "019ec6c3-28a4-79f0-91f9-74a2f34b0928",
+        Some("2026-06-14T23:32:19Z"),
     );
 
     let _ = fs::remove_dir_all(root);
@@ -305,12 +391,15 @@ fn repair_resume_session_metadata_prefix_synthesizes_unique_prefix_match() {
 
     assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
     let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
-    assert_eq!(
-        repaired_raw.lines().next(),
-        Some(
-            r#"{"payload":{"cwd":"/tmp/workspace","id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#
-        )
+    let meta = assert_codex_session_meta_line(
+        repaired_raw
+            .lines()
+            .next()
+            .expect("session should have first line"),
+        "019ebd01-c881-74c0-b01d-7fdf5bd4dd32",
+        Some("2026-06-13T02:04:31Z"),
     );
+    assert_eq!(meta["payload"]["cwd"], "/tmp/workspace");
 
     let _ = fs::remove_dir_all(root);
 }

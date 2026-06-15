@@ -1,5 +1,17 @@
 use super::*;
 
+fn assert_repaired_session_meta_line(line: &str, session_id: &str) {
+    let value: serde_json::Value =
+        serde_json::from_str(line).expect("repaired metadata should be valid JSON");
+    assert_eq!(value["type"], "session_meta");
+    assert_eq!(value["payload"]["id"], session_id);
+    assert!(value["timestamp"].as_str().is_some());
+    assert!(value["payload"]["timestamp"].as_str().is_some());
+    assert!(value["payload"]["cwd"].as_str().is_some());
+    assert_eq!(value["payload"]["originator"], "prodex-repair");
+    assert_eq!(value["payload"]["source"], "cli");
+}
+
 #[test]
 fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
     let root = temp_dir("auto-route-gemini-resume");
@@ -244,19 +256,88 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
         .unwrap();
 
     let repaired = fs::read_to_string(session_path).unwrap();
-    assert_eq!(
-        repaired.lines().next(),
-        Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
+    assert_repaired_session_meta_line(
+        repaired.lines().next().unwrap(),
+        "019ebd01-c881-74c0-b01d-7fdf5bd4dd32",
     );
     let other_repaired = fs::read_to_string(other_session_path).unwrap();
-    assert_eq!(
-        other_repaired.lines().next(),
-        Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
+    assert_repaired_session_meta_line(
+        other_repaired.lines().next().unwrap(),
+        "019ebd01-c881-74c0-b01d-7fdf5bd4dd32",
     );
     let orphan_repaired = fs::read_to_string(orphan_session_path).unwrap();
-    assert_eq!(
-        orphan_repaired.lines().next(),
-        Some(r#"{"payload":{"id":"019ebd01-c881-74c0-b01d-7fdf5bd4dd32"},"type":"session_meta"}"#)
+    assert_repaired_session_meta_line(
+        orphan_repaired.lines().next().unwrap(),
+        "019ebd01-c881-74c0-b01d-7fdf5bd4dd32",
+    );
+}
+
+#[test]
+fn run_strategy_repairs_resume_session_in_managed_profile_after_shared_migration() {
+    let root = temp_dir("repair-resume-managed-profile-after-migration");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let profile_home = root.join("profiles").join("em2015-139.com");
+    let sessions = profile_home.join("sessions/2026/06/14");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        secret_store::auth_json_path(&profile_home),
+        r#"{"tokens":{"access_token":"profile-token"}}"#,
+    )
+    .unwrap();
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let session_path = sessions.join(format!("rollout-2026-06-14T23-32-19-{session_id}.jsonl"));
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-14T23:32:19Z\",\"type\":\"event\",\"payload\":{\"message\":\"partial only\"}}\n",
+    )
+    .unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("em2015-139.com".to_string()),
+            profiles: BTreeMap::from([(
+                "em2015-139.com".to_string(),
+                ProfileEntry {
+                    codex_home: profile_home.clone(),
+                    managed: true,
+                    email: Some("em2015-139.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: Some("em2015-139.com".to_string()),
+        auto_rotate: false,
+        no_auto_rotate: true,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args: vec![OsString::from(session_id)],
+    })
+    .unwrap();
+    let prepared = prepare_runtime_launch(strategy.runtime_request()).unwrap();
+
+    strategy
+        .build_plan(&prepared, prepared.runtime_proxy.as_ref())
+        .unwrap();
+
+    let repaired_path = shared_codex_home.join(format!(
+        "sessions/2026/06/14/rollout-2026-06-14T23-32-19-{session_id}.jsonl"
+    ));
+    let repaired = fs::read_to_string(repaired_path).unwrap();
+    assert_repaired_session_meta_line(
+        repaired.lines().next().unwrap(),
+        "019ec6c3-28a4-79f0-91f9-74a2f34b0928",
     );
 }
 

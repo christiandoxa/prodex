@@ -1864,6 +1864,7 @@ name = "prodex-session-store"
 version = "0.184.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "prodex-app-reports",
  "prodex-core",
  "prodex-state",
