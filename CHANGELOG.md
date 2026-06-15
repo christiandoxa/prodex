@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.184.0 - 2026-06-15
+
+### Deps
+
+- Bump rusqlite from 0.31.0 to 0.40.1 (`a0a02bf`)
+
+### Misc
+
+- Recover sqlite-backed resume rollouts (`823fa1a`)
+
 ## 0.183.0 - 2026-06-15
 
 ### Misc
@@ -75,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Standardize OpenAI-compatible adapters (`d956122`)
-
-## 0.172.0 - 2026-06-10
-
-### CLI
-
-- Retry precommit quota and preserve images (`27c3c9e`)
