@@ -49,7 +49,14 @@ impl std::error::Error for SessionResolveError {}
 #[derive(Debug, Clone)]
 struct SessionRepairCandidate {
     path: PathBuf,
-    state_db_exact_match: bool,
+    state_db_match_kind: Option<SessionRepairMatchKind>,
+    resolved_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SessionRepairMatchKind {
+    Prefix,
+    Exact,
 }
 
 pub fn collect_session_reports(
@@ -198,30 +205,50 @@ pub fn repair_resume_session_metadata_prefix(
 
     let mut exact_paths = Vec::new();
     for candidate in &session_paths {
-        if candidate.state_db_exact_match {
-            exact_paths.push(candidate.path.clone());
+        if candidate.state_db_match_kind == Some(SessionRepairMatchKind::Exact) {
+            exact_paths.push(candidate.clone());
             continue;
         }
         if let Some(path) = session_file_repair_match(&candidate.path, selector, true)? {
-            exact_paths.push(path);
+            exact_paths.push(SessionRepairCandidate {
+                path,
+                state_db_match_kind: None,
+                resolved_session_id: None,
+            });
         }
     }
-    for path in exact_paths {
-        if repair_session_file_metadata_prefix(&path, selector, true)? {
-            return Ok(Some(path));
+    for candidate in exact_paths {
+        let repair_selector = candidate.resolved_session_id.as_deref().unwrap_or(selector);
+        if repair_session_file_metadata_prefix(&candidate.path, repair_selector, true)? {
+            return Ok(Some(candidate.path));
         }
     }
 
     let mut prefix_paths = Vec::new();
     for candidate in &session_paths {
+        if candidate.state_db_match_kind == Some(SessionRepairMatchKind::Prefix) {
+            prefix_paths.push(candidate.clone());
+            continue;
+        }
         if let Some(path) = session_file_repair_match(&candidate.path, selector, false)? {
-            prefix_paths.push(path);
+            prefix_paths.push(SessionRepairCandidate {
+                path,
+                state_db_match_kind: None,
+                resolved_session_id: None,
+            });
         }
     }
     if prefix_paths.len() == 1
-        && repair_session_file_metadata_prefix(&prefix_paths[0], selector, true)?
+        && repair_session_file_metadata_prefix(
+            &prefix_paths[0].path,
+            prefix_paths[0]
+                .resolved_session_id
+                .as_deref()
+                .unwrap_or(selector),
+            true,
+        )?
     {
-        return Ok(Some(prefix_paths[0].clone()));
+        return Ok(Some(prefix_paths[0].path.clone()));
     }
 
     Ok(None)
@@ -239,7 +266,7 @@ pub fn find_unrepairable_resume_session(
     let session_paths = collect_resume_repair_candidate_paths(shared_codex_root, selector)?;
 
     for candidate in session_paths {
-        let path = if candidate.state_db_exact_match {
+        let path = if candidate.state_db_match_kind == Some(SessionRepairMatchKind::Exact) {
             candidate.path
         } else {
             let Some(path) = session_file_repair_match(&candidate.path, selector, true)? else {
@@ -293,7 +320,8 @@ fn collect_resume_repair_candidate_paths(
             .into_iter()
             .map(|path| SessionRepairCandidate {
                 path,
-                state_db_exact_match: false,
+                state_db_match_kind: None,
+                resolved_session_id: None,
             }),
     );
     collect_state_db_rollout_paths(root, selector, &mut paths);
@@ -304,7 +332,12 @@ fn collect_resume_repair_candidate_paths(
         if let Some(existing) = deduped.last_mut()
             && existing.path == candidate.path
         {
-            existing.state_db_exact_match |= candidate.state_db_exact_match;
+            existing.state_db_match_kind = existing
+                .state_db_match_kind
+                .max(candidate.state_db_match_kind);
+            if existing.resolved_session_id.is_none() {
+                existing.resolved_session_id = candidate.resolved_session_id;
+            }
             continue;
         }
         deduped.push(candidate);
@@ -362,21 +395,18 @@ fn state_db_rollout_paths_for_selector(
         else {
             continue;
         };
+        let resolved_session_id =
+            state_db_rollout_row_session_id(&thread_id, &rollout_path, selector);
         let path = resolve_state_db_rollout_path(codex_home, &rollout_path);
         if path.is_file() && is_session_metadata_file(&path) {
             paths.push(SessionRepairCandidate {
                 path,
-                state_db_exact_match: match_kind == SessionRepairMatchKind::Exact,
+                state_db_match_kind: Some(match_kind),
+                resolved_session_id,
             });
         }
     }
     Ok(paths)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionRepairMatchKind {
-    Exact,
-    Prefix,
 }
 
 fn state_db_rollout_row_match_kind(
@@ -398,6 +428,25 @@ fn state_db_rollout_row_match_kind(
         return Some(SessionRepairMatchKind::Prefix);
     }
     None
+}
+
+fn state_db_rollout_row_session_id(
+    thread_id: &str,
+    rollout_path: &str,
+    selector: &str,
+) -> Option<String> {
+    let normalized_thread_id = thread_id.strip_prefix("thread_").unwrap_or(thread_id);
+    if session_id_matches_selector(normalized_thread_id, selector, false)
+        && full_codex_session_id(normalized_thread_id).is_some()
+    {
+        return Some(normalized_thread_id.to_string());
+    }
+    if session_id_matches_selector(thread_id, selector, false)
+        && full_codex_session_id(thread_id).is_some()
+    {
+        return Some(thread_id.to_string());
+    }
+    session_path_id_matching_selector(Path::new(rollout_path), selector, false)
 }
 
 fn resolve_state_db_rollout_path(codex_home: &Path, rollout_path: &str) -> PathBuf {

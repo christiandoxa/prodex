@@ -240,6 +240,54 @@ fn repair_resume_session_metadata_prefix_uses_state_db_rollout_path() {
 }
 
 #[test]
+fn repair_resume_session_metadata_prefix_uses_state_db_prefix_rollout_path() {
+    let root = test_temp_dir("session-repair-state-db-prefix-rollout");
+    fs::create_dir_all(&root).expect("root should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let rollout_dir = root.join("state-db-rollouts");
+    fs::create_dir_all(&rollout_dir).expect("rollout dir should be created");
+    let session_path = rollout_dir.join("rollout-from-state-db.jsonl");
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-14T23:32:19Z\",\"type\":\"event\",\"payload\":{\"message\":\"chat from state db prefix path\"}}\n",
+    )
+    .expect("session should be written");
+    let db_path = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![
+                format!("thread_{session_id}"),
+                session_path.display().to_string()
+            ],
+        )
+        .expect("thread row should be created");
+    drop(connection);
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, "019ec6c3").expect("repair should succeed");
+    let unrepairable = find_unrepairable_resume_session(&root, "019ec6c3")
+        .expect("unrepairable check should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    assert_eq!(unrepairable, None);
+    let repaired_raw = fs::read_to_string(&session_path).expect("session should be readable");
+    assert_eq!(
+        repaired_raw.lines().next(),
+        Some(r#"{"payload":{"id":"019ec6c3-28a4-79f0-91f9-74a2f34b0928"},"type":"session_meta"}"#)
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_synthesizes_unique_prefix_match() {
     let root = test_temp_dir("session-synthetic-prefix-rollout");
     let sessions = root.join("sessions/2026/06/13");
