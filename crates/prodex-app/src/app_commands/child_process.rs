@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use std::ffi::OsString;
+use std::fs::{self, File};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
@@ -26,6 +28,7 @@ pub(crate) fn run_child_plan(
     plan: &ChildProcessPlan,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<ExitStatus> {
+    cleanup_codex_arg0_temp_dirs_best_effort(&plan.codex_home);
     let mut command = Command::new(&plan.binary);
     command.args(&plan.args).env("CODEX_HOME", &plan.codex_home);
     for key in &plan.removed_env {
@@ -53,6 +56,97 @@ pub(crate) fn run_child_plan(
         .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
     Ok(status)
 }
+
+pub(crate) fn cleanup_codex_arg0_temp_dirs_best_effort(codex_home: &Path) {
+    let arg0_root = codex_home.join("tmp").join("arg0");
+    if let Err(err) = cleanup_codex_arg0_temp_dirs(&arg0_root) {
+        let _ = err;
+    }
+}
+
+fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
+    let entries = match fs::read_dir(arg0_root) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+            repair_codex_arg0_permissions_best_effort(arg0_root);
+            fs::read_dir(arg0_root)?
+        }
+        Err(err) => return Err(err),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || !arg0_dir_name_is_owned(&path) {
+            continue;
+        }
+        let Some(_lock_file) = try_lock_codex_arg0_dir(&path)? else {
+            continue;
+        };
+        if let Err(err) = fs::remove_dir_all(&path) {
+            if err.kind() == io::ErrorKind::NotFound {
+                continue;
+            }
+            repair_codex_arg0_permissions_best_effort(&path);
+            match fs::remove_dir_all(&path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn arg0_dir_name_is_owned(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("codex-arg0"))
+}
+
+fn try_lock_codex_arg0_dir(dir: &Path) -> io::Result<Option<File>> {
+    let lock_path = dir.join(".lock");
+    let lock_file = match File::options().read(true).write(true).open(&lock_path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+            repair_codex_arg0_permissions_best_effort(dir);
+            match File::options().read(true).write(true).open(&lock_path) {
+                Ok(file) => file,
+                Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(err) if err.kind() == io::ErrorKind::PermissionDenied => return Ok(None),
+                Err(err) => return Err(err),
+            }
+        }
+        Err(err) => return Err(err),
+    };
+    match lock_file.try_lock() {
+        Ok(()) => Ok(Some(lock_file)),
+        Err(fs::TryLockError::WouldBlock) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+#[cfg(unix)]
+fn repair_codex_arg0_permissions_best_effort(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.is_dir() {
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                repair_codex_arg0_permissions_best_effort(&entry.path());
+            }
+        }
+    } else {
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+}
+
+#[cfg(not(unix))]
+fn repair_codex_arg0_permissions_best_effort(_path: &Path) {}
 
 pub(crate) fn run_codex_direct_passthrough(args: Vec<OsString>) -> Result<ExitStatus> {
     let binary = codex_bin();

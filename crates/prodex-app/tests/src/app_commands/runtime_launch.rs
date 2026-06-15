@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "runtime_launch/arg0_cleanup.rs"]
+mod arg0_cleanup;
 #[path = "runtime_launch/provider_rewrite.rs"]
 mod provider_rewrite;
 #[path = "runtime_launch/routes.rs"]
