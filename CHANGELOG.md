@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.186.0 - 2026-06-15
+
+### Misc
+
+- Clean stale codex arg0 temp dirs (`599d788`)
+
 ## 0.185.0 - 2026-06-15
 
 ### Docs
@@ -83,9 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Replace super wildcard import (`80ba5e6`)
 - Use OpenAI-compatible API for API keys (`1d3f8f1`)
-
-## 0.174.0 - 2026-06-10
-
-### Misc
-
-- Add browser terminal expose (`b1ee6da`)
