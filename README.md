@@ -4,6 +4,8 @@
 
 Use multiple Codex accounts and supported provider backends from one command line. OpenAI/Codex profiles get quota-aware routing and auto-rotation; provider adapters let `prodex s` launch the Codex front end against Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
 
+![Prodex overview](assets/prodex-overview.png)
+
 ## Contents
 
 - [Why prodex](#why-prodex)
