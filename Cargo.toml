@@ -107,7 +107,7 @@ prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex
 redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.183.0" }
 reqwest = { version = "0.13.2", default-features = false }
 rpassword = "7.5.4"
-rusqlite = { version = "0.31.0", features = ["bundled"] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
 runtime_anthropic = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.183.0" }
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.183.0" }
 runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.183.0" }
