@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.185.0 - 2026-06-15
+
+### Docs
+
+- Add README overview image (`dafdb34`)
+
+### Misc
+
+- Write codex-compatible resume metadata (`4c20a19`)
+
 ## 0.184.0 - 2026-06-15
 
 ### Deps
@@ -79,9 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add browser terminal expose (`b1ee6da`)
-
-## 0.173.0 - 2026-06-10
-
-### Misc
-
-- Standardize OpenAI-compatible adapters (`d956122`)
