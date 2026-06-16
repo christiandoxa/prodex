@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.189.0 - 2026-06-17
+
+### Misc
+
+- Add gateway routing (`055b1f3`)
+
 ## 0.188.0 - 2026-06-16
 
 ### Runtime
@@ -83,9 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Preserve SSE header-array turn state (`8478bfb`)
 - Respect anthropic crate boundaries (`9f9ef08`)
 - Optimize hot paths (`3039952`)
-
-## 0.177.0 - 2026-06-11
-
-### Runtime
-
-- Surface proxy contract and import progress (`9a59ca0`)

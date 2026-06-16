@@ -50,10 +50,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.188.0`:
+The current local version in this repo is `0.189.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.188.0
+npm install -g @christiandoxa/prodex@0.189.0
 ```
 
 Dependency status in this repo:
@@ -339,6 +339,7 @@ prodex doctor --runtime --json
 prodex doctor --bundle ./prodex-doctor.json --redacted
 prodex setup --dry-run
 prodex capability list
+prodex gateway --provider gemini
 ```
 
 If you see `409 stale_continuation`, Prodex found continuation state for the request but could not safely replay it as a fresh turn on a different profile. That is deliberate: the missing or stale binding may still belong to a specific profile, session, or tool-output chain, and replaying it elsewhere can break the conversation. Start a new prompt, or return to the same session/profile if the original continuation is still available.
@@ -362,6 +363,18 @@ Use `prodex audit` when you want to inspect the local append-only audit log. It 
 
 Use `prodex context audit` when shared Codex memory, rule, skill, or AGENTS files feel too token-heavy. Use `prodex context compress PATH --dry-run` first; compression is local and deterministic, skips backups, only edits Markdown/text prose files, and writes an `.original.md` backup before replacement.
 
+Use `prodex gateway` when you need an OpenAI-compatible service endpoint instead of launching Codex:
+
+```bash
+PRODEX_GATEWAY_TOKEN=change-me GEMINI_API_KEY=... prodex gateway --provider gemini
+curl http://127.0.0.1:4000/v1/responses \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"prodex-fast","input":"hello"}'
+```
+
+The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It emits `x-prodex-call-id`, writes `gateway_spend` events to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, and supports policy-defined route strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) plus keyword/model, Presidio, and external webhook guardrails.
+
 For managed local deployments, you can pin runtime logging and proxy tuning in `~/.prodex/policy.toml`:
 
 ```toml
@@ -379,11 +392,32 @@ backend = "file"
 worker_count = 16
 active_request_limit = 128
 responses_active_limit = 96
+
+[gateway]
+listen_addr = "127.0.0.1:4000"
+provider = "gemini"
+require_auth = true
+
+[[gateway.route_aliases]]
+alias = "prodex-fast"
+models = ["gemini-3-flash", "gemini-2.5-flash"]
+strategy = "fallback"
+
+[gateway.observability]
+sinks = ["runtime-log", "jsonl"]
+jsonl_path = "gateway-spend.jsonl"
+
+[gateway.guardrails]
+blocked_keywords = ["secret project"]
+blocked_output_keywords = ["do not reveal"]
+allowed_models = ["prodex-fast"]
+webhook_url = "https://guardrails.example/check"
+webhook_phases = ["pre", "post"]
 ```
 
 Environment variables still override `policy.toml`.
 Use `prodex info` to inspect the resulting effective runtime tuning values.
-See [docs/runtime-policy.md](./docs/runtime-policy.md) for all `runtime` and `runtime_proxy` keys, env overrides, defaults, and meanings.
+See [docs/runtime-policy.md](./docs/runtime-policy.md) for all `runtime`, `gateway`, and `runtime_proxy` keys, env overrides, defaults, and meanings.
 
 ## Enterprise Notes
 
@@ -405,7 +439,7 @@ Known gaps today:
 - no keychain, Vault, or KMS-backed secret storage implementation yet
 - audit logs follow the resolved runtime log directory by default, or `PRODEX_AUDIT_LOG_DIR` when set
 - no RBAC, SSO, SCIM, or central admin plane
-- runtime observability is still centered on local logs plus `doctor --runtime --json`
+- runtime observability has local logs, `doctor --runtime --json`, and gateway JSONL/HTTP event export; it is still not a centralized admin plane
 - the profile pool is still owned per host, not by a shared service
 - runtime-store modularization is still underway, so the state layer should be treated as an internal boundary rather than a stable integration surface
 
