@@ -41,7 +41,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1275,
+    "maxLines": 1273,
     "reason": "Local rewrite shared routing, gateway route-load tracking, guardrail webhook dispatch, provider-scoped session model memory, and Copilot startup instruction cache initialization remain capped while provider-specific selection helpers are split out."
   },
   {

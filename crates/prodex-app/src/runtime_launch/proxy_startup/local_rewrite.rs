@@ -815,9 +815,7 @@ pub(super) fn runtime_gateway_guardrail_webhook_block(
     if !shared.gateway_guardrail_webhook.enabled_for(phase) {
         return None;
     }
-    let Some(url) = shared.gateway_guardrail_webhook.url.as_deref() else {
-        return None;
-    };
+    let url = shared.gateway_guardrail_webhook.url.as_deref()?;
     let payload = serde_json::json!({
         "phase": phase,
         "request_id": request_id,

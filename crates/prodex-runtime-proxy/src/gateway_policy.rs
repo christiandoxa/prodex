@@ -217,9 +217,9 @@ fn runtime_gateway_route_selected_model(
         RuntimeGatewayRouteStrategy::First => models[0].to_string(),
         RuntimeGatewayRouteStrategy::LeastBusy => models
             .iter()
-            .min_by_key(|model| {
+            .min_by_key(|&model| {
                 model_state
-                    .get(&model.to_string())
+                    .get::<str>(model)
                     .map(|state| state.in_flight)
                     .unwrap_or_default()
             })
@@ -228,10 +228,10 @@ fn runtime_gateway_route_selected_model(
             .to_string(),
         RuntimeGatewayRouteStrategy::LowestCost => models
             .iter()
-            .min_by_key(|model| {
+            .min_by_key(|&model| {
                 alias
                     .model_metrics
-                    .get(&model.to_string())
+                    .get::<str>(model)
                     .and_then(RuntimeGatewayRouteModelMetrics::cost_score)
                     .unwrap_or(u64::MAX)
             })
@@ -240,13 +240,13 @@ fn runtime_gateway_route_selected_model(
             .to_string(),
         RuntimeGatewayRouteStrategy::LowestLatency => models
             .iter()
-            .min_by_key(|model| {
+            .min_by_key(|&model| {
                 let state_latency = model_state
-                    .get(&model.to_string())
+                    .get::<str>(model)
                     .and_then(|state| state.latency_ms_ewma);
                 let policy_latency = alias
                     .model_metrics
-                    .get(&model.to_string())
+                    .get::<str>(model)
                     .and_then(|metrics| metrics.latency_ms);
                 state_latency.or(policy_latency).unwrap_or(u64::MAX)
             })
@@ -255,14 +255,14 @@ fn runtime_gateway_route_selected_model(
             .to_string(),
         RuntimeGatewayRouteStrategy::Rpm => models
             .iter()
-            .max_by_key(|model| {
+            .max_by_key(|&model| {
                 let limit = alias
                     .model_metrics
-                    .get(&model.to_string())
+                    .get::<str>(model)
                     .and_then(|metrics| metrics.rpm_limit)
                     .unwrap_or(u64::MAX / 2);
                 let used = model_state
-                    .get(&model.to_string())
+                    .get::<str>(model)
                     .map(|state| state.requests_this_minute)
                     .unwrap_or_default();
                 limit.saturating_sub(used)
@@ -272,14 +272,14 @@ fn runtime_gateway_route_selected_model(
             .to_string(),
         RuntimeGatewayRouteStrategy::Tpm => models
             .iter()
-            .max_by_key(|model| {
+            .max_by_key(|&model| {
                 let limit = alias
                     .model_metrics
-                    .get(&model.to_string())
+                    .get::<str>(model)
                     .and_then(|metrics| metrics.tpm_limit)
                     .unwrap_or(u64::MAX / 2);
                 let used = model_state
-                    .get(&model.to_string())
+                    .get::<str>(model)
                     .map(|state| state.tokens_this_minute)
                     .unwrap_or_default()
                     .saturating_add(estimated_tokens);
