@@ -42,6 +42,7 @@ pub struct RuntimePolicyConfig {
     pub version: u32,
     pub runtime: RuntimePolicyRuntimeSettings,
     pub runtime_proxy: RuntimePolicyProxySettings,
+    pub gateway: RuntimePolicyGatewaySettings,
     pub secrets: RuntimePolicySecretsSettings,
 }
 
@@ -55,6 +56,73 @@ pub struct RuntimePolicyRuntimeSettings {
 pub struct RuntimePolicySecretsSettings {
     pub backend: Option<SecretBackendKind>,
     pub keyring_service: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewaySettings {
+    pub listen_addr: Option<String>,
+    pub provider: Option<String>,
+    pub base_url: Option<String>,
+    pub require_auth: Option<bool>,
+    #[serde(default)]
+    pub route_aliases: Vec<RuntimePolicyGatewayRouteAlias>,
+    #[serde(default)]
+    pub observability: RuntimePolicyGatewayObservabilitySettings,
+    #[serde(default)]
+    pub guardrails: RuntimePolicyGatewayGuardrailsSettings,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayRouteAlias {
+    pub alias: String,
+    #[serde(default)]
+    pub models: Vec<String>,
+    pub strategy: Option<String>,
+    #[serde(default)]
+    pub model_metrics: Vec<RuntimePolicyGatewayRouteModelMetrics>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayRouteModelMetrics {
+    pub model: String,
+    pub input_cost_per_million_microusd: Option<u64>,
+    pub output_cost_per_million_microusd: Option<u64>,
+    pub latency_ms: Option<u64>,
+    pub rpm_limit: Option<u64>,
+    pub tpm_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayObservabilitySettings {
+    #[serde(default)]
+    pub sinks: Vec<String>,
+    pub call_id_header: Option<String>,
+    pub jsonl_path: Option<String>,
+    pub http_endpoint: Option<String>,
+    pub http_schema: Option<String>,
+    pub http_bearer_token_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayGuardrailsSettings {
+    #[serde(default)]
+    pub blocked_keywords: Vec<String>,
+    #[serde(default)]
+    pub blocked_output_keywords: Vec<String>,
+    #[serde(default)]
+    pub allowed_models: Vec<String>,
+    pub presidio_redaction: Option<bool>,
+    pub prompt_injection_detection: Option<bool>,
+    pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub webhook_phases: Vec<String>,
+    pub webhook_bearer_token_env: Option<String>,
+    pub webhook_fail_closed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -326,6 +394,8 @@ pub struct RuntimePolicyFile {
     pub runtime: RuntimePolicyRuntimeFile,
     #[serde(default)]
     pub runtime_proxy: RuntimePolicyProxySettings,
+    #[serde(default)]
+    pub gateway: RuntimePolicyGatewaySettings,
     #[serde(default)]
     pub secrets: RuntimePolicySecretsFile,
 }

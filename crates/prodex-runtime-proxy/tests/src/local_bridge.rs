@@ -15,8 +15,46 @@ fn classifies_only_bridge_paths_and_methods() {
     assert_eq!(responses.route, LocalBridgeRoute::Responses);
     assert_eq!(responses.method, "POST");
 
+    let chat = local_bridge_classify_request("post", "/v1/chat/completions").unwrap();
+    assert_eq!(chat.route, LocalBridgeRoute::ChatCompletions);
+    assert_eq!(chat.method, "POST");
+
+    for (path, route) in [
+        ("/v1/embeddings", LocalBridgeRoute::Embeddings),
+        (
+            "/v1/images/generations",
+            LocalBridgeRoute::ImagesGenerations,
+        ),
+        ("/v1/images/edits", LocalBridgeRoute::ImagesEdits),
+        ("/v1/images/variations", LocalBridgeRoute::ImagesVariations),
+        ("/v1/audio/speech", LocalBridgeRoute::AudioSpeech),
+        (
+            "/v1/audio/transcriptions",
+            LocalBridgeRoute::AudioTranscriptions,
+        ),
+        (
+            "/v1/audio/translations",
+            LocalBridgeRoute::AudioTranslations,
+        ),
+        ("/v1/rerank", LocalBridgeRoute::Rerank),
+        ("/v1/a2a", LocalBridgeRoute::A2a),
+        ("/v1/messages", LocalBridgeRoute::Messages),
+    ] {
+        let class = local_bridge_classify_request("POST", path).unwrap();
+        assert_eq!(class.route, route, "{path}");
+    }
+
+    let batches = local_bridge_classify_request("GET", "/v1/batches").unwrap();
+    assert_eq!(batches.route, LocalBridgeRoute::Batches);
+    let batch = local_bridge_classify_request("POST", "/v1/batches/batch_123/cancel").unwrap();
+    assert_eq!(batch.route, LocalBridgeRoute::Batch);
+
     assert_eq!(
         local_bridge_classify_request("POST", "/v1/models").unwrap_err(),
+        LocalBridgeRequestRejection::MethodNotAllowed
+    );
+    assert_eq!(
+        local_bridge_classify_request("GET", "/v1/chat/completions").unwrap_err(),
         LocalBridgeRequestRejection::MethodNotAllowed
     );
     assert_eq!(

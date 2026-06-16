@@ -272,6 +272,427 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
     execute_runtime_launch(strategy)
 }
 
+pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
+    let paths = AppPaths::discover()?;
+    let state = AppState::load(&paths)?;
+    let policy = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
+    let provider = args
+        .provider
+        .or_else(|| policy.provider.as_deref().and_then(gateway_policy_provider));
+    let provider_name = provider.map(SuperExternalProvider::as_str);
+    let upstream_base_url = gateway_upstream_base_url(&args, &policy, provider)?;
+    let provider_options = gateway_provider_options(provider, args.api_key.as_deref())?;
+    let auth_token = args
+        .auth_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            env::var("PRODEX_GATEWAY_TOKEN")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
+    if policy.require_auth == Some(true) && auth_token.is_none() {
+        bail!("gateway auth is required by policy.toml; set --auth-token or PRODEX_GATEWAY_TOKEN");
+    }
+    if auth_token.is_some()
+        && matches!(
+            &provider_options,
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }
+                if api_keys.is_empty()
+        )
+    {
+        bail!(
+            "OpenAI-compatible gateway auth requires a separate upstream key; set --api-key, OPENAI_API_KEY, or OPENAI_API_KEYS"
+        );
+    }
+    let listen_addr = args
+        .listen
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            policy
+                .listen_addr
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "127.0.0.1:4000".to_string());
+    gateway_validate_listen_auth(&listen_addr, auth_token.as_deref())?;
+    let gateway_route_aliases = policy
+        .route_aliases
+        .iter()
+        .map(|alias| {
+            let strategy = alias
+                .strategy
+                .as_deref()
+                .and_then(runtime_proxy_crate::RuntimeGatewayRouteStrategy::parse)
+                .unwrap_or_default();
+            runtime_proxy_crate::RuntimeGatewayRouteAlias {
+                alias: alias.alias.trim().to_string(),
+                models: alias
+                    .models
+                    .iter()
+                    .map(|model| model.trim().to_string())
+                    .filter(|model| !model.is_empty())
+                    .collect(),
+                strategy,
+                model_metrics: alias
+                    .model_metrics
+                    .iter()
+                    .map(|metrics| {
+                        (
+                            metrics.model.trim().to_string(),
+                            runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
+                                input_cost_per_million_microusd: metrics
+                                    .input_cost_per_million_microusd,
+                                output_cost_per_million_microusd: metrics
+                                    .output_cost_per_million_microusd,
+                                latency_ms: metrics.latency_ms,
+                                rpm_limit: metrics.rpm_limit,
+                                tpm_limit: metrics.tpm_limit,
+                            },
+                        )
+                    })
+                    .collect(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let gateway_guardrails = runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
+        blocked_keywords: policy
+            .guardrails
+            .blocked_keywords
+            .iter()
+            .map(|keyword| keyword.trim().to_string())
+            .filter(|keyword| !keyword.is_empty())
+            .collect(),
+        blocked_output_keywords: policy
+            .guardrails
+            .blocked_output_keywords
+            .iter()
+            .map(|keyword| keyword.trim().to_string())
+            .filter(|keyword| !keyword.is_empty())
+            .collect(),
+        allowed_models: policy
+            .guardrails
+            .allowed_models
+            .iter()
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty())
+            .collect(),
+        prompt_injection_detection: policy
+            .guardrails
+            .prompt_injection_detection
+            .unwrap_or(false),
+    };
+    let presidio_redaction_enabled = if args.presidio {
+        true
+    } else if args.no_presidio {
+        false
+    } else {
+        policy.guardrails.presidio_redaction.unwrap_or(false)
+    };
+    let gateway_call_id_header = policy
+        .observability
+        .call_id_header
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("x-prodex-call-id")
+        .to_string();
+    let gateway_observability = gateway_observability_config(&paths, &policy)?;
+    let gateway_guardrail_webhook = gateway_guardrail_webhook_config(&policy);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &state,
+        upstream_base_url,
+        provider: provider_options,
+        upstream_no_proxy: false,
+        smart_context_enabled: args.smart_context,
+        presidio_redaction_enabled,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some(&listen_addr),
+        gateway_auth_token_hash: auth_token
+            .as_deref()
+            .map(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token),
+        gateway_route_aliases,
+        gateway_guardrails,
+        gateway_guardrail_webhook,
+        gateway_call_id_header: Some(gateway_call_id_header),
+        gateway_observability,
+    })?;
+    println!(
+        "Prodex gateway listening on http://{} provider={} auth_required={} endpoints=/v1/responses,/v1/chat/completions,/v1/embeddings,/v1/images/*,/v1/audio/*,/v1/batches,/v1/rerank,/v1/a2a,/v1/messages models=/v1/models",
+        proxy.listen_addr,
+        provider_name.unwrap_or("openai-compatible"),
+        auth_token.is_some()
+    );
+    loop {
+        std::thread::park();
+    }
+}
+
+fn gateway_guardrail_webhook_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> RuntimeGatewayGuardrailWebhookConfig {
+    let url = policy
+        .guardrails
+        .webhook_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let phases = policy
+        .guardrails
+        .webhook_phases
+        .iter()
+        .map(|phase| phase.trim().to_ascii_lowercase())
+        .filter(|phase| !phase.is_empty())
+        .map(|phase| match phase.as_str() {
+            "request" => "pre".to_string(),
+            "response" => "post".to_string(),
+            _ => phase,
+        })
+        .collect();
+    let bearer_token = policy
+        .guardrails
+        .webhook_bearer_token_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|env_name| {
+            env::var(env_name)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
+    RuntimeGatewayGuardrailWebhookConfig {
+        url,
+        phases,
+        bearer_token,
+        fail_closed: policy.guardrails.webhook_fail_closed.unwrap_or(false),
+    }
+}
+
+fn gateway_observability_config(
+    paths: &AppPaths,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<RuntimeGatewayObservabilityConfig> {
+    let mut sinks = policy
+        .observability
+        .sinks
+        .iter()
+        .map(|sink| sink.trim().to_string())
+        .filter(|sink| !sink.is_empty())
+        .collect::<Vec<_>>();
+    if !sinks
+        .iter()
+        .any(|sink| sink.eq_ignore_ascii_case("runtime-log") || sink.eq_ignore_ascii_case("log"))
+    {
+        sinks.push("runtime-log".to_string());
+    }
+    let jsonl_path = policy
+        .observability
+        .jsonl_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            let path = PathBuf::from(value);
+            if path.is_absolute() {
+                path
+            } else {
+                paths.root.join(path)
+            }
+        });
+    if jsonl_path.is_some() && !sinks.iter().any(|sink| sink.eq_ignore_ascii_case("jsonl")) {
+        sinks.push("jsonl".to_string());
+    }
+    let http_endpoint = policy
+        .observability
+        .http_endpoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if http_endpoint.is_some() && !sinks.iter().any(|sink| sink.eq_ignore_ascii_case("http")) {
+        sinks.push("http".to_string());
+    }
+    let http_schema = policy
+        .observability
+        .http_schema
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("generic")
+        .to_ascii_lowercase();
+    let http_bearer_token = policy
+        .observability
+        .http_bearer_token_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|env_name| {
+            env::var(env_name)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
+    Ok(RuntimeGatewayObservabilityConfig {
+        sinks,
+        jsonl_path,
+        http_endpoint,
+        http_schema,
+        http_bearer_token,
+    })
+}
+
+fn gateway_policy_provider(value: &str) -> Option<SuperExternalProvider> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => Some(SuperExternalProvider::Anthropic),
+        "copilot" | "github-copilot" | "github_copilot" => Some(SuperExternalProvider::Copilot),
+        "deepseek" => Some(SuperExternalProvider::DeepSeek),
+        "gemini" => Some(SuperExternalProvider::Gemini),
+        _ => None,
+    }
+}
+
+fn gateway_upstream_base_url(
+    args: &GatewayArgs,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    provider: Option<SuperExternalProvider>,
+) -> Result<String> {
+    let raw = args
+        .base_url
+        .as_deref()
+        .or(policy.base_url.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| provider.map(|provider| provider.default_base_url().to_string()))
+        .or_else(|| {
+            env::var("OPENAI_BASE_URL")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    gateway_normalize_upstream_base_url(&raw, provider)
+}
+
+fn gateway_normalize_upstream_base_url(
+    value: &str,
+    provider: Option<SuperExternalProvider>,
+) -> Result<String> {
+    let trimmed = value.trim().trim_end_matches('/').to_string();
+    let parsed = reqwest::Url::parse(&trimmed)
+        .with_context(|| format!("invalid gateway --base-url {trimmed:?}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        bail!("gateway --base-url must use http or https");
+    }
+    if parsed.host_str().is_none() {
+        bail!("gateway --base-url must include a host");
+    }
+    if provider.is_none() && parsed.path().trim_matches('/').is_empty() {
+        Ok(format!("{trimmed}/v1"))
+    } else {
+        Ok(trimmed)
+    }
+}
+
+fn gateway_provider_options(
+    provider: Option<SuperExternalProvider>,
+    api_key: Option<&str>,
+) -> Result<RuntimeLocalRewriteProviderOptions> {
+    match provider {
+        Some(SuperExternalProvider::Anthropic) => {
+            runtime_anthropic_api_keys_from_request_or_env(api_key)
+                .map(|api_keys| RuntimeLocalRewriteProviderOptions::Anthropic {
+                    auth: RuntimeAnthropicProviderAuth::ApiKeys { api_keys },
+                })
+                .context("gateway anthropic provider requires --api-key or ANTHROPIC_API_KEY(S)")
+        }
+        Some(SuperExternalProvider::Copilot) => {
+            runtime_copilot_api_keys_from_request_or_env(api_key)
+                .map(|api_keys| RuntimeLocalRewriteProviderOptions::Copilot {
+                    auth: RuntimeCopilotProviderAuth::ApiKeys { api_keys },
+                })
+                .context("gateway copilot provider requires --api-key or GITHUB_COPILOT_API_KEY(S)")
+        }
+        Some(SuperExternalProvider::DeepSeek) => {
+            runtime_deepseek_api_keys_from_request_or_env(api_key)
+                .map(|api_keys| RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys })
+                .context("gateway deepseek provider requires --api-key or DEEPSEEK_API_KEY(S)")
+        }
+        Some(SuperExternalProvider::Gemini) => {
+            let api_keys = runtime_gemini_api_keys_from_request_or_env(api_key).context(
+                "gateway gemini provider requires --api-key or GEMINI_API_KEY(S) / GOOGLE_API_KEY(S)",
+            )?;
+            Ok(RuntimeLocalRewriteProviderOptions::Gemini {
+                auth: RuntimeGeminiProviderAuth::ApiKeys { api_keys },
+                thinking_budget_tokens: None,
+                model_resolution: RuntimeGeminiModelResolution::from_current_settings(),
+            })
+        }
+        None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: gateway_openai_api_keys(api_key),
+        }),
+    }
+}
+
+fn gateway_openai_api_keys(value: Option<&str>) -> Vec<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| vec![value.to_string()])
+        .or_else(|| {
+            env::var("OPENAI_API_KEYS")
+                .ok()
+                .and_then(|value| gateway_api_keys_from_list(&value))
+                .or_else(|| {
+                    env::var("OPENAI_API_KEY")
+                        .ok()
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty())
+                        .map(|value| vec![value])
+                })
+        })
+        .unwrap_or_default()
+}
+
+fn gateway_api_keys_from_list(value: &str) -> Option<Vec<String>> {
+    let keys = value
+        .split([',', ';', '\n'])
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    (!keys.is_empty()).then_some(keys)
+}
+
+fn gateway_validate_listen_auth(listen_addr: &str, auth_token: Option<&str>) -> Result<()> {
+    let host = listen_addr
+        .rsplit_once(':')
+        .map(|(host, _)| host.trim_matches(['[', ']']))
+        .unwrap_or(listen_addr)
+        .trim();
+    let loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|addr| addr.is_loopback());
+    if !loopback && auth_token.is_none() {
+        bail!(
+            "refusing to bind unauthenticated gateway on non-loopback address {listen_addr}; set --auth-token or PRODEX_GATEWAY_TOKEN"
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RunLaunchRoute {
     ManagedRuntime,
@@ -888,6 +1309,13 @@ fn start_local_rewrite_proxy_endpoint(
         smart_context_enabled: request.smart_context_enabled,
         presidio_redaction_enabled: request.presidio_redaction_enabled,
         model_context_window_tokens,
+        preferred_listen_addr: None,
+        gateway_auth_token_hash: None,
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })?;
     let local_model_provider_id = runtime_local_rewrite_model_provider_id(selection, request)
         .unwrap_or(SUPER_LOCAL_PROVIDER_ID);

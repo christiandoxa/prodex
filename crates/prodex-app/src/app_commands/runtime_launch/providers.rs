@@ -68,9 +68,7 @@ pub(super) fn resolve_gemini_runtime_launch_profile_name(
     state
         .profiles
         .iter()
-        .find_map(|(name, profile)| {
-            matches!(profile.provider, ProfileProvider::Gemini { .. }).then(|| name.clone())
-        })
+        .find_map(|(name, profile)| matches!(profile.provider, ProfileProvider::Gemini { .. }).then(|| name.clone()))
         .or_else(|| resolve_runtime_launch_profile_name(state, None).ok())
         .ok_or_else(|| {
             anyhow::anyhow!(
@@ -312,7 +310,9 @@ pub(super) fn runtime_local_rewrite_provider_options(
             })
         }
         Some(provider) => bail!("unsupported external provider '{provider}'"),
-        None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses),
+        None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: Vec::new(),
+        }),
     }
 }
 
@@ -607,7 +607,9 @@ fn runtime_gemini_oauth_profiles_for_provider(
     Ok(profiles)
 }
 
-fn runtime_deepseek_api_keys_from_request_or_env(value: Option<&str>) -> Option<Vec<String>> {
+pub(super) fn runtime_deepseek_api_keys_from_request_or_env(
+    value: Option<&str>,
+) -> Option<Vec<String>> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -626,7 +628,9 @@ fn runtime_deepseek_api_keys_from_request_or_env(value: Option<&str>) -> Option<
         })
 }
 
-fn runtime_anthropic_api_keys_from_request_or_env(value: Option<&str>) -> Option<Vec<String>> {
+pub(super) fn runtime_anthropic_api_keys_from_request_or_env(
+    value: Option<&str>,
+) -> Option<Vec<String>> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -655,7 +659,9 @@ fn runtime_provider_api_keys_from_list(value: &str) -> Option<Vec<String>> {
     (!keys.is_empty()).then_some(keys)
 }
 
-fn runtime_copilot_api_keys_from_request_or_env(value: Option<&str>) -> Option<Vec<String>> {
+pub(super) fn runtime_copilot_api_keys_from_request_or_env(
+    value: Option<&str>,
+) -> Option<Vec<String>> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -674,7 +680,9 @@ fn runtime_copilot_api_keys_from_request_or_env(value: Option<&str>) -> Option<V
         })
 }
 
-fn runtime_gemini_api_keys_from_request_or_env(value: Option<&str>) -> Option<Vec<String>> {
+pub(super) fn runtime_gemini_api_keys_from_request_or_env(
+    value: Option<&str>,
+) -> Option<Vec<String>> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())

@@ -30,6 +30,10 @@ fn classifies_runtime_proxy_lanes_without_transport_side_effects() {
         RuntimeRouteKind::Compact
     );
     assert_eq!(
+        runtime_proxy_request_lane("/v1/chat/completions", false),
+        RuntimeRouteKind::Responses
+    );
+    assert_eq!(
         runtime_proxy_request_lane("/backend-api/codex/realtime", true),
         RuntimeRouteKind::Websocket
     );
@@ -37,6 +41,10 @@ fn classifies_runtime_proxy_lanes_without_transport_side_effects() {
         runtime_proxy_request_lane("/dashboard", false),
         RuntimeRouteKind::Standard
     );
+    assert!(runtime_proxy_request_is_long_lived(
+        "/v1/chat/completions",
+        false
+    ));
 }
 
 #[test]

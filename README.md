@@ -65,6 +65,18 @@ Prodex supports two provider paths:
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
 | Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
 
+`prodex gateway` exposes the provider bridge as a standalone OpenAI-compatible service for non-Codex clients:
+
+```bash
+PRODEX_GATEWAY_TOKEN=change-me GEMINI_API_KEY=... prodex gateway --provider gemini
+curl http://127.0.0.1:4000/v1/responses \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"prodex-fast","input":"hello"}'
+```
+
+The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It adds `x-prodex-call-id` to responses, writes local request detail plus `gateway_spend` events to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, supports policy-defined routing strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) for model aliases/fallback chains, and can apply keyword/model, Presidio, and external webhook guardrails before calls and on outputs. Configure defaults under `[gateway]` in `policy.toml`.
+
 <details>
 <summary>Provider behavior details</summary>
 
@@ -123,6 +135,7 @@ prodex tokensavior
 prodex clawcompactor
 prodex presidio doctor
 prodex presidio redact --text "My phone is 212-555-1234"
+prodex gateway --provider gemini
 prodex s
 prodex super
 prodex claude mem

@@ -35,7 +35,8 @@ pub(crate) use anthropic_rewrite::{
 };
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
-    RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeLocalRewriteProviderOptions,
+    RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeGatewayGuardrailWebhookConfig,
+    RuntimeGatewayObservabilityConfig, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};

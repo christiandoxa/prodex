@@ -21,6 +21,78 @@ Defaults below are production defaults. Test builds use smaller timeouts and lim
 | `runtime.log_dir` | `PRODEX_RUNTIME_LOG_DIR` | OS temp directory, usually `/tmp` on Linux | Directory for `prodex-runtime-latest.path` and per-run `prodex-runtime-*.log` files. |
 | `runtime.log_format` | `PRODEX_RUNTIME_LOG_FORMAT` | `text` | Runtime proxy log format. Valid values: `text`, `json`. |
 
+## Gateway Keys
+
+`prodex gateway` runs a standalone OpenAI-compatible HTTP gateway.
+Native OpenAI-compatible upstreams are passed through for `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models`.
+Provider bridges translate `/v1/responses` where supported and pass native-compatible side endpoints through to the selected upstream.
+
+| Policy key | Environment override | Default | Meaning |
+| --- | --- | --- | --- |
+| `gateway.listen_addr` | none | `127.0.0.1:4000` | Gateway bind address. Non-loopback binds require `--auth-token` or `PRODEX_GATEWAY_TOKEN`. |
+| `gateway.provider` | CLI `--provider` | OpenAI-compatible upstream | Provider preset: `anthropic`, `copilot`, `deepseek`, or `gemini`. |
+| `gateway.base_url` | CLI `--base-url`; `OPENAI_BASE_URL` for OpenAI-compatible mode | Provider default, or `https://api.openai.com/v1` | Upstream base URL. OpenAI-compatible mode appends `/v1` when the URL has no path. |
+| `gateway.require_auth` | none | `false` | Require gateway bearer auth even on loopback. Token value comes from `--auth-token` or `PRODEX_GATEWAY_TOKEN`. |
+| `gateway.route_aliases` | none | empty | Declarative model aliases. Matching request `model` values are rewritten according to each alias `strategy`. |
+| `gateway.route_aliases[].strategy` | none | `fallback` | Routing strategy for the alias: `fallback` rewrites to `combo:...`, `round-robin` selects one target by request id, `least-busy` selects the target with the fewest in-flight gateway requests, `first` always picks the first target. |
+| `gateway.route_aliases[].model_metrics` | none | empty | Optional per-model routing hints for metric strategies: cost, latency, RPM limit, and TPM limit. |
+| `gateway.observability.sinks` | none | `runtime-log` | Enabled gateway observability sinks. `runtime-log` is always enabled; `jsonl` and `http` are enabled automatically when their target fields are set. |
+| `gateway.observability.call_id_header` | none | `x-prodex-call-id` | Response header containing a stable per-request call id such as `prodex-42`. |
+| `gateway.observability.jsonl_path` | none | empty | Optional JSONL export path for structured `gateway_spend` events. Relative paths are resolved under the Prodex root. |
+| `gateway.observability.http_endpoint` | none | empty | Optional HTTP JSON export endpoint for structured `gateway_spend` events. |
+| `gateway.observability.http_schema` | none | `generic` | HTTP export payload schema: `generic`, `otel`, `datadog`, or `langfuse`. |
+| `gateway.observability.http_bearer_token_env` | none | empty | Environment variable name containing a bearer token for `gateway.observability.http_endpoint`. |
+| `gateway.guardrails.blocked_keywords` | none | empty | Case-insensitive pre-call keyword blocks applied before upstream send. |
+| `gateway.guardrails.blocked_output_keywords` | none | empty | Case-insensitive output keyword blocks. Buffered responses are replaced with `403 policy_violation`; streaming responses are stopped and logged when a keyword is observed. |
+| `gateway.guardrails.allowed_models` | none | empty | Optional pre-call allowlist for request `model` values, checked before route alias rewrite. |
+| `gateway.guardrails.presidio_redaction` | CLI `--presidio` / `--no-presidio` | `false` | Enable Presidio request-body redaction for gateway traffic. |
+| `gateway.guardrails.prompt_injection_detection` | none | `false` | Enable built-in prompt-injection heuristic checks before upstream send. |
+| `gateway.guardrails.webhook_url` | none | empty | Optional external guardrail HTTP endpoint. Prodex sends base64 request/response bodies and expects JSON such as `{"allow": false, "reason": "...", "message": "..."}` to block. |
+| `gateway.guardrails.webhook_phases` | none | both phases | External guardrail phases: `pre` for requests before upstream send, `post` for buffered responses before returning to caller. |
+| `gateway.guardrails.webhook_bearer_token_env` | none | empty | Environment variable name containing a bearer token for `gateway.guardrails.webhook_url`. |
+| `gateway.guardrails.webhook_fail_closed` | none | `false` | Block when the external guardrail endpoint fails or returns non-2xx. |
+
+Example:
+
+```toml
+[gateway]
+listen_addr = "127.0.0.1:4000"
+provider = "gemini"
+require_auth = true
+
+[[gateway.route_aliases]]
+alias = "prodex-fast"
+models = ["gemini-3-flash", "gemini-2.5-flash"]
+strategy = "fallback"
+
+[[gateway.route_aliases.model_metrics]]
+model = "gemini-3-flash"
+input_cost_per_million_microusd = 100
+output_cost_per_million_microusd = 200
+latency_ms = 300
+rpm_limit = 60
+tpm_limit = 100000
+
+[gateway.observability]
+sinks = ["runtime-log", "jsonl", "http"]
+call_id_header = "x-prodex-call-id"
+jsonl_path = "gateway-spend.jsonl"
+http_endpoint = "https://otel-collector.example/v1/events"
+http_schema = "otel"
+http_bearer_token_env = "PRODEX_GATEWAY_OBSERVABILITY_TOKEN"
+
+[gateway.guardrails]
+blocked_keywords = ["secret project"]
+blocked_output_keywords = ["do not reveal"]
+allowed_models = ["prodex-fast"]
+presidio_redaction = true
+prompt_injection_detection = true
+webhook_url = "https://guardrails.example/check"
+webhook_phases = ["pre", "post"]
+webhook_bearer_token_env = "PRODEX_GATEWAY_GUARDRAIL_TOKEN"
+webhook_fail_closed = true
+```
+
 ## Runtime Proxy Keys
 
 `runtime_proxy.preset` selects a conservative preset before individual `runtime_proxy` keys are applied.

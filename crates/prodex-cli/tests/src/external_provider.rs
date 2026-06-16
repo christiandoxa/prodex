@@ -154,6 +154,34 @@ fn super_deepseek_provider_rejects_unknown_provider() {
 }
 
 #[test]
+fn gateway_provider_args_parse_as_top_level_command() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "gateway",
+        "--listen",
+        "127.0.0.1:4100",
+        "--provider",
+        "gemini",
+        "--api-key",
+        "test-key",
+        "--auth-token",
+        "gateway-token",
+        "--smart-context",
+        "--presidio",
+    ])
+    .expect("gateway command should parse");
+    let Commands::Gateway(args) = command else {
+        panic!("expected gateway command");
+    };
+    assert_eq!(args.listen.as_deref(), Some("127.0.0.1:4100"));
+    assert_eq!(args.provider, Some(SuperExternalProvider::Gemini));
+    assert_eq!(args.api_key.as_deref(), Some("test-key"));
+    assert_eq!(args.auth_token.as_deref(), Some("gateway-token"));
+    assert!(args.smart_context);
+    assert!(args.presidio);
+}
+
+#[test]
 fn super_gemini_provider_enables_native_image_generation_only_for_gemini() {
     for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
         let args = parse_super_as_caveman(&[

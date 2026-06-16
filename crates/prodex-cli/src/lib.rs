@@ -167,6 +167,10 @@ pub enum Commands {
     #[command(about = "Expose a protected browser terminal through a Cloudflare quick tunnel.")]
     Expose(ExposeArgs),
     #[command(
+        about = "Run a standalone OpenAI-compatible gateway backed by Prodex provider routing."
+    )]
+    Gateway(GatewayArgs),
+    #[command(
         trailing_var_arg = true,
         about = "Run Claude Code through prodex via an Anthropic-compatible runtime proxy.",
         after_help = CLI_CLAUDE_AFTER_HELP
@@ -280,6 +284,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "super"
             | "s"
             | "expose"
+            | "gateway"
             | "claude"
             | "help"
             | "__runtime-broker"

@@ -1,5 +1,18 @@
 [
   {
+    "id": "gateway-routing-0.189.0",
+    "requiredSubjects": [
+      "feat: add gateway routing"
+    ],
+    "caps": {
+      "maxFiles": 40,
+      "maxBehaviorFiles": 27,
+      "maxLines": 3300,
+      "maxFileLines": 650
+    },
+    "reason": "Reviewed cross-cutting gateway routing release with local full test suite, release hygiene, format, and whitespace gates."
+  },
+  {
     "id": "runtime-hot-path-optimization-0.178.0",
     "requiredSubjects": [
       "perf(runtime): optimize hot paths"

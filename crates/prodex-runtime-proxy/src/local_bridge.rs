@@ -5,12 +5,37 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 pub const LOCAL_BRIDGE_HEALTH_PATH: &str = "/health";
 pub const LOCAL_BRIDGE_MODELS_PATH: &str = "/v1/models";
 pub const LOCAL_BRIDGE_RESPONSES_PATH: &str = "/v1/responses";
+pub const LOCAL_BRIDGE_CHAT_COMPLETIONS_PATH: &str = "/v1/chat/completions";
+pub const LOCAL_BRIDGE_EMBEDDINGS_PATH: &str = "/v1/embeddings";
+pub const LOCAL_BRIDGE_IMAGES_GENERATIONS_PATH: &str = "/v1/images/generations";
+pub const LOCAL_BRIDGE_IMAGES_EDITS_PATH: &str = "/v1/images/edits";
+pub const LOCAL_BRIDGE_IMAGES_VARIATIONS_PATH: &str = "/v1/images/variations";
+pub const LOCAL_BRIDGE_AUDIO_SPEECH_PATH: &str = "/v1/audio/speech";
+pub const LOCAL_BRIDGE_AUDIO_TRANSCRIPTIONS_PATH: &str = "/v1/audio/transcriptions";
+pub const LOCAL_BRIDGE_AUDIO_TRANSLATIONS_PATH: &str = "/v1/audio/translations";
+pub const LOCAL_BRIDGE_BATCHES_PATH: &str = "/v1/batches";
+pub const LOCAL_BRIDGE_RERANK_PATH: &str = "/v1/rerank";
+pub const LOCAL_BRIDGE_A2A_PATH: &str = "/v1/a2a";
+pub const LOCAL_BRIDGE_MESSAGES_PATH: &str = "/v1/messages";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalBridgeRoute {
     Health,
     Models,
     Responses,
+    ChatCompletions,
+    Embeddings,
+    ImagesGenerations,
+    ImagesEdits,
+    ImagesVariations,
+    AudioSpeech,
+    AudioTranscriptions,
+    AudioTranslations,
+    Batches,
+    Batch,
+    Rerank,
+    A2a,
+    Messages,
 }
 
 impl LocalBridgeRoute {
@@ -19,6 +44,18 @@ impl LocalBridgeRoute {
             Self::Health => LOCAL_BRIDGE_HEALTH_PATH,
             Self::Models => LOCAL_BRIDGE_MODELS_PATH,
             Self::Responses => LOCAL_BRIDGE_RESPONSES_PATH,
+            Self::ChatCompletions => LOCAL_BRIDGE_CHAT_COMPLETIONS_PATH,
+            Self::Embeddings => LOCAL_BRIDGE_EMBEDDINGS_PATH,
+            Self::ImagesGenerations => LOCAL_BRIDGE_IMAGES_GENERATIONS_PATH,
+            Self::ImagesEdits => LOCAL_BRIDGE_IMAGES_EDITS_PATH,
+            Self::ImagesVariations => LOCAL_BRIDGE_IMAGES_VARIATIONS_PATH,
+            Self::AudioSpeech => LOCAL_BRIDGE_AUDIO_SPEECH_PATH,
+            Self::AudioTranscriptions => LOCAL_BRIDGE_AUDIO_TRANSCRIPTIONS_PATH,
+            Self::AudioTranslations => LOCAL_BRIDGE_AUDIO_TRANSLATIONS_PATH,
+            Self::Batches | Self::Batch => LOCAL_BRIDGE_BATCHES_PATH,
+            Self::Rerank => LOCAL_BRIDGE_RERANK_PATH,
+            Self::A2a => LOCAL_BRIDGE_A2A_PATH,
+            Self::Messages => LOCAL_BRIDGE_MESSAGES_PATH,
         }
     }
 }
@@ -53,7 +90,11 @@ pub fn local_bridge_classify_request(
             }
             LocalBridgeRoute::Health
         }
-        LOCAL_BRIDGE_MODELS_PATH => {
+        path if path == LOCAL_BRIDGE_MODELS_PATH
+            || path
+                .strip_prefix("/v1/models/")
+                .is_some_and(|id| !id.is_empty()) =>
+        {
             if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
                 return Err(LocalBridgeRequestRejection::MethodNotAllowed);
             }
@@ -64,6 +105,90 @@ pub fn local_bridge_classify_request(
                 return Err(LocalBridgeRequestRejection::MethodNotAllowed);
             }
             LocalBridgeRoute::Responses
+        }
+        LOCAL_BRIDGE_CHAT_COMPLETIONS_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::ChatCompletions
+        }
+        LOCAL_BRIDGE_EMBEDDINGS_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::Embeddings
+        }
+        LOCAL_BRIDGE_IMAGES_GENERATIONS_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::ImagesGenerations
+        }
+        LOCAL_BRIDGE_IMAGES_EDITS_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::ImagesEdits
+        }
+        LOCAL_BRIDGE_IMAGES_VARIATIONS_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::ImagesVariations
+        }
+        LOCAL_BRIDGE_AUDIO_SPEECH_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::AudioSpeech
+        }
+        LOCAL_BRIDGE_AUDIO_TRANSCRIPTIONS_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::AudioTranscriptions
+        }
+        LOCAL_BRIDGE_AUDIO_TRANSLATIONS_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::AudioTranslations
+        }
+        LOCAL_BRIDGE_BATCHES_PATH => {
+            if !method.eq_ignore_ascii_case("POST") && !method.eq_ignore_ascii_case("GET") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::Batches
+        }
+        path if path
+            .strip_prefix("/v1/batches/")
+            .is_some_and(|suffix| !suffix.is_empty()) =>
+        {
+            if !method.eq_ignore_ascii_case("GET")
+                && !method.eq_ignore_ascii_case("POST")
+                && !method.eq_ignore_ascii_case("DELETE")
+            {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::Batch
+        }
+        LOCAL_BRIDGE_RERANK_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::Rerank
+        }
+        LOCAL_BRIDGE_A2A_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::A2a
+        }
+        LOCAL_BRIDGE_MESSAGES_PATH => {
+            if !method.eq_ignore_ascii_case("POST") {
+                return Err(LocalBridgeRequestRejection::MethodNotAllowed);
+            }
+            LocalBridgeRoute::Messages
         }
         _ => return Err(LocalBridgeRequestRejection::PathNotFound),
     };

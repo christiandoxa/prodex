@@ -6,6 +6,7 @@ use prodex_runtime_gemini::gemini_model_fallback_chain;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
+use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RuntimeProviderBridgeKind {
@@ -473,6 +474,78 @@ pub(super) fn runtime_provider_request_ledger_message(
     )
 }
 
+pub(super) fn runtime_provider_gateway_spend_event(
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    path_and_query: &str,
+    model: Option<&str>,
+    status: u16,
+    elapsed_ms: u128,
+    request_bytes: usize,
+) -> RuntimeProviderGatewaySpendEvent {
+    RuntimeProviderGatewaySpendEvent {
+        event: "gateway_spend",
+        request: request_id,
+        call_id: format!("prodex-{request_id}"),
+        provider: runtime_provider_label(kind).to_string(),
+        path: path_without_query(path_and_query).to_string(),
+        model: model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown")
+            .to_string(),
+        status,
+        elapsed_ms,
+        request_bytes,
+        response_bytes: None,
+        input_tokens: None,
+        output_tokens: None,
+        cost_usd: None,
+        sink: "runtime-log".to_string(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct RuntimeProviderGatewaySpendEvent {
+    pub(super) event: &'static str,
+    pub(super) request: u64,
+    pub(super) call_id: String,
+    pub(super) provider: String,
+    pub(super) path: String,
+    pub(super) model: String,
+    pub(super) status: u16,
+    pub(super) elapsed_ms: u128,
+    pub(super) request_bytes: usize,
+    pub(super) response_bytes: Option<usize>,
+    pub(super) input_tokens: Option<u64>,
+    pub(super) output_tokens: Option<u64>,
+    pub(super) cost_usd: Option<f64>,
+    pub(super) sink: String,
+}
+
+impl RuntimeProviderGatewaySpendEvent {
+    pub(super) fn log_message(&self) -> String {
+        runtime_proxy_structured_log_message(
+            "gateway_spend",
+            [
+                runtime_proxy_log_field("request", self.request.to_string()),
+                runtime_proxy_log_field("call_id", self.call_id.as_str()),
+                runtime_proxy_log_field("provider", self.provider.as_str()),
+                runtime_proxy_log_field("path", self.path.as_str()),
+                runtime_proxy_log_field("model", self.model.as_str()),
+                runtime_proxy_log_field("status", self.status.to_string()),
+                runtime_proxy_log_field("elapsed_ms", self.elapsed_ms.to_string()),
+                runtime_proxy_log_field("request_bytes", self.request_bytes.to_string()),
+                runtime_proxy_log_field("response_bytes", "unknown"),
+                runtime_proxy_log_field("input_tokens", "unknown"),
+                runtime_proxy_log_field("output_tokens", "unknown"),
+                runtime_proxy_log_field("cost_usd", "unknown"),
+                runtime_proxy_log_field("sink", self.sink.as_str()),
+            ],
+        )
+    }
+}
+
 pub(super) fn runtime_provider_should_retry_with_next_model(
     class: RuntimeProviderErrorClass,
 ) -> bool {
@@ -877,5 +950,40 @@ mod tests {
             RuntimeProviderBridgeKind::Copilot,
             "/v1/chat/completions"
         ));
+    }
+
+    #[test]
+    fn gateway_spend_message_includes_stable_call_fields() {
+        let event = runtime_provider_gateway_spend_event(
+            42,
+            RuntimeProviderBridgeKind::Gemini,
+            "/v1/responses?trace=1",
+            Some("prodex-fast"),
+            200,
+            123,
+            456,
+        );
+        let message = event.log_message();
+
+        let fields = runtime_proxy_crate::runtime_proxy_log_fields(&message);
+        assert_eq!(
+            runtime_proxy_crate::runtime_proxy_log_event(&message),
+            Some("gateway_spend")
+        );
+        assert_eq!(fields.get("call_id").map(String::as_str), Some("prodex-42"));
+        assert_eq!(fields.get("provider").map(String::as_str), Some("gemini"));
+        assert_eq!(
+            fields.get("path").map(String::as_str),
+            Some("/v1/responses")
+        );
+        assert_eq!(fields.get("model").map(String::as_str), Some("prodex-fast"));
+        assert_eq!(fields.get("status").map(String::as_str), Some("200"));
+        assert_eq!(fields.get("request_bytes").map(String::as_str), Some("456"));
+        assert_eq!(fields.get("cost_usd").map(String::as_str), Some("unknown"));
+
+        let json: serde_json::Value = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["event"], "gateway_spend");
+        assert_eq!(json["call_id"], "prodex-42");
+        assert_eq!(json["response_bytes"], serde_json::Value::Null);
     }
 }

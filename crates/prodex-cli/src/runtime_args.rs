@@ -222,6 +222,34 @@ pub struct ExposeArgs {
     pub no_tunnel: bool,
 }
 
+#[derive(Args, Debug)]
+pub struct GatewayArgs {
+    /// Address to bind the OpenAI-compatible gateway to.
+    #[arg(long, value_name = "ADDR")]
+    pub listen: Option<String>,
+    /// External provider preset for the gateway. Omit for an OpenAI-compatible upstream.
+    #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
+    pub provider: Option<SuperExternalProvider>,
+    /// Upstream base URL. Defaults to the selected provider default, policy.toml, or OPENAI_BASE_URL.
+    #[arg(long = "base-url", visible_alias = "url", value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Provider API key. Prefer provider-specific env vars for shells/history.
+    #[arg(long = "api-key", value_name = "KEY")]
+    pub api_key: Option<String>,
+    /// Require this bearer token from gateway clients. Env fallback: PRODEX_GATEWAY_TOKEN.
+    #[arg(long = "auth-token", value_name = "TOKEN")]
+    pub auth_token: Option<String>,
+    /// Enable Smart Context Autopilot for gateway /v1/responses and /v1/chat/completions requests.
+    #[arg(long = "smart-context", default_value_t = false)]
+    pub smart_context: bool,
+    /// Enable Presidio request-body redaction for gateway requests.
+    #[arg(long, conflicts_with = "no_presidio")]
+    pub presidio: bool,
+    /// Disable policy-enabled Presidio redaction for this gateway process.
+    #[arg(long, conflicts_with = "presidio")]
+    pub no_presidio: bool,
+}
+
 impl SuperArgs {
     pub fn presidio_preference(&self) -> Option<bool> {
         if self.presidio {

@@ -100,6 +100,147 @@ profile_inflight_hard_limit = 9
 }
 
 #[test]
+fn load_runtime_policy_from_root_parses_gateway_settings() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway]
+listen_addr = "127.0.0.1:4100"
+provider = "gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+require_auth = true
+
+[[gateway.route_aliases]]
+alias = "prodex-fast"
+models = ["gemini-3-flash", "gemini-2.5-flash"]
+strategy = "lowest-cost"
+
+[[gateway.route_aliases.model_metrics]]
+model = "gemini-3-flash"
+input_cost_per_million_microusd = 100
+output_cost_per_million_microusd = 200
+latency_ms = 300
+rpm_limit = 60
+tpm_limit = 100000
+
+[[gateway.route_aliases.model_metrics]]
+model = "gemini-2.5-flash"
+input_cost_per_million_microusd = 50
+output_cost_per_million_microusd = 100
+latency_ms = 250
+rpm_limit = 30
+tpm_limit = 50000
+
+[gateway.observability]
+sinks = ["log", "jsonl", "http"]
+call_id_header = "x-prodex-call-id"
+jsonl_path = "gateway-spend.jsonl"
+http_endpoint = "https://otel-collector.example/v1/events"
+http_schema = "otel"
+http_bearer_token_env = "PRODEX_GATEWAY_OBSERVABILITY_TOKEN"
+
+[gateway.guardrails]
+blocked_keywords = ["secret project"]
+blocked_output_keywords = ["do not reveal"]
+allowed_models = ["prodex-fast"]
+presidio_redaction = true
+prompt_injection_detection = true
+webhook_url = "https://guardrails.example/check"
+webhook_phases = ["pre", "post"]
+webhook_bearer_token_env = "PRODEX_GATEWAY_GUARDRAIL_TOKEN"
+webhook_fail_closed = true
+"#,
+    )
+    .unwrap();
+
+    let loaded = load_runtime_policy_from_root(&root).unwrap().unwrap();
+    assert_eq!(
+        loaded.gateway.listen_addr.as_deref(),
+        Some("127.0.0.1:4100")
+    );
+    assert_eq!(loaded.gateway.provider.as_deref(), Some("gemini"));
+    assert_eq!(loaded.gateway.route_aliases[0].alias, "prodex-fast");
+    assert_eq!(
+        loaded.gateway.route_aliases[0].models,
+        vec!["gemini-3-flash", "gemini-2.5-flash"]
+    );
+    assert_eq!(
+        loaded.gateway.route_aliases[0].strategy.as_deref(),
+        Some("lowest-cost")
+    );
+    assert_eq!(loaded.gateway.route_aliases[0].model_metrics.len(), 2);
+    assert_eq!(
+        loaded.gateway.route_aliases[0].model_metrics[0].rpm_limit,
+        Some(60)
+    );
+    assert_eq!(
+        loaded.gateway.observability.sinks,
+        vec!["log", "jsonl", "http"]
+    );
+    assert_eq!(
+        loaded.gateway.observability.jsonl_path.as_deref(),
+        Some("gateway-spend.jsonl")
+    );
+    assert_eq!(
+        loaded.gateway.observability.http_endpoint.as_deref(),
+        Some("https://otel-collector.example/v1/events")
+    );
+    assert_eq!(
+        loaded.gateway.observability.http_schema.as_deref(),
+        Some("otel")
+    );
+    assert_eq!(
+        loaded
+            .gateway
+            .observability
+            .http_bearer_token_env
+            .as_deref(),
+        Some("PRODEX_GATEWAY_OBSERVABILITY_TOKEN")
+    );
+    assert_eq!(
+        loaded.gateway.guardrails.blocked_keywords,
+        vec!["secret project"]
+    );
+    assert_eq!(
+        loaded.gateway.guardrails.blocked_output_keywords,
+        vec!["do not reveal"]
+    );
+    assert_eq!(
+        loaded.gateway.guardrails.allowed_models,
+        vec!["prodex-fast"]
+    );
+    assert_eq!(loaded.gateway.guardrails.presidio_redaction, Some(true));
+    assert_eq!(
+        loaded.gateway.guardrails.prompt_injection_detection,
+        Some(true)
+    );
+    assert_eq!(
+        loaded.gateway.guardrails.webhook_url.as_deref(),
+        Some("https://guardrails.example/check")
+    );
+    assert_eq!(
+        loaded.gateway.guardrails.webhook_phases,
+        vec!["pre", "post"]
+    );
+    assert_eq!(
+        loaded
+            .gateway
+            .guardrails
+            .webhook_bearer_token_env
+            .as_deref(),
+        Some("PRODEX_GATEWAY_GUARDRAIL_TOKEN")
+    );
+    assert_eq!(loaded.gateway.guardrails.webhook_fail_closed, Some(true));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn load_runtime_policy_from_root_parses_runtime_proxy_preset() {
     clear_runtime_policy_cache();
     let root = temp_root("preset-parse");

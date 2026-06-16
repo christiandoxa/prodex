@@ -56,8 +56,269 @@ pub fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> 
     }
 
     validate_runtime_proxy_policy(policy, path)?;
+    validate_gateway_policy(policy, path)?;
 
     Ok(())
+}
+
+pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    if matches!(
+        policy.gateway.listen_addr.as_deref().map(str::trim),
+        Some("")
+    ) {
+        bail!("gateway.listen_addr in {} cannot be empty", path.display());
+    }
+    if matches!(policy.gateway.provider.as_deref().map(str::trim), Some("")) {
+        bail!("gateway.provider in {} cannot be empty", path.display());
+    }
+    if matches!(policy.gateway.base_url.as_deref().map(str::trim), Some("")) {
+        bail!("gateway.base_url in {} cannot be empty", path.display());
+    }
+    for (index, alias) in policy.gateway.route_aliases.iter().enumerate() {
+        let field = format!("gateway.route_aliases[{index}]");
+        if alias.alias.trim().is_empty() {
+            bail!("{field}.alias in {} cannot be empty", path.display());
+        }
+        if alias.models.is_empty() {
+            bail!("{field}.models in {} cannot be empty", path.display());
+        }
+        if alias.models.iter().any(|model| model.trim().is_empty()) {
+            bail!(
+                "{field}.models in {} cannot contain empty values",
+                path.display()
+            );
+        }
+        if let Some(strategy) = alias.strategy.as_deref() {
+            validate_gateway_route_strategy(strategy)
+                .with_context(|| format!("{field}.strategy in {} is invalid", path.display()))?;
+        }
+        for (metric_index, metric) in alias.model_metrics.iter().enumerate() {
+            let metric_field = format!("{field}.model_metrics[{metric_index}]");
+            if metric.model.trim().is_empty() {
+                bail!("{metric_field}.model in {} cannot be empty", path.display());
+            }
+            if !alias
+                .models
+                .iter()
+                .any(|model| model.trim() == metric.model.trim())
+            {
+                bail!(
+                    "{metric_field}.model in {} must match one of {field}.models",
+                    path.display()
+                );
+            }
+            validate_optional_u64(
+                metric.input_cost_per_million_microusd,
+                path,
+                &format!("{metric_field}.input_cost_per_million_microusd"),
+            )?;
+            validate_optional_u64(
+                metric.output_cost_per_million_microusd,
+                path,
+                &format!("{metric_field}.output_cost_per_million_microusd"),
+            )?;
+            validate_optional_u64(
+                metric.latency_ms,
+                path,
+                &format!("{metric_field}.latency_ms"),
+            )?;
+            validate_optional_u64(metric.rpm_limit, path, &format!("{metric_field}.rpm_limit"))?;
+            validate_optional_u64(metric.tpm_limit, path, &format!("{metric_field}.tpm_limit"))?;
+        }
+    }
+    for (index, sink) in policy.gateway.observability.sinks.iter().enumerate() {
+        if sink.trim().is_empty() {
+            bail!(
+                "gateway.observability.sinks[{index}] in {} cannot be empty",
+                path.display()
+            );
+        }
+    }
+    if matches!(
+        policy
+            .gateway
+            .observability
+            .call_id_header
+            .as_deref()
+            .map(str::trim),
+        Some("")
+    ) {
+        bail!(
+            "gateway.observability.call_id_header in {} cannot be empty",
+            path.display()
+        );
+    }
+    if matches!(
+        policy
+            .gateway
+            .observability
+            .jsonl_path
+            .as_deref()
+            .map(str::trim),
+        Some("")
+    ) {
+        bail!(
+            "gateway.observability.jsonl_path in {} cannot be empty",
+            path.display()
+        );
+    }
+    if let Some(endpoint) = policy.gateway.observability.http_endpoint.as_deref() {
+        let endpoint = endpoint.trim();
+        if endpoint.is_empty() {
+            bail!(
+                "gateway.observability.http_endpoint in {} cannot be empty",
+                path.display()
+            );
+        }
+        if !gateway_observability_http_endpoint_has_http_host(endpoint) {
+            bail!(
+                "gateway.observability.http_endpoint in {} must be an http(s) URL with host",
+                path.display()
+            );
+        }
+    }
+    if matches!(
+        policy
+            .gateway
+            .observability
+            .http_bearer_token_env
+            .as_deref()
+            .map(str::trim),
+        Some("")
+    ) {
+        bail!(
+            "gateway.observability.http_bearer_token_env in {} cannot be empty",
+            path.display()
+        );
+    }
+    if let Some(schema) = policy.gateway.observability.http_schema.as_deref() {
+        validate_gateway_observability_http_schema(schema).with_context(|| {
+            format!(
+                "gateway.observability.http_schema in {} is invalid",
+                path.display()
+            )
+        })?;
+    }
+    for (index, keyword) in policy
+        .gateway
+        .guardrails
+        .blocked_keywords
+        .iter()
+        .enumerate()
+    {
+        if keyword.trim().is_empty() {
+            bail!(
+                "gateway.guardrails.blocked_keywords[{index}] in {} cannot be empty",
+                path.display()
+            );
+        }
+    }
+    for (index, keyword) in policy
+        .gateway
+        .guardrails
+        .blocked_output_keywords
+        .iter()
+        .enumerate()
+    {
+        if keyword.trim().is_empty() {
+            bail!(
+                "gateway.guardrails.blocked_output_keywords[{index}] in {} cannot be empty",
+                path.display()
+            );
+        }
+    }
+    for (index, model) in policy.gateway.guardrails.allowed_models.iter().enumerate() {
+        if model.trim().is_empty() {
+            bail!(
+                "gateway.guardrails.allowed_models[{index}] in {} cannot be empty",
+                path.display()
+            );
+        }
+    }
+    if let Some(url) = policy.gateway.guardrails.webhook_url.as_deref() {
+        let url = url.trim();
+        if url.is_empty() {
+            bail!(
+                "gateway.guardrails.webhook_url in {} cannot be empty",
+                path.display()
+            );
+        }
+        if !gateway_observability_http_endpoint_has_http_host(url) {
+            bail!(
+                "gateway.guardrails.webhook_url in {} must be an http(s) URL with host",
+                path.display()
+            );
+        }
+    }
+    for (index, phase) in policy.gateway.guardrails.webhook_phases.iter().enumerate() {
+        validate_gateway_guardrail_webhook_phase(phase).with_context(|| {
+            format!(
+                "gateway.guardrails.webhook_phases[{index}] in {} is invalid",
+                path.display()
+            )
+        })?;
+    }
+    if matches!(
+        policy
+            .gateway
+            .guardrails
+            .webhook_bearer_token_env
+            .as_deref()
+            .map(str::trim),
+        Some("")
+    ) {
+        bail!(
+            "gateway.guardrails.webhook_bearer_token_env in {} cannot be empty",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn validate_gateway_route_strategy(value: &str) -> Result<()> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "fallback" | "ordered-fallback" | "ordered_fallback" | "round-robin" | "round_robin"
+        | "rr" | "first" | "first-available" | "first_available" | "ordered" | "least-busy"
+        | "least_busy" | "least-busy-model" | "least_busy_model" | "lowest-cost"
+        | "lowest_cost" | "cost" | "cost-optimized" | "cost_optimized" | "lowest-latency"
+        | "lowest_latency" | "latency" | "latency-optimized" | "latency_optimized" | "rpm"
+        | "rpm-headroom" | "rpm_headroom" | "tpm" | "tpm-headroom" | "tpm_headroom" => Ok(()),
+        "" => bail!("strategy cannot be empty"),
+        _ => bail!(
+            "strategy must be one of fallback, round-robin, first, least-busy, lowest-cost, lowest-latency, rpm, tpm"
+        ),
+    }
+}
+
+fn validate_gateway_observability_http_schema(value: &str) -> Result<()> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "generic" | "otel" | "opentelemetry" | "datadog" | "langfuse" => Ok(()),
+        "" => bail!("schema cannot be empty"),
+        _ => bail!("schema must be one of generic, otel, datadog, langfuse"),
+    }
+}
+
+fn validate_gateway_guardrail_webhook_phase(value: &str) -> Result<()> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "pre" | "request" | "post" | "response" => Ok(()),
+        "" => bail!("phase cannot be empty"),
+        _ => bail!("phase must be one of pre, post"),
+    }
+}
+
+fn gateway_observability_http_endpoint_has_http_host(value: &str) -> bool {
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return false;
+    };
+    if !matches!(scheme, "http" | "https") {
+        return false;
+    }
+    let host = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    !host.is_empty() && !host.contains('@')
 }
 
 pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {

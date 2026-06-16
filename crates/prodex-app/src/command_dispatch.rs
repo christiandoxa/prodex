@@ -159,6 +159,12 @@ impl CommandExecute for GeminiCompatRefreshArgs {
     }
 }
 
+impl CommandExecute for GatewayArgs {
+    fn execute(self) -> Result<()> {
+        handle_gateway(self)
+    }
+}
+
 impl CommandExecute for ImportCurrentArgs {
     fn execute(self) -> Result<()> {
         handle_import_current_profile(self)
@@ -285,6 +291,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         }
         Commands::Super(command) => RoutedCommand::new(command),
         Commands::Expose(command) => RoutedCommand::new(command),
+        Commands::Gateway(command) => RoutedCommand::new(command),
         Commands::Claude(command) => RoutedCommand::new(command),
         Commands::RuntimeBroker(command) => RoutedCommand::new(command),
         Commands::GeminiCompatRefresh(command) => RoutedCommand::new(command),

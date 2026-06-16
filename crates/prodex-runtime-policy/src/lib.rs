@@ -9,7 +9,9 @@ pub use self::load::{load_runtime_policy_cached, load_runtime_policy_from_root};
 pub use self::paths::{resolve_runtime_policy_path, runtime_policy_path};
 pub use self::types::{
     PRODEX_POLICY_FILE_NAME, PRODEX_POLICY_VERSION, PRODEX_RUNTIME_PROXY_PRESET_ENV,
-    RuntimeLogFormat, RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyProxyPreset,
+    RuntimeLogFormat, RuntimePolicyConfig, RuntimePolicyFile,
+    RuntimePolicyGatewayGuardrailsSettings, RuntimePolicyGatewayObservabilitySettings,
+    RuntimePolicyGatewayRouteAlias, RuntimePolicyGatewaySettings, RuntimePolicyProxyPreset,
     RuntimePolicyProxyPresetSelection, RuntimePolicyProxySettings, RuntimePolicyRuntimeFile,
     RuntimePolicyRuntimeSettings, RuntimePolicySecretsFile, RuntimePolicySecretsSettings,
     RuntimePolicySummary,
@@ -66,6 +68,17 @@ pub fn runtime_policy_proxy() -> Option<RuntimePolicyProxySettings> {
     }
     env_preset
         .map(|preset| RuntimePolicyProxySettings::default().with_effective_preset(Some(preset)))
+}
+
+pub fn runtime_policy_gateway() -> Option<RuntimePolicyGatewaySettings> {
+    if !runtime_policy_enabled_for_current_process() {
+        return None;
+    }
+    let paths = prodex_core::AppPaths::discover().ok()?;
+    load_runtime_policy_cached(&paths.root)
+        .ok()
+        .flatten()
+        .map(|config| config.gateway)
 }
 
 pub fn runtime_proxy_preset_from_env() -> Option<RuntimePolicyProxyPreset> {

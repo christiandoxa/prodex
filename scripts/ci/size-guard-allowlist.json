@@ -1,8 +1,8 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 965,
-    "reason": "Runtime launch orchestration remains capped while resume repair and provider-specific setup are extracted."
+    "maxLines": 1393,
+    "reason": "Runtime launch orchestration remains capped while gateway startup, guardrail policy resolution, observability export, resume repair, and provider-specific setup are extracted."
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
@@ -41,13 +41,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 932,
-    "reason": "Local rewrite shared routing, provider-scoped session model memory, and Copilot startup instruction cache initialization remain capped while provider-specific selection helpers are split out."
+    "maxLines": 1275,
+    "reason": "Local rewrite shared routing, gateway route-load tracking, guardrail webhook dispatch, provider-scoped session model memory, and Copilot startup instruction cache initialization remain capped while provider-specific selection helpers are split out."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs",
-    "maxLines": 881,
-    "reason": "Provider bridge catalog and OpenAI-compatible wire-format contract remain capped while provider metadata is split from transport routing."
+    "maxLines": 989,
+    "reason": "Provider bridge catalog, gateway spend-event schema, and OpenAI-compatible wire-format contract remain capped while provider metadata is split from transport routing."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",

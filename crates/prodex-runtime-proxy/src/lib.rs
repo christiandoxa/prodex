@@ -29,6 +29,7 @@ mod chain_log;
 mod continuation;
 mod error_policy;
 mod failure_response;
+mod gateway_policy;
 mod health;
 mod lineage;
 mod local_bridge;
@@ -56,6 +57,7 @@ pub use self::chain_log::*;
 pub use self::continuation::*;
 pub use self::error_policy::*;
 pub use self::failure_response::*;
+pub use self::gateway_policy::*;
 pub use self::health::*;
 pub use self::lineage::*;
 pub use self::local_bridge::*;
@@ -158,6 +160,11 @@ pub fn is_runtime_anthropic_messages_path(path_and_query: &str) -> bool {
     path_without_query(path_and_query).ends_with(RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH)
 }
 
+pub fn is_runtime_chat_completions_path(path_and_query: &str) -> bool {
+    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
+    path_without_query(normalized_path_and_query.as_ref()).ends_with("/chat/completions")
+}
+
 pub fn is_runtime_compact_path(path_and_query: &str) -> bool {
     let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
     path_without_query(normalized_path_and_query.as_ref()).ends_with("/responses/compact")
@@ -168,7 +175,10 @@ pub fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKi
         RuntimeRouteKind::Websocket
     } else if is_runtime_compact_path(path) {
         RuntimeRouteKind::Compact
-    } else if is_runtime_responses_path(path) || is_runtime_anthropic_messages_path(path) {
+    } else if is_runtime_responses_path(path)
+        || is_runtime_chat_completions_path(path)
+        || is_runtime_anthropic_messages_path(path)
+    {
         RuntimeRouteKind::Responses
     } else {
         RuntimeRouteKind::Standard
@@ -176,7 +186,10 @@ pub fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKi
 }
 
 pub fn runtime_proxy_request_is_long_lived(path: &str, websocket: bool) -> bool {
-    websocket || is_runtime_responses_path(path) || is_runtime_anthropic_messages_path(path)
+    websocket
+        || is_runtime_responses_path(path)
+        || is_runtime_chat_completions_path(path)
+        || is_runtime_anthropic_messages_path(path)
 }
 
 pub fn runtime_proxy_request_header_value<'a>(
@@ -208,6 +221,7 @@ pub fn runtime_proxy_request_prefers_interactive_inflight_wait(
 
 pub fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxyRequest) -> bool {
     is_runtime_responses_path(&request.path_and_query)
+        || is_runtime_chat_completions_path(&request.path_and_query)
         || runtime_proxy_request_prefers_interactive_inflight_wait(request)
 }
 
