@@ -4,7 +4,7 @@
 
 Use multiple Codex accounts and supported provider backends from one command line. OpenAI/Codex profiles get quota-aware routing and auto-rotation; provider adapters let `prodex s` launch the Codex front end against Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
 
-![Prodex overview](assets/prodex-overview.png)
+![Prodex overview](https://github.com/christiandoxa/prodex/releases/download/assets/prodex-overview.png)
 
 ## Contents
 
@@ -567,7 +567,10 @@ prodex run
 prodex run --profile main
 prodex run --dry-run
 prodex exec "review this repo"
+prodex delete 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 ```
+
+Codex-owned TUI commands such as `/usage`, `/goal`, `/import`, and `/delete` stay upstream Codex behavior. Prodex preserves their request metadata through the proxy and does not add a competing command surface. The CLI form `prodex delete <session>` passes through to Codex and, after a successful delete, prunes matching Prodex session affinity metadata.
 
 </details>
 
@@ -788,7 +791,7 @@ Gemini CLI compatibility helpers accept inline `gemini_memory` / `gemini_policy`
 
 Before Codex launches, the Gemini provider projects Gemini CLI settings and extension surfaces into the active `CODEX_HOME`: system/global/project `mcpServers` and extension `mcpServers` become generated Codex `[mcp_servers.gemini_*]` entries with settings taking precedence over extension servers of the same Gemini name; system/global/project and extension command hooks are merged into `hooks.json` for Codex `/hooks` review; `~/.gemini/commands`, project `.gemini/commands`, and extension `commands/*.toml` become Codex custom prompts with Gemini command aliases preserved where possible; extension `skills/*/SKILL.md` are copied into generated Codex skill folders under `.agents/skills`; and extension `agents/*.md` become generated Codex custom agents under `agents/*.toml`. Built-in `/prompts:gemini-refresh`, `/prompts:gemini-memory-show`, `/prompts:gemini-memory-refresh`, `/prompts:gemini-memory-inbox`, `/prompts:gemini-remember`, `/prompts:gemini-checkpoint-create`, `/prompts:gemini-checkpoint-restore`, `/prompts:gemini-checkpoint-export`, and `/prompts:gemini-rewind` cover reload/admin, memory, and checkpoint workflows. Generated helper scripts in `CODEX_HOME/bin` include `prodex-gemini-refresh`, `prodex-gemini-checkpoint-create`, and `prodex-gemini-checkpoint-restore`. Set `PRODEX_GEMINI_EXTENSIONS=none` or an allow-list of extension names to control extension loading, `PRODEX_GEMINI_EXTENSION_DIRS` to add extension roots, or `PRODEX_GEMINI_DISABLE_CLI_COMPAT=1` to skip the launch-time Codex surface projection.
 
-Gemini Live realtime websocket sessions translate Codex audio, transcript, text, function-call, function-result, interruption, cancellation, housekeeping, and turn-completion events to and from Gemini `BidiGenerateContent`; one Gemini auth/profile is selected before upgrade and remains fixed for the session. `PRODEX_GEMINI_LIVE_MODEL` overrides the default Live model, while `PRODEX_GEMINI_LIVE_URL` is available for a custom or test Live endpoint. `prodex doctor --runtime` recognizes provider bridge and Gemini markers such as `local_rewrite_provider_model_fallback`, `local_rewrite_gemini_quota_rotate`, `local_rewrite_gemini_invalid_stream_retry`, and `local_rewrite_gemini_live_error`.
+Gemini Live realtime websocket translation remains available for compatible callers and credentialed adapter tests, mapping Codex audio, transcript, text, function-call, function-result, interruption, cancellation, housekeeping, and turn-completion events to and from Gemini `BidiGenerateContent`; one Gemini auth/profile is selected before upgrade and remains fixed for the session. Codex 0.140.0 removed the upstream TUI voice controls, so this bridge should not be treated as a normal Codex TUI voice feature. `PRODEX_GEMINI_LIVE_MODEL` overrides the default Live model, while `PRODEX_GEMINI_LIVE_URL` is available for a custom or test Live endpoint. `prodex doctor --runtime` recognizes provider bridge and Gemini markers such as `local_rewrite_provider_model_fallback`, `local_rewrite_gemini_quota_rotate`, `local_rewrite_gemini_invalid_stream_retry`, and `local_rewrite_gemini_live_error`.
 
 Run `npm run test:gemini-schema` after changing Gemini request, response, SSE, semantic compact, exact-output, tool-schema, or Live translation. Run `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` for a credentialed end-to-end Gemini adapter smoke request; set `PRODEX_BIN` or `PRODEX_LIVE_GEMINI_MODEL` to override the binary or model. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` for command-output-only, file edit, `apply_patch`, reference-repo clone/inspection, optional-tool update discipline, semantic compact, and explicit `exec resume` checks. Add `PRODEX_LIVE_GEMINI_MCP=1` and/or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when the local environment should also exercise MCP and image-input paths.
 
@@ -964,7 +967,9 @@ On Unix-like systems, this is usually:
 ~/.codex
 ```
 
-In practice, profile `history.jsonl`, `sessions`, `archived_sessions`, `config.toml`, `managed_config.toml`, `environments.toml`, plugins, skills, app-server plugin state, memory-extension state, remote-control enrollment, and Codex runtime SQLite files such as `state_*`, `goals_*`, `logs_*`, and `memories_*` link to the same Codex home that direct Codex uses.
+In practice, profile `history.jsonl`, `sessions`, `archived_sessions`, `config.toml`, `managed_config.toml`, `environments.toml`, `.credentials.json`, plugins, skills, app-server plugin state, memory-extension state, remote-control enrollment, and Codex runtime SQLite files such as `state_*`, `goals_*`, `logs_*`, and `memories_*` link to the same Codex home that direct Codex uses.
+
+Codex 0.140.0 defaults CLI auth credentials to the file store, so managed Prodex profiles continue to keep `auth.json` isolated per profile, including OpenAI, API-key, and Bedrock API-key auth JSON. MCP OAuth defaults to Codex `auto`; when it falls back to the file store, `.credentials.json` is shared with direct Codex. OS keyring-backed MCP OAuth credentials remain Codex/OS-owned and are not part of Prodex profile export bundles.
 
 Codex cloud-managed config bundle caches are identity/account scoped and remain profile-local. System-level Codex requirements and managed config files remain owned by upstream Codex and the operating system.
 

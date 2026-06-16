@@ -134,7 +134,44 @@ fn handle_compaction_v2_backend_request(
         .unwrap_or_default();
     let account_id = request_header(&request, "ChatGPT-Account-Id").unwrap_or_default();
 
-    if path.ends_with("/backend-api/codex/responses") {
+    if path.ends_with("/backend-api/codex/responses/compact") {
+        responses_accounts
+            .lock()
+            .expect("responses_accounts poisoned")
+            .push(account_id.clone());
+        responses_headers
+            .lock()
+            .expect("responses_headers poisoned")
+            .push(request_headers_map(&request));
+        responses_bodies
+            .lock()
+            .expect("responses_bodies poisoned")
+            .push(request_body);
+        if account_id == "second-account" {
+            write_compaction_v2_backend_response(
+                stream,
+                "HTTP/1.1 200 OK",
+                "application/json",
+                serde_json::json!({
+                    "output": [{
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "compacted"}],
+                    }],
+                })
+                .to_string(),
+                Some("turn-compact-unary"),
+            );
+        } else {
+            write_compaction_v2_backend_response(
+                stream,
+                "HTTP/1.1 503 Service Unavailable",
+                "application/json",
+                serde_json::json!({"error":"wrong_profile"}).to_string(),
+                None,
+            );
+        }
+    } else if path.ends_with("/backend-api/codex/responses") {
         responses_accounts
             .lock()
             .expect("responses_accounts poisoned")
@@ -220,6 +257,135 @@ fn compaction_v2_sse_body() -> String {
         "\r\n",
     )
     .to_string()
+}
+
+#[test]
+fn runtime_proxy_http_compact_response_turn_state_binds_followup_profile() {
+    let temp_dir = TestDir::isolated();
+    let backend = RuntimeCompactionV2Backend::start();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let now = Local::now().timestamp();
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::from([(
+            runtime_compact_session_lineage_key("sess-compact-unary"),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+    save_runtime_usage_snapshots(
+        &paths,
+        &BTreeMap::from([(
+            "second".to_string(),
+            ready_runtime_usage_snapshot(now, 95),
+        )]),
+    )
+    .expect("failed to save usage snapshots");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let client = Client::builder().build().expect("client");
+    let compact_response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses/compact",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::json!({
+                "session_id": "sess-compact-unary",
+                "input": [],
+                "instructions": "compact",
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("compact request should succeed");
+    assert_eq!(compact_response.status().as_u16(), 200);
+    assert_eq!(
+        compact_response
+            .headers()
+            .get("x-codex-turn-state")
+            .and_then(|value| value.to_str().ok()),
+        Some("turn-compact-unary")
+    );
+
+    let followup_response = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header("x-codex-turn-state", "turn-compact-unary")
+        .body(
+            serde_json::json!({
+                "model": "gpt-5",
+                "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("follow-up request should succeed");
+    assert_eq!(followup_response.status().as_u16(), 200);
+
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string(), "second-account".to_string()],
+        "compact response turn-state should pin the follow-up to the compact owner"
+    );
+    let log_tail = wait_for_runtime_log_tail_until(
+        || fs::read(&proxy.log_path).ok(),
+        |log| log.contains("compact_committed_owner")
+            && log.contains("compact_followup_profile=Some((\"second\", \"turn_state\"))"),
+        2_000,
+        5_000,
+        20,
+    );
+    let log = String::from_utf8_lossy(&log_tail);
+    assert!(
+        log.contains("compact_committed_owner profile=second session=sess-compact-unary turn_state=turn-compact-unary"),
+        "compact unary response should record turn-state lineage: {log}"
+    );
+    assert!(
+        log.contains("compact_followup_profile=Some((\"second\", \"turn_state\"))"),
+        "follow-up selection should use compact turn-state lineage: {log}"
+    );
 }
 
 #[test]

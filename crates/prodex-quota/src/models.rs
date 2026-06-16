@@ -269,7 +269,15 @@ pub struct StoredAuth {
     #[serde(rename = "OPENAI_API_KEY")]
     pub openai_api_key: Option<String>,
     #[serde(default)]
+    pub bedrock_api_key: Option<BedrockApiKeyAuth>,
+    #[serde(default)]
     pub last_refresh: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BedrockApiKeyAuth {
+    pub api_key: Option<String>,
+    pub region: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -47,7 +47,10 @@ pub(super) fn run_runtime_proxy_websocket_session(
                     format!(
                         "request={message_id} websocket_session={session_id} inbound_text previous_response_id={:?} turn_state={:?} bytes={}",
                         request_metadata.previous_response_id,
-                        runtime_request_turn_state(handshake_request),
+                        request_metadata
+                            .turn_state
+                            .clone()
+                            .or_else(|| runtime_request_turn_state(handshake_request)),
                         text.len()
                     ),
                 );

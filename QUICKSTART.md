@@ -18,7 +18,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex caveman mem rtk` or default `prodex super` RTK shell-command guidance
 - Optional: `sqz-mcp`, `token-savior`, and `claw-compactor` if you want the matching `prodex sqz`, `prodex tokensavior`, or `prodex clawcompactor` optimizer overlays
 
-If you install `@christiandoxa/prodex` from npm, the runtime dependency `@openai/codex@latest` is installed for you at install or update time. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
+If you install `@christiandoxa/prodex` from npm, Prodex prefers an already installed `codex` on your `PATH` and falls back to its bundled `@openai/codex@latest` dependency when no external Codex CLI is available. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
 If you want the `mem` path, install Claude-Mem separately with the upstream installer:
 
@@ -58,7 +58,7 @@ npm install -g @christiandoxa/prodex@0.186.0
 
 Dependency status in this repo:
 
-- The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest
+- The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest and is used as a fallback when no external `codex` is available
 - Source installs still use whatever `codex` binary is on your `PATH`
 - Packaged Codex runtime resources, including the Codex 0.136.0 and newer bundled zsh runtime helper, stay owned by the Codex package; Prodex does not override `zsh_path`
 - `prodex update` passes through to `codex update` directly without profile selection, quota preflight, or the local runtime proxy
@@ -107,7 +107,9 @@ prodex profile add second
 prodex login --profile second
 ```
 
-Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history, session, environment, managed config, plugin/app-server, remote-control enrollment, and memory database state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl`, `sessions`, `archived_sessions`, `managed_config.toml`, `environments.toml`, plugin cache/state, and Codex SQLite files including `state_*` and `memories_*` aligned with direct Codex, so logout or account switching does not hide prior chats.
+Managed Prodex profiles keep `auth.json` isolated per profile, but Codex-owned history, session, environment, managed config, MCP OAuth fallback credentials, plugin/app-server, remote-control enrollment, and memory database state use the native Codex home by default (`~/.codex` on Unix-like systems). That keeps `history.jsonl`, `sessions`, `archived_sessions`, `managed_config.toml`, `environments.toml`, `.credentials.json`, plugin cache/state, and Codex SQLite files including `state_*` and `memories_*` aligned with direct Codex, so logout or account switching does not hide prior chats.
+
+Codex 0.140.0 defaults CLI auth credentials to the file store, so managed profiles still carry profile-local `auth.json`, including Bedrock API-key auth JSON. MCP OAuth defaults to Codex `auto`; file fallback lives in shared `.credentials.json`, while OS keyring credentials stay Codex/OS-owned and are not exported by Prodex.
 
 Codex cloud-managed config bundle caches are identity/account scoped and remain profile-local. System-level Codex requirements and managed config files remain owned by upstream Codex and the operating system.
 
@@ -170,12 +172,13 @@ prodex run
 prodex run --profile second
 prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 prodex exec "review this repo"
+prodex delete 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 printf 'context from stdin' | prodex run exec "summarize this"
 ```
 
 Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation.
 
-New Codex top-level subcommands stay on this managed path by default. For example, `prodex remote-control` is treated as `prodex run remote-control` unless Prodex explicitly adds its own command with that name.
+New Codex top-level subcommands stay on this managed path by default. For example, `prodex remote-control` is treated as `prodex run remote-control` unless Prodex explicitly adds its own command with that name. Codex-owned TUI commands such as `/usage`, `/goal`, `/import`, and `/delete` remain upstream behavior; `prodex delete <session>` passes through to Codex and prunes matching Prodex session affinity metadata after a successful delete.
 
 Codex CLI 0.124.0 added first-class Amazon Bedrock and OpenAI-compatible custom provider support. Configure Bedrock or another provider in the selected profile's Codex `config.toml`, for example with `model_provider = "amazon-bedrock"`.
 
@@ -261,7 +264,7 @@ Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`.
 - **Tools:** Codex/MCP tool schemas are translated natively to Gemini function declarations (`tools[0].functionDeclarations`).
 - **Memory:** Gemini `MEMORY.md` and `INBOX.md` files are loaded and prepended to the context.
 - **Settings Gemini memory is loaded by default Extensions:** `mcpServers`, `commands/*.toml`, `skills/*/SKILL.md`, and `agents/*.md` from Gemini CLI are projected into Codex config, hooks, prompts, skills, and agents before launch.
-- **Live Mode:** Codex Live websocket events (audio, transcript, text, function calls) map bi-directionally to Gemini `BidiGenerateContent`.
+- **Live Mode:** The Gemini Live websocket bridge remains for compatible callers and adapter tests, but Codex 0.140.0 removed upstream TUI voice controls.
 - **Context Window:** Prodex handles context limits dynamically, matching Gemini's 1M-token default (`GEMINI_DEFAULT_CONTEXT_WINDOW`), allowing large file analysis.
 - **Compaction:** Remote compaction maps to Gemini's semantic chat-compression or a deterministic local summary as fallback.
 

@@ -316,6 +316,7 @@ pub struct RuntimeWebsocketRequestMetadata {
     pub previous_response_id: Option<String>,
     pub session_id: Option<String>,
     pub prompt_cache_key: Option<String>,
+    pub turn_state: Option<String>,
     pub requires_previous_response_affinity: bool,
     pub previous_response_fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 }
@@ -330,6 +331,7 @@ pub fn parse_runtime_websocket_request_metadata(
         previous_response_id: runtime_request_previous_response_id_from_value(&value),
         session_id: runtime_request_session_id_from_value(&value),
         prompt_cache_key: runtime_request_prompt_cache_key_from_value(&value),
+        turn_state: runtime_request_turn_state_from_value(&value),
         requires_previous_response_affinity:
             runtime_request_value_requires_previous_response_affinity(&value),
         previous_response_fresh_fallback_shape:
@@ -451,6 +453,21 @@ pub fn runtime_websocket_request_requires_locked_previous_response_affinity(
 
 pub fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_proxy_request_header_value(&request.headers, "x-codex-turn-state").map(str::to_string)
+}
+
+pub fn runtime_request_turn_state_from_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("x-codex-turn-state")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            value
+                .get("client_metadata")
+                .and_then(|metadata| metadata.get("x-codex-turn-state"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 pub fn runtime_request_session_id_from_value(value: &serde_json::Value) -> Option<String> {

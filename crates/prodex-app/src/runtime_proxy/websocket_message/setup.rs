@@ -53,7 +53,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let request_requires_previous_response_affinity =
             request_metadata.requires_previous_response_affinity;
         let previous_response_id = request_metadata.previous_response_id.clone();
-        let mut request_turn_state = runtime_request_turn_state(&handshake_request);
+        let mut request_turn_state = request_metadata
+            .turn_state
+            .clone()
+            .or_else(|| runtime_request_turn_state(&handshake_request));
         let explicit_request_session_id = runtime_request_explicit_session_id(&handshake_request);
         let request_session_id_header_present = explicit_request_session_id.is_some();
         let previous_response_fresh_fallback_shape =

@@ -14,6 +14,7 @@ enum AuthSummaryKind {
     InvalidAuth,
     Chatgpt,
     ApiKey,
+    BedrockApiKey,
     Other(String),
 }
 
@@ -38,6 +39,10 @@ impl AuthSummaryKind {
             },
             Self::ApiKey => AuthSummary {
                 label: "api-key".to_string(),
+                quota_compatible: false,
+            },
+            Self::BedrockApiKey => AuthSummary {
+                label: "bedrock-api-key".to_string(),
                 quota_compatible: false,
             },
             Self::Other(label) => AuthSummary {
@@ -76,12 +81,25 @@ pub fn auth_summary_from_stored_auth(stored_auth: &StoredAuth) -> AuthSummary {
         .openai_api_key
         .as_deref()
         .is_some_and(|key| !key.trim().is_empty());
+    let has_bedrock_api_key = stored_auth.bedrock_api_key.as_ref().is_some_and(|auth| {
+        auth.api_key
+            .as_deref()
+            .is_some_and(|key| !key.trim().is_empty())
+    });
+    let auth_mode = stored_auth
+        .auth_mode
+        .as_deref()
+        .map(normalize_auth_mode_label);
 
     if has_chatgpt_token {
         return AuthSummaryKind::Chatgpt.into_summary();
     }
 
-    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key" | "apikey")) || has_api_key {
+    if auth_mode.as_deref() == Some("bedrockapikey") || has_bedrock_api_key {
+        return AuthSummaryKind::BedrockApiKey.into_summary();
+    }
+
+    if auth_mode.as_deref() == Some("apikey") || has_api_key {
         return AuthSummaryKind::ApiKey.into_summary();
     }
 
@@ -105,7 +123,21 @@ pub fn usage_auth_from_stored_auth(stored_auth: &StoredAuth) -> Result<UsageAuth
         .openai_api_key
         .as_deref()
         .is_some_and(|key| !key.trim().is_empty());
-    if matches!(stored_auth.auth_mode.as_deref(), Some("api_key" | "apikey")) || has_api_key {
+    let has_bedrock_api_key = stored_auth.bedrock_api_key.as_ref().is_some_and(|auth| {
+        auth.api_key
+            .as_deref()
+            .is_some_and(|key| !key.trim().is_empty())
+    });
+    let auth_mode = stored_auth
+        .auth_mode
+        .as_deref()
+        .map(normalize_auth_mode_label);
+    if auth_mode.as_deref() == Some("bedrockapikey") || has_bedrock_api_key {
+        bail!(
+            "quota endpoint requires a ChatGPT access token. Amazon Bedrock API key auth is provider-managed."
+        );
+    }
+    if auth_mode.as_deref() == Some("apikey") || has_api_key {
         bail!("quota endpoint requires a ChatGPT access token. Run `codex login` first.");
     }
 
@@ -150,6 +182,15 @@ pub fn usage_auth_from_stored_auth(stored_auth: &StoredAuth) -> Result<UsageAuth
         expires_at,
         last_refresh,
     })
+}
+
+fn normalize_auth_mode_label(value: &str) -> String {
+    value
+        .trim()
+        .chars()
+        .filter(|ch| !matches!(ch, '_' | '-' | ' '))
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 pub fn usage_auth_needs_proactive_refresh(auth: &UsageAuth, now: i64) -> bool {

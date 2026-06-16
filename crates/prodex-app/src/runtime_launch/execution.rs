@@ -12,6 +12,9 @@ pub(crate) trait RuntimeLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan>;
+    fn after_child_exit(&self, _status: &ExitStatus) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub(crate) trait RuntimeLaunchPlanFactory {
@@ -101,7 +104,9 @@ where
     S: RuntimeLaunchStrategy,
 {
     let execution = build_runtime_launch_execution(&strategy)?;
-    exit_with_status(run_runtime_launch_execution(execution)?)
+    let status = run_runtime_launch_execution(execution)?;
+    strategy.after_child_exit(&status)?;
+    exit_with_status(status)
 }
 
 fn build_runtime_launch_execution<S>(strategy: &S) -> Result<RuntimeLaunchExecution>

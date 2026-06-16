@@ -25,6 +25,41 @@ fn turn_state_override_prefers_retry_value_for_matching_candidate() {
 }
 
 #[test]
+fn websocket_body_turn_state_wins_over_handshake_header() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = test_runtime_shared("setup-body-turn-state");
+    let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let request_metadata = RuntimeWebsocketRequestMetadata {
+        turn_state: Some("turn-body".to_string()),
+        ..RuntimeWebsocketRequestMetadata::default()
+    };
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses?transport=websocket".to_string(),
+        headers: vec![(
+            "x-codex-turn-state".to_string(),
+            "turn-handshake".to_string(),
+        )],
+        body: Vec::new(),
+    };
+
+    let flow = RuntimeWebsocketTextMessageFlow::new(RuntimeWebsocketTextMessageInput {
+        session_id: 7,
+        request_id: 11,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create","client_metadata":{"x-codex-turn-state":"turn-body"}}"#,
+        request_metadata: &request_metadata,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+    })
+    .expect("websocket flow should initialize");
+
+    assert_eq!(flow.request_turn_state.as_deref(), Some("turn-body"));
+}
+
+#[test]
 fn should_promote_committed_profile_only_for_fresh_requests() {
     let _guard = acquire_test_runtime_lock();
     let shared = test_runtime_shared("setup-promote-committed");

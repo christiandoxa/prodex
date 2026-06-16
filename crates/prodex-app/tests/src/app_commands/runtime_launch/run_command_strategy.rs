@@ -13,6 +13,86 @@ fn assert_repaired_session_meta_line(line: &str, session_id: &str) {
 }
 
 #[test]
+fn run_strategy_resolves_codex_delete_partial_selector_before_launch() {
+    let root = temp_dir("delete-partial-selector");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout.jsonl"),
+        format!(
+            "{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\"}}}}\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_args: vec![OsString::from("delete"), OsString::from("019c9e3d")],
+    })
+    .unwrap();
+
+    assert_eq!(strategy.delete_session_id.as_deref(), Some(session_id));
+}
+
+#[test]
+fn codex_delete_cleanup_prunes_session_and_compact_bindings() {
+    let root = temp_dir("delete-prune-bindings");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let compact_key = prodex_runtime_store::runtime_compact_session_lineage_key(session_id);
+    let now = chrono::Local::now().timestamp();
+    write_state(
+        &root,
+        AppState {
+            profiles: BTreeMap::from([(
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: root.join("main-home"),
+                    managed: false,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            session_profile_bindings: BTreeMap::from([
+                (
+                    session_id.to_string(),
+                    ResponseProfileBinding {
+                        profile_name: "main".to_string(),
+                        bound_at: now,
+                    },
+                ),
+                (
+                    compact_key.clone(),
+                    ResponseProfileBinding {
+                        profile_name: "main".to_string(),
+                        bound_at: now,
+                    },
+                ),
+            ]),
+            ..AppState::default()
+        },
+    );
+
+    cleanup_codex_deleted_session_binding(Some(session_id)).unwrap();
+
+    let state = AppState::load(&paths).unwrap();
+    assert!(!state.session_profile_bindings.contains_key(session_id));
+    assert!(!state.session_profile_bindings.contains_key(&compact_key));
+}
+
+#[test]
 fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
     let root = temp_dir("auto-route-gemini-resume");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());

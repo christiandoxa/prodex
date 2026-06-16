@@ -108,6 +108,16 @@ fn rejects_invalid_jwt_shape() {
 }
 
 #[test]
+fn bedrock_api_key_auth_json_has_no_openai_identity() {
+    let identity = parse_identity_from_auth_json(
+        r#"{"auth_mode":"bedrock_api_key","bedrock_api_key":{"api_key":"bedrock-test","region":"us-east-1"}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(identity, ProfileIdentity::default());
+}
+
+#[test]
 fn normalizes_email_and_account_id() {
     assert_eq!(normalize_email(" User@Example.COM "), "user@example.com");
     assert_eq!(

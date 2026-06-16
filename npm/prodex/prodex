@@ -46,6 +46,60 @@ const packageRoot = path.dirname(requireFromHere.resolve("./package.json"));
 const codexShimPath = path.join(packageRoot, "lib", "codex-shim.cjs");
 const platformPackage = PLATFORM_PACKAGES[process.platform]?.[process.arch];
 
+function candidateCommandNames(command) {
+  if (process.platform !== "win32") {
+    return [command];
+  }
+  const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter(Boolean);
+  const lowerCommand = command.toLowerCase();
+  if (extensions.some((extension) => lowerCommand.endsWith(extension.toLowerCase()))) {
+    return [command];
+  }
+  return [command, ...extensions.map((extension) => `${command}${extension.toLowerCase()}`)];
+}
+
+function isExecutableFile(filePath) {
+  try {
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile()) {
+      return false;
+    }
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveCommandFromPath(command, pathValue) {
+  const hasPathSeparator = command.includes("/") || command.includes("\\");
+  if (path.isAbsolute(command) || hasPathSeparator) {
+    return isExecutableFile(command) ? command : null;
+  }
+
+  for (const entry of (pathValue || "").split(path.delimiter)) {
+    if (!entry) {
+      continue;
+    }
+    for (const candidateName of candidateCommandNames(command)) {
+      const candidate = path.join(entry, candidateName);
+      if (isExecutableFile(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function resolveExternalCodexBin() {
+  if (process.env.PRODEX_CODEX_BIN) {
+    return process.env.PRODEX_CODEX_BIN;
+  }
+  return resolveCommandFromPath("codex", process.env.PATH || "");
+}
+
 if (!platformPackage) {
   process.stderr.write(
     `Unsupported platform for @christiandoxa/prodex: ${process.platform} ${process.arch}\n`,
@@ -75,34 +129,42 @@ if (!fs.existsSync(nativeBinaryPath)) {
   process.exit(1);
 }
 
-const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "prodex-codex-"));
-const codexCmd = path.join(shimDir, "codex");
-const codexCmdWindows = path.join(shimDir, "codex.cmd");
+let cleanup = () => {};
+let codexBin = resolveExternalCodexBin();
+let childPath = process.env.PATH ?? "";
 
-fs.writeFileSync(
-  codexCmd,
-  `#!/bin/sh\nexec node ${JSON.stringify(codexShimPath)} "$@"\n`,
-  { mode: 0o755 },
-);
-fs.writeFileSync(
-  codexCmdWindows,
-  `@echo off\r\nnode ${JSON.stringify(codexShimPath)} %*\r\n`,
-  { mode: 0o755 },
-);
+if (!codexBin) {
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "prodex-codex-"));
+  const codexCmd = path.join(shimDir, "codex");
+  const codexCmdWindows = path.join(shimDir, "codex.cmd");
 
-const cleanup = () => {
-  try {
-    fs.rmSync(shimDir, { recursive: true, force: true });
-  } catch {
-    // Best-effort cleanup only.
-  }
-};
+  fs.writeFileSync(
+    codexCmd,
+    `#!/bin/sh\nexec node ${JSON.stringify(codexShimPath)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    codexCmdWindows,
+    `@echo off\r\nnode ${JSON.stringify(codexShimPath)} %*\r\n`,
+    { mode: 0o755 },
+  );
+
+  childPath = `${shimDir}${path.delimiter}${childPath}`;
+  codexBin = "codex";
+  cleanup = () => {
+    try {
+      fs.rmSync(shimDir, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup only.
+    }
+  };
+}
 
 const child = spawn(nativeBinaryPath, process.argv.slice(2), {
   env: {
     ...process.env,
-    PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
-    PRODEX_CODEX_BIN: "codex",
+    PATH: childPath,
+    PRODEX_CODEX_BIN: codexBin,
     npm_package_name: packageJson.name,
     npm_package_version: packageJson.version,
   },

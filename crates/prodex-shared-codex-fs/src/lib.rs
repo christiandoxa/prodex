@@ -45,6 +45,7 @@ const SHARED_CODEX_FILE_NAMES: &[&str] = &[
     "environments.toml",
     "AGENTS.md",
     "AGENTS.override.md",
+    ".credentials.json",
     ".tmp/plugins.sha",
     ".tmp/known_marketplaces.json",
     ".tmp/app-server-remote-plugin-sync-v1",

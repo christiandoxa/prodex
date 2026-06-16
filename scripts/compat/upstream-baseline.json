@@ -2,21 +2,24 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.139.0 release",
+      "baseline_source": "openai/codex rust-v0.140.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
         {
           "path": "codex-rs/core/src/client.rs",
-          "reason": "Owns Responses route constants, compact route constants, conversation headers, turn-state replay, previous-response continuations, and websocket enablement.",
+          "reason": "Owns Responses route constants, compact route calls, request metadata/header construction, and websocket client metadata used by Prodex affinity.",
           "required_contains": [
             "RESPONSES_ENDPOINT",
             "/responses",
             "RESPONSES_COMPACT_ENDPOINT",
             "/responses/compact",
             "build_responses_headers",
-            "build_responses_identity_headers",
+            "build_responses_compatibility_headers",
+            "build_ws_client_metadata",
             "build_session_headers",
+            "CodexResponsesMetadata",
+            "response_create_client_metadata",
             "previous_response_id",
             "X_CODEX_INSTALLATION_ID_HEADER",
             "x-codex-installation-id",
@@ -44,30 +47,46 @@
             "x-client-request-id",
             "stream_responses_websocket",
             "compact_conversation_history",
-            "current_window_id",
-            "turn_metadata_header",
-            "parse_turn_metadata_header"
+            "compact_input",
+            "client_metadata"
           ]
         },
         {
           "path": "codex-rs/core/src/compact_remote.rs",
-          "reason": "Owns remote compaction flow that reaches the unary Responses compact endpoint through ModelClient.",
+          "reason": "Owns remote compaction flow that reaches unary /responses/compact and supplies request metadata/turn-state context.",
           "required_contains": [
             "run_remote_compact_task",
+            "run_inline_remote_auto_compact_task",
             "compact_conversation_history",
             "CompactionImplementation::ResponsesCompact",
             "ContextCompactionItem",
             "CompactionTurnMetadata",
-            "current_header_value_for_compaction",
-            "turn_metadata_header"
+            "CodexResponsesRequestKind::Compaction",
+            "turn_state",
+            "responses_metadata"
           ]
         },
         {
           "path": "codex-rs/core/src/turn_metadata.rs",
-          "reason": "Owns outbound x-codex-turn-metadata schema, request_kind stamping, window_id attribution, and compaction metadata payloads.",
+          "reason": "Owns turn metadata state conversion into CodexResponsesMetadata and extra responsesapi client metadata.",
           "required_contains": [
-            "REQUEST_KIND_KEY",
             "request_kind",
+            "window_id",
+            "Turn",
+            "Memory",
+            "CodexResponsesMetadata",
+            "CodexResponsesRequestKind",
+            "to_responses_metadata",
+            "responses_metadata_template",
+            "set_responsesapi_client_metadata"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/responses_metadata.rs",
+          "reason": "Owns Codex Responses metadata, compatibility headers, client_metadata, and compaction metadata schema.",
+          "required_contains": [
+            "CodexResponsesMetadata",
+            "CodexResponsesRequestKind",
             "COMPACTION_KEY",
             "compaction",
             "WINDOW_ID_KEY",
@@ -78,13 +97,14 @@
             "CompactionImplementation",
             "CompactionPhase",
             "CompactionStrategy",
-            "TurnMetadataRequestKind",
             "Turn",
             "Prewarm",
             "Compaction",
             "Memory",
-            "current_header_value_for_model_request_kind",
-            "current_header_value_for_compaction",
+            "compatibility_headers",
+            "client_metadata",
+            "turn_metadata_payload",
+            "X_CODEX_TURN_METADATA_HEADER",
             "to_ascii_json_string"
           ]
         },
@@ -125,6 +145,19 @@
             "X-Models-Etag",
             "insufficient_quota",
             "rate_limit_exceeded"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/endpoint/compact.rs",
+          "reason": "Owns unary /responses/compact transport and response x-codex-turn-state capture.",
+          "required_contains": [
+            "CompactClient",
+            "responses/compact",
+            "compact_input",
+            "X_CODEX_TURN_STATE_HEADER",
+            "x-codex-turn-state",
+            "turn_state",
+            "headers"
           ]
         },
         {
@@ -260,8 +293,8 @@
             "RESPONSES_COMPACT_ENDPOINT",
             "/responses/compact",
             "compact_conversation_history",
-            "turn_metadata_header",
-            "parse_turn_metadata_header"
+            "compact_input",
+            "CodexResponsesMetadata"
           ],
           "expected_routes_all": [
             "/responses/compact"
@@ -274,9 +307,10 @@
           "file": "codex-rs/core/src/client.rs",
           "file_contains_all": [
             "compact_conversation_history",
-            "turn_metadata_header",
             "build_responses_headers",
-            "parse_turn_metadata_header"
+            "build_responses_compatibility_headers",
+            "CodexResponsesMetadata",
+            "compact_input"
           ],
           "expected_routes_all": [
             "/responses/compact"
@@ -292,7 +326,8 @@
           "reason": "Conversation metadata headers are forwarded together for affinity and upstream Codex behavior.",
           "file_contains_all": [
             "build_responses_headers",
-            "build_responses_identity_headers",
+            "build_responses_compatibility_headers",
+            "build_ws_client_metadata",
             "build_session_headers",
             "x-codex-installation-id",
             "x-codex-turn-state",
@@ -327,7 +362,7 @@
           "reason": "Prodex must keep preserving upstream Codex metadata headers that drive affinity, subagent behavior, beta transport, and client identity.",
           "file_contains_all": [
             "build_responses_headers",
-            "build_responses_identity_headers",
+            "build_responses_compatibility_headers",
             "build_session_headers",
             "x-openai-subagent",
             "x-codex-turn-state",
@@ -384,7 +419,8 @@
             "run_remote_compact_task",
             "compact_conversation_history",
             "CompactionImplementation::ResponsesCompact",
-            "ContextCompactionItem"
+            "ContextCompactionItem",
+            "CodexResponsesRequestKind::Compaction"
           ],
           "expected_routes_all": [
             "/responses/compact"
@@ -397,9 +433,9 @@
           "file": "codex-rs/core/src/compact_remote.rs",
           "file_contains_all": [
             "CompactionTurnMetadata",
-            "current_header_value_for_compaction",
-            "turn_metadata_header",
-            "compact_conversation_history"
+            "compact_conversation_history",
+            "CodexResponsesRequestKind::Compaction",
+            "responses_metadata"
           ],
           "expected_routes_all": [
             "/responses/compact"
@@ -409,20 +445,36 @@
           ]
         },
         {
+          "id": "compact.response-turn-state",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/compact.rs",
+          "reason": "Compact unary responses can establish x-codex-turn-state, which Prodex must bind for follow-up affinity.",
+          "file_contains_all": [
+            "compact_input",
+            "X_CODEX_TURN_STATE_HEADER",
+            "x-codex-turn-state",
+            "turn_state",
+            "headers"
+          ],
+          "expected_routes_all": [
+            "/responses/compact"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-state"
+          ]
+        },
+        {
           "id": "turn-metadata.request-kind-window",
           "kind": "metadata_group",
           "reason": "Codex 0.135 turn metadata distinguishes turn, prewarm, compaction, and memory requests and stamps the logical window id for turn-owned model requests.",
           "file": "codex-rs/core/src/turn_metadata.rs",
           "file_contains_all": [
-            "REQUEST_KIND_KEY",
             "request_kind",
-            "WINDOW_ID_KEY",
             "window_id",
-            "TurnMetadataRequestKind",
             "Turn",
-            "Prewarm",
             "Memory",
-            "current_header_value_for_model_request_kind"
+            "CodexResponsesMetadata",
+            "to_responses_metadata"
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
@@ -432,7 +484,7 @@
           "id": "turn-metadata.compaction-dispatch",
           "kind": "metadata_group",
           "reason": "Compaction requests must carry trigger, reason, implementation, phase, and strategy metadata in x-codex-turn-metadata.",
-          "file": "codex-rs/core/src/turn_metadata.rs",
+          "file": "codex-rs/core/src/responses_metadata.rs",
           "file_contains_all": [
             "COMPACTION_KEY",
             "compaction",
@@ -442,7 +494,9 @@
             "CompactionImplementation",
             "CompactionPhase",
             "CompactionStrategy",
-            "current_header_value_for_compaction"
+            "CodexResponsesRequestKind",
+            "turn_metadata_payload",
+            "X_CODEX_TURN_METADATA_HEADER"
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
@@ -606,18 +660,19 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.139.0",
-      "name": "0.139.0",
-      "published_at": "2026-06-09T13:13:00Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.139.0",
+      "tag_name": "rust-v0.140.0",
+      "name": "0.140.0",
+      "published_at": "2026-06-15T21:06:37Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.140.0",
       "body_head": [
         "## New Features",
-        "- Code mode can now call standalone web search directly, including from nested JavaScript tool calls, and receive plaintext search results. (#26719)",
-        "- Tool and connector input schemas now preserve `oneOf` and `allOf`, and large schemas keep more shallow structure when compacted. (#24118, #27084)",
-        "- `codex doctor` now includes editor and pager environment details in the local report while redacting raw values in JSON output. (#27081)",
-        "- `codex plugin marketplace list --json` now includes each marketplace source, and plugin lists can return from the cached remote catalog before refreshing in the background. (#27009, #26932)",
+        "- New custom TUI commands: `/usage` shows rate-limit info, `/goal` sets a persistent thread goal, `/import` attaches files/images through the composer, and `/delete` permanently deletes the current thread. (#28243, #28336, #27786, #27658)",
+        "- `codex delete` can permanently delete a stored session from the CLI. (#27658)",
+        "- Amazon Bedrock API-key authentication can now be managed by Codex, including profile import/export support. (#27249)",
+        "- CLI and MCP OAuth credentials can use encrypted local storage. (#27860, #27718)",
         "## Bug Fixes",
-        "- `codex resume --last \"...\"` and `codex fork --last \"...\"` now treat the trailing argument as the initial prompt instead of misreading it as a session ID. (#26818)"
+        "- Send request-scoped turn state over WebSocket and through compact requests. (#27588, #27548)",
+        "- Remove the experimental realtime voice controls from the TUI. (#27386)"
       ]
     }
   },

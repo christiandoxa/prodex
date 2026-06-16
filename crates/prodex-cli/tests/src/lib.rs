@@ -580,6 +580,27 @@ fn codex_archive_commands_default_to_managed_run_passthrough() {
 }
 
 #[test]
+fn codex_delete_defaults_to_managed_run_passthrough() {
+    assert!(should_default_cli_invocation_to_run(&os_args(&[
+        "prodex",
+        "delete",
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+    ])));
+
+    let command =
+        parse_cli_command_from(["prodex", "delete", "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+            .expect("codex delete should parse as run passthrough");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+
+    assert_eq!(
+        args.codex_args,
+        os_args(&["delete", "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
+    );
+}
+
+#[test]
 fn codex_exec_resume_output_schema_defaults_to_managed_run_passthrough() {
     assert!(should_default_cli_invocation_to_run(&os_args(&[
         "prodex",

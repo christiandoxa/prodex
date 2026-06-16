@@ -50,6 +50,11 @@ fn shared_codex_manifest_includes_managed_config_toml_as_file() {
 }
 
 #[test]
+fn shared_codex_manifest_includes_mcp_oauth_fallback_credentials_as_file() {
+    assert!(shared_codex_manifest_entries().contains(&SharedCodexEntry::file(".credentials.json")));
+}
+
+#[test]
 fn shared_codex_manifest_keeps_cloud_config_bundle_cache_profile_local() {
     assert!(
         !shared_codex_manifest_entries()

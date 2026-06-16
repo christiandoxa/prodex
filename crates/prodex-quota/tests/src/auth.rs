@@ -16,6 +16,24 @@ fn auth_summary_detects_api_key() {
 }
 
 #[test]
+fn auth_summary_detects_bedrock_api_key() {
+    let summary = auth_summary_from_auth_text(
+        r#"{"auth_mode":"bedrock_api_key","bedrock_api_key":{"api_key":"bedrock-test","region":"us-east-1"}}"#,
+    );
+    assert_eq!(summary.label, "bedrock-api-key");
+    assert!(!summary.quota_compatible);
+}
+
+#[test]
+fn usage_auth_rejects_bedrock_api_key_with_provider_hint() {
+    let err = usage_auth_from_auth_text(
+        r#"{"auth_mode":"bedrock_api_key","bedrock_api_key":{"api_key":"bedrock-test","region":"us-east-1"}}"#,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("Amazon Bedrock API key auth"));
+}
+
+#[test]
 fn usage_auth_prefers_jwt_account_id() {
     let jwt =
         test_jwt(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_jwt"},"exp":200}"#);

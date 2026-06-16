@@ -63,6 +63,7 @@ fn parses_websocket_request_metadata_without_runtime_state() {
                 "previous_response_id": "resp_123",
                 "session_id": "sess_456",
                 "prompt_cache_key": "cache-a",
+                "client_metadata": {"x-codex-turn-state": " turn-body "},
                 "input": [{"type":"message","content":"continue"}]
             }"#,
     );
@@ -70,11 +71,24 @@ fn parses_websocket_request_metadata_without_runtime_state() {
     assert_eq!(metadata.previous_response_id.as_deref(), Some("resp_123"));
     assert_eq!(metadata.session_id.as_deref(), Some("sess_456"));
     assert_eq!(metadata.prompt_cache_key.as_deref(), Some("cache-a"));
+    assert_eq!(metadata.turn_state.as_deref(), Some("turn-body"));
     assert!(!metadata.requires_previous_response_affinity);
     assert_eq!(
         metadata.previous_response_fresh_fallback_shape,
         Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
     );
+}
+
+#[test]
+fn parses_top_level_websocket_turn_state_for_forward_compatibility() {
+    let metadata = parse_runtime_websocket_request_metadata(
+        r#"{
+                "x-codex-turn-state": " turn-top ",
+                "client_metadata": {"x-codex-turn-state": "turn-body"}
+            }"#,
+    );
+
+    assert_eq!(metadata.turn_state.as_deref(), Some("turn-top"));
 }
 
 #[test]
