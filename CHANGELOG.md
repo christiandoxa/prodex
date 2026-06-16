@@ -2,11 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.188.0 - 2026-06-16
+
+### Runtime
+
+- Harden websocket smart context handling (`2c7584b`)
+
 ## 0.187.0 - 2026-06-16
 
 ### Misc
 
-- Support codex 0.140.0 compatibility (`25c9327`)
+- Avoid redundant delete selector scan (`f5b4de8`)
+- Support codex 0.140.0 compatibility (`ab87d3d`)
 
 ## 0.186.0 - 2026-06-15
 
@@ -82,9 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Surface proxy contract and import progress (`9a59ca0`)
-
-## 0.176.0 - 2026-06-11
-
-### Misc
-
-- Add plan-aware auto-rotate scoring (`297fe59`)
