@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.187.0 - 2026-06-16
+
+### Misc
+
+- Support codex 0.140.0 compatibility (`25c9327`)
+
 ## 0.186.0 - 2026-06-15
 
 ### Misc
@@ -82,10 +88,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add plan-aware auto-rotate scoring (`297fe59`)
-
-## 0.175.0 - 2026-06-11
-
-### Misc
-
-- Replace super wildcard import (`80ba5e6`)
-- Use OpenAI-compatible API for API keys (`1d3f8f1`)
