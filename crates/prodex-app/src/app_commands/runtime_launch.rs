@@ -118,12 +118,12 @@ fn codex_delete_session_selector(codex_args: &[OsString]) -> Option<&str> {
     codex_args
         .iter()
         .skip(1)
+        .rev()
         .filter_map(|arg| arg.to_str())
-        .filter(|arg| {
+        .find(|arg| {
             let trimmed = arg.trim();
             !trimmed.is_empty() && !trimmed.starts_with('-')
         })
-        .last()
 }
 
 fn is_full_codex_session_id(selector: &str) -> bool {
