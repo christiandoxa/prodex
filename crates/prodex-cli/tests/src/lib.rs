@@ -96,7 +96,6 @@ fn doctor_install_parse_as_top_level_command() {
     let Commands::Doctor(args) = command else {
         panic!("expected doctor command");
     };
-
     assert!(args.install);
 }
 
@@ -108,7 +107,6 @@ fn setup_parse_as_top_level_command() {
     let Commands::Setup(args) = command else {
         panic!("expected setup command");
     };
-
     assert!(args.dry_run);
     assert!(args.verify_assets);
     assert!(args.json);
@@ -124,7 +122,6 @@ fn capability_list_parse_as_top_level_command() {
     let Commands::Capability(CapabilityCommands::List(args)) = command else {
         panic!("expected capability list command");
     };
-
     assert!(args.json);
     assert!(!should_default_cli_invocation_to_run(&os_args(&[
         "prodex",
@@ -136,7 +133,6 @@ fn capability_list_parse_as_top_level_command() {
 fn super_and_s_parse_to_same_default_super_behavior() {
     let super_args = parse_super_as_caveman(&["prodex", "super"]);
     let alias_args = parse_super_as_caveman(&["prodex", "s"]);
-
     assert_same_caveman_args(super_args, alias_args);
 }
 
@@ -186,7 +182,6 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
         "review",
         "--dangerously-bypass-approvals-and-sandbox",
     ]);
-
     assert_same_caveman_args(super_args, alias_args);
 }
 
@@ -197,14 +192,12 @@ fn s_profile_shortcut_selects_profile() {
     let Commands::Super(args) = command else {
         panic!("expected super command");
     };
-
     assert_eq!(args.profile.as_deref(), Some("nama_profile"));
 }
 
 #[test]
 fn super_mem_super_slim_expands_to_all_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "--mem-super-slim", "exec", "review"]);
-
     assert_eq!(
         args.codex_args,
         vec![
@@ -222,7 +215,6 @@ fn super_mem_super_slim_expands_to_all_super_prefixes() {
 #[test]
 fn super_default_keeps_all_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
-
     assert!(args.full_access);
     assert!(args.smart_context);
     assert!(args.super_optimizer_overlay);
@@ -319,7 +311,6 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
         "exec",
         "hello",
     ]);
-
     assert_eq!(
         args.codex_args,
         os_args(&[
@@ -389,7 +380,6 @@ fn super_presidio_flags_conflict() {
 #[test]
 fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
     let args = parse_super_as_caveman(&["prodex", "super", "--url", "http://127.0.0.1:8131"]);
-
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8131/v1"));
 }
 
