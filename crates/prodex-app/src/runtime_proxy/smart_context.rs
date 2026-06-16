@@ -275,6 +275,33 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         return Cow::Borrowed(&request.body);
     }
 
+    if transport == RuntimeSmartContextTransport::Websocket
+        && request.body.len() > SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
+    {
+        if let Some(body) = runtime_smart_context_minified_json_body_from_original(&request.body) {
+            runtime_smart_context_log_prepare_fallback(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                profile_name,
+                request.body.len(),
+                "websocket_large_payload",
+            );
+            return Cow::Owned(body);
+        }
+        runtime_smart_context_log_prepare_fallback(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            profile_name,
+            request.body.len(),
+            "websocket_large_payload",
+        );
+        return Cow::Borrowed(&request.body);
+    }
+
     let result = catch_runtime_smart_context_unwind_silently(|| {
         if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE") {
             std::panic::panic_any(RuntimeSmartContextInjectedPanic);

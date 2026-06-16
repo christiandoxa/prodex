@@ -283,6 +283,60 @@ fn smart_context_http_and_websocket_prepare_match_for_same_payload_class() {
 }
 
 #[test]
+fn smart_context_large_websocket_payload_minifies_without_rewrite_panic() {
+    let shared = smart_context_test_shared("large-websocket-minify");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    smart_context_observe_minimal_budget(&shared);
+    let output = (0..4200)
+        .map(|index| format!("line {index}: noisy resumed goal output with src/main.rs:{index}:1"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = serde_json::to_string_pretty(&serde_json::json!({
+        "type": "response.create",
+        "model": "gpt-5.5",
+        "previous_response_id": "resp_large_ws",
+        "session_id": "sess-large-ws",
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_large_ws",
+            "output": output
+        }]
+    }))
+    .unwrap();
+    assert!(body.len() > SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES);
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/codex/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let prepared = prepare_runtime_smart_context_websocket_text(
+        146,
+        &body,
+        &handshake_request,
+        &shared,
+        "main",
+    );
+
+    let prepared_text = prepared.as_ref();
+    let value = serde_json::from_str::<serde_json::Value>(prepared_text).unwrap();
+    assert_eq!(
+        value["previous_response_id"].as_str(),
+        Some("resp_large_ws")
+    );
+    assert_eq!(value["session_id"].as_str(), Some("sess-large-ws"));
+    assert_eq!(
+        value["input"][0]["output"].as_str().unwrap().len(),
+        output.len()
+    );
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("reason=websocket_large_payload"));
+    assert!(!log.contains("smart_context_panic"));
+    assert!(!log.contains("panic_cooldown"));
+}
+
+#[test]
 fn smart_context_prepare_rewrites_affinity_continuation_under_critical_pressure() {
     let shared = smart_context_test_shared("rewrite-affinity-pressure");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
