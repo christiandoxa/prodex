@@ -9,3 +9,9 @@ paths = [
 regexes = [
   '''eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0\.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL3Byb2ZpbGUiOnsiZW1haWwiOiJ1c2VyQGV4YW1wbGUuY29tIn19\.c2ln''',
 ]
+
+[[allowlists]]
+description = "Local token-savior cache is ignored workspace state, not repository content"
+paths = [
+  '''\.token-savior-cache\.json''',
+]

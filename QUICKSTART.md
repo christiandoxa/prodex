@@ -367,8 +367,9 @@ Use `prodex gateway` when you need an OpenAI-compatible service endpoint instead
 
 ```bash
 PRODEX_GATEWAY_TOKEN=change-me GEMINI_API_KEY=... prodex gateway --provider gemini
+auth_header="Authorization: Bearer $PRODEX_GATEWAY_TOKEN"
 curl http://127.0.0.1:4000/v1/responses \
-  -H "Authorization: Bearer change-me" \
+  -H "$auth_header" \
   -H "Content-Type: application/json" \
   -d '{"model":"prodex-fast","input":"hello"}'
 ```
