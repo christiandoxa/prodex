@@ -404,7 +404,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     filter: "main_internal_tests::runtime_proxy_selection_and_pressure::admission::compact::",
-    weightSeconds: 4,
+    weightSeconds: 5,
   },
   {
     filter: "main_internal_tests::runtime_proxy_selection_and_pressure::rotation::continuation_cleanup::",
@@ -444,7 +444,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_doctor_json_value_includes_selection_markers",
-    weightSeconds: 7,
+    weightSeconds: 5,
   },
   {
     name: "runtime_doctor_summary_counts_recent_runtime_markers",
@@ -452,11 +452,11 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_doctor_state_collects_persisted_degradation_and_orphans",
-    weightSeconds: 6,
+    weightSeconds: 8,
   },
   {
     name: "remove_all_profiles_clears_state_and_continuation_sidecars",
-    weightSeconds: 6,
+    weightSeconds: 8,
   },
   {
     name: "previous_response_release_preserves_session_and_compact_session_lineage_for_compact_followups",
@@ -464,7 +464,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_state_save_scheduler_persists_latest_snapshot",
-    weightSeconds: 5,
+    weightSeconds: 4,
   },
   {
     name: "translate_runtime_anthropic_messages_request_maps_tools_and_tool_results",
@@ -480,7 +480,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval",
-    weightSeconds: 5,
+    weightSeconds: 4,
   },
   {
     name: "perform_prodex_cleanup_deduplicates_profiles_by_email",
@@ -488,7 +488,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_previous_response_not_found_decision_matrix_stays_consistent",
-    weightSeconds: 5,
+    weightSeconds: 7,
   },
   {
     name: "auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state",
@@ -496,11 +496,11 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_profile",
-    weightSeconds: 5,
+    weightSeconds: 4,
   },
   {
     name: "runtime_proxy_continues_anthropic_web_search_server_tool_responses",
-    weightSeconds: 5,
+    weightSeconds: 7,
   },
   {
     name: "next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidate_is_auth_failed",

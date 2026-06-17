@@ -88,20 +88,17 @@ export function classifyChangedPaths(changedPaths) {
 
 export function forceHeavyForCiEvent({ eventName, ref } = {}) {
   const normalizedEventName = String(eventName ?? "").trim();
-  const normalizedRef = String(ref ?? "").trim();
-  if (normalizedEventName !== "push") {
-    return null;
-  }
-  if (normalizedRef === "main" || normalizedRef === "refs/heads/main") {
+  if (normalizedEventName === "schedule" || normalizedEventName === "workflow_dispatch") {
     return {
       heavy: true,
-      reason: "push to main requires full CI",
+      reason: `${normalizedEventName} requires full CI`,
       paths: [],
       heavyPaths: [],
       lightPaths: [],
       unknownPaths: [],
     };
   }
+  void ref;
   return null;
 }
 
@@ -175,7 +172,7 @@ function printHelp() {
       "Inputs:",
       "  --base <rev>       Git diff base revision. Required unless --path is used.",
       "  --head <rev>       Git diff head revision. Defaults to HEAD.",
-      "  --event-name <name> GitHub event name. Pushes to main always require full CI.",
+      "  --event-name <name> GitHub event name. Scheduled and manual events require full CI.",
       "  --ref <ref>         GitHub ref or ref name for event-specific classification.",
       "  --path <path>      Add an explicit changed path. Repeatable, mainly for tests.",
       "  --json             Print a JSON result.",

@@ -182,19 +182,20 @@ test("heavy path wins over lightweight paths", () => {
   assert.equal(result.heavyPaths[0], "crates/prodex-core/src/lib.rs");
 });
 
-test("pushes to main force full CI regardless of changed paths", () => {
-  assert.deepEqual(forceHeavyForCiEvent({ eventName: "push", ref: "main" }), {
+test("scheduled and manual events force full CI regardless of changed paths", () => {
+  assert.deepEqual(forceHeavyForCiEvent({ eventName: "schedule", ref: "main" }), {
     heavy: true,
-    reason: "push to main requires full CI",
+    reason: "schedule requires full CI",
     paths: [],
     heavyPaths: [],
     lightPaths: [],
     unknownPaths: [],
   });
-  assert.equal(forceHeavyForCiEvent({ eventName: "push", ref: "refs/heads/main" }).heavy, true);
+  assert.equal(forceHeavyForCiEvent({ eventName: "workflow_dispatch", ref: "refs/heads/main" }).heavy, true);
 });
 
-test("non-main pushes and pull requests keep path-based CI impact", () => {
+test("pushes and pull requests keep path-based CI impact", () => {
+  assert.equal(forceHeavyForCiEvent({ eventName: "push", ref: "refs/heads/main" }), null);
   assert.equal(forceHeavyForCiEvent({ eventName: "push", ref: "refs/heads/feature" }), null);
   assert.equal(forceHeavyForCiEvent({ eventName: "pull_request", ref: "refs/pull/1/merge" }), null);
 });
@@ -208,7 +209,7 @@ test("CLI emits JSON for explicit paths", async () => {
   assert.deepEqual(result.paths, ["README.md"]);
 });
 
-test("CLI forces heavy for push events to main before reading changed paths", async () => {
+test("CLI keeps lightweight classification for push events to main", async () => {
   const { stdout } = await execFileAsync(process.execPath, [
     SCRIPT_PATH,
     "--event-name",
@@ -221,8 +222,26 @@ test("CLI forces heavy for push events to main before reading changed paths", as
   ]);
   const result = JSON.parse(stdout);
 
+  assert.equal(result.heavy, false);
+  assert.equal(result.reason, "only lightweight docs/npm/release metadata paths changed");
+  assert.deepEqual(result.paths, ["README.md"]);
+});
+
+test("CLI forces heavy for scheduled events before reading changed paths", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    SCRIPT_PATH,
+    "--event-name",
+    "schedule",
+    "--ref",
+    "refs/heads/main",
+    "--path",
+    "README.md",
+    "--json",
+  ]);
+  const result = JSON.parse(stdout);
+
   assert.equal(result.heavy, true);
-  assert.equal(result.reason, "push to main requires full CI");
+  assert.equal(result.reason, "schedule requires full CI");
   assert.deepEqual(result.paths, []);
 });
 
