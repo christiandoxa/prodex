@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn doctor_quota_checks_profiles_in_parallel() {
     let fixture = setup_fixture();
-    fixture.usage_server.set_delay_ms(80);
+    fixture.usage_server.set_delay_ms(250);
 
     let output = run_prodex(&fixture, &["doctor", "--quota"]);
 

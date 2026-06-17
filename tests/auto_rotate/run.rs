@@ -182,7 +182,7 @@ fn explicit_profile_can_disable_auto_rotate() {
 fn run_preflight_checks_fallback_profiles_in_parallel() {
     let fixture = setup_fixture();
     add_managed_profile(&fixture, "third", "third-account");
-    fixture.usage_server.set_delay_ms(80);
+    fixture.usage_server.set_delay_ms(250);
 
     let output = run_prodex(&fixture, &["run", "--profile", "main", "--no-auto-rotate"]);
 

@@ -290,7 +290,7 @@ fn login_without_profile_updates_token_only_for_duplicate_email() {
 fn login_without_profile_looks_up_existing_profiles_in_parallel() {
     let fixture = setup_fixture();
     add_managed_profile(&fixture, "third", "third-account");
-    fixture.usage_server.set_delay_ms(80);
+    fixture.usage_server.set_delay_ms(250);
 
     let output = run_prodex_with_env(
         &fixture,
