@@ -41,6 +41,9 @@ If you only use one Codex account and do not need quota rotation, you probably d
 
 You need at least one logged-in Prodex profile.
 
+<details>
+<summary>Tool requirements</summary>
+
 | Tool | Used by |
 |---|---|
 | Codex CLI | `prodex`, `prodex run`, `prodex caveman`, `prodex super` |
@@ -48,12 +51,17 @@ You need at least one logged-in Prodex profile.
 | Claude-Mem | `mem` variants |
 | RTK | `rtk` variants and `prodex s` / `prodex super` |
 
+</details>
+
 ## Supported providers
 
 Prodex supports two provider paths:
 
 - **Profile-backed routing**: persisted profiles that Prodex can select, rotate, and inspect where provider APIs allow it.
 - **Runtime provider launch**: `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider ...` starts Codex with a temporary provider bridge for that session.
+
+<details>
+<summary>Supported provider matrix</summary>
 
 | Provider | Launch to Codex | Auth path | Quota view | Notes |
 |---|---:|---|---:|---|
@@ -65,7 +73,12 @@ Prodex supports two provider paths:
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
 | Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
 
+</details>
+
 `prodex gateway` exposes the provider bridge as a standalone OpenAI-compatible service for non-Codex clients:
+
+<details>
+<summary>Gateway quickstart</summary>
 
 ```bash
 PRODEX_GATEWAY_TOKEN=change-me GEMINI_API_KEY=... prodex gateway --provider gemini
@@ -76,9 +89,16 @@ curl http://127.0.0.1:4000/v1/responses \
   -d '{"model":"prodex-fast","input":"hello"}'
 ```
 
+</details>
+
+<details>
+<summary>Gateway capabilities</summary>
+
 The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It adds `x-prodex-call-id` to responses, writes local request detail plus `gateway_spend` events for both `request` and `response` phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, supports catalog-backed policy routing strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) for model aliases/fallback chains, can enforce static virtual keys with persisted request/spend usage plus model/budget/RPM/TPM limits, supports file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, and can apply keyword/model, Presidio, and external webhook guardrails before calls and on outputs. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can list usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, inspect usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, fetch the machine-readable gateway contract at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; policy/env-backed keys remain read-only, admin-managed key and SCIM user mutations are recorded in `prodex audit`, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix and tenant scopes. Configure defaults under `[gateway]` in `policy.toml`; validate provider catalog edits with `npm run catalog:providers`.
 
 JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/responses` plus gateway key, usage, billing ledger, metrics, and OpenAPI admin calls.
+
+</details>
 
 <details>
 <summary>Provider behavior details</summary>
