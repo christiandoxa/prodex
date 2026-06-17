@@ -15,3 +15,9 @@ description = "Local token-savior cache is ignored workspace state, not reposito
 paths = [
   '''\.token-savior-cache\.json''',
 ]
+
+[[allowlists]]
+description = "Cargo build output is ignored workspace state, not repository content"
+paths = [
+  '''target/''',
+]

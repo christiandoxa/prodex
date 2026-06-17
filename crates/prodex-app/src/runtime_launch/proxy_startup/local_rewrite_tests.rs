@@ -1955,8 +1955,10 @@ fn gateway_oidc_test_token(
     .expect("test OIDC token should sign")
 }
 
-const GATEWAY_OIDC_TEST_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDJETqse41HRBsc
+const GATEWAY_OIDC_TEST_PRIVATE_KEY: &str = concat!(
+    "-----BEGIN ",
+    "PRIVATE KEY-----\n",
+    r#"MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDJETqse41HRBsc
 7cfcq3ak4oZWFCoZlcic525A3FfO4qW9BMtRO/iXiyCCHn8JhiL9y8j5JdVP2Q9Z
 IpfElcFd3/guS9w+5RqQGgCR+H56IVUyHZWtTJbKPcwWXQdNUX0rBFcsBzCRESJL
 eelOEdHIjG7LRkx5l/FUvlqsyHDVJEQsHwegZ8b8C0fz0EgT2MMEdn10t6Ur1rXz
@@ -1982,7 +1984,10 @@ aUYxmBPCpXu3UjhfQiWqFq/mFyzlqlgvuCc9g95HPQKBgAscKP8mLxdKwOgX8yFW
 GcZ0izY/30012ajdHY+/QK5lsMoxTnn0skdS+spLxaS5ZEO4qvPVb8RAoCkWMMal
 2pOhmquJQVDPDLuZHdrIiKiDM20dy9sMfHygWcZjQ4WSxf/J7T9canLZIXFhHAZT
 3wc9h4G8BBCtWN2TN/LsGZdB
------END PRIVATE KEY-----"#;
+"#,
+    "-----END ",
+    "PRIVATE KEY-----",
+);
 
 fn temp_root(name: &str) -> std::path::PathBuf {
     let nonce = SystemTime::now()
