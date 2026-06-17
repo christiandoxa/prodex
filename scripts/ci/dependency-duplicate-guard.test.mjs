@@ -31,9 +31,21 @@ crypto-common v0.1.7
 crypto-common v0.2.1
     digest v0.11.3
 
+const-oid v0.9.6
+    spki v0.7.3
+
+const-oid v0.10.2
+    spki v0.8.0
+
 digest v0.10.7 (*)
 
 digest v0.11.3 (*)
+
+fallible-iterator v0.2.0
+    rusqlite v0.40.0
+
+fallible-iterator v0.3.0
+    der v0.8.0
 
 getrandom v0.2.17
     rand_core v0.6.4
@@ -44,9 +56,39 @@ getrandom v0.3.4
 getrandom v0.4.2
     tempfile v3.27.0
 
+hmac v0.12.1
+    pbkdf2 v0.12.2
+
+hmac v0.13.0
+    jsonwebtoken v10.2.0
+
+rand v0.8.6
+    proptest v1.9.0
+
+rand v0.9.4
+    rsa v0.10.0-rc.10
+
+rand v0.10.1
+    jsonwebtoken v10.2.0
+
+rand_chacha v0.3.1
+    rand v0.8.6
+
+rand_chacha v0.9.0
+    rand v0.9.4
+
 rand_core v0.6.4 (*)
 
 rand_core v0.9.5 (*)
+
+rand_core v0.10.1
+    rand v0.10.1
+
+sha2 v0.10.9
+    rsa v0.9.8
+
+sha2 v0.11.0
+    jsonwebtoken v10.2.0
 
 thiserror v1.0.69
     filedescriptor v0.8.3
@@ -71,11 +113,17 @@ test("default budget accepts current duplicate families", () => {
     duplicateFamilies.map((entry) => [entry.name, entry.versions.length]),
     [
       ["block-buffer", 2],
+      ["const-oid", 2],
       ["cpufeatures", 2],
       ["crypto-common", 2],
       ["digest", 2],
+      ["fallible-iterator", 2],
       ["getrandom", 3],
-      ["rand_core", 2],
+      ["hmac", 2],
+      ["rand", 3],
+      ["rand_chacha", 2],
+      ["rand_core", 3],
+      ["sha2", 2],
       ["thiserror", 2],
       ["thiserror-impl", 2],
     ],
@@ -95,16 +143,16 @@ test("unallowlisted duplicate family fails", () => {
 });
 
 test("allowed family over version budget fails", () => {
-  const duplicateFamilies = parseCargoTreeDuplicates(`${CURRENT_TREE_OUTPUT}\nrand_core v0.10.0\n`);
+  const duplicateFamilies = parseCargoTreeDuplicates(`${CURRENT_TREE_OUTPUT}\nrand_core v0.11.0\n`);
   const summary = evaluateDuplicateBudget(duplicateFamilies);
 
   assert.equal(summary.status, "failed");
   assert.deepEqual(summary.overBudgetFamilies, [
     {
       name: "rand_core",
-      versions: ["0.6.4", "0.9.5", "0.10.0"],
-      maxVersions: 2,
-      reason: "crypto-common and rand/proptest currently span rand_core 0.6 and 0.9.",
+      versions: ["0.6.4", "0.9.5", "0.10.1", "0.11.0"],
+      maxVersions: 3,
+      reason: "crypto-common, rand/proptest, and JWT/RSA dependencies currently span rand_core 0.6, 0.9, and 0.10.",
     },
   ]);
 });

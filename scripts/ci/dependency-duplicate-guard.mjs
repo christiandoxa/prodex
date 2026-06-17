@@ -26,14 +26,44 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "tungstenite/sha1 and export crypto use different digest major lines.",
   },
   {
+    name: "const-oid",
+    maxVersions: 2,
+    reason: "JWT/RSA OIDC verification and existing crypto dependencies currently span const-oid 0.9 and 0.10.",
+  },
+  {
+    name: "fallible-iterator",
+    maxVersions: 2,
+    reason: "gateway SQLite usage and crypto ASN.1 dependencies currently resolve different fallible-iterator lines.",
+  },
+  {
     name: "getrandom",
     maxVersions: 3,
     reason: "rand/proptest/tempfile/export crypto currently span getrandom 0.2, 0.3, and 0.4.",
   },
   {
     name: "rand_core",
+    maxVersions: 3,
+    reason: "crypto-common, rand/proptest, and JWT/RSA dependencies currently span rand_core 0.6, 0.9, and 0.10.",
+  },
+  {
+    name: "hmac",
     maxVersions: 2,
-    reason: "crypto-common and rand/proptest currently span rand_core 0.6 and 0.9.",
+    reason: "JWT/RSA support and existing crypto dependencies currently span hmac 0.12 and 0.13.",
+  },
+  {
+    name: "rand",
+    maxVersions: 3,
+    reason: "runtime tests, provider crypto, and JWT/RSA support currently span rand 0.8, 0.9, and 0.10.",
+  },
+  {
+    name: "rand_chacha",
+    maxVersions: 2,
+    reason: "rand 0.8 and rand 0.9 dependency lines currently require separate rand_chacha versions.",
+  },
+  {
+    name: "sha2",
+    maxVersions: 2,
+    reason: "JWT/RSA support and existing crypto dependencies currently span sha2 0.10 and 0.11.",
   },
   {
     name: "thiserror",
