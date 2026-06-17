@@ -279,9 +279,6 @@ jobs:
             ~/.cargo/bin/cargo-deny
           key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.1-deny-0.19.0
 
-      - name: Check locked compile graph
-        run: cargo check --locked --workspace --all-targets --all-features
-
       - name: Run clippy warning gate
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
@@ -571,7 +568,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Validate runtime CI manifest
-        if: matrix.suite == 'root'
+        if: matrix.validate_manifest == 'true'
         run: npm run ci:runtime-manifest
 
       - name: Run runtime proxy internal test shard ${{ matrix.label }}

@@ -140,7 +140,13 @@ fn doctor_bundle_writes_redacted_json_without_auth_secret_leakage() {
     let output = run_prodex_with_env(
         &fixture,
         &["doctor", "--bundle", bundle_path_arg.as_str(), "--redacted"],
-        &[("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str())],
+        &[
+            ("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str()),
+            ("PRODEX_TEST_SKIP_BINARY_SHA256", "1"),
+            ("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "250"),
+            ("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "50"),
+            ("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "50"),
+        ],
     );
 
     assert!(

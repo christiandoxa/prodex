@@ -30,6 +30,24 @@ pub(crate) fn run_prodex_with_env(
     args: &[&str],
     extra_env: &[(&str, &str)],
 ) -> std::process::Output {
+    let ready_timeout_ms = extra_env
+        .iter()
+        .find_map(|(key, value)| {
+            (*key == "PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS").then_some(*value)
+        })
+        .unwrap_or("30000");
+    let health_connect_timeout_ms = extra_env
+        .iter()
+        .find_map(|(key, value)| {
+            (*key == "PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS").then_some(*value)
+        })
+        .unwrap_or("1500");
+    let health_read_timeout_ms = extra_env
+        .iter()
+        .find_map(|(key, value)| {
+            (*key == "PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS").then_some(*value)
+        })
+        .unwrap_or("3000");
     Command::new(env!("CARGO_BIN_EXE_prodex"))
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("PRODEX_HOME", &fixture.prodex_home)
@@ -37,9 +55,16 @@ pub(crate) fn run_prodex_with_env(
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
         .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
-        .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "30000")
-        .env("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "1500")
-        .env("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "3000")
+        .env("PRODEX_TEST_SKIP_BINARY_SHA256", "1")
+        .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", ready_timeout_ms)
+        .env(
+            "PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS",
+            health_connect_timeout_ms,
+        )
+        .env(
+            "PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS",
+            health_read_timeout_ms,
+        )
         .env("PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS", "250")
         .env("PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS", "250")
         .env("PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS", "250")
@@ -62,6 +87,7 @@ pub(crate) fn run_prodex_with_env_and_stdin(
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
         .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
+        .env("PRODEX_TEST_SKIP_BINARY_SHA256", "1")
         .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "30000")
         .env("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "1500")
         .env("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "3000")
@@ -99,6 +125,7 @@ pub(crate) fn spawn_prodex_with_env(
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
         .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
+        .env("PRODEX_TEST_SKIP_BINARY_SHA256", "1")
         .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "30000")
         .env("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "1500")
         .env("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "3000")

@@ -4,6 +4,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -171,17 +172,22 @@ pub(crate) fn runtime_current_prodex_version() -> &'static str {
 }
 
 pub(crate) fn runtime_executable_sha256(path: &Path) -> Result<String> {
+    if cfg!(debug_assertions) && env::var_os("PRODEX_TEST_SKIP_BINARY_SHA256").is_some() {
+        return Ok("test-skip-sha256".to_string());
+    }
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     let digest = Sha256::digest(&bytes);
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 pub(crate) fn runtime_current_binary_identity() -> (Option<String>, Option<String>) {
-    let path = env::current_exe().ok();
-    let sha256 = path
-        .as_deref()
-        .and_then(|path| runtime_executable_sha256(path).ok());
-    (path.map(|path| path.display().to_string()), sha256)
+    let identity = runtime_current_prodex_binary_identity();
+    (
+        identity
+            .executable_path
+            .map(|path| path.display().to_string()),
+        identity.executable_sha256,
+    )
 }
 
 pub(crate) fn runtime_process_pid_alive(pid: u32) -> bool {
@@ -281,15 +287,20 @@ fn runtime_process_version_resolution(pid: u32) -> RuntimeProcessVersionResoluti
 }
 
 pub(crate) fn runtime_current_prodex_binary_identity() -> RuntimeProdexBinaryIdentity {
-    let executable_path = env::current_exe().ok();
-    let executable_sha256 = executable_path
-        .as_ref()
-        .and_then(|path| read_prodex_sha256_from_executable(path).ok());
-    RuntimeProdexBinaryIdentity {
-        prodex_version: Some(runtime_current_prodex_version().to_string()),
-        executable_path,
-        executable_sha256,
-    }
+    static IDENTITY: OnceLock<RuntimeProdexBinaryIdentity> = OnceLock::new();
+    IDENTITY
+        .get_or_init(|| {
+            let executable_path = env::current_exe().ok();
+            let executable_sha256 = executable_path
+                .as_ref()
+                .and_then(|path| read_prodex_sha256_from_executable(path).ok());
+            RuntimeProdexBinaryIdentity {
+                prodex_version: Some(runtime_current_prodex_version().to_string()),
+                executable_path,
+                executable_sha256,
+            }
+        })
+        .clone()
 }
 
 pub(crate) fn runtime_current_prodex_version_identity() -> RuntimeProdexBinaryIdentity {

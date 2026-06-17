@@ -440,11 +440,11 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_doctor_fields_surface_queue_lag_and_failure_classes",
-    weightSeconds: 7,
+    weightSeconds: 6,
   },
   {
     name: "runtime_doctor_json_value_includes_selection_markers",
-    weightSeconds: 5,
+    weightSeconds: 6,
   },
   {
     name: "runtime_doctor_summary_counts_recent_runtime_markers",
@@ -452,11 +452,11 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_doctor_state_collects_persisted_degradation_and_orphans",
-    weightSeconds: 8,
+    weightSeconds: 9,
   },
   {
     name: "remove_all_profiles_clears_state_and_continuation_sidecars",
-    weightSeconds: 8,
+    weightSeconds: 7,
   },
   {
     name: "previous_response_release_preserves_session_and_compact_session_lineage_for_compact_followups",
@@ -468,11 +468,11 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "translate_runtime_anthropic_messages_request_maps_tools_and_tool_results",
-    weightSeconds: 5,
+    weightSeconds: 4,
   },
   {
     name: "translate_runtime_anthropic_messages_request_keeps_versioned_builtin_client_tools",
-    weightSeconds: 5,
+    weightSeconds: 6,
   },
   {
     name: "perform_prodex_cleanup_removes_safe_local_artifacts",
@@ -480,31 +480,31 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval",
-    weightSeconds: 4,
+    weightSeconds: 3,
   },
   {
     name: "perform_prodex_cleanup_deduplicates_profiles_by_email",
-    weightSeconds: 5,
+    weightSeconds: 6,
   },
   {
     name: "runtime_previous_response_not_found_decision_matrix_stays_consistent",
-    weightSeconds: 7,
+    weightSeconds: 8,
   },
   {
     name: "auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state",
-    weightSeconds: 5,
-  },
-  {
-    name: "runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_profile",
     weightSeconds: 4,
   },
   {
+    name: "runtime_proxy_anthropic_messages_retries_tool_result_transcript_on_another_profile",
+    weightSeconds: 5,
+  },
+  {
     name: "runtime_proxy_continues_anthropic_web_search_server_tool_responses",
-    weightSeconds: 7,
+    weightSeconds: 8,
   },
   {
     name: "next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidate_is_auth_failed",
-    weightSeconds: 5,
+    weightSeconds: 4,
   },
   {
     name: "previous_response_negative_cache_boundary_matrix_respects_threshold_and_expiry",
@@ -512,7 +512,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
   },
   {
     name: "runtime_state_save_accepts_legacy_backoffs_without_last_good_backup",
-    weightSeconds: 5,
+    weightSeconds: 6,
   },
 ]);
 

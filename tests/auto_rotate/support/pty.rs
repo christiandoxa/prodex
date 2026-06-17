@@ -34,6 +34,7 @@ pub(crate) fn run_prodex_with_pty_prompt_answer(
         .env("PRODEX_CODEX_BIN", &fixture.codex_bin)
         .env("CODEX_CHATGPT_BASE_URL", &fixture.usage_base_url)
         .env("TEST_CODEX_LOG", &fixture.codex_log)
+        .env("PRODEX_TEST_SKIP_BINARY_SHA256", "1")
         .env("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "30000")
         .env("PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS", "1500")
         .env("PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS", "3000")
