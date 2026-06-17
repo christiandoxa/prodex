@@ -29,13 +29,42 @@ Provider bridges translate `/v1/responses` where supported and pass native-compa
 
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
-| `gateway.listen_addr` | none | `127.0.0.1:4000` | Gateway bind address. Non-loopback binds require `--auth-token` or `PRODEX_GATEWAY_TOKEN`. |
+| `gateway.listen_addr` | none | `127.0.0.1:4000` | Gateway bind address. Non-loopback binds require `--auth-token`, `PRODEX_GATEWAY_TOKEN`, or `gateway.virtual_keys`. |
 | `gateway.provider` | CLI `--provider` | OpenAI-compatible upstream | Provider preset: `anthropic`, `copilot`, `deepseek`, or `gemini`. |
 | `gateway.base_url` | CLI `--base-url`; `OPENAI_BASE_URL` for OpenAI-compatible mode | Provider default, or `https://api.openai.com/v1` | Upstream base URL. OpenAI-compatible mode appends `/v1` when the URL has no path. |
-| `gateway.require_auth` | none | `false` | Require gateway bearer auth even on loopback. Token value comes from `--auth-token` or `PRODEX_GATEWAY_TOKEN`. |
+| `gateway.require_auth` | none | `false` | Require gateway bearer auth even on loopback. Token value comes from `--auth-token`, `PRODEX_GATEWAY_TOKEN`, or configured virtual key env vars. |
+| `gateway.state.backend` | none | `file` | Gateway admin/usage state backend. Valid values: `file`, `sqlite`, `postgres`, `redis`. `postgres` stores admin-managed virtual keys, usage counters, and billing ledger rows in a shared Postgres database. `redis` stores the same data in Redis using locked JSON snapshots and a Redis list for the ledger. |
+| `gateway.state.sqlite_path` | none | `gateway-state.sqlite` under the Prodex root when `backend=sqlite` | SQLite database path for admin-managed virtual keys, usage counters, and schema migrations. Relative paths are resolved under the Prodex root. |
+| `gateway.state.postgres_url_env` | none | empty | Environment variable containing a Postgres connection URL. Required when `backend="postgres"`. |
+| `gateway.state.redis_url_env` | none | empty | Environment variable containing a Redis connection URL. Required when `backend="redis"`. |
+| `gateway.admin_tokens` | env vars named by `token_env` | empty | Additional admin-plane bearer tokens. They protect `/v1/prodex/gateway/*` only and do not authorize model traffic. |
+| `gateway.admin_tokens[].role` | none | `admin` | Admin-plane role: `admin` can create/update/delete keys; `viewer` can read keys, usage, metrics, and OpenAPI only. |
+| `gateway.admin_tokens[].allowed_key_prefixes` | none | empty | Optional virtual-key name prefixes this admin token can see and mutate. Empty means global access. |
+| `gateway.admin_tokens[].tenant_id` | none | empty | Optional tenant boundary for this admin token. Tenant-scoped admins only see and mutate keys, SCIM users, usage, ledger rows, summaries, CSV exports, and metrics in that tenant. |
+| `gateway.sso.proxy_token_env` | named env var | empty | Enable trusted reverse-proxy SSO for admin endpoints. The proxy must send this shared token in `gateway.sso.token_header`; Prodex then trusts the configured identity headers. |
+| `gateway.sso.token_header` | none | `x-prodex-sso-token` | Header carrying the trusted proxy shared token. |
+| `gateway.sso.user_header` | none | `x-prodex-sso-user` | Header carrying the authenticated user name/email from the upstream SSO proxy. |
+| `gateway.sso.role_header` | none | `x-prodex-sso-role` | Optional header carrying `admin` or `viewer`; missing/invalid values fall back to `gateway.sso.default_role`. |
+| `gateway.sso.key_prefixes_header` | none | `x-prodex-sso-key-prefixes` | Optional comma/semicolon/newline-separated virtual-key prefixes visible to the SSO principal. Empty means global access. |
+| `gateway.sso.tenant_header` | none | `x-prodex-sso-tenant` | Optional tenant id header from a trusted SSO proxy. Missing values fall back to an active matching SCIM user's tenant. |
+| `gateway.sso.oidc_issuer` | none | empty | Enable native OIDC/JWT admin auth for bearer tokens issued by this issuer. Requires `oidc_audience`; Prodex discovers JWKS from this issuer when `oidc_jwks_url` is omitted. |
+| `gateway.sso.oidc_audience` | none | empty | Required audience for OIDC/JWT admin bearer tokens. |
+| `gateway.sso.oidc_jwks_url` | none | issuer discovery | Optional JWKS URL used to verify OIDC/JWT admin bearer token signatures. |
+| `gateway.sso.oidc_user_claim` | none | `email` | Claim used as the admin principal name before SCIM lookup. Runtime falls back to `email`, `preferred_username`, then `sub`. |
+| `gateway.sso.oidc_role_claim` | none | `prodex_role` | Optional claim carrying `admin` or `viewer`; missing/invalid values fall back to SCIM user role or `gateway.sso.default_role`. |
+| `gateway.sso.oidc_tenant_claim` | none | `prodex_tenant` | Optional claim carrying the admin tenant id; missing values fall back to an active matching SCIM user's tenant. |
+| `gateway.sso.oidc_key_prefixes_claim` | none | `prodex_key_prefixes` | Optional string or string-array claim carrying visible virtual-key prefixes; missing values fall back to SCIM user prefixes. |
+| `gateway.sso.default_role` | none | `admin` | Default role for SSO-authenticated admin requests when the role header is absent. |
 | `gateway.route_aliases` | none | empty | Declarative model aliases. Matching request `model` values are rewritten according to each alias `strategy`. |
 | `gateway.route_aliases[].strategy` | none | `fallback` | Routing strategy for the alias: `fallback` rewrites to `combo:...`, `round-robin` selects one target by request id, `least-busy` selects the target with the fewest in-flight gateway requests, `first` always picks the first target. |
-| `gateway.route_aliases[].model_metrics` | none | empty | Optional per-model routing hints for metric strategies: cost, latency, RPM limit, and TPM limit. |
+| `gateway.route_aliases[].model_metrics` | none | catalog defaults where known | Optional per-model routing hints for metric strategies: cost, latency, RPM limit, and TPM limit. Policy values override the embedded provider/model catalog. |
+| `gateway.virtual_keys` | env vars named by `token_env` | empty | Static virtual gateway keys. Each key can enforce model allowlists, persisted request/spend budgets, RPM, and TPM. |
+| `gateway.virtual_keys[].token_env` | named env var | required per key | Environment variable containing the bearer token for this virtual key. Missing or empty env vars are configuration errors. |
+| `gateway.virtual_keys[].tenant_id` | none | empty | Optional tenant id assigned to this policy-backed key for tenant-scoped admin visibility. |
+| `gateway.virtual_keys[].allowed_models` | none | empty | Optional model allowlist checked against the request `model` before route alias rewrite. |
+| `gateway.virtual_keys[].budget_usd` | none | empty | Optional persisted spend cap for estimated request cost when catalog or policy cost is available. |
+| `gateway.virtual_keys[].request_budget` | none | empty | Optional persisted total request cap for the virtual key name. |
+| `gateway.virtual_keys[].rpm_limit` / `gateway.virtual_keys[].tpm_limit` | none | empty | Optional per-minute request/token caps. TPM uses Prodex's semantic request-token estimator. |
 | `gateway.observability.sinks` | none | `runtime-log` | Enabled gateway observability sinks. `runtime-log` is always enabled; `jsonl` and `http` are enabled automatically when their target fields are set. |
 | `gateway.observability.call_id_header` | none | `x-prodex-call-id` | Response header containing a stable per-request call id such as `prodex-42`. |
 | `gateway.observability.jsonl_path` | none | empty | Optional JSONL export path for structured `gateway_spend` events. Relative paths are resolved under the Prodex root. |
@@ -52,6 +81,8 @@ Provider bridges translate `/v1/responses` where supported and pass native-compa
 | `gateway.guardrails.webhook_bearer_token_env` | none | empty | Environment variable name containing a bearer token for `gateway.guardrails.webhook_url`. |
 | `gateway.guardrails.webhook_fail_closed` | none | `false` | Block when the external guardrail endpoint fails or returns non-2xx. |
 
+Admin-managed virtual keys and SCIM users default to file state under the Prodex root as `gateway-virtual-keys.json`; request/spend usage defaults to `gateway-virtual-key-usage.json`, and response-reconciled billing ledger records default to `gateway-billing-ledger.jsonl`. Set `[gateway.state] backend = "sqlite"` to store admin-managed keys, SCIM users, usage counters, billing ledger records, and schema migrations in one SQLite database, `backend = "postgres"` with `postgres_url_env` to store the same admin/usage/ledger/SCIM state in a shared Postgres database, or `backend = "redis"` with `redis_url_env` to store gateway state in Redis. The configured gateway admin token from `--auth-token` or `PRODEX_GATEWAY_TOKEN` has admin role and can `GET`/`POST` `/v1/prodex/gateway/keys`, `GET`/`PATCH`/`DELETE` `/v1/prodex/gateway/keys/{name}`, `GET`/`POST` `/v1/prodex/gateway/scim/v2/Users`, `GET`/`PATCH`/`PUT`/`DELETE` `/v1/prodex/gateway/scim/v2/Users/{id}`, read `/v1/prodex/gateway/usage`, read `/v1/prodex/gateway/ledger`, read aggregated billing totals from `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics from `/v1/prodex/gateway/metrics`, fetch `/v1/prodex/gateway/openapi.json`, and use the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`. Additional `[[gateway.admin_tokens]]` entries can be `admin` or read-only `viewer`, and can set `allowed_key_prefixes` and/or `tenant_id` to restrict key list/read/mutation, SCIM user management, usage, ledger, summary, CSV, and metrics visibility. `[gateway.sso]` can trust an authenticated reverse proxy by requiring a shared proxy token header and mapping user, role, tenant, and key-prefix headers to the same admin RBAC model. It can also verify native OIDC/JWT bearer tokens against a configured issuer and audience, using either a configured JWKS URL or the issuer discovery document; role, tenant, and key-prefix claims can come from the token, or from an active matching SCIM user when those claims are absent. An inactive matching SCIM user is rejected. Virtual-key bearer tokens cannot use these admin endpoints. `POST /keys` returns a generated bearer token once when `token` is omitted, while persisted state stores only its hash. Keys configured by `policy.toml` stay source `policy` and are read-only through the admin API. Admin-managed key create, update, rotate, delete, and SCIM user mutations are recorded as `gateway_admin` events in `prodex audit` without storing bearer token material. Gateway observability emits `gateway_spend` with `phase=request` after upstream response headers and `phase=response` after buffered response completion or streaming EOF/drop. Provider catalog edits should pass `npm run catalog:providers`.
+
 Example:
 
 ```toml
@@ -59,6 +90,39 @@ Example:
 listen_addr = "127.0.0.1:4000"
 provider = "gemini"
 require_auth = true
+
+[gateway.state]
+backend = "sqlite"
+sqlite_path = "gateway-state.sqlite"
+
+[[gateway.admin_tokens]]
+name = "ops"
+token_env = "PRODEX_GATEWAY_OPS_TOKEN"
+role = "admin"
+
+[[gateway.admin_tokens]]
+name = "auditor"
+token_env = "PRODEX_GATEWAY_AUDITOR_TOKEN"
+role = "viewer"
+allowed_key_prefixes = ["team-a-"]
+tenant_id = "tenant-a"
+
+[gateway.sso]
+proxy_token_env = "PRODEX_GATEWAY_SSO_PROXY_TOKEN"
+user_header = "x-auth-request-email"
+role_header = "x-prodex-role"
+key_prefixes_header = "x-prodex-key-prefixes"
+tenant_header = "x-prodex-tenant"
+default_role = "viewer"
+
+# Or verify native OIDC/JWT admin bearer tokens directly.
+# oidc_issuer = "https://idp.example"
+# oidc_audience = "prodex-gateway"
+# oidc_jwks_url = "https://idp.example/.well-known/jwks.json" # optional
+# oidc_user_claim = "email"
+# oidc_role_claim = "prodex_role"
+# oidc_tenant_claim = "prodex_tenant"
+# oidc_key_prefixes_claim = "prodex_key_prefixes"
 
 [[gateway.route_aliases]]
 alias = "prodex-fast"
@@ -70,6 +134,16 @@ model = "gemini-3-flash"
 input_cost_per_million_microusd = 100
 output_cost_per_million_microusd = 200
 latency_ms = 300
+rpm_limit = 60
+tpm_limit = 100000
+
+[[gateway.virtual_keys]]
+name = "team-a"
+token_env = "PRODEX_GATEWAY_TEAM_A_TOKEN"
+tenant_id = "tenant-a"
+allowed_models = ["prodex-fast"]
+budget_usd = 10.0
+request_budget = 1000
 rpm_limit = 60
 tpm_limit = 100000
 

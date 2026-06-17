@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   copyRepoFile,
   ensureDir,
+  gatewaySdkPackageManifest,
   mainPackageManifest,
   packageSlug,
   pathExists,
@@ -80,6 +81,17 @@ async function stageMainPackage(version, outputDir) {
   return packageDir;
 }
 
+async function stageGatewaySdkPackage(version, outputDir) {
+  const packageDir = path.join(outputDir, "packages", packageSlug("@christiandoxa/prodex-gateway-sdk"));
+  await ensureDir(packageDir);
+  await copyRepoFile("LICENSE", path.join(packageDir, "LICENSE"));
+  await copyRepoFile("npm/prodex-gateway-sdk/README.md", path.join(packageDir, "README.md"));
+  await copyRepoFile("npm/prodex-gateway-sdk/index.mjs", path.join(packageDir, "index.mjs"));
+  await copyRepoFile("npm/prodex-gateway-sdk/index.d.ts", path.join(packageDir, "index.d.ts"));
+  await writeJsonFile(path.join(packageDir, "package.json"), gatewaySdkPackageManifest(version));
+  return packageDir;
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
@@ -101,6 +113,7 @@ async function main() {
     stagedPackages.push(await stagePlatformPackage(version, args.inputDir, args.outputDir, spec));
   }
   stagedPackages.push(await stageMainPackage(version, args.outputDir));
+  stagedPackages.push(await stageGatewaySdkPackage(version, args.outputDir));
 
   await fs.writeFile(
     path.join(args.outputDir, "packages.json"),

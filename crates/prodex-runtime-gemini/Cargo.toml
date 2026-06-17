@@ -10,3 +10,6 @@ repository.workspace = true
 name = "prodex_runtime_gemini"
 path = "src/lib.rs"
 doctest = false
+
+[dependencies]
+prodex_provider_core = { workspace = true }

@@ -3,6 +3,7 @@ mod preflight;
 mod provider_names;
 mod providers;
 mod resume_repair;
+use std::collections::BTreeMap;
 use {preflight::*, provider_names::*, providers::*, resume_repair::*};
 
 struct RunCommandStrategy {
@@ -294,10 +295,18 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         });
-    if policy.require_auth == Some(true) && auth_token.is_none() {
-        bail!("gateway auth is required by policy.toml; set --auth-token or PRODEX_GATEWAY_TOKEN");
+    let gateway_admin_tokens = gateway_admin_tokens_config(auth_token.as_deref(), &policy)?;
+    if policy.require_auth == Some(true) && auth_token.is_none() && policy.virtual_keys.is_empty() {
+        bail!(
+            "gateway auth is required by policy.toml; set --auth-token, PRODEX_GATEWAY_TOKEN, or [[gateway.virtual_keys]]; [[gateway.admin_tokens]] only protects admin endpoints"
+        );
     }
-    if auth_token.is_some()
+    let gateway_virtual_keys = gateway_virtual_keys_config(&policy)?;
+    let gateway_auth_required = auth_token.is_some() || !gateway_virtual_keys.is_empty();
+    if policy.require_auth == Some(true) && !gateway_auth_required {
+        bail!("gateway auth is required by policy.toml; configured virtual key env vars are empty");
+    }
+    if gateway_auth_required
         && matches!(
             &provider_options,
             RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }
@@ -323,7 +332,8 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "127.0.0.1:4000".to_string());
-    gateway_validate_listen_auth(&listen_addr, auth_token.as_deref())?;
+    gateway_validate_listen_auth(&listen_addr, gateway_auth_required)?;
+    let gateway_provider_id = gateway_provider_catalog_id(provider);
     let gateway_route_aliases = policy
         .route_aliases
         .iter()
@@ -333,33 +343,21 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
                 .as_deref()
                 .and_then(runtime_proxy_crate::RuntimeGatewayRouteStrategy::parse)
                 .unwrap_or_default();
+            let models = alias
+                .models
+                .iter()
+                .map(|model| model.trim().to_string())
+                .filter(|model| !model.is_empty())
+                .collect::<Vec<_>>();
             runtime_proxy_crate::RuntimeGatewayRouteAlias {
                 alias: alias.alias.trim().to_string(),
-                models: alias
-                    .models
-                    .iter()
-                    .map(|model| model.trim().to_string())
-                    .filter(|model| !model.is_empty())
-                    .collect(),
+                model_metrics: gateway_route_alias_model_metrics(
+                    gateway_provider_id,
+                    &models,
+                    &alias.model_metrics,
+                ),
+                models,
                 strategy,
-                model_metrics: alias
-                    .model_metrics
-                    .iter()
-                    .map(|metrics| {
-                        (
-                            metrics.model.trim().to_string(),
-                            runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
-                                input_cost_per_million_microusd: metrics
-                                    .input_cost_per_million_microusd,
-                                output_cost_per_million_microusd: metrics
-                                    .output_cost_per_million_microusd,
-                                latency_ms: metrics.latency_ms,
-                                rpm_limit: metrics.rpm_limit,
-                                tpm_limit: metrics.tpm_limit,
-                            },
-                        )
-                    })
-                    .collect(),
             }
         })
         .collect::<Vec<_>>();
@@ -405,6 +403,8 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
         .filter(|value| !value.is_empty())
         .unwrap_or("x-prodex-call-id")
         .to_string();
+    let gateway_state_store = gateway_state_store_config(&paths, &policy)?;
+    let gateway_sso = gateway_sso_config(&policy)?;
     let gateway_observability = gateway_observability_config(&paths, &policy)?;
     let gateway_guardrail_webhook = gateway_guardrail_webhook_config(&policy);
     let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
@@ -420,6 +420,10 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
         gateway_auth_token_hash: auth_token
             .as_deref()
             .map(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token),
+        gateway_admin_tokens,
+        gateway_sso,
+        gateway_state_store,
+        gateway_virtual_keys,
         gateway_route_aliases,
         gateway_guardrails,
         gateway_guardrail_webhook,
@@ -430,7 +434,7 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
         "Prodex gateway listening on http://{} provider={} auth_required={} endpoints=/v1/responses,/v1/chat/completions,/v1/embeddings,/v1/images/*,/v1/audio/*,/v1/batches,/v1/rerank,/v1/a2a,/v1/messages models=/v1/models",
         proxy.listen_addr,
         provider_name.unwrap_or("openai-compatible"),
-        auth_token.is_some()
+        gateway_auth_required
     );
     loop {
         std::thread::park();
@@ -477,6 +481,224 @@ fn gateway_guardrail_webhook_config(
         bearer_token,
         fail_closed: policy.guardrails.webhook_fail_closed.unwrap_or(false),
     }
+}
+
+fn gateway_state_store_config(
+    paths: &AppPaths,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<RuntimeGatewayStateStore> {
+    match policy
+        .state
+        .backend
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("file")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "file" => Ok(RuntimeGatewayStateStore::file(paths)),
+        "sqlite" => {
+            let configured = policy
+                .state
+                .sqlite_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("gateway-state.sqlite");
+            let path = PathBuf::from(configured);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                paths.root.join(path)
+            };
+            Ok(RuntimeGatewayStateStore::sqlite(path))
+        }
+        "postgres" => {
+            let env_name = policy
+                .state
+                .postgres_url_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("PRODEX_GATEWAY_POSTGRES_URL");
+            let url = env::var(env_name)
+                .with_context(|| format!("gateway.state.backend=postgres requires {env_name}"))?
+                .trim()
+                .to_string();
+            if url.is_empty() {
+                bail!("gateway.state.backend=postgres env {env_name} cannot be empty");
+            }
+            Ok(RuntimeGatewayStateStore::postgres(
+                env_name.to_string(),
+                url,
+            ))
+        }
+        "redis" => {
+            let env_name = policy
+                .state
+                .redis_url_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("PRODEX_GATEWAY_REDIS_URL");
+            let url = env::var(env_name)
+                .with_context(|| format!("gateway.state.backend=redis requires {env_name}"))?
+                .trim()
+                .to_string();
+            if url.is_empty() {
+                bail!("gateway.state.backend=redis env {env_name} cannot be empty");
+            }
+            Ok(RuntimeGatewayStateStore::redis(env_name.to_string(), url))
+        }
+        other => {
+            bail!("gateway.state.backend must be file, sqlite, postgres, or redis, got {other:?}")
+        }
+    }
+}
+
+fn gateway_admin_tokens_config(
+    legacy_admin_token: Option<&str>,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Vec<RuntimeGatewayAdminToken>> {
+    let mut tokens = Vec::new();
+    if let Some(token) = legacy_admin_token
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        tokens.push(RuntimeGatewayAdminToken {
+            name: "default-admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            allowed_key_prefixes: Vec::new(),
+        });
+    }
+    for configured in &policy.admin_tokens {
+        let Some(token) = env::var(&configured.token_env)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let role = configured
+            .role
+            .as_deref()
+            .and_then(RuntimeGatewayAdminRole::parse)
+            .unwrap_or(RuntimeGatewayAdminRole::Admin);
+        tokens.push(RuntimeGatewayAdminToken {
+            name: configured.name.trim().to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token),
+            role,
+            tenant_id: configured
+                .tenant_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            allowed_key_prefixes: configured
+                .allowed_key_prefixes
+                .iter()
+                .map(|prefix| prefix.trim().to_string())
+                .filter(|prefix| !prefix.is_empty())
+                .collect(),
+        });
+    }
+    Ok(tokens)
+}
+
+fn gateway_sso_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<RuntimeGatewaySsoConfig> {
+    let proxy_token_hash = match policy
+        .sso
+        .proxy_token_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(env_name) => {
+            let token = env::var(env_name)
+                .with_context(|| format!("gateway.sso.proxy_token_env requires {env_name}"))?
+                .trim()
+                .to_string();
+            if token.is_empty() {
+                bail!("gateway.sso.proxy_token_env env {env_name} cannot be empty");
+            }
+            Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+                &token,
+            ))
+        }
+        None => None,
+    };
+    let default_role = policy
+        .sso
+        .default_role
+        .as_deref()
+        .and_then(RuntimeGatewayAdminRole::parse)
+        .unwrap_or(RuntimeGatewayAdminRole::Admin);
+    Ok(RuntimeGatewaySsoConfig {
+        proxy_token_hash,
+        token_header: gateway_sso_header(&policy.sso.token_header, "x-prodex-sso-token"),
+        user_header: gateway_sso_header(&policy.sso.user_header, "x-prodex-sso-user"),
+        role_header: gateway_sso_header(&policy.sso.role_header, "x-prodex-sso-role"),
+        tenant_header: gateway_sso_header(&policy.sso.tenant_header, "x-prodex-sso-tenant"),
+        key_prefixes_header: gateway_sso_header(
+            &policy.sso.key_prefixes_header,
+            "x-prodex-sso-key-prefixes",
+        ),
+        oidc: gateway_sso_oidc_config(policy)?,
+        default_role,
+    })
+}
+
+fn gateway_sso_oidc_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Option<RuntimeGatewayOidcConfig>> {
+    let Some(issuer) = policy
+        .sso
+        .oidc_issuer
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let audience = policy
+        .sso
+        .oidc_audience
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("gateway.sso.oidc_audience is required when oidc_issuer is set")?;
+    Ok(Some(RuntimeGatewayOidcConfig {
+        issuer: issuer.to_string(),
+        audience: audience.to_string(),
+        jwks_url: policy
+            .sso
+            .oidc_jwks_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        user_claim: gateway_sso_header(&policy.sso.oidc_user_claim, "email"),
+        role_claim: gateway_sso_header(&policy.sso.oidc_role_claim, "prodex_role"),
+        tenant_claim: gateway_sso_header(&policy.sso.oidc_tenant_claim, "prodex_tenant"),
+        key_prefixes_claim: gateway_sso_header(
+            &policy.sso.oidc_key_prefixes_claim,
+            "prodex_key_prefixes",
+        ),
+    }))
+}
+
+fn gateway_sso_header(value: &Option<String>, default: &str) -> String {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_string()
 }
 
 fn gateway_observability_config(
@@ -550,6 +772,110 @@ fn gateway_observability_config(
         http_schema,
         http_bearer_token,
     })
+}
+
+fn gateway_virtual_keys_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>> {
+    policy
+        .virtual_keys
+        .iter()
+        .map(|key| {
+            let token_env = key.token_env.trim();
+            let token = env::var(token_env)
+                .with_context(|| {
+                    format!("gateway virtual key '{}' requires {token_env}", key.name)
+                })?
+                .trim()
+                .to_string();
+            if token.is_empty() {
+                bail!(
+                    "gateway virtual key '{}' env {token_env} cannot be empty",
+                    key.name
+                );
+            }
+            Ok(runtime_proxy_crate::RuntimeGatewayVirtualKey {
+                name: key.name.trim().to_string(),
+                tenant_id: key
+                    .tenant_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token),
+                allowed_models: key
+                    .allowed_models
+                    .iter()
+                    .map(|model| model.trim().to_string())
+                    .filter(|model| !model.is_empty())
+                    .collect(),
+                budget_microusd: key.budget_usd.map(gateway_budget_usd_to_microusd),
+                request_budget: key.request_budget,
+                rpm_limit: key.rpm_limit,
+                tpm_limit: key.tpm_limit,
+            })
+        })
+        .collect()
+}
+
+fn gateway_budget_usd_to_microusd(value: f64) -> u64 {
+    (value * 1_000_000.0).round().clamp(1.0, u64::MAX as f64) as u64
+}
+
+fn gateway_provider_catalog_id(
+    provider: Option<SuperExternalProvider>,
+) -> prodex_provider_core::ProviderId {
+    match provider {
+        Some(SuperExternalProvider::Anthropic) => prodex_provider_core::ProviderId::Anthropic,
+        Some(SuperExternalProvider::Copilot) => prodex_provider_core::ProviderId::Copilot,
+        Some(SuperExternalProvider::DeepSeek) => prodex_provider_core::ProviderId::DeepSeek,
+        Some(SuperExternalProvider::Gemini) => prodex_provider_core::ProviderId::Gemini,
+        None => prodex_provider_core::ProviderId::OpenAi,
+    }
+}
+
+fn gateway_route_alias_model_metrics(
+    provider: prodex_provider_core::ProviderId,
+    models: &[String],
+    configured: &[prodex_runtime_policy::RuntimePolicyGatewayRouteModelMetrics],
+) -> BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelMetrics> {
+    let mut metrics = BTreeMap::new();
+    for model in models {
+        let cost = prodex_provider_core::provider_model_cost(provider, model);
+        if cost.any() {
+            metrics.insert(
+                model.clone(),
+                runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
+                    input_cost_per_million_microusd: cost.input_cost_per_million_microusd,
+                    output_cost_per_million_microusd: cost.output_cost_per_million_microusd,
+                    ..runtime_proxy_crate::RuntimeGatewayRouteModelMetrics::default()
+                },
+            );
+        }
+    }
+    for metric in configured {
+        let model = metric.model.trim().to_string();
+        if model.is_empty() {
+            continue;
+        }
+        let entry = metrics.entry(model).or_default();
+        if metric.input_cost_per_million_microusd.is_some() {
+            entry.input_cost_per_million_microusd = metric.input_cost_per_million_microusd;
+        }
+        if metric.output_cost_per_million_microusd.is_some() {
+            entry.output_cost_per_million_microusd = metric.output_cost_per_million_microusd;
+        }
+        if metric.latency_ms.is_some() {
+            entry.latency_ms = metric.latency_ms;
+        }
+        if metric.rpm_limit.is_some() {
+            entry.rpm_limit = metric.rpm_limit;
+        }
+        if metric.tpm_limit.is_some() {
+            entry.tpm_limit = metric.tpm_limit;
+        }
+    }
+    metrics
 }
 
 fn gateway_policy_provider(value: &str) -> Option<SuperExternalProvider> {
@@ -675,7 +1001,7 @@ fn gateway_api_keys_from_list(value: &str) -> Option<Vec<String>> {
     (!keys.is_empty()).then_some(keys)
 }
 
-fn gateway_validate_listen_auth(listen_addr: &str, auth_token: Option<&str>) -> Result<()> {
+fn gateway_validate_listen_auth(listen_addr: &str, auth_required: bool) -> Result<()> {
     let host = listen_addr
         .rsplit_once(':')
         .map(|(host, _)| host.trim_matches(['[', ']']))
@@ -685,9 +1011,9 @@ fn gateway_validate_listen_auth(listen_addr: &str, auth_token: Option<&str>) -> 
         || host
             .parse::<std::net::IpAddr>()
             .is_ok_and(|addr| addr.is_loopback());
-    if !loopback && auth_token.is_none() {
+    if !loopback && !auth_required {
         bail!(
-            "refusing to bind unauthenticated gateway on non-loopback address {listen_addr}; set --auth-token or PRODEX_GATEWAY_TOKEN"
+            "refusing to bind unauthenticated gateway on non-loopback address {listen_addr}; set --auth-token, PRODEX_GATEWAY_TOKEN, or [[gateway.virtual_keys]]"
         );
     }
     Ok(())
@@ -1311,6 +1637,10 @@ fn start_local_rewrite_proxy_endpoint(
         model_context_window_tokens,
         preferred_listen_addr: None,
         gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(paths),
+        gateway_virtual_keys: Vec::new(),
         gateway_route_aliases: Vec::new(),
         gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
         gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),

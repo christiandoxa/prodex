@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import {
   cargoTomlPath,
+  gatewaySdkPackageName,
   mainPackageName,
   openaiCodexDependencySpecifier,
   platformPackages,
@@ -40,6 +41,7 @@ async function updatePackageJson(filePath, version) {
 
   const isProdexPackage =
     packageJson.name === mainPackageName ||
+    packageJson.name === gatewaySdkPackageName ||
     platformPackages.some((spec) => spec.packageName === packageJson.name);
   if (!isProdexPackage) {
     return false;

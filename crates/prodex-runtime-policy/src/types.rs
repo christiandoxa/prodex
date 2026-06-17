@@ -66,7 +66,15 @@ pub struct RuntimePolicyGatewaySettings {
     pub base_url: Option<String>,
     pub require_auth: Option<bool>,
     #[serde(default)]
+    pub state: RuntimePolicyGatewayStateSettings,
+    #[serde(default)]
+    pub admin_tokens: Vec<RuntimePolicyGatewayAdminToken>,
+    #[serde(default)]
+    pub sso: RuntimePolicyGatewaySsoSettings,
+    #[serde(default)]
     pub route_aliases: Vec<RuntimePolicyGatewayRouteAlias>,
+    #[serde(default)]
+    pub virtual_keys: Vec<RuntimePolicyGatewayVirtualKey>,
     #[serde(default)]
     pub observability: RuntimePolicyGatewayObservabilitySettings,
     #[serde(default)]
@@ -74,6 +82,45 @@ pub struct RuntimePolicyGatewaySettings {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayStateSettings {
+    pub backend: Option<String>,
+    pub sqlite_path: Option<String>,
+    pub postgres_url_env: Option<String>,
+    pub redis_url_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayAdminToken {
+    pub name: String,
+    pub token_env: String,
+    pub role: Option<String>,
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub allowed_key_prefixes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewaySsoSettings {
+    pub proxy_token_env: Option<String>,
+    pub token_header: Option<String>,
+    pub user_header: Option<String>,
+    pub role_header: Option<String>,
+    pub tenant_header: Option<String>,
+    pub key_prefixes_header: Option<String>,
+    pub oidc_issuer: Option<String>,
+    pub oidc_audience: Option<String>,
+    pub oidc_jwks_url: Option<String>,
+    pub oidc_user_claim: Option<String>,
+    pub oidc_role_claim: Option<String>,
+    pub oidc_tenant_claim: Option<String>,
+    pub oidc_key_prefixes_claim: Option<String>,
+    pub default_role: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGatewayRouteAlias {
     pub alias: String,
@@ -84,13 +131,27 @@ pub struct RuntimePolicyGatewayRouteAlias {
     pub model_metrics: Vec<RuntimePolicyGatewayRouteModelMetrics>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGatewayRouteModelMetrics {
     pub model: String,
     pub input_cost_per_million_microusd: Option<u64>,
     pub output_cost_per_million_microusd: Option<u64>,
     pub latency_ms: Option<u64>,
+    pub rpm_limit: Option<u64>,
+    pub tpm_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayVirtualKey {
+    pub name: String,
+    pub token_env: String,
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub allowed_models: Vec<String>,
+    pub budget_usd: Option<f64>,
+    pub request_budget: Option<u64>,
     pub rpm_limit: Option<u64>,
     pub tpm_limit: Option<u64>,
 }

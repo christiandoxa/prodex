@@ -36,14 +36,18 @@ prodex_core = { workspace = true }
 prodex_housekeeping = { workspace = true }
 prodex_profile_export = { workspace = true }
 prodex_profile_identity = { workspace = true }
+prodex_provider_core = { workspace = true }
 prodex_proxy_config = { workspace = true }
 prodex_quota = { workspace = true }
 prodex_runtime_mem = { workspace = true }
 prodex_runtime_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
+postgres = { workspace = true }
 redaction = { workspace = true }
+redis = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
 rpassword = { workspace = true }
+rusqlite = { workspace = true }
 runtime_anthropic_crate = { workspace = true }
 prodex_runtime_doctor = { workspace = true }
 prodex_runtime_gemini = { workspace = true }
@@ -73,6 +77,7 @@ tiny_http = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
+jsonwebtoken = { version = "10.4.0", features = ["rust_crypto"] }
 
 
 [dev-dependencies]

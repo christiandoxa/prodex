@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use anyhow::{Context, Result, bail};
 #[cfg(test)]
 use base64::Engine;

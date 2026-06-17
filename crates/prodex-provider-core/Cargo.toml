@@ -1,0 +1,15 @@
+[package]
+name = "prodex-provider-core"
+version.workspace = true
+edition.workspace = true
+description = "Provider catalog, adapter contracts, and cost helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_provider_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

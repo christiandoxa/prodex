@@ -20,6 +20,12 @@ use super::local_rewrite_rate_limits::{
     append_binary_rate_limit_headers, append_text_rate_limit_headers,
     runtime_deepseek_codex_rate_limit_headers, runtime_openai_style_codex_rate_limit_headers,
 };
+use super::local_rewrite_transport::emit_runtime_gateway_spend_event;
+use super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_gateway_cost_for_request,
+    runtime_provider_gateway_response_spend_event,
+    runtime_provider_gateway_response_spend_event_from_tokens, runtime_provider_model_from_body,
+};
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeRotationProxyShared,
     RuntimeStreamingResponse, build_runtime_proxy_json_error_response,
@@ -27,10 +33,14 @@ use crate::{
     write_runtime_streaming_response,
 };
 use anyhow::{Context, Result};
+use prodex_provider_core::{ProviderModelCost, estimate_text_tokens, extract_usage_tokens};
 use runtime_proxy_crate::path_without_query;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io::Read;
 use std::sync::Arc;
+use std::time::Instant;
+
+const RUNTIME_GATEWAY_SPEND_STREAM_CAPTURE_MAX_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 struct RuntimeChatCompatibleProvider {
@@ -42,6 +52,7 @@ struct RuntimeChatCompatibleRewriteContext<'a> {
     status: u16,
     content_type: &'a str,
     shared: &'a RuntimeLocalRewriteProxyShared,
+    captured: &'a RuntimeProxyRequest,
     provider: RuntimeChatCompatibleProvider,
     profile_name: Option<String>,
     binding_recorder: Option<RuntimeCopilotBindingRecorder>,
@@ -52,6 +63,7 @@ struct RuntimeGeminiRewriteContext<'a> {
     status: u16,
     content_type: &'a str,
     shared: &'a RuntimeLocalRewriteProxyShared,
+    captured: &'a RuntimeProxyRequest,
     gemini_context: Option<RuntimeGeminiRequestContext>,
 }
 
@@ -153,6 +165,14 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
     let live_response = match response {
         RuntimeLocalRewriteUpstreamResponse::Live(live_response) => live_response,
         RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
+            emit_runtime_gateway_response_spend_event_for_body(
+                request_id,
+                captured,
+                shared,
+                parts.status,
+                0,
+                parts.body.as_slice(),
+            );
             let _ = request.respond(runtime_local_rewrite_response_with_call_id(
                 parts, request_id, shared,
             ));
@@ -209,6 +229,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                 status,
                 content_type: &content_type,
                 shared,
+                captured,
                 provider: RuntimeChatCompatibleProvider {
                     prefix: "deepseek",
                     label: "DeepSeek",
@@ -229,6 +250,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                 status,
                 content_type: &content_type,
                 shared,
+                captured,
                 provider: RuntimeChatCompatibleProvider {
                     prefix: "anthropic",
                     label: "Anthropic",
@@ -250,6 +272,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                     status,
                     content_type: &content_type,
                     shared,
+                    captured,
                     provider: RuntimeChatCompatibleProvider {
                         prefix: "gemini",
                         label: "Google Gemini",
@@ -268,6 +291,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                     status,
                     content_type: &content_type,
                     shared,
+                    captured,
                     gemini_context,
                 },
             );
@@ -290,6 +314,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                 status,
                 content_type: &content_type,
                 shared,
+                captured,
                 provider: RuntimeChatCompatibleProvider {
                     prefix: "copilot",
                     label: "GitHub Copilot",
@@ -305,10 +330,17 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         let writer = request.into_writer();
         let mut headers = text_headers;
         runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
+        let body = runtime_gateway_spend_stream_body(
+            runtime_gateway_guardrail_stream_body(Box::new(response), request_id, shared),
+            request_id,
+            status,
+            captured,
+            shared,
+        );
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
-            body: runtime_gateway_guardrail_stream_body(Box::new(response), request_id, shared),
+            body,
             request_id,
             profile_name: provider_profile_name,
             log_path: shared.runtime_shared.log_path.clone(),
@@ -319,8 +351,19 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         return;
     }
 
+    let response_started_at = Instant::now();
     let response = runtime_local_rewrite_buffered_response_parts(status, headers, response)
-        .map(|parts| runtime_local_rewrite_response_with_call_id(parts, request_id, shared))
+        .map(|parts| {
+            emit_runtime_gateway_response_spend_event_for_body(
+                request_id,
+                captured,
+                shared,
+                parts.status,
+                response_started_at.elapsed().as_millis(),
+                parts.body.as_slice(),
+            );
+            runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
+        })
         .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
     let _ = request.respond(response);
 }
@@ -342,6 +385,190 @@ fn runtime_local_rewrite_append_call_id_header(
     }
 }
 
+fn emit_runtime_gateway_response_spend_event_for_body(
+    request_id: u64,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    status: u16,
+    elapsed_ms: u128,
+    response_body: &[u8],
+) {
+    let provider_kind = shared.provider.bridge_kind();
+    let model = runtime_provider_model_from_body(&captured.body);
+    let cost = runtime_gateway_response_cost(
+        request_id,
+        provider_kind,
+        captured,
+        shared,
+        model.as_deref(),
+    );
+    emit_runtime_gateway_spend_event(
+        shared,
+        runtime_provider_gateway_response_spend_event(
+            request_id,
+            provider_kind,
+            &captured.path_and_query,
+            model.as_deref(),
+            status,
+            elapsed_ms,
+            &captured.body,
+            response_body,
+            cost,
+        ),
+    );
+}
+
+fn runtime_gateway_response_cost(
+    request_id: u64,
+    provider_kind: RuntimeProviderBridgeKind,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    model: Option<&str>,
+) -> ProviderModelCost {
+    let route_load = shared
+        .gateway_route_load
+        .lock()
+        .map(|load| load.clone())
+        .unwrap_or_default();
+    runtime_provider_gateway_cost_for_request(
+        provider_kind,
+        &shared.gateway_route_aliases,
+        &route_load,
+        request_id,
+        &captured.body,
+        model.unwrap_or("unknown"),
+    )
+}
+
+fn runtime_gateway_spend_stream_body(
+    body: Box<dyn Read + Send>,
+    request_id: u64,
+    status: u16,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Box<dyn Read + Send> {
+    let provider_kind = shared.provider.bridge_kind();
+    let model = runtime_provider_model_from_body(&captured.body);
+    let cost = runtime_gateway_response_cost(
+        request_id,
+        provider_kind,
+        captured,
+        shared,
+        model.as_deref(),
+    );
+    Box::new(RuntimeGatewaySpendStreamReader {
+        inner: body,
+        shared: shared.clone(),
+        request_id,
+        provider_kind,
+        path_and_query: captured.path_and_query.clone(),
+        model,
+        status,
+        started_at: Instant::now(),
+        request_body: captured.body.clone(),
+        response_bytes: 0,
+        estimated_output_tokens: 0,
+        captured_response: Vec::new(),
+        captured_complete: true,
+        cost,
+        emitted: false,
+    })
+}
+
+struct RuntimeGatewaySpendStreamReader {
+    inner: Box<dyn Read + Send>,
+    shared: RuntimeLocalRewriteProxyShared,
+    request_id: u64,
+    provider_kind: RuntimeProviderBridgeKind,
+    path_and_query: String,
+    model: Option<String>,
+    status: u16,
+    started_at: Instant,
+    request_body: Vec<u8>,
+    response_bytes: usize,
+    estimated_output_tokens: u64,
+    captured_response: Vec<u8>,
+    captured_complete: bool,
+    cost: ProviderModelCost,
+    emitted: bool,
+}
+
+impl RuntimeGatewaySpendStreamReader {
+    fn observe_chunk(&mut self, chunk: &[u8]) {
+        self.response_bytes = self.response_bytes.saturating_add(chunk.len());
+        self.estimated_output_tokens = self
+            .estimated_output_tokens
+            .saturating_add(estimate_text_tokens(&String::from_utf8_lossy(chunk)));
+        if self.captured_response.len() < RUNTIME_GATEWAY_SPEND_STREAM_CAPTURE_MAX_BYTES {
+            let remaining =
+                RUNTIME_GATEWAY_SPEND_STREAM_CAPTURE_MAX_BYTES - self.captured_response.len();
+            let take = remaining.min(chunk.len());
+            self.captured_response.extend_from_slice(&chunk[..take]);
+            if take < chunk.len() {
+                self.captured_complete = false;
+            }
+        } else if !chunk.is_empty() {
+            self.captured_complete = false;
+        }
+    }
+
+    fn emit_once(&mut self) {
+        if self.emitted {
+            return;
+        }
+        self.emitted = true;
+        let usage = if self.captured_complete {
+            extract_usage_tokens(&self.captured_response)
+        } else {
+            prodex_provider_core::ProviderTokenUsage::default()
+        };
+        let observed_output_tokens = usage
+            .output_tokens
+            .or_else(|| (self.estimated_output_tokens > 0).then_some(self.estimated_output_tokens));
+        emit_runtime_gateway_spend_event(
+            &self.shared,
+            runtime_provider_gateway_response_spend_event_from_tokens(
+                self.request_id,
+                self.provider_kind,
+                &self.path_and_query,
+                self.model.as_deref(),
+                self.status,
+                self.started_at.elapsed().as_millis(),
+                &self.request_body,
+                self.response_bytes,
+                usage.input_tokens,
+                observed_output_tokens,
+                self.cost,
+            ),
+        );
+    }
+}
+
+impl Read for RuntimeGatewaySpendStreamReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self.inner.read(buf) {
+            Ok(0) => {
+                self.emit_once();
+                Ok(0)
+            }
+            Ok(read) => {
+                self.observe_chunk(&buf[..read]);
+                Ok(read)
+            }
+            Err(err) => {
+                self.emit_once();
+                Err(err)
+            }
+        }
+    }
+}
+
+impl Drop for RuntimeGatewaySpendStreamReader {
+    fn drop(&mut self) {
+        self.emit_once();
+    }
+}
+
 fn respond_runtime_chat_compatible_rewrite(
     request_id: u64,
     request: tiny_http::Request,
@@ -352,6 +579,7 @@ fn respond_runtime_chat_compatible_rewrite(
         status,
         content_type,
         shared,
+        captured,
         provider,
         profile_name,
         binding_recorder,
@@ -390,7 +618,13 @@ fn respond_runtime_chat_compatible_rewrite(
         } else {
             Box::new(reader)
         };
-        let body = runtime_gateway_guardrail_stream_body(body, request_id, shared);
+        let body = runtime_gateway_spend_stream_body(
+            runtime_gateway_guardrail_stream_body(body, request_id, shared),
+            request_id,
+            status,
+            captured,
+            shared,
+        );
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
@@ -405,6 +639,7 @@ fn respond_runtime_chat_compatible_rewrite(
         return;
     }
 
+    let response_started_at = Instant::now();
     let response = runtime_deepseek_chat_buffered_response_parts(
         status,
         response,
@@ -418,6 +653,14 @@ fn respond_runtime_chat_compatible_rewrite(
             &parts.body,
         );
         append_binary_rate_limit_headers(&mut parts.headers, rate_limit_headers);
+        emit_runtime_gateway_response_spend_event_for_body(
+            request_id,
+            captured,
+            shared,
+            parts.status,
+            response_started_at.elapsed().as_millis(),
+            parts.body.as_slice(),
+        );
         runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
     })
     .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
@@ -435,6 +678,7 @@ fn respond_runtime_gemini_rewrite(
         status,
         content_type,
         shared,
+        captured,
         gemini_context,
     } = context;
     let RuntimeGeminiRequestContext {
@@ -476,7 +720,13 @@ fn respond_runtime_gemini_rewrite(
             Arc::clone(&shared.gemini_conversations),
             binding_recorder,
         ));
-        let body = runtime_gateway_guardrail_stream_body(body, request_id, shared);
+        let body = runtime_gateway_spend_stream_body(
+            runtime_gateway_guardrail_stream_body(body, request_id, shared),
+            request_id,
+            status,
+            captured,
+            shared,
+        );
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
@@ -491,6 +741,7 @@ fn respond_runtime_gemini_rewrite(
         return;
     }
 
+    let response_started_at = Instant::now();
     let response = runtime_gemini_generate_buffered_response_parts(
         status,
         response,
@@ -504,6 +755,14 @@ fn respond_runtime_gemini_rewrite(
             &parts.body,
         );
         append_binary_rate_limit_headers(&mut parts.headers, rate_limit_headers);
+        emit_runtime_gateway_response_spend_event_for_body(
+            request_id,
+            captured,
+            shared,
+            parts.status,
+            response_started_at.elapsed().as_millis(),
+            parts.body.as_slice(),
+        );
         runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
     })
     .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));

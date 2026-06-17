@@ -4,12 +4,14 @@
   "packageManager": "npm@11.12.1",
   "workspaces": [
     "npm/prodex",
+    "npm/prodex-gateway-sdk",
     "npm/platforms/*"
   ],
   "scripts": {
     "npm:version": "node scripts/npm/version.mjs",
     "npm:sync-version": "node scripts/npm/sync-version.mjs --root npm && node scripts/npm/sync-docs-version.mjs",
     "npm:sync-docs-version": "node scripts/npm/sync-docs-version.mjs",
+    "npm:wrapper:test": "node --test scripts/npm/prodex-wrapper.test.mjs",
     "npm:stage": "node scripts/npm/stage.mjs",
     "npm:publish": "node scripts/npm/publish.mjs",
     "changelog": "node scripts/npm/changelog.mjs",
@@ -23,6 +25,9 @@
     "compat:watch": "node scripts/compat/watch-upstream.mjs",
     "compat:watch-fixtures": "node scripts/compat/watch-upstream-fixture-tests.mjs",
     "compat:watch-ci": "node scripts/compat/watch-upstream-ci.mjs",
+    "catalog:providers": "node scripts/catalog/provider-catalog-check.mjs",
+    "catalog:providers:json": "node scripts/catalog/provider-catalog-check.mjs --json",
+    "sdk:gateway:test": "node --test npm/prodex-gateway-sdk/test/*.test.mjs",
     "load:mock-upstream": "node tests/load/mock-upstream.mjs",
     "load:runtime-proxy": "node tests/load/runtime-proxy-load.mjs",
     "release:prepare": "node scripts/npm/release-prepare.mjs",

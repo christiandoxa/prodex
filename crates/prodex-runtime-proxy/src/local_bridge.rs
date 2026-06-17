@@ -374,6 +374,15 @@ impl LocalBridgeBearerTokenHash {
         STANDARD.encode(self.hash)
     }
 
+    pub fn from_hash_base64(value: &str) -> Option<Self> {
+        let bytes = STANDARD.decode(value.trim()).ok()?;
+        let hash: [u8; 32] = bytes.try_into().ok()?;
+        Some(Self {
+            algorithm: "sha256",
+            hash,
+        })
+    }
+
     pub fn verify_bearer_token(&self, token: &str) -> bool {
         constant_time_eq(
             self.hash.as_slice(),

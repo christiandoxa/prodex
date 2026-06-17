@@ -74,6 +74,90 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     if matches!(policy.gateway.base_url.as_deref().map(str::trim), Some("")) {
         bail!("gateway.base_url in {} cannot be empty", path.display());
     }
+    if let Some(backend) = policy.gateway.state.backend.as_deref() {
+        validate_gateway_state_backend(backend)
+            .with_context(|| format!("gateway.state.backend in {} is invalid", path.display()))?;
+    }
+    if matches!(
+        policy.gateway.state.sqlite_path.as_deref().map(str::trim),
+        Some("")
+    ) {
+        bail!(
+            "gateway.state.sqlite_path in {} cannot be empty",
+            path.display()
+        );
+    }
+    if matches!(
+        policy
+            .gateway
+            .state
+            .postgres_url_env
+            .as_deref()
+            .map(str::trim),
+        Some("")
+    ) {
+        bail!(
+            "gateway.state.postgres_url_env in {} cannot be empty",
+            path.display()
+        );
+    }
+    if matches!(
+        policy.gateway.state.redis_url_env.as_deref().map(str::trim),
+        Some("")
+    ) {
+        bail!(
+            "gateway.state.redis_url_env in {} cannot be empty",
+            path.display()
+        );
+    }
+    match policy
+        .gateway
+        .state
+        .backend
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("postgres") if policy.gateway.state.postgres_url_env.is_none() => {
+            bail!(
+                "gateway.state.postgres_url_env in {} is required when gateway.state.backend=postgres",
+                path.display()
+            );
+        }
+        Some("redis") if policy.gateway.state.redis_url_env.is_none() => {
+            bail!(
+                "gateway.state.redis_url_env in {} is required when gateway.state.backend=redis",
+                path.display()
+            );
+        }
+        _ => {}
+    }
+    for (index, token) in policy.gateway.admin_tokens.iter().enumerate() {
+        let field = format!("gateway.admin_tokens[{index}]");
+        if token.name.trim().is_empty() {
+            bail!("{field}.name in {} cannot be empty", path.display());
+        }
+        if token.token_env.trim().is_empty() {
+            bail!("{field}.token_env in {} cannot be empty", path.display());
+        }
+        if let Some(role) = token.role.as_deref() {
+            validate_gateway_admin_role(role)
+                .with_context(|| format!("{field}.role in {} is invalid", path.display()))?;
+        }
+        if matches!(token.tenant_id.as_deref().map(str::trim), Some("")) {
+            bail!("{field}.tenant_id in {} cannot be empty", path.display());
+        }
+        for (prefix_index, prefix) in token.allowed_key_prefixes.iter().enumerate() {
+            if prefix.trim().is_empty() {
+                bail!(
+                    "{field}.allowed_key_prefixes[{prefix_index}] in {} cannot be empty",
+                    path.display()
+                );
+            }
+        }
+    }
+    validate_gateway_sso_policy(policy, path)?;
     for (index, alias) in policy.gateway.route_aliases.iter().enumerate() {
         let field = format!("gateway.route_aliases[{index}]");
         if alias.alias.trim().is_empty() {
@@ -125,6 +209,37 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             validate_optional_u64(metric.rpm_limit, path, &format!("{metric_field}.rpm_limit"))?;
             validate_optional_u64(metric.tpm_limit, path, &format!("{metric_field}.tpm_limit"))?;
         }
+    }
+    for (index, key) in policy.gateway.virtual_keys.iter().enumerate() {
+        let field = format!("gateway.virtual_keys[{index}]");
+        if key.name.trim().is_empty() {
+            bail!("{field}.name in {} cannot be empty", path.display());
+        }
+        if key.token_env.trim().is_empty() {
+            bail!("{field}.token_env in {} cannot be empty", path.display());
+        }
+        if matches!(key.tenant_id.as_deref().map(str::trim), Some("")) {
+            bail!("{field}.tenant_id in {} cannot be empty", path.display());
+        }
+        for (model_index, model) in key.allowed_models.iter().enumerate() {
+            if model.trim().is_empty() {
+                bail!(
+                    "{field}.allowed_models[{model_index}] in {} cannot be empty",
+                    path.display()
+                );
+            }
+        }
+        if let Some(budget_usd) = key.budget_usd
+            && (!budget_usd.is_finite() || budget_usd <= 0.0)
+        {
+            bail!(
+                "{field}.budget_usd in {} must be greater than 0",
+                path.display()
+            );
+        }
+        validate_optional_u64(key.request_budget, path, &format!("{field}.request_budget"))?;
+        validate_optional_u64(key.rpm_limit, path, &format!("{field}.rpm_limit"))?;
+        validate_optional_u64(key.tpm_limit, path, &format!("{field}.tpm_limit"))?;
     }
     for (index, sink) in policy.gateway.observability.sinks.iter().enumerate() {
         if sink.trim().is_empty() {
@@ -290,11 +405,94 @@ fn validate_gateway_route_strategy(value: &str) -> Result<()> {
     }
 }
 
+fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let sso = &policy.gateway.sso;
+    if matches!(sso.proxy_token_env.as_deref().map(str::trim), Some("")) {
+        bail!(
+            "gateway.sso.proxy_token_env in {} cannot be empty",
+            path.display()
+        );
+    }
+    for (field, value) in [
+        ("gateway.sso.token_header", sso.token_header.as_deref()),
+        ("gateway.sso.user_header", sso.user_header.as_deref()),
+        ("gateway.sso.role_header", sso.role_header.as_deref()),
+        ("gateway.sso.tenant_header", sso.tenant_header.as_deref()),
+        (
+            "gateway.sso.key_prefixes_header",
+            sso.key_prefixes_header.as_deref(),
+        ),
+        ("gateway.sso.oidc_issuer", sso.oidc_issuer.as_deref()),
+        ("gateway.sso.oidc_audience", sso.oidc_audience.as_deref()),
+        ("gateway.sso.oidc_jwks_url", sso.oidc_jwks_url.as_deref()),
+        (
+            "gateway.sso.oidc_user_claim",
+            sso.oidc_user_claim.as_deref(),
+        ),
+        (
+            "gateway.sso.oidc_role_claim",
+            sso.oidc_role_claim.as_deref(),
+        ),
+        (
+            "gateway.sso.oidc_tenant_claim",
+            sso.oidc_tenant_claim.as_deref(),
+        ),
+        (
+            "gateway.sso.oidc_key_prefixes_claim",
+            sso.oidc_key_prefixes_claim.as_deref(),
+        ),
+    ] {
+        if matches!(value.map(str::trim), Some("")) {
+            bail!("{field} in {} cannot be empty", path.display());
+        }
+    }
+    let oidc_enabled =
+        sso.oidc_issuer.is_some() || sso.oidc_audience.is_some() || sso.oidc_jwks_url.is_some();
+    if oidc_enabled {
+        if sso.oidc_issuer.is_none() || sso.oidc_audience.is_none() {
+            bail!(
+                "gateway.sso OIDC in {} requires oidc_issuer and oidc_audience",
+                path.display()
+            );
+        }
+        if let Some(jwks_url) = sso.oidc_jwks_url.as_deref().map(str::trim)
+            && !(jwks_url.starts_with("https://") || jwks_url.starts_with("http://"))
+        {
+            bail!(
+                "gateway.sso.oidc_jwks_url in {} must be an http or https URL",
+                path.display()
+            );
+        }
+    }
+    if let Some(role) = sso.default_role.as_deref() {
+        validate_gateway_admin_role(role).with_context(|| {
+            format!("gateway.sso.default_role in {} is invalid", path.display())
+        })?;
+    }
+    Ok(())
+}
+
 fn validate_gateway_observability_http_schema(value: &str) -> Result<()> {
     match value.trim().to_ascii_lowercase().as_str() {
         "generic" | "otel" | "opentelemetry" | "datadog" | "langfuse" => Ok(()),
         "" => bail!("schema cannot be empty"),
         _ => bail!("schema must be one of generic, otel, datadog, langfuse"),
+    }
+}
+
+fn validate_gateway_state_backend(value: &str) -> Result<()> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "file" | "sqlite" | "postgres" | "redis" => Ok(()),
+        "" => bail!("backend cannot be empty"),
+        _ => bail!("backend must be one of file, sqlite, postgres, redis"),
+    }
+}
+
+fn validate_gateway_admin_role(value: &str) -> Result<()> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "admin" | "write" | "writer" | "viewer" | "read" | "readonly" | "read-only" => Ok(()),
+        "" => bail!("role cannot be empty"),
+        _ => bail!("role must be one of admin, viewer"),
     }
 }
 

@@ -76,7 +76,9 @@ curl http://127.0.0.1:4000/v1/responses \
   -d '{"model":"prodex-fast","input":"hello"}'
 ```
 
-The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It adds `x-prodex-call-id` to responses, writes local request detail plus `gateway_spend` events to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, supports policy-defined routing strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) for model aliases/fallback chains, and can apply keyword/model, Presidio, and external webhook guardrails before calls and on outputs. Configure defaults under `[gateway]` in `policy.toml`.
+The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It adds `x-prodex-call-id` to responses, writes local request detail plus `gateway_spend` events for both `request` and `response` phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, supports catalog-backed policy routing strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) for model aliases/fallback chains, can enforce static virtual keys with persisted request/spend usage plus model/budget/RPM/TPM limits, supports file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, and can apply keyword/model, Presidio, and external webhook guardrails before calls and on outputs. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can list usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, inspect usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, fetch the machine-readable gateway contract at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; policy/env-backed keys remain read-only, admin-managed key and SCIM user mutations are recorded in `prodex audit`, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix and tenant scopes. Configure defaults under `[gateway]` in `policy.toml`; validate provider catalog edits with `npm run catalog:providers`.
+
+JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/responses` plus gateway key, usage, billing ledger, metrics, and OpenAPI admin calls.
 
 <details>
 <summary>Provider behavior details</summary>
@@ -104,6 +106,8 @@ Runtime proxy design contract:
 ```bash
 npm install -g @christiandoxa/prodex
 ```
+
+The npm package uses its bundled `@openai/codex@latest` dependency by default. To deliberately use a separate Codex CLI from your machine, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`.
 
 </details>
 
@@ -1056,6 +1060,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - [LOCAL.md](./LOCAL.md) — self-hosted local model setup and testing
 - [docs/state-model.md](./docs/state-model.md) — state ownership and persistence model
 - [docs/runtime-policy.md](./docs/runtime-policy.md) — runtime policy keys, environment overrides, and runtime log path resolution
+- [docs/deployment.md](./docs/deployment.md) — Docker Compose scaffold for the standalone gateway
 - [docs/testing.md](./docs/testing.md) — contributor testing guidance
 
 ## Support

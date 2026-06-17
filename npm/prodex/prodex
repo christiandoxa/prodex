@@ -97,7 +97,25 @@ function resolveExternalCodexBin() {
   if (process.env.PRODEX_CODEX_BIN) {
     return process.env.PRODEX_CODEX_BIN;
   }
-  return resolveCommandFromPath("codex", process.env.PATH || "");
+  const resolution = (process.env.PRODEX_CODEX_RESOLUTION || "bundled").toLowerCase();
+  if (resolution === "bundled") {
+    return null;
+  }
+  if (resolution !== "external") {
+    process.stderr.write(
+      `Unsupported PRODEX_CODEX_RESOLUTION=${JSON.stringify(process.env.PRODEX_CODEX_RESOLUTION)}; expected "bundled" or "external".\n`,
+    );
+    process.exit(1);
+  }
+
+  const externalCodex = resolveCommandFromPath("codex", process.env.PATH || "");
+  if (!externalCodex) {
+    process.stderr.write(
+      "PRODEX_CODEX_RESOLUTION=external was set, but no executable codex was found on PATH.\n",
+    );
+    process.exit(1);
+  }
+  return externalCodex;
 }
 
 if (!platformPackage) {

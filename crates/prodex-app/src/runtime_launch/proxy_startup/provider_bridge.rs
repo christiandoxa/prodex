@@ -2,11 +2,17 @@ use super::provider_models::{
     runtime_provider_model_catalog_json, runtime_provider_model_json_for,
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
-use prodex_runtime_gemini::gemini_model_fallback_chain;
+use prodex_provider_core::{
+    ProviderAdapterContract, ProviderId, ProviderModelCost, ProviderWireFormat,
+    calculate_cost_microusd, estimate_request_input_tokens, estimate_text_tokens,
+    extract_usage_tokens, microusd_to_usd, provider_adapter, provider_model_cost,
+    provider_model_fallback_chain,
+};
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RuntimeProviderBridgeKind {
@@ -15,6 +21,18 @@ pub(super) enum RuntimeProviderBridgeKind {
     OpenAiResponses,
     DeepSeek,
     Gemini,
+}
+
+impl RuntimeProviderBridgeKind {
+    pub(super) fn provider_id(self) -> ProviderId {
+        match self {
+            Self::Anthropic => ProviderId::Anthropic,
+            Self::Copilot => ProviderId::Copilot,
+            Self::OpenAiResponses => ProviderId::OpenAi,
+            Self::DeepSeek => ProviderId::DeepSeek,
+            Self::Gemini => ProviderId::Gemini,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,48 +198,40 @@ const RUNTIME_PROVIDER_ERROR_RULES: &[RuntimeProviderErrorRule] = &[
 ];
 
 pub(super) fn runtime_provider_label(kind: RuntimeProviderBridgeKind) -> &'static str {
-    match kind {
-        RuntimeProviderBridgeKind::Anthropic => "anthropic",
-        RuntimeProviderBridgeKind::Copilot => "copilot",
-        RuntimeProviderBridgeKind::OpenAiResponses => "openai",
-        RuntimeProviderBridgeKind::DeepSeek => "deepseek",
-        RuntimeProviderBridgeKind::Gemini => "gemini",
-    }
+    kind.provider_id().label()
 }
 
 pub(super) fn runtime_provider_openai_contract(
     kind: RuntimeProviderBridgeKind,
 ) -> RuntimeProviderOpenAiContract {
-    match kind {
-        RuntimeProviderBridgeKind::OpenAiResponses => RuntimeProviderOpenAiContract {
-            client_request_format: RuntimeProviderWireFormat::OpenAiResponses,
-            upstream_request_format: RuntimeProviderWireFormat::OpenAiResponses,
-            response_format: RuntimeProviderWireFormat::OpenAiResponses,
-            canonical_client_endpoint: "/v1/responses",
-            model_list_endpoint: "/v1/models",
-            supports_streaming: true,
-            supports_model_fallback: false,
-        },
-        RuntimeProviderBridgeKind::Anthropic
-        | RuntimeProviderBridgeKind::Copilot
-        | RuntimeProviderBridgeKind::DeepSeek => RuntimeProviderOpenAiContract {
-            client_request_format: RuntimeProviderWireFormat::OpenAiResponses,
-            upstream_request_format: RuntimeProviderWireFormat::OpenAiChatCompletions,
-            response_format: RuntimeProviderWireFormat::OpenAiResponses,
-            canonical_client_endpoint: "/v1/responses",
-            model_list_endpoint: "/v1/models",
-            supports_streaming: true,
-            supports_model_fallback: true,
-        },
-        RuntimeProviderBridgeKind::Gemini => RuntimeProviderOpenAiContract {
-            client_request_format: RuntimeProviderWireFormat::OpenAiResponses,
-            upstream_request_format: RuntimeProviderWireFormat::GeminiGenerateContent,
-            response_format: RuntimeProviderWireFormat::OpenAiResponses,
-            canonical_client_endpoint: "/v1/responses",
-            model_list_endpoint: "/v1/models",
-            supports_streaming: true,
-            supports_model_fallback: true,
-        },
+    let adapter = provider_adapter(kind.provider_id());
+    RuntimeProviderOpenAiContract {
+        client_request_format: runtime_provider_wire_format_from_core(
+            adapter.client_request_format(),
+        ),
+        upstream_request_format: runtime_provider_wire_format_from_core(
+            adapter.upstream_request_format(),
+        ),
+        response_format: runtime_provider_wire_format_from_core(adapter.response_format()),
+        canonical_client_endpoint: adapter.canonical_client_endpoint(),
+        model_list_endpoint: adapter.model_list_endpoint(),
+        supports_streaming: adapter.supports_streaming(),
+        supports_model_fallback: adapter.supports_model_fallback(),
+    }
+}
+
+fn runtime_provider_wire_format_from_core(format: ProviderWireFormat) -> RuntimeProviderWireFormat {
+    match format {
+        ProviderWireFormat::OpenAiResponses => RuntimeProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::OpenAiChatCompletions => {
+            RuntimeProviderWireFormat::OpenAiChatCompletions
+        }
+        ProviderWireFormat::GeminiGenerateContent => {
+            RuntimeProviderWireFormat::GeminiGenerateContent
+        }
+        ProviderWireFormat::AnthropicMessages | ProviderWireFormat::Passthrough => {
+            RuntimeProviderWireFormat::OpenAiResponses
+        }
     }
 }
 
@@ -316,49 +326,7 @@ pub(super) fn runtime_provider_model_fallback_chain(
     kind: RuntimeProviderBridgeKind,
     model: &str,
 ) -> Vec<String> {
-    let model = model.trim();
-    if let Some(chain) = runtime_provider_combo_chain(model) {
-        return chain;
-    }
-    let lower = model.to_ascii_lowercase();
-    let chain: &[&str] = match kind {
-        RuntimeProviderBridgeKind::Anthropic => match lower.as_str() {
-            "" | "auto" | "default" => &[
-                prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
-                "claude-opus-4-8",
-                "claude-haiku-4-5",
-            ],
-            "opus" | "best" => &["claude-opus-4-8", "claude-sonnet-4-6"],
-            "sonnet" | "pro" => &["claude-sonnet-4-6", "claude-opus-4-8"],
-            "haiku" | "flash" => &["claude-haiku-4-5", "claude-sonnet-4-6"],
-            _ => return vec![model.to_string()],
-        },
-        RuntimeProviderBridgeKind::Copilot => match lower.as_str() {
-            "" | "auto" | "default" => &[
-                prodex_cli::SUPER_COPILOT_DEFAULT_MODEL,
-                "gpt-5.4",
-                "gpt-5.3-codex",
-            ],
-            "codex" | "pro" => &["gpt-5.1-codex", "gpt-5.3-codex", "gpt-5.4"],
-            "claude" | "sonnet" => &["claude-sonnet-4-6", "gpt-5.1-codex"],
-            "gemini" => &["gemini-3.1-pro-preview", "gpt-5.1-codex"],
-            _ => return vec![model.to_string()],
-        },
-        RuntimeProviderBridgeKind::Gemini => return gemini_model_fallback_chain(model),
-        RuntimeProviderBridgeKind::DeepSeek => match lower.as_str() {
-            "" | "auto" => &["deepseek-v4-pro", "deepseek-v4-flash"],
-            "pro" => &["deepseek-v4-pro", "deepseek-v4-flash"],
-            "flash" => &["deepseek-v4-flash", "deepseek-v4-pro"],
-            _ => return vec![model.to_string()],
-        },
-        RuntimeProviderBridgeKind::OpenAiResponses => {
-            if model.is_empty() {
-                return Vec::new();
-            }
-            return vec![model.to_string()];
-        }
-    };
-    runtime_provider_dedup_chain(chain.iter().map(|value| (*value).to_string()).collect())
+    provider_model_fallback_chain(kind.provider_id(), model)
 }
 
 pub(super) fn runtime_provider_canonical_model(
@@ -370,6 +338,44 @@ pub(super) fn runtime_provider_canonical_model(
         .next()
         .filter(|model| !model.trim().is_empty())
         .unwrap_or_else(|| model.to_string())
+}
+
+pub(super) fn runtime_provider_gateway_cost_for_request(
+    kind: RuntimeProviderBridgeKind,
+    aliases: &[runtime_proxy_crate::RuntimeGatewayRouteAlias],
+    model_state: &BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelState>,
+    request_id: u64,
+    body: &[u8],
+    model: &str,
+) -> ProviderModelCost {
+    if let Some(rewrite) = runtime_proxy_crate::runtime_gateway_rewrite_route_alias_with_state(
+        body,
+        aliases,
+        request_id,
+        model_state,
+    ) && let Some(alias) = aliases
+        .iter()
+        .find(|alias| alias.alias.eq_ignore_ascii_case(model))
+    {
+        if let Some(metrics) = alias.model_metrics.get(&rewrite.model) {
+            return ProviderModelCost {
+                input_cost_per_million_microusd: metrics.input_cost_per_million_microusd,
+                output_cost_per_million_microusd: metrics.output_cost_per_million_microusd,
+            };
+        }
+        if matches!(
+            rewrite.strategy,
+            runtime_proxy_crate::RuntimeGatewayRouteStrategy::Fallback
+        ) && let Some(first_model) = alias.models.first()
+            && let Some(metrics) = alias.model_metrics.get(first_model)
+        {
+            return ProviderModelCost {
+                input_cost_per_million_microusd: metrics.input_cost_per_million_microusd,
+                output_cost_per_million_microusd: metrics.output_cost_per_million_microusd,
+            };
+        }
+    }
+    provider_model_cost(kind.provider_id(), model)
 }
 
 pub(super) fn runtime_provider_error_class(
@@ -474,6 +480,7 @@ pub(super) fn runtime_provider_request_ledger_message(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn runtime_provider_gateway_spend_event(
     request_id: u64,
     kind: RuntimeProviderBridgeKind,
@@ -482,25 +489,105 @@ pub(super) fn runtime_provider_gateway_spend_event(
     status: u16,
     elapsed_ms: u128,
     request_bytes: usize,
+    request_body: &[u8],
+    cost: ProviderModelCost,
 ) -> RuntimeProviderGatewaySpendEvent {
+    let model = model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+    let input_tokens = Some(estimate_request_input_tokens(request_body));
+    let cost_usd = calculate_cost_microusd(input_tokens, None, cost).map(microusd_to_usd);
     RuntimeProviderGatewaySpendEvent {
         event: "gateway_spend",
+        phase: "request",
         request: request_id,
         call_id: format!("prodex-{request_id}"),
         provider: runtime_provider_label(kind).to_string(),
         path: path_without_query(path_and_query).to_string(),
-        model: model
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("unknown")
-            .to_string(),
+        model,
         status,
         elapsed_ms,
         request_bytes,
         response_bytes: None,
-        input_tokens: None,
+        input_tokens,
         output_tokens: None,
-        cost_usd: None,
+        cost_usd,
+        sink: "runtime-log".to_string(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn runtime_provider_gateway_response_spend_event(
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    path_and_query: &str,
+    model: Option<&str>,
+    status: u16,
+    elapsed_ms: u128,
+    request_body: &[u8],
+    response_body: &[u8],
+    cost: ProviderModelCost,
+) -> RuntimeProviderGatewaySpendEvent {
+    let usage = extract_usage_tokens(response_body);
+    let output_tokens = usage.output_tokens.or_else(|| {
+        (!response_body.is_empty())
+            .then(|| estimate_text_tokens(&String::from_utf8_lossy(response_body)))
+    });
+    runtime_provider_gateway_response_spend_event_from_tokens(
+        request_id,
+        kind,
+        path_and_query,
+        model,
+        status,
+        elapsed_ms,
+        request_body,
+        response_body.len(),
+        usage.input_tokens,
+        output_tokens,
+        cost,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    path_and_query: &str,
+    model: Option<&str>,
+    status: u16,
+    elapsed_ms: u128,
+    request_body: &[u8],
+    response_bytes: usize,
+    observed_input_tokens: Option<u64>,
+    observed_output_tokens: Option<u64>,
+    cost: ProviderModelCost,
+) -> RuntimeProviderGatewaySpendEvent {
+    let model = model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+    let input_tokens =
+        observed_input_tokens.or_else(|| Some(estimate_request_input_tokens(request_body)));
+    let output_tokens = observed_output_tokens;
+    let cost_usd = calculate_cost_microusd(input_tokens, output_tokens, cost).map(microusd_to_usd);
+    RuntimeProviderGatewaySpendEvent {
+        event: "gateway_spend",
+        phase: "response",
+        request: request_id,
+        call_id: format!("prodex-{request_id}"),
+        provider: runtime_provider_label(kind).to_string(),
+        path: path_without_query(path_and_query).to_string(),
+        model,
+        status,
+        elapsed_ms,
+        request_bytes: request_body.len(),
+        response_bytes: Some(response_bytes),
+        input_tokens,
+        output_tokens,
+        cost_usd,
         sink: "runtime-log".to_string(),
     }
 }
@@ -508,6 +595,7 @@ pub(super) fn runtime_provider_gateway_spend_event(
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct RuntimeProviderGatewaySpendEvent {
     pub(super) event: &'static str,
+    pub(super) phase: &'static str,
     pub(super) request: u64,
     pub(super) call_id: String,
     pub(super) provider: String,
@@ -528,6 +616,7 @@ impl RuntimeProviderGatewaySpendEvent {
         runtime_proxy_structured_log_message(
             "gateway_spend",
             [
+                runtime_proxy_log_field("phase", self.phase),
                 runtime_proxy_log_field("request", self.request.to_string()),
                 runtime_proxy_log_field("call_id", self.call_id.as_str()),
                 runtime_proxy_log_field("provider", self.provider.as_str()),
@@ -536,14 +625,29 @@ impl RuntimeProviderGatewaySpendEvent {
                 runtime_proxy_log_field("status", self.status.to_string()),
                 runtime_proxy_log_field("elapsed_ms", self.elapsed_ms.to_string()),
                 runtime_proxy_log_field("request_bytes", self.request_bytes.to_string()),
-                runtime_proxy_log_field("response_bytes", "unknown"),
-                runtime_proxy_log_field("input_tokens", "unknown"),
-                runtime_proxy_log_field("output_tokens", "unknown"),
-                runtime_proxy_log_field("cost_usd", "unknown"),
+                runtime_proxy_log_field(
+                    "response_bytes",
+                    optional_u64_label(self.response_bytes.map(|value| value as u64)),
+                ),
+                runtime_proxy_log_field("input_tokens", optional_u64_label(self.input_tokens)),
+                runtime_proxy_log_field("output_tokens", optional_u64_label(self.output_tokens)),
+                runtime_proxy_log_field("cost_usd", optional_f64_label(self.cost_usd)),
                 runtime_proxy_log_field("sink", self.sink.as_str()),
             ],
         )
     }
+}
+
+fn optional_u64_label(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn optional_f64_label(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.8}"))
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 pub(super) fn runtime_provider_should_retry_with_next_model(
@@ -603,27 +707,6 @@ fn runtime_provider_json_response(
         )],
         body: body.into(),
     }
-}
-
-fn runtime_provider_combo_chain(model: &str) -> Option<Vec<String>> {
-    let chain = model.trim().strip_prefix("combo:")?;
-    let models = chain
-        .split([',', ';', '|', '>'])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    (!models.is_empty()).then(|| runtime_provider_dedup_chain(models))
-}
-
-fn runtime_provider_dedup_chain(models: Vec<String>) -> Vec<String> {
-    let mut output = Vec::new();
-    for model in models {
-        if !output.iter().any(|existing| existing == &model) {
-            output.push(model);
-        }
-    }
-    output
 }
 
 fn runtime_provider_error_tokens(body: &[u8]) -> Vec<String> {
@@ -962,6 +1045,8 @@ mod tests {
             200,
             123,
             456,
+            br#"{"model":"prodex-fast","input":"hello from prodex"}"#,
+            ProviderModelCost::default(),
         );
         let message = event.log_message();
 
@@ -970,6 +1055,7 @@ mod tests {
             runtime_proxy_crate::runtime_proxy_log_event(&message),
             Some("gateway_spend")
         );
+        assert_eq!(fields.get("phase").map(String::as_str), Some("request"));
         assert_eq!(fields.get("call_id").map(String::as_str), Some("prodex-42"));
         assert_eq!(fields.get("provider").map(String::as_str), Some("gemini"));
         assert_eq!(
@@ -979,11 +1065,42 @@ mod tests {
         assert_eq!(fields.get("model").map(String::as_str), Some("prodex-fast"));
         assert_eq!(fields.get("status").map(String::as_str), Some("200"));
         assert_eq!(fields.get("request_bytes").map(String::as_str), Some("456"));
+        assert_ne!(
+            fields.get("input_tokens").map(String::as_str),
+            Some("unknown")
+        );
         assert_eq!(fields.get("cost_usd").map(String::as_str), Some("unknown"));
 
         let json: serde_json::Value = serde_json::to_value(&event).unwrap();
         assert_eq!(json["event"], "gateway_spend");
+        assert_eq!(json["phase"], "request");
         assert_eq!(json["call_id"], "prodex-42");
         assert_eq!(json["response_bytes"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn gateway_response_spend_uses_response_usage_and_total_cost() {
+        let response_body =
+            br#"{"id":"resp","usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#;
+        let event = runtime_provider_gateway_response_spend_event(
+            9,
+            RuntimeProviderBridgeKind::OpenAiResponses,
+            "/v1/responses",
+            Some("gpt-5.4"),
+            200,
+            12,
+            br#"{"model":"gpt-5.4","input":"hello"}"#,
+            response_body,
+            ProviderModelCost {
+                input_cost_per_million_microusd: Some(1_000_000),
+                output_cost_per_million_microusd: Some(2_000_000),
+            },
+        );
+
+        assert_eq!(event.phase, "response");
+        assert_eq!(event.response_bytes, Some(response_body.len()));
+        assert_eq!(event.input_tokens, Some(7));
+        assert_eq!(event.output_tokens, Some(11));
+        assert_eq!(event.cost_usd, Some(0.000029));
     }
 }

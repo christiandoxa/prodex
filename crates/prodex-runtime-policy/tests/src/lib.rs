@@ -115,6 +115,38 @@ provider = "gemini"
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 require_auth = true
 
+[gateway.state]
+backend = "sqlite"
+sqlite_path = "gateway-state.sqlite"
+
+[[gateway.admin_tokens]]
+name = "ops"
+token_env = "PRODEX_GATEWAY_OPS_TOKEN"
+role = "admin"
+
+[[gateway.admin_tokens]]
+name = "auditor"
+token_env = "PRODEX_GATEWAY_AUDITOR_TOKEN"
+role = "viewer"
+allowed_key_prefixes = ["team-a-", "sandbox-"]
+tenant_id = "tenant-a"
+
+[gateway.sso]
+proxy_token_env = "PRODEX_GATEWAY_SSO_PROXY_TOKEN"
+token_header = "x-prodex-sso-token"
+user_header = "x-auth-request-email"
+role_header = "x-prodex-role"
+key_prefixes_header = "x-prodex-key-prefixes"
+tenant_header = "x-prodex-tenant"
+oidc_issuer = "https://idp.example"
+oidc_audience = "prodex-gateway"
+oidc_jwks_url = "https://idp.example/.well-known/jwks.json"
+oidc_user_claim = "preferred_username"
+oidc_role_claim = "prodex_role"
+oidc_tenant_claim = "prodex_tenant"
+oidc_key_prefixes_claim = "prodex_key_prefixes"
+default_role = "viewer"
+
 [[gateway.route_aliases]]
 alias = "prodex-fast"
 models = ["gemini-3-flash", "gemini-2.5-flash"]
@@ -135,6 +167,16 @@ output_cost_per_million_microusd = 100
 latency_ms = 250
 rpm_limit = 30
 tpm_limit = 50000
+
+[[gateway.virtual_keys]]
+name = "team-a"
+token_env = "PRODEX_GATEWAY_TEAM_A_TOKEN"
+tenant_id = "tenant-a"
+allowed_models = ["prodex-fast"]
+budget_usd = 12.5
+request_budget = 1000
+rpm_limit = 60
+tpm_limit = 100000
 
 [gateway.observability]
 sinks = ["log", "jsonl", "http"]
@@ -164,6 +206,58 @@ webhook_fail_closed = true
         Some("127.0.0.1:4100")
     );
     assert_eq!(loaded.gateway.provider.as_deref(), Some("gemini"));
+    assert_eq!(loaded.gateway.state.backend.as_deref(), Some("sqlite"));
+    assert_eq!(
+        loaded.gateway.state.sqlite_path.as_deref(),
+        Some("gateway-state.sqlite")
+    );
+    assert_eq!(loaded.gateway.admin_tokens.len(), 2);
+    assert_eq!(loaded.gateway.admin_tokens[0].name, "ops");
+    assert_eq!(
+        loaded.gateway.admin_tokens[1].role.as_deref(),
+        Some("viewer")
+    );
+    assert_eq!(
+        loaded.gateway.admin_tokens[1].allowed_key_prefixes,
+        vec!["team-a-", "sandbox-"]
+    );
+    assert_eq!(
+        loaded.gateway.admin_tokens[1].tenant_id.as_deref(),
+        Some("tenant-a")
+    );
+    assert_eq!(
+        loaded.gateway.sso.proxy_token_env.as_deref(),
+        Some("PRODEX_GATEWAY_SSO_PROXY_TOKEN")
+    );
+    assert_eq!(
+        loaded.gateway.sso.user_header.as_deref(),
+        Some("x-auth-request-email")
+    );
+    assert_eq!(
+        loaded.gateway.sso.tenant_header.as_deref(),
+        Some("x-prodex-tenant")
+    );
+    assert_eq!(
+        loaded.gateway.sso.oidc_issuer.as_deref(),
+        Some("https://idp.example")
+    );
+    assert_eq!(
+        loaded.gateway.sso.oidc_audience.as_deref(),
+        Some("prodex-gateway")
+    );
+    assert_eq!(
+        loaded.gateway.sso.oidc_jwks_url.as_deref(),
+        Some("https://idp.example/.well-known/jwks.json")
+    );
+    assert_eq!(
+        loaded.gateway.sso.oidc_user_claim.as_deref(),
+        Some("preferred_username")
+    );
+    assert_eq!(
+        loaded.gateway.sso.oidc_tenant_claim.as_deref(),
+        Some("prodex_tenant")
+    );
+    assert_eq!(loaded.gateway.sso.default_role.as_deref(), Some("viewer"));
     assert_eq!(loaded.gateway.route_aliases[0].alias, "prodex-fast");
     assert_eq!(
         loaded.gateway.route_aliases[0].models,
@@ -178,6 +272,21 @@ webhook_fail_closed = true
         loaded.gateway.route_aliases[0].model_metrics[0].rpm_limit,
         Some(60)
     );
+    assert_eq!(loaded.gateway.virtual_keys[0].name, "team-a");
+    assert_eq!(
+        loaded.gateway.virtual_keys[0].token_env,
+        "PRODEX_GATEWAY_TEAM_A_TOKEN"
+    );
+    assert_eq!(
+        loaded.gateway.virtual_keys[0].allowed_models,
+        vec!["prodex-fast"]
+    );
+    assert_eq!(
+        loaded.gateway.virtual_keys[0].tenant_id.as_deref(),
+        Some("tenant-a")
+    );
+    assert_eq!(loaded.gateway.virtual_keys[0].budget_usd, Some(12.5));
+    assert_eq!(loaded.gateway.virtual_keys[0].request_budget, Some(1000));
     assert_eq!(
         loaded.gateway.observability.sinks,
         vec!["log", "jsonl", "http"]
@@ -236,6 +345,116 @@ webhook_fail_closed = true
         Some("PRODEX_GATEWAY_GUARDRAIL_TOKEN")
     );
     assert_eq!(loaded.gateway.guardrails.webhook_fail_closed, Some(true));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_empty_gateway_admin_key_prefix() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-admin-empty-prefix");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.admin_tokens]]
+name = "scoped"
+token_env = "PRODEX_GATEWAY_SCOPED_TOKEN"
+allowed_key_prefixes = [""]
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.admin_tokens[0].allowed_key_prefixes[0]")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_incomplete_gateway_oidc_sso() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-oidc-incomplete");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_issuer = "https://idp.example"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("requires oidc_issuer and oidc_audience"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_parses_shared_gateway_state_settings() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-shared-state");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.state]
+backend = "postgres"
+postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"
+redis_url_env = "PRODEX_GATEWAY_REDIS_URL"
+"#,
+    )
+    .unwrap();
+
+    let loaded = load_runtime_policy_from_root(&root).unwrap().unwrap();
+    assert_eq!(loaded.gateway.state.backend.as_deref(), Some("postgres"));
+    assert_eq!(
+        loaded.gateway.state.postgres_url_env.as_deref(),
+        Some("PRODEX_GATEWAY_POSTGRES_URL")
+    );
+    assert_eq!(
+        loaded.gateway.state.redis_url_env.as_deref(),
+        Some("PRODEX_GATEWAY_REDIS_URL")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_shared_backend_without_url_env() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-shared-state-missing-env");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.state]
+backend = "redis"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.state.redis_url_env"),
+        "{err:#}"
+    );
 
     let _ = fs::remove_dir_all(root);
 }

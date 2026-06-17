@@ -10,6 +10,7 @@ export const repoRoot = process.env.PRODEX_REPO_ROOT
 export const cargoTomlPath = path.join(repoRoot, "Cargo.toml");
 export const npmScope = "@christiandoxa";
 export const mainPackageName = `${npmScope}/prodex`;
+export const gatewaySdkPackageName = `${npmScope}/prodex-gateway-sdk`;
 export const openaiCodexDependencySpecifier = "latest";
 export const packageVersionPattern = /^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/;
 
@@ -129,6 +130,30 @@ export function mainPackageManifest(version) {
       type: "git",
       url: "git+https://github.com/christiandoxa/prodex.git",
       directory: "npm/prodex",
+    },
+  };
+}
+
+export function gatewaySdkPackageManifest(version) {
+  return {
+    name: gatewaySdkPackageName,
+    version,
+    description: "JavaScript client for the Prodex gateway admin and Responses API",
+    license: "Apache-2.0",
+    type: "module",
+    main: "index.mjs",
+    types: "index.d.ts",
+    files: ["index.mjs", "index.d.ts", "README.md", "LICENSE"],
+    engines: {
+      node: ">=18",
+    },
+    publishConfig: {
+      access: "public",
+    },
+    repository: {
+      type: "git",
+      url: "git+https://github.com/christiandoxa/prodex.git",
+      directory: "npm/prodex-gateway-sdk",
     },
   };
 }

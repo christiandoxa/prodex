@@ -1,0 +1,21 @@
+# Rust build artifacts
+target/
+
+# Node/npm workspace artifacts
+node_modules/
+npm/*/node_modules/
+
+# Local workspace state
+.codex/
+.git/
+.idea/
+.token-savior-cache.json
+release/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.iml
+*.swp
+*.swo
+*~

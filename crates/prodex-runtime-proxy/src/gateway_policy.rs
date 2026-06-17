@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 
+use crate::{LocalBridgeBearerTokenHash, local_bridge_authorization_bearer_token};
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeGatewayRouteAlias {
     pub alias: String,
@@ -120,6 +123,66 @@ pub struct RuntimeGatewayGuardrailBlock {
     pub value: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeGatewayVirtualKey {
+    pub name: String,
+    pub tenant_id: Option<String>,
+    pub token_hash: LocalBridgeBearerTokenHash,
+    pub allowed_models: Vec<String>,
+    pub budget_microusd: Option<u64>,
+    pub request_budget: Option<u64>,
+    pub rpm_limit: Option<u64>,
+    pub tpm_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeGatewayVirtualKeyUsage {
+    pub minute_epoch: u64,
+    pub requests_this_minute: u64,
+    pub tokens_this_minute: u64,
+    pub requests_total: u64,
+    pub spend_microusd: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeGatewayVirtualKeyAdmission {
+    pub key_name: String,
+    pub model: Option<String>,
+    pub input_tokens: u64,
+    pub estimated_cost_microusd: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeGatewayVirtualKeyRejection {
+    MissingOrInvalidToken,
+    ModelNotAllowed,
+    RequestBudgetExceeded,
+    BudgetExceeded,
+    RpmLimitExceeded,
+    TpmLimitExceeded,
+}
+
+impl RuntimeGatewayVirtualKeyRejection {
+    pub fn status(self) -> u16 {
+        match self {
+            Self::MissingOrInvalidToken => 401,
+            Self::ModelNotAllowed | Self::RequestBudgetExceeded | Self::BudgetExceeded => 403,
+            Self::RpmLimitExceeded | Self::TpmLimitExceeded => 429,
+        }
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::MissingOrInvalidToken => "invalid_gateway_key",
+            Self::ModelNotAllowed => "model_not_allowed",
+            Self::RequestBudgetExceeded => "request_budget_exceeded",
+            Self::BudgetExceeded => "budget_exceeded",
+            Self::RpmLimitExceeded => "rpm_limit_exceeded",
+            Self::TpmLimitExceeded => "tpm_limit_exceeded",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeGatewayGuardrailBlockKind {
     BlockedKeyword,
@@ -148,6 +211,114 @@ pub fn runtime_gateway_response_guardrail_block(
         &config.blocked_output_keywords,
         RuntimeGatewayGuardrailBlockKind::BlockedOutputKeyword,
     )
+}
+
+pub fn runtime_gateway_virtual_key_from_headers<'a>(
+    headers: &[(String, String)],
+    keys: &'a [RuntimeGatewayVirtualKey],
+) -> Result<Option<&'a RuntimeGatewayVirtualKey>, RuntimeGatewayVirtualKeyRejection> {
+    if keys.is_empty() {
+        return Ok(None);
+    }
+    let Some(token) = headers.iter().find_map(|(name, value)| {
+        name.eq_ignore_ascii_case("authorization")
+            .then(|| local_bridge_authorization_bearer_token(value))
+            .flatten()
+    }) else {
+        return Err(RuntimeGatewayVirtualKeyRejection::MissingOrInvalidToken);
+    };
+    keys.iter()
+        .find(|key| key.token_hash.verify_bearer_token(token))
+        .map(Some)
+        .ok_or(RuntimeGatewayVirtualKeyRejection::MissingOrInvalidToken)
+}
+
+pub fn runtime_gateway_virtual_key_admission(
+    key: &RuntimeGatewayVirtualKey,
+    usage: Option<&RuntimeGatewayVirtualKeyUsage>,
+    body: &[u8],
+    estimated_cost_microusd: Option<u64>,
+    minute_epoch: u64,
+) -> Result<RuntimeGatewayVirtualKeyAdmission, RuntimeGatewayVirtualKeyRejection> {
+    let model = runtime_gateway_request_model(body);
+    if !key.allowed_models.is_empty()
+        && model.as_ref().is_some_and(|model| {
+            !key.allowed_models
+                .iter()
+                .any(|allowed| allowed.trim().eq_ignore_ascii_case(model))
+        })
+    {
+        return Err(RuntimeGatewayVirtualKeyRejection::ModelNotAllowed);
+    }
+
+    let input_tokens = runtime_gateway_estimated_tokens(body);
+    let usage = usage.cloned().unwrap_or_default();
+    let same_minute = usage.minute_epoch == minute_epoch;
+    let requests_this_minute = if same_minute {
+        usage.requests_this_minute
+    } else {
+        0
+    };
+    let tokens_this_minute = if same_minute {
+        usage.tokens_this_minute
+    } else {
+        0
+    };
+
+    if let Some(limit) = key.request_budget
+        && usage.requests_total >= limit
+    {
+        return Err(RuntimeGatewayVirtualKeyRejection::RequestBudgetExceeded);
+    }
+    if let (Some(limit), Some(cost)) = (key.budget_microusd, estimated_cost_microusd)
+        && usage.spend_microusd.saturating_add(cost) > limit
+    {
+        return Err(RuntimeGatewayVirtualKeyRejection::BudgetExceeded);
+    }
+    if let Some(limit) = key.rpm_limit
+        && requests_this_minute.saturating_add(1) > limit
+    {
+        return Err(RuntimeGatewayVirtualKeyRejection::RpmLimitExceeded);
+    }
+    if let Some(limit) = key.tpm_limit
+        && tokens_this_minute.saturating_add(input_tokens) > limit
+    {
+        return Err(RuntimeGatewayVirtualKeyRejection::TpmLimitExceeded);
+    }
+
+    Ok(RuntimeGatewayVirtualKeyAdmission {
+        key_name: key.name.clone(),
+        model,
+        input_tokens,
+        estimated_cost_microusd,
+    })
+}
+
+pub fn runtime_gateway_record_virtual_key_usage(
+    usage: &mut RuntimeGatewayVirtualKeyUsage,
+    admission: &RuntimeGatewayVirtualKeyAdmission,
+    minute_epoch: u64,
+) {
+    if usage.minute_epoch != minute_epoch {
+        usage.minute_epoch = minute_epoch;
+        usage.requests_this_minute = 0;
+        usage.tokens_this_minute = 0;
+    }
+    usage.requests_this_minute = usage.requests_this_minute.saturating_add(1);
+    usage.tokens_this_minute = usage
+        .tokens_this_minute
+        .saturating_add(admission.input_tokens);
+    usage.requests_total = usage.requests_total.saturating_add(1);
+    if let Some(cost) = admission.estimated_cost_microusd {
+        usage.spend_microusd = usage.spend_microusd.saturating_add(cost);
+    }
+}
+
+pub fn runtime_gateway_minute_epoch() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() / 60)
+        .unwrap_or_default()
 }
 
 pub fn runtime_gateway_rewrite_route_alias(
@@ -292,7 +463,7 @@ fn runtime_gateway_route_selected_model(
 }
 
 fn runtime_gateway_estimated_tokens(body: &[u8]) -> u64 {
-    (body.len() as u64 / 4).saturating_add(1)
+    prodex_provider_core::estimate_request_input_tokens(body)
 }
 
 pub fn runtime_gateway_guardrail_block(
@@ -311,16 +482,7 @@ pub fn runtime_gateway_guardrail_block(
         return Some(block);
     }
     if !config.allowed_models.is_empty() {
-        let requested_model = serde_json::from_slice::<serde_json::Value>(body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("model")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|model| !model.is_empty())
-                    .map(str::to_string)
-            });
+        let requested_model = runtime_gateway_request_model(body);
         if let Some(requested_model) = requested_model
             && !config
                 .allowed_models
@@ -341,6 +503,19 @@ pub fn runtime_gateway_guardrail_block(
         &config.blocked_keywords,
         RuntimeGatewayGuardrailBlockKind::BlockedKeyword,
     )
+}
+
+pub fn runtime_gateway_request_model(body: &[u8]) -> Option<String> {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("model")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(str::to_string)
+        })
 }
 
 fn runtime_gateway_prompt_injection_block(body: &[u8]) -> Option<RuntimeGatewayGuardrailBlock> {
@@ -607,6 +782,86 @@ mod tests {
         assert_eq!(
             block.kind,
             RuntimeGatewayGuardrailBlockKind::PromptInjection
+        );
+    }
+
+    #[test]
+    fn virtual_key_authorizes_and_records_usage() {
+        let key = RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            token_hash: LocalBridgeBearerTokenHash::from_token("secret"),
+            allowed_models: vec!["prodex-fast".to_string()],
+            budget_microusd: Some(10_000),
+            request_budget: Some(2),
+            rpm_limit: Some(2),
+            tpm_limit: Some(100),
+        };
+        let headers = vec![("Authorization".to_string(), "Bearer secret".to_string())];
+        let keys = vec![key];
+        let selected = runtime_gateway_virtual_key_from_headers(&headers, &keys)
+            .expect("valid key")
+            .expect("key enabled");
+        assert_eq!(selected.name, "team-a");
+
+        let mut usage = RuntimeGatewayVirtualKeyUsage::default();
+        let admission = runtime_gateway_virtual_key_admission(
+            selected,
+            Some(&usage),
+            br#"{"model":"prodex-fast","input":"hello from prodex"}"#,
+            Some(500),
+            10,
+        )
+        .expect("admission");
+        runtime_gateway_record_virtual_key_usage(&mut usage, &admission, 10);
+
+        assert_eq!(usage.minute_epoch, 10);
+        assert_eq!(usage.requests_this_minute, 1);
+        assert_eq!(usage.requests_total, 1);
+        assert_eq!(usage.spend_microusd, 500);
+    }
+
+    #[test]
+    fn virtual_key_rejects_model_and_rate_limits() {
+        let key = RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            token_hash: LocalBridgeBearerTokenHash::from_token("secret"),
+            allowed_models: vec!["prodex-fast".to_string()],
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: Some(1),
+            tpm_limit: None,
+        };
+        let bad_model = runtime_gateway_virtual_key_admission(
+            &key,
+            None,
+            br#"{"model":"other","input":"hello"}"#,
+            None,
+            10,
+        )
+        .unwrap_err();
+        assert_eq!(
+            bad_model,
+            RuntimeGatewayVirtualKeyRejection::ModelNotAllowed
+        );
+
+        let usage = RuntimeGatewayVirtualKeyUsage {
+            minute_epoch: 10,
+            requests_this_minute: 1,
+            ..RuntimeGatewayVirtualKeyUsage::default()
+        };
+        let rate_limit = runtime_gateway_virtual_key_admission(
+            &key,
+            Some(&usage),
+            br#"{"model":"prodex-fast","input":"hello"}"#,
+            None,
+            10,
+        )
+        .unwrap_err();
+        assert_eq!(
+            rate_limit,
+            RuntimeGatewayVirtualKeyRejection::RpmLimitExceeded
         );
     }
 }

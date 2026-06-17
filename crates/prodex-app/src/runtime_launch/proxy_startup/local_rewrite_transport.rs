@@ -1,12 +1,13 @@
 use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAuth};
 use super::gemini_rewrite::RuntimeGeminiAuth;
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite::schedule_runtime_gateway_billing_ledger_reconcile;
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderGatewaySpendEvent, RuntimeProviderWireFormat,
-    runtime_provider_gateway_spend_event, runtime_provider_label,
-    runtime_provider_model_fallback_chain, runtime_provider_model_from_body,
-    runtime_provider_openai_contract, runtime_provider_request_body_with_model,
-    runtime_provider_request_ledger_message,
+    runtime_provider_gateway_cost_for_request, runtime_provider_gateway_spend_event,
+    runtime_provider_label, runtime_provider_model_fallback_chain,
+    runtime_provider_model_from_body, runtime_provider_openai_contract,
+    runtime_provider_request_body_with_model, runtime_provider_request_ledger_message,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
@@ -67,6 +68,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
             request.method
         )
     })?;
+    let request_body_for_spend = body.clone();
     let mut upstream_request = shared.client.request(method, upstream_url);
     match auth {
         RuntimeLocalRewritePreparedAuth::Anthropic { auth } => {
@@ -219,6 +221,19 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
             body_bytes,
         ),
     );
+    let route_load = shared
+        .gateway_route_load
+        .lock()
+        .map(|load| load.clone())
+        .unwrap_or_default();
+    let cost = runtime_provider_gateway_cost_for_request(
+        provider_kind,
+        &shared.gateway_route_aliases,
+        &route_load,
+        request_id,
+        &request_body_for_spend,
+        model.as_deref().unwrap_or("unknown"),
+    );
     emit_runtime_gateway_spend_event(
         shared,
         runtime_provider_gateway_spend_event(
@@ -229,16 +244,19 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
             response.status().as_u16(),
             started_at.elapsed().as_millis(),
             body_bytes,
+            &request_body_for_spend,
+            cost,
         ),
     );
     Ok(response)
 }
 
-fn emit_runtime_gateway_spend_event(
+pub(super) fn emit_runtime_gateway_spend_event(
     shared: &RuntimeLocalRewriteProxyShared,
     event: RuntimeProviderGatewaySpendEvent,
 ) {
     runtime_proxy_log(&shared.runtime_shared, event.log_message());
+    schedule_runtime_gateway_billing_ledger_reconcile(shared, event.clone());
     if shared.gateway_observability.sink_enabled("jsonl")
         && let Some(path) = shared.gateway_observability.jsonl_path.as_ref()
     {
@@ -342,6 +360,7 @@ fn runtime_gateway_otel_attributes(
 ) -> Vec<serde_json::Value> {
     vec![
         serde_json::json!({"key": "prodex.call_id", "value": {"stringValue": event.call_id}}),
+        serde_json::json!({"key": "prodex.phase", "value": {"stringValue": event.phase}}),
         serde_json::json!({"key": "prodex.provider", "value": {"stringValue": event.provider}}),
         serde_json::json!({"key": "prodex.path", "value": {"stringValue": event.path}}),
         serde_json::json!({"key": "prodex.model", "value": {"stringValue": event.model}}),
@@ -709,6 +728,8 @@ mod tests {
             200,
             42,
             128,
+            br#"{"model":"gpt-5-mini","input":"hello from prodex"}"#,
+            prodex_provider_core::ProviderModelCost::default(),
         );
 
         let generic = runtime_gateway_observability_http_payload(&event, "generic");
