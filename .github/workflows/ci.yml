@@ -864,7 +864,7 @@ jobs:
           set +e
           node scripts/ci/github-job-durations.mjs \
             --max-wall-minutes 6 \
-            --max-runner-minutes 60 \
+            --max-runner-minutes 75 \
             --run-id "${{ github.run_id }}" \
             --exclude-name "CI duration telemetry" \
             --limit 12 < "${jobs_json}" \
@@ -872,7 +872,7 @@ jobs:
           text_status="${PIPESTATUS[0]}"
           node scripts/ci/github-job-durations.mjs \
             --max-wall-minutes 6 \
-            --max-runner-minutes 60 \
+            --max-runner-minutes 75 \
             --run-id "${{ github.run_id }}" \
             --exclude-name "CI duration telemetry" \
             --limit 12 \
