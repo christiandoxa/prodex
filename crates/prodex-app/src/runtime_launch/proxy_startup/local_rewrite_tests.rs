@@ -20,32 +20,43 @@ use std::fs;
 use std::io::{Cursor, Read};
 use std::net::SocketAddr;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
 
-struct TestEnvGuard {
-    key: &'static str,
-    previous: Option<OsString>,
+fn env_lock() -> &'static Mutex<()> {
+    static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    TEST_ENV_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-impl TestEnvGuard {
+struct TestEnvVarGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl TestEnvVarGuard {
     fn set(key: &'static str, value: &str) -> Self {
+        let guard = env_lock().lock().unwrap();
         let previous = std::env::var_os(key);
-        // SAFETY: gateway tests that use this helper run in a serial test suite.
+        // SAFETY: the shared test env lock serializes mutation and restoration.
         unsafe { std::env::set_var(key, value) };
-        Self { key, previous }
+        Self {
+            key,
+            previous,
+            _guard: guard,
+        }
     }
 }
 
-impl Drop for TestEnvGuard {
+impl Drop for TestEnvVarGuard {
     fn drop(&mut self) {
         if let Some(previous) = self.previous.as_ref() {
-            // SAFETY: gateway tests that use this helper run in a serial test suite.
+            // SAFETY: the shared test env lock serializes mutation and restoration.
             unsafe { std::env::set_var(self.key, previous) };
         } else {
-            // SAFETY: gateway tests that use this helper run in a serial test suite.
+            // SAFETY: the shared test env lock serializes mutation and restoration.
             unsafe { std::env::remove_var(self.key) };
         }
     }
@@ -429,7 +440,7 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
 fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
     let root = temp_root("gateway-admin-crud");
     let audit_dir = root.join("audit");
-    let _audit_env = TestEnvGuard::set("PRODEX_AUDIT_LOG_DIR", audit_dir.to_str().unwrap());
+    let _audit_env = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", audit_dir.to_str().unwrap());
     let paths = app_paths_for_root(root.clone());
     let upstream = TestUpstream::start_n(2);
     let admin_token = "admin-token";

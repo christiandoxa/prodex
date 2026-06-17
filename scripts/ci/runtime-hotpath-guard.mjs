@@ -68,6 +68,33 @@ const ALLOWLIST = Object.freeze([
       "bounded local rewrite worker pool created during launch, outside request commit path",
   },
   {
+    name: "local-rewrite-gateway-openoptions-import",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
+    id: "blocking-file-open",
+    pattern: /\buse std::fs::OpenOptions;/,
+    maxHits: 1,
+    reason:
+      "OpenOptions is used by gateway admin and background state stores, not by upstream stream forwarding",
+  },
+  {
+    name: "local-rewrite-gateway-file-state-io",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
+    id: "blocking-disk-io",
+    pattern: /\bstd::fs::(?:read|write|create_dir_all|rename)\s*\(/,
+    maxHits: 17,
+    reason:
+      "gateway file backend I/O is limited to admin/config loading, ledger reconciliation, and background usage persistence outside stream commit",
+  },
+  {
+    name: "local-rewrite-gateway-background-save",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
+    id: "spawn-blocking",
+    pattern: /\bspawn_blocking\s*\(/,
+    maxHits: 2,
+    reason:
+      "gateway ledger and usage saves are moved onto the bounded blocking pool after request admission",
+  },
+  {
     name: "gemini-live-sidecar-launch-thread",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs",
     id: "blocking-thread-spawn",
@@ -151,6 +178,39 @@ const ALLOWLIST = Object.freeze([
     maxHits: 1,
     reason:
       "bounded websocket TCP/DNS worker and dispatcher pools; spawn-outcome helper is cfg(test)",
+  },
+  {
+    name: "local-rewrite-test-fixture-disk-io",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::(?:read|read_to_string|remove_dir_all|create_dir_all)\s*\(/,
+    maxHits: 7,
+    reason:
+      "test fixtures inspect audit logs, ledgers, and isolated temp state after proxy requests complete",
+  },
+  {
+    name: "local-rewrite-test-mock-server-threads",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bthread::spawn\s*\(/,
+    maxHits: 3,
+    reason: "test-only mock upstream servers run on bounded fixture threads",
+  },
+  {
+    name: "local-rewrite-transport-log-dir-create",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs",
+    id: "blocking-disk-io",
+    pattern: /\bstd::fs::create_dir_all\s*\(/,
+    maxHits: 1,
+    reason: "best-effort runtime log directory creation before appending provider fallback diagnostics",
+  },
+  {
+    name: "local-rewrite-transport-log-open",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs",
+    id: "blocking-file-open",
+    pattern: /\bstd::fs::OpenOptions::new\s*\(/,
+    maxHits: 1,
+    reason: "best-effort runtime log append for provider fallback diagnostics",
   },
 ]);
 
