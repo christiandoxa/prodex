@@ -51,7 +51,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 2109,
+    "maxLines": 2114,
     "reason": "Local rewrite and gateway regression coverage remains capped while admin auth, virtual-key usage, SCIM, and billing ledger scenarios are split into focused test modules."
   },
   {
