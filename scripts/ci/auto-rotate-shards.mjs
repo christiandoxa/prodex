@@ -58,25 +58,21 @@ const AUTO_ROTATE_SHARDS = Object.freeze([
     id: "shared-state-history",
     label: "shared state resume history",
     filters: ["shared_state::run_shares_resume_history_across_managed_profiles"],
-    exclusive: true,
   },
   {
     id: "shared-state-memories",
     label: "shared state housekeeping memories",
     filters: ["shared_state::run_shares_housekeeping_memories_across_managed_profiles"],
-    exclusive: true,
   },
   {
     id: "shared-state-native",
     label: "shared state native Codex behavior",
     filters: ["shared_state::run_shares_native_codex_behavior_state_across_managed_profiles"],
-    exclusive: true,
   },
   {
     id: "shared-state-plugins",
     label: "shared state plugins and memory extensions",
     filters: ["shared_state::run_shares_codex_plugin_and_memory_extension_state_across_managed_profiles"],
-    exclusive: true,
   },
   {
     id: "super-mode",

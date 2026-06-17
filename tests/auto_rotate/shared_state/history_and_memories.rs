@@ -8,7 +8,7 @@ fn run_shares_resume_history_across_managed_profiles() {
     fs::write(seeded_session_dir.join("seed.json"), "{\"seed\":true}\n")
         .expect("failed to seed session");
 
-    let first_output = run_prodex_with_env(
+    let first_output = run_prodex_with_direct_provider_and_env(
         &fixture,
         &["run", "--profile", "main", "--skip-quota-check"],
         &[("TEST_SESSION_MARKER", "main-run")],
@@ -19,7 +19,7 @@ fn run_shares_resume_history_across_managed_profiles() {
         String::from_utf8_lossy(&first_output.stderr)
     );
 
-    let second_output = run_prodex_with_env(
+    let second_output = run_prodex_with_direct_provider_and_env(
         &fixture,
         &["run", "--profile", "second", "--skip-quota-check"],
         &[("TEST_SESSION_MARKER", "second-run")],
@@ -120,7 +120,7 @@ fn run_shares_housekeeping_memories_across_managed_profiles() {
     )
     .expect("failed to seed memory");
 
-    let first_output = run_prodex_with_env(
+    let first_output = run_prodex_with_direct_provider_and_env(
         &fixture,
         &["run", "--profile", "main", "--skip-quota-check"],
         &[("TEST_MEMORY_MARKER", "main-memory")],
@@ -131,7 +131,7 @@ fn run_shares_housekeeping_memories_across_managed_profiles() {
         String::from_utf8_lossy(&first_output.stderr)
     );
 
-    let second_output = run_prodex_with_env(
+    let second_output = run_prodex_with_direct_provider_and_env(
         &fixture,
         &["run", "--profile", "second", "--skip-quota-check"],
         &[("TEST_MEMORY_MARKER", "second-memory")],
@@ -174,4 +174,3 @@ fn run_shares_housekeeping_memories_across_managed_profiles() {
         );
     }
 }
-

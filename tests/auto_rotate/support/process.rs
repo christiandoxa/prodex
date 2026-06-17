@@ -6,6 +6,25 @@ pub(crate) fn run_prodex(fixture: &Fixture, args: &[&str]) -> std::process::Outp
     run_prodex_with_env(fixture, args, &[])
 }
 
+pub(crate) fn run_prodex_with_direct_provider(
+    fixture: &Fixture,
+    args: &[&str],
+) -> std::process::Output {
+    run_prodex_with_direct_provider_and_env(fixture, args, &[])
+}
+
+pub(crate) fn run_prodex_with_direct_provider_and_env(
+    fixture: &Fixture,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> std::process::Output {
+    let mut direct_args = Vec::with_capacity(args.len() + 2);
+    direct_args.extend_from_slice(args);
+    direct_args.push("-c");
+    direct_args.push("model_provider=\"prodex-test-direct\"");
+    run_prodex_with_env(fixture, &direct_args, extra_env)
+}
+
 pub(crate) fn run_prodex_with_env(
     fixture: &Fixture,
     args: &[&str],

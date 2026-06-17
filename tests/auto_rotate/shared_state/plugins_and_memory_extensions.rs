@@ -141,7 +141,7 @@ enabled = true
     )
     .expect("failed to seed main extension marker");
 
-    let first_output = run_prodex(
+    let first_output = run_prodex_with_direct_provider(
         &fixture,
         &["run", "--profile", "main", "--skip-quota-check"],
     );
@@ -202,7 +202,7 @@ enabled = true
     )
     .expect("failed to seed second extension marker");
 
-    let second_output = run_prodex(
+    let second_output = run_prodex_with_direct_provider(
         &fixture,
         &["run", "--profile", "second", "--skip-quota-check"],
     );

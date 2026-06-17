@@ -215,17 +215,10 @@ async function main() {
   }
 
   completed.push(
-    ...(await runStepsParallel(workspaceSteps(args), {
+    ...(await runStepsParallel([...workspaceSteps(args), autoRotateStep(args)], {
       dryRun: args.dryRun,
-      jobs: 2,
-      timingSummary: timingSummary(args, "full-rust-test:workspace"),
-    })),
-  );
-
-  completed.push(
-    ...(await runStepsSerial([autoRotateStep(args)], {
-      dryRun: args.dryRun,
-      timingSummary: timingSummary(args, "full-rust-test:auto-rotate"),
+      jobs: 3,
+      timingSummary: timingSummary(args, "full-rust-test:test-partitions"),
     })),
   );
 

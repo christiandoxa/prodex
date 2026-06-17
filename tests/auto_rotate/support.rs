@@ -20,7 +20,8 @@ mod usage_server;
 
 pub(super) use fixture::{Fixture, setup_fixture, write_json};
 pub(super) use process::{
-    run_prodex, run_prodex_with_env, run_prodex_with_env_and_stdin, spawn_prodex_with_env,
+    run_prodex, run_prodex_with_direct_provider, run_prodex_with_direct_provider_and_env,
+    run_prodex_with_env, run_prodex_with_env_and_stdin, spawn_prodex_with_env,
 };
 #[cfg(unix)]
 pub(super) use pty::run_prodex_with_pty_prompt_answer;

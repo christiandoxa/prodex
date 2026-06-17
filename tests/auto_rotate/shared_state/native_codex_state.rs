@@ -41,7 +41,7 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
     )
     .expect("failed to seed main agent");
 
-    let first_output = run_prodex(
+    let first_output = run_prodex_with_direct_provider(
         &fixture,
         &["run", "--profile", "main", "--skip-quota-check"],
     );
@@ -73,7 +73,7 @@ fn run_shares_native_codex_behavior_state_across_managed_profiles() {
     )
     .expect("failed to seed second agent");
 
-    let second_output = run_prodex(
+    let second_output = run_prodex_with_direct_provider(
         &fixture,
         &["run", "--profile", "second", "--skip-quota-check"],
     );

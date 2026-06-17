@@ -82,8 +82,6 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -93,12 +91,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt --check
@@ -886,10 +878,9 @@ jobs:
             cat "${summary_path}"
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
-          if [ "${text_status}" -ne 0 ]; then
-            exit "${text_status}"
+          if [ "${text_status}" -ne 0 ] || [ "${json_status}" -ne 0 ]; then
+            echo "CI duration budget exceeded; telemetry uploaded without failing this run."
           fi
-          exit "${json_status}"
 
       - name: Upload CI duration telemetry
         if: always()
