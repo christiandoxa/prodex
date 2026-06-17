@@ -31,12 +31,6 @@ crypto-common v0.1.7
 crypto-common v0.2.1
     digest v0.11.3
 
-const-oid v0.9.6
-    spki v0.7.3
-
-const-oid v0.10.2
-    spki v0.8.0
-
 digest v0.10.7 (*)
 
 digest v0.11.3 (*)
@@ -56,26 +50,11 @@ getrandom v0.3.4
 getrandom v0.4.2
     tempfile v3.27.0
 
-hmac v0.12.1
-    pbkdf2 v0.12.2
-
-hmac v0.13.0
-    jsonwebtoken v10.2.0
-
-rand v0.8.6
-    proptest v1.9.0
-
 rand v0.9.4
-    rsa v0.10.0-rc.10
+    provider crypto v0.1.0
 
 rand v0.10.1
-    jsonwebtoken v10.2.0
-
-rand_chacha v0.3.1
-    rand v0.8.6
-
-rand_chacha v0.9.0
-    rand v0.9.4
+    jsonwebtoken v10.4.0
 
 rand_core v0.6.4 (*)
 
@@ -83,12 +62,6 @@ rand_core v0.9.5 (*)
 
 rand_core v0.10.1
     rand v0.10.1
-
-sha2 v0.10.9
-    rsa v0.9.8
-
-sha2 v0.11.0
-    jsonwebtoken v10.2.0
 
 thiserror v1.0.69
     filedescriptor v0.8.3
@@ -101,6 +74,12 @@ thiserror-impl v1.0.69
 
 thiserror-impl v2.0.18
     thiserror v2.0.18
+
+untrusted v0.7.1
+    webpki v0.22.4
+
+untrusted v0.9.0
+    aws-lc-rs v1.15.0
 `;
 
 test("default budget accepts current duplicate families", () => {
@@ -113,19 +92,16 @@ test("default budget accepts current duplicate families", () => {
     duplicateFamilies.map((entry) => [entry.name, entry.versions.length]),
     [
       ["block-buffer", 2],
-      ["const-oid", 2],
       ["cpufeatures", 2],
       ["crypto-common", 2],
       ["digest", 2],
       ["fallible-iterator", 2],
       ["getrandom", 3],
-      ["hmac", 2],
-      ["rand", 3],
-      ["rand_chacha", 2],
+      ["rand", 2],
       ["rand_core", 3],
-      ["sha2", 2],
       ["thiserror", 2],
       ["thiserror-impl", 2],
+      ["untrusted", 2],
     ],
   );
   assert.equal(summary.duplicateFamilyBudget, DEFAULT_DUPLICATE_BUDGET.length);
@@ -152,7 +128,7 @@ test("allowed family over version budget fails", () => {
       name: "rand_core",
       versions: ["0.6.4", "0.9.5", "0.10.1", "0.11.0"],
       maxVersions: 3,
-      reason: "crypto-common, rand/proptest, and JWT/RSA dependencies currently span rand_core 0.6, 0.9, and 0.10.",
+      reason: "crypto-common, rand/proptest, and JWT AWS-LC dependencies currently span rand_core 0.6, 0.9, and 0.10.",
     },
   ]);
 });
