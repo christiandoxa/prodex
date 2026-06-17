@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.190.0 - 2026-06-17
+
+### Misc
+
+- Add provider gateway platform (`ee1a55b`)
+
 ## 0.189.0 - 2026-06-17
 
 ### Misc
@@ -81,11 +87,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Use explicit resume repair imports (`269c5ea`)
 - 0.179.0 (`e354890`)
 - Repair corrupt resume sessions (`00b09ae`)
-
-## 0.178.0 - 2026-06-12
-
-### Runtime
-
-- Preserve SSE header-array turn state (`8478bfb`)
-- Respect anthropic crate boundaries (`9f9ef08`)
-- Optimize hot paths (`3039952`)

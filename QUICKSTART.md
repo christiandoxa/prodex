@@ -18,7 +18,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex caveman mem rtk` or default `prodex super` RTK shell-command guidance
 - Optional: `sqz-mcp`, `token-savior`, and `claw-compactor` if you want the matching `prodex sqz`, `prodex tokensavior`, or `prodex clawcompactor` optimizer overlays
 
-If you install `@christiandoxa/prodex` from npm, Prodex prefers an already installed `codex` on your `PATH` and falls back to its bundled `@openai/codex@latest` dependency when no external Codex CLI is available. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
+If you install `@christiandoxa/prodex` from npm, Prodex uses its bundled `@openai/codex@latest` dependency by default so a broken or architecture-mismatched global `codex` on `PATH` does not affect `prodex run`. To deliberately use an external Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
 If you want the `mem` path, install Claude-Mem separately with the upstream installer:
 
@@ -50,15 +50,15 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.189.0`:
+The current local version in this repo is `0.190.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.189.0
+npm install -g @christiandoxa/prodex@0.190.0
 ```
 
 Dependency status in this repo:
 
-- The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest and is used as a fallback when no external `codex` is available
+- The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest and is used by default; external Codex is opt-in through `PRODEX_CODEX_BIN` or `PRODEX_CODEX_RESOLUTION=external`
 - Source installs still use whatever `codex` binary is on your `PATH`
 - Packaged Codex runtime resources, including the Codex 0.136.0 and newer bundled zsh runtime helper, stay owned by the Codex package; Prodex does not override `zsh_path`
 - `prodex update` passes through to `codex update` directly without profile selection, quota preflight, or the local runtime proxy
@@ -374,7 +374,11 @@ curl http://127.0.0.1:4000/v1/responses \
   -d '{"model":"prodex-fast","input":"hello"}'
 ```
 
-The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It emits `x-prodex-call-id`, writes `gateway_spend` events to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, and supports policy-defined route strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) plus keyword/model, Presidio, and external webhook guardrails.
+The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It emits `x-prodex-call-id`, writes `gateway_spend` events for request and response phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, and supports catalog-backed route strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`), static virtual keys with persisted request/spend usage and model/budget/RPM/TPM limits, file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, plus keyword/model, Presidio, and external webhook guardrails. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can inspect usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, read virtual-key usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, fetch the machine-readable gateway contract at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; policy/env-backed keys remain read-only, admin-managed key and SCIM user mutations are recorded in `prodex audit`, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix and tenant scopes.
+
+JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for gateway Responses, key, usage, billing ledger, metrics, and OpenAPI calls.
+
+For the repository-provided Docker Compose scaffold, see [docs/deployment.md](./docs/deployment.md).
 
 For managed local deployments, you can pin runtime logging and proxy tuning in `~/.prodex/policy.toml`:
 
@@ -399,10 +403,30 @@ listen_addr = "127.0.0.1:4000"
 provider = "gemini"
 require_auth = true
 
+[gateway.state]
+backend = "sqlite"
+sqlite_path = "gateway-state.sqlite"
+
+[[gateway.admin_tokens]]
+name = "auditor"
+token_env = "PRODEX_GATEWAY_AUDITOR_TOKEN"
+role = "viewer"
+allowed_key_prefixes = ["team-a-"]
+tenant_id = "tenant-a"
+
 [[gateway.route_aliases]]
 alias = "prodex-fast"
 models = ["gemini-3-flash", "gemini-2.5-flash"]
 strategy = "fallback"
+
+[[gateway.virtual_keys]]
+name = "team-a"
+token_env = "PRODEX_GATEWAY_TEAM_A_TOKEN"
+tenant_id = "tenant-a"
+allowed_models = ["prodex-fast"]
+request_budget = 1000
+rpm_limit = 60
+tpm_limit = 100000
 
 [gateway.observability]
 sinks = ["runtime-log", "jsonl"]
@@ -439,8 +463,9 @@ Known gaps today:
 - local `auth.json` remains the compatibility source of truth for current Codex flows even when a non-file backend is selected
 - no keychain, Vault, or KMS-backed secret storage implementation yet
 - audit logs follow the resolved runtime log directory by default, or `PRODEX_AUDIT_LOG_DIR` when set
-- no RBAC, SSO, SCIM, or central admin plane
-- runtime observability has local logs, `doctor --runtime --json`, and gateway JSONL/HTTP event export; it is still not a centralized admin plane
+- gateway admin RBAC currently supports admin/viewer bearer tokens, trusted reverse-proxy SSO headers, native OIDC/JWT bearer verification with discovery, SCIM-compatible user provisioning, tenant-scoped admin boundaries, and a built-in dashboard, but it is still not a hosted central SaaS control plane
+- runtime observability has local logs, `doctor --runtime --json`, gateway JSONL/HTTP event export, virtual-key usage reads, and Prometheus text metrics; it is still not a centralized admin plane
+- Docker Compose plus file, SQLite, Postgres, and Redis gateway state backends exist for admin keys, usage counters, and billing ledger state
 - the profile pool is still owned per host, not by a shared service
 - runtime-store modularization is still underway, so the state layer should be treated as an internal boundary rather than a stable integration surface
 
