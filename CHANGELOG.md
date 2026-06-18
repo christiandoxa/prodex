@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.192.0 - 2026-06-18
+
+### CLI
+
+- Guide full optimizer stack (`465a339`)
+
 ## 0.191.0 - 2026-06-18
 
 ### Docs
@@ -78,9 +84,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy session repair clippy gate (`2ee6f1e`)
 - Repair incomplete resume sessions (`5f99366`)
-
-## 0.180.0 - 2026-06-13
-
-### CLI
-
-- Add profile dashboard (`f4e2f87`)
