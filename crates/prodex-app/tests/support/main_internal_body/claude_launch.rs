@@ -419,7 +419,13 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
     let hook_script = fs::read_to_string(caveman_home.join("bin/prodex-caveman-sessionstart"))
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
-    assert!(hook_script.contains("noisy shell commands must visibly start with rtk <cmd>"));
+    assert!(hook_script.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(hook_script.contains("Claude-Mem"));
+    assert!(hook_script.contains("rtk <cmd>"));
+    assert!(hook_script.contains("prodex-sqz"));
+    assert!(hook_script.contains("prodex-token-savior"));
+    assert!(hook_script.contains("prodex-claw-compactor"));
+    assert!(hook_script.contains("Presidio is opt-in only"));
     assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
     let hook_key = format!("{}:session_start:0:0", temp_config.display());
     let trusted_hash = parsed_config["hooks"]["state"][&hook_key]["trusted_hash"]

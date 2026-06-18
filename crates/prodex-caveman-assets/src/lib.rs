@@ -83,33 +83,41 @@ which rtk
 
 pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Super Optimizers
 
-Prodex Super mode already enables Caveman, RTK guidance, Claude-Mem super-slim recall, and Smart Context Autopilot. Presidio redaction is active only when the user opts in at the Super prompt or passes `--presidio`. Use extra token optimizers only when they are local, deterministic, and safe for the current task.
+Prodex Super mode already enables Caveman, Claude-Mem super-slim recall, RTK, SQZ, token-savior, claw-compactor, and Smart Context Autopilot when the matching local tools are installed. Treat launch through `prodex s` or `prodex super` as the user's instruction to use the full local optimizer stack where it fits the task. Presidio redaction is the exception: it is active only when the user opts in at the Super prompt or passes `--presidio`.
 
 ## Token Flow
 
-RTK handles upstream/input command output before it enters the context window. Launching through `prodex s` or `prodex super` is already the user's instruction to use RTK; do not wait for a reminder.
+Use the optimizers by default, but keep their boundaries clear:
 
-Visible noisy shell commands must use `rtk <cmd>` for diffs, commit inspection, tests, builds, package-manager output, recursive search, and long logs. Prodex also auto-wraps common noisy commands as a safety fallback when RTK is installed, but auto-wrappers are only a backstop for accidental misses. They are not a substitute for writing visible `rtk <cmd>` commands, because the Codex TUI shows the command text before PATH resolution.
+- Claude-Mem captures and recalls prior Codex/Claude session context. Let the installed `mem` watch consume the active Prodex session path; do not duplicate long historical context manually when a concise recall or session reference is enough.
+- RTK handles upstream/input command output before it enters the context window. Visible noisy shell commands must use `rtk <cmd>` for diffs, commit inspection, tests, builds, package-manager output, recursive search, and long logs. Prodex also auto-wraps common noisy commands as a safety fallback when RTK is installed, but auto-wrappers are only a backstop for accidental misses. They are not a substitute for writing visible `rtk <cmd>` commands, because the Codex TUI shows the command text before PATH resolution.
+- SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large pasted/generated text, long command outputs that must be reused, and conversation/context compression instead of re-emitting full text.
+- token-savior handles codebase navigation and symbol context. If the `prodex-token-savior` MCP server is available, prefer it before reading broad source trees, hunting definitions, or scanning callers; then reread exact source for edits and failing lines.
+- claw-compactor handles workspace-level Markdown/code-memory summaries. Use `prodex-claw-compactor` or `prodex-claw-compactor-auto` for explicit workspace summary/benchmark requests or when a large repo overview is needed; do not edit from compressed code alone.
 
-SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large text blobs, and conversation/context compression instead of re-emitting full text.
+## Invocation Discipline
 
-## Repeated Reads
+Before emitting or requesting large context, choose the local optimizer that fits:
 
-Prefer existing artifact refs and Smart Context summaries over asking for the same file or command output again. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads instead of emitting full repeated content.
+- First pass over noisy terminal output: use visible `rtk <cmd>`.
+- Reusing content already seen, repeated file reads, or large text blobs: use `prodex-sqz` when available.
+- Locating symbols, callers, dead code, or API changes: use `prodex-token-savior` when available.
+- Workspace-level summary, benchmark, or memory-file compaction: use `prodex-claw-compactor`/`prodex-claw-compactor-auto` when available.
+- Prior-session/project memory: rely on Claude-Mem's active transcript watch and concise recall, not bulk transcript replay.
 
-## Code Navigation
+If a requested optimizer command or MCP server is unavailable, say so briefly and continue with the best local fallback. Do not pretend optimization happened.
 
-If the `prodex-token-savior` MCP server is available, prefer its symbol/navigation tools before reading large source files. Keep exact source for edits, failing tests, stack traces, migrations, generated files, lockfiles, and security-sensitive changes.
+## Installed Surfaces
 
 Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, and `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly. Prodex routes compatible token-savior cache/state under `PRODEX_HOME` (default `~/.prodex`) instead of the workspace.
 
 ## AST Compression
 
-If `claw-compactor` is available, Prodex Super installs a trusted one-shot SessionStart wrapper at `prodex-claw-compactor-sessionstart`. The startup probe is disabled by default so Codex launch is not delayed; opt in with `PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS=<seconds>` when you want the runtime to receive a compact workspace savings signal. The wrapper delegates to `prodex-claw-compactor-auto "$(pwd)"` only when that timeout is greater than zero. When the current directory has no Markdown memory files, the wrapper generates a temporary shadow workspace with a synthetic `MEMORY.md` summary and leaves the original directory untouched. Use `claw-compactor` only as a manual, reversible code-summary aid for exploration after that. Do not edit from compressed code alone; rehydrate or reread the exact source before changing behavior.
+If `claw-compactor` is available, Prodex Super installs a trusted one-shot SessionStart wrapper at `prodex-claw-compactor-sessionstart`. The startup probe is disabled by default so Codex launch is not delayed; opt in with `PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS=<seconds>` when you want the runtime to receive a compact workspace savings signal. The wrapper delegates to `prodex-claw-compactor-auto "$(pwd)"` only when that timeout is greater than zero. When the current directory has no Markdown memory files, the wrapper generates a temporary shadow workspace with a synthetic `MEMORY.md` and leaves the original directory untouched. Treat claw output as an overview or planning aid; rehydrate or reread exact source before changing behavior.
 
 ## Safety
 
-Never compress away critical signals: errors, panics, denied permissions, test failures, stack traces, diffs, review findings, secrets, auth material, quota/runtime proxy diagnostics, or exact command output that the user asked to see.
+Never compress away critical signals: errors, panics, denied permissions, test failures, stack traces, diffs, review findings, secrets, auth material, quota/runtime proxy diagnostics, or exact command output that the user asked to see. For exact-output tasks, bypass lossy compression and return the exact requested text.
 "#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

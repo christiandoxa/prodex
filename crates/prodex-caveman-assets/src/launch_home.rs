@@ -52,7 +52,7 @@ if [ -e "$marker" ]; then
   exit 0
 fi
 : > "$marker" 2>/dev/null || exit 0
-printf '%s\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'RTK ACTIVE WHEN CONFIGURED. In prodex rtk/s/super, noisy shell commands must visibly start with rtk <cmd>; do not wait for the user to remind you.'
+printf '%s\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE. Use Claude-Mem for recall, visible rtk <cmd> for noisy shell output, prodex-sqz for repeated/large context, prodex-token-savior for code navigation, and prodex-claw-compactor for workspace summaries. Presidio is opt-in only.'
 "#
     );
     write_executable_script(&script_path, &script)

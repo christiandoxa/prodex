@@ -12,7 +12,7 @@ use crate::{
     preview_external_provider_catalog_codex_args, preview_gemini_provider_codex_args,
     preview_local_provider_catalog_codex_args, profile_openai_compatible_codex_args,
     runtime_caveman_extract_launch_prefixes, runtime_caveman_extract_presidio_prefix,
-    runtime_launch_cli_gemini_thinking_budget_tokens,
+    runtime_caveman_resolve_mem_mode, runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens,
 };
 pub(crate) use prodex_runtime_launch::{
@@ -178,6 +178,7 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
         runtime_caveman_extract_launch_prefixes(&args.codex_args);
+    let mem_mode = runtime_caveman_resolve_mem_mode(args.smart_context, mem_mode);
     let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =

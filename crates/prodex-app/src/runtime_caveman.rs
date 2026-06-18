@@ -24,11 +24,7 @@ impl CavemanLaunchStrategy {
         let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
         let mut args = args;
         args.super_optimizer_overlay |= super_optimizer_prefix_enabled;
-        let mem_mode = if args.smart_context {
-            runtime_mem_super_default_transcript_mode(mem_mode)
-        } else {
-            mem_mode
-        };
+        let mem_mode = runtime_caveman_resolve_mem_mode(args.smart_context, mem_mode);
         let (codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
@@ -181,6 +177,17 @@ pub(super) fn handle_caveman(args: CavemanArgs) -> Result<()> {
     execute_runtime_launch(CavemanLaunchStrategy::new(args))
 }
 
+pub(crate) fn runtime_caveman_resolve_mem_mode(
+    smart_context: bool,
+    mem_mode: Option<RuntimeMemTranscriptMode>,
+) -> Option<RuntimeMemTranscriptMode> {
+    if smart_context {
+        runtime_mem_super_default_transcript_mode(mem_mode)
+    } else {
+        mem_mode
+    }
+}
+
 pub(super) fn prepare_caveman_launch_home(
     paths: &AppPaths,
     base_codex_home: &Path,
@@ -317,6 +324,17 @@ mod tests {
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
+    }
+
+    #[test]
+    fn super_dry_run_mem_resolution_matches_launch_strategy() {
+        let args = super_as_caveman_args(&["prodex", "s", "--dry-run", "exec", "hi"]);
+        let (mem_mode, _, _, _) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
+
+        assert_eq!(
+            runtime_caveman_resolve_mem_mode(args.smart_context, mem_mode),
+            Some(RuntimeMemTranscriptMode::SuperSlim)
+        );
     }
 
     #[test]

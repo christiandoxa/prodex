@@ -56,15 +56,17 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     let awareness = fs::read_to_string(dir.join("SUPER_OPTIMIZERS.md"))
         .expect("SUPER_OPTIMIZERS.md should exist");
     assert!(awareness.contains("sqz"));
-    assert!(awareness.contains("Presidio redaction is active only"));
+    assert!(awareness.contains("Presidio redaction is the exception"));
     assert!(awareness.contains("RTK handles upstream/input command output"));
-    assert!(awareness.contains("do not wait for a reminder"));
+    assert!(awareness.contains("full local optimizer stack"));
     assert!(awareness.contains("auto-wrappers are only a backstop"));
     assert!(awareness.contains("SQZ handles downstream/context reuse"));
     assert!(awareness.contains("prodex-sqz"));
     assert!(awareness.contains("token-savior"));
+    assert!(awareness.contains("Locating symbols, callers, dead code, or API changes"));
     assert!(awareness.contains("claw-compactor"));
     assert!(awareness.contains("prodex-claw-compactor-auto"));
+    assert!(awareness.contains("Prior-session/project memory"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
     assert_eq!(
@@ -224,6 +226,13 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
     let hook_script = fs::read_to_string(overlay.join("bin").join("prodex-caveman-sessionstart"))
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
+    assert!(hook_script.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(hook_script.contains("Claude-Mem"));
+    assert!(hook_script.contains("rtk <cmd>"));
+    assert!(hook_script.contains("prodex-sqz"));
+    assert!(hook_script.contains("prodex-token-savior"));
+    assert!(hook_script.contains("prodex-claw-compactor"));
+    assert!(hook_script.contains("Presidio is opt-in only"));
     assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
 
     let _ = fs::remove_dir_all(base);
@@ -400,6 +409,12 @@ fn caveman_session_start_script_outputs_once_per_launch_home() {
     assert!(first.status.success());
     let first_stdout = String::from_utf8(first.stdout).expect("first stdout should be utf8");
     assert!(first_stdout.contains("CAVEMAN MODE ACTIVE"));
+    assert!(first_stdout.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(first_stdout.contains("Claude-Mem"));
+    assert!(first_stdout.contains("prodex-sqz"));
+    assert!(first_stdout.contains("prodex-token-savior"));
+    assert!(first_stdout.contains("prodex-claw-compactor"));
+    assert!(first_stdout.contains("Presidio is opt-in only"));
 
     let second = std::process::Command::new(&script)
         .env("CODEX_HOME", &codex_home)

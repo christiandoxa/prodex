@@ -570,10 +570,14 @@ Use `prodex s expose` when you need to reach the live Super terminal from a brow
 
 Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman and Claude-Mem pieces, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction is added to that proxy only when you opt in at the prompt. Prodex passes token-savior cache and stats paths under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions keep generated state out of worktrees.
 
-RTK and SQZ split the token work across different sides of the flow:
+Super instructs Codex to use the whole local optimizer stack where it fits the task, not just RTK:
 
+- Claude-Mem handles prior-session/project recall through the active Prodex session watch.
 - RTK works upstream/input-side. Use visible `rtk <cmd>` for noisy terminal commands before their output enters the model context, such as `git diff`, `cargo test`, `npm test`, build logs, and package-manager output. Prodex also auto-wraps common noisy commands as a fallback when RTK is installed, but that fallback does not make the TUI show an `rtk` prefix.
-- SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server. Use it for repeated workspace reads, large text blobs, and long-session context reuse instead of emitting the same full content again.
+- SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server. Use it for repeated workspace reads, large text blobs, long command outputs that need reuse, and long-session context compression instead of emitting the same full content again.
+- token-savior handles symbol lookup, caller/context navigation, duplicate/dead-code checks, and API-impact searches before broad source reads.
+- claw-compactor handles workspace-level summary or benchmark requests through `prodex-claw-compactor` / `prodex-claw-compactor-auto`; treat its output as overview context and reread exact source before edits.
+- Presidio stays optional and only runs when you opt in with the Super prompt or `--presidio`.
 
 Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 
