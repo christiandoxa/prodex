@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.191.0 - 2026-06-18
+
+### Docs
+
+- Collapse detailed README sections (`3c4fe19`)
+
 ## 0.190.0 - 2026-06-17
 
 ### Misc
@@ -78,12 +84,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Add profile dashboard (`f4e2f87`)
-
-## 0.179.0 - 2026-06-13
-
-### Misc
-
-- Satisfy optimizer discovery clippy (`0ad238b`)
-- Use explicit resume repair imports (`269c5ea`)
-- 0.179.0 (`e354890`)
-- Repair corrupt resume sessions (`00b09ae`)
