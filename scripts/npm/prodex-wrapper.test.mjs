@@ -27,10 +27,118 @@ function cleanEnv(overrides = {}) {
   return env;
 }
 
+function hostOpenAiCodexPlatformSpec() {
+  const specs = {
+    linux: {
+      x64: {
+        packageName: "@openai/codex-linux-x64",
+        targetTriple: "x86_64-unknown-linux-musl",
+        binaryFileName: "codex",
+      },
+      arm64: {
+        packageName: "@openai/codex-linux-arm64",
+        targetTriple: "aarch64-unknown-linux-musl",
+        binaryFileName: "codex",
+      },
+    },
+    darwin: {
+      x64: {
+        packageName: "@openai/codex-darwin-x64",
+        targetTriple: "x86_64-apple-darwin",
+        binaryFileName: "codex",
+      },
+      arm64: {
+        packageName: "@openai/codex-darwin-arm64",
+        targetTriple: "aarch64-apple-darwin",
+        binaryFileName: "codex",
+      },
+    },
+    win32: {
+      x64: {
+        packageName: "@openai/codex-win32-x64",
+        targetTriple: "x86_64-pc-windows-msvc",
+        binaryFileName: "codex.exe",
+      },
+      arm64: {
+        packageName: "@openai/codex-win32-arm64",
+        targetTriple: "aarch64-pc-windows-msvc",
+        binaryFileName: "codex.exe",
+      },
+    },
+  };
+  return specs[process.platform]?.[process.arch] ?? null;
+}
+
 async function writeExecutable(filePath, contents) {
   await ensureDir(path.dirname(filePath));
   await fs.writeFile(filePath, contents);
   await fs.chmod(filePath, 0o755);
+}
+
+async function stageCodexShimInstall() {
+  if (process.platform === "win32") {
+    return null;
+  }
+  const spec = hostOpenAiCodexPlatformSpec();
+  if (!spec) {
+    return null;
+  }
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-codex-shim-test-"));
+  const mainPackageDir = packageInstallDir(root, "@christiandoxa/prodex");
+  await ensureDir(path.join(mainPackageDir, "lib"));
+  await copyRepoFile(
+    "npm/prodex/lib/codex-shim.cjs",
+    path.join(mainPackageDir, "lib", "codex-shim.cjs"),
+  );
+
+  const openAiCodexDir = packageInstallDir(root, "@openai/codex");
+  await ensureDir(path.join(openAiCodexDir, "bin"));
+  await writeJsonFile(path.join(openAiCodexDir, "package.json"), {
+    name: "@openai/codex",
+    version: "0.0.0-test",
+    bin: {
+      codex: "bin/codex.js",
+    },
+  });
+  await writeExecutable(
+    path.join(openAiCodexDir, "bin", "codex.js"),
+    ["#!/usr/bin/env node", "throw new Error('codex js fallback should not run');", ""].join(
+      "\n",
+    ),
+  );
+
+  const platformPackageDir = packageInstallDir(root, spec.packageName);
+  const nativeBinaryPath = path.join(
+    platformPackageDir,
+    "vendor",
+    spec.targetTriple,
+    "bin",
+    spec.binaryFileName,
+  );
+  await writeJsonFile(path.join(platformPackageDir, "package.json"), {
+    name: spec.packageName,
+    version: "0.0.0-test",
+  });
+  await writeExecutable(
+    nativeBinaryPath,
+    [
+      "#!/usr/bin/env node",
+      "console.log(JSON.stringify({",
+      "  argv: process.argv.slice(2),",
+      "  managedByNpm: process.env.CODEX_MANAGED_BY_NPM || null,",
+      "  managedPackageRoot: process.env.CODEX_MANAGED_PACKAGE_ROOT || null,",
+      "}));",
+      "",
+    ].join("\n"),
+  );
+
+  return {
+    root,
+    shimPath: path.join(mainPackageDir, "lib", "codex-shim.cjs"),
+    nativeBinaryPath,
+    openAiCodexDir,
+  };
 }
 
 async function stageWrapperInstall(version) {
@@ -148,4 +256,41 @@ test("prodex npm wrapper can opt into external Codex explicitly", async (t) => {
   );
   assert.equal(explicitMode.codexBin, install.externalCodex);
   assert.equal(explicitMode.pathEntries[0], install.externalDir);
+});
+
+test("prodex Codex shim prefers direct native Codex package", async (t) => {
+  const install = await stageCodexShimInstall();
+  if (!install) {
+    t.skip("Codex shim native package test is only implemented for POSIX runners");
+    return;
+  }
+  t.after(() => fs.rm(install.root, { recursive: true, force: true }));
+
+  const result = spawnSync(process.execPath, [install.shimPath, "run", "--probe"], {
+    encoding: "utf8",
+    env: cleanEnv({}),
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.argv, ["run", "--probe"]);
+  assert.equal(output.managedByNpm, "1");
+  assert.equal(output.managedPackageRoot, await fs.realpath(install.openAiCodexDir));
+});
+
+test("prodex Codex shim repairs non-executable native Codex binary", async (t) => {
+  const install = await stageCodexShimInstall();
+  if (!install) {
+    t.skip("Codex shim native package test is only implemented for POSIX runners");
+    return;
+  }
+  t.after(() => fs.rm(install.root, { recursive: true, force: true }));
+  await fs.chmod(install.nativeBinaryPath, 0o644);
+
+  const result = spawnSync(process.execPath, [install.shimPath, "--version"], {
+    encoding: "utf8",
+    env: cleanEnv({}),
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const mode = (await fs.stat(install.nativeBinaryPath)).mode;
+  assert.ok(mode & 0o111);
 });

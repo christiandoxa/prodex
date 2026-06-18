@@ -6,6 +6,8 @@ import {
   gatewaySdkPackageName,
   mainPackageName,
   openaiCodexDependencySpecifier,
+  openaiCodexPlatformDependencySpecifier,
+  openaiCodexPlatformPackages,
   platformPackages,
   readCargoVersion,
   readJsonFile,
@@ -57,6 +59,13 @@ async function updatePackageJson(filePath, version) {
     for (const spec of platformPackages) {
       if (packageJson.optionalDependencies[spec.packageName] !== version) {
         packageJson.optionalDependencies[spec.packageName] = version;
+        changed = true;
+      }
+    }
+    for (const spec of openaiCodexPlatformPackages) {
+      const expected = openaiCodexPlatformDependencySpecifier(spec);
+      if (packageJson.optionalDependencies[spec.packageName] !== expected) {
+        packageJson.optionalDependencies[spec.packageName] = expected;
         changed = true;
       }
     }

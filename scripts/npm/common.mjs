@@ -59,6 +59,37 @@ export const platformPackages = [
   },
 ];
 
+export const openaiCodexPlatformPackages = [
+  {
+    packageName: "@openai/codex-linux-x64",
+    distTag: "linux-x64",
+  },
+  {
+    packageName: "@openai/codex-linux-arm64",
+    distTag: "linux-arm64",
+  },
+  {
+    packageName: "@openai/codex-darwin-x64",
+    distTag: "darwin-x64",
+  },
+  {
+    packageName: "@openai/codex-darwin-arm64",
+    distTag: "darwin-arm64",
+  },
+  {
+    packageName: "@openai/codex-win32-x64",
+    distTag: "win32-x64",
+  },
+  {
+    packageName: "@openai/codex-win32-arm64",
+    distTag: "win32-arm64",
+  },
+];
+
+export function openaiCodexPlatformDependencySpecifier(spec) {
+  return `npm:@openai/codex@${spec.distTag}`;
+}
+
 export function packageSlug(packageName) {
   return packageName.replace(/^@[^/]+\//, "");
 }
@@ -103,7 +134,13 @@ export function parseCargoVersion(contents) {
 
 export function mainPackageManifest(version) {
   const optionalDependencies = Object.fromEntries(
-    platformPackages.map((spec) => [spec.packageName, version]),
+    [
+      ...platformPackages.map((spec) => [spec.packageName, version]),
+      ...openaiCodexPlatformPackages.map((spec) => [
+        spec.packageName,
+        openaiCodexPlatformDependencySpecifier(spec),
+      ]),
+    ],
   );
 
   return {

@@ -41,6 +41,8 @@
     "npm/package-lock.json",
     "npm/prodex/package.json",
     "npm/prodex/package-lock.json",
+    "npm/prodex-gateway-sdk/package.json",
+    "npm/prodex-gateway-sdk/package-lock.json",
     "npm/platforms/*/package.json",
     "npm/platforms/*/package-lock.json"
   ],

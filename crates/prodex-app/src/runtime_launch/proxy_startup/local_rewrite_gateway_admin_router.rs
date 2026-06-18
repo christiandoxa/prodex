@@ -1,0 +1,366 @@
+use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite_gateway_admin_auth::runtime_gateway_admin_auth;
+use super::local_rewrite_gateway_admin_keys::{
+    runtime_gateway_admin_create_key_response, runtime_gateway_admin_delete_key_response,
+    runtime_gateway_admin_get_key_response, runtime_gateway_admin_update_key_response,
+};
+use super::local_rewrite_gateway_admin_ledger::{
+    runtime_gateway_admin_ledger_csv_response, runtime_gateway_admin_ledger_response,
+    runtime_gateway_admin_ledger_summary_csv_response,
+    runtime_gateway_admin_ledger_summary_response,
+};
+use super::local_rewrite_gateway_admin_payloads::{
+    runtime_gateway_admin_guardrails_payload, runtime_gateway_admin_observability_payload,
+    runtime_gateway_admin_providers_payload, runtime_gateway_openapi_spec,
+};
+use super::local_rewrite_gateway_admin_response::runtime_gateway_admin_json_response;
+use super::local_rewrite_gateway_admin_scim::{
+    runtime_gateway_admin_scim_create_user_response,
+    runtime_gateway_admin_scim_delete_user_response, runtime_gateway_admin_scim_get_user_response,
+    runtime_gateway_admin_scim_list_users_response,
+    runtime_gateway_admin_scim_update_user_response,
+};
+use super::local_rewrite_gateway_dashboard::runtime_gateway_admin_dashboard_response;
+use super::local_rewrite_gateway_key_payloads::runtime_gateway_admin_keys_payload;
+use super::local_rewrite_gateway_metrics::runtime_gateway_prometheus_response;
+use super::*;
+
+pub(super) fn runtime_gateway_request_path_is_admin(
+    request_path: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> bool {
+    let path = path_without_query(request_path);
+    let admin_prefix = format!("{}/prodex/gateway", shared.mount_path.trim_end_matches('/'));
+    path == format!("{admin_prefix}/admin")
+        || path == format!("{admin_prefix}/openapi.json")
+        || path == format!("{admin_prefix}/metrics")
+        || path == format!("{admin_prefix}/providers")
+        || path == format!("{admin_prefix}/observability")
+        || path == format!("{admin_prefix}/guardrails")
+        || path == format!("{admin_prefix}/usage")
+        || path == format!("{admin_prefix}/keys")
+        || path.starts_with(&format!("{admin_prefix}/keys/"))
+        || path == format!("{admin_prefix}/ledger")
+        || path == format!("{admin_prefix}/ledger.csv")
+        || path == format!("{admin_prefix}/ledger/summary")
+        || path == format!("{admin_prefix}/ledger/summary.csv")
+        || path == format!("{admin_prefix}/scim/v2/Users")
+        || path.starts_with(&format!("{admin_prefix}/scim/v2/Users/"))
+}
+
+pub(super) fn runtime_gateway_admin_response(
+    request_id: u64,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Option<tiny_http::ResponseBox> {
+    let path = path_without_query(&captured.path_and_query);
+    let admin_prefix = format!("{}/prodex/gateway", shared.mount_path.trim_end_matches('/'));
+    let keys_path = format!("{admin_prefix}/keys");
+    let usage_path = format!("{admin_prefix}/usage");
+    let ledger_path = format!("{admin_prefix}/ledger");
+    let ledger_csv_path = format!("{ledger_path}.csv");
+    let ledger_summary_path = format!("{ledger_path}/summary");
+    let ledger_summary_csv_path = format!("{ledger_summary_path}.csv");
+    let metrics_path = format!("{admin_prefix}/metrics");
+    let providers_path = format!("{admin_prefix}/providers");
+    let observability_path = format!("{admin_prefix}/observability");
+    let guardrails_path = format!("{admin_prefix}/guardrails");
+    let openapi_path = format!("{admin_prefix}/openapi.json");
+    let admin_path = format!("{admin_prefix}/admin");
+    let scim_users_path = format!("{admin_prefix}/scim/v2/Users");
+    let key_name = path
+        .strip_prefix(&(keys_path.clone() + "/"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let scim_user_id = path
+        .strip_prefix(&(scim_users_path.clone() + "/"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if path == admin_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway admin dashboard endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_dashboard_response(shared));
+    }
+    if path != usage_path
+        && path != ledger_path
+        && path != ledger_csv_path
+        && path != ledger_summary_path
+        && path != ledger_summary_csv_path
+        && path != metrics_path
+        && path != providers_path
+        && path != observability_path
+        && path != guardrails_path
+        && path != keys_path
+        && path != openapi_path
+        && path != scim_users_path
+        && key_name.is_none()
+        && scim_user_id.is_none()
+    {
+        return None;
+    }
+    let Some(admin_auth) = runtime_gateway_admin_auth(captured, shared) else {
+        if shared.gateway_auth_token_hash.is_none()
+            && shared.gateway_admin_tokens.is_empty()
+            && shared.gateway_sso.proxy_token_hash.is_none()
+            && shared.gateway_sso.oidc.is_none()
+        {
+            return Some(build_runtime_proxy_json_error_response(
+                403,
+                "admin_auth_not_configured",
+                "configure a gateway admin bearer token to use gateway admin endpoints",
+            ));
+        }
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_admin_auth_rejected",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("path", path),
+                ],
+            ),
+        );
+        return Some(build_runtime_proxy_json_error_response(
+            401,
+            "invalid_admin_token",
+            "missing or invalid gateway admin bearer token",
+        ));
+    };
+    let admin_method = captured.method.to_ascii_uppercase();
+    let admin_write = (path == keys_path && admin_method == "POST")
+        || (key_name.is_some() && matches!(admin_method.as_str(), "PATCH" | "DELETE"))
+        || (path == scim_users_path && admin_method == "POST")
+        || (scim_user_id.is_some() && matches!(admin_method.as_str(), "PATCH" | "PUT" | "DELETE"));
+    if admin_write && !admin_auth.role.can_write() {
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_admin_role_rejected",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("path", path),
+                    runtime_proxy_log_field("admin", admin_auth.name.as_str()),
+                    runtime_proxy_log_field("role", admin_auth.role.as_str()),
+                ],
+            ),
+        );
+        return Some(build_runtime_proxy_json_error_response(
+            403,
+            "gateway_admin_role_forbidden",
+            "gateway admin role does not allow this mutation",
+        ));
+    }
+
+    if path == openapi_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway OpenAPI endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_openapi_spec(shared),
+        ));
+    }
+
+    if path == usage_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway usage endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_admin_keys_payload(shared, "gateway.usage", Some(&admin_auth)),
+        ));
+    }
+
+    if path == ledger_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway ledger endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_ledger_response(shared, &admin_auth));
+    }
+
+    if path == ledger_csv_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway ledger CSV endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_ledger_csv_response(
+            shared,
+            &admin_auth,
+        ));
+    }
+
+    if path == ledger_summary_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway ledger summary endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_ledger_summary_response(
+            shared,
+            &admin_auth,
+        ));
+    }
+
+    if path == ledger_summary_csv_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway ledger summary CSV endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_ledger_summary_csv_response(
+            shared,
+            &admin_auth,
+        ));
+    }
+
+    if path == metrics_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway metrics endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_prometheus_response(shared, &admin_auth));
+    }
+
+    if path == providers_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway providers endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_admin_providers_payload(),
+        ));
+    }
+
+    if path == observability_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway observability endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_admin_observability_payload(shared),
+        ));
+    }
+
+    if path == guardrails_path {
+        if !captured.method.eq_ignore_ascii_case("GET") {
+            return Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway guardrails endpoint requires GET",
+            ));
+        }
+        return Some(runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_admin_guardrails_payload(shared),
+        ));
+    }
+
+    if path == keys_path {
+        return match admin_method.as_str() {
+            "GET" => Some(runtime_gateway_admin_json_response(
+                200,
+                runtime_gateway_admin_keys_payload(shared, "gateway.keys", Some(&admin_auth)),
+            )),
+            "POST" => Some(runtime_gateway_admin_create_key_response(
+                captured,
+                shared,
+                &admin_auth,
+            )),
+            _ => Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway keys endpoint supports GET and POST",
+            )),
+        };
+    }
+
+    if path == scim_users_path {
+        return match admin_method.as_str() {
+            "GET" => Some(runtime_gateway_admin_scim_list_users_response(
+                shared,
+                &admin_auth,
+            )),
+            "POST" => Some(runtime_gateway_admin_scim_create_user_response(
+                captured,
+                shared,
+                &admin_auth,
+            )),
+            _ => Some(build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway SCIM Users endpoint supports GET and POST",
+            )),
+        };
+    }
+
+    if let Some(scim_user_id) = scim_user_id {
+        return Some(match admin_method.as_str() {
+            "GET" => {
+                runtime_gateway_admin_scim_get_user_response(scim_user_id, shared, &admin_auth)
+            }
+            "PATCH" | "PUT" => runtime_gateway_admin_scim_update_user_response(
+                scim_user_id,
+                captured,
+                shared,
+                &admin_auth,
+            ),
+            "DELETE" => {
+                runtime_gateway_admin_scim_delete_user_response(scim_user_id, shared, &admin_auth)
+            }
+            _ => build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway SCIM User endpoint supports GET, PATCH, PUT, and DELETE",
+            ),
+        });
+    }
+
+    let key_name = key_name.unwrap_or_default();
+    Some(match admin_method.as_str() {
+        "GET" => runtime_gateway_admin_get_key_response(key_name, shared, &admin_auth),
+        "PATCH" => {
+            runtime_gateway_admin_update_key_response(key_name, captured, shared, &admin_auth)
+        }
+        "DELETE" => runtime_gateway_admin_delete_key_response(key_name, shared, &admin_auth),
+        _ => build_runtime_proxy_json_error_response(
+            405,
+            "method_not_allowed",
+            "gateway key endpoint supports GET, PATCH, and DELETE",
+        ),
+    })
+}

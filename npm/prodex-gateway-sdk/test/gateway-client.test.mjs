@@ -42,6 +42,80 @@ test("metrics requests text format", async () => {
   assert.equal(calls[0].init.headers.get("accept"), "text/plain");
 });
 
+test("observability and guardrails helpers read config surfaces", async () => {
+  const calls = [];
+  const client = new ProdexGatewayClient({
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith("/observability")) {
+        return jsonResponse({
+          object: "gateway.observability",
+          sinks: ["runtime-log"],
+          http_schema: "generic",
+          http_bearer_token_configured: false,
+        });
+      }
+      return jsonResponse({
+        object: "gateway.guardrails",
+        blocked_keywords_count: 1,
+        blocked_output_keywords_count: 0,
+        allowed_models: ["prodex-fast"],
+        prompt_injection_detection: true,
+        pii_redaction: true,
+        webhook: {
+          configured: true,
+          phases: ["pre", "post"],
+          bearer_token_configured: true,
+          fail_closed: false,
+        },
+      });
+    },
+  });
+
+  const observability = await client.observability();
+  const guardrails = await client.guardrails();
+
+  assert.deepEqual(observability.sinks, ["runtime-log"]);
+  assert.equal(guardrails.webhook.configured, true);
+  assert.equal(guardrails.pii_redaction, true);
+  assert.equal(calls[0].url, "http://127.0.0.1:4000/v1/prodex/gateway/observability");
+  assert.equal(calls[1].url, "http://127.0.0.1:4000/v1/prodex/gateway/guardrails");
+});
+
+test("providers helper reads adapter contract matrix", async () => {
+  const calls = [];
+  const client = new ProdexGatewayClient({
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return jsonResponse({
+        object: "gateway.providers",
+        providers: [
+          {
+            provider: "openai",
+            client_request_format: "openai-responses",
+            upstream_request_format: "openai-responses",
+            response_format: "openai-responses",
+            canonical_client_endpoint: "/v1/responses",
+            model_list_endpoint: "/v1/models",
+            supports_streaming: true,
+            supports_model_fallback: false,
+            supported_endpoints: ["responses", "models"],
+            model_count: 4,
+            replay_case_count: 1,
+          },
+        ],
+      });
+    },
+  });
+
+  const providers = await client.providers();
+
+  assert.equal(providers.providers[0].provider, "openai");
+  assert.equal(providers.providers[0].client_request_format, "openai-responses");
+  assert.equal(providers.providers[0].replay_case_count, 1);
+  assert.equal(calls[0].url, "http://127.0.0.1:4000/v1/prodex/gateway/providers");
+});
+
 test("SCIM user helpers send bearer JSON requests", async () => {
   const calls = [];
   const client = new ProdexGatewayClient({
@@ -62,6 +136,8 @@ test("SCIM user helpers send bearer JSON requests", async () => {
     active: true,
     "urn:prodex:params:scim:schemas:gateway:2.0:User": {
       role: "admin",
+      team_id: "team-a",
+      budget_id: "budget-a",
       allowed_key_prefixes: ["team-a-"],
     },
   });
@@ -71,6 +147,8 @@ test("SCIM user helpers send bearer JSON requests", async () => {
 
   assert.equal(created.id, "user-1");
   assert.equal(updated.userName, "alice@example.com");
+  assert.equal(calls[0].init.body.includes('"team_id":"team-a"'), true);
+  assert.equal(calls[0].init.body.includes('"budget_id":"budget-a"'), true);
   assert.equal(calls[0].url, "http://127.0.0.1:4000/v1/prodex/gateway/scim/v2/Users");
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.get("authorization"), "Bearer admin-token");

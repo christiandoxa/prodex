@@ -47,55 +47,43 @@ const PLATFORM_TARGETS = {
   },
 };
 
-function resolveCodexBin() {
+function currentPlatformTarget() {
+  return PLATFORM_TARGETS[process.platform]?.[process.arch] ?? null;
+}
+
+function resolveOpenAiCodexPackageRoot() {
   let packageJsonPath;
   try {
     packageJsonPath = requireFromHere.resolve("@openai/codex/package.json");
   } catch {
-    process.stderr.write(
-      "Unable to locate @openai/codex. Reinstall @christiandoxa/prodex so its runtime dependency is present.\n",
-    );
-    process.exit(1);
+    return null;
   }
-
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-  if (typeof packageJson.bin === "string") {
-    return path.resolve(path.dirname(packageJsonPath), packageJson.bin);
-  }
-  if (packageJson.bin && typeof packageJson.bin === "object") {
-    const candidate = packageJson.bin.codex ?? Object.values(packageJson.bin)[0];
-    if (typeof candidate === "string") {
-      return path.resolve(path.dirname(packageJsonPath), candidate);
-    }
-  }
-  return path.resolve(path.dirname(packageJsonPath), "bin", "codex.js");
+  return path.dirname(packageJsonPath);
 }
 
-function explainBundledNativeCodexPermissionIssue() {
-  const platformTarget = PLATFORM_TARGETS[process.platform]?.[process.arch];
-  if (!platformTarget || process.platform === "win32") {
-    return;
+function codexManagedEnv() {
+  const packageRoot = resolveOpenAiCodexPackageRoot();
+  if (!packageRoot) {
+    return process.env;
   }
+  return {
+    ...process.env,
+    CODEX_MANAGED_BY_NPM: "1",
+    CODEX_MANAGED_PACKAGE_ROOT: fs.realpathSync(packageRoot),
+  };
+}
 
-  let platformPackageJsonPath;
-  try {
-    platformPackageJsonPath = requireFromHere.resolve(`${platformTarget.packageName}/package.json`);
-  } catch {
-    return;
-  }
-
-  const nativeBinaryPath = path.join(
-    path.dirname(platformPackageJsonPath),
-    "vendor",
-    platformTarget.targetTriple,
-    "bin",
-    platformTarget.binaryFileName,
-  );
-  if (!fs.existsSync(nativeBinaryPath)) {
-    return;
-  }
+function ensureNativeCodexExecutable(nativeBinaryPath) {
   try {
     fs.accessSync(nativeBinaryPath, fs.constants.X_OK);
+    return;
+  } catch {
+    repairNativeCodexExecutablePermissionBestEffort(nativeBinaryPath);
+  }
+
+  try {
+    fs.accessSync(nativeBinaryPath, fs.constants.X_OK);
+    return;
   } catch {
     process.stderr.write(
       [
@@ -108,10 +96,102 @@ function explainBundledNativeCodexPermissionIssue() {
   }
 }
 
-const codexBin = resolveCodexBin();
-explainBundledNativeCodexPermissionIssue();
-const child = spawn(process.execPath, [codexBin, ...process.argv.slice(2)], {
-  env: process.env,
+function repairNativeCodexExecutablePermissionBestEffort(nativeBinaryPath) {
+  if (process.platform === "win32") {
+    return;
+  }
+  try {
+    const stats = fs.statSync(nativeBinaryPath);
+    if (!stats.isFile()) {
+      return;
+    }
+    fs.chmodSync(nativeBinaryPath, (stats.mode & 0o777) | 0o755);
+  } catch {
+    // The explicit executable check below reports the actionable failure.
+  }
+}
+
+function resolveNativeCodexCommand() {
+  const platformTarget = currentPlatformTarget();
+  if (!platformTarget) {
+    return null;
+  }
+
+  let platformPackageJsonPath;
+  try {
+    platformPackageJsonPath = requireFromHere.resolve(`${platformTarget.packageName}/package.json`);
+  } catch {
+    return null;
+  }
+
+  const nativeBinaryPath = path.join(
+    path.dirname(platformPackageJsonPath),
+    "vendor",
+    platformTarget.targetTriple,
+    "bin",
+    platformTarget.binaryFileName,
+  );
+  if (!fs.existsSync(nativeBinaryPath)) {
+    process.stderr.write(
+      [
+        `Missing bundled Codex native binary at ${nativeBinaryPath}`,
+        "Reinstall @christiandoxa/prodex with optional dependencies enabled, or set PRODEX_CODEX_BIN to an existing Codex CLI.",
+        "",
+      ].join("\n"),
+    );
+    process.exit(1);
+  }
+  ensureNativeCodexExecutable(nativeBinaryPath);
+
+  return {
+    command: nativeBinaryPath,
+    args: process.argv.slice(2),
+    env: codexManagedEnv(),
+  };
+}
+
+function resolveCodexJsCommand() {
+  const packageRoot = resolveOpenAiCodexPackageRoot();
+  if (!packageRoot) {
+    process.stderr.write(
+      "Unable to locate @openai/codex. Reinstall @christiandoxa/prodex so its runtime dependency is present.\n",
+    );
+    process.exit(1);
+  }
+  const packageJsonPath = path.join(packageRoot, "package.json");
+
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  if (typeof packageJson.bin === "string") {
+    return {
+      command: process.execPath,
+      args: [path.resolve(packageRoot, packageJson.bin), ...process.argv.slice(2)],
+      env: process.env,
+    };
+  }
+  if (packageJson.bin && typeof packageJson.bin === "object") {
+    const candidate = packageJson.bin.codex ?? Object.values(packageJson.bin)[0];
+    if (typeof candidate === "string") {
+      return {
+        command: process.execPath,
+        args: [path.resolve(packageRoot, candidate), ...process.argv.slice(2)],
+        env: process.env,
+      };
+    }
+  }
+  return {
+    command: process.execPath,
+    args: [path.resolve(packageRoot, "bin", "codex.js"), ...process.argv.slice(2)],
+    env: process.env,
+  };
+}
+
+function resolveCodexCommand() {
+  return resolveNativeCodexCommand() ?? resolveCodexJsCommand();
+}
+
+const codexCommand = resolveCodexCommand();
+const child = spawn(codexCommand.command, codexCommand.args, {
+  env: codexCommand.env,
   stdio: "inherit",
 });
 

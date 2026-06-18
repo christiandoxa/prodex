@@ -4,7 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mainPackageName, platformPackages, packageSlug } from "../npm/common.mjs";
+import {
+  mainPackageName,
+  openaiCodexPlatformDependencySpecifier,
+  openaiCodexPlatformPackages,
+  platformPackages,
+  packageSlug,
+} from "../npm/common.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
@@ -102,7 +108,13 @@ function docs(version, label) {
 
 async function writePackageManifests(fixtureRoot, version) {
   const optionalDependencies = Object.fromEntries(
-    platformPackages.map((spec) => [spec.packageName, version]),
+    [
+      ...platformPackages.map((spec) => [spec.packageName, version]),
+      ...openaiCodexPlatformPackages.map((spec) => [
+        spec.packageName,
+        openaiCodexPlatformDependencySpecifier(spec),
+      ]),
+    ],
   );
   await writeFile(
     fixtureRoot,
@@ -217,6 +229,12 @@ async function assertVersionSynced(fixtureRoot, version) {
     const platformDir = packageSlug(spec.packageName).replace(/^prodex-/, "");
     const platformManifest = await readJson(fixtureRoot, `npm/platforms/${platformDir}/package.json`);
     assert(platformManifest.version === version, `${spec.packageName} version mismatch: ${platformManifest.version}`);
+  }
+  for (const spec of openaiCodexPlatformPackages) {
+    assert(
+      mainManifest.optionalDependencies?.[spec.packageName] === openaiCodexPlatformDependencySpecifier(spec),
+      `optional dependency ${spec.packageName} mismatch`,
+    );
   }
 
   const changelog = await fs.readFile(path.join(fixtureRoot, "CHANGELOG.md"), "utf8");

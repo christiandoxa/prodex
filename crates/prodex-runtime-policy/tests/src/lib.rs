@@ -130,6 +130,10 @@ token_env = "PRODEX_GATEWAY_AUDITOR_TOKEN"
 role = "viewer"
 allowed_key_prefixes = ["team-a-", "sandbox-"]
 tenant_id = "tenant-a"
+team_id = "platform"
+project_id = "codex-gateway"
+user_id = "alice@example.com"
+budget_id = "budget-platform"
 
 [gateway.sso]
 proxy_token_env = "PRODEX_GATEWAY_SSO_PROXY_TOKEN"
@@ -172,6 +176,10 @@ tpm_limit = 50000
 name = "team-a"
 token_env = "PRODEX_GATEWAY_TEAM_A_TOKEN"
 tenant_id = "tenant-a"
+team_id = "platform"
+project_id = "codex-gateway"
+user_id = "alice@example.com"
+budget_id = "budget-platform"
 allowed_models = ["prodex-fast"]
 budget_usd = 12.5
 request_budget = 1000
@@ -192,6 +200,7 @@ blocked_output_keywords = ["do not reveal"]
 allowed_models = ["prodex-fast"]
 presidio_redaction = true
 prompt_injection_detection = true
+pii_redaction = true
 webhook_url = "https://guardrails.example/check"
 webhook_phases = ["pre", "post"]
 webhook_bearer_token_env = "PRODEX_GATEWAY_GUARDRAIL_TOKEN"
@@ -224,6 +233,22 @@ webhook_fail_closed = true
     assert_eq!(
         loaded.gateway.admin_tokens[1].tenant_id.as_deref(),
         Some("tenant-a")
+    );
+    assert_eq!(
+        loaded.gateway.admin_tokens[1].team_id.as_deref(),
+        Some("platform")
+    );
+    assert_eq!(
+        loaded.gateway.admin_tokens[1].project_id.as_deref(),
+        Some("codex-gateway")
+    );
+    assert_eq!(
+        loaded.gateway.admin_tokens[1].user_id.as_deref(),
+        Some("alice@example.com")
+    );
+    assert_eq!(
+        loaded.gateway.admin_tokens[1].budget_id.as_deref(),
+        Some("budget-platform")
     );
     assert_eq!(
         loaded.gateway.sso.proxy_token_env.as_deref(),
@@ -285,6 +310,22 @@ webhook_fail_closed = true
         loaded.gateway.virtual_keys[0].tenant_id.as_deref(),
         Some("tenant-a")
     );
+    assert_eq!(
+        loaded.gateway.virtual_keys[0].team_id.as_deref(),
+        Some("platform")
+    );
+    assert_eq!(
+        loaded.gateway.virtual_keys[0].project_id.as_deref(),
+        Some("codex-gateway")
+    );
+    assert_eq!(
+        loaded.gateway.virtual_keys[0].user_id.as_deref(),
+        Some("alice@example.com")
+    );
+    assert_eq!(
+        loaded.gateway.virtual_keys[0].budget_id.as_deref(),
+        Some("budget-platform")
+    );
     assert_eq!(loaded.gateway.virtual_keys[0].budget_usd, Some(12.5));
     assert_eq!(loaded.gateway.virtual_keys[0].request_budget, Some(1000));
     assert_eq!(
@@ -328,6 +369,7 @@ webhook_fail_closed = true
         loaded.gateway.guardrails.prompt_injection_detection,
         Some(true)
     );
+    assert_eq!(loaded.gateway.guardrails.pii_redaction, Some(true));
     assert_eq!(
         loaded.gateway.guardrails.webhook_url.as_deref(),
         Some("https://guardrails.example/check")
@@ -371,6 +413,33 @@ allowed_key_prefixes = [""]
     assert!(
         err.to_string()
             .contains("gateway.admin_tokens[0].allowed_key_prefixes[0]")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_empty_gateway_admin_governance_scope() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-admin-empty-governance-scope");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.admin_tokens]]
+name = "scoped"
+token_env = "PRODEX_GATEWAY_SCOPED_TOKEN"
+team_id = ""
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.admin_tokens[0].team_id"),
+        "{err:#}"
     );
 
     let _ = fs::remove_dir_all(root);

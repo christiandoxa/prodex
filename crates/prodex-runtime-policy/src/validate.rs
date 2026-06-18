@@ -3,6 +3,12 @@ use secret_store::SecretBackendKind;
 use std::path::Path;
 
 use crate::types::{PRODEX_POLICY_VERSION, RuntimePolicyFile};
+use crate::validate_helpers::{
+    gateway_observability_http_endpoint_has_http_host, validate_gateway_admin_role,
+    validate_gateway_guardrail_webhook_phase, validate_gateway_observability_http_schema,
+    validate_gateway_route_strategy, validate_gateway_state_backend, validate_optional_i64_percent,
+    validate_optional_u64, validate_optional_usize, validate_optional_usize_allow_zero,
+};
 
 pub fn parse_secret_backend_kind(value: &str) -> Result<SecretBackendKind> {
     value
@@ -148,6 +154,16 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
         if matches!(token.tenant_id.as_deref().map(str::trim), Some("")) {
             bail!("{field}.tenant_id in {} cannot be empty", path.display());
         }
+        for (name, value) in [
+            ("team_id", token.team_id.as_deref()),
+            ("project_id", token.project_id.as_deref()),
+            ("user_id", token.user_id.as_deref()),
+            ("budget_id", token.budget_id.as_deref()),
+        ] {
+            if matches!(value.map(str::trim), Some("")) {
+                bail!("{field}.{name} in {} cannot be empty", path.display());
+            }
+        }
         for (prefix_index, prefix) in token.allowed_key_prefixes.iter().enumerate() {
             if prefix.trim().is_empty() {
                 bail!(
@@ -220,6 +236,16 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
         }
         if matches!(key.tenant_id.as_deref().map(str::trim), Some("")) {
             bail!("{field}.tenant_id in {} cannot be empty", path.display());
+        }
+        for (name, value) in [
+            ("team_id", key.team_id.as_deref()),
+            ("project_id", key.project_id.as_deref()),
+            ("user_id", key.user_id.as_deref()),
+            ("budget_id", key.budget_id.as_deref()),
+        ] {
+            if matches!(value.map(str::trim), Some("")) {
+                bail!("{field}.{name} in {} cannot be empty", path.display());
+            }
         }
         for (model_index, model) in key.allowed_models.iter().enumerate() {
             if model.trim().is_empty() {
@@ -390,21 +416,6 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     Ok(())
 }
 
-fn validate_gateway_route_strategy(value: &str) -> Result<()> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "fallback" | "ordered-fallback" | "ordered_fallback" | "round-robin" | "round_robin"
-        | "rr" | "first" | "first-available" | "first_available" | "ordered" | "least-busy"
-        | "least_busy" | "least-busy-model" | "least_busy_model" | "lowest-cost"
-        | "lowest_cost" | "cost" | "cost-optimized" | "cost_optimized" | "lowest-latency"
-        | "lowest_latency" | "latency" | "latency-optimized" | "latency_optimized" | "rpm"
-        | "rpm-headroom" | "rpm_headroom" | "tpm" | "tpm-headroom" | "tpm_headroom" => Ok(()),
-        "" => bail!("strategy cannot be empty"),
-        _ => bail!(
-            "strategy must be one of fallback, round-robin, first, least-busy, lowest-cost, lowest-latency, rpm, tpm"
-        ),
-    }
-}
-
 fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let sso = &policy.gateway.sso;
     if matches!(sso.proxy_token_env.as_deref().map(str::trim), Some("")) {
@@ -470,53 +481,6 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
         })?;
     }
     Ok(())
-}
-
-fn validate_gateway_observability_http_schema(value: &str) -> Result<()> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "generic" | "otel" | "opentelemetry" | "datadog" | "langfuse" => Ok(()),
-        "" => bail!("schema cannot be empty"),
-        _ => bail!("schema must be one of generic, otel, datadog, langfuse"),
-    }
-}
-
-fn validate_gateway_state_backend(value: &str) -> Result<()> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "file" | "sqlite" | "postgres" | "redis" => Ok(()),
-        "" => bail!("backend cannot be empty"),
-        _ => bail!("backend must be one of file, sqlite, postgres, redis"),
-    }
-}
-
-fn validate_gateway_admin_role(value: &str) -> Result<()> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "admin" | "write" | "writer" | "viewer" | "read" | "readonly" | "read-only" => Ok(()),
-        "" => bail!("role cannot be empty"),
-        _ => bail!("role must be one of admin, viewer"),
-    }
-}
-
-fn validate_gateway_guardrail_webhook_phase(value: &str) -> Result<()> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "pre" | "request" | "post" | "response" => Ok(()),
-        "" => bail!("phase cannot be empty"),
-        _ => bail!("phase must be one of pre, post"),
-    }
-}
-
-fn gateway_observability_http_endpoint_has_http_host(value: &str) -> bool {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return false;
-    };
-    if !matches!(scheme, "http" | "https") {
-        return false;
-    }
-    let host = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default()
-        .trim();
-    !host.is_empty() && !host.contains('@')
 }
 
 pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
@@ -720,37 +684,6 @@ pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) ->
         "runtime_proxy.startup_sync_probe_warm_limit",
     )?;
 
-    Ok(())
-}
-
-fn validate_optional_usize(value: Option<usize>, path: &Path, field: &str) -> Result<()> {
-    if matches!(value, Some(0)) {
-        bail!("{field} in {} must be greater than 0", path.display());
-    }
-    Ok(())
-}
-
-fn validate_optional_usize_allow_zero(
-    _value: Option<usize>,
-    _path: &Path,
-    _field: &str,
-) -> Result<()> {
-    Ok(())
-}
-
-fn validate_optional_u64(value: Option<u64>, path: &Path, field: &str) -> Result<()> {
-    if matches!(value, Some(0)) {
-        bail!("{field} in {} must be greater than 0", path.display());
-    }
-    Ok(())
-}
-
-fn validate_optional_i64_percent(value: Option<i64>, path: &Path, field: &str) -> Result<()> {
-    if let Some(value) = value
-        && !(1..=10).contains(&value)
-    {
-        bail!("{field} in {} must be between 1 and 10", path.display());
-    }
     Ok(())
 }
 

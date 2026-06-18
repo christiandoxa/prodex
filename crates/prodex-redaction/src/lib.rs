@@ -32,6 +32,20 @@ pub fn redaction_redacted_body_snippet(body: &[u8], max_chars: usize) -> String 
     redaction_text_snippet(&redacted, max_chars)
 }
 
+pub fn redaction_redact_gateway_body(body: &[u8]) -> Option<Vec<u8>> {
+    match serde_json::from_slice::<serde_json::Value>(body) {
+        Ok(mut value) => {
+            let changed = redaction_redact_gateway_json_value(&mut value);
+            changed.then(|| serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
+        }
+        Err(_) => {
+            let text = String::from_utf8_lossy(body);
+            let redacted = redaction_redact_gateway_text(&text);
+            (redacted.as_bytes() != body).then(|| redacted.into_bytes())
+        }
+    }
+}
+
 pub fn redaction_redacted_headers_debug(headers: &[(String, String)]) -> String {
     let redacted_headers = headers
         .iter()
@@ -167,10 +181,107 @@ fn redaction_redact_sensitive_header_value(name: &str, value: &str) -> String {
     REDACTED.to_string()
 }
 
-fn redaction_redact_secret_like_text(value: &str) -> String {
+pub fn redaction_redact_secret_like_text(value: &str) -> String {
     let value = redaction_redact_sensitive_key_value_text(value);
     let value = redaction_redact_bearer_like_values(&value);
     redaction_redact_prefixed_api_key_tokens(&value)
+}
+
+fn redaction_redact_gateway_json_value(value: &mut serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut changed = false;
+            for (key, value) in map.iter_mut() {
+                if redaction_key_looks_sensitive(key) {
+                    if value != &serde_json::Value::String(REDACTED.to_string()) {
+                        *value = serde_json::Value::String(REDACTED.to_string());
+                        changed = true;
+                    }
+                } else {
+                    changed |= redaction_redact_gateway_json_value(value);
+                }
+            }
+            changed
+        }
+        serde_json::Value::Array(values) => {
+            let mut changed = false;
+            for value in values {
+                changed |= redaction_redact_gateway_json_value(value);
+            }
+            changed
+        }
+        serde_json::Value::String(value) => {
+            let redacted = redaction_redact_gateway_text(value);
+            if redacted != *value {
+                *value = redacted;
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn redaction_redact_gateway_text(value: &str) -> String {
+    let value = redaction_redact_secret_like_text(value);
+    let value = redaction_redact_email_tokens(&value);
+    redaction_redact_long_digit_tokens(&value)
+}
+
+fn redaction_redact_email_tokens(value: &str) -> String {
+    redaction_redact_matching_tokens(value, redaction_token_byte, |token| {
+        let Some((local, domain)) = token.split_once('@') else {
+            return false;
+        };
+        !local.is_empty() && domain.contains('.') && domain.split('.').all(|part| !part.is_empty())
+    })
+}
+
+fn redaction_redact_long_digit_tokens(value: &str) -> String {
+    redaction_redact_matching_tokens(value, redaction_digit_group_byte, |token| {
+        let digit_count = token.bytes().filter(u8::is_ascii_digit).count();
+        (13..=19).contains(&digit_count)
+    })
+}
+
+fn redaction_redact_matching_tokens<F, G>(value: &str, token_byte: F, should_redact: G) -> String
+where
+    F: Fn(u8) -> bool,
+    G: Fn(&str) -> bool,
+{
+    let mut redacted = String::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if token_byte(bytes[index]) {
+            let start = index;
+            while index < bytes.len() && token_byte(bytes[index]) {
+                index += 1;
+            }
+            let token = &value[start..index];
+            if should_redact(token) {
+                redacted.push_str(REDACTED);
+            } else {
+                redacted.push_str(token);
+            }
+            continue;
+        }
+        let Some(ch) = value[index..].chars().next() else {
+            break;
+        };
+        redacted.push(ch);
+        index += ch.len_utf8();
+    }
+    redacted
+}
+
+fn redaction_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'%' | b'+' | b'-' | b'@')
+}
+
+fn redaction_digit_group_byte(byte: u8) -> bool {
+    byte.is_ascii_digit() || matches!(byte, b' ' | b'-')
 }
 
 fn redaction_redact_sensitive_key_value_text(value: &str) -> String {

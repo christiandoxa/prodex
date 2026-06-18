@@ -132,6 +132,18 @@ export class ProdexGatewayClient {
     });
   }
 
+  async observability(options = {}) {
+    return this.request("/v1/prodex/gateway/observability", { signal: options.signal });
+  }
+
+  async guardrails(options = {}) {
+    return this.request("/v1/prodex/gateway/guardrails", { signal: options.signal });
+  }
+
+  async providers(options = {}) {
+    return this.request("/v1/prodex/gateway/providers", { signal: options.signal });
+  }
+
   async request(path, options = {}) {
     const headers = new Headers(options.headers ?? {});
     if (this.token && !headers.has("authorization")) {

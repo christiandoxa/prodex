@@ -2057,6 +2057,7 @@ version = "0.190.0"
 dependencies = [
  "base64",
  "prodex-provider-core",
+ "prodex-redaction",
  "prodex-runtime-state",
  "prodex-runtime-tuning",
  "serde",

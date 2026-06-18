@@ -124,6 +124,39 @@ fn redaction_body_masks_plain_text_secret_assignments() {
 }
 
 #[test]
+fn redaction_gateway_body_masks_pii_and_secret_like_content() {
+    let bearer_token = fake_named_secret("gateway_bearer");
+    let prefixed_key = fake_api_key("sk-proj-", "gateway");
+    let body = serde_json::to_vec(&serde_json::json!({
+        "model": "gpt-5.4",
+        "input": [
+            {
+                "type": "input_text",
+                "text": format!(
+                    "email alice@example.com card 4111-1111-1111-1111 bearer {bearer_token} key {prefixed_key}"
+                )
+            },
+            {
+                "type": "input_text",
+                "text": "bob@example.org"
+            }
+        ]
+    }))
+    .expect("test body should serialize");
+
+    let redacted = redaction_redact_gateway_body(&body).expect("body should change");
+    let redacted = String::from_utf8(redacted).expect("redacted body should be utf8");
+
+    assert!(redacted.contains("\"model\":\"gpt-5.4\""));
+    assert!(redacted.contains("<redacted>"));
+    assert!(!redacted.contains("alice@example.com"));
+    assert!(!redacted.contains("bob@example.org"));
+    assert!(!redacted.contains("4111-1111-1111-1111"));
+    assert!(!redacted.contains(bearer_token.as_str()));
+    assert!(!redacted.contains(prefixed_key.as_str()));
+}
+
+#[test]
 fn redaction_cli_args_mask_sensitive_flags_and_inline_values() {
     let api_value = fake_named_secret("cli_flag");
     let config_token = fake_named_secret("config_token");

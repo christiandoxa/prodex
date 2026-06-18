@@ -1,20 +1,13 @@
 use prodex_provider_core::{
-    ProviderAdapterContract, ProviderEndpoint, ProviderId, ProviderWireFormat, provider_adapter,
-    provider_model_catalog, provider_model_fallback_chain,
+    PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContract, ProviderEndpoint, ProviderId,
+    ProviderTransformPhase, ProviderWireFormat, extract_usage_tokens, provider_adapter,
+    provider_adapter_contract_matrix, provider_model_catalog, provider_model_fallback_chain,
+    provider_replay_cases,
 };
-
-const PROVIDERS: &[ProviderId] = &[
-    ProviderId::OpenAi,
-    ProviderId::Anthropic,
-    ProviderId::Copilot,
-    ProviderId::DeepSeek,
-    ProviderId::Gemini,
-    ProviderId::Local,
-];
 
 #[test]
 fn adapters_publish_required_contract_surface() {
-    for provider in PROVIDERS {
+    for provider in PROVIDER_CONTRACT_PROVIDERS {
         let adapter = provider_adapter(*provider);
         assert_eq!(adapter.provider(), *provider);
         assert_eq!(
@@ -40,7 +33,7 @@ fn adapters_publish_required_contract_surface() {
 
 #[test]
 fn model_catalog_entries_are_provider_scoped_and_unique() {
-    for provider in PROVIDERS {
+    for provider in PROVIDER_CONTRACT_PROVIDERS {
         let mut seen = Vec::new();
         for model in provider_model_catalog(*provider) {
             assert_eq!(model.provider, *provider);
@@ -67,7 +60,7 @@ fn model_catalog_entries_are_provider_scoped_and_unique() {
 #[test]
 fn adapter_transform_contract_preserves_body_and_declares_formats() {
     let body = br#"{"model":"auto","input":"hello"}"#;
-    for provider in PROVIDERS {
+    for provider in PROVIDER_CONTRACT_PROVIDERS {
         let adapter = provider_adapter(*provider);
 
         let request = adapter.transform_request_body(body);
@@ -84,6 +77,68 @@ fn adapter_transform_contract_preserves_body_and_declares_formats() {
         assert_eq!(response.body, body);
         assert!(!response.lossy);
     }
+}
+
+#[test]
+fn provider_replay_cases_exercise_transform_usage_and_fallback_contracts() {
+    let cases = provider_replay_cases();
+    assert_eq!(cases.len(), PROVIDER_CONTRACT_PROVIDERS.len());
+    for case in cases {
+        let adapter = provider_adapter(case.provider);
+
+        let request = adapter.transform_request_body(case.request_body);
+        assert_eq!(
+            request.phase,
+            ProviderTransformPhase::ClientRequestToUpstream
+        );
+        assert_eq!(request.provider, case.provider);
+        assert_eq!(request.from_format, adapter.client_request_format());
+        assert_eq!(request.to_format, adapter.upstream_request_format());
+        assert_eq!(request.body, case.request_body);
+        assert!(!request.lossy);
+        assert!(adapter.estimate_input_tokens(case.request_body) > 0);
+
+        let response = adapter.transform_response_body(case.response_body);
+        assert_eq!(
+            response.phase,
+            ProviderTransformPhase::UpstreamResponseToClient
+        );
+        assert_eq!(response.provider, case.provider);
+        assert_eq!(response.from_format, adapter.upstream_request_format());
+        assert_eq!(response.to_format, adapter.response_format());
+        assert_eq!(response.body, case.response_body);
+        assert!(!response.lossy);
+
+        let usage = extract_usage_tokens(case.response_body);
+        assert_eq!(usage.input_tokens, case.expected_input_tokens);
+        assert_eq!(usage.output_tokens, case.expected_output_tokens);
+
+        let fallback = adapter.fallback_chain(case.model);
+        if adapter.supports_model_fallback() {
+            assert!(
+                !fallback.is_empty(),
+                "{:?} should have fallback",
+                case.provider
+            );
+        } else {
+            assert_eq!(fallback, vec![case.model.to_string()]);
+        }
+    }
+}
+
+#[test]
+fn public_contract_matrix_is_machine_readable() {
+    let matrix = provider_adapter_contract_matrix();
+    assert_eq!(matrix.len(), PROVIDER_CONTRACT_PROVIDERS.len());
+    let json = serde_json::to_value(&matrix).expect("contract matrix should serialize");
+    assert_eq!(json[0]["provider"], "openai");
+    assert!(
+        json[0]["supported_endpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|endpoint| endpoint == "responses")
+    );
 }
 
 #[test]

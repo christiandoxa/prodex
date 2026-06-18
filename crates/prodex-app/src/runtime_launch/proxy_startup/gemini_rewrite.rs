@@ -16,6 +16,20 @@ mod gemini_command_output;
 mod gemini_history_hardening;
 #[path = "gemini_request.rs"]
 mod gemini_request;
+#[path = "gemini_request_extensions.rs"]
+mod gemini_request_extensions;
+#[path = "gemini_request_generation.rs"]
+mod gemini_request_generation;
+#[path = "gemini_request_io.rs"]
+mod gemini_request_io;
+#[path = "gemini_request_media.rs"]
+mod gemini_request_media;
+#[path = "gemini_request_policy.rs"]
+mod gemini_request_policy;
+#[path = "gemini_request_session.rs"]
+mod gemini_request_session;
+#[path = "gemini_request_tool_output.rs"]
+mod gemini_request_tool_output;
 #[path = "gemini_response.rs"]
 mod gemini_response;
 #[path = "gemini_schema.rs"]
@@ -330,8 +344,36 @@ mod native_url_tests {
 mod gemini_rewrite_command_output_tests;
 
 #[cfg(test)]
+#[path = "gemini_rewrite_context_tests.rs"]
+mod gemini_rewrite_context_tests;
+
+#[cfg(test)]
 #[path = "gemini_rewrite_history_tests.rs"]
 mod gemini_rewrite_history_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_leak_tests.rs"]
+mod gemini_rewrite_leak_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_media_tests.rs"]
+mod gemini_rewrite_media_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_optional_tool_tests.rs"]
+mod gemini_rewrite_optional_tool_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_status_tests.rs"]
+mod gemini_rewrite_status_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_thought_and_native_tool_tests.rs"]
+mod gemini_rewrite_thought_and_native_tool_tests;
+
+#[cfg(test)]
+#[path = "gemini_rewrite_tool_output_history_tests.rs"]
+mod gemini_rewrite_tool_output_history_tests;
 
 #[cfg(test)]
 #[path = "gemini_rewrite_test_support.rs"]

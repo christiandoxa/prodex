@@ -1,6 +1,14 @@
 use super::gemini_rewrite::{
-    runtime_gemini_normalized_response_value, runtime_gemini_responses_value_from_generate_value,
+    RuntimeGeminiProviderAuth, runtime_gemini_normalized_response_value,
+    runtime_gemini_responses_value_from_generate_value,
 };
+use super::local_rewrite::{
+    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+};
+use super::local_rewrite_gemini::send_runtime_gemini_upstream_request;
+use super::local_rewrite_response::runtime_local_rewrite_response_with_call_id;
+use super::*;
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result, bail};
 use prodex_runtime_gemini::GEMINI_CHAT_COMPRESSION_MODEL;
@@ -18,6 +26,104 @@ const GEMINI_LOCAL_COMPACT_MAX_SNIPPET_BYTES: usize = 768;
 const GEMINI_LOCAL_COMPACT_MAX_SUMMARY_BYTES: usize = 24 * 1024;
 const GEMINI_SEMANTIC_COMPACT_ACTIVE_USER_MAX_BYTES: usize = 2 * 1024;
 const GEMINI_SEMANTIC_COMPACT_LATEST_TOOL_MAX_BYTES: usize = 1024;
+
+pub(super) fn respond_runtime_gemini_compact_request(
+    request_id: u64,
+    request: tiny_http::Request,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    auth: &RuntimeGeminiProviderAuth,
+) {
+    let semantic = runtime_gemini_semantic_compact_request_body(&captured.body).and_then(|body| {
+        let semantic_request = RuntimeProxyRequest {
+            method: captured.method.clone(),
+            path_and_query: format!("{}/responses", shared.mount_path.trim_end_matches('/')),
+            headers: captured.headers.clone(),
+            body: body.clone(),
+        };
+        let result = send_runtime_gemini_upstream_request(
+            request_id,
+            &semantic_request,
+            shared,
+            body,
+            auth,
+        )?;
+        let RuntimeLocalRewriteUpstreamResult {
+            response,
+            gemini_context,
+            ..
+        } = result;
+        let profile_name = gemini_context
+            .as_ref()
+            .map(|context| context.profile_name.as_str())
+            .unwrap_or(RUNTIME_LOCAL_REWRITE_PROFILE);
+        let parts = match response {
+            RuntimeLocalRewriteUpstreamResponse::Live(live) if live.prefix.is_empty() => {
+                let status = live.response.status().as_u16();
+                runtime_gemini_semantic_compact_response_parts(
+                    status,
+                    live.response,
+                    request_id,
+                    &captured.body,
+                )?
+            }
+            RuntimeLocalRewriteUpstreamResponse::Live(_) => {
+                bail!("Gemini semantic compact unexpectedly returned a stream prefix")
+            }
+            RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
+                bail!(
+                    "Gemini semantic compact returned buffered HTTP {}",
+                    parts.status
+                )
+            }
+        };
+        Ok((parts, profile_name.to_string()))
+    });
+
+    let parts = match semantic {
+        Ok((parts, profile_name)) => {
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "local_rewrite_gemini_compact_semantic",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("profile", profile_name),
+                        runtime_proxy_log_field(
+                            "path",
+                            path_without_query(&captured.path_and_query),
+                        ),
+                        runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
+                    ],
+                ),
+            );
+            parts
+        }
+        Err(err) => {
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "local_rewrite_gemini_compact_fallback",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field(
+                            "path",
+                            path_without_query(&captured.path_and_query),
+                        ),
+                        runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
+                        runtime_proxy_log_field("reason", format!("{err:#}")),
+                    ],
+                ),
+            );
+            runtime_gemini_local_compact_response_parts(&captured.body)
+        }
+    };
+    let _ = request.respond(runtime_local_rewrite_response_with_call_id(
+        parts, request_id, shared,
+    ));
+}
 
 pub(super) fn runtime_gemini_semantic_compact_request_body(body: &[u8]) -> Result<Vec<u8>> {
     let mut value: serde_json::Value =

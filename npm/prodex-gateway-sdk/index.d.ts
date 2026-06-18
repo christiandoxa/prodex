@@ -15,6 +15,10 @@ export interface GatewayKeyCreateRequest {
   name: string;
   token?: string;
   tenant_id?: string | null;
+  team_id?: string | null;
+  project_id?: string | null;
+  user_id?: string | null;
+  budget_id?: string | null;
   allowed_models?: string[];
   budget_microusd?: number | null;
   budget_usd?: number | null;
@@ -40,6 +44,10 @@ export interface GatewayUsage {
 export interface GatewayKey {
   name: string;
   tenant_id?: string | null;
+  team_id?: string | null;
+  project_id?: string | null;
+  user_id?: string | null;
+  budget_id?: string | null;
   source: "policy" | "admin" | string;
   disabled: boolean;
   editable: boolean;
@@ -95,6 +103,10 @@ export interface GatewayBillingLedger {
 export interface GatewayBillingSummaryBucket {
   key_name?: string | null;
   model?: string | null;
+  team_id?: string | null;
+  project_id?: string | null;
+  user_id?: string | null;
+  budget_id?: string | null;
   requests: number;
   successful_requests: number;
   failed_requests: number;
@@ -120,6 +132,54 @@ export interface GatewayBillingSummary {
   by_key: GatewayBillingSummaryBucket[];
   by_model: GatewayBillingSummaryBucket[];
   by_key_model: GatewayBillingSummaryBucket[];
+  by_team?: GatewayBillingSummaryBucket[];
+  by_project?: GatewayBillingSummaryBucket[];
+  by_user?: GatewayBillingSummaryBucket[];
+  by_budget?: GatewayBillingSummaryBucket[];
+}
+
+export interface GatewayObservability {
+  object: string;
+  call_id_header?: string | null;
+  sinks: string[];
+  jsonl_path?: string | null;
+  http_endpoint?: string | null;
+  http_schema: string;
+  http_bearer_token_configured: boolean;
+}
+
+export interface GatewayGuardrails {
+  object: string;
+  blocked_keywords_count: number;
+  blocked_output_keywords_count: number;
+  allowed_models: string[];
+  prompt_injection_detection: boolean;
+  pii_redaction: boolean;
+  webhook: {
+    configured: boolean;
+    phases: string[];
+    bearer_token_configured: boolean;
+    fail_closed: boolean;
+  };
+}
+
+export interface GatewayProviderContract {
+  provider: string;
+  client_request_format: string;
+  upstream_request_format: string;
+  response_format: string;
+  canonical_client_endpoint: string;
+  model_list_endpoint: string;
+  supports_streaming: boolean;
+  supports_model_fallback: boolean;
+  supported_endpoints: string[];
+  model_count: number;
+  replay_case_count: number;
+}
+
+export interface GatewayProviders {
+  object: string;
+  providers: GatewayProviderContract[];
 }
 
 export interface GatewayKeyResponse {
@@ -136,6 +196,10 @@ export interface GatewayKeyDeleted {
 
 export interface GatewayScimProdexUserExtension {
   tenant_id?: string | null;
+  team_id?: string | null;
+  project_id?: string | null;
+  user_id?: string | null;
+  budget_id?: string | null;
   role?: "admin" | "viewer" | string | null;
   allowed_key_prefixes?: string[];
 }
@@ -146,6 +210,10 @@ export interface GatewayScimUserWrite {
   displayName?: string | null;
   active?: boolean;
   tenant_id?: string | null;
+  team_id?: string | null;
+  project_id?: string | null;
+  user_id?: string | null;
+  budget_id?: string | null;
   role?: "admin" | "viewer" | string | null;
   allowed_key_prefixes?: string[];
   "urn:prodex:params:scim:schemas:gateway:2.0:User"?: GatewayScimProdexUserExtension;
@@ -172,6 +240,10 @@ export interface GatewayScimUser {
   displayName?: string | null;
   active: boolean;
   tenant_id?: string | null;
+  team_id?: string | null;
+  project_id?: string | null;
+  user_id?: string | null;
+  budget_id?: string | null;
   meta?: Record<string, unknown>;
   "urn:prodex:params:scim:schemas:gateway:2.0:User"?: GatewayScimProdexUserExtension;
 }
@@ -220,6 +292,9 @@ export class ProdexGatewayClient {
   billingSummaryCsv(options?: ProdexGatewayRequestOptions): Promise<string>;
   openapi<T = unknown>(options?: ProdexGatewayRequestOptions): Promise<T>;
   metrics(options?: ProdexGatewayRequestOptions): Promise<string>;
+  observability(options?: ProdexGatewayRequestOptions): Promise<GatewayObservability>;
+  guardrails(options?: ProdexGatewayRequestOptions): Promise<GatewayGuardrails>;
+  providers(options?: ProdexGatewayRequestOptions): Promise<GatewayProviders>;
   request<T = unknown>(
     path: string,
     options?: ProdexGatewayRequestOptions & {

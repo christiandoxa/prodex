@@ -18,7 +18,13 @@ use self::tools::{
     runtime_deepseek_tools_from_responses_request,
     runtime_deepseek_web_search_options_from_responses_request,
 };
-pub(super) use super::deepseek_sse::RuntimeDeepSeekChatSseReader;
+use super::deepseek_content::{
+    runtime_deepseek_responses_content_text, runtime_deepseek_responses_content_text_value,
+};
+use super::deepseek_reasoning::{
+    runtime_deepseek_apply_reasoning_from_responses_request, runtime_deepseek_thinking_enabled,
+};
+pub(super) use super::deepseek_sse_reader::RuntimeDeepSeekChatSseReader;
 use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_canonical_model};
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
@@ -629,124 +635,6 @@ fn runtime_deepseek_tool_output_text(
         .unwrap_or_default()
 }
 
-fn runtime_deepseek_responses_content_text(value: Option<&serde_json::Value>) -> String {
-    match value {
-        Some(serde_json::Value::String(text)) => text.clone(),
-        Some(serde_json::Value::Array(parts)) => parts
-            .iter()
-            .filter_map(runtime_deepseek_responses_content_part_text)
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Some(other) => other.to_string(),
-        None => String::new(),
-    }
-}
-
-fn runtime_deepseek_responses_content_text_value(value: &serde_json::Value) -> String {
-    runtime_deepseek_responses_content_text(Some(value))
-}
-
-fn runtime_deepseek_responses_content_part_text(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(text) => Some(text.clone()),
-        serde_json::Value::Object(object) => object
-            .get("text")
-            .and_then(serde_json::Value::as_str)
-            .or_else(|| object.get("input_text").and_then(serde_json::Value::as_str))
-            .or_else(|| {
-                object
-                    .get("output_text")
-                    .and_then(serde_json::Value::as_str)
-            })
-            .map(str::to_string),
-        _ => None,
-    }
-}
-
-fn runtime_deepseek_apply_reasoning_from_responses_request(
-    value: &serde_json::Value,
-    request: &mut serde_json::Map<String, serde_json::Value>,
-    provider_kind: RuntimeProviderBridgeKind,
-) {
-    let effort = value
-        .get("reasoning")
-        .and_then(|reasoning| reasoning.get("effort"))
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            value
-                .get("reasoning_effort")
-                .and_then(serde_json::Value::as_str)
-        });
-    if provider_kind == RuntimeProviderBridgeKind::Gemini {
-        if let Some(effort) = effort.and_then(runtime_gemini_openai_reasoning_effort) {
-            request.insert(
-                "reasoning_effort".to_string(),
-                serde_json::Value::String(effort.to_string()),
-            );
-        }
-        return;
-    }
-    match effort.and_then(runtime_deepseek_reasoning_effort) {
-        Some(Some(effort)) => {
-            request.insert(
-                "thinking".to_string(),
-                serde_json::json!({"type": "enabled"}),
-            );
-            request.insert(
-                "reasoning_effort".to_string(),
-                serde_json::Value::String(effort.to_string()),
-            );
-        }
-        Some(None) => {
-            request.insert(
-                "thinking".to_string(),
-                serde_json::json!({"type": "disabled"}),
-            );
-        }
-        None => {}
-    }
-}
-
-fn runtime_gemini_openai_reasoning_effort(effort: &str) -> Option<&'static str> {
-    match effort.trim().to_ascii_lowercase().as_str() {
-        "xhigh" | "max" | "high" => Some("high"),
-        "medium" => Some("medium"),
-        "low" => Some("low"),
-        "minimal" => Some("minimal"),
-        "none" => Some("none"),
-        _ => None,
-    }
-}
-
-fn runtime_deepseek_thinking_enabled(value: &serde_json::Value) -> bool {
-    runtime_deepseek_reasoning_effort_from_responses_request(value)
-        .and_then(runtime_deepseek_reasoning_effort)
-        .is_some_and(|effort| effort.is_some())
-}
-
-fn runtime_deepseek_reasoning_effort_from_responses_request(
-    value: &serde_json::Value,
-) -> Option<&str> {
-    value
-        .get("reasoning")
-        .and_then(|reasoning| reasoning.get("effort"))
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            value
-                .get("reasoning_effort")
-                .and_then(serde_json::Value::as_str)
-        })
-}
-
-fn runtime_deepseek_reasoning_effort(effort: &str) -> Option<Option<&'static str>> {
-    match effort.trim().to_ascii_lowercase().as_str() {
-        "xhigh" | "max" => Some(Some("max")),
-        "high" | "medium" | "low" => Some(Some("high")),
-        "minimal" | "none" => Some(None),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 #[path = "deepseek_optional_tools_tests.rs"]
 mod deepseek_optional_tools_tests;
@@ -754,6 +642,10 @@ mod deepseek_optional_tools_tests;
 #[cfg(test)]
 #[path = "deepseek_provider_tool_tests.rs"]
 mod deepseek_provider_tool_tests;
+
+#[cfg(test)]
+#[path = "deepseek_rewrite_rtk_tests.rs"]
+mod deepseek_rewrite_rtk_tests;
 
 #[cfg(test)]
 #[path = "deepseek_rewrite_tests.rs"]

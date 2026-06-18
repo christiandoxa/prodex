@@ -3,6 +3,7 @@ mod load;
 mod paths;
 mod types;
 mod validate;
+mod validate_helpers;
 
 pub use self::cache::clear_runtime_policy_cache;
 pub use self::load::{load_runtime_policy_cached, load_runtime_policy_from_root};

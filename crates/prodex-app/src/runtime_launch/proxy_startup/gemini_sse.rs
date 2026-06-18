@@ -3,11 +3,13 @@ use super::gemini_rewrite::runtime_gemini_normalized_response_value;
 use std::io::{self, Read};
 use std::sync::Arc;
 
+#[path = "gemini_sse_guardrails.rs"]
+mod gemini_sse_guardrails;
 #[path = "gemini_sse_state.rs"]
 mod gemini_sse_state;
 
+pub(super) use gemini_sse_guardrails::runtime_gemini_forced_command_output;
 use gemini_sse_state::RuntimeGeminiSseState;
-pub(super) use gemini_sse_state::runtime_gemini_forced_command_output;
 
 pub(super) type RuntimeGeminiBindingRecorder = Arc<dyn Fn(String, Vec<String>) + Send + Sync>;
 
@@ -209,3 +211,19 @@ impl<R: Read> Read for RuntimeGeminiGenerateSseReader<R> {
 #[cfg(test)]
 #[path = "gemini_sse_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "gemini_sse_exact_output_tests.rs"]
+mod exact_output_tests;
+
+#[cfg(test)]
+#[path = "gemini_sse_guardrail_tests.rs"]
+mod guardrail_tests;
+
+#[cfg(test)]
+#[path = "gemini_sse_media_tests.rs"]
+mod media_tests;
+
+#[cfg(test)]
+#[path = "gemini_sse_status_tests.rs"]
+mod status_tests;

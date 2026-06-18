@@ -97,6 +97,10 @@ pub struct RuntimePolicyGatewayAdminToken {
     pub token_env: String,
     pub role: Option<String>,
     pub tenant_id: Option<String>,
+    pub team_id: Option<String>,
+    pub project_id: Option<String>,
+    pub user_id: Option<String>,
+    pub budget_id: Option<String>,
     #[serde(default)]
     pub allowed_key_prefixes: Vec<String>,
 }
@@ -148,6 +152,10 @@ pub struct RuntimePolicyGatewayVirtualKey {
     pub name: String,
     pub token_env: String,
     pub tenant_id: Option<String>,
+    pub team_id: Option<String>,
+    pub project_id: Option<String>,
+    pub user_id: Option<String>,
+    pub budget_id: Option<String>,
     #[serde(default)]
     pub allowed_models: Vec<String>,
     pub budget_usd: Option<f64>,
@@ -179,6 +187,7 @@ pub struct RuntimePolicyGatewayGuardrailsSettings {
     pub allowed_models: Vec<String>,
     pub presidio_redaction: Option<bool>,
     pub prompt_injection_detection: Option<bool>,
+    pub pii_redaction: Option<bool>,
     pub webhook_url: Option<String>,
     #[serde(default)]
     pub webhook_phases: Vec<String>,

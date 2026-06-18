@@ -6,6 +6,8 @@ import {
   cargoTomlPath,
   mainPackageName,
   openaiCodexDependencySpecifier,
+  openaiCodexPlatformDependencySpecifier,
+  openaiCodexPlatformPackages,
   packageSlug,
   packageVersionPattern,
   platformPackages,
@@ -152,7 +154,17 @@ async function checkPackageManifests(version, errors) {
       mainManifest.optionalDependencies?.[spec.packageName],
       version,
     );
+  }
+  for (const spec of openaiCodexPlatformPackages) {
+    expectEqual(
+      errors,
+      `${mainPackageName} optional dependency ${spec.packageName}`,
+      mainManifest.optionalDependencies?.[spec.packageName],
+      openaiCodexPlatformDependencySpecifier(spec),
+    );
+  }
 
+  for (const spec of platformPackages) {
     const relativePath = `npm/platforms/${platformRepoDir(spec)}/package.json`;
     const manifest = await readJsonFile(path.join(repoRoot, relativePath));
     expectEqual(errors, `${relativePath} name`, manifest.name, spec.packageName);
