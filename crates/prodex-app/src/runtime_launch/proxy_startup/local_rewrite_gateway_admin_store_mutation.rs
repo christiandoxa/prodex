@@ -32,16 +32,16 @@ where
 {
     match &shared.gateway_state_store {
         RuntimeGatewayStateStore::File { key_store_path, .. } => {
-            runtime_gateway_mutate_admin_key_store_file(shared, &key_store_path, mutation)
+            runtime_gateway_mutate_admin_key_store_file(shared, key_store_path, mutation)
         }
         RuntimeGatewayStateStore::Sqlite { path } => {
-            runtime_gateway_mutate_admin_key_store_sqlite(shared, &path, mutation)
+            runtime_gateway_mutate_admin_key_store_sqlite(shared, path, mutation)
         }
         RuntimeGatewayStateStore::Postgres { url, .. } => {
-            runtime_gateway_mutate_admin_key_store_postgres(shared, &url, mutation)
+            runtime_gateway_mutate_admin_key_store_postgres(shared, url, mutation)
         }
         RuntimeGatewayStateStore::Redis { url, .. } => {
-            runtime_gateway_mutate_admin_key_store_redis(shared, &url, mutation)
+            runtime_gateway_mutate_admin_key_store_redis(shared, url, mutation)
         }
     }
 }

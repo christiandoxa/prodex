@@ -1,7 +1,6 @@
 use crate::AppPaths;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use std::fs;
-use std::io::Read;
 use std::net::SocketAddr;
 use std::sync::mpsc;
 use std::thread;
