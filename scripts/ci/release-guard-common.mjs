@@ -139,6 +139,8 @@ function isNpmVersionMetadataChange(change, filePath) {
       "npm/package-lock.json",
       "npm/prodex/package.json",
       "npm/prodex/package-lock.json",
+      "npm/prodex-gateway-sdk/package.json",
+      "npm/prodex-gateway-sdk/package-lock.json",
     ].includes(normalized) &&
     !/^npm\/platforms\/[^/]+\/package(?:-lock)?\.json$/.test(normalized)
   ) {
