@@ -57,7 +57,6 @@ Examples:
   prodex
   prodex run
   prodex super
-  prodex run mem
   prodex exec \"review this repo\"
   prodex run --profile main
   prodex run exec \"review this repo\"
@@ -71,16 +70,14 @@ Notes:
 pub const CLI_CLAUDE_AFTER_HELP: &str = "\
 Examples:
   prodex claude --print \"summarize this repo\"
-  prodex claude mem
   prodex claude caveman
-  prodex claude caveman mem
   prodex claude caveman -- -p \"summarize this repo briefly\"
   prodex claude --profile main --print \"review the latest changes\"
   prodex claude --skip-quota-check -- --help
 
 Notes:
   Prodex injects a local Anthropic-compatible proxy via `ANTHROPIC_BASE_URL`.
-  Prefix Claude args with `caveman` and/or `mem` to load the Caveman or Claude-Mem plugin for that session only.
+  Prefix Claude args with `caveman` to load the Caveman plugin for that session only.
   Use `PRODEX_CLAUDE_BIN` to point prodex at a specific Claude Code binary.
   `prodex claude` requires the default OpenAI/Codex provider; profiles that set `model_provider` to a non-OpenAI backend are not supported on this path.
   Claude defaults to the current Codex model from `config.toml` when available.
@@ -90,7 +87,6 @@ Notes:
 pub const CLI_CAVEMAN_AFTER_HELP: &str = "\
 Examples:
   prodex caveman
-  prodex caveman mem
   prodex rtk
   prodex sqz
   prodex super
@@ -102,8 +98,7 @@ Notes:
   Prodex launches Codex from a temporary overlay `CODEX_HOME` so Caveman stays isolated from the base profile.
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
-  Prefix Codex args with `mem` to point Claude-Mem transcript watching at the selected Prodex session path.
-  Add optimizer prefixes before Codex args to enable launch overlays: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `presidio`.
+  Add optimizer prefixes before Codex args to enable launch overlays: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `presidio`.
   Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex tokensavior`, and `prodex clawcompactor` map to `prodex caveman <prefix>`.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
@@ -119,11 +114,10 @@ Examples:
   prodex super --profile main
 
 Notes:
-  `prodex super` is a shortcut for `prodex caveman mem rtk sqz tokensavior clawcompactor --full-access`, with an interactive Presidio opt-in prompt before launch.
-  It always enables the Caveman overlay, the Claude-Mem transcript watcher prefix, RTK shell-command guidance, Super optimizer overlay, and launch-time full access.
-  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access`.
+  `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor --full-access`, with an interactive Presidio opt-in prompt before launch.
+  It always enables the Caveman overlay, RTK shell-command guidance, Super optimizer overlay, and launch-time full access.
+  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access`.
   Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive.
-  Use `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies in Claude-Mem recall.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Use `--provider anthropic` to route through Anthropic's OpenAI-compatible Chat Completions API. Sign in with `prodex login --with-claude`, or supply `--api-key`, ANTHROPIC_API_KEY, or ANTHROPIC_API_KEYS.

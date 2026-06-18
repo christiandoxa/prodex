@@ -13,7 +13,8 @@ pub(super) fn runtime_gateway_admin_keys_payload(
     admin_auth: Option<&RuntimeGatewayAdminAuth>,
 ) -> serde_json::Value {
     let usage = shared
-        .gateway_virtual_key_usage
+        .gateway_usage
+        .usage
         .lock()
         .map(|usage| usage.clone())
         .unwrap_or_default();
@@ -62,7 +63,7 @@ pub(super) fn runtime_gateway_admin_keys_payload(
         "state_backend": shared.gateway_state_store.label(),
         "state_path": shared.gateway_state_store.key_store_path().display().to_string(),
         "key_store_path": shared.gateway_virtual_key_store_path.display().to_string(),
-        "usage_path": shared.gateway_virtual_key_usage_path.as_ref().map(|path| path.display().to_string()),
+        "usage_path": shared.gateway_usage.path.as_ref().map(|path| path.display().to_string()),
         "unknown_persisted_keys": unknown_persisted_keys,
     })
 }

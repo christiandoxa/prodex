@@ -155,7 +155,6 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
         "32000",
         "--auto-compact-token-limit",
         "24000",
-        "--mem-full",
         "exec",
         "review",
         "--dangerously-bypass-approvals-and-sandbox",
@@ -177,7 +176,6 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
         "32000",
         "--auto-compact-token-limit",
         "24000",
-        "--mem-full",
         "exec",
         "review",
         "--dangerously-bypass-approvals-and-sandbox",
@@ -196,23 +194,6 @@ fn s_profile_shortcut_selects_profile() {
 }
 
 #[test]
-fn super_mem_super_slim_expands_to_all_super_prefixes() {
-    let args = parse_super_as_caveman(&["prodex", "super", "--mem-super-slim", "exec", "review"]);
-    assert_eq!(
-        args.codex_args,
-        vec![
-            OsString::from("mem-super-slim"),
-            OsString::from("rtk"),
-            OsString::from("sqz"),
-            OsString::from("tokensavior"),
-            OsString::from("clawcompactor"),
-            OsString::from("exec"),
-            OsString::from("review")
-        ]
-    );
-}
-
-#[test]
 fn super_default_keeps_all_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
     assert!(args.full_access);
@@ -221,7 +202,6 @@ fn super_default_keeps_all_super_prefixes() {
     assert_eq!(
         args.codex_args,
         vec![
-            OsString::from("mem"),
             OsString::from("rtk"),
             OsString::from("sqz"),
             OsString::from("tokensavior"),
@@ -229,21 +209,6 @@ fn super_default_keeps_all_super_prefixes() {
             OsString::from("exec"),
             OsString::from("review")
         ]
-    );
-}
-
-#[test]
-fn super_rejects_conflicting_mem_schema_flags() {
-    assert!(
-        parse_cli_command_from([
-            "prodex",
-            "super",
-            "--mem-full",
-            "--mem-super-slim",
-            "exec",
-            "review",
-        ])
-        .is_err()
     );
 }
 
@@ -269,7 +234,6 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
     assert_eq!(
         args.into_caveman_args().codex_args,
         os_args(&[
-            "mem",
             "rtk",
             "sqz",
             "tokensavior",
@@ -290,7 +254,6 @@ fn super_includes_presidio_prefix_when_opted_in() {
     assert_eq!(
         args.into_caveman_args_with_presidio(true).codex_args,
         os_args(&[
-            "mem",
             "rtk",
             "sqz",
             "tokensavior",
@@ -314,7 +277,6 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
     assert_eq!(
         args.codex_args,
         os_args(&[
-            "mem",
             "rtk",
             "sqz",
             "tokensavior",
@@ -359,7 +321,6 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
     assert_eq!(
         args.codex_args,
         os_args(&[
-            "mem",
             "rtk",
             "sqz",
             "tokensavior",

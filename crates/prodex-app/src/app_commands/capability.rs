@@ -10,9 +10,9 @@ use terminal_ui::{print_blank_line, print_panel, print_stdout_line};
 struct ProdexCapability {
     name: &'static str,
     category: &'static str,
-    status: &'static str,
+    status: String,
     command: Option<&'static str>,
-    description: &'static str,
+    description: String,
 }
 
 pub(crate) fn handle_capability(command: CapabilityCommands) -> Result<()> {
@@ -221,16 +221,16 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
         ProdexCapability {
             name: "smart-context",
             category: "runtime",
-            status: "built-in",
+            status: "built-in".to_string(),
             command: None,
-            description: "runtime proxy context compaction and rehydration",
+            description: "runtime proxy context compaction and rehydration".to_string(),
         },
         ProdexCapability {
             name: "runtime-doctor",
             category: "diagnostics",
-            status: "built-in",
+            status: "built-in".to_string(),
             command: None,
-            description: "runtime log and pressure diagnostics",
+            description: "runtime log and pressure diagnostics".to_string(),
         },
     ]
 }
@@ -244,9 +244,12 @@ fn capability(
     ProdexCapability {
         name,
         category,
-        status: command.map(command_available_status).unwrap_or("built-in"),
+        status: command
+            .map(command_available_status)
+            .unwrap_or("built-in")
+            .to_string(),
         command,
-        description,
+        description: description.to_string(),
     }
 }
 

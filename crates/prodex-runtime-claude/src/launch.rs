@@ -8,7 +8,6 @@ use std::process::Command;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RuntimeProxyClaudeLaunchModes {
     pub caveman_mode: bool,
-    pub mem_mode: bool,
 }
 
 pub fn runtime_proxy_claude_extract_launch_modes(
@@ -19,7 +18,6 @@ pub fn runtime_proxy_claude_extract_launch_modes(
     while let Some(arg) = claude_args.get(prefix_len).and_then(|value| value.to_str()) {
         match arg {
             "caveman" => launch_modes.caveman_mode = true,
-            "mem" => launch_modes.mem_mode = true,
             _ => break,
         }
         prefix_len += 1;
@@ -50,7 +48,6 @@ pub fn runtime_proxy_claude_launch_env(
     listen_addr: SocketAddr,
     config_dir: &Path,
     codex_home: &Path,
-    mem_plugin_root: Option<&Path>,
 ) -> Vec<(&'static str, OsString)> {
     let target_model = runtime_proxy_claude_launch_model(codex_home);
     let base_url = format!("http://{listen_addr}");
@@ -68,12 +65,6 @@ pub fn runtime_proxy_claude_launch_env(
             )),
         ),
     ];
-    if let Some(plugin_root) = mem_plugin_root {
-        env.push((
-            "CLAUDE_PLUGIN_ROOT",
-            OsString::from(plugin_root.as_os_str()),
-        ));
-    }
     if runtime_anthropic_crate::runtime_proxy_claude_use_foundry_compat() {
         env.push(("CLAUDE_CODE_USE_FOUNDRY", OsString::from("1")));
         env.push(("ANTHROPIC_FOUNDRY_BASE_URL", OsString::from(base_url)));

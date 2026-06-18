@@ -47,7 +47,8 @@ pub(super) fn runtime_gateway_admin_get_key_response(
         return runtime_gateway_admin_key_scope_forbidden_response();
     }
     let usage = shared
-        .gateway_virtual_key_usage
+        .gateway_usage
+        .usage
         .lock()
         .ok()
         .and_then(|usage| usage.get(&entry.key.name).cloned());
@@ -349,7 +350,7 @@ pub(super) fn runtime_gateway_admin_update_key_response(
                 serde_json::json!({
                     "object": "gateway.key",
                     "key": entry.map(|entry| {
-                        runtime_gateway_admin_key_json(&entry, shared.gateway_virtual_key_usage.lock().ok().and_then(|usage| usage.get(&entry.key.name).cloned()))
+                        runtime_gateway_admin_key_json(&entry, shared.gateway_usage.usage.lock().ok().and_then(|usage| usage.get(&entry.key.name).cloned()))
                     }),
                     "token": rotated_token,
                 }),

@@ -70,23 +70,12 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             &current_dir,
             claude_version.as_deref(),
         )?;
-        let mem_plugin_dir = self
-            .launch_modes
-            .mem_mode
-            .then(runtime_mem_claude_plugin_dir)
-            .transpose()?;
-        if self.launch_modes.mem_mode {
-            ensure_runtime_mem_prodex_observer(&prepared.paths)?;
-        }
         let caveman_plugin_dir = self
             .launch_modes
             .caveman_mode
             .then(|| prepare_runtime_proxy_claude_caveman_plugin_dir(&prepared.paths))
             .transpose()?;
         let mut plugin_dirs = Vec::new();
-        if let Some(plugin_dir) = mem_plugin_dir.as_ref() {
-            plugin_dirs.push(plugin_dir.clone());
-        }
         if let Some(plugin_dir) = caveman_plugin_dir.as_ref() {
             plugin_dirs.push(plugin_dir.clone());
         }
@@ -95,7 +84,6 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             runtime_proxy.listen_addr,
             &claude_config_dir,
             &prepared.codex_home,
-            mem_plugin_dir.as_deref(),
         );
         Ok(RuntimeLaunchPlan::new(
             ChildProcessPlan::new(claude_bin, prepared.codex_home.clone())

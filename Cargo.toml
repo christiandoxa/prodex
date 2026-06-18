@@ -38,7 +38,6 @@ members = [
     "crates/prodex-runtime-log",
     "crates/prodex-runtime-policy",
     "crates/prodex-runtime-metrics",
-    "crates/prodex-runtime-mem",
     "crates/prodex-runtime-quota",
     "crates/prodex-runtime-state",
     "crates/prodex-runtime-store",
@@ -94,7 +93,6 @@ prodex_runtime_cookies = { package = "prodex-runtime-cookies", path = "crates/pr
 prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor", version = "0.192.0" }
 prodex_runtime_gemini = { package = "prodex-runtime-gemini", path = "crates/prodex-runtime-gemini", version = "0.192.0" }
 prodex_runtime_launch = { package = "prodex-runtime-launch", path = "crates/prodex-runtime-launch", version = "0.192.0" }
-prodex_runtime_mem = { package = "prodex-runtime-mem", path = "crates/prodex-runtime-mem", version = "0.192.0" }
 prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy", version = "0.192.0" }
 prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.192.0" }
 prodex_runtime_quota = { package = "prodex-runtime-quota", path = "crates/prodex-runtime-quota", version = "0.192.0" }

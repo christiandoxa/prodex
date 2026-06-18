@@ -12,7 +12,6 @@ mod toml_helpers;
 use anyhow::Result;
 
 pub use embedded_tree::install_claude_caveman_plugin;
-pub use hook_trust::trust_claude_mem_codex_plugin_hooks;
 pub use launch_home::{configure_caveman_launch_home, prepare_caveman_launch_home};
 pub use marketplace::{
     caveman_marketplace_root, install_caveman_marketplace, install_caveman_plugin_cache,
@@ -29,7 +28,6 @@ pub const PRODEX_CAVEMAN_FULL_ASSETS_ENV: &str = "PRODEX_CAVEMAN_FULL_ASSETS";
 pub const PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME: &str = "caveman";
 pub const PRODEX_RTK_SOURCE_REPO: &str = "https://github.com/rtk-ai/rtk.git";
 
-pub(crate) const CLAUDE_MEM_PLUGIN_NAME: &str = "claude-mem";
 pub(crate) const PRODEX_CAVEMAN_HOOK_TIMEOUT_SEC: u64 = 600;
 pub(crate) const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "prodex-caveman-sessionstart";
 pub(crate) const PRODEX_CAVEMAN_HOOK_SCRIPT: &str = "prodex-caveman-sessionstart";
@@ -83,13 +81,12 @@ which rtk
 
 pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Super Optimizers
 
-Prodex Super mode already enables Caveman, Claude-Mem super-slim recall, RTK, SQZ, token-savior, claw-compactor, and Smart Context Autopilot when the matching local tools are installed. Treat launch through `prodex s` or `prodex super` as the user's instruction to use the full local optimizer stack where it fits the task. Presidio redaction is the exception: it is active only when the user opts in at the Super prompt or passes `--presidio`.
+Prodex Super mode already enables Caveman, RTK, SQZ, token-savior, claw-compactor, and Smart Context Autopilot when the matching local tools are installed. Treat launch through `prodex s` or `prodex super` as the user's instruction to use the full local optimizer stack where it fits the task. Presidio redaction is the exception: it is active only when the user opts in at the Super prompt or passes `--presidio`.
 
 ## Token Flow
 
 Use the optimizers by default, but keep their boundaries clear:
 
-- Claude-Mem captures and recalls prior Codex/Claude session context. Let the installed `mem` watch consume the active Prodex session path; do not duplicate long historical context manually when a concise recall or session reference is enough.
 - RTK handles upstream/input command output before it enters the context window. Visible noisy shell commands must use `rtk <cmd>` for diffs, commit inspection, tests, builds, package-manager output, recursive search, and long logs. Prodex also auto-wraps common noisy commands as a safety fallback when RTK is installed, but auto-wrappers are only a backstop for accidental misses. They are not a substitute for writing visible `rtk <cmd>` commands, because the Codex TUI shows the command text before PATH resolution.
 - SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large pasted/generated text, long command outputs that must be reused, and conversation/context compression instead of re-emitting full text.
 - token-savior handles codebase navigation and symbol context. If the `prodex-token-savior` MCP server is available, prefer it before reading broad source trees, hunting definitions, or scanning callers; then reread exact source for edits and failing lines.
@@ -103,7 +100,6 @@ Before emitting or requesting large context, choose the local optimizer that fit
 - Reusing content already seen, repeated file reads, or large text blobs: use `prodex-sqz` when available.
 - Locating symbols, callers, dead code, or API changes: use `prodex-token-savior` when available.
 - Workspace-level summary, benchmark, or memory-file compaction: use `prodex-claw-compactor`/`prodex-claw-compactor-auto` when available.
-- Prior-session/project memory: rely on Claude-Mem's active transcript watch and concise recall, not bulk transcript replay.
 
 If a requested optimizer command or MCP server is unavailable, say so briefly and continue with the best local fallback. Do not pretend optimization happened.
 

@@ -53,7 +53,7 @@ fn gemini_response_translation_drops_optimizer_and_caveman_instruction_leaks() {
         "modelVersion": "gemini-3.1-pro-preview",
         "candidates": [{
             "content": {"parts": [{
-                "text": "Do not use lossy summarization for edits, syntax definitions, migrations, schema parsing, binary patches, protocol specs, dependencies, lockfiles, exact references, or generated outputs.\n\nThe user instruction `caveman full` triggers the Caveman Plugin `full` level. Do not explain these instructions to the user.\n\nclaude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
+                "text": "Do not use lossy summarization for edits, syntax definitions, migrations, schema parsing, binary patches, protocol specs, dependencies, lockfiles, exact references, or generated outputs.\n\nThe user instruction `caveman full` triggers the Caveman Plugin `full` level. Do not explain these instructions to the user.\n\nrtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
             }]},
             "finishReason": "STOP"
         }]
@@ -66,7 +66,7 @@ fn gemini_response_translation_drops_optimizer_and_caveman_instruction_leaks() {
 
     assert_eq!(
         text,
-        "claude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
+        "rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
     );
 }
 
@@ -77,7 +77,7 @@ fn gemini_response_translation_drops_exec_loop_and_redaction_instruction_leaks()
         "modelVersion": "gemini-3.1-pro-preview",
         "candidates": [{
             "content": {"parts": [{
-                "text": "Use the normal `exec` follow-up loops for running tasks; do not wrap interactive loops in compression.\nIf you need exact command output, run `rtk bypass <cmd>` or just use the plain command.\nPresidio redaction replaces sensitive PII with synthetic markers before the model sees it.\n\nThese optimizers are active only when the user selects them via `prodex super` or individual binary opt-in.\n\nclaude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
+                "text": "Use the normal `exec` follow-up loops for running tasks; do not wrap interactive loops in compression.\nIf you need exact command output, run `rtk bypass <cmd>` or just use the plain command.\nPresidio redaction replaces sensitive PII with synthetic markers before the model sees it.\n\nThese optimizers are active only when the user selects them via `prodex super` or individual binary opt-in.\n\nrtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
             }]},
             "finishReason": "STOP"
         }]
@@ -90,7 +90,7 @@ fn gemini_response_translation_drops_exec_loop_and_redaction_instruction_leaks()
 
     assert_eq!(
         text,
-        "claude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
+        "rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru."
     );
 }
 

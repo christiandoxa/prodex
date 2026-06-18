@@ -42,7 +42,6 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
             .expect("listen address should parse"),
         &config_dir,
         &codex_home,
-        None,
     );
     assert_eq!(
         env.iter()
@@ -168,7 +167,6 @@ fn runtime_proxy_claude_launch_env_honors_model_override() {
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
         &temp_dir.path.join("codex-home"),
-        None,
     );
     assert_eq!(
         env.iter()
@@ -192,7 +190,6 @@ fn runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_overrid
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
         &temp_dir.path.join("codex-home"),
-        None,
     );
     assert_eq!(
         env.iter()
@@ -222,7 +219,6 @@ fn runtime_proxy_claude_launch_env_uses_codex_config_model_by_default() {
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
         &codex_home,
-        None,
     );
     assert_eq!(
         env.iter()
@@ -246,33 +242,12 @@ fn runtime_proxy_claude_launch_env_maps_alias_backed_override_to_builtin_picker_
             .expect("listen address should parse"),
         &temp_dir.path.join("claude-config"),
         &temp_dir.path.join("codex-home"),
-        None,
     );
     assert_eq!(
         env.iter()
             .find(|(key, _)| *key == "ANTHROPIC_MODEL")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("opus".to_string())
-    );
-}
-
-#[test]
-fn runtime_proxy_claude_launch_env_sets_plugin_root_when_mem_enabled() {
-    let temp_dir = TestDir::isolated();
-    let plugin_root = temp_dir.path.join("claude-mem/plugin");
-    let env = runtime_proxy_claude_launch_env(
-        "127.0.0.1:43124"
-            .parse()
-            .expect("listen address should parse"),
-        &temp_dir.path.join("claude-config"),
-        &temp_dir.path.join("codex-home"),
-        Some(&plugin_root),
-    );
-    assert_eq!(
-        env.iter()
-            .find(|(key, _)| *key == "CLAUDE_PLUGIN_ROOT")
-            .map(|(_, value)| value.to_string_lossy().into_owned()),
-        Some(plugin_root.to_string_lossy().into_owned())
     );
 }
 

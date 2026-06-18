@@ -52,7 +52,7 @@ fn runtime_proxy_passthrough_args_rewrite_local_provider_base_url() {
             realtime_ws_model: None,
         }),
         &[
-            OsString::from("mem"),
+            OsString::from("review"),
             OsString::from("-c"),
             OsString::from("model_provider=\"prodex-local\""),
             OsString::from("-c"),
@@ -67,7 +67,7 @@ fn runtime_proxy_passthrough_args_rewrite_local_provider_base_url() {
     assert_eq!(
         args,
         vec![
-            "mem".to_string(),
+            "review".to_string(),
             "-c".to_string(),
             "model_provider=\"prodex-local\"".to_string(),
             "-c".to_string(),

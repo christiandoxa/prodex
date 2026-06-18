@@ -73,7 +73,8 @@ pub(super) fn runtime_gateway_prometheus_response(
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
     let usage = shared
-        .gateway_virtual_key_usage
+        .gateway_usage
+        .usage
         .lock()
         .map(|usage| usage.clone())
         .unwrap_or_default();

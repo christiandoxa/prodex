@@ -8,7 +8,6 @@ pub(crate) struct CavemanLaunchStrategy {
     args: CavemanArgs,
     codex_args: Vec<OsString>,
     include_code_review: bool,
-    mem_mode: Option<RuntimeMemTranscriptMode>,
     rtk_enabled: bool,
     presidio_enabled: bool,
     model_provider_override: Option<String>,
@@ -19,12 +18,11 @@ pub(crate) struct CavemanLaunchStrategy {
 
 impl CavemanLaunchStrategy {
     pub(crate) fn new(args: CavemanArgs) -> Self {
-        let (mem_mode, rtk_enabled, super_optimizer_prefix_enabled, codex_args) =
+        let (rtk_enabled, super_optimizer_prefix_enabled, codex_args) =
             runtime_caveman_extract_launch_prefixes(&args.codex_args);
         let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
         let mut args = args;
         args.super_optimizer_overlay |= super_optimizer_prefix_enabled;
-        let mem_mode = runtime_caveman_resolve_mem_mode(args.smart_context, mem_mode);
         let (codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
@@ -38,7 +36,6 @@ impl CavemanLaunchStrategy {
             args,
             codex_args,
             include_code_review,
-            mem_mode,
             rtk_enabled,
             presidio_enabled,
             model_provider_override,
@@ -93,11 +90,6 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         }
         if self.args.super_optimizer_overlay {
             prodex_caveman_assets::configure_super_optimizer_codex_home(&caveman_home)?;
-        }
-        if let Some(mem_mode) = self.mem_mode {
-            ensure_runtime_mem_prodex_observer(&prepared.paths)?;
-            ensure_runtime_mem_codex_watch_for_home_with_mode(&caveman_home, mem_mode)?;
-            prodex_caveman_assets::trust_claude_mem_codex_plugin_hooks(&caveman_home)?;
         }
         let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
         if self.provider_runtime_uses_local_proxy_auth() {
@@ -177,17 +169,6 @@ pub(super) fn handle_caveman(args: CavemanArgs) -> Result<()> {
     execute_runtime_launch(CavemanLaunchStrategy::new(args))
 }
 
-pub(crate) fn runtime_caveman_resolve_mem_mode(
-    smart_context: bool,
-    mem_mode: Option<RuntimeMemTranscriptMode>,
-) -> Option<RuntimeMemTranscriptMode> {
-    if smart_context {
-        runtime_mem_super_default_transcript_mode(mem_mode)
-    } else {
-        mem_mode
-    }
-}
-
 pub(super) fn prepare_caveman_launch_home(
     paths: &AppPaths,
     base_codex_home: &Path,
@@ -200,8 +181,7 @@ pub(super) fn prepare_caveman_launch_home(
 
 pub(crate) fn runtime_caveman_extract_launch_prefixes(
     args: &[OsString],
-) -> (Option<RuntimeMemTranscriptMode>, bool, bool, Vec<OsString>) {
-    let mut mem_mode = None;
+) -> (bool, bool, Vec<OsString>) {
     let mut rtk_enabled = false;
     let mut super_optimizer_overlay = false;
     let mut remaining = args.to_vec();
@@ -220,17 +200,10 @@ pub(crate) fn runtime_caveman_extract_launch_prefixes(
             }
         }
 
-        let (next_mem_mode, next_remaining) = runtime_mem_extract_mode_with_detail(&remaining);
-        if next_mem_mode.is_some() && next_remaining.len() != remaining.len() {
-            mem_mode = next_mem_mode;
-            remaining = next_remaining;
-            continue;
-        }
-
         break;
     }
 
-    (mem_mode, rtk_enabled, super_optimizer_overlay, remaining)
+    (rtk_enabled, super_optimizer_overlay, remaining)
 }
 
 pub(crate) fn runtime_caveman_extract_presidio_prefix(
@@ -269,7 +242,6 @@ mod tests {
     }
 
     fn assert_super_optional_stack(strategy: &CavemanLaunchStrategy) {
-        assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
@@ -278,15 +250,7 @@ mod tests {
         assert!(strategy.codex_args.contains(&OsString::from(
             "--dangerously-bypass-approvals-and-sandbox"
         )));
-        for extracted_prefix in [
-            "mem",
-            "mem-super-slim",
-            "rtk",
-            "sqz",
-            "tokensavior",
-            "clawcompactor",
-            "presidio",
-        ] {
+        for extracted_prefix in ["rtk", "sqz", "tokensavior", "clawcompactor", "presidio"] {
             assert!(
                 !strategy
                     .codex_args
@@ -297,11 +261,10 @@ mod tests {
     }
 
     #[test]
-    fn super_default_mem_uses_super_slim_transcript_mode() {
+    fn super_default_enables_optimizer_stack() {
         let strategy =
             CavemanLaunchStrategy::new(super_as_caveman_args(&["prodex", "super", "exec", "hi"]));
 
-        assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
@@ -316,25 +279,13 @@ mod tests {
     }
 
     #[test]
-    fn super_alias_default_mem_uses_super_slim_transcript_mode() {
+    fn super_alias_enables_optimizer_stack() {
         let strategy =
             CavemanLaunchStrategy::new(super_as_caveman_args(&["prodex", "s", "exec", "hi"]));
 
-        assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::SuperSlim));
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
-    }
-
-    #[test]
-    fn super_dry_run_mem_resolution_matches_launch_strategy() {
-        let args = super_as_caveman_args(&["prodex", "s", "--dry-run", "exec", "hi"]);
-        let (mem_mode, _, _, _) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
-
-        assert_eq!(
-            runtime_caveman_resolve_mem_mode(args.smart_context, mem_mode),
-            Some(RuntimeMemTranscriptMode::SuperSlim)
-        );
     }
 
     #[test]
@@ -461,87 +412,9 @@ mod tests {
     }
 
     #[test]
-    fn super_mem_full_keeps_full_transcript_mode() {
-        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex",
-            "super",
-            "--mem-full",
-            "exec",
-            "hi",
-        ]));
-
-        assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::Full));
-        assert!(strategy.rtk_enabled);
-        assert!(strategy.presidio_enabled);
-    }
-
-    #[test]
-    fn caveman_default_mem_keeps_slim_transcript_mode() {
-        let strategy = CavemanLaunchStrategy::new(CavemanArgs {
-            profile: None,
-            auto_rotate: false,
-            no_auto_rotate: false,
-            skip_quota_check: false,
-            full_access: false,
-            dry_run: false,
-            base_url: None,
-            no_proxy: false,
-            smart_context: false,
-            super_optimizer_overlay: false,
-            external_provider: None,
-            external_provider_api_key: None,
-            codex_args: vec![OsString::from("mem"), OsString::from("exec")],
-        });
-
-        assert_eq!(strategy.mem_mode, Some(RuntimeMemTranscriptMode::Slim));
-        assert!(!strategy.rtk_enabled);
-        assert!(!strategy.args.super_optimizer_overlay);
-    }
-
-    #[test]
-    fn caveman_launch_prefixes_extract_mem_then_rtk() {
-        let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
-            runtime_caveman_extract_launch_prefixes(&[
-                OsString::from("mem"),
-                OsString::from("rtk"),
-                OsString::from("--full-access"),
-                OsString::from("exec"),
-                OsString::from("hi"),
-            ]);
-
-        assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Slim));
-        assert!(rtk_enabled);
-        assert!(!super_optimizer_overlay);
-        assert_eq!(
-            codex_args,
-            vec![
-                OsString::from("--full-access"),
-                OsString::from("exec"),
-                OsString::from("hi")
-            ]
-        );
-    }
-
-    #[test]
-    fn caveman_launch_prefixes_extract_rtk_then_mem() {
-        let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
-            runtime_caveman_extract_launch_prefixes(&[
-                OsString::from("rtk"),
-                OsString::from("mem-full"),
-                OsString::from("exec"),
-            ]);
-
-        assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
-        assert!(rtk_enabled);
-        assert!(!super_optimizer_overlay);
-        assert_eq!(codex_args, vec![OsString::from("exec")]);
-    }
-
-    #[test]
     fn caveman_launch_prefixes_extract_all_super_optimizers() {
-        let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
+        let (rtk_enabled, super_optimizer_overlay, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[
-                OsString::from("mem"),
                 OsString::from("rtk"),
                 OsString::from("sqz"),
                 OsString::from("tokensavior"),
@@ -551,7 +424,6 @@ mod tests {
                 OsString::from("hi"),
             ]);
 
-        assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Slim));
         assert!(rtk_enabled);
         assert!(super_optimizer_overlay);
         assert_eq!(
@@ -566,9 +438,8 @@ mod tests {
 
     #[test]
     fn caveman_launch_extracts_presidio_prefix_after_super_optimizers() {
-        let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
+        let (rtk_enabled, super_optimizer_overlay, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[
-                OsString::from("mem"),
                 OsString::from("rtk"),
                 OsString::from("sqz"),
                 OsString::from("presidio"),
@@ -577,7 +448,6 @@ mod tests {
             ]);
         let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
 
-        assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Slim));
         assert!(rtk_enabled);
         assert!(super_optimizer_overlay);
         assert!(presidio_enabled);

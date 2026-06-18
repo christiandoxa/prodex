@@ -2,7 +2,7 @@
 
 One Prodex profile pool for OpenAI-backed routing, plus runtime provider bridges for Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, `prodex claude` for Claude Code, and add the `mem` prefix when you want to reuse an existing Claude-Mem install with either front end. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider gemini|anthropic|copilot|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, and `prodex claude` for Claude Code. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider gemini|anthropic|copilot|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
 
 For contributors: this is a Cargo workspace. `src/main.rs` is the binary entrypoint, `src/lib.rs` is a compatibility shim, application orchestration lives under `crates/prodex-app/`, and reusable leaf crates live under `crates/`.
 
@@ -14,19 +14,10 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Codex CLI 0.124.0 or newer if you want to use Amazon Bedrock or another custom `model_provider`
 - Codex CLI if you want to use `prodex`
 - Claude Code (`claude`) if you want to use `prodex claude`
-- Optional: `claude-mem` if you want `prodex caveman mem`, `prodex claude mem`, or `prodex claude caveman mem`
-- Optional: RTK (`rtk-ai/rtk`) if you want `prodex caveman mem rtk` or default `prodex super` RTK shell-command guidance
+- Optional: RTK (`rtk-ai/rtk`) if you want `prodex rtk` or default `prodex super` RTK shell-command guidance
 - Optional: `sqz-mcp`, `token-savior`, and `claw-compactor` if you want the matching `prodex sqz`, `prodex tokensavior`, or `prodex clawcompactor` optimizer overlays
 
 If you install `@christiandoxa/prodex` from npm, Prodex uses its bundled `@openai/codex@latest` dependency by default so a broken or architecture-mismatched global `codex` on `PATH` does not affect `prodex run`. To deliberately use an external Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
-
-If you want the `mem` path, install Claude-Mem separately with the upstream installer:
-
-```bash
-npx claude-mem install --ide codex-cli
-npx claude-mem install --ide claude-code
-npx claude-mem start
-```
 
 ## Install
 
@@ -188,8 +179,6 @@ If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex sk
 
 ```bash
 prodex caveman
-prodex caveman mem
-prodex caveman mem rtk
 prodex rtk
 prodex sqz
 prodex tokensavior
@@ -205,15 +194,13 @@ Use this path when you want Codex itself as the front end but want Caveman mode 
 
 If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
 
-Use `prodex caveman mem` when you also want an existing Claude-Mem Codex install to follow the selected Prodex session path instead of watching only the default `~/.codex/sessions` tree.
-Add optimizer prefixes before Codex args to inject launch overlays into the temporary Codex home: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `presidio`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
-Mem mode uses a slim Codex transcript schema by default so recall stays lower-token; use `prodex super --mem-super-slim` to store prompt summaries/references instead of full prompt bodies, or `prodex super --mem-full` when you need full assistant/tool transcript capture.
-`prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot through a dedicated runtime proxy for OpenAI/Codex providers, then ask whether to enable Presidio redaction. Empty input or `n` is equivalent to `prodex caveman mem rtk sqz tokensavior clawcompactor --full-access`; `y` is equivalent to `prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access`. Use `--presidio` or `--no-presidio` to make that choice non-interactive. When enabled, Presidio redacts UTF-8 HTTP request bodies and WebSocket text frames through local Presidio before forwarding them upstream. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cache-friendly context framing, and critical-signal self-checks.
+Add optimizer prefixes before Codex args to inject launch overlays into the temporary Codex home: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `presidio`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
+`prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot through a dedicated runtime proxy for OpenAI/Codex providers, then ask whether to enable Presidio redaction. Empty input or `n` is equivalent to `prodex caveman rtk sqz tokensavior clawcompactor --full-access`; `y` is equivalent to `prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access`. Use `--presidio` or `--no-presidio` to make that choice non-interactive. When enabled, Presidio redacts UTF-8 HTTP request bodies and WebSocket text frames through local Presidio before forwarding them upstream. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cache-friendly context framing, and critical-signal self-checks.
 Use `prodex s expose` to start a browser-accessible terminal session protected by a high-entropy access token. When `cloudflared` is on `PATH`, Prodex creates a Cloudflare quick tunnel and prints the public URL; use `--no-tunnel` for loopback-only access. Closing the browser tab does not stop the PTY, and reopening the same token URL replays recent terminal scrollback while the `prodex s expose` process is still running.
-Super's optimization stack is local and deterministic by default: Caveman, Claude-Mem, an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registered `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, overlay `sqz`/`claw-compactor` wrappers when discoverable, and a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME`, so Codex conversation restarts do not replay it. If the directory has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a generated `MEMORY.md` and does not modify the original directory.
+Super's optimization stack is local and deterministic by default: Caveman, an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registered `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, overlay `sqz`/`claw-compactor` wrappers when discoverable, and a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME`, so Codex conversation restarts do not replay it. If the directory has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a generated `MEMORY.md` and does not modify the original directory.
 For token-savior, prefer an isolated stable-Python venv at `~/.local/share/prodex-optimizers/token-savior/.venv`; Prodex prefers that managed venv over a global `PATH` binary to avoid experimental Python dependency breakage.
 Prodex passes token-savior cache and stats paths under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions keep generated state out of worktrees.
-Super instructs Codex to use the full local optimizer stack where it fits: Claude-Mem for prior-session recall, visible `rtk <cmd>` for noisy shell output, `prodex-sqz` for repeated large context and long-session reuse, `prodex-token-savior` for symbol/navigation work before broad source reads, and `prodex-claw-compactor` or `prodex-claw-compactor-auto` for workspace-level summaries. Presidio remains opt-in through the prompt or `--presidio`.
+Super instructs Codex to use the full local optimizer stack where it fits: visible `rtk <cmd>` for noisy shell output, `prodex-sqz` for repeated large context and long-session reuse, `prodex-token-savior` for symbol/navigation work before broad source reads, and `prodex-claw-compactor` or `prodex-claw-compactor-auto` for workspace-level summaries. Presidio remains opt-in through the prompt or `--presidio`.
 RTK handles upstream/input command output before it enters the context window through visible `rtk <cmd>` commands, with overlay auto-wrappers as a safety fallback. Auto-wrappers are only a backstop; write `rtk <cmd>` explicitly when you want the TUI/transcript to show RTK usage. SQZ handles downstream/context reuse through the auto-registered `prodex-sqz` MCP server when `sqz-mcp` is available.
 Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 
@@ -283,9 +270,7 @@ Prodex uses system and environment proxy settings for upstream OpenAI quota/auth
 
 ```bash
 prodex claude -- -p "summarize this repo"
-prodex claude mem -- -p "recall past work on this repo"
 prodex claude caveman
-prodex claude caveman mem
 prodex claude caveman -- -p "summarize this repo briefly"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
@@ -295,8 +280,6 @@ Use this path when you want Claude Code to be the front end while Prodex routes 
 This path requires the default OpenAI/Codex provider. Profiles whose `config.toml` sets a non-OpenAI `model_provider`, including `amazon-bedrock`, are not supported by `prodex claude`.
 
 Use `prodex claude caveman` when you want the same Claude path but with the upstream Caveman plugin loaded through Claude's session-local `--plugin-dir` support. Prodex keeps the plugin bundle stable under `.prodex`, and the adapted Caveman hooks read and write the Prodex-managed `CLAUDE_CONFIG_DIR` instead of your global `~/.claude`.
-
-Use `prodex claude mem` when you want to reuse an existing upstream Claude-Mem Claude Code install, and use `prodex claude caveman mem` when you want Caveman mode and Claude-Mem together in the same Claude session.
 
 What changes on this path:
 

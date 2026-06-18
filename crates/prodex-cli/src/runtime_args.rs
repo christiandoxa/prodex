@@ -178,13 +178,7 @@ pub struct SuperArgs {
         requires = "provider_or_url"
     )]
     pub local_auto_compact_token_limit: Option<usize>,
-    /// Use the full Claude-Mem Codex transcript schema instead of Prodex's slim default.
-    #[arg(long, conflicts_with = "mem_super_slim")]
-    pub mem_full: bool,
-    /// Use Prodex's super-slim mem schema that stores prompt summaries/references instead of full prompts.
-    #[arg(long, conflicts_with = "mem_full")]
-    pub mem_super_slim: bool,
-    /// Arguments passed through to `codex` after the implied `mem` prefix.
+    /// Arguments passed through to `codex` after the implied optimizer prefixes.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
 }
@@ -302,19 +296,12 @@ impl SuperArgs {
 
         let mut codex_args = Vec::with_capacity(
             self.codex_args.len()
-                + 2
+                + 1
                 + SUPER_OPTIMIZER_PREFIXES.len()
                 + usize::from(presidio)
                 + local_provider_args.len()
                 + external_provider_args.len(),
         );
-        codex_args.push(OsString::from(if self.mem_super_slim {
-            "mem-super-slim"
-        } else if self.mem_full {
-            "mem-full"
-        } else {
-            "mem"
-        }));
         codex_args.push(OsString::from("rtk"));
         codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
         if presidio {

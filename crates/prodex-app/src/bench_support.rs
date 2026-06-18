@@ -6,7 +6,6 @@ pub use prodex_bench_support::{
     RUNTIME_PROXY_COMPACT_SESSION_SELECTION_BENCH_CASE, RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS,
     RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE, RUNTIME_PROXY_MIXED_POOL_BENCH_CASE,
     RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_CASE, RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_CASE,
-    RUNTIME_PROXY_RUNTIME_MEM_SUPER_SLIM_BENCH_CASE,
     RUNTIME_PROXY_SMART_CONTEXT_REWRITE_BENCH_CASE, RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE,
     RUNTIME_PROXY_WEBSOCKET_STALE_REUSE_BENCH_CASE, RuntimeProxyHotPathBenchCaseSpec,
     RuntimeProxyHotPathBenchCaseSuite, RuntimeProxyHotPathBenchCheckConfig,
@@ -20,8 +19,8 @@ pub use selection_cases::{
     RuntimeProxyWebsocketStaleReuseBenchCase,
 };
 pub use stream_cases::{
-    RuntimeProxyLineageCleanupBenchCase, RuntimeProxyRuntimeMemSuperSlimBenchCase,
-    RuntimeProxySmartContextRewriteBenchCase, RuntimeProxySseInspectBenchCase,
+    RuntimeProxyLineageCleanupBenchCase, RuntimeProxySmartContextRewriteBenchCase,
+    RuntimeProxySseInspectBenchCase,
 };
 
 use self::common::*;
@@ -43,8 +42,6 @@ pub fn run_runtime_proxy_hot_path_bench_check(
     let lineage_cleanup = RuntimeProxyLineageCleanupBenchCase::new(sizes.lineage_cleanup);
     let smart_context_rewrite =
         RuntimeProxySmartContextRewriteBenchCase::new(sizes.smart_context_rewrite);
-    let runtime_mem_super_slim =
-        RuntimeProxyRuntimeMemSuperSlimBenchCase::new(sizes.runtime_mem_super_slim);
 
     run_runtime_proxy_hot_path_case_suite(
         config,
@@ -59,7 +56,6 @@ pub fn run_runtime_proxy_hot_path_bench_check(
             sse_inspect: || sse_inspect.inspect(),
             lineage_cleanup: || lineage_cleanup.clear_dead_response_bindings(),
             smart_context_rewrite: || smart_context_rewrite.rewrite_large_tool_output(),
-            runtime_mem_super_slim: || runtime_mem_super_slim.shadow_token_heavy_events(),
         },
     )
 }

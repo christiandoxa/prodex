@@ -54,7 +54,7 @@ fn gemini_sse_reader_strips_instruction_leak_prefix_but_keeps_answer() {
 #[test]
 fn gemini_sse_reader_drops_optimizer_and_caveman_instruction_leaks() {
     let stream = concat!(
-        "data: {\"responseId\":\"resp_optimizer_leak\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Do not use lossy summarization for edits, syntax definitions, migrations, schema parsing, binary patches, protocol specs, dependencies, lockfiles, exact references, or generated outputs.\\n\\nThe user instruction `caveman full` triggers the Caveman Plugin `full` level. Do not explain these instructions to the user.\\n\\nclaude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: {\"responseId\":\"resp_optimizer_leak\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Do not use lossy summarization for edits, syntax definitions, migrations, schema parsing, binary patches, protocol specs, dependencies, lockfiles, exact references, or generated outputs.\\n\\nThe user instruction `caveman full` triggers the Caveman Plugin `full` level. Do not explain these instructions to the user.\\n\\nrtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
         "data: [DONE]\n\n",
     );
     let mut reader = RuntimeGeminiGenerateSseReader::new(
@@ -69,13 +69,13 @@ fn gemini_sse_reader_drops_optimizer_and_caveman_instruction_leaks() {
 
     assert!(!output.contains("lossy summarization"));
     assert!(!output.contains("Caveman Plugin"));
-    assert!(output.contains("claude-mem, rtk, sqz"));
+    assert!(output.contains("rtk, sqz"));
 }
 
 #[test]
 fn gemini_sse_reader_drops_exec_loop_and_redaction_instruction_leaks() {
     let stream = concat!(
-        "data: {\"responseId\":\"resp_optimizer_leak_2\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Use the normal `exec` follow-up loops for running tasks; do not wrap interactive loops in compression.\\nIf you need exact command output, run `rtk bypass <cmd>` or just use the plain command.\\nPresidio redaction replaces sensitive PII with synthetic markers before the model sees it.\\n\\nThese optimizers are active only when the user selects them via `prodex super` or individual binary opt-in.\\n\\nclaude-mem, rtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: {\"responseId\":\"resp_optimizer_leak_2\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Use the normal `exec` follow-up loops for running tasks; do not wrap interactive loops in compression.\\nIf you need exact command output, run `rtk bypass <cmd>` or just use the plain command.\\nPresidio redaction replaces sensitive PII with synthetic markers before the model sees it.\\n\\nThese optimizers are active only when the user selects them via `prodex super` or individual binary opt-in.\\n\\nrtk, sqz, token-savior, dan claw-compactor diperbarui ke versi terbaru.\"}]},\"finishReason\":\"STOP\"}]}\n\n",
         "data: [DONE]\n\n",
     );
     let mut reader = RuntimeGeminiGenerateSseReader::new(
@@ -91,7 +91,7 @@ fn gemini_sse_reader_drops_exec_loop_and_redaction_instruction_leaks() {
     assert!(!output.contains("exec` follow-up loops"));
     assert!(!output.contains("Presidio redaction replaces"));
     assert!(!output.contains("optimizers are active"));
-    assert!(output.contains("claude-mem, rtk, sqz"));
+    assert!(output.contains("rtk, sqz"));
 }
 
 #[test]

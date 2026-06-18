@@ -37,7 +37,7 @@ fn smart_context_generated_summary_uses_path_aliases_only_when_shorter() {
             "type": "function_call_output",
             "call_id": "call_1",
             "output": format!(
-                "psc manifest 4 artifacts\n{repo}/crates/prodex-app/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-app/tests/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-runtime-proxy/src/smart_context.rs\n{repo}/crates/prodex-runtime-mem/src/lib.rs"
+                "psc manifest 3 artifacts\n{repo}/crates/prodex-app/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-app/tests/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-runtime-proxy/src/smart_context.rs"
             )
         }]
     });
@@ -63,7 +63,7 @@ fn smart_context_prepare_aliases_existing_generated_paths_without_new_transform(
             "type": "function_call_output",
             "call_id": "call_1",
             "output": format!(
-                "psc m refs-only\n{repo}/crates/prodex-app/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-app/tests/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-runtime-proxy/src/smart_context.rs\n{repo}/crates/prodex-runtime-mem/src/lib.rs"
+                "psc m refs-only\n{repo}/crates/prodex-app/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-app/tests/src/runtime_proxy/smart_context.rs\n{repo}/crates/prodex-runtime-proxy/src/smart_context.rs"
             )
         }]
     }));

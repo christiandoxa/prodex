@@ -1,5 +1,18 @@
 [
   {
+    "id": "runtime-provider-split-and-claude-mem-removal-0.193.0",
+    "requiredSubjects": [
+      "refactor(runtime): split provider modules and remove Claude-Mem"
+    ],
+    "caps": {
+      "maxFiles": 70,
+      "maxBehaviorFiles": 54,
+      "maxLines": 6000,
+      "maxFileLines": 1000
+    },
+    "reason": "Reviewed provider module extraction and complete Claude-Mem removal with the local full test suite, pre-push release hygiene, formatting, metadata, and size guards."
+  },
+  {
     "id": "gateway-routing-0.189.0",
     "requiredSubjects": [
       "feat: add gateway routing"

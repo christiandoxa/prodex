@@ -55,6 +55,28 @@ fn shared_codex_manifest_includes_mcp_oauth_fallback_credentials_as_file() {
 }
 
 #[test]
+fn shared_codex_manifest_includes_plugin_marketplace_state() {
+    let entries = shared_codex_manifest_entries();
+    for name in [
+        "plugins",
+        ".tmp/plugins",
+        ".tmp/marketplaces",
+        ".tmp/known_marketplaces.json",
+        ".tmp/app-server-remote-plugin-sync-v1",
+    ] {
+        let expected = if name.ends_with(".json") || name.ends_with("-v1") {
+            SharedCodexEntry::file(name)
+        } else {
+            SharedCodexEntry::directory(name)
+        };
+        assert!(
+            entries.contains(&expected),
+            "shared Codex manifest should include {name}"
+        );
+    }
+}
+
+#[test]
 fn shared_codex_manifest_keeps_cloud_config_bundle_cache_profile_local() {
     assert!(
         !shared_codex_manifest_entries()
@@ -74,6 +96,73 @@ fn profile_v2_config_names_match_plain_ascii_profile_names() {
     assert!(!is_shared_codex_profile_v2_config_name(
         "../prod.config.toml"
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_plugin_cache_and_marketplace_state_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("plugin-cache-marketplaces");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let plugin_manifest = codex_home
+        .join("plugins/cache/openai-curated/sample-plugin/1.2.3/.codex-plugin/plugin.json");
+    let marketplace_manifest = codex_home.join(".tmp/marketplaces/openai-curated/marketplace.json");
+    let known_marketplaces = codex_home.join(".tmp/known_marketplaces.json");
+    let remote_sync_marker = codex_home.join(".tmp/app-server-remote-plugin-sync-v1");
+
+    fs::create_dir_all(plugin_manifest.parent().unwrap()).expect("plugin cache dir");
+    fs::create_dir_all(marketplace_manifest.parent().unwrap()).expect("marketplace dir");
+    fs::write(&plugin_manifest, r#"{"name":"sample-plugin"}"#).expect("plugin manifest");
+    fs::write(&marketplace_manifest, r#"{"plugins":[]}"#).expect("marketplace manifest");
+    fs::write(&known_marketplaces, r#"{"marketplaces":[]}"#).expect("known marketplaces");
+    fs::write(&remote_sync_marker, "synced").expect("remote plugin sync marker");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    assert_eq!(
+        fs::read_to_string(
+            paths
+                .shared_codex_root
+                .join("plugins/cache/openai-curated/sample-plugin/1.2.3/.codex-plugin/plugin.json")
+        )
+        .expect("shared plugin manifest should read"),
+        r#"{"name":"sample-plugin"}"#
+    );
+    assert_eq!(
+        fs::read_to_string(
+            paths
+                .shared_codex_root
+                .join(".tmp/marketplaces/openai-curated/marketplace.json")
+        )
+        .expect("shared marketplace manifest should read"),
+        r#"{"plugins":[]}"#
+    );
+    assert_eq!(
+        fs::read_to_string(
+            codex_home
+                .join("plugins/cache/openai-curated/sample-plugin/1.2.3/.codex-plugin/plugin.json")
+        )
+        .expect("profile plugin symlink should remain readable"),
+        r#"{"name":"sample-plugin"}"#
+    );
+    assert_eq!(
+        fs::read_link(codex_home.join("plugins")).expect("plugins should be shared by symlink"),
+        paths.shared_codex_root.join("plugins")
+    );
+    assert_eq!(
+        fs::read_to_string(paths.shared_codex_root.join(".tmp/known_marketplaces.json"))
+            .expect("known marketplaces should move to shared root"),
+        r#"{"marketplaces":[]}"#
+    );
+    assert_eq!(
+        fs::read_to_string(
+            paths
+                .shared_codex_root
+                .join(".tmp/app-server-remote-plugin-sync-v1")
+        )
+        .expect("remote plugin sync marker should move to shared root"),
+        "synced"
+    );
 }
 
 #[cfg(unix)]

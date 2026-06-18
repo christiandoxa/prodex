@@ -221,17 +221,7 @@ pub const RUNTIME_PROXY_SMART_CONTEXT_REWRITE_BENCH_CASE: RuntimeProxyHotPathBen
         },
     };
 
-pub const RUNTIME_PROXY_RUNTIME_MEM_SUPER_SLIM_BENCH_CASE: RuntimeProxyHotPathBenchCaseSpec =
-    RuntimeProxyHotPathBenchCaseSpec {
-        name: "runtime_mem_super_slim_token_heavy_shadow",
-        default_size: 96,
-        threshold: RuntimeProxyHotPathBenchThreshold {
-            name: "runtime_mem_super_slim_token_heavy_shadow",
-            max_median_ns_per_iteration: 17_000_000,
-        },
-    };
-
-pub const RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS: [RuntimeProxyHotPathBenchCaseSpec; 9] = [
+pub const RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS: [RuntimeProxyHotPathBenchCaseSpec; 8] = [
     RUNTIME_PROXY_QUOTA_FALLBACK_BENCH_CASE,
     RUNTIME_PROXY_PREVIOUS_RESPONSE_BENCH_CASE,
     RUNTIME_PROXY_MIXED_POOL_BENCH_CASE,
@@ -240,7 +230,6 @@ pub const RUNTIME_PROXY_HOT_PATH_BENCH_CASE_SPECS: [RuntimeProxyHotPathBenchCase
     RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE,
     RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE,
     RUNTIME_PROXY_SMART_CONTEXT_REWRITE_BENCH_CASE,
-    RUNTIME_PROXY_RUNTIME_MEM_SUPER_SLIM_BENCH_CASE,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -253,7 +242,6 @@ pub struct RuntimeProxyHotPathBenchScenarioSizes {
     pub sse_inspect: usize,
     pub lineage_cleanup: usize,
     pub smart_context_rewrite: usize,
-    pub runtime_mem_super_slim: usize,
 }
 
 impl RuntimeProxyHotPathBenchScenarioSizes {
@@ -268,7 +256,6 @@ impl RuntimeProxyHotPathBenchScenarioSizes {
             sse_inspect: RUNTIME_PROXY_SSE_INSPECT_BENCH_CASE.default_size,
             lineage_cleanup: RUNTIME_PROXY_LINEAGE_CLEANUP_BENCH_CASE.default_size,
             smart_context_rewrite: RUNTIME_PROXY_SMART_CONTEXT_REWRITE_BENCH_CASE.default_size,
-            runtime_mem_super_slim: RUNTIME_PROXY_RUNTIME_MEM_SUPER_SLIM_BENCH_CASE.default_size,
         }
     }
 }
@@ -398,7 +385,6 @@ pub struct RuntimeProxyHotPathBenchCaseSuite<
     SseInspect,
     LineageCleanup,
     SmartContextRewrite,
-    RuntimeMemSuperSlim,
 > {
     pub quota_fallback: QuotaFallback,
     pub previous_response: PreviousResponse,
@@ -408,7 +394,6 @@ pub struct RuntimeProxyHotPathBenchCaseSuite<
     pub sse_inspect: SseInspect,
     pub lineage_cleanup: LineageCleanup,
     pub smart_context_rewrite: SmartContextRewrite,
-    pub runtime_mem_super_slim: RuntimeMemSuperSlim,
 }
 
 #[doc(hidden)]
@@ -430,8 +415,6 @@ pub fn run_runtime_proxy_hot_path_case_suite<
     LineageCleanupResult,
     SmartContextRewrite,
     SmartContextRewriteResult,
-    RuntimeMemSuperSlim,
-    RuntimeMemSuperSlimResult,
 >(
     config: RuntimeProxyHotPathBenchCheckConfig,
     mut suite: RuntimeProxyHotPathBenchCaseSuite<
@@ -443,7 +426,6 @@ pub fn run_runtime_proxy_hot_path_case_suite<
         SseInspect,
         LineageCleanup,
         SmartContextRewrite,
-        RuntimeMemSuperSlim,
     >,
 ) -> Vec<RuntimeProxyHotPathBenchCheckResult>
 where
@@ -455,7 +437,6 @@ where
     SseInspect: FnMut() -> SseInspectResult,
     LineageCleanup: FnMut() -> LineageCleanupResult,
     SmartContextRewrite: FnMut() -> SmartContextRewriteResult,
-    RuntimeMemSuperSlim: FnMut() -> RuntimeMemSuperSlimResult,
 {
     let config = config.normalized();
 
@@ -499,11 +480,6 @@ where
             config.clone(),
             RUNTIME_PROXY_SMART_CONTEXT_REWRITE_BENCH_CASE.threshold,
             || (suite.smart_context_rewrite)(),
-        ),
-        run_runtime_proxy_hot_path_case(
-            config,
-            RUNTIME_PROXY_RUNTIME_MEM_SUPER_SLIM_BENCH_CASE.threshold,
-            || (suite.runtime_mem_super_slim)(),
         ),
     ]
 }

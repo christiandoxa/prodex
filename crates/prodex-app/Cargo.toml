@@ -39,7 +39,6 @@ prodex_profile_identity = { workspace = true }
 prodex_provider_core = { workspace = true }
 prodex_proxy_config = { workspace = true }
 prodex_quota = { workspace = true }
-prodex_runtime_mem = { workspace = true }
 prodex_runtime_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
 postgres = { workspace = true }

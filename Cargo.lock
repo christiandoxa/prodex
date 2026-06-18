@@ -1749,7 +1749,6 @@ dependencies = [
  "prodex-runtime-gemini",
  "prodex-runtime-launch",
  "prodex-runtime-log",
- "prodex-runtime-mem",
  "prodex-runtime-metrics",
  "prodex-runtime-policy",
  "prodex-runtime-proxy",
@@ -1929,6 +1928,7 @@ version = "0.192.0"
 dependencies = [
  "anyhow",
  "base64",
+ "prodex-runtime-proxy",
  "serde_json",
 ]
 
@@ -2021,15 +2021,6 @@ name = "prodex-runtime-log"
 version = "0.192.0"
 dependencies = [
  "prodex-runtime-proxy",
- "serde_json",
-]
-
-[[package]]
-name = "prodex-runtime-mem"
-version = "0.192.0"
-dependencies = [
- "anyhow",
- "dirs",
  "serde_json",
 ]
 

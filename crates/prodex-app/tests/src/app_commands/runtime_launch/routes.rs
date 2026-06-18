@@ -53,6 +53,67 @@ fn run_launch_route_preserves_app_server_protocol_args_for_direct_passthrough() 
 }
 
 #[test]
+fn run_launch_route_preserves_release_0141_command_server_args_for_direct_passthrough() {
+    for passthrough in [
+        vec![
+            OsString::from("app-server"),
+            OsString::from("thread/listChildren"),
+            OsString::from("--payload"),
+            OsString::from(
+                r#"{"method":"thread/listChildren","params":{"parentThreadId":"thread_parent"}}"#,
+            ),
+        ],
+        vec![
+            OsString::from("app-server"),
+            OsString::from("externalAgent/import"),
+            OsString::from("--payload"),
+            OsString::from(
+                r#"{"method":"externalAgent/import","params":{"externalAgentId":"agent_1"}}"#,
+            ),
+        ],
+        vec![
+            OsString::from("app-server"),
+            OsString::from("rateLimit/resetCredits/read"),
+            OsString::from("--payload"),
+            OsString::from(r#"{"method":"rateLimit/resetCredits/read","params":{}}"#),
+        ],
+        vec![
+            OsString::from("exec-server"),
+            OsString::from("--listen"),
+            OsString::from("ws://127.0.0.1:0"),
+            OsString::from("--remote"),
+            OsString::from("wss://remote.example/executor"),
+            OsString::from("--environment-id"),
+            OsString::from("env_123"),
+            OsString::from("--name"),
+            OsString::from("native-shell"),
+            OsString::from("--use-agent-identity-auth"),
+        ],
+    ] {
+        let args = test_run_args(passthrough.clone());
+
+        assert_eq!(
+            run_launch_route(&args),
+            RunLaunchRoute::CodexCommandServerDirectPassthrough
+        );
+        assert_eq!(args.codex_args, passthrough);
+    }
+}
+
+#[test]
+fn run_launch_route_keeps_codex_exec_hook_trust_flag_managed_and_unmodified() {
+    let passthrough = vec![
+        OsString::from("exec"),
+        OsString::from("--dangerously-bypass-hook-trust"),
+        OsString::from("summarize hooks"),
+    ];
+    let args = test_run_args(passthrough.clone());
+
+    assert_eq!(run_launch_route(&args), RunLaunchRoute::ManagedRuntime);
+    assert_eq!(args.codex_args, passthrough);
+}
+
+#[test]
 fn run_launch_route_preserves_mcp_meta_args_for_direct_passthrough() {
     let passthrough = vec![
         OsString::from("mcp-server"),

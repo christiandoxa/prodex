@@ -48,7 +48,6 @@ You need at least one logged-in Prodex profile.
 |---|---|
 | Codex CLI | `prodex`, `prodex run`, `prodex caveman`, `prodex super` |
 | Claude Code | `prodex claude` |
-| Claude-Mem | `mem` variants |
 | RTK | `rtk` variants and `prodex s` / `prodex super` |
 
 </details>
@@ -144,7 +143,7 @@ If you install from source, make sure the `codex` binary in your `PATH` is alrea
 
 ## Optional tools
 
-`prodex` can run without Claude-Mem, RTK, SQZ, token-savior, claw-compactor, or Presidio.
+`prodex` can run without RTK, SQZ, token-savior, claw-compactor, or Presidio.
 
 Install them only if you want to use commands such as:
 
@@ -152,8 +151,6 @@ Install them only if you want to use commands such as:
 <summary>Optional tool commands</summary>
 
 ```bash
-prodex caveman mem
-prodex caveman mem rtk
 prodex rtk
 prodex sqz
 prodex tokensavior
@@ -163,35 +160,7 @@ prodex presidio redact --text "My phone is 212-555-1234"
 prodex gateway --provider gemini
 prodex s
 prodex super
-prodex claude mem
-prodex claude caveman mem
 ```
-
-</details>
-
-<details>
-<summary>Install Claude-Mem</summary>
-
-Claude-Mem is used by the `mem` variants.
-
-Recommended install:
-
-```bash
-npx claude-mem install
-```
-
-Then follow the interactive prompts.
-
-You can also install it from inside Claude Code:
-
-```text
-/plugin marketplace add thedotmack/claude-mem
-/plugin install claude-mem
-```
-
-After installation, restart Claude Code or your coding CLI.
-
-> Do not use `npm install -g claude-mem` as the main install method. That installs the SDK/library only; it does not register the plugin hooks or start the worker service.
 
 </details>
 
@@ -538,7 +507,6 @@ This is the mode I tune and use myself every day.
 It combines:
 
 - Caveman mode
-- Claude-Mem transcript watching
 - RTK shell-command guidance
 - full-access launch mode
 - Smart Context Autopilot in the runtime proxy
@@ -553,13 +521,13 @@ prodex s expose
 `prodex super` expands to:
 
 ```bash
-prodex caveman mem rtk sqz tokensavior clawcompactor --full-access
+prodex caveman rtk sqz tokensavior clawcompactor --full-access
 ```
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps the expansion above. If you answer `y`, it is equivalent to:
 
 ```bash
-prodex caveman mem rtk sqz tokensavior clawcompactor presidio --full-access
+prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access
 ```
 
 Use `prodex super --presidio` to enable Presidio without prompting, or `prodex super --no-presidio` to skip the prompt and keep Presidio disabled. Presidio enables runtime request-body and WebSocket text redaction through local Presidio for the session. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
@@ -568,11 +536,10 @@ Full access maps to Codex's sandbox-bypass launch flag. Use it only when you int
 
 Use `prodex s expose` when you need to reach the live Super terminal from a browser. Prodex starts a local PTY bridge protected by a high-entropy access token, launches `cloudflared tunnel --protocol http2 --url ...` when `cloudflared` is available, and prints both the loopback and Cloudflare quick-tunnel URLs. The browser tab can close without stopping the session; reopening the same token URL reconnects to the existing PTY and replays recent scrollback. Add `--no-tunnel` for local-only access, `--max-clients N` to cap simultaneous browsers, or `--command 'prodex s --no-presidio'` to choose the initial terminal command.
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads the existing Caveman and Claude-Mem pieces, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction is added to that proxy only when you opt in at the prompt. Prodex passes token-savior cache and stats paths under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions keep generated state out of worktrees.
+Super's built-in optimization stack is deliberately local and deterministic. It preloads Caveman, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction is added to that proxy only when you opt in at the prompt. Prodex passes token-savior cache and stats paths under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions keep generated state out of worktrees.
 
 Super instructs Codex to use the whole local optimizer stack where it fits the task, not just RTK:
 
-- Claude-Mem handles prior-session/project recall through the active Prodex session watch.
 - RTK works upstream/input-side. Use visible `rtk <cmd>` for noisy terminal commands before their output enters the model context, such as `git diff`, `cargo test`, `npm test`, build logs, and package-manager output. Prodex also auto-wraps common noisy commands as a fallback when RTK is installed, but that fallback does not make the TUI show an `rtk` prefix.
 - SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server. Use it for repeated workspace reads, large text blobs, long command outputs that need reuse, and long-session context compression instead of emitting the same full content again.
 - token-savior handles symbol lookup, caller/context navigation, duplicate/dead-code checks, and API-impact searches before broad source reads.
@@ -702,7 +669,7 @@ unless Prodex explicitly owns that command.
 |---|---|---|
 | Normal Codex | `prodex` or `prodex run` | Managed Codex launch with profile selection and quota routing. |
 | Caveman | `prodex caveman` | Runs Codex with a temporary overlay `CODEX_HOME`. |
-| Super | `prodex s` or `prodex super` | Daily mode with Caveman, Claude-Mem, RTK guidance, full access, and deterministic/local token optimizations. |
+| Super | `prodex s` or `prodex super` | Daily mode with Caveman, RTK guidance, full access, and deterministic/local token optimizations. |
 | Claude Code | `prodex claude` | Runs Claude Code through Prodex-managed state. |
 
 <details>
@@ -722,8 +689,6 @@ prodex exec "review this repo"
 
 ```bash
 prodex caveman
-prodex caveman mem
-prodex caveman mem rtk
 prodex rtk
 prodex sqz
 prodex tokensavior
@@ -736,9 +701,7 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex caveman` runs Codex with a temporary overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
-If you use the `mem` variant, Prodex points an existing Claude-Mem Codex setup to the active Prodex session path instead of the default `~/.codex/sessions`.
-
-Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `mem`, `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `presidio`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`.
+Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `presidio`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
@@ -763,21 +726,7 @@ prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex s` is the short alias for `prodex super`.
 
-This is my daily mode. It is the path I keep tuning for normal work: Caveman enabled, Claude-Mem transcript watching enabled, RTK guidance enabled, full access available, and context handling handled by the runtime proxy.
-
-Super mode uses Prodex's slim Claude-Mem Codex schema by default to avoid storing full assistant/tool output in recall context.
-
-Use `--mem-super-slim` to store prompt summaries/references instead of full prompt bodies:
-
-```bash
-prodex super --mem-super-slim
-```
-
-Use `--mem-full` when you need the full transcript schema:
-
-```bash
-prodex super --mem-full
-```
+This is my daily mode. It is the path I keep tuning for normal work: Caveman enabled, RTK guidance enabled, full access available, and context handling handled by the runtime proxy.
 
 Super also enables Smart Context Autopilot in the runtime proxy.
 
@@ -869,11 +818,8 @@ Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_
 
 ```bash
 prodex claude -- -p "summarize this repo"
-prodex claude mem -- -p "recall past work on this repo"
 prodex claude caveman
-prodex claude caveman mem
 prodex claude caveman -- -p "summarize this repo briefly"
-prodex claude caveman mem -- -p "summarize this repo briefly"
 prodex claude --profile second caveman -- -p "review the latest diff briefly"
 prodex claude --profile second -- -p --output-format json "show the latest diff"
 ```
@@ -881,8 +827,6 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 `prodex claude` uses the normal Claude Code flow while keeping state under Prodex-managed configuration.
 
 `prodex claude caveman` enables Caveman for that session while keeping state under the Prodex-managed `CLAUDE_CONFIG_DIR`, not the global `~/.claude`.
-
-`prodex claude caveman mem` combines Caveman and Claude-Mem.
 
 `prodex claude` is only supported with the default OpenAI/Codex provider.
 

@@ -66,7 +66,6 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     assert!(awareness.contains("Locating symbols, callers, dead code, or API changes"));
     assert!(awareness.contains("claw-compactor"));
     assert!(awareness.contains("prodex-claw-compactor-auto"));
-    assert!(awareness.contains("Prior-session/project memory"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
     assert_eq!(
@@ -227,7 +226,6 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
     assert!(hook_script.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
-    assert!(hook_script.contains("Claude-Mem"));
     assert!(hook_script.contains("rtk <cmd>"));
     assert!(hook_script.contains("prodex-sqz"));
     assert!(hook_script.contains("prodex-token-savior"));
@@ -410,7 +408,6 @@ fn caveman_session_start_script_outputs_once_per_launch_home() {
     let first_stdout = String::from_utf8(first.stdout).expect("first stdout should be utf8");
     assert!(first_stdout.contains("CAVEMAN MODE ACTIVE"));
     assert!(first_stdout.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
-    assert!(first_stdout.contains("Claude-Mem"));
     assert!(first_stdout.contains("prodex-sqz"));
     assert!(first_stdout.contains("prodex-token-savior"));
     assert!(first_stdout.contains("prodex-claw-compactor"));

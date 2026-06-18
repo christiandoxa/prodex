@@ -145,7 +145,6 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_full_super_prefix_
     assert_eq!(
         args.codex_args,
         vec![
-            OsString::from("mem"),
             OsString::from("rtk"),
             OsString::from("sqz"),
             OsString::from("tokensavior"),
@@ -369,77 +368,6 @@ fn launch_commands_accept_no_proxy_flag() {
 }
 
 #[test]
-fn caveman_command_accepts_full_access_shortcut_after_mem_prefix() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "caveman",
-        "mem",
-        "--full-access",
-        "exec",
-        "review this repo",
-    ])
-    .expect("caveman full-access shortcut should parse");
-    let Commands::Caveman(args) = command else {
-        panic!("expected caveman command");
-    };
-    assert!(!args.full_access);
-    assert_eq!(
-        args.codex_args,
-        vec![
-            OsString::from("mem"),
-            OsString::from("--full-access"),
-            OsString::from("exec"),
-            OsString::from("review this repo")
-        ]
-    );
-
-    let (mem_mode, codex_args) = runtime_mem_extract_mode(&args.codex_args);
-    assert!(mem_mode);
-    let (launch_args, include_code_review) =
-        prepare_codex_launch_args(&codex_args, args.full_access);
-    assert_eq!(
-        launch_args,
-        vec![
-            OsString::from("--dangerously-bypass-approvals-and-sandbox"),
-            OsString::from("exec"),
-            OsString::from("review this repo")
-        ]
-    );
-    assert!(!include_code_review);
-}
-
-#[test]
-fn super_command_mem_full_expands_to_full_mem_prefix() {
-    let command = parse_cli_command_from(["prodex", "super", "--mem-full", "exec", "review"])
-        .expect("super mem-full command should parse");
-    let Commands::Super(args) = command else {
-        panic!("expected super command");
-    };
-
-    let args = args.into_caveman_args();
-    assert_eq!(
-        args.codex_args,
-        vec![
-            OsString::from("mem-full"),
-            OsString::from("rtk"),
-            OsString::from("sqz"),
-            OsString::from("tokensavior"),
-            OsString::from("clawcompactor"),
-            OsString::from("exec"),
-            OsString::from("review")
-        ]
-    );
-    let (mem_mode, rtk_enabled, super_optimizer_overlay, codex_args) =
-        runtime_caveman_extract_launch_prefixes(&args.codex_args);
-    assert_eq!(mem_mode, Some(RuntimeMemTranscriptMode::Full));
-    assert!(rtk_enabled);
-    assert!(super_optimizer_overlay);
-    let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
-    assert!(!presidio_enabled);
-    assert_eq!(codex_args, vec![OsString::from("exec"), OsString::from("review")]);
-}
-
-#[test]
 fn super_command_url_expands_to_local_openai_provider_config() {
     let command = parse_cli_command_from([
         "prodex",
@@ -467,11 +395,10 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    assert_eq!(rendered.first().map(String::as_str), Some("mem"));
-    assert_eq!(rendered.get(1).map(String::as_str), Some("rtk"));
-    assert_eq!(rendered.get(2).map(String::as_str), Some("sqz"));
-    assert_eq!(rendered.get(3).map(String::as_str), Some("tokensavior"));
-    assert_eq!(rendered.get(4).map(String::as_str), Some("clawcompactor"));
+    assert_eq!(rendered.first().map(String::as_str), Some("rtk"));
+    assert_eq!(rendered.get(1).map(String::as_str), Some("sqz"));
+    assert_eq!(rendered.get(2).map(String::as_str), Some("tokensavior"));
+    assert_eq!(rendered.get(3).map(String::as_str), Some("clawcompactor"));
     assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
     assert!(rendered.contains(&"model=\"local/qwen\"".to_string()));
     assert!(rendered.contains(
@@ -491,7 +418,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         ["exec", "review this repo"]
     );
 
-    let (_, _, _, codex_args) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
+    let (_, _, codex_args) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
     assert_eq!(
         codex_cli_config_override_value(&codex_args, "model_provider").as_deref(),
         Some("prodex-local")

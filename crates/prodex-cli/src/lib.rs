@@ -160,7 +160,7 @@ pub enum Commands {
     #[command(
         trailing_var_arg = true,
         visible_alias = "s",
-        about = "Alias for `prodex caveman mem rtk sqz tokensavior clawcompactor --full-access`.",
+        about = "Alias for `prodex caveman rtk sqz tokensavior clawcompactor --full-access`.",
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),

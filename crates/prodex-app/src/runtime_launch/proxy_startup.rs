@@ -36,6 +36,8 @@ mod local_rewrite_gateway_guardrail_webhook;
 mod local_rewrite_gateway_key_patch;
 mod local_rewrite_gateway_key_payloads;
 mod local_rewrite_gateway_key_store_backend;
+mod local_rewrite_gateway_keys;
+mod local_rewrite_gateway_ledger;
 mod local_rewrite_gateway_ledger_types;
 mod local_rewrite_gateway_metrics;
 mod local_rewrite_gateway_openapi;
@@ -49,6 +51,7 @@ mod local_rewrite_gateway_sql_ledger;
 mod local_rewrite_gateway_sqlite_utils;
 mod local_rewrite_gateway_store_file;
 mod local_rewrite_gateway_store_types;
+mod local_rewrite_gateway_usage;
 mod local_rewrite_gateway_usage_backend;
 mod local_rewrite_gateway_util;
 mod local_rewrite_gemini;
@@ -76,6 +79,8 @@ mod openai_responses_contract_tests;
 mod provider_bridge;
 mod provider_bridge_spend;
 mod provider_models;
+mod provider_sse_events;
+mod provider_sse_reader;
 mod provider_tools;
 pub(crate) use anthropic_rewrite::{
     RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth,

@@ -3,6 +3,10 @@ use super::deepseek_rewrite::{
     runtime_deepseek_created_at, runtime_deepseek_responses_usage,
     runtime_deepseek_rtk_wrapped_tool_arguments, runtime_deepseek_store_conversation,
 };
+use super::provider_sse_events::{
+    runtime_provider_sse_failed_event, runtime_provider_sse_output_text_item_added_event,
+    runtime_provider_sse_output_text_item_done_event,
+};
 use super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use std::collections::BTreeMap;
 
@@ -350,20 +354,12 @@ impl RuntimeDeepSeekSseState {
         }
         let sequence_number = self.next_sequence_number();
         self.completed = true;
-        Some(self.event(
-            "response.failed",
-            serde_json::json!({
-                "type": "response.failed",
-                "sequence_number": sequence_number,
-                "created_at": self.created_at,
-                "response": {
-                    "id": self.response_id,
-                    "error": {
-                        "code": code,
-                        "message": message,
-                    },
-                },
-            }),
+        Some(runtime_provider_sse_failed_event(
+            sequence_number,
+            self.created_at,
+            &self.response_id,
+            code,
+            message,
         ))
     }
 
@@ -377,19 +373,10 @@ impl RuntimeDeepSeekSseState {
         }
         self.output_text_item_added = true;
         let sequence_number = self.next_sequence_number();
-        Some(self.event(
-            "response.output_item.added",
-            serde_json::json!({
-                "type": "response.output_item.added",
-                "sequence_number": sequence_number,
-                "response_id": self.response_id,
-                "item": {
-                    "id": self.output_text_item_id(),
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                },
-            }),
+        Some(runtime_provider_sse_output_text_item_added_event(
+            sequence_number,
+            &self.response_id,
+            &self.output_text_item_id(),
         ))
     }
 
@@ -403,22 +390,11 @@ impl RuntimeDeepSeekSseState {
         }
         self.output_text_item_done = true;
         let sequence_number = self.next_sequence_number();
-        events.push(self.event(
-            "response.output_item.done",
-            serde_json::json!({
-                "type": "response.output_item.done",
-                "sequence_number": sequence_number,
-                "response_id": self.response_id,
-                "item": {
-                    "id": self.output_text_item_id(),
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{
-                        "type": "output_text",
-                        "text": self.output_text,
-                    }],
-                },
-            }),
+        events.push(runtime_provider_sse_output_text_item_done_event(
+            sequence_number,
+            &self.response_id,
+            &self.output_text_item_id(),
+            &self.output_text,
         ));
         events
     }

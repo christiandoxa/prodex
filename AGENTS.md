@@ -35,7 +35,6 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-runtime-doctor/`: runtime diagnostics summary helpers
 - `crates/prodex-runtime-launch/`: child process and runtime launch planning primitives
 - `crates/prodex-runtime-log/`: runtime log path and marker helpers
-- `crates/prodex-runtime-mem/`: runtime memory mode helpers
 - `crates/prodex-runtime-metrics/`: runtime broker metrics model and Prometheus rendering
 - `crates/prodex-runtime-policy/`: runtime policy parsing, validation, caching, and summary helpers
 - `crates/prodex-runtime-proxy/`: side-effect-free runtime proxy boundary types, classifiers, path/log parsing, payload parsing, and transport helper logic
