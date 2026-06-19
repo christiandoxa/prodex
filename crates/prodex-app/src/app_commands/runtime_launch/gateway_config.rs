@@ -740,7 +740,7 @@ fn gateway_openai_api_keys(value: Option<&str>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn gateway_api_keys_from_list(value: &str) -> Option<Vec<String>> {
+pub(super) fn gateway_api_keys_from_list(value: &str) -> Option<Vec<String>> {
     let keys = value
         .split([',', ';', '\n'])
         .map(str::trim)

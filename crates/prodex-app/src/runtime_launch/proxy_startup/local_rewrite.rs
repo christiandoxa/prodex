@@ -612,8 +612,12 @@ fn handle_runtime_local_rewrite_proxy_request(
         let provider_name = match &shared.provider {
             RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
             RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. } => "OpenAI",
+            RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => {
+                "Prodex local embeddings"
+            }
             RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
-            _ => "DeepSeek",
+            RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => "DeepSeek",
         };
         let _ = request.respond(build_runtime_proxy_text_response(
             501,

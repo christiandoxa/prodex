@@ -12,6 +12,8 @@ mod doctor;
 mod gateway;
 mod info;
 mod info_handler;
+mod mem0_memory;
+mod memory_mcp;
 mod presidio;
 mod quota;
 mod runtime_launch;
@@ -30,6 +32,8 @@ pub(crate) use self::doctor::*;
 pub(crate) use self::gateway::*;
 pub(crate) use self::info::*;
 pub(crate) use self::info_handler::*;
+pub(crate) use self::mem0_memory::*;
+pub(crate) use self::memory_mcp::*;
 pub(crate) use self::presidio::*;
 pub(crate) use self::quota::*;
 pub(crate) use self::selection::*;
@@ -46,9 +50,16 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
         None => prompt_super_presidio_opt_in()?,
     };
     if matches!(args.cli, Some(SuperCliAgent::Gemini | SuperCliAgent::Agy)) {
+        if args.mem0 {
+            bail!("--mem0 is only supported by the Codex Super overlay, not native Gemini/Agy CLI");
+        }
         return crate::runtime_gemini_cli::handle_super_google_cli(args, use_presidio);
     }
-    handle_caveman(args.into_caveman_args_with_presidio(use_presidio))
+    let use_mem0 = match args.mem0_preference() {
+        Some(use_mem0) => use_mem0,
+        None => prompt_super_mem0_opt_in()?,
+    };
+    handle_caveman(args.into_caveman_args_with_choices(use_presidio, use_mem0))
 }
 
 pub(super) fn prepare_runtime_launch(
@@ -82,6 +93,17 @@ fn prompt_super_presidio_opt_in() -> Result<bool> {
     )
 }
 
+fn prompt_super_mem0_opt_in() -> Result<bool> {
+    let stdin = io::stdin();
+    let stderr = io::stderr();
+    prompt_super_mem0_opt_in_from(
+        stdin.is_terminal(),
+        stderr.is_terminal(),
+        stdin.lock(),
+        stderr,
+    )
+}
+
 fn prompt_super_presidio_opt_in_from<R, W>(
     stdin_is_terminal: bool,
     stderr_is_terminal: bool,
@@ -102,6 +124,32 @@ where
     input
         .read_line(&mut answer)
         .context("failed to read Presidio prompt answer")?;
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+fn prompt_super_mem0_opt_in_from<R, W>(
+    stdin_is_terminal: bool,
+    stderr_is_terminal: bool,
+    mut input: R,
+    mut output: W,
+) -> Result<bool>
+where
+    R: BufRead,
+    W: Write,
+{
+    if !stdin_is_terminal || !stderr_is_terminal {
+        return Ok(false);
+    }
+
+    write!(output, "Use managed Mem0 memory via Docker? [y/N] ")?;
+    output.flush().context("failed to flush prompt")?;
+    let mut answer = String::new();
+    input
+        .read_line(&mut answer)
+        .context("failed to read Mem0 memory prompt answer")?;
     Ok(matches!(
         answer.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
@@ -152,6 +200,34 @@ mod tests {
             )?;
             assert!(!enabled);
             assert!(output.is_empty());
+        }
+        Ok(())
+    }
+
+    fn mem0_prompt_answer(answer: &str) -> Result<(bool, String)> {
+        let mut output = Vec::new();
+        let enabled =
+            prompt_super_mem0_opt_in_from(true, true, io::Cursor::new(answer), &mut output)?;
+        let output = String::from_utf8(output).context("prompt output should be UTF-8")?;
+        Ok((enabled, output))
+    }
+
+    #[test]
+    fn super_mem0_prompt_accepts_y_and_yes() -> Result<()> {
+        for answer in ["y\n", "Y\n", "yes\n", "YES\n"] {
+            let (enabled, output) = mem0_prompt_answer(answer)?;
+            assert!(enabled, "{answer:?} should opt in");
+            assert_eq!(output, "Use managed Mem0 memory via Docker? [y/N] ");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn super_mem0_prompt_rejects_n_and_default() -> Result<()> {
+        for answer in ["n\n", "N\n", "\n", "no\n"] {
+            let (enabled, output) = mem0_prompt_answer(answer)?;
+            assert!(!enabled, "{answer:?} should not opt in");
+            assert_eq!(output, "Use managed Mem0 memory via Docker? [y/N] ");
         }
         Ok(())
     }

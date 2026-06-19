@@ -134,6 +134,9 @@ pub struct SetupArgs {
 pub enum CapabilityCommands {
     /// List optional Prodex capabilities and local availability.
     List(CapabilityListArgs),
+    /// Diagnose the local optimizer stack used by `prodex s` / `prodex super`.
+    #[command(name = "super-doctor", visible_alias = "s-doctor")]
+    SuperDoctor(SuperDoctorArgs),
 }
 
 #[derive(Args, Debug)]
@@ -141,6 +144,19 @@ pub struct CapabilityListArgs {
     /// Emit machine-readable JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct SuperDoctorArgs {
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Exit non-zero when any Super optimizer check is not ready.
+    #[arg(long)]
+    pub strict: bool,
+    /// Include local Presidio Analyzer/Anonymizer health checks.
+    #[arg(long)]
+    pub presidio: bool,
 }
 
 #[derive(Args, Debug)]

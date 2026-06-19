@@ -98,8 +98,8 @@ Notes:
   Prodex launches Codex from a temporary overlay `CODEX_HOME` so Caveman stays isolated from the base profile.
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
-  Add optimizer prefixes before Codex args to enable launch overlays: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `presidio`.
-  Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex tokensavior`, and `prodex clawcompactor` map to `prodex caveman <prefix>`.
+  Add optimizer prefixes before Codex args to enable launch overlays: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, `presidio`.
+  Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex tokensavior`, `prodex clawcompactor`, and `prodex mem` map to `prodex caveman <prefix>`.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
@@ -109,15 +109,20 @@ Examples:
   prodex super gemini
   prodex super gemini --cli gemini
   prodex super gemini --cli agy
+  prodex super doctor
+  prodex super doctor --json --strict
   prodex super exec \"review latest diff in super mode\"
   prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
   prodex super --profile main
 
 Notes:
-  `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor --full-access`, with an interactive Presidio opt-in prompt before launch.
-  It always enables the Caveman overlay, RTK shell-command guidance, Super optimizer overlay, and launch-time full access.
-  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access`.
-  Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive.
+  `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor mem --full-access`, with interactive Presidio and managed-Mem0 opt-in prompts before launch.
+  It always enables the Caveman overlay, RTK shell-command guidance, Super optimizer overlay, built-in prodex-memory MCP, Smart Context, and launch-time full access.
+  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor mem presidio --full-access`.
+  Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
+  Empty input or `n` at the Mem0 prompt keeps the default SQLite memory backend; use `--mem0` or `--no-mem0` to make the memory backend choice non-interactive.
+  Managed Mem0 uses Docker Compose and a session-local Prodex gateway; launch prints Docker progress, and if no upstream provider API key is available, Prodex serves local embeddings for Mem0.
+  Use `prodex super doctor` or `prodex s doctor` to inspect local optimizer readiness without launching Codex.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Use `--provider anthropic` to route through Anthropic's OpenAI-compatible Chat Completions API. Sign in with `prodex login --with-claude`, or supply `--api-key`, ANTHROPIC_API_KEY, or ANTHROPIC_API_KEYS.

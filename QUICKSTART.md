@@ -41,10 +41,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.193.0`:
+The current local version in this repo is `0.194.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.193.0
+npm install -g @christiandoxa/prodex@0.194.0
 ```
 
 Dependency status in this repo:
@@ -183,6 +183,7 @@ prodex rtk
 prodex sqz
 prodex tokensavior
 prodex clawcompactor
+prodex mem
 prodex super --url http://127.0.0.1:8131
 prodex super --url http://127.0.0.1:8131 --dry-run
 prodex s expose
@@ -194,15 +195,16 @@ Use this path when you want Codex itself as the front end but want Caveman mode 
 
 If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
 
-Add optimizer prefixes before Codex args to inject launch overlays into the temporary Codex home: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `presidio`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
-`prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot through a dedicated runtime proxy for OpenAI/Codex providers, then ask whether to enable Presidio redaction. Empty input or `n` is equivalent to `prodex caveman rtk sqz tokensavior clawcompactor --full-access`; `y` is equivalent to `prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access`. Use `--presidio` or `--no-presidio` to make that choice non-interactive. When enabled, Presidio redacts UTF-8 HTTP request bodies and WebSocket text frames through local Presidio before forwarding them upstream. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cache-friendly context framing, and critical-signal self-checks.
+Add optimizer prefixes before Codex args to inject launch overlays into the temporary Codex home: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, or `presidio`. Top-level shortcuts such as `prodex rtk`, `prodex sqz`, and `prodex mem` map to `prodex caveman <prefix>`. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
+`prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot through a dedicated runtime proxy for OpenAI/Codex providers, then ask whether to enable Presidio redaction. Empty input or `n` is equivalent to `prodex caveman rtk sqz tokensavior clawcompactor mem --full-access`; `y` is equivalent to `prodex caveman rtk sqz tokensavior clawcompactor mem presidio --full-access`. Use `--presidio` or `--no-presidio` to make that choice non-interactive. Super then asks whether to use managed Mem0 memory. Empty input or `n` keeps the built-in SQLite `prodex-memory` backend; answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server, route its OpenAI-compatible calls through a session-local Prodex gateway, and avoid Mem0 Cloud or `MEM0_API_KEY`. Use `--no-mem0` to skip that prompt. Managed Mem0 mode requires Docker Compose; if no upstream provider API key is available, Prodex serves deterministic local embeddings for Mem0 and keeps generation disabled on that internal gateway. When enabled, Presidio redacts UTF-8 HTTP request bodies and WebSocket text frames through local Presidio before forwarding them upstream. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cache-friendly context framing, and critical-signal self-checks.
+Use `prodex s doctor` to check RTK, SQZ MCP, token-savior, claw-compactor, built-in prodex-memory, built-in Smart Context, and embedded Caveman/Super assets without launching Codex. Add `--json`, `--strict`, or `--presidio` when you need machine-readable output, non-zero failure on unavailable tools, or Presidio service health checks. `prodex s --dry-run` includes the same optimizer matrix in the launch preview.
 Use `prodex s expose` to start a browser-accessible terminal session protected by a high-entropy access token. When `cloudflared` is on `PATH`, Prodex creates a Cloudflare quick tunnel and prints the public URL; use `--no-tunnel` for loopback-only access. Closing the browser tab does not stop the PTY, and reopening the same token URL replays recent terminal scrollback while the `prodex s expose` process is still running.
-Super's optimization stack is local and deterministic by default: Caveman, an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registered `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, overlay `sqz`/`claw-compactor` wrappers when discoverable, and a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME`, so Codex conversation restarts do not replay it. If the directory has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a generated `MEMORY.md` and does not modify the original directory.
+Super's optimization stack is local and deterministic by default: Caveman, an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registered `sqz-mcp`, `token-savior`, and built-in `prodex-memory` MCP servers, overlay `sqz`/`claw-compactor` wrappers when discoverable, and a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME`, so Codex conversation restarts do not replay it. If the directory has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a generated `MEMORY.md` and does not modify the original directory.
 For token-savior, prefer an isolated stable-Python venv at `~/.local/share/prodex-optimizers/token-savior/.venv`; Prodex prefers that managed venv over a global `PATH` binary to avoid experimental Python dependency breakage.
-Prodex passes token-savior cache and stats paths under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions keep generated state out of worktrees.
-Super instructs Codex to use the full local optimizer stack where it fits: visible `rtk <cmd>` for noisy shell output, `prodex-sqz` for repeated large context and long-session reuse, `prodex-token-savior` for symbol/navigation work before broad source reads, and `prodex-claw-compactor` or `prodex-claw-compactor-auto` for workspace-level summaries. Presidio remains opt-in through the prompt or `--presidio`.
+Prodex passes token-savior cache, stats paths, and local memory under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions and memory state stay out of worktrees. `prodex-memory` is local Mem0-style memory and does not use Mem0 Cloud or require `MEM0_API_KEY`; the default backend is SQLite, and `--mem0` switches Super to the managed Mem0 OSS Docker backend.
+Super instructs Codex to use the full local optimizer stack where it fits: visible `rtk <cmd>` for noisy shell output, `prodex-sqz` for repeated large context and long-session reuse, `prodex-token-savior` for symbol/navigation work before broad source reads, `prodex-memory` for durable local preferences/project facts, and `prodex-claw-compactor` or `prodex-claw-compactor-auto` for workspace-level summaries. Presidio remains opt-in through the prompt or `--presidio`.
 RTK handles upstream/input command output before it enters the context window through visible `rtk <cmd>` commands, with overlay auto-wrappers as a safety fallback. Auto-wrappers are only a backstop; write `rtk <cmd>` explicitly when you want the TUI/transcript to show RTK usage. SQZ handles downstream/context reuse through the auto-registered `prodex-sqz` MCP server when `sqz-mcp` is available.
-Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
+Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. The generated `SUPER_OPTIMIZERS.md` overlay includes an `Available Now` section for the exact tools discovered in that session.
 
 Use DeepSeek with the Codex/Super front end:
 

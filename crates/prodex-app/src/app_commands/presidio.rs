@@ -4,10 +4,13 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
+use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 use terminal_ui::print_panel;
 
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
@@ -15,6 +18,11 @@ const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
 const DEFAULT_PRESIDIO_ANONYMIZER_URL: &str = "http://localhost:5001";
 const DEFAULT_PRESIDIO_LANGUAGE: &str = "en";
 const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const PRESIDIO_AUTO_START_ENV: &str = "PRODEX_PRESIDIO_AUTO_START";
+const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
+const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
+const PRESIDIO_ANALYZER_IMAGE: &str = "mcr.microsoft.com/presidio-analyzer:latest";
+const PRESIDIO_ANONYMIZER_IMAGE: &str = "mcr.microsoft.com/presidio-anonymizer:latest";
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct ProdexPresidioConfig {
@@ -73,6 +81,79 @@ pub(crate) fn handle_presidio(command: PresidioCommands) -> Result<()> {
         PresidioCommands::Enable(args) => handle_presidio_enable(args),
         PresidioCommands::Disable => handle_presidio_disable(),
     }
+}
+
+pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Result<()> {
+    let config = load_presidio_config(paths)?.unwrap_or_default();
+    let analyzer_url = config.analyzer_url;
+    let anonymizer_url = config.anonymizer_url;
+    eprintln!(
+        "Prodex launch: Presidio redaction enabled; checking Analyzer={} Anonymizer={} ...",
+        analyzer_url, anonymizer_url
+    );
+    let client = presidio_http_client()?;
+    let analyzer = probe_presidio_health(&client, &analyzer_url);
+    let anonymizer = probe_presidio_health(&client, &anonymizer_url);
+    if analyzer.ok && anonymizer.ok {
+        eprintln!("Prodex launch: Presidio services are ready.");
+        return Ok(());
+    }
+
+    if presidio_auto_start_disabled() {
+        eprintln!(
+            "Prodex launch: Presidio auto-start disabled by {PRESIDIO_AUTO_START_ENV}=0; continuing with configured endpoints."
+        );
+        return Ok(());
+    }
+
+    if analyzer_url != DEFAULT_PRESIDIO_ANALYZER_URL
+        || anonymizer_url != DEFAULT_PRESIDIO_ANONYMIZER_URL
+    {
+        eprintln!(
+            "Prodex launch: Presidio uses custom endpoints; not starting Docker containers automatically."
+        );
+        return Ok(());
+    }
+
+    if !docker_available() {
+        eprintln!("Prodex launch: Docker is unavailable, so Presidio containers were not started.");
+        return Ok(());
+    }
+
+    if !analyzer.ok {
+        eprintln!("Prodex launch: starting Presidio Analyzer Docker container...");
+        ensure_presidio_container(
+            PRESIDIO_ANALYZER_CONTAINER,
+            PRESIDIO_ANALYZER_IMAGE,
+            "5002:3000",
+        )?;
+    }
+    if !anonymizer.ok {
+        eprintln!("Prodex launch: starting Presidio Anonymizer Docker container...");
+        ensure_presidio_container(
+            PRESIDIO_ANONYMIZER_CONTAINER,
+            PRESIDIO_ANONYMIZER_IMAGE,
+            "5001:3000",
+        )?;
+    }
+
+    eprintln!("Prodex launch: waiting for Presidio services to become ready...");
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while Instant::now() < deadline {
+        let analyzer = probe_presidio_health(&client, &analyzer_url);
+        let anonymizer = probe_presidio_health(&client, &anonymizer_url);
+        if analyzer.ok && anonymizer.ok {
+            eprintln!("Prodex launch: Presidio services are ready.");
+            return Ok(());
+        }
+        thread::sleep(Duration::from_secs(2));
+    }
+
+    eprintln!(
+        "Prodex launch: Presidio services did not become healthy before launch; continuing with runtime fail_mode={}.",
+        config.fail_mode
+    );
+    Ok(())
 }
 
 fn handle_presidio_doctor(args: PresidioDoctorArgs) -> Result<()> {
@@ -396,6 +477,66 @@ fn probe_presidio_health(client: &Client, base_url: &str) -> PresidioHealth {
             message: err.to_string(),
         },
     }
+}
+
+fn presidio_auto_start_disabled() -> bool {
+    env::var(PRESIDIO_AUTO_START_ENV)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn docker_available() -> bool {
+    Command::new("docker")
+        .arg("version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn ensure_presidio_container(name: &str, image: &str, port: &str) -> Result<()> {
+    if docker_container_exists(name) {
+        let status = Command::new("docker")
+            .args(["start", name])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .with_context(|| format!("failed to start Presidio container {name}"))?;
+        if !status.success() {
+            bail!("docker start {name} failed with {status}");
+        }
+        return Ok(());
+    }
+
+    let status = Command::new("docker")
+        .args(["run", "-d", "--name", name, "-p", port, image])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| format!("failed to run Presidio container {name}"))?;
+    if !status.success() {
+        bail!("docker run {name} failed with {status}");
+    }
+    Ok(())
+}
+
+fn docker_container_exists(name: &str) -> bool {
+    Command::new("docker")
+        .args(["container", "inspect", name])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn presidio_health_label(health: &PresidioHealth) -> String {

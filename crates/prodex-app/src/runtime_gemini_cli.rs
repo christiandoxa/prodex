@@ -49,9 +49,15 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
+        if self.presidio_enabled {
+            crate::ensure_presidio_services_for_super_launch(&prepared.paths)?;
+        }
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
         prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;
-        prodex_caveman_assets::configure_super_optimizer_codex_home(&caveman_home)?;
+        prodex_caveman_assets::configure_super_optimizer_codex_home_with_presidio(
+            &caveman_home,
+            self.presidio_enabled,
+        )?;
 
         let launch_args = runtime_super_google_cli_launch_args(
             self.agent,

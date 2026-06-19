@@ -2,9 +2,15 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.193.0 - 2026-06-18
+## 0.194.0 - 2026-06-19
 
 - No grouped changes.
+
+## 0.193.0 - 2026-06-19
+
+### Runtime
+
+- Restore Anthropic crate boundary (`bf70a02`)
 
 ## 0.192.0 - 2026-06-18
 
@@ -74,10 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Recover resume sessions from readable rollouts (`c4a355e`)
-
-## 0.182.0 - 2026-06-14
-
-### CLI
-
-- Repair matching resume sessions across profiles (`85ea1ef`)
-- Repair resume sessions in selected profiles (`3be54d0`)

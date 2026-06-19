@@ -143,7 +143,7 @@ If you install from source, make sure the `codex` binary in your `PATH` is alrea
 
 ## Optional tools
 
-`prodex` can run without RTK, SQZ, token-savior, claw-compactor, or Presidio.
+`prodex` can run without RTK, SQZ, token-savior, claw-compactor, or Presidio. `prodex-memory` is built in and is enabled by Super mode as a local-first memory MCP server.
 
 Install them only if you want to use commands such as:
 
@@ -155,12 +155,80 @@ prodex rtk
 prodex sqz
 prodex tokensavior
 prodex clawcompactor
+prodex mem
+prodex s doctor
 prodex presidio doctor
 prodex presidio redact --text "My phone is 212-555-1234"
 prodex gateway --provider gemini
 prodex s
 prodex super
 ```
+
+</details>
+
+<details>
+<summary>Prodex memory mode</summary>
+
+```bash
+prodex s
+prodex super
+prodex caveman mem
+prodex s doctor
+```
+
+`prodex s` runs Codex with the built-in `prodex-memory` MCP server registered in the temporary overlay `CODEX_HOME`.
+The base Codex profile stays unchanged; memory state is owned by Prodex.
+Use `prodex caveman mem` when you want only Caveman plus the local memory MCP overlay, without the full Super stack.
+
+`prodex-memory` provides Mem0-style local memory without Mem0 Cloud, Mem0 CLI, or `MEM0_API_KEY`.
+By default it stores memories in a SQLite database under `PRODEX_HOME`:
+
+```text
+$PRODEX_HOME/memory/prodex-memory.sqlite
+```
+
+`prodex s` asks the Presidio prompt first, then asks whether to use managed Mem0 memory. Empty input or `n` keeps the lightweight SQLite backend. Answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server. Use `--no-mem0` to skip that prompt non-interactively.
+
+The default SQLite path remains the fastest OOTB memory path:
+
+- no Mem0 Cloud endpoint
+- no `MEM0_API_KEY`
+- no user-visible Mem0 auth
+- local SQLite storage
+- MCP tools exposed as `prodex-memory`
+
+Managed Mem0 mode requires Docker Compose (`docker compose` or `docker-compose`). It does not require a Mem0 Cloud token or a user-supplied provider API key for the default memory path. OpenAI-compatible API-key profiles, `--url` local providers, and supported provider bridges can provide richer upstream LLM/embedding behavior; otherwise Prodex falls back to local embeddings for Mem0.
+
+<details>
+<summary>Managed Mem0 internals</summary>
+
+Managed Mem0 mode is still local-first:
+
+- Prodex clones `https://github.com/mem0ai/mem0` under `$PRODEX_HOME/mem0` if needed.
+- Prodex writes the Mem0 server `.env` with generated local `ADMIN_API_KEY`, `JWT_SECRET`, and Postgres password.
+- Mem0 auth stays enabled; Prodex keeps the local API key internal and injects it only into the temporary MCP overlay.
+- Mem0 receives `OPENAI_BASE_URL=http://host.docker.internal:<prodex-gateway-port>/v1`.
+- Mem0 receives an internal Prodex gateway bearer token as `OPENAI_API_KEY`.
+- The gateway selects an efficient memory LLM when available, preferring nano/mini models, and defaults embeddings to `text-embedding-3-small`.
+- If no upstream API-key profile is available, the internal gateway still serves deterministic local embeddings for Mem0 and disables generation endpoints for that Mem0-only gateway.
+- Prodex writes raw/no-infer memories by default, so the managed path does not spend LLM quota for memory extraction.
+- No Mem0 Cloud endpoint and no user-managed `MEM0_API_KEY` are used.
+
+</details>
+
+<details>
+<summary>Memory diagnostics</summary>
+
+Use `prodex s doctor` to verify that the built-in memory store can be opened before launching Codex. The hidden MCP server can also be launched directly for diagnostics:
+
+```bash
+prodex s doctor
+prodex __memory-mcp --store /tmp/prodex-memory.sqlite
+```
+
+Mem0 Cloud's official MCP endpoint is intentionally not part of Prodex Super's default path. Configure it manually only when you explicitly want Mem0 Platform auth and are willing to manage `MEM0_API_KEY` yourself.
+
+</details>
 
 </details>
 
@@ -370,6 +438,8 @@ docker run -d --name presidio-analyzer -p 5002:3000 mcr.microsoft.com/presidio-a
 docker run -d --name presidio-anonymizer -p 5001:3000 mcr.microsoft.com/presidio-anonymizer:latest
 ```
 
+When Super mode opts into Presidio and the default local endpoints are not healthy, Prodex now tries to start these Docker containers automatically before launching Codex. Set `PRODEX_PRESIDIO_AUTO_START=0` to disable that best-effort auto-start and only use the configured endpoints.
+
 Source checkout with Compose:
 
 ```bash
@@ -521,22 +591,28 @@ prodex s expose
 `prodex super` expands to:
 
 ```bash
-prodex caveman rtk sqz tokensavior clawcompactor --full-access
+prodex caveman rtk sqz tokensavior clawcompactor mem --full-access
 ```
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps the expansion above. If you answer `y`, it is equivalent to:
 
 ```bash
-prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access
+prodex caveman rtk sqz tokensavior clawcompactor mem presidio --full-access
 ```
 
 Use `prodex super --presidio` to enable Presidio without prompting, or `prodex super --no-presidio` to skip the prompt and keep Presidio disabled. Presidio enables runtime request-body and WebSocket text redaction through local Presidio for the session. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
 
+After the Presidio prompt, Super asks whether to use managed Mem0 memory. Empty input or `n` keeps the built-in SQLite-backed `prodex-memory` MCP backend. Answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server, route its OpenAI-compatible calls through a session-local Prodex gateway, and inject the local Mem0 API key into the temporary Codex MCP config. Use `--no-mem0` to skip the prompt. This path does not use Mem0 Cloud or `MEM0_API_KEY`; Docker Compose is required, and Prodex falls back to local embeddings when no upstream provider API key is available.
+
+Super prints prelaunch progress for runtime proxy setup, Presidio auto-start/checks, and managed Mem0 Docker startup. The output happens before Codex starts; runtime notices still go to logs once the TUI is running.
+
 Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
+
+Use `prodex s doctor` to inspect the Super optimizer stack without launching Codex. Add `--json` for machine-readable output, `--strict` to exit non-zero when any optimizer check is unavailable, and `--presidio` to include local Presidio Analyzer/Anonymizer health checks. `prodex s --dry-run` also prints the same optimizer matrix for the launch preview.
 
 Use `prodex s expose` when you need to reach the live Super terminal from a browser. Prodex starts a local PTY bridge protected by a high-entropy access token, launches `cloudflared tunnel --protocol http2 --url ...` when `cloudflared` is available, and prints both the loopback and Cloudflare quick-tunnel URLs. The browser tab can close without stopping the session; reopening the same token URL reconnects to the existing PTY and replays recent scrollback. Add `--no-tunnel` for local-only access, `--max-clients N` to cap simultaneous browsers, or `--command 'prodex s --no-presidio'` to choose the initial terminal command.
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads Caveman, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction is added to that proxy only when you opt in at the prompt. Prodex passes token-savior cache and stats paths under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions keep generated state out of worktrees.
+Super's built-in optimization stack is deliberately local and deterministic. It preloads Caveman, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp`, `token-savior`, and built-in `prodex-memory` MCP servers, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction is added to that proxy only when you opt in at the prompt. Prodex passes token-savior cache, stats paths, and local memory under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions and memory state stay out of worktrees.
 
 Super instructs Codex to use the whole local optimizer stack where it fits the task, not just RTK:
 
@@ -544,9 +620,11 @@ Super instructs Codex to use the whole local optimizer stack where it fits the t
 - SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server. Use it for repeated workspace reads, large text blobs, long command outputs that need reuse, and long-session context compression instead of emitting the same full content again.
 - token-savior handles symbol lookup, caller/context navigation, duplicate/dead-code checks, and API-impact searches before broad source reads.
 - claw-compactor handles workspace-level summary or benchmark requests through `prodex-claw-compactor` / `prodex-claw-compactor-auto`; treat its output as overview context and reread exact source before edits.
+- prodex-memory provides local Mem0-style memory through the default SQLite backend, or through managed Mem0 OSS Docker when you opt in with the Super prompt or `--mem0`; neither path uses Mem0 Cloud auth or `MEM0_API_KEY`.
 - Presidio stays optional and only runs when you opt in with the Super prompt or `--presidio`.
 
 Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
+The generated `SUPER_OPTIMIZERS.md` overlay includes an `Available Now` section so the model can see which MCP servers and wrappers were actually discovered for that session.
 
 </details>
 
@@ -693,7 +771,10 @@ prodex rtk
 prodex sqz
 prodex tokensavior
 prodex clawcompactor
+prodex mem
 prodex caveman --dry-run
+prodex s doctor
+prodex s doctor --json --strict
 prodex caveman --profile main
 prodex caveman exec "review this repo in caveman mode"
 prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
@@ -701,7 +782,7 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex caveman` runs Codex with a temporary overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
-Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, or `presidio`. Top-level shortcuts such as `prodex rtk` and `prodex sqz` map to `prodex caveman <prefix>`.
+Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, or `presidio`. Top-level shortcuts such as `prodex rtk`, `prodex sqz`, and `prodex mem` map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
@@ -786,7 +867,7 @@ Gemini Live realtime websocket translation remains available for compatible call
 
 Run `npm run test:gemini-schema` after changing Gemini request, response, SSE, semantic compact, exact-output, tool-schema, or Live translation. Run `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` for a credentialed end-to-end Gemini adapter smoke request; set `PRODEX_BIN` or `PRODEX_LIVE_GEMINI_MODEL` to override the binary or model. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` for command-output-only, file edit, `apply_patch`, reference-repo clone/inspection, optional-tool update discipline, semantic compact, and explicit `exec resume` checks. Add `PRODEX_LIVE_GEMINI_MCP=1` and/or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when the local environment should also exercise MCP and image-input paths.
 
-Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use.
+Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use. Super then asks whether to use managed Mem0 memory. Empty input or `n` keeps the built-in SQLite memory backend; answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server and route its OpenAI-compatible calls through Prodex gateway. Use `--no-mem0` to skip that prompt.
 
 Prodex now supports multi-language Presidio redaction, including automatic detection and multi-language merging. The runtime uses `presidio.toml` endpoints and language configuration when available, falling back to `http://localhost:5002` and `http://localhost:5001` for Analyzer/Anonymizer URLs, and English (`en`) for language if not specified. It honors `fail_mode = "open"` or `"closed"`.
 

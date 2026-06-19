@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
+use super::{collect_super_tool_statuses, render_super_tool_statuses};
 use crate::{
     CavemanArgs, ChildProcessPlan, CodexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
@@ -206,19 +207,31 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
             .map(crate::SuperExternalProvider::as_str),
         external_provider_api_key: args.external_provider_api_key.as_deref(),
     };
+    let memory_backend = match args.memory_backend {
+        crate::SuperMemoryBackend::Sqlite => "local sqlite",
+        crate::SuperMemoryBackend::Mem0 => "managed Mem0 Docker (would start)",
+    };
+    let mut extra_report = format!(
+        "Optimizer overlay: rtk={}; super={}\nMemory backend: {}",
+        if rtk_enabled { "enabled" } else { "disabled" },
+        if super_optimizer_overlay {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        memory_backend,
+    );
+    if super_optimizer_overlay {
+        let paths = crate::AppPaths::discover()?;
+        let statuses = collect_super_tool_statuses(&paths, presidio_enabled);
+        extra_report.push('\n');
+        extra_report.push_str(&render_super_tool_statuses(&statuses));
+    }
     print_runtime_launch_dry_run(
         "caveman",
         request,
         RuntimeLaunchDryRunChild::Caveman { codex_args },
-        Some(&format!(
-            "Optimizer overlay: rtk={}; super={}",
-            if rtk_enabled { "enabled" } else { "disabled" },
-            if super_optimizer_overlay {
-                "enabled"
-            } else {
-                "disabled"
-            },
-        )),
+        Some(&extra_report),
     )
 }
 

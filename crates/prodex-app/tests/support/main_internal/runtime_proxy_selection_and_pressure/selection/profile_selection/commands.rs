@@ -124,6 +124,45 @@ fn caveman_command_accepts_passthrough_args() {
 }
 
 #[test]
+fn optimizer_shortcuts_parse_as_dedicated_commands() {
+    let rtk = parse_cli_command_from(["prodex", "rtk", "--profile", "main", "exec", "review"])
+        .expect("rtk shortcut should parse");
+    let Commands::Rtk(args) = rtk else {
+        panic!("expected rtk shortcut");
+    };
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert_eq!(args.codex_args, vec![OsString::from("exec"), OsString::from("review")]);
+
+    let sqz = parse_cli_command_from(["prodex", "sqz", "exec", "review"])
+        .expect("sqz shortcut should parse");
+    assert!(matches!(sqz, Commands::Sqz(_)));
+
+    let token_savior = parse_cli_command_from(["prodex", "tokensavior", "exec", "review"])
+        .expect("tokensavior shortcut should parse");
+    assert!(matches!(token_savior, Commands::TokenSavior(_)));
+
+    let token_savior_alias = parse_cli_command_from(["prodex", "token-savior", "exec", "review"])
+        .expect("token-savior alias should parse");
+    assert!(matches!(token_savior_alias, Commands::TokenSavior(_)));
+
+    let claw_compactor = parse_cli_command_from(["prodex", "clawcompactor", "exec", "review"])
+        .expect("clawcompactor shortcut should parse");
+    assert!(matches!(claw_compactor, Commands::ClawCompactor(_)));
+
+    let claw_compactor_alias = parse_cli_command_from(["prodex", "claw-compactor", "exec", "review"])
+        .expect("claw-compactor alias should parse");
+    assert!(matches!(claw_compactor_alias, Commands::ClawCompactor(_)));
+
+    let mem = parse_cli_command_from(["prodex", "mem", "exec", "review"])
+        .expect("mem shortcut should parse");
+    assert!(matches!(mem, Commands::Mem(_)));
+
+    let memory_alias = parse_cli_command_from(["prodex", "memory", "exec", "review"])
+        .expect("memory alias should parse");
+    assert!(matches!(memory_alias, Commands::Mem(_)));
+}
+
+#[test]
 fn super_command_parses_as_distinct_subcommand_and_expands_to_full_super_prefix_stack() {
     let command = parse_cli_command_from([
         "prodex",
@@ -149,6 +188,7 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_full_super_prefix_
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
+            OsString::from("mem"),
             OsString::from("exec"),
             OsString::from("review this repo")
         ]
@@ -173,6 +213,42 @@ fn super_command_accepts_s_alias() {
     assert_eq!(
         args.codex_args,
         vec![OsString::from("exec"), OsString::from("review this repo")]
+    );
+}
+
+#[test]
+fn super_doctor_alias_routes_to_capability_super_doctor() {
+    let command = parse_cli_command_from(["prodex", "s", "doctor", "--json", "--strict"])
+        .expect("super doctor alias should parse");
+    let Commands::Capability(CapabilityCommands::SuperDoctor(args)) = command else {
+        panic!("expected capability super-doctor command");
+    };
+    assert!(args.json);
+    assert!(args.strict);
+
+    let command = parse_cli_command_from(["prodex", "super", "doctor", "--presidio"])
+        .expect("super doctor command should parse");
+    let Commands::Capability(CapabilityCommands::SuperDoctor(args)) = command else {
+        panic!("expected capability super-doctor command");
+    };
+    assert!(args.presidio);
+}
+
+#[test]
+fn hidden_memory_mcp_command_accepts_store_path() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "__memory-mcp",
+        "--store",
+        "/tmp/prodex-memory.sqlite",
+    ])
+    .expect("memory mcp command should parse");
+    let Commands::MemoryMcp(args) = command else {
+        panic!("expected memory mcp command");
+    };
+    assert_eq!(
+        args.store.as_deref(),
+        Some(std::path::Path::new("/tmp/prodex-memory.sqlite"))
     );
 }
 
@@ -399,6 +475,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
     assert_eq!(rendered.get(1).map(String::as_str), Some("sqz"));
     assert_eq!(rendered.get(2).map(String::as_str), Some("tokensavior"));
     assert_eq!(rendered.get(3).map(String::as_str), Some("clawcompactor"));
+    assert_eq!(rendered.get(4).map(String::as_str), Some("mem"));
     assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
     assert!(rendered.contains(&"model=\"local/qwen\"".to_string()));
     assert!(rendered.contains(

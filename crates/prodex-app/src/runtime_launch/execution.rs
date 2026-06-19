@@ -113,7 +113,22 @@ fn build_runtime_launch_execution<S>(strategy: &S) -> Result<RuntimeLaunchExecut
 where
     S: RuntimeLaunchStrategy,
 {
-    RuntimeLaunchExecutionFactory::new(strategy.runtime_request(), strategy).build()
+    let request = strategy.runtime_request();
+    emit_runtime_launch_progress(&request);
+    RuntimeLaunchExecutionFactory::new(request, strategy).build()
+}
+
+fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
+    eprintln!("Prodex launch: preparing runtime and launch overlay...");
+    if request.presidio_redaction_enabled {
+        eprintln!("Prodex launch: Presidio redaction requested; preparing local redaction proxy.");
+    }
+    if request.smart_context_enabled {
+        eprintln!("Prodex launch: Smart Context runtime proxy requested.");
+    }
+    if request.model_provider_override.is_some() || request.external_provider.is_some() {
+        eprintln!("Prodex launch: local provider bridge requested.");
+    }
 }
 
 fn run_runtime_launch_execution(execution: RuntimeLaunchExecution) -> Result<ExitStatus> {
@@ -121,6 +136,7 @@ fn run_runtime_launch_execution(execution: RuntimeLaunchExecution) -> Result<Exi
         plan,
         runtime_proxy,
     } = execution;
+    eprintln!("Prodex launch: starting child process...");
     let status = run_child_plan(&plan.child, runtime_proxy.as_ref());
     drop(runtime_proxy);
     cleanup_runtime_launch_plan(&plan);

@@ -56,6 +56,7 @@ fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
         left.external_provider_api_key,
         right.external_provider_api_key
     );
+    assert_eq!(left.memory_backend, right.memory_backend);
     assert_eq!(left.codex_args, right.codex_args);
 }
 
@@ -206,6 +207,7 @@ fn super_default_keeps_all_super_prefixes() {
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
+            OsString::from("mem"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -238,6 +240,7 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
             "sqz",
             "tokensavior",
             "clawcompactor",
+            "mem",
             "exec",
             "hello",
         ])
@@ -258,6 +261,7 @@ fn super_includes_presidio_prefix_when_opted_in() {
             "sqz",
             "tokensavior",
             "clawcompactor",
+            "mem",
             "presidio",
             "exec",
             "hello",
@@ -281,6 +285,7 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
             "sqz",
             "tokensavior",
             "clawcompactor",
+            "mem",
             "presidio",
             "exec",
             "hello",
@@ -325,10 +330,42 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
             "sqz",
             "tokensavior",
             "clawcompactor",
+            "mem",
             "exec",
             "hello",
         ])
     );
+}
+
+#[test]
+fn super_mem0_flag_selects_managed_memory_backend() {
+    let command = parse_cli_command_from(["prodex", "super", "--mem0", "exec", "hello"])
+        .expect("super command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+    assert_eq!(args.mem0_preference(), Some(true));
+    let caveman = args.into_caveman_args_with_choices(false, true);
+    assert_eq!(caveman.memory_backend, SuperMemoryBackend::Mem0);
+    assert!(caveman.codex_args.contains(&OsString::from("mem")));
+}
+
+#[test]
+fn super_no_mem0_flag_selects_sqlite_memory_backend() {
+    let command = parse_cli_command_from(["prodex", "super", "--no-mem0", "exec", "hello"])
+        .expect("super command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+    assert_eq!(args.mem0_preference(), Some(false));
+    let caveman = args.into_caveman_args_with_choices(false, false);
+    assert_eq!(caveman.memory_backend, SuperMemoryBackend::Sqlite);
+    assert!(caveman.codex_args.contains(&OsString::from("mem")));
+}
+
+#[test]
+fn super_mem0_flags_conflict() {
+    assert!(parse_cli_command_from(["prodex", "super", "--mem0", "--no-mem0", "exec"]).is_err());
 }
 
 #[test]
@@ -466,6 +503,8 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
         ("token-savior", "tokensavior"),
         ("clawcompactor", "clawcompactor"),
         ("claw-compactor", "clawcompactor"),
+        ("mem", "mem"),
+        ("memory", "mem"),
     ] {
         assert!(!should_default_cli_invocation_to_run(&os_args(&[
             "prodex",
@@ -477,7 +516,8 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
             Commands::Rtk(args)
             | Commands::Sqz(args)
             | Commands::TokenSavior(args)
-            | Commands::ClawCompactor(args) => args,
+            | Commands::ClawCompactor(args)
+            | Commands::Mem(args) => args,
             other => panic!("expected optimizer shortcut command, got {other:?}"),
         };
         assert_eq!(args.codex_args, os_args(&["exec", "hello"]));

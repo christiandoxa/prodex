@@ -2,7 +2,7 @@ use clap::{ArgGroup, Args};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-pub const SUPER_OPTIMIZER_PREFIXES: [&str; 3] = ["sqz", "tokensavior", "clawcompactor"];
+pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "mem"];
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
@@ -98,6 +98,9 @@ pub struct CavemanArgs {
     /// External provider API key supplied by a higher-level launch shortcut.
     #[arg(skip)]
     pub external_provider_api_key: Option<String>,
+    /// Local memory backend selected by a higher-level launch shortcut.
+    #[arg(skip)]
+    pub memory_backend: SuperMemoryBackend,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
@@ -137,6 +140,12 @@ pub struct SuperArgs {
     /// Disable Presidio redaction and skip the interactive opt-in prompt.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
+    /// Start the managed Mem0 OSS Docker server and route memory LLM/embeddings through Prodex.
+    #[arg(long, conflicts_with = "no_mem0")]
+    pub mem0: bool,
+    /// Skip the Mem0 prompt and use the lightweight built-in SQLite memory backend.
+    #[arg(long, conflicts_with = "mem0")]
+    pub no_mem0: bool,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
     #[arg(
         long,
@@ -183,6 +192,13 @@ pub struct SuperArgs {
     pub codex_args: Vec<OsString>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SuperMemoryBackend {
+    #[default]
+    Sqlite,
+    Mem0,
+}
+
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperCliAgent {
     Codex,
@@ -195,6 +211,13 @@ pub struct GeminiCompatRefreshArgs {
     /// CODEX_HOME to refresh Gemini CLI compatibility surfaces into.
     #[arg(long, value_name = "PATH")]
     pub codex_home: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct MemoryMcpArgs {
+    /// SQLite store path for local Prodex memory.
+    #[arg(long, value_name = "PATH")]
+    pub store: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -255,11 +278,25 @@ impl SuperArgs {
         }
     }
 
+    pub fn mem0_preference(&self) -> Option<bool> {
+        if self.mem0 {
+            Some(true)
+        } else if self.no_mem0 {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
     pub fn into_caveman_args(self) -> CavemanArgs {
-        self.into_caveman_args_with_presidio(false)
+        self.into_caveman_args_with_choices(false, false)
     }
 
     pub fn into_caveman_args_with_presidio(self, presidio: bool) -> CavemanArgs {
+        self.into_caveman_args_with_choices(presidio, false)
+    }
+
+    pub fn into_caveman_args_with_choices(self, presidio: bool, mem0: bool) -> CavemanArgs {
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
         let external_upstream_base_url = self.provider.map(|provider| {
             self.base_url
@@ -325,6 +362,11 @@ impl SuperArgs {
             super_optimizer_overlay: true,
             external_provider: self.provider,
             external_provider_api_key: self.api_key,
+            memory_backend: if mem0 {
+                SuperMemoryBackend::Mem0
+            } else {
+                SuperMemoryBackend::Sqlite
+            },
             codex_args,
         }
     }

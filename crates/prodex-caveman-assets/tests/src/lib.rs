@@ -66,6 +66,7 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     assert!(awareness.contains("Locating symbols, callers, dead code, or API changes"));
     assert!(awareness.contains("claw-compactor"));
     assert!(awareness.contains("prodex-claw-compactor-auto"));
+    assert!(awareness.contains("- prodex-memory backend: local sqlite"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
     assert_eq!(

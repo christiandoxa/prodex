@@ -14,6 +14,7 @@ pub(crate) struct CavemanLaunchStrategy {
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
     gemini_thinking_budget_tokens: Option<u64>,
+    managed_mem0_memory: Mutex<Vec<ManagedMem0Memory>>,
 }
 
 impl CavemanLaunchStrategy {
@@ -42,6 +43,7 @@ impl CavemanLaunchStrategy {
             profile_v2_name,
             model_context_window_tokens,
             gemini_thinking_budget_tokens,
+            managed_mem0_memory: Mutex::new(Vec::new()),
         }
     }
 }
@@ -75,6 +77,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan> {
+        if self.presidio_enabled {
+            ensure_presidio_services_for_super_launch(&prepared.paths)?;
+        }
         let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
         if self.provider_runtime_uses_local_proxy_auth() {
             write_provider_runtime_codex_auth(&caveman_home)?;
@@ -88,8 +93,33 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.rtk_enabled {
             prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;
         }
+        let managed_mem0_memory = if self.args.memory_backend == SuperMemoryBackend::Mem0 {
+            Some(start_managed_mem0_memory(
+                &prepared.paths,
+                &self.runtime_request(),
+            )?)
+        } else {
+            None
+        };
         if self.args.super_optimizer_overlay {
-            prodex_caveman_assets::configure_super_optimizer_codex_home(&caveman_home)?;
+            let memory_config = managed_mem0_memory
+                .as_ref()
+                .map(|memory| prodex_caveman_assets::SuperOptimizerMemoryConfig {
+                    mem0_api_url: Some(memory.api_url.as_str()),
+                    mem0_api_key: Some(memory.api_key.as_str()),
+                })
+                .unwrap_or_default();
+            prodex_caveman_assets::configure_super_optimizer_codex_home_with_options(
+                &caveman_home,
+                self.presidio_enabled,
+                memory_config,
+            )?;
+        }
+        if let Some(memory) = managed_mem0_memory {
+            self.managed_mem0_memory
+                .lock()
+                .map_err(|_| anyhow::anyhow!("managed Mem0 memory lock poisoned"))?
+                .push(memory);
         }
         let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
         if self.provider_runtime_uses_local_proxy_auth() {
@@ -224,7 +254,13 @@ pub(crate) fn runtime_caveman_extract_presidio_prefix(
 fn runtime_caveman_super_optimizer_prefix(prefix: &str) -> bool {
     matches!(
         prefix,
-        "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor"
+        "sqz"
+            | "tokensavior"
+            | "token-savior"
+            | "clawcompactor"
+            | "claw-compactor"
+            | "mem"
+            | "memory"
     )
 }
 
@@ -419,6 +455,7 @@ mod tests {
                 OsString::from("sqz"),
                 OsString::from("tokensavior"),
                 OsString::from("clawcompactor"),
+                OsString::from("mem"),
                 OsString::from("--full-access"),
                 OsString::from("exec"),
                 OsString::from("hi"),

@@ -4,6 +4,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use crate::localization::localize_text_file;
 use crate::toml_helpers::ensure_child_table;
@@ -15,15 +16,133 @@ pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
 const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
 const PRODEX_OPTIMIZERS_DIR_NAME: &str = "prodex-optimizers";
 const TOKEN_SAVIOR_STATE_DIR_NAME: &str = "token-savior";
+const PRODEX_MEMORY_BACKEND_ENV: &str = "PRODEX_MEMORY_BACKEND";
+const PRODEX_MEM0_API_URL_ENV: &str = "PRODEX_MEM0_API_URL";
+const PRODEX_MEM0_API_KEY_ENV: &str = "PRODEX_MEM0_API_KEY";
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SuperOptimizerMemoryConfig<'a> {
+    pub mem0_api_url: Option<&'a str>,
+    pub mem0_api_key: Option<&'a str>,
+}
+
+impl SuperOptimizerMemoryConfig<'_> {
+    fn backend_label(&self) -> &'static str {
+        if self.mem0_api_url.is_some() && self.mem0_api_key.is_some() {
+            "managed Mem0"
+        } else {
+            "local sqlite"
+        }
+    }
+
+    fn env_vars(&self) -> Vec<(&'static str, String)> {
+        let (Some(api_url), Some(api_key)) = (self.mem0_api_url, self.mem0_api_key) else {
+            return Vec::new();
+        };
+        vec![
+            (PRODEX_MEMORY_BACKEND_ENV, "mem0".to_string()),
+            (PRODEX_MEM0_API_URL_ENV, api_url.to_string()),
+            (PRODEX_MEM0_API_KEY_ENV, api_key.to_string()),
+        ]
+    }
+}
 
 pub fn configure_super_optimizer_codex_home(codex_home: &Path) -> Result<()> {
+    configure_super_optimizer_codex_home_with_presidio(codex_home, false)
+}
+
+pub fn configure_super_optimizer_codex_home_with_presidio(
+    codex_home: &Path,
+    presidio_enabled: bool,
+) -> Result<()> {
+    configure_super_optimizer_codex_home_with_options(
+        codex_home,
+        presidio_enabled,
+        SuperOptimizerMemoryConfig::default(),
+    )
+}
+
+pub fn configure_super_optimizer_codex_home_with_options(
+    codex_home: &Path,
+    presidio_enabled: bool,
+    memory_config: SuperOptimizerMemoryConfig<'_>,
+) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
+    let path_dirs = path_dirs_from_env();
+    let optimizer_roots = managed_optimizer_roots();
     let optimizers_path = codex_home.join(SUPER_OPTIMIZERS_MD);
-    fs::write(&optimizers_path, PRODEX_SUPER_OPTIMIZER_AWARENESS)
+    let awareness = render_super_optimizer_awareness(
+        &path_dirs,
+        &optimizer_roots,
+        presidio_enabled,
+        memory_config,
+    );
+    fs::write(&optimizers_path, awareness)
         .with_context(|| format!("failed to write {}", optimizers_path.display()))?;
     localize_text_file(&codex_home.join(AGENTS_MD))?;
     ensure_agents_reference(codex_home, &optimizers_path)?;
-    configure_super_optimizer_mcp_servers(codex_home)
+    configure_super_optimizer_mcp_servers_with_sources(
+        codex_home,
+        &path_dirs,
+        &optimizer_roots,
+        memory_config,
+    )?;
+    configure_super_optimizer_command_wrappers(codex_home, &path_dirs, &optimizer_roots)?;
+    claw::configure_session_hook(codex_home, &path_dirs, &optimizer_roots)
+}
+
+fn render_super_optimizer_awareness(
+    path_dirs: &[PathBuf],
+    optimizer_roots: &[PathBuf],
+    presidio_enabled: bool,
+    memory_config: SuperOptimizerMemoryConfig<'_>,
+) -> String {
+    let mut awareness = PRODEX_SUPER_OPTIMIZER_AWARENESS.to_string();
+    awareness.push_str("\n## Available Now\n\n");
+    awareness.push_str(&format!(
+        "- rtk: {}\n",
+        availability_label(find_path_command("rtk", path_dirs).as_deref())
+    ));
+    awareness.push_str(&format!(
+        "- prodex-sqz MCP: {}\n",
+        availability_label(
+            find_optimizer_command("sqz-mcp", path_dirs, optimizer_roots).as_deref()
+        )
+    ));
+    awareness.push_str(&format!(
+        "- prodex-token-savior MCP: {}\n",
+        availability_label(
+            find_optimizer_command("token-savior", path_dirs, optimizer_roots).as_deref()
+        )
+    ));
+    awareness.push_str(&format!(
+        "- prodex-claw-compactor: {}\n",
+        availability_label(
+            find_optimizer_command("claw-compactor", path_dirs, optimizer_roots).as_deref()
+        )
+    ));
+    awareness.push_str(&format!(
+        "- prodex-memory MCP: {}\n",
+        availability_label(find_prodex_memory_command().as_deref())
+    ));
+    awareness.push_str(&format!(
+        "- prodex-memory backend: {}\n",
+        memory_config.backend_label()
+    ));
+    awareness.push_str(&format!(
+        "- presidio: {}\n",
+        if presidio_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    ));
+    awareness
+}
+
+fn availability_label(path: Option<&Path>) -> String {
+    path.map(|path| format!("yes ({})", path.display()))
+        .unwrap_or_else(|| "no".to_string())
 }
 
 fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) -> Result<()> {
@@ -50,18 +169,11 @@ fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) -> Result<(
     Ok(())
 }
 
-fn configure_super_optimizer_mcp_servers(codex_home: &Path) -> Result<()> {
-    let path_dirs = path_dirs_from_env();
-    let optimizer_roots = managed_optimizer_roots();
-    configure_super_optimizer_mcp_servers_with_sources(codex_home, &path_dirs, &optimizer_roots)?;
-    configure_super_optimizer_command_wrappers(codex_home, &path_dirs, &optimizer_roots)?;
-    claw::configure_session_hook(codex_home, &path_dirs, &optimizer_roots)
-}
-
 fn configure_super_optimizer_mcp_servers_with_sources(
     codex_home: &Path,
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
+    memory_config: SuperOptimizerMemoryConfig<'_>,
 ) -> Result<()> {
     let config_path = codex_home.join("config.toml");
     let contents = fs::read_to_string(&config_path).unwrap_or_default();
@@ -98,6 +210,16 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             command,
             &[],
             &token_savior_env,
+        );
+    }
+    if let Some(command) = find_prodex_memory_command() {
+        let memory_env = memory_config.env_vars();
+        configure_stdio_mcp_server(
+            &mut table,
+            "prodex-memory",
+            command,
+            &["__memory-mcp"],
+            &memory_env,
         );
     }
 
@@ -316,8 +438,26 @@ fn find_managed_optimizer_command(command: &str, optimizer_roots: &[PathBuf]) ->
     None
 }
 
+fn find_prodex_memory_command() -> Option<PathBuf> {
+    env::current_exe().ok().filter(|path| executable_file(path))
+}
+
 fn optimizer_command_ready(command: &str, path: &Path) -> bool {
-    executable_file(path) && (command != "token-savior" || token_savior_command_ready(path))
+    executable_file(path)
+        && match command {
+            "sqz-mcp" => command_probe_success(path, &["--transport", "stdio", "--help"]),
+            "token-savior" => token_savior_command_ready(path),
+            _ => true,
+        }
+}
+
+fn command_probe_success(path: &Path, args: &[&str]) -> bool {
+    Command::new(path)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn token_savior_command_ready(path: &Path) -> bool {
@@ -494,6 +634,25 @@ mod tests {
             .join("site-packages")
             .join("mcp");
         fs::create_dir_all(&site_packages).expect("fake mcp package should be created");
+    }
+
+    fn write_fake_executable(path: &Path, script: &str) {
+        fs::write(path, script).expect("fake executable should be written");
+        #[cfg(unix)]
+        {
+            let mut permissions = fs::metadata(path)
+                .expect("fake executable should stat")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).expect("fake executable should chmod");
+        }
+    }
+
+    fn write_fake_sqz_mcp(path: &Path) {
+        write_fake_executable(
+            path,
+            "#!/usr/bin/env sh\nprintf '%s\\n' 'Usage: sqz-mcp [--transport stdio|sse]'\n",
+        );
     }
 
     #[test]
@@ -694,8 +853,8 @@ mod tests {
         fs::create_dir_all(path_root.as_path()).expect("path root should be created");
         fs::create_dir_all(command.parent().expect("command parent should exist"))
             .expect("command parent should be created");
-        fs::write(&path_command, "").expect("path command should be written");
-        fs::write(&command, "").expect("fake command should be written");
+        write_fake_sqz_mcp(&path_command);
+        write_fake_sqz_mcp(&command);
 
         let found = find_optimizer_command("sqz-mcp", from_ref(&path_root), from_ref(&root));
         assert_eq!(found, Some(command));
@@ -821,12 +980,13 @@ mod tests {
         fs::create_dir_all(&codex_home).expect("codex home should exist");
         fs::create_dir_all(command.parent().expect("command parent should exist"))
             .expect("command parent should be created");
-        fs::write(&command, "").expect("fake command should be written");
+        write_fake_sqz_mcp(&command);
 
         configure_super_optimizer_mcp_servers_with_sources(
             &codex_home,
             &[],
             std::slice::from_ref(&optimizer_root),
+            SuperOptimizerMemoryConfig::default(),
         )
         .expect("super optimizer MCP config should write");
 
@@ -842,8 +1002,57 @@ mod tests {
             .and_then(toml::Value::as_str);
         let expected_command = command.display().to_string();
         assert_eq!(command_value, Some(expected_command.as_str()));
+        let memory_args = table
+            .get("mcp_servers")
+            .and_then(toml::Value::as_table)
+            .and_then(|servers| servers.get("prodex-memory"))
+            .and_then(toml::Value::as_table)
+            .and_then(|server| server.get("args"))
+            .and_then(toml::Value::as_array)
+            .expect("prodex-memory args should be registered");
+        assert_eq!(
+            memory_args,
+            &vec![toml::Value::String("__memory-mcp".to_string())]
+        );
 
         let _ = fs::remove_dir_all(codex_home);
+        let _ = fs::remove_dir_all(optimizer_root);
+    }
+
+    #[test]
+    fn super_optimizer_awareness_includes_dynamic_availability() {
+        let path_root = temp_dir("awareness-path-root");
+        let optimizer_root = temp_dir("awareness-optimizer-root");
+        let rtk = command_path(path_root.join("rtk"));
+        let sqz = command_path(
+            optimizer_root
+                .join("sqz")
+                .join("target")
+                .join("release")
+                .join("sqz-mcp"),
+        );
+        fs::create_dir_all(rtk.parent().expect("rtk parent should exist"))
+            .expect("rtk parent should be created");
+        fs::create_dir_all(sqz.parent().expect("sqz parent should exist"))
+            .expect("sqz parent should be created");
+        write_fake_executable(&rtk, "#!/usr/bin/env sh\nexit 0\n");
+        write_fake_sqz_mcp(&sqz);
+
+        let awareness = render_super_optimizer_awareness(
+            std::slice::from_ref(&path_root),
+            std::slice::from_ref(&optimizer_root),
+            true,
+            SuperOptimizerMemoryConfig::default(),
+        );
+        assert!(awareness.contains("## Available Now"));
+        assert!(awareness.contains("- rtk: yes"));
+        assert!(awareness.contains("- prodex-sqz MCP: yes"));
+        assert!(awareness.contains("- prodex-token-savior MCP: no"));
+        assert!(awareness.contains("- prodex-memory MCP: yes"));
+        assert!(awareness.contains("- prodex-memory backend: local sqlite"));
+        assert!(awareness.contains("- presidio: enabled"));
+
+        let _ = fs::remove_dir_all(path_root);
         let _ = fs::remove_dir_all(optimizer_root);
     }
 }

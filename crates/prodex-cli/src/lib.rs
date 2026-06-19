@@ -158,9 +158,17 @@ pub enum Commands {
     )]
     ClawCompactor(CavemanArgs),
     #[command(
+        name = "mem",
+        visible_alias = "memory",
+        trailing_var_arg = true,
+        about = "Shortcut for `prodex caveman mem`.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    Mem(CavemanArgs),
+    #[command(
         trailing_var_arg = true,
         visible_alias = "s",
-        about = "Alias for `prodex caveman rtk sqz tokensavior clawcompactor --full-access`.",
+        about = "Alias for `prodex caveman rtk sqz tokensavior clawcompactor mem --full-access`.",
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),
@@ -180,6 +188,8 @@ pub enum Commands {
     RuntimeBroker(RuntimeBrokerArgs),
     #[command(name = "__gemini-compat-refresh", hide = true)]
     GeminiCompatRefresh(GeminiCompatRefreshArgs),
+    #[command(name = "__memory-mcp", hide = true)]
+    MemoryMcp(MemoryMcpArgs),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -191,6 +201,7 @@ where
     T: Into<OsString>,
 {
     let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let raw_args = rewrite_super_doctor_args(&raw_args);
     let raw_args = rewrite_super_expose_args(&raw_args);
     let raw_args = rewrite_super_provider_alias_args(&raw_args);
     let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
@@ -199,6 +210,31 @@ where
         raw_args
     };
     Ok(Cli::try_parse_from(parse_args)?.command)
+}
+
+fn rewrite_super_doctor_args(args: &[OsString]) -> Vec<OsString> {
+    let Some(command) = args.get(1).and_then(|arg| arg.to_str()) else {
+        return args.to_vec();
+    };
+    if command != "s" && command != "super" {
+        return args.to_vec();
+    }
+    let Some(subcommand) = args.get(2).and_then(|arg| arg.to_str()) else {
+        return args.to_vec();
+    };
+    if subcommand != "doctor" {
+        return args.to_vec();
+    }
+    let mut rewritten = Vec::with_capacity(args.len() + 1);
+    rewritten.push(
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| OsString::from("prodex")),
+    );
+    rewritten.push(OsString::from("capability"));
+    rewritten.push(OsString::from("super-doctor"));
+    rewritten.extend(args.iter().skip(3).cloned());
+    rewritten
 }
 
 fn rewrite_super_expose_args(args: &[OsString]) -> Vec<OsString> {
@@ -281,6 +317,8 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "token-savior"
             | "clawcompactor"
             | "claw-compactor"
+            | "mem"
+            | "memory"
             | "super"
             | "s"
             | "expose"
@@ -289,6 +327,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "help"
             | "__runtime-broker"
             | "__gemini-compat-refresh"
+            | "__memory-mcp"
     )
 }
 

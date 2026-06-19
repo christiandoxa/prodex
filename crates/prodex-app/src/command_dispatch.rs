@@ -44,7 +44,10 @@ impl CommandDispatchExt for Commands {
     fn should_show_update_notice(&self) -> bool {
         !matches!(
             self,
-            Commands::RuntimeBroker(_) | Commands::Update(_) | Commands::GeminiCompatRefresh(_)
+            Commands::RuntimeBroker(_)
+                | Commands::Update(_)
+                | Commands::GeminiCompatRefresh(_)
+                | Commands::MemoryMcp(_)
         )
     }
 }
@@ -237,6 +240,12 @@ impl CommandExecute for SessionCommands {
     }
 }
 
+impl CommandExecute for MemoryMcpArgs {
+    fn execute(self) -> Result<()> {
+        handle_memory_mcp(self)
+    }
+}
+
 impl CommandExecute for SetupArgs {
     fn execute(self) -> Result<()> {
         handle_setup(self)
@@ -250,7 +259,10 @@ impl CommandExecute for SuperArgs {
                 bail!("--dry-run is not supported with native Google agent CLIs")
             }
             let use_presidio = self.presidio_preference().unwrap_or(false);
-            return handle_caveman_dry_run(self.into_caveman_args_with_presidio(use_presidio));
+            let use_mem0 = self.mem0_preference().unwrap_or(false);
+            return handle_caveman_dry_run(
+                self.into_caveman_args_with_choices(use_presidio, use_mem0),
+            );
         }
         handle_super(self)
     }
@@ -289,12 +301,16 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::ClawCompactor(command) => {
             RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "clawcompactor"))
         }
+        Commands::Mem(command) => {
+            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "mem"))
+        }
         Commands::Super(command) => RoutedCommand::new(command),
         Commands::Expose(command) => RoutedCommand::new(command),
         Commands::Gateway(command) => RoutedCommand::new(command),
         Commands::Claude(command) => RoutedCommand::new(command),
         Commands::RuntimeBroker(command) => RoutedCommand::new(command),
         Commands::GeminiCompatRefresh(command) => RoutedCommand::new(command),
+        Commands::MemoryMcp(command) => RoutedCommand::new(command),
     }
 }
 
