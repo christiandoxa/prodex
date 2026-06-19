@@ -1,4 +1,15 @@
-use super::*;
+use super::{
+    SuperOptimizerMemoryConfig, configure_stdio_mcp_server,
+    configure_super_optimizer_mcp_servers_with_sources, find_managed_optimizer_command,
+    find_optimizer_command, python_venv_root_for_command, render_super_optimizer_awareness,
+    token_savior_mcp_env, token_savior_state_dirs_from_prodex_home,
+};
+use crate::toml_helpers::ensure_child_table;
+use std::env;
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::slice::from_ref;
 use std::time::{SystemTime, UNIX_EPOCH};
 
