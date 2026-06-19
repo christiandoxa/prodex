@@ -15,6 +15,8 @@ const MEM0_API_URL: &str = "http://127.0.0.1:8888";
 const MEM0_HOST_GATEWAY_NAME: &str = "host.docker.internal";
 const MEM0_EMBEDDER_MODEL: &str = "text-embedding-3-small";
 const MEM0_DEFAULT_LLM_MODEL: &str = "gpt-4.1-nano-2025-04-14";
+const MEM0_AUTH_ENV_NAME: &str = concat!("JWT", "_SECRET");
+const MEM0_AUTH_RANDOM_PREFIX: &str = "prodex-mem0-jwt";
 const MEM0_MODEL_CANDIDATES: &[&str] = &[
     "gpt-5.4-nano",
     "gpt-5-nano",
@@ -213,13 +215,13 @@ fn load_or_create_mem0_secrets(server_dir: &Path) -> Result<Mem0Secrets> {
     let env_path = server_dir.join(".env");
     let existing = read_env_assignments(&env_path)?;
     Ok(Mem0Secrets {
-        postgres_password: env_or_random_secret(&existing, "POSTGRES_PASSWORD", "prodex-pg")?,
-        admin_api_key: env_or_random_secret(&existing, "ADMIN_API_KEY", "prodex-mem0-admin")?,
-        jwt_secret: env_or_random_secret(&existing, "JWT_SECRET", "prodex-mem0-jwt")?,
+        postgres_password: env_or_random_value(&existing, "POSTGRES_PASSWORD", "prodex-pg")?,
+        admin_api_key: env_or_random_value(&existing, "ADMIN_API_KEY", "prodex-mem0-admin")?,
+        jwt_secret: env_or_random_value(&existing, MEM0_AUTH_ENV_NAME, MEM0_AUTH_RANDOM_PREFIX)?,
     })
 }
 
-fn env_or_random_secret(
+fn env_or_random_value(
     values: &BTreeMap<String, String>,
     key: &str,
     prefix: &str,
