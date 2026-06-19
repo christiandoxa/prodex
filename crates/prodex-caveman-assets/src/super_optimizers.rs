@@ -220,17 +220,17 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             &token_savior_env,
         );
     }
-    if memory_config.enabled {
-        if let Some(command) = find_prodex_memory_command() {
-            let memory_env = memory_config.env_vars();
-            configure_stdio_mcp_server(
-                &mut table,
-                "prodex-memory",
-                command,
-                &["__memory-mcp"],
-                &memory_env,
-            );
-        }
+    if memory_config.enabled
+        && let Some(command) = find_prodex_memory_command()
+    {
+        let memory_env = memory_config.env_vars();
+        configure_stdio_mcp_server(
+            &mut table,
+            "prodex-memory",
+            command,
+            &["__memory-mcp"],
+            &memory_env,
+        );
     }
 
     let rendered = toml::to_string(&toml::Value::Table(table))
