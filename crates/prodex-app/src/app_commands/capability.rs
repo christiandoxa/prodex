@@ -63,38 +63,39 @@ fn handle_capability_list(args: CapabilityListArgs) -> Result<()> {
 }
 
 pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, String)> {
-    let mut rows = Vec::new();
-    rows.push((
-        "Codex CLI".to_string(),
-        command_version_status(codex_bin(), "--version"),
-    ));
-    rows.push((
-        "Codex auth".to_string(),
-        command_status(codex_bin(), &["login", "status"]),
-    ));
-    rows.push((
-        "Claude Code".to_string(),
-        command_version_status(claude_bin(), "--version"),
-    ));
-    rows.push((
-        "RTK".to_string(),
-        command_version_status("rtk", "--version"),
-    ));
-    rows.push((
-        "SQZ MCP".to_string(),
-        command_version_status("sqz-mcp", "--version"),
-    ));
-    rows.push((
-        "token-savior".to_string(),
-        command_version_status("token-savior", "--version"),
-    ));
-    rows.push((
-        "claw-compactor".to_string(),
-        command_probe_status(
-            "claw-compactor",
-            command_capability_probe_args("claw-compactor"),
+    let mut rows = vec![
+        (
+            "Codex CLI".to_string(),
+            command_version_status(codex_bin(), "--version"),
         ),
-    ));
+        (
+            "Codex auth".to_string(),
+            command_status(codex_bin(), &["login", "status"]),
+        ),
+        (
+            "Claude Code".to_string(),
+            command_version_status(claude_bin(), "--version"),
+        ),
+        (
+            "RTK".to_string(),
+            command_version_status("rtk", "--version"),
+        ),
+        (
+            "SQZ MCP".to_string(),
+            command_version_status("sqz-mcp", "--version"),
+        ),
+        (
+            "token-savior".to_string(),
+            command_version_status("token-savior", "--version"),
+        ),
+        (
+            "claw-compactor".to_string(),
+            command_probe_status(
+                "claw-compactor",
+                command_capability_probe_args("claw-compactor"),
+            ),
+        ),
+    ];
     let memory_store = default_memory_store_path(paths);
     rows.push((
         "prodex-memory".to_string(),
