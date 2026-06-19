@@ -1,4 +1,5 @@
 use super::*;
+use filetime::FileTime;
 
 pub(super) fn ensure_shared_codex_parent_dir(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -87,10 +88,23 @@ pub(super) fn copy_shared_codex_file_replacing_existing(
 ) -> Result<()> {
     ensure_shared_codex_parent_dir(destination)?;
     remove_existing_shared_codex_file_destination(destination)?;
+    let source_metadata =
+        fs::metadata(source).with_context(|| format!("failed to inspect {}", source.display()))?;
     fs::copy(source, destination).with_context(|| {
         format!(
             "{context} {} to {}",
             source.display(),
+            destination.display()
+        )
+    })?;
+    filetime::set_file_times(
+        destination,
+        FileTime::from_last_access_time(&source_metadata),
+        FileTime::from_last_modification_time(&source_metadata),
+    )
+    .with_context(|| {
+        format!(
+            "failed to preserve modified time for copied file {}",
             destination.display()
         )
     })?;

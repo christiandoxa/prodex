@@ -85,7 +85,7 @@ which rtk
 
 pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Super Optimizers
 
-Prodex Super mode already enables Caveman, RTK, SQZ, token-savior, claw-compactor, prodex-memory, and Smart Context Autopilot when the matching local tools are installed. Treat launch through `prodex s` or `prodex super` as the user's instruction to use the full local optimizer stack where it fits the task. Presidio redaction is the exception: it is active only when the user opts in at the Super prompt or passes `--presidio`.
+Prodex Super mode already enables Caveman, RTK, SQZ, token-savior, claw-compactor, and Smart Context Autopilot when the matching local tools are installed. Treat launch through `prodex s` or `prodex super` as the user's instruction to use the local optimizer stack where it fits the task. Presidio redaction and prodex-memory are opt-in surfaces.
 
 ## Token Flow
 
@@ -95,7 +95,7 @@ Use the optimizers by default, but keep their boundaries clear:
 - SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large pasted/generated text, long command outputs that must be reused, and conversation/context compression instead of re-emitting full text.
 - token-savior handles codebase navigation and symbol context. If the `prodex-token-savior` MCP server is available, prefer it before reading broad source trees, hunting definitions, or scanning callers; then reread exact source for edits and failing lines.
 - claw-compactor handles workspace-level Markdown/code-memory summaries. Use `prodex-claw-compactor` or `prodex-claw-compactor-auto` for explicit workspace summary/benchmark requests or when a large repo overview is needed; do not edit from compressed code alone.
-- prodex-memory handles local-first memory through the `prodex-memory` MCP server. Use it for stable user preferences, project facts, and reusable context. It uses SQLite under `PRODEX_HOME` by default, can use managed Mem0 OSS when Super launch opts in, and does not use Mem0 Cloud or require `MEM0_API_KEY`.
+- prodex-memory handles local-first memory through the `prodex-memory` MCP server when memory is requested. Use it for stable user preferences, project facts, and reusable context. It uses SQLite under `PRODEX_HOME` for the `mem` prefix, can use managed Mem0 OSS when Super launch opts in, and does not use Mem0 Cloud or require `MEM0_API_KEY`.
 
 ## Invocation Discipline
 
@@ -105,13 +105,13 @@ Before emitting or requesting large context, choose the local optimizer that fit
 - Reusing content already seen, repeated file reads, or large text blobs: use `prodex-sqz` when available.
 - Locating symbols, callers, dead code, or API changes: use `prodex-token-savior` when available.
 - Workspace-level summary, benchmark, or memory-file compaction: use `prodex-claw-compactor`/`prodex-claw-compactor-auto` when available.
-- Durable local memory: use `prodex-memory` when available.
+- Durable local memory: use `prodex-memory` only when it is enabled for the session.
 
 If a requested optimizer command or MCP server is unavailable, say so briefly and continue with the best local fallback. Do not pretend optimization happened.
 
 ## Installed Surfaces
 
-Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout, and `prodex-memory` from the running Prodex binary. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly. Prodex routes compatible token-savior cache/state and local memory under `PRODEX_HOME` (default `~/.prodex`) instead of the workspace; managed Mem0 mode still keeps Mem0 server data under `PRODEX_HOME`.
+Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout, and `prodex-memory` from the running Prodex binary only when memory is requested. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly. Prodex routes compatible token-savior cache/state and local memory under `PRODEX_HOME` (default `~/.prodex`) instead of the workspace; managed Mem0 mode still keeps Mem0 server data under `PRODEX_HOME`.
 
 ## AST Compression
 

@@ -1,4 +1,5 @@
 use super::*;
+use filetime::FileTime;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct PrepareTestDir {
@@ -96,6 +97,40 @@ fn profile_v2_config_names_match_plain_ascii_profile_names() {
     assert!(!is_shared_codex_profile_v2_config_name(
         "../prod.config.toml"
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_restores_session_mtime_from_last_timestamp() {
+    let temp_dir = PrepareTestDir::new("session-mtime");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/19/rollout-2026-06-19T08-00-00-session.jsonl");
+    let stale_mtime = FileTime::from_unix_time(1_800_000_000, 0);
+    let expected_mtime = FileTime::from_unix_time(1_766_132_168, 0);
+
+    fs::create_dir_all(session_file.parent().expect("session parent"))
+        .expect("session parent should be created");
+    fs::write(
+        &session_file,
+        concat!(
+            r#"{"timestamp":"2025-12-19T08:00:00Z","type":"session_meta"}"#,
+            "\n",
+            r#"{"timestamp":"2025-12-19T08:16:08Z","type":"response_item"}"#,
+            "\n"
+        ),
+    )
+    .expect("session file should write");
+    filetime::set_file_mtime(&session_file, stale_mtime).expect("session mtime should update");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    let restored_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&session_file).expect("session metadata should read"),
+    );
+    assert_eq!(restored_mtime, expected_mtime);
 }
 
 #[cfg(unix)]

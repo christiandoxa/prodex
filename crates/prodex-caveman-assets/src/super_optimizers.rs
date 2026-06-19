@@ -22,13 +22,16 @@ const PRODEX_MEM0_API_KEY_ENV: &str = "PRODEX_MEM0_API_KEY";
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SuperOptimizerMemoryConfig<'a> {
+    pub enabled: bool,
     pub mem0_api_url: Option<&'a str>,
     pub mem0_api_key: Option<&'a str>,
 }
 
 impl SuperOptimizerMemoryConfig<'_> {
     fn backend_label(&self) -> &'static str {
-        if self.mem0_api_url.is_some() && self.mem0_api_key.is_some() {
+        if !self.enabled {
+            "disabled"
+        } else if self.mem0_api_url.is_some() && self.mem0_api_key.is_some() {
             "managed Mem0"
         } else {
             "local sqlite"
@@ -36,6 +39,9 @@ impl SuperOptimizerMemoryConfig<'_> {
     }
 
     fn env_vars(&self) -> Vec<(&'static str, String)> {
+        if !self.enabled {
+            return Vec::new();
+        }
         let (Some(api_url), Some(api_key)) = (self.mem0_api_url, self.mem0_api_key) else {
             return Vec::new();
         };
@@ -121,10 +127,12 @@ fn render_super_optimizer_awareness(
             find_optimizer_command("claw-compactor", path_dirs, optimizer_roots).as_deref()
         )
     ));
-    awareness.push_str(&format!(
-        "- prodex-memory MCP: {}\n",
+    let memory_availability = if memory_config.enabled {
         availability_label(find_prodex_memory_command().as_deref())
-    ));
+    } else {
+        "disabled".to_string()
+    };
+    awareness.push_str(&format!("- prodex-memory MCP: {memory_availability}\n"));
     awareness.push_str(&format!(
         "- prodex-memory backend: {}\n",
         memory_config.backend_label()
@@ -212,15 +220,17 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             &token_savior_env,
         );
     }
-    if let Some(command) = find_prodex_memory_command() {
-        let memory_env = memory_config.env_vars();
-        configure_stdio_mcp_server(
-            &mut table,
-            "prodex-memory",
-            command,
-            &["__memory-mcp"],
-            &memory_env,
-        );
+    if memory_config.enabled {
+        if let Some(command) = find_prodex_memory_command() {
+            let memory_env = memory_config.env_vars();
+            configure_stdio_mcp_server(
+                &mut table,
+                "prodex-memory",
+                command,
+                &["__memory-mcp"],
+                &memory_env,
+            );
+        }
     }
 
     let rendered = toml::to_string(&toml::Value::Table(table))

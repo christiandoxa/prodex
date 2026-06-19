@@ -144,7 +144,10 @@ where
         return Ok(false);
     }
 
-    write!(output, "Use managed Mem0 memory via Docker? [y/N] ")?;
+    write!(
+        output,
+        "Enable prodex-memory via managed Mem0 Docker? [y/N] "
+    )?;
     output.flush().context("failed to flush prompt")?;
     let mut answer = String::new();
     input
@@ -217,7 +220,10 @@ mod tests {
         for answer in ["y\n", "Y\n", "yes\n", "YES\n"] {
             let (enabled, output) = mem0_prompt_answer(answer)?;
             assert!(enabled, "{answer:?} should opt in");
-            assert_eq!(output, "Use managed Mem0 memory via Docker? [y/N] ");
+            assert_eq!(
+                output,
+                "Enable prodex-memory via managed Mem0 Docker? [y/N] "
+            );
         }
         Ok(())
     }
@@ -227,7 +233,10 @@ mod tests {
         for answer in ["n\n", "N\n", "\n", "no\n"] {
             let (enabled, output) = mem0_prompt_answer(answer)?;
             assert!(!enabled, "{answer:?} should not opt in");
-            assert_eq!(output, "Use managed Mem0 memory via Docker? [y/N] ");
+            assert_eq!(
+                output,
+                "Enable prodex-memory via managed Mem0 Docker? [y/N] "
+            );
         }
         Ok(())
     }

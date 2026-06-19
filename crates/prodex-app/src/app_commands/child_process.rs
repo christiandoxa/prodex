@@ -177,7 +177,7 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
 }
 
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
-    let (rtk_enabled, super_optimizer_overlay, codex_args) =
+    let (rtk_enabled, super_optimizer_overlay, memory_prefix_enabled, codex_args) =
         runtime_caveman_extract_launch_prefixes(&args.codex_args);
     let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
@@ -207,9 +207,13 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
             .map(crate::SuperExternalProvider::as_str),
         external_provider_api_key: args.external_provider_api_key.as_deref(),
     };
-    let memory_backend = match args.memory_backend {
-        crate::SuperMemoryBackend::Sqlite => "local sqlite",
-        crate::SuperMemoryBackend::Mem0 => "managed Mem0 Docker (would start)",
+    let memory_backend = match (
+        memory_prefix_enabled || args.memory_backend == crate::SuperMemoryBackend::Mem0,
+        args.memory_backend,
+    ) {
+        (false, _) => "disabled",
+        (true, crate::SuperMemoryBackend::Sqlite) => "local sqlite",
+        (true, crate::SuperMemoryBackend::Mem0) => "managed Mem0 Docker (would start)",
     };
     let mut extra_report = format!(
         "Optimizer overlay: rtk={}; super={}\nMemory backend: {}",

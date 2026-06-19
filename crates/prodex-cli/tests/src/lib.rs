@@ -207,7 +207,6 @@ fn super_default_keeps_all_super_prefixes() {
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
-            OsString::from("mem"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -240,7 +239,6 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
             "sqz",
             "tokensavior",
             "clawcompactor",
-            "mem",
             "exec",
             "hello",
         ])
@@ -261,7 +259,6 @@ fn super_includes_presidio_prefix_when_opted_in() {
             "sqz",
             "tokensavior",
             "clawcompactor",
-            "mem",
             "presidio",
             "exec",
             "hello",
@@ -285,7 +282,6 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
             "sqz",
             "tokensavior",
             "clawcompactor",
-            "mem",
             "presidio",
             "exec",
             "hello",
@@ -330,7 +326,6 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
             "sqz",
             "tokensavior",
             "clawcompactor",
-            "mem",
             "exec",
             "hello",
         ])
@@ -360,7 +355,7 @@ fn super_no_mem0_flag_selects_sqlite_memory_backend() {
     assert_eq!(args.mem0_preference(), Some(false));
     let caveman = args.into_caveman_args_with_choices(false, false);
     assert_eq!(caveman.memory_backend, SuperMemoryBackend::Sqlite);
-    assert!(caveman.codex_args.contains(&OsString::from("mem")));
+    assert!(!caveman.codex_args.contains(&OsString::from("mem")));
 }
 
 #[test]

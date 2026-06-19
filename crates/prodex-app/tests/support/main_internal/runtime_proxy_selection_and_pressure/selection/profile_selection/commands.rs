@@ -188,7 +188,6 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_full_super_prefix_
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
-            OsString::from("mem"),
             OsString::from("exec"),
             OsString::from("review this repo")
         ]
@@ -475,7 +474,6 @@ fn super_command_url_expands_to_local_openai_provider_config() {
     assert_eq!(rendered.get(1).map(String::as_str), Some("sqz"));
     assert_eq!(rendered.get(2).map(String::as_str), Some("tokensavior"));
     assert_eq!(rendered.get(3).map(String::as_str), Some("clawcompactor"));
-    assert_eq!(rendered.get(4).map(String::as_str), Some("mem"));
     assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
     assert!(rendered.contains(&"model=\"local/qwen\"".to_string()));
     assert!(rendered.contains(
@@ -495,7 +493,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         ["exec", "review this repo"]
     );
 
-    let (_, _, codex_args) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
+    let (_, _, _, codex_args) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
     assert_eq!(
         codex_cli_config_override_value(&codex_args, "model_provider").as_deref(),
         Some("prodex-local")

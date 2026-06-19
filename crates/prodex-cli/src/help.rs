@@ -116,11 +116,11 @@ Examples:
   prodex super --profile main
 
 Notes:
-  `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor mem --full-access`, with interactive Presidio and managed-Mem0 opt-in prompts before launch.
-  It always enables the Caveman overlay, RTK shell-command guidance, Super optimizer overlay, built-in prodex-memory MCP, Smart Context, and launch-time full access.
-  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor mem presidio --full-access`.
+  `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor --full-access`, with interactive Presidio and managed-Mem0 opt-in prompts before launch.
+  It always enables the Caveman overlay, RTK shell-command guidance, Super optimizer overlay, Smart Context, and launch-time full access.
+  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access`.
   Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
-  Empty input or `n` at the Mem0 prompt keeps the default SQLite memory backend; use `--mem0` or `--no-mem0` to make the memory backend choice non-interactive.
+  Empty input or `n` at the Mem0 prompt leaves prodex-memory disabled; use `--mem0` to enable managed Mem0 or the `mem` optimizer prefix for local SQLite memory.
   Managed Mem0 uses Docker Compose and a session-local Prodex gateway; launch prints Docker progress, and if no upstream provider API key is available, Prodex serves local embeddings for Mem0.
   Use `prodex super doctor` or `prodex s doctor` to inspect local optimizer readiness without launching Codex.
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.

@@ -1,4 +1,5 @@
 use super::*;
+use filetime::FileTime;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct CopyTestDir {
@@ -59,4 +60,26 @@ fn copy_directory_contents_replaces_readonly_existing_file() {
         fs::read_to_string(&destination_pack_path).expect("destination pack should be readable"),
         "fresh plugin pack"
     );
+}
+
+#[test]
+fn copy_directory_contents_preserves_source_file_modified_time() {
+    let temp_dir = CopyTestDir::new("preserve-mtime");
+    let source = temp_dir.path.join("source");
+    let destination = temp_dir.path.join("destination");
+    let source_file = source.join("sessions/2026/06/19/session.jsonl");
+    let destination_file = destination.join("sessions/2026/06/19/session.jsonl");
+    let source_mtime = FileTime::from_unix_time(1_765_930_560, 123_000_000);
+
+    fs::create_dir_all(source_file.parent().expect("source parent"))
+        .expect("source parent should be created");
+    fs::write(&source_file, "session").expect("source file should write");
+    filetime::set_file_mtime(&source_file, source_mtime).expect("source mtime should update");
+
+    copy_directory_contents(&source, &destination).expect("copy should succeed");
+
+    let destination_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&destination_file).expect("destination metadata should read"),
+    );
+    assert_eq!(destination_mtime, source_mtime);
 }

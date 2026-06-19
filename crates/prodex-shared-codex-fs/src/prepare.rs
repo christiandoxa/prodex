@@ -1,4 +1,9 @@
 use super::*;
+use chrono::{DateTime, Utc};
+use filetime::FileTime;
+use std::io::{BufRead, BufReader};
+
+const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
 
 pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
     create_codex_home_if_missing(codex_home)?;
@@ -10,8 +15,87 @@ pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result
         ensure_shared_codex_entry(paths, codex_home, &entry)?;
     }
     persist_codex_session_image_attachments(&paths.shared_codex_root)?;
+    restore_codex_session_modified_times(&paths.shared_codex_root)?;
 
     Ok(())
+}
+
+fn restore_codex_session_modified_times(codex_home: &Path) -> Result<()> {
+    restore_codex_session_modified_times_in_dir(&codex_home.join("sessions"))?;
+    restore_codex_session_modified_times_in_dir(&codex_home.join("archived_sessions"))
+}
+
+fn restore_codex_session_modified_times_in_dir(sessions_dir: &Path) -> Result<()> {
+    if !sessions_dir.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(sessions_dir)
+        .with_context(|| format!("failed to read {}", sessions_dir.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", sessions_dir.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to read metadata for {}", path.display()))?;
+        if file_type.is_dir() {
+            restore_codex_session_modified_times_in_dir(&path)?;
+        } else if file_type.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
+        {
+            restore_codex_session_file_modified_time(&path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn restore_codex_session_file_modified_time(session_file: &Path) -> Result<()> {
+    let Some(timestamp) = last_session_event_timestamp(session_file)? else {
+        return Ok(());
+    };
+    let metadata = fs::metadata(session_file)
+        .with_context(|| format!("failed to inspect {}", session_file.display()))?;
+    let modified_time =
+        FileTime::from_unix_time(timestamp.timestamp(), timestamp.timestamp_subsec_nanos());
+    filetime::set_file_times(
+        session_file,
+        FileTime::from_last_access_time(&metadata),
+        modified_time,
+    )
+    .with_context(|| {
+        format!(
+            "failed to restore session modified time for {}",
+            session_file.display()
+        )
+    })
+}
+
+fn last_session_event_timestamp(session_file: &Path) -> Result<Option<DateTime<Utc>>> {
+    let file = fs::File::open(session_file)
+        .with_context(|| format!("failed to read {}", session_file.display()))?;
+    let reader = BufReader::new(file);
+    let mut timestamp = None;
+
+    for line in reader.lines() {
+        let line = line.with_context(|| format!("failed to read {}", session_file.display()))?;
+        if let Some(value) = session_line_timestamp(&line) {
+            timestamp = Some(value);
+        }
+    }
+
+    Ok(timestamp)
+}
+
+fn session_line_timestamp(line: &str) -> Option<DateTime<Utc>> {
+    let start = line.find(SESSION_TIMESTAMP_PREFIX)? + SESSION_TIMESTAMP_PREFIX.len();
+    let end = line[start..].find('"')? + start;
+    DateTime::parse_from_rfc3339(&line[start..end])
+        .ok()
+        .map(|timestamp| timestamp.with_timezone(&Utc))
 }
 
 fn migrate_legacy_shared_codex_roots(paths: &AppPaths) -> Result<()> {

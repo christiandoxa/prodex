@@ -56,9 +56,9 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     let awareness = fs::read_to_string(dir.join("SUPER_OPTIMIZERS.md"))
         .expect("SUPER_OPTIMIZERS.md should exist");
     assert!(awareness.contains("sqz"));
-    assert!(awareness.contains("Presidio redaction is the exception"));
+    assert!(awareness.contains("Presidio redaction and prodex-memory are opt-in surfaces"));
     assert!(awareness.contains("RTK handles upstream/input command output"));
-    assert!(awareness.contains("full local optimizer stack"));
+    assert!(awareness.contains("local optimizer stack"));
     assert!(awareness.contains("auto-wrappers are only a backstop"));
     assert!(awareness.contains("SQZ handles downstream/context reuse"));
     assert!(awareness.contains("prodex-sqz"));
@@ -66,7 +66,7 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     assert!(awareness.contains("Locating symbols, callers, dead code, or API changes"));
     assert!(awareness.contains("claw-compactor"));
     assert!(awareness.contains("prodex-claw-compactor-auto"));
-    assert!(awareness.contains("- prodex-memory backend: local sqlite"));
+    assert!(awareness.contains("- prodex-memory backend: disabled"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
     assert_eq!(

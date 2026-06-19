@@ -408,6 +408,38 @@ fn mcp_config_registers_managed_sqz_when_path_is_empty() {
         .and_then(toml::Value::as_str);
     let expected_command = command.display().to_string();
     assert_eq!(command_value, Some(expected_command.as_str()));
+    let memory_server = table
+        .get("mcp_servers")
+        .and_then(toml::Value::as_table)
+        .and_then(|servers| servers.get("prodex-memory"));
+    assert!(
+        memory_server.is_none(),
+        "prodex-memory should stay disabled unless memory is requested"
+    );
+
+    let _ = fs::remove_dir_all(codex_home);
+    let _ = fs::remove_dir_all(optimizer_root);
+}
+
+#[test]
+fn mcp_config_registers_prodex_memory_when_enabled() {
+    let codex_home = temp_dir("codex-home-memory");
+    fs::create_dir_all(&codex_home).expect("codex home should exist");
+
+    configure_super_optimizer_mcp_servers_with_sources(
+        &codex_home,
+        &[],
+        &[],
+        SuperOptimizerMemoryConfig {
+            enabled: true,
+            ..Default::default()
+        },
+    )
+    .expect("super optimizer MCP config should write");
+
+    let config =
+        fs::read_to_string(codex_home.join("config.toml")).expect("config.toml should exist");
+    let table = toml::from_str::<toml::Value>(&config).expect("config should parse");
     let memory_args = table
         .get("mcp_servers")
         .and_then(toml::Value::as_table)
@@ -422,7 +454,6 @@ fn mcp_config_registers_managed_sqz_when_path_is_empty() {
     );
 
     let _ = fs::remove_dir_all(codex_home);
-    let _ = fs::remove_dir_all(optimizer_root);
 }
 
 #[test]
@@ -454,8 +485,8 @@ fn super_optimizer_awareness_includes_dynamic_availability() {
     assert!(awareness.contains("- rtk: yes"));
     assert!(awareness.contains("- prodex-sqz MCP: yes"));
     assert!(awareness.contains("- prodex-token-savior MCP: no"));
-    assert!(awareness.contains("- prodex-memory MCP: yes"));
-    assert!(awareness.contains("- prodex-memory backend: local sqlite"));
+    assert!(awareness.contains("- prodex-memory MCP: disabled"));
+    assert!(awareness.contains("- prodex-memory backend: disabled"));
     assert!(awareness.contains("- presidio: enabled"));
 
     let _ = fs::remove_dir_all(path_root);

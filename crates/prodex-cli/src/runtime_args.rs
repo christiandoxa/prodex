@@ -2,7 +2,7 @@ use clap::{ArgGroup, Args};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "mem"];
+pub const SUPER_OPTIMIZER_PREFIXES: [&str; 3] = ["sqz", "tokensavior", "clawcompactor"];
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
@@ -140,10 +140,10 @@ pub struct SuperArgs {
     /// Disable Presidio redaction and skip the interactive opt-in prompt.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
-    /// Start the managed Mem0 OSS Docker server and route memory LLM/embeddings through Prodex.
+    /// Enable prodex-memory with the managed Mem0 OSS Docker backend.
     #[arg(long, conflicts_with = "no_mem0")]
     pub mem0: bool,
-    /// Skip the Mem0 prompt and use the lightweight built-in SQLite memory backend.
+    /// Skip the Mem0 prompt and leave prodex-memory disabled for Super.
     #[arg(long, conflicts_with = "mem0")]
     pub no_mem0: bool,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
@@ -336,11 +336,15 @@ impl SuperArgs {
                 + 1
                 + SUPER_OPTIMIZER_PREFIXES.len()
                 + usize::from(presidio)
+                + usize::from(mem0)
                 + local_provider_args.len()
                 + external_provider_args.len(),
         );
         codex_args.push(OsString::from("rtk"));
         codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
+        if mem0 {
+            codex_args.push(OsString::from("mem"));
+        }
         if presidio {
             codex_args.push(OsString::from("presidio"));
         }

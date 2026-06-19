@@ -10,6 +10,7 @@ pub(crate) struct CavemanLaunchStrategy {
     include_code_review: bool,
     rtk_enabled: bool,
     presidio_enabled: bool,
+    memory_enabled: bool,
     model_provider_override: Option<String>,
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
@@ -19,11 +20,13 @@ pub(crate) struct CavemanLaunchStrategy {
 
 impl CavemanLaunchStrategy {
     pub(crate) fn new(args: CavemanArgs) -> Self {
-        let (rtk_enabled, super_optimizer_prefix_enabled, codex_args) =
+        let (rtk_enabled, super_optimizer_prefix_enabled, memory_prefix_enabled, codex_args) =
             runtime_caveman_extract_launch_prefixes(&args.codex_args);
         let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
         let mut args = args;
         args.super_optimizer_overlay |= super_optimizer_prefix_enabled;
+        let memory_enabled =
+            memory_prefix_enabled || args.memory_backend == SuperMemoryBackend::Mem0;
         let (codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
@@ -39,6 +42,7 @@ impl CavemanLaunchStrategy {
             include_code_review,
             rtk_enabled,
             presidio_enabled,
+            memory_enabled,
             model_provider_override,
             profile_v2_name,
             model_context_window_tokens,
@@ -93,22 +97,27 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.rtk_enabled {
             prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;
         }
-        let managed_mem0_memory = if self.args.memory_backend == SuperMemoryBackend::Mem0 {
-            Some(start_managed_mem0_memory(
-                &prepared.paths,
-                &self.runtime_request(),
-            )?)
-        } else {
-            None
-        };
+        let managed_mem0_memory =
+            if self.memory_enabled && self.args.memory_backend == SuperMemoryBackend::Mem0 {
+                Some(start_managed_mem0_memory(
+                    &prepared.paths,
+                    &self.runtime_request(),
+                )?)
+            } else {
+                None
+            };
         if self.args.super_optimizer_overlay {
             let memory_config = managed_mem0_memory
                 .as_ref()
                 .map(|memory| prodex_caveman_assets::SuperOptimizerMemoryConfig {
+                    enabled: true,
                     mem0_api_url: Some(memory.api_url.as_str()),
                     mem0_api_key: Some(memory.api_key.as_str()),
                 })
-                .unwrap_or_default();
+                .unwrap_or(prodex_caveman_assets::SuperOptimizerMemoryConfig {
+                    enabled: self.memory_enabled,
+                    ..Default::default()
+                });
             prodex_caveman_assets::configure_super_optimizer_codex_home_with_options(
                 &caveman_home,
                 self.presidio_enabled,
@@ -211,15 +220,22 @@ pub(super) fn prepare_caveman_launch_home(
 
 pub(crate) fn runtime_caveman_extract_launch_prefixes(
     args: &[OsString],
-) -> (bool, bool, Vec<OsString>) {
+) -> (bool, bool, bool, Vec<OsString>) {
     let mut rtk_enabled = false;
     let mut super_optimizer_overlay = false;
+    let mut memory_enabled = false;
     let mut remaining = args.to_vec();
 
     loop {
         if let Some(prefix) = remaining.first().and_then(|arg| arg.to_str()) {
             if prefix == "rtk" {
                 rtk_enabled = true;
+                remaining.remove(0);
+                continue;
+            }
+            if runtime_caveman_memory_prefix(prefix) {
+                super_optimizer_overlay = true;
+                memory_enabled = true;
                 remaining.remove(0);
                 continue;
             }
@@ -233,7 +249,12 @@ pub(crate) fn runtime_caveman_extract_launch_prefixes(
         break;
     }
 
-    (rtk_enabled, super_optimizer_overlay, remaining)
+    (
+        rtk_enabled,
+        super_optimizer_overlay,
+        memory_enabled,
+        remaining,
+    )
 }
 
 pub(crate) fn runtime_caveman_extract_presidio_prefix(
@@ -254,14 +275,12 @@ pub(crate) fn runtime_caveman_extract_presidio_prefix(
 fn runtime_caveman_super_optimizer_prefix(prefix: &str) -> bool {
     matches!(
         prefix,
-        "sqz"
-            | "tokensavior"
-            | "token-savior"
-            | "clawcompactor"
-            | "claw-compactor"
-            | "mem"
-            | "memory"
+        "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor"
     )
+}
+
+fn runtime_caveman_memory_prefix(prefix: &str) -> bool {
+    matches!(prefix, "mem" | "memory")
 }
 
 #[cfg(test)]
@@ -281,6 +300,7 @@ mod tests {
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
+        assert!(!strategy.memory_enabled);
         assert!(strategy.args.smart_context);
         assert!(strategy.args.full_access);
         assert!(strategy.codex_args.contains(&OsString::from(
@@ -449,7 +469,7 @@ mod tests {
 
     #[test]
     fn caveman_launch_prefixes_extract_all_super_optimizers() {
-        let (rtk_enabled, super_optimizer_overlay, codex_args) =
+        let (rtk_enabled, super_optimizer_overlay, memory_enabled, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[
                 OsString::from("rtk"),
                 OsString::from("sqz"),
@@ -463,6 +483,7 @@ mod tests {
 
         assert!(rtk_enabled);
         assert!(super_optimizer_overlay);
+        assert!(memory_enabled);
         assert_eq!(
             codex_args,
             vec![
@@ -475,7 +496,7 @@ mod tests {
 
     #[test]
     fn caveman_launch_extracts_presidio_prefix_after_super_optimizers() {
-        let (rtk_enabled, super_optimizer_overlay, codex_args) =
+        let (rtk_enabled, super_optimizer_overlay, memory_enabled, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[
                 OsString::from("rtk"),
                 OsString::from("sqz"),
@@ -487,6 +508,7 @@ mod tests {
 
         assert!(rtk_enabled);
         assert!(super_optimizer_overlay);
+        assert!(!memory_enabled);
         assert!(presidio_enabled);
         assert_eq!(
             codex_args,
