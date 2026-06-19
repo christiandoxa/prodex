@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.196.0 - 2026-06-19
+
+### Runtime
+
+- Add runtime token log commands (`6ada09f`)
+
 ## 0.195.0 - 2026-06-19
 
 ### Misc
 
+- Satisfy super optimizer clippy gate (`6f97361`)
 - Stabilize super startup and resume ordering (`c9c9db3`)
 
 ## 0.194.0 - 2026-06-19
@@ -73,13 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Write codex-compatible resume metadata (`4c20a19`)
-
-## 0.184.0 - 2026-06-15
-
-### Deps
-
-- Bump rusqlite from 0.31.0 to 0.40.1 (`a0a02bf`)
-
-### Misc
-
-- Recover sqlite-backed resume rollouts (`823fa1a`)
