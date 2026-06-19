@@ -52,6 +52,11 @@ pub enum Commands {
     )]
     Info(InfoArgs),
     #[command(
+        name = "log",
+        about = "Show the latest sent/received token counts or stream them live."
+    )]
+    Log(LogArgs),
+    #[command(
         subcommand,
         about = "Inspect shared Codex session metadata.",
         after_help = CLI_SESSION_AFTER_HELP
@@ -296,6 +301,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "use"
             | "current"
             | "info"
+            | "log"
             | "session"
             | "doctor"
             | "setup"

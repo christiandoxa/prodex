@@ -192,7 +192,44 @@ async fn runtime_presidio_redact_body(
         .build()
         .context("failed to build Presidio runtime HTTP client")?;
 
-    let languages = config.languages;
+    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&text) {
+        let mut values = Vec::new();
+        collect_json_string_values(&json, false, &mut values);
+        if values.is_empty() {
+            return Ok(text.into_bytes());
+        }
+
+        let separator = presidio_json_value_separator(&values);
+        let combined = values.join(&separator);
+        let redacted = runtime_presidio_redact_text(&client, &combined, &config).await?;
+        if redacted == combined {
+            return Ok(text.into_bytes());
+        }
+
+        let redacted_values = redacted.split(&separator).collect::<Vec<_>>();
+        if redacted_values.len() != values.len() {
+            anyhow::bail!(
+                "Presidio changed JSON value separator count: expected {}, got {}",
+                values.len(),
+                redacted_values.len()
+            );
+        }
+        let mut redacted_values = redacted_values.into_iter();
+        replace_json_string_values(&mut json, false, &mut redacted_values);
+        return serde_json::to_vec(&json).context("failed to serialize redacted JSON request body");
+    }
+
+    Ok(runtime_presidio_redact_text(&client, &text, &config)
+        .await?
+        .into_bytes())
+}
+
+async fn runtime_presidio_redact_text(
+    client: &reqwest::Client,
+    text: &str,
+    config: &RuntimePresidioRedactionConfig,
+) -> Result<String> {
+    let languages = &config.languages;
     let language_mode = config.language_mode;
 
     let mut all_analyzer_results = Vec::new();
@@ -200,21 +237,20 @@ async fn runtime_presidio_redact_body(
     match language_mode {
         PresidioLanguageMode::Fixed => {
             let results =
-                presidio_analyze_async(&client, &config.analyzer_url, &text, &languages[0]).await?;
+                presidio_analyze_async(client, &config.analyzer_url, text, &languages[0]).await?;
             all_analyzer_results = results;
         }
         PresidioLanguageMode::Auto => {
             let detected_lang =
-                detect_presidio_language(&text, &languages).unwrap_or_else(|| languages[0].clone());
+                detect_presidio_language(text, languages).unwrap_or_else(|| languages[0].clone());
             let results =
-                presidio_analyze_async(&client, &config.analyzer_url, &text, &detected_lang)
-                    .await?;
+                presidio_analyze_async(client, &config.analyzer_url, text, &detected_lang).await?;
             all_analyzer_results = results;
         }
         PresidioLanguageMode::Multi => {
-            for lang in &languages {
+            for lang in languages {
                 let results =
-                    presidio_analyze_async(&client, &config.analyzer_url, &text, lang).await?;
+                    presidio_analyze_async(client, &config.analyzer_url, text, lang).await?;
                 all_analyzer_results.extend(results.into_iter().map(|mut r| {
                     r.language = lang.clone();
                     r
@@ -225,7 +261,7 @@ async fn runtime_presidio_redact_body(
     }
 
     if all_analyzer_results.is_empty() {
-        return Ok(text.into_bytes());
+        return Ok(text.to_string());
     }
 
     let anonymized = client
@@ -242,7 +278,68 @@ async fn runtime_presidio_redact_body(
         .json::<PresidioAnonymizeResponse>()
         .await
         .context("failed to parse Presidio Anonymizer response")?;
-    Ok(anonymized.text.into_bytes())
+    Ok(anonymized.text)
+}
+
+fn collect_json_string_values(
+    value: &serde_json::Value,
+    redact_string: bool,
+    values: &mut Vec<String>,
+) {
+    match value {
+        serde_json::Value::String(text) if redact_string => values.push(text.clone()),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_string_values(item, redact_string, values);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                collect_json_string_values(value, should_redact_json_string_field(key), values);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn replace_json_string_values<'a>(
+    value: &mut serde_json::Value,
+    redact_string: bool,
+    values: &mut impl Iterator<Item = &'a str>,
+) {
+    match value {
+        serde_json::Value::String(text) if redact_string => {
+            if let Some(redacted) = values.next() {
+                *text = redacted.to_string();
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                replace_json_string_values(item, redact_string, values);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                replace_json_string_values(value, should_redact_json_string_field(key), values);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn should_redact_json_string_field(key: &str) -> bool {
+    matches!(
+        key,
+        "arguments" | "content" | "input" | "instructions" | "output" | "text"
+    )
+}
+
+fn presidio_json_value_separator(values: &[String]) -> String {
+    let mut separator = "\u{e000}PRODEX_PRESIDIO_VALUE\u{e001}".to_string();
+    while values.iter().any(|value| value.contains(&separator)) {
+        separator.push('\u{e002}');
+    }
+    separator
 }
 
 async fn presidio_analyze_async(
@@ -399,12 +496,12 @@ mod tests {
     #[test]
     fn runtime_presidio_redact_body_anonymizes_request_payload() {
         let (analyzer_url, analyzer_handle) = start_presidio_fixture(
-            r#"[{"start":22,"end":38,"score":0.99,"entity_type":"EMAIL_ADDRESS"}]"#,
+            r#"[{"start":8,"end":24,"score":0.99,"entity_type":"EMAIL_ADDRESS"}]"#,
             "/analyze",
             "user@example.com",
         );
         let (anonymizer_url, anonymizer_handle) = start_presidio_fixture(
-            r#"{"text":"{\"input\":\"contact <EMAIL_ADDRESS>\"}"}"#,
+            r#"{"text":"contact <EMAIL_ADDRESS>"}"#,
             "/anonymize",
             "EMAIL_ADDRESS",
         );
@@ -421,13 +518,15 @@ mod tests {
             .unwrap();
         let redacted = runtime
             .block_on(runtime_presidio_redact_body(
-                br#"{"input":"contact user@example.com"}"#.to_vec(),
+                br#"{"type":"response.create","input":"contact user@example.com"}"#.to_vec(),
                 config,
             ))
             .unwrap();
         let text = String::from_utf8(redacted).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert!(!text.contains("user@example.com"));
-        assert!(text.contains("<EMAIL_ADDRESS>"));
+        assert_eq!(json["type"], "response.create");
+        assert_eq!(json["input"], "contact <EMAIL_ADDRESS>");
         analyzer_handle.join().unwrap();
         anonymizer_handle.join().unwrap();
     }

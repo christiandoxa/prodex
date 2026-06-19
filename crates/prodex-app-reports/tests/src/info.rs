@@ -27,6 +27,23 @@ fn token_usage_summary_parses_json_runtime_log_markers() {
 }
 
 #[test]
+fn token_usage_event_parses_snapshot_fields() {
+    let event = info_token_usage_event_from_line(
+        "[2026-06-19 20:00:00.000 +07:00] token_usage request=42 transport=websocket profile=main source=responses_websocket input_tokens=120 cached_input_tokens=80 output_tokens=15 reasoning_tokens=3",
+    )
+    .expect("token event");
+    assert_eq!(event.timestamp, "2026-06-19 20:00:00.000 +07:00");
+    assert_eq!(event.request, Some(42));
+    assert_eq!(event.profile, "main");
+    assert_eq!(event.transport, "websocket");
+    assert_eq!(event.source, "responses_websocket");
+    assert_eq!(event.input_tokens, 120);
+    assert_eq!(event.cached_input_tokens, 80);
+    assert_eq!(event.output_tokens, 15);
+    assert_eq!(event.reasoning_tokens, 3);
+}
+
+#[test]
 fn active_runtime_log_paths_filter_to_runtime_processes() {
     let processes = vec![
         ProdexProcessInfo {

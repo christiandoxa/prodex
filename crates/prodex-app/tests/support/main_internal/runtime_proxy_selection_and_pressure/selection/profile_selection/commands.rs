@@ -65,6 +65,24 @@ fn cleanup_command_does_not_default_to_run() {
 }
 
 #[test]
+fn log_command_supports_last_and_stream_modes() {
+    let command = parse_cli_command_from(["prodex", "log"]).expect("log command");
+    let Commands::Log(args) = command else {
+        panic!("expected log command");
+    };
+    assert_eq!(args.mode, LogMode::Last);
+    assert!(!args.json);
+
+    let command =
+        parse_cli_command_from(["prodex", "log", "stream", "--json"]).expect("log stream command");
+    let Commands::Log(args) = command else {
+        panic!("expected log command");
+    };
+    assert_eq!(args.mode, LogMode::Stream);
+    assert!(args.json);
+}
+
+#[test]
 fn logout_command_accepts_positional_profile_name() {
     let command = parse_cli_command_from(["prodex", "logout", "second"]).expect("logout command");
     let Commands::Logout(args) = command else {

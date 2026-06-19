@@ -186,6 +186,12 @@ impl CommandExecute for InfoArgs {
     }
 }
 
+impl CommandExecute for LogArgs {
+    fn execute(self) -> Result<()> {
+        handle_log(self)
+    }
+}
+
 impl CommandExecute for PresidioCommands {
     fn execute(self) -> Result<()> {
         handle_presidio(self)
@@ -274,6 +280,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::UseProfile(command) => RoutedCommand::new(command),
         Commands::Current => RoutedCommand::new(CurrentCommand),
         Commands::Info(command) => RoutedCommand::new(command),
+        Commands::Log(command) => RoutedCommand::new(command),
         Commands::Session(command) => RoutedCommand::new(command),
         Commands::Doctor(command) => RoutedCommand::new(command),
         Commands::Setup(command) => RoutedCommand::new(command),

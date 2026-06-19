@@ -36,6 +36,19 @@ pub struct InfoTokenUsageCounts {
     pub reasoning_tokens: u64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct InfoTokenUsageEvent {
+    pub timestamp: String,
+    pub request: Option<u64>,
+    pub profile: String,
+    pub transport: String,
+    pub source: String,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: u64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InfoTokenUsageSummary {
     pub log_count: usize,

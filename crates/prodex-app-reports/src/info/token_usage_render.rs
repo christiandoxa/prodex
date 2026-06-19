@@ -57,31 +57,66 @@ impl InfoTokenUsageCounts {
 }
 
 pub fn info_token_usage_from_line(line: &str) -> Option<(String, InfoTokenUsageCounts)> {
+    let event = info_token_usage_event_from_line(line)?;
+    Some((
+        event.profile,
+        InfoTokenUsageCounts {
+            input_tokens: event.input_tokens,
+            cached_input_tokens: event.cached_input_tokens,
+            output_tokens: event.output_tokens,
+            reasoning_tokens: event.reasoning_tokens,
+        },
+    ))
+}
+
+pub fn info_token_usage_event_from_line(line: &str) -> Option<InfoTokenUsageEvent> {
     if !line.contains("token_usage") {
         return None;
     }
     let fields = info_runtime_parse_fields(line);
-    Some((
-        fields
+    Some(InfoTokenUsageEvent {
+        timestamp: info_token_usage_timestamp(line),
+        request: fields.get("request").and_then(|value| value.parse().ok()),
+        profile: fields
             .get("profile")
             .cloned()
             .unwrap_or_else(|| "unknown".to_string()),
-        InfoTokenUsageCounts {
-            input_tokens: fields.get("input_tokens")?.parse::<u64>().ok()?,
-            cached_input_tokens: fields
-                .get("cached_input_tokens")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or_default(),
-            output_tokens: fields
-                .get("output_tokens")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or_default(),
-            reasoning_tokens: fields
-                .get("reasoning_tokens")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or_default(),
-        },
-    ))
+        transport: fields
+            .get("transport")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string()),
+        source: fields
+            .get("source")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string()),
+        input_tokens: fields.get("input_tokens")?.parse::<u64>().ok()?,
+        cached_input_tokens: fields
+            .get("cached_input_tokens")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_default(),
+        output_tokens: fields
+            .get("output_tokens")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_default(),
+        reasoning_tokens: fields
+            .get("reasoning_tokens")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_default(),
+    })
+}
+
+fn info_token_usage_timestamp(line: &str) -> String {
+    if let Some(timestamp) = line
+        .strip_prefix('[')
+        .and_then(|line| line.split_once(']'))
+        .map(|(timestamp, _)| timestamp)
+    {
+        return timestamp.to_string();
+    }
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()
+        .and_then(|value| value.get("timestamp")?.as_str().map(str::to_string))
+        .unwrap_or_default()
 }
 
 pub fn format_info_token_usage_summary(summary: &InfoTokenUsageSummary) -> String {

@@ -234,7 +234,7 @@ pub(super) fn start_mem0_memory_gateway_for_runtime_request(
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: request.model_context_window_tokens,
-        preferred_listen_addr: None,
+        preferred_listen_addr: Some("0.0.0.0:0"),
         gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
             gateway_token,
         )),

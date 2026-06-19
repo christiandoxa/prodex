@@ -80,6 +80,25 @@ pub struct InfoArgs {
     pub tokens: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
+pub enum LogMode {
+    /// Show the most recent token usage event and exit.
+    #[default]
+    Last,
+    /// Follow runtime logs and print token usage events as they arrive.
+    Stream,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct LogArgs {
+    /// Output mode. Omit for the latest event, or use `stream` for live updates.
+    #[arg(value_enum, default_value_t)]
+    pub mode: LogMode,
+    /// Emit JSON. Stream mode emits one JSON object per line.
+    #[arg(long)]
+    pub json: bool,
+}
+
 #[derive(Args, Debug)]
 pub struct DoctorArgs {
     /// Also probe each profile's quota endpoint.

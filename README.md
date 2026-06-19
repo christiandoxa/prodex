@@ -993,6 +993,8 @@ See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 
 ```bash
 prodex info
+prodex log
+prodex log stream
 prodex doctor --install
 prodex doctor --runtime
 prodex doctor --bundle ./prodex-doctor.json --redacted
@@ -1006,6 +1008,8 @@ git diff | prodex context compact-output --kind git-diff
 | Command | Description |
 |---|---|
 | `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
+| `prodex log` | Shows the latest runtime token event: tokens sent (`input_tokens`), cache hits, tokens received (`output_tokens`), and reasoning tokens. |
+| `prodex log stream` | Follows all active runtime logs and prints token events live. Add `--json` for JSON Lines output. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |

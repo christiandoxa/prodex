@@ -69,6 +69,7 @@ pub fn show_update_notice_if_available(command: &Commands) -> Result<()> {
 pub fn should_emit_update_notice(command: &Commands) -> bool {
     match command {
         Commands::Info(_) => false,
+        Commands::Log(_) => false,
         Commands::Doctor(args) => !args.json && args.bundle.is_none(),
         Commands::Audit(args) => !args.json,
         Commands::Context(ContextCommands::Audit(args)) => !args.json,

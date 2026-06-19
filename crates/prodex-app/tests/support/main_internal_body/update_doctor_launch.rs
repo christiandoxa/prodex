@@ -62,6 +62,7 @@ fn cached_update_version_is_scoped_to_release_source() {
 #[test]
 fn update_notice_is_suppressed_for_machine_output_modes() {
     assert!(!should_emit_update_notice(&Commands::Info(InfoArgs::default())));
+    assert!(!should_emit_update_notice(&Commands::Log(LogArgs::default())));
     assert!(!should_emit_update_notice(&Commands::Doctor(DoctorArgs {
         quota: false,
         runtime: true,
