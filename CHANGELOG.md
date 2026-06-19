@@ -2,9 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.195.0 - 2026-06-19
+
+### Misc
+
+- Stabilize super startup and resume ordering (`c9c9db3`)
+
 ## 0.194.0 - 2026-06-19
 
-- No grouped changes.
+### Misc
+
+- Satisfy capability clippy gate (`82aedf8`)
+- Avoid Mem0 env secret scan false positive (`69f38ac`)
 
 ## 0.193.0 - 2026-06-19
 
@@ -74,9 +83,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Recover sqlite-backed resume rollouts (`823fa1a`)
-
-## 0.183.0 - 2026-06-15
-
-### Misc
-
-- Recover resume sessions from readable rollouts (`c4a355e`)
