@@ -719,7 +719,6 @@ fn session_list_parses_line_modes_and_filters() {
     assert_eq!(args.limit, Some(5));
     assert!(args.include_subagents);
 }
-
 #[test]
 fn session_current_parses_resume_command_filters_and_cwd() {
     let command = parse_cli_command_from([
