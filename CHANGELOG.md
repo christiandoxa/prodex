@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.197.0 - 2026-06-20
+
+### Misc
+
+- Add prodex inspect diagnostics (`0c500ab`)
+
 ## 0.196.0 - 2026-06-19
 
 ### Runtime
@@ -70,13 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Clean stale codex arg0 temp dirs (`599d788`)
-
-## 0.185.0 - 2026-06-15
-
-### Docs
-
-- Add README overview image (`dafdb34`)
-
-### Misc
-
-- Write codex-compatible resume metadata (`4c20a19`)
