@@ -6,9 +6,9 @@ use std::path::PathBuf;
 pub enum ProfileCommands {
     /// Add a profile entry and optionally seed it from another CODEX_HOME.
     Add(AddProfileArgs),
-    /// Export one or more profiles, including their auth.json access tokens.
+    /// Export one or more profiles, including supported profile secrets.
     Export(ExportProfileArgs),
-    /// Import profiles from a bundle created by `prodex profile export`.
+    /// Import profiles from an export bundle or supported built-in source.
     Import(ImportProfileArgs),
     /// Copy the current shared Codex home into a new managed profile and activate it.
     ImportCurrent(ImportCurrentArgs),
@@ -121,8 +121,8 @@ pub struct CodexPassthroughArgs {
     /// Existing profile to log into. If omitted, prodex creates or reuses a profile by workspace identity.
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
-    /// Extra arguments passed through to `codex login` unchanged.
-    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
+    /// Login-method flags or extra arguments for the selected provider login flow.
+    #[arg(value_name = "LOGIN_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
 }
 

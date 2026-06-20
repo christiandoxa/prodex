@@ -54,7 +54,7 @@ pub fn runtime_launch_dry_run_plan(
         RuntimeLaunchDryRunChild::Codex { .. } => (base_codex_home.to_path_buf(), None),
         RuntimeLaunchDryRunChild::Caveman { .. } => {
             let caveman_home =
-                dry_run_caveman_home_placeholder(managed_profiles_root, base_codex_home);
+                dry_run_prodex_overlay_home_placeholder(managed_profiles_root, base_codex_home);
             (caveman_home.clone(), Some(caveman_home))
         }
     };

@@ -1,5 +1,18 @@
 [
   {
+    "id": "inspect-diagnostics-and-readme-presidio-0.197.0",
+    "requiredSubjects": [
+      "feat: add prodex inspect diagnostics"
+    ],
+    "caps": {
+      "maxFiles": 46,
+      "maxBehaviorFiles": 32,
+      "maxLines": 1900,
+      "maxFileLines": 400
+    },
+    "reason": "Reviewed inspect MCP diagnostics, README Presidio en/id documentation, runtime hot-path guard split-module allowlist updates, and release metadata with local full test suite plus staged preflight."
+  },
+  {
     "id": "runtime-provider-split-and-claude-mem-removal-0.193.0",
     "requiredSubjects": [
       "refactor(runtime): split provider modules and remove Claude-Mem"

@@ -147,7 +147,7 @@ export function mainPackageManifest(version) {
     name: mainPackageName,
     version,
     description:
-      "Safe multi-account auto-rotate for Codex CLI with isolated CODEX_HOME profiles",
+      "Multi-provider Codex wrapper with OpenAI quota-aware routing and Claude Code support",
     license: "Apache-2.0",
     bin: {
       prodex: "prodex",

@@ -181,7 +181,7 @@ pub(crate) fn render_all_quota_watch_output(
         ),
         detail,
         0,
-        QuotaReportSort::Remaining,
+        QuotaReportSort::Current,
         QuotaProviderFilter::All,
         false,
     )
@@ -369,7 +369,7 @@ pub(crate) fn watch_all_quotas(
 ) -> Result<()> {
     let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
-    let mut sort = QuotaReportSort::Remaining;
+    let mut sort = QuotaReportSort::Current;
     let mut provider_filter = provider_filter;
     let collection_provider_filter = if provider_filter_locked {
         provider_filter

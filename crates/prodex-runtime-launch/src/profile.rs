@@ -94,15 +94,22 @@ pub fn ensure_profile_path_is_unique(
     Ok(())
 }
 
-pub fn dry_run_caveman_home_placeholder(
+pub fn dry_run_prodex_overlay_home_placeholder(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> PathBuf {
     managed_profiles_root.join(format!(
-        ".caveman-dry-run-from-{}",
+        ".prodex-overlay-dry-run-from-{}",
         base_codex_home
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("profile")
     ))
+}
+
+pub fn dry_run_caveman_home_placeholder(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+) -> PathBuf {
+    dry_run_prodex_overlay_home_placeholder(managed_profiles_root, base_codex_home)
 }

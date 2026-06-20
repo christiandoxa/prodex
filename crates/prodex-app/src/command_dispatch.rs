@@ -48,6 +48,7 @@ impl CommandDispatchExt for Commands {
                 | Commands::Update(_)
                 | Commands::GeminiCompatRefresh(_)
                 | Commands::MemoryMcp(_)
+                | Commands::InspectMcp(_)
         )
     }
 }
@@ -252,6 +253,12 @@ impl CommandExecute for MemoryMcpArgs {
     }
 }
 
+impl CommandExecute for InspectMcpArgs {
+    fn execute(self) -> Result<()> {
+        handle_inspect_mcp(self)
+    }
+}
+
 impl CommandExecute for SetupArgs {
     fn execute(self) -> Result<()> {
         handle_setup(self)
@@ -318,6 +325,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::RuntimeBroker(command) => RoutedCommand::new(command),
         Commands::GeminiCompatRefresh(command) => RoutedCommand::new(command),
         Commands::MemoryMcp(command) => RoutedCommand::new(command),
+        Commands::InspectMcp(command) => RoutedCommand::new(command),
     }
 }
 

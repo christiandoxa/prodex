@@ -1,8 +1,8 @@
 # prodex
 
-`prodex` is a multi-account, multi-provider Codex wrapper with auto-rotation.
+`prodex` is a multi-account, multi-provider Codex wrapper with quota-aware profile routing.
 
-Use multiple Codex accounts and supported provider backends from one command line. OpenAI/Codex profiles get quota-aware routing and auto-rotation; provider adapters let `prodex s` launch the Codex front end against Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
+Use multiple Codex accounts and supported provider backends from one command line. OpenAI/Codex profiles get quota-aware routing and can auto-rotate when multiple eligible profiles exist; provider adapters let `prodex s` launch the Codex front end against Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
 
 ![Prodex overview](https://github.com/christiandoxa/prodex/releases/download/assets/prodex-overview.png)
 
@@ -29,9 +29,9 @@ Use multiple Codex accounts and supported provider backends from one command lin
 Use `prodex` if you want to:
 
 - use multiple Codex accounts from one CLI
-- rotate to another account when quota runs out
+- rotate to another eligible account when quota runs out
 - launch Codex/Super against non-OpenAI providers without changing front ends
-- keep profile credentials separated
+- keep profile `auth.json` account credentials separated
 - keep sessions attached to the profile that created them
 - run Codex, Caveman mode, Super mode, and Claude Code through the same wrapper
 
@@ -39,7 +39,7 @@ If you only use one Codex account and do not need quota rotation, you probably d
 
 ## Requirements
 
-You need at least one logged-in Prodex profile.
+For OpenAI/Codex quota-aware routing, you need at least one logged-in Prodex profile. Local `--url` launches and some provider API-key launches can run without a persisted profile.
 
 <details>
 <summary>Tool requirements</summary>
@@ -62,12 +62,13 @@ Prodex supports two provider paths:
 <details>
 <summary>Supported provider matrix</summary>
 
-| Provider | Launch to Codex | Auth path | Quota view | Notes |
+| Provider | Launch path | Auth path | Quota view | Notes |
 |---|---:|---|---:|---|
-| OpenAI / Codex | `prodex`, `prodex run`, `prodex s` | ChatGPT OAuth, device code, or OpenAI/API-compatible key via `prodex login` | Yes | Full quota preflight and profile auto-rotation. |
-| Google Gemini | `prodex s gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key` | OAuth profiles | API-key mode uses Google's OpenAI-compatible Chat Completions endpoint; OAuth uses Code Assist. Both rotate before commit. |
+| OpenAI / Codex | `prodex`, `prodex run`, `prodex s` | ChatGPT OAuth, device code, or OpenAI/API-compatible key via `prodex login` | Yes | Quota preflight, plus profile auto-rotation when multiple eligible profiles exist. |
+| Google Gemini | `prodex s gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key` | OAuth profiles | API-key mode uses Google's OpenAI-compatible Chat Completions endpoint; OAuth uses Code Assist. Both can rotate before commit across configured profiles/keys. |
+| Google Antigravity CLI | `prodex s gemini --cli agy` | Antigravity keyring / Google Sign-In via `prodex login --with-antigravity` or `agy auth login` | CLI quota snapshot | Native CLI path; no Prodex account auto-rotation or Presidio proxying. |
 | Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | OAuth profiles | Shows Claude OAuth readiness; add `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups. |
-| GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Native profile and API-key modes rotate before commit; continuations stay bound to the owning profile. |
+| GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Native profile and API-key modes can rotate before commit across configured profiles/keys; continuations stay bound to the owning profile. |
 | DeepSeek | `prodex s deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
 | Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
@@ -91,7 +92,7 @@ curl http://127.0.0.1:4000/v1/responses \
 </details>
 
 <details>
-<summary>Gateway capabilities</summary>
+<summary>Gateway capabilities (advanced)</summary>
 
 The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It adds `x-prodex-call-id` to responses, writes local request detail plus `gateway_spend` events for both `request` and `response` phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, supports catalog-backed policy routing strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`) for model aliases/fallback chains, can enforce static virtual keys with persisted request/spend usage plus model/budget/RPM/TPM limits, supports file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, and can apply keyword/model, local PII redaction, Presidio, and external webhook guardrails before calls and on outputs. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can list usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, inspect usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, inspect provider adapter contracts at `/v1/prodex/gateway/providers`, inspect active observability and guardrail configuration at `/v1/prodex/gateway/observability` and `/v1/prodex/gateway/guardrails`, fetch the machine-readable gateway contract at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; policy/env-backed keys remain read-only, SCIM users can carry tenant/team/project/user/budget scopes for SSO/OIDC fallback, admin-managed key and SCIM user mutations are recorded in `prodex audit`, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix plus tenant/team/project/user/budget scopes. Configure defaults under `[gateway]` in `policy.toml`; validate provider catalog edits with `npm run catalog:providers`.
 
@@ -100,9 +101,9 @@ JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/response
 </details>
 
 <details>
-<summary>Provider behavior details</summary>
+<summary>Provider behavior details (advanced)</summary>
 
-The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers now have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, local URLs, and Bedrock/custom Codex providers still skip OpenAI quota preflight.
+The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth, Antigravity CLI, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers now have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, Antigravity CLI, local URLs, and Bedrock/custom Codex providers still skip OpenAI quota preflight.
 
 Runtime proxy design contract:
 
@@ -143,7 +144,7 @@ If you install from source, make sure the `codex` binary in your `PATH` is alrea
 
 ## Optional tools
 
-`prodex` can run without RTK, SQZ, token-savior, claw-compactor, Presidio, or prodex-memory. `prodex-memory` is built in and opt-in through the `mem` prefix or managed Mem0 Super prompt.
+`prodex` can run without RTK, SQZ, token-savior, claw-compactor, Presidio, or prodex-memory. `prodex-inspect` is a built-in read-only MCP server for profile/runtime diagnostics and is auto-registered in Prodex overlay sessions. `prodex-memory` is built in and opt-in through the `mem` prefix or managed Mem0 Super prompt.
 
 Install them only if you want to use commands such as:
 
@@ -167,7 +168,24 @@ prodex super
 </details>
 
 <details>
-<summary>Prodex memory mode</summary>
+<summary>Prodex inspect MCP</summary>
+
+`prodex-inspect` exposes read-only MCP tools for agent-side diagnostics:
+
+- `prodex_status`: Prodex paths, active profile, profile count, binding counts, and version.
+- `prodex_profiles`: configured profiles without secrets.
+- `prodex_latest_runtime_log`: latest runtime log pointer plus a bounded tail excerpt.
+
+Prodex auto-registers it for Prodex overlay sessions. For direct diagnostics:
+
+```bash
+prodex __inspect-mcp
+```
+
+</details>
+
+<details>
+<summary>Prodex memory mode (advanced)</summary>
 
 ```bash
 prodex s
@@ -178,7 +196,7 @@ prodex s doctor
 
 `prodex s` leaves `prodex-memory` disabled unless you opt in.
 The base Codex profile stays unchanged; memory state is owned by Prodex.
-Use `prodex caveman mem` when you want only Caveman plus the local memory MCP overlay, without the full Super stack.
+Use `prodex caveman mem` when you want only Caveman plus the local memory MCP server, without the full Super stack.
 
 `prodex-memory` provides Mem0-style local memory without Mem0 Cloud, Mem0 CLI, or `MEM0_API_KEY`.
 The local `mem` prefix stores memories in a SQLite database under `PRODEX_HOME`:
@@ -200,7 +218,7 @@ The SQLite path remains the fastest OOTB memory path when you request memory:
 Managed Mem0 mode requires Docker Compose (`docker compose` or `docker-compose`). It does not require a Mem0 Cloud token or a user-supplied provider API key for the default memory path. OpenAI-compatible API-key profiles, `--url` local providers, and supported provider bridges can provide richer upstream LLM/embedding behavior; otherwise Prodex falls back to local embeddings for Mem0.
 
 <details>
-<summary>Managed Mem0 internals</summary>
+<summary>Managed Mem0 internals (advanced)</summary>
 
 Managed Mem0 mode is still local-first:
 
@@ -217,7 +235,7 @@ Managed Mem0 mode is still local-first:
 </details>
 
 <details>
-<summary>Memory diagnostics</summary>
+<summary>Memory diagnostics (advanced)</summary>
 
 Use `prodex s doctor` to verify that the built-in memory store can be opened before launching Codex. The hidden MCP server can also be launched directly for diagnostics:
 
@@ -346,7 +364,7 @@ sqz gain
 which sqz-mcp
 ```
 
-Prodex auto-registers `prodex-sqz` for Super/Caveman overlay sessions when `sqz-mcp` is discoverable.
+Prodex auto-registers `prodex-sqz` for Prodex overlay sessions when `sqz-mcp` is discoverable.
 
 </details>
 
@@ -428,7 +446,9 @@ python3 ~/.local/share/claw-compactor/scripts/mem_compress.py /path/to/workspace
 
 Presidio is used by `prodex presidio` and by the optional Super-mode privacy prompt. It runs as local Analyzer and Anonymizer HTTP services.
 
-Fast Docker install using Microsoft's published images:
+### English-only quick install
+
+Use Microsoft's published images when you only need English (`en`):
 
 ```bash
 docker pull mcr.microsoft.com/presidio-analyzer
@@ -438,39 +458,135 @@ docker run -d --name presidio-analyzer -p 5002:3000 mcr.microsoft.com/presidio-a
 docker run -d --name presidio-anonymizer -p 5001:3000 mcr.microsoft.com/presidio-anonymizer:latest
 ```
 
-When Super mode opts into Presidio and the default local endpoints are not healthy, Prodex now tries to start these Docker containers automatically before launching Codex. Set `PRODEX_PRESIDIO_AUTO_START=0` to disable that best-effort auto-start and only use the configured endpoints.
+<details>
+<summary>English + Indonesian install (advanced)</summary>
 
-Source checkout with Compose:
+Prodex can route requests with `--language-mode auto --languages en,id`, but Indonesian (`id`) detection only works if the Analyzer supports Indonesian NLP configuration and recognizers. The default Microsoft Analyzer image is usually English-only, so build a custom Analyzer and keep the standard Anonymizer.
 
-```bash
-git clone https://github.com/microsoft/presidio.git ~/.local/share/presidio
-cd ~/.local/share/presidio
-docker compose -f docker-compose-text.yml up -d --build
-```
-
-Verify with Prodex:
+Minimal local Analyzer example:
 
 ```bash
-prodex presidio doctor
-prodex presidio redact --text "My name is John Smith and my phone is 212-555-1234."
-prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
-prodex presidio redact --language id --text "Nomor telepon saya adalah 0812-3456-7890."
-prodex presidio enable
-prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
+mkdir -p ~/.local/share/presidio-id-analyzer
+cd ~/.local/share/presidio-id-analyzer
+
+cat > Dockerfile <<'EOF'
+FROM python:3.11-slim
+RUN pip install --no-cache-dir flask gunicorn presidio-analyzer spacy \
+ && python -m spacy download en_core_web_sm \
+ && python -m spacy download xx_ent_wiki_sm
+WORKDIR /app
+COPY app.py /app/app.py
+CMD ["gunicorn", "-b", "0.0.0.0:3000", "app:app"]
+EOF
+
+cat > app.py <<'EOF'
+from flask import Flask, jsonify, request
+from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerRegistry
+from presidio_analyzer.nlp_engine import NlpEngineProvider
+from presidio_analyzer.predefined_recognizers import EmailRecognizer, UrlRecognizer
+
+nlp_config = {
+    "nlp_engine_name": "spacy",
+    "models": [
+        {"lang_code": "en", "model_name": "en_core_web_sm"},
+        {"lang_code": "id", "model_name": "xx_ent_wiki_sm"},
+    ],
+}
+nlp_engine = NlpEngineProvider(nlp_configuration=nlp_config).create_engine()
+registry = RecognizerRegistry(supported_languages=["en", "id"])
+registry.load_predefined_recognizers(nlp_engine=nlp_engine, languages=["en", "id"])
+registry.add_recognizer(EmailRecognizer(supported_language="id"))
+registry.add_recognizer(UrlRecognizer(supported_language="id"))
+
+registry.add_recognizer(PatternRecognizer(
+    supported_entity="PHONE_NUMBER",
+    language="id",
+    patterns=[Pattern("id mobile phone", r"(?<!\d)(?:\+62|62|0)8[1-9][\d\s.-]{7,13}\d(?!\d)", 0.75)],
+    context=["telepon", "nomor", "hp", "ponsel"],
+))
+registry.add_recognizer(PatternRecognizer(
+    supported_entity="ID_INDONESIA_NIK",
+    language="id",
+    patterns=[Pattern("nik", r"(?<!\d)\d{16}(?!\d)", 0.75)],
+    context=["nik", "ktp"],
+))
+registry.add_recognizer(PatternRecognizer(
+    supported_entity="ID_INDONESIA_NPWP",
+    language="id",
+    patterns=[Pattern("npwp", r"(?<!\d)\d{2}\.?\d{3}\.?\d{3}\.?\d[-.]?\d{3}\.?\d{3}(?!\d)", 0.75)],
+    context=["npwp", "pajak"],
+))
+registry.add_recognizer(PatternRecognizer(
+    supported_entity="PERSON",
+    language="id",
+    patterns=[Pattern("nama saya", r"(?i)\b(?:nama saya|saya bernama|nama)\s+[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3}", 0.85)],
+    context=["nama", "saya", "bernama"],
+))
+
+analyzer = AnalyzerEngine(
+    nlp_engine=nlp_engine,
+    registry=registry,
+    supported_languages=["en", "id"],
+)
+app = Flask(__name__)
+
+@app.get("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+@app.post("/analyze")
+def analyze():
+    body = request.get_json(force=True)
+    results = analyzer.analyze(
+        text=body["text"],
+        language=body.get("language", "en"),
+        entities=body.get("entities"),
+        score_threshold=body.get("score_threshold", 0),
+    )
+    return jsonify([result.to_dict() for result in results])
+EOF
+
+docker build -t prodex-presidio-analyzer-id:latest .
+docker rm -f presidio-analyzer presidio-anonymizer 2>/dev/null || true
+docker run -d --name presidio-analyzer -p 5002:3000 prodex-presidio-analyzer-id:latest
+docker run -d --name presidio-anonymizer -p 5001:3000 mcr.microsoft.com/presidio-anonymizer:latest
+
 prodex presidio enable --language-mode auto --languages en,id
-prodex presidio status
-prodex presidio doctor --json
-prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
-prodex presidio enable --language-mode auto --languages en,id
-prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
-prodex presidio enable --language-mode auto --languages en,id
-prodex presidio status
-prodex presidio doctor --json
-prodex presidio status
-prodex presidio doctor --json
 ```
 
-When you answer `y` to the `prodex super` / `prodex s` Presidio prompt or pass `--presidio`, Super starts a dedicated runtime proxy that redacts UTF-8 HTTP request bodies and WebSocket text frames through the local Presidio Analyzer and Anonymizer before forwarding them upstream. This is equivalent to adding the `presidio` prefix to the Super stack. Use `--no-presidio` to skip the prompt and keep redaction disabled. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
+This example keeps built-in recognizers such as `EMAIL_ADDRESS` and `URL`, adds Indonesian phone numbers, NIK, NPWP, and context-based `PERSON` detection for text like `Nama saya Budi`.
+
+</details>
+
+### Verify
+
+```bash
+prodex presidio doctor --json
+prodex presidio redact --language en --text "My name is John Smith and my phone is 212-555-1234."
+prodex presidio redact --language id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
+prodex presidio redact --language id --text "NIK saya 3171010101900001 dan email saya budi@example.com."
+```
+
+English should redact `PERSON` and `PHONE_NUMBER`. Indonesian should redact `PERSON`, `PHONE_NUMBER`, `ID_INDONESIA_NIK`, and `EMAIL_ADDRESS`. If `id` misses names or identifiers, the Analyzer container is not using the custom Indonesian config/recognizers.
+
+### Use with `prodex s`
+
+Once `prodex presidio enable --language-mode auto --languages en,id` is configured and the custom Analyzer plus Anonymizer containers are healthy, run `prodex s` and answer `y` to the Presidio prompt. That is enough to enable runtime request-body and WebSocket text-frame redaction for the session. Use `--presidio` to enable it non-interactively or `--no-presidio` to skip it.
+
+If the endpoints are unhealthy, Prodex may auto-start the default Microsoft containers. Those are English-only unless your custom Analyzer image/container is already configured and running. Set `PRODEX_PRESIDIO_AUTO_START=0` to disable best-effort auto-start and only use configured endpoints.
+
+<details>
+<summary>Docker Desktop context note</summary>
+
+If the containers do not appear in Docker Desktop, check the active Docker context. Docker Desktop usually uses `desktop-linux`.
+
+```bash
+docker context show
+docker context ls
+docker --context desktop-linux ps -a --filter name=presidio
+```
+
+</details>
 </details>
 
 ## Quick start
@@ -495,9 +611,10 @@ prodex profile add second
 prodex login --profile second
 prodex login --with-google
 prodex login --with-claude
+prodex login --with-antigravity
 ```
 
-Interactive `prodex login` now asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, Google sign-in for Gemini, or Claude sign-in through Claude Code OAuth. For API-key profiles, you can also set an OpenAI-compatible backend URL:
+Interactive `prodex login` now asks for the login method before starting a browser. Choose ChatGPT browser login, device-code login, API-key login, Google sign-in for Gemini, Claude sign-in through Claude Code OAuth, or Antigravity CLI sign-in through `agy auth login`. Antigravity login is global to the `agy` CLI and does not create a Prodex profile. For API-key profiles, you can also set an OpenAI-compatible backend URL:
 
 ```bash
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
@@ -558,7 +675,7 @@ When you import a Copilot profile, Prodex does not move the Copilot token into P
 ## Daily command: `prodex s`
 
 <details>
-<summary>Super mode overview</summary>
+<summary>Runs Codex with Caveman, RTK, and local optimizer guidance</summary>
 
 For daily work, I use:
 
@@ -594,13 +711,16 @@ prodex s expose
 prodex caveman rtk sqz tokensavior clawcompactor --full-access
 ```
 
+<details>
+<summary>Prompts, Presidio, memory, and expose (advanced)</summary>
+
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps the expansion above. If you answer `y`, it is equivalent to:
 
 ```bash
 prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access
 ```
 
-Use `prodex super --presidio` to enable Presidio without prompting, or `prodex super --no-presidio` to skip the prompt and keep Presidio disabled. Presidio enables runtime request-body and WebSocket text redaction through local Presidio for the session. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
+Use `prodex super --presidio` to enable Presidio without prompting, or `prodex super --no-presidio` to skip the prompt and keep Presidio disabled. Presidio enables runtime request-body and WebSocket text redaction through local Presidio for the session when services are healthy; service failures follow `fail_mode`. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
 
 After the Presidio prompt, Super asks whether to enable prodex-memory through managed Mem0 Docker. Empty input or `n` leaves `prodex-memory` disabled, so Codex will not wait for that MCP server. Answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server, route its OpenAI-compatible calls through a session-local Prodex gateway, and inject the local Mem0 API key into the temporary Codex MCP config. Use `--no-mem0` to skip the prompt. Use the `mem` optimizer prefix for local SQLite memory. This path does not use Mem0 Cloud or `MEM0_API_KEY`; Docker Compose is required, and Prodex falls back to local embeddings when no upstream provider API key is available.
 
@@ -612,19 +732,27 @@ Use `prodex s doctor` to inspect the Super optimizer stack without launching Cod
 
 Use `prodex s expose` when you need to reach the live Super terminal from a browser. Prodex starts a local PTY bridge protected by a high-entropy access token, launches `cloudflared tunnel --protocol http2 --url ...` when `cloudflared` is available, and prints both the loopback and Cloudflare quick-tunnel URLs. The browser tab can close without stopping the session; reopening the same token URL reconnects to the existing PTY and replays recent scrollback. Add `--no-tunnel` for local-only access, `--max-clients N` to cap simultaneous browsers, or `--command 'prodex s --no-presidio'` to choose the initial terminal command.
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads Caveman, exposes an overlay `rtk` wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers `sqz-mcp` and `token-savior` MCP servers, exposes `sqz` and `claw-compactor` wrappers when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction and prodex-memory are added only when you opt in. Prodex passes token-savior cache, stats paths, and local memory under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions and memory state stay out of worktrees.
+</details>
 
-Super instructs Codex to use the whole local optimizer stack where it fits the task, not just RTK:
+<details>
+<summary>Super optimizer internals (advanced)</summary>
+
+Super's built-in optimization stack is deliberately local and deterministic. It preloads Caveman, exposes a Prodex overlay `rtk` PATH wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers built-in `prodex-inspect` plus discovered `sqz-mcp` and `token-savior` MCP servers, exposes `sqz` and `claw-compactor` wrapper commands when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction and prodex-memory are added only when you opt in. Prodex passes token-savior cache, stats paths, and local memory under `PRODEX_HOME` (default `~/.prodex`) so compatible token-savior versions and memory state stay out of worktrees.
+
+Super instructs Codex to use the available local optimizer stack where it fits the task, not just RTK:
 
 - RTK works upstream/input-side. Use visible `rtk <cmd>` for noisy terminal commands before their output enters the model context, such as `git diff`, `cargo test`, `npm test`, build logs, and package-manager output. Prodex also auto-wraps common noisy commands as a fallback when RTK is installed, but that fallback does not make the TUI show an `rtk` prefix.
-- SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server. Use it for repeated workspace reads, large text blobs, long command outputs that need reuse, and long-session context compression instead of emitting the same full content again.
-- token-savior handles symbol lookup, caller/context navigation, duplicate/dead-code checks, and API-impact searches before broad source reads.
-- claw-compactor handles workspace-level summary or benchmark requests through `prodex-claw-compactor` / `prodex-claw-compactor-auto`; treat its output as overview context and reread exact source before edits.
+- SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server when `sqz-mcp` is available. Use it for repeated workspace reads, large text blobs, long command outputs that need reuse, and long-session context compression instead of emitting the same full content again.
+- token-savior handles symbol lookup, caller/context navigation, duplicate/dead-code checks, and API-impact searches before broad source reads when token-savior is available.
+- prodex-inspect provides read-only MCP diagnostics for Prodex status, profiles, and latest runtime log tail.
+- claw-compactor handles workspace-level summary or benchmark requests through `prodex-claw-compactor` / `prodex-claw-compactor-auto` when available; treat its output as overview context and reread exact source before edits.
 - prodex-memory provides local Mem0-style memory through the `mem` prefix with SQLite, or through managed Mem0 OSS Docker when you opt in with the Super prompt or `--mem0`; neither path uses Mem0 Cloud auth or `MEM0_API_KEY`.
 - Presidio stays optional and only runs when you opt in with the Super prompt or `--presidio`.
 
 Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 The generated `SUPER_OPTIMIZERS.md` overlay includes an `Available Now` section so the model can see which MCP servers and wrappers were actually discovered for that session.
+
+</details>
 
 </details>
 
@@ -746,12 +874,12 @@ unless Prodex explicitly owns that command.
 | Mode | Command | Description |
 |---|---|---|
 | Normal Codex | `prodex` or `prodex run` | Managed Codex launch with profile selection and quota routing. |
-| Caveman | `prodex caveman` | Runs Codex with a temporary overlay `CODEX_HOME`. |
+| Caveman | `prodex caveman` | Runs Codex with Caveman mode enabled. |
 | Super | `prodex s` or `prodex super` | Daily mode with Caveman, RTK guidance, full access, and deterministic/local token optimizations. |
 | Claude Code | `prodex claude` | Runs Claude Code through Prodex-managed state. |
 
 <details>
-<summary>Normal Codex</summary>
+<summary>Normal Codex — managed Codex launch</summary>
 
 ```bash
 prodex
@@ -763,7 +891,7 @@ prodex exec "review this repo"
 </details>
 
 <details>
-<summary>Caveman mode</summary>
+<summary>Caveman mode — runs Codex with Caveman enabled</summary>
 
 ```bash
 prodex caveman
@@ -780,16 +908,16 @@ prodex caveman exec "review this repo in caveman mode"
 prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 ```
 
-`prodex caveman` runs Codex with a temporary overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
+`prodex caveman` runs Codex with Caveman mode active in a temporary Prodex overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
-Add optimizer prefixes before Codex args when you want Prodex to inject a specific launch overlay for that session: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, or `presidio`. Top-level shortcuts such as `prodex rtk`, `prodex sqz`, and `prodex mem` map to `prodex caveman <prefix>`.
+Add optimizer prefixes before Codex args when you want Prodex to enable a specific session tool in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, or `presidio`. Top-level shortcuts such as `prodex rtk`, `prodex sqz`, and `prodex mem` map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
 </details>
 
 <details>
-<summary>Super mode</summary>
+<summary>Super mode — daily Caveman + RTK + optimizer stack</summary>
 
 ```bash
 prodex s
@@ -811,6 +939,9 @@ This is my daily mode. It is the path I keep tuning for normal work: Caveman ena
 
 Super also enables Smart Context Autopilot in the runtime proxy.
 
+<details>
+<summary>Provider launch examples and bridge behavior (advanced)</summary>
+
 Use `--provider anthropic` when you want the Codex/Super front end with Anthropic upstream:
 
 ```bash
@@ -828,7 +959,7 @@ prodex profile import copilot
 prodex s --provider copilot --model gpt-5.1-codex
 ```
 
-Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens from GitHub before launch, rotates fresh native Responses requests across eligible profiles, and binds streaming response IDs back to the owning profile for continuations. `GITHUB_COPILOT_API_KEY`, `GITHUB_COPILOT_API_KEYS`, or `--api-key` can be used when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures.
+Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens from GitHub before launch, can rotate fresh native Responses requests across multiple eligible profiles, and binds streaming response IDs back to the owning profile for continuations. `GITHUB_COPILOT_API_KEY`, `GITHUB_COPILOT_API_KEYS`, or `--api-key` can be used when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.
 
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 
@@ -836,7 +967,7 @@ Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek 
 prodex s deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KEY"
 ```
 
-If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` environment and fetches DeepSeek `/user/balance`. The Super optional tools still run normally because they are local launch overlays around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
+If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` environment and fetches DeepSeek `/user/balance`. Available Super optimizer tools remain local Prodex overlay additions around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
 
 Use `--provider gemini` when you want the Codex/Super front end with Gemini upstream:
 
@@ -849,9 +980,9 @@ GEMINI_API_KEY=... prodex s gemini --model gemini-2.5-pro
 prodex s gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
 ```
 
-Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login` and routes through Google's Code Assist Gemini endpoint. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex converts Codex Responses requests to Chat Completions and sends them through Google's documented `/v1beta/openai/chat/completions` endpoint with Bearer authentication. Streaming, function calls, continuations, and Gemini `reasoning_effort` values are converted back into Codex Responses semantics. Plural key env vars may be comma-, semicolon-, or newline-separated and rotate before commit on auth/quota/rate/temporary failures. OAuth sessions keep fresh Gemini requests sticky to the previous successful profile by default for smoother Codex-style continuity; set `PRODEX_GEMINI_STICKY_FRESH_OAUTH=0` to restore pure fresh-request round robin. The default model is `auto`, matching Gemini CLI-style model routing through Gemini 3 and stable fallbacks; launch-time Gemini `modelConfigs` / `modelIdResolutions` / `modelChains` are projected into the Codex catalog and runtime fallback snapshot when configured. The injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192 where budget mode is used. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. The Super optional tools still run as local Codex overlays on this path.
+Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login --with-google` or the interactive Google sign-in choice, then routes through Google's Code Assist Gemini endpoint. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex converts Codex Responses requests to Chat Completions and sends them through Google's documented `/v1beta/openai/chat/completions` endpoint with Bearer authentication. Streaming, function calls, continuations, and Gemini `reasoning_effort` values are converted back into Codex Responses semantics. Plural key env vars may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures. OAuth sessions keep fresh Gemini requests sticky to the previous successful profile by default for smoother Codex-style continuity; set `PRODEX_GEMINI_STICKY_FRESH_OAUTH=0` to restore pure fresh-request round robin. The default model is `auto`, matching Gemini CLI-style model routing through Gemini 3 and stable fallbacks; launch-time Gemini `modelConfigs` / `modelIdResolutions` / `modelChains` are projected into the Codex catalog and runtime fallback snapshot when configured. The injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192 where budget mode is used. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. Available Super optimizer tools remain local Prodex overlay additions around Codex on this path.
 
-`prodex s gemini --cli gemini` launches the native Google Gemini CLI instead of Codex, defaults its native tools to YOLO approval mode, and routes Code Assist requests through Prodex OAuth profile rotation. This native CLI path currently requires a Google OAuth profile and does not accept `--api-key`. Set `PRODEX_GEMINI_BIN` to override the `gemini` executable.
+`prodex s gemini --cli gemini` launches the native Google Gemini CLI instead of Codex, defaults its native tools to YOLO approval mode, and routes Code Assist requests through Prodex OAuth profile routing. This native CLI path currently requires a Google OAuth profile and does not accept `--api-key`. Set `PRODEX_GEMINI_BIN` to override the `gemini` executable.
 
 `prodex s gemini --cli agy` launches the native Antigravity CLI with `--dangerously-skip-permissions` so tool permission prompts are auto-approved. Antigravity CLI owns its authentication through the system keyring/Google Sign-In and does not expose an endpoint or token override, so Prodex account auto-rotation and Presidio proxying are not available on this path. Set `PRODEX_AGY_BIN` to override the `agy` executable.
 
@@ -866,6 +997,11 @@ Before Codex launches, the Gemini provider projects Gemini CLI settings and exte
 Gemini Live realtime websocket translation remains available for compatible callers and credentialed adapter tests, mapping Codex audio, transcript, text, function-call, function-result, interruption, cancellation, housekeeping, and turn-completion events to and from Gemini `BidiGenerateContent`; one Gemini auth/profile is selected before upgrade and remains fixed for the session. Codex 0.140.0 removed the upstream TUI voice controls, so this bridge should not be treated as a normal Codex TUI voice feature. `PRODEX_GEMINI_LIVE_MODEL` overrides the default Live model, while `PRODEX_GEMINI_LIVE_URL` is available for a custom or test Live endpoint. `prodex doctor --runtime` recognizes provider bridge and Gemini markers such as `local_rewrite_provider_model_fallback`, `local_rewrite_gemini_quota_rotate`, `local_rewrite_gemini_invalid_stream_retry`, and `local_rewrite_gemini_live_error`.
 
 Run `npm run test:gemini-schema` after changing Gemini request, response, SSE, semantic compact, exact-output, tool-schema, or Live translation. Run `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` for a credentialed end-to-end Gemini adapter smoke request; set `PRODEX_BIN` or `PRODEX_LIVE_GEMINI_MODEL` to override the binary or model. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` for command-output-only, file edit, `apply_patch`, reference-repo clone/inspection, optional-tool update discipline, semantic compact, and explicit `exec resume` checks. Add `PRODEX_LIVE_GEMINI_MCP=1` and/or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when the local environment should also exercise MCP and image-input paths.
+
+</details>
+
+<details>
+<summary>Presidio, memory, and optimizer internals (advanced)</summary>
 
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use. Super then asks whether to enable prodex-memory through managed Mem0 Docker. Empty input or `n` leaves prodex-memory disabled; answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server and route its OpenAI-compatible calls through Prodex gateway. Use `--no-mem0` to skip that prompt, or the `mem` prefix for local SQLite memory.
 
@@ -894,8 +1030,10 @@ Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_
 
 </details>
 
+</details>
+
 <details>
-<summary>Claude Code</summary>
+<summary>Claude Code — managed Claude Code state</summary>
 
 ```bash
 prodex claude -- -p "summarize this repo"
@@ -1008,8 +1146,8 @@ git diff | prodex context compact-output --kind git-diff
 | Command | Description |
 |---|---|
 | `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
-| `prodex log` | Shows the latest runtime token event: tokens sent (`input_tokens`), cache hits, tokens received (`output_tokens`), and reasoning tokens. |
-| `prodex log stream` | Follows all active runtime logs and prints token events live. Add `--json` for JSON Lines output. |
+| `prodex log` | Shows the latest session transcript text plus the latest runtime token event. |
+| `prodex log stream` | Follows session/runtime logs and prints transcript text plus token events live. Add `--json` for JSON Lines token events only. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |
@@ -1059,7 +1197,7 @@ Set `PRODEX_SHARED_CODEX_HOME` only when you intentionally want a different shar
 <details>
 <summary>Bedrock and custom providers</summary>
 
-Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Google Gemini OAuth profiles, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health snapshots, and configured custom providers.
+Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex quota` also supports Google Gemini OAuth profiles, Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health snapshots, and configured custom providers.
 
 If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy.
 

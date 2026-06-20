@@ -105,6 +105,10 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
         },
     ));
     rows.push((
+        "prodex-inspect".to_string(),
+        "ok (built-in read-only MCP)".to_string(),
+    ));
+    rows.push((
         "Caveman assets".to_string(),
         match prodex_caveman_assets::verify_embedded_caveman_assets() {
             Ok(report) => format!(
@@ -148,7 +152,8 @@ pub(crate) fn collect_super_tool_statuses(
                 ),
                 Err(err) => format!("fail ({err:#})"),
             },
-            detail: "Caveman/Super embedded assets are required for the overlay home".to_string(),
+            detail: "Caveman/Super embedded assets are required for the Prodex overlay home"
+                .to_string(),
         },
         command_tool_status("rtk", "rtk --version", "rtk", &["--version"]),
         command_tool_status("rtk-gain", "rtk gain", "rtk", &["gain"]),
@@ -170,6 +175,14 @@ pub(crate) fn collect_super_tool_statuses(
             "claw-compactor",
             &["--help"],
         ),
+        SuperToolStatus {
+            name: "prodex-inspect",
+            check: "built-in",
+            ready: true,
+            status: "ok (read-only MCP)".to_string(),
+            detail: "Read-only MCP diagnostics for Prodex status, profiles, and latest runtime log"
+                .to_string(),
+        },
         memory_tool_status(paths),
         SuperToolStatus {
             name: "smart-context",
@@ -307,7 +320,7 @@ fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
         ),
         (
             "Optional tools".to_string(),
-            "probe codex, claude, rtk, sqz-mcp, token-savior, claw-compactor, prodex-memory"
+            "probe codex, claude, rtk, sqz-mcp, token-savior, claw-compactor, prodex-inspect, prodex-memory"
                 .to_string(),
         ),
     ]
@@ -319,7 +332,7 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
         capability("claude", "runtime", Some("claude"), "Claude Code frontend"),
         capability(
             "caveman",
-            "overlay",
+            "mode-assets",
             None,
             "embedded Caveman Codex/Claude plugin assets",
         ),
@@ -347,6 +360,14 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             Some("claw-compactor"),
             "local deterministic code-summary aid",
         ),
+        ProdexCapability {
+            name: "prodex-inspect",
+            category: "diagnostics",
+            status: "built-in".to_string(),
+            command: Some("prodex __inspect-mcp"),
+            description: "read-only MCP diagnostics for Prodex status, profiles, and runtime logs"
+                .to_string(),
+        },
         ProdexCapability {
             name: "prodex-memory",
             category: "memory",

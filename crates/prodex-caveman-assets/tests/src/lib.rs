@@ -66,7 +66,11 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     assert!(awareness.contains("Locating symbols, callers, dead code, or API changes"));
     assert!(awareness.contains("claw-compactor"));
     assert!(awareness.contains("prodex-claw-compactor-auto"));
+    assert!(awareness.contains("- prodex-inspect MCP:"));
     assert!(awareness.contains("- prodex-memory backend: disabled"));
+    let config = fs::read_to_string(dir.join("config.toml")).expect("config should exist");
+    assert!(config.contains("[mcp_servers.prodex-inspect]"));
+    assert!(config.contains("__inspect-mcp"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
     assert_eq!(
@@ -223,6 +227,7 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
     let overlay_config =
         fs::read_to_string(overlay.join("config.toml")).expect("overlay config.toml");
     assert!(overlay_config.contains("prodex-caveman"));
+    assert!(overlay_config.contains("plugins = false"));
     let hook_script = fs::read_to_string(overlay.join("bin").join("prodex-caveman-sessionstart"))
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
@@ -397,7 +402,7 @@ fn caveman_session_start_script_outputs_once_per_launch_home() {
     assert_eq!(config.matches("prodex-caveman-sessionstart").count(), 1);
     assert!(
         !config.contains("zsh_path"),
-        "Caveman overlay must not override Codex package-managed zsh discovery"
+        "Prodex overlay must not override Codex package-managed zsh discovery"
     );
 
     let script = codex_home.join("bin").join("prodex-caveman-sessionstart");

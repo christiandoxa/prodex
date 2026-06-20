@@ -84,18 +84,18 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.presidio_enabled {
             ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
-        let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
+        let overlay_home = prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?;
         if self.provider_runtime_uses_local_proxy_auth() {
-            write_provider_runtime_codex_auth(&caveman_home)?;
+            write_provider_runtime_codex_auth(&overlay_home)?;
         }
-        let codex_args = profile_openai_compatible_codex_args(&caveman_home, &self.codex_args);
-        let codex_args = prepare_local_provider_catalog_codex_args(&caveman_home, &codex_args)?;
-        let codex_args = prepare_external_provider_catalog_codex_args(&caveman_home, &codex_args)?;
-        let codex_args = prepare_deepseek_provider_codex_args(&caveman_home, &codex_args)?;
-        let codex_args = prepare_gemini_provider_codex_args(&caveman_home, &codex_args)?;
+        let codex_args = profile_openai_compatible_codex_args(&overlay_home, &self.codex_args);
+        let codex_args = prepare_local_provider_catalog_codex_args(&overlay_home, &codex_args)?;
+        let codex_args = prepare_external_provider_catalog_codex_args(&overlay_home, &codex_args)?;
+        let codex_args = prepare_deepseek_provider_codex_args(&overlay_home, &codex_args)?;
+        let codex_args = prepare_gemini_provider_codex_args(&overlay_home, &codex_args)?;
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         if self.rtk_enabled {
-            prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;
+            prodex_caveman_assets::configure_rtk_codex_home(&overlay_home)?;
         }
         let managed_mem0_memory =
             if self.memory_enabled && self.args.memory_backend == SuperMemoryBackend::Mem0 {
@@ -119,7 +119,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
                     ..Default::default()
                 });
             prodex_caveman_assets::configure_super_optimizer_codex_home_with_options(
-                &caveman_home,
+                &overlay_home,
                 self.presidio_enabled,
                 memory_config,
             )?;
@@ -130,11 +130,11 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
                 .map_err(|_| anyhow::anyhow!("managed Mem0 memory lock poisoned"))?
                 .push(memory);
         }
-        let mut child = codex_child_plan(caveman_home.clone(), runtime_args);
+        let mut child = codex_child_plan(overlay_home.clone(), runtime_args);
         if self.provider_runtime_uses_local_proxy_auth() {
             force_codex_api_key_auth_for_provider_runtime(&mut child);
         }
-        prepend_child_path(&mut child, caveman_home.join("bin"));
+        prepend_child_path(&mut child, overlay_home.join("bin"));
         if self.rtk_enabled {
             clear_rtk_auto_wrap_control_env(&mut child);
         }
@@ -147,7 +147,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
                 OsString::from("1"),
             ));
         }
-        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home))
+        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
     }
 }
 
@@ -208,11 +208,11 @@ pub(super) fn handle_caveman(args: CavemanArgs) -> Result<()> {
     execute_runtime_launch(CavemanLaunchStrategy::new(args))
 }
 
-pub(super) fn prepare_caveman_launch_home(
+pub(super) fn prepare_prodex_overlay_home(
     paths: &AppPaths,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prodex_caveman_assets::prepare_caveman_launch_home(
+    prodex_caveman_assets::prepare_prodex_overlay_home(
         &paths.managed_profiles_root,
         base_codex_home,
     )

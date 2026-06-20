@@ -134,6 +134,10 @@ fn render_super_optimizer_awareness(
     };
     awareness.push_str(&format!("- prodex-memory MCP: {memory_availability}\n"));
     awareness.push_str(&format!(
+        "- prodex-inspect MCP: {}\n",
+        availability_label(find_prodex_builtin_command().as_deref())
+    ));
+    awareness.push_str(&format!(
         "- prodex-memory backend: {}\n",
         memory_config.backend_label()
     ));
@@ -230,6 +234,15 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             command,
             &["__memory-mcp"],
             &memory_env,
+        );
+    }
+    if let Some(command) = find_prodex_builtin_command() {
+        configure_stdio_mcp_server(
+            &mut table,
+            "prodex-inspect",
+            command,
+            &["__inspect-mcp"],
+            &[],
         );
     }
 
@@ -449,6 +462,10 @@ fn find_managed_optimizer_command(command: &str, optimizer_roots: &[PathBuf]) ->
 }
 
 fn find_prodex_memory_command() -> Option<PathBuf> {
+    find_prodex_builtin_command()
+}
+
+fn find_prodex_builtin_command() -> Option<PathBuf> {
     env::current_exe().ok().filter(|path| executable_file(path))
 }
 

@@ -1,7 +1,7 @@
 use crate::{
     PreparedRuntimeLaunch, RuntimeLaunchRequest, RuntimeLaunchStrategy, RuntimeProxyEndpoint,
     agy_bin, clear_rtk_auto_wrap_control_env, execute_runtime_launch, gemini_bin,
-    prepare_caveman_launch_home, prepend_child_path, refresh_gemini_oauth_secret_if_needed,
+    prepare_prodex_overlay_home, prepend_child_path, refresh_gemini_oauth_secret_if_needed,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -52,10 +52,10 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
         if self.presidio_enabled {
             crate::ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
-        let caveman_home = prepare_caveman_launch_home(&prepared.paths, &prepared.codex_home)?;
-        prodex_caveman_assets::configure_rtk_codex_home(&caveman_home)?;
+        let overlay_home = prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?;
+        prodex_caveman_assets::configure_rtk_codex_home(&overlay_home)?;
         prodex_caveman_assets::configure_super_optimizer_codex_home_with_presidio(
-            &caveman_home,
+            &overlay_home,
             self.presidio_enabled,
         )?;
 
@@ -92,7 +92,7 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
             }
             SuperCliAgent::Codex => bail!("Codex is not a native Google CLI launch target"),
         };
-        prepend_child_path(&mut child, caveman_home.join("bin"));
+        prepend_child_path(&mut child, overlay_home.join("bin"));
         clear_rtk_auto_wrap_control_env(&mut child);
         if self.presidio_enabled {
             child.extra_env.push((
@@ -100,7 +100,7 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
                 OsString::from("1"),
             ));
         }
-        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(caveman_home))
+        Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
     }
 }
 

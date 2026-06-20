@@ -216,7 +216,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         (true, crate::SuperMemoryBackend::Mem0) => "managed Mem0 Docker (would start)",
     };
     let mut extra_report = format!(
-        "Optimizer overlay: rtk={}; super={}\nMemory backend: {}",
+        "Prodex overlay: rtk={}; super={}\nMemory backend: {}",
         if rtk_enabled { "enabled" } else { "disabled" },
         if super_optimizer_overlay {
             "enabled"

@@ -114,6 +114,10 @@ fn setup_parse_as_top_level_command() {
     assert!(!should_default_cli_invocation_to_run(&os_args(&[
         "prodex", "setup",
     ])));
+    let args = ["prodex", "__inspect-mcp"];
+    let command = parse_cli_command_from(args).expect("inspect MCP should parse");
+    assert!(matches!(command, Commands::InspectMcp(_)));
+    assert!(!should_default_cli_invocation_to_run(&os_args(&args)));
 }
 
 #[test]

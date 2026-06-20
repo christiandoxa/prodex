@@ -5,9 +5,9 @@ use super::RUNTIME_PROXY_DOCTOR_TAIL_BYTES;
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommands {
-    /// List all shared Codex sessions.
+    /// List shared Codex parent sessions.
     List(SessionListArgs),
-    /// List shared Codex sessions started from the current directory.
+    /// List shared Codex parent sessions started from the current directory.
     Current(SessionCurrentArgs),
     /// Resume a shared Codex session by unique partial or full id.
     Resume(SessionResumeArgs),
@@ -82,10 +82,10 @@ pub struct InfoArgs {
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
 pub enum LogMode {
-    /// Show the most recent token usage event and exit.
+    /// Show the most recent transcript text and token usage event and exit.
     #[default]
     Last,
-    /// Follow runtime logs and print token usage events as they arrive.
+    /// Follow session/runtime logs and print transcript text plus token usage events.
     Stream,
 }
 
@@ -94,7 +94,7 @@ pub struct LogArgs {
     /// Output mode. Omit for the latest event, or use `stream` for live updates.
     #[arg(value_enum, default_value_t)]
     pub mode: LogMode,
-    /// Emit JSON. Stream mode emits one JSON object per line.
+    /// Emit token-usage JSON. Stream mode emits one JSON token event per line.
     #[arg(long)]
     pub json: bool,
 }
@@ -151,7 +151,7 @@ pub struct SetupArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum CapabilityCommands {
-    /// List optional Prodex capabilities and local availability.
+    /// List Prodex capabilities and local availability.
     List(CapabilityListArgs),
     /// Diagnose the local optimizer stack used by `prodex s` / `prodex super`.
     #[command(name = "super-doctor", visible_alias = "s-doctor")]

@@ -514,6 +514,11 @@ fn compare_quota_reports_for_sort(
     sort: QuotaReportSort,
 ) -> Ordering {
     match sort {
+        QuotaReportSort::Current => quota_report_current_sort_key(left)
+            .cmp(&quota_report_current_sort_key(right))
+            .then_with(|| {
+                quota_report_remaining_sort_key(left).cmp(&quota_report_remaining_sort_key(right))
+            }),
         QuotaReportSort::Remaining => {
             quota_report_remaining_sort_key(left).cmp(&quota_report_remaining_sort_key(right))
         }
@@ -543,6 +548,10 @@ fn quota_report_remaining_sort_key(report: &QuotaReport) -> (usize, i64) {
         quota_report_status_rank(report),
         quota_report_earliest_main_reset_epoch(report).unwrap_or(i64::MAX),
     )
+}
+
+fn quota_report_current_sort_key(report: &QuotaReport) -> usize {
+    usize::from(!report.active)
 }
 
 fn quota_report_account_sort_value(report: &QuotaReport) -> String {

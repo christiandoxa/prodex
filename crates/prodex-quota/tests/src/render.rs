@@ -191,7 +191,12 @@ fn quota_report_sort_modes_order_by_selected_columns() {
     ];
     reports[0].auth.label = "zzz".to_string();
     reports[1].auth.label = "aaa".to_string();
+    reports[0].active = true;
 
+    assert_eq!(
+        sorted_names_by(&reports, QuotaReportSort::Current),
+        vec!["beta", "alpha"]
+    );
     assert_eq!(
         sorted_names_by(&reports, QuotaReportSort::Remaining),
         vec!["alpha", "beta"]

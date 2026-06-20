@@ -119,7 +119,7 @@ where
 }
 
 fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
-    eprintln!("Prodex launch: preparing runtime and launch overlay...");
+    eprintln!("Prodex launch: preparing runtime and Prodex overlay...");
     if request.presidio_redaction_enabled {
         eprintln!("Prodex launch: Presidio redaction requested; preparing local redaction proxy.");
     }

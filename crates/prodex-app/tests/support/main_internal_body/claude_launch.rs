@@ -113,7 +113,7 @@ fn prepare_runtime_proxy_claude_caveman_plugin_dir_installs_local_plugin_bundle(
 }
 
 #[test]
-fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
+fn prepare_prodex_overlay_home_localizes_config_and_installs_plugin() {
     let _env_guard = TestEnvVarGuard::unset(PRODEX_CAVEMAN_FULL_ASSETS_ENV);
     let temp_dir = TestDir::new();
     let paths = AppPaths {
@@ -138,17 +138,17 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
         .expect("config symlink should create");
     fs::write(base_home.join("auth.json"), "{}").expect("auth file should write");
 
-    let caveman_home =
-        prepare_caveman_launch_home(&paths, &base_home).expect("caveman home should prepare");
-    let temp_config = caveman_home.join("config.toml");
+    let overlay_home =
+        prepare_prodex_overlay_home(&paths, &base_home).expect("Prodex overlay should prepare");
+    let temp_config = overlay_home.join("config.toml");
     let metadata = fs::symlink_metadata(&temp_config).expect("temp config metadata");
     assert!(
         !metadata.file_type().is_symlink(),
-        "temporary Caveman config should be detached from the shared config symlink"
+        "temporary Prodex overlay config should be detached from the shared config symlink"
     );
 
     let rendered_config = fs::read_to_string(&temp_config).expect("temp config should read");
-    assert!(rendered_config.contains("plugins = true"));
+    assert!(rendered_config.contains("plugins = false"));
     assert!(!rendered_config.contains("codex_hooks"));
     assert!(!rendered_config.contains("suppress_unstable_features_warning"));
     assert!(rendered_config.contains("[[hooks.SessionStart]]"));
@@ -169,7 +169,7 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
             .as_str()
             .is_some_and(|command| command == "prodex-caveman-sessionstart")
     );
-    let hook_script = fs::read_to_string(caveman_home.join("bin/prodex-caveman-sessionstart"))
+    let hook_script = fs::read_to_string(overlay_home.join("bin/prodex-caveman-sessionstart"))
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
     assert!(hook_script.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
@@ -198,39 +198,39 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
         "base home should not gain a persistent hooks.json file"
     );
     assert!(
-        !caveman_home.join("hooks.json").exists(),
-        "temporary Caveman home should use inline config.toml hooks"
+        !overlay_home.join("hooks.json").exists(),
+        "temporary Prodex overlay home should use inline config.toml hooks"
     );
 
     let marketplace_path =
-        caveman_home.join(".tmp/marketplaces/prodex-caveman/.agents/plugins/marketplace.json");
+        overlay_home.join(".tmp/marketplaces/prodex-caveman/.agents/plugins/marketplace.json");
     let marketplace_text =
         fs::read_to_string(&marketplace_path).expect("marketplace manifest should read");
     assert!(marketplace_text.contains("\"name\": \"prodex-caveman\""));
     assert!(
-        caveman_home
+        overlay_home
             .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/.codex-plugin/plugin.json")
             .is_file()
     );
     assert!(
-        caveman_home
+        overlay_home
             .join("plugins/cache/prodex-caveman/caveman/0.1.0/.codex-plugin/plugin.json")
             .is_file()
     );
     assert!(
-        caveman_home
+        overlay_home
             .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/skills/caveman/SKILL.md")
             .is_file(),
         "core Caveman skill should install by default"
     );
     assert!(
-        !caveman_home
+        !overlay_home
             .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/skills/compress/SKILL.md")
             .exists(),
         "compress skill should not install in the default lean overlay"
     );
     assert!(
-        !caveman_home
+        !overlay_home
             .join("plugins/cache/prodex-caveman/caveman/0.1.0/skills/compress/SKILL.md")
             .exists(),
         "compress skill should not install in the default plugin cache"
@@ -238,7 +238,7 @@ fn prepare_caveman_launch_home_localizes_config_and_installs_plugin() {
 }
 
 #[test]
-fn prepare_caveman_launch_home_can_install_full_caveman_assets() {
+fn prepare_prodex_overlay_home_can_install_full_caveman_assets() {
     let _env_guard = TestEnvVarGuard::set(PRODEX_CAVEMAN_FULL_ASSETS_ENV, "1");
     let temp_dir = TestDir::new();
     let paths = AppPaths {
@@ -254,16 +254,16 @@ fn prepare_caveman_launch_home_can_install_full_caveman_assets() {
     let base_home = paths.managed_profiles_root.join("main");
     create_codex_home_if_missing(&base_home).expect("base home");
 
-    let caveman_home =
-        prepare_caveman_launch_home(&paths, &base_home).expect("caveman home should prepare");
+    let overlay_home =
+        prepare_prodex_overlay_home(&paths, &base_home).expect("Prodex overlay should prepare");
     assert!(
-        caveman_home
+        overlay_home
             .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/skills/compress/SKILL.md")
             .is_file(),
         "compress skill should install when full assets are enabled"
     );
     assert!(
-        caveman_home
+        overlay_home
             .join("plugins/cache/prodex-caveman/caveman/0.1.0/skills/compress/scripts/compress.py")
             .is_file(),
         "compress scripts should install when full assets are enabled"

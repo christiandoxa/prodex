@@ -109,6 +109,7 @@ pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool
             | Commands::RuntimeBroker(_)
             | Commands::Update(_)
             | Commands::MemoryMcp(_)
+            | Commands::InspectMcp(_)
     )
 }
 

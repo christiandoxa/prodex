@@ -12,7 +12,10 @@ mod toml_helpers;
 use anyhow::Result;
 
 pub use embedded_tree::install_claude_caveman_plugin;
-pub use launch_home::{configure_caveman_launch_home, prepare_caveman_launch_home};
+pub use launch_home::{
+    configure_caveman_launch_home, configure_prodex_overlay_home, prepare_caveman_launch_home,
+    prepare_prodex_overlay_home,
+};
 pub use marketplace::{
     caveman_marketplace_root, install_caveman_marketplace, install_caveman_plugin_cache,
 };
@@ -85,13 +88,14 @@ which rtk
 
 pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Super Optimizers
 
-Prodex Super mode already enables Caveman, RTK, SQZ, token-savior, claw-compactor, and Smart Context Autopilot when the matching local tools are installed. Treat launch through `prodex s` or `prodex super` as the user's instruction to use the local optimizer stack where it fits the task. Presidio redaction and prodex-memory are opt-in surfaces.
+Prodex Super mode already enables Caveman, RTK, built-in prodex-inspect, SQZ, token-savior, claw-compactor, and Smart Context Autopilot when the matching local tools are installed. Treat launch through `prodex s` or `prodex super` as the user's instruction to use the local optimizer stack where it fits the task. Presidio redaction and prodex-memory are opt-in surfaces.
 
 ## Token Flow
 
 Use the optimizers by default, but keep their boundaries clear:
 
 - RTK handles upstream/input command output before it enters the context window. Visible noisy shell commands must use `rtk <cmd>` for diffs, commit inspection, tests, builds, package-manager output, recursive search, and long logs. Prodex also auto-wraps common noisy commands as a safety fallback when RTK is installed, but auto-wrappers are only a backstop for accidental misses. They are not a substitute for writing visible `rtk <cmd>` commands, because the Codex TUI shows the command text before PATH resolution.
+- prodex-inspect handles read-only Prodex diagnostics through MCP. Use it for profile status, active profile, and latest runtime-log tail before shelling out to broad diagnostics.
 - SQZ handles downstream/context reuse after content is already in the session. If the `prodex-sqz` MCP server is available, use it for repeated workspace reads, large pasted/generated text, long command outputs that must be reused, and conversation/context compression instead of re-emitting full text.
 - token-savior handles codebase navigation and symbol context. If the `prodex-token-savior` MCP server is available, prefer it before reading broad source trees, hunting definitions, or scanning callers; then reread exact source for edits and failing lines.
 - claw-compactor handles workspace-level Markdown/code-memory summaries. Use `prodex-claw-compactor` or `prodex-claw-compactor-auto` for explicit workspace summary/benchmark requests or when a large repo overview is needed; do not edit from compressed code alone.
@@ -102,6 +106,7 @@ Use the optimizers by default, but keep their boundaries clear:
 Before emitting or requesting large context, choose the local optimizer that fits:
 
 - First pass over noisy terminal output: use visible `rtk <cmd>`.
+- Prodex status/profile/runtime-log diagnostics: use `prodex-inspect`.
 - Reusing content already seen, repeated file reads, or large text blobs: use `prodex-sqz` when available.
 - Locating symbols, callers, dead code, or API changes: use `prodex-token-savior` when available.
 - Workspace-level summary, benchmark, or memory-file compaction: use `prodex-claw-compactor`/`prodex-claw-compactor-auto` when available.
@@ -111,7 +116,7 @@ If a requested optimizer command or MCP server is unavailable, say so briefly an
 
 ## Installed Surfaces
 
-Prodex registers `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout, and `prodex-memory` from the running Prodex binary only when memory is requested. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly. Prodex routes compatible token-savior cache/state and local memory under `PRODEX_HOME` (default `~/.prodex`) instead of the workspace; managed Mem0 mode still keeps Mem0 server data under `PRODEX_HOME`.
+Prodex registers built-in `prodex-inspect`, `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout, and `prodex-memory` from the running Prodex binary only when memory is requested. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly. Prodex routes compatible token-savior cache/state and local memory under `PRODEX_HOME` (default `~/.prodex`) instead of the workspace; managed Mem0 mode still keeps Mem0 server data under `PRODEX_HOME`.
 
 ## AST Compression
 

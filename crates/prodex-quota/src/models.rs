@@ -105,6 +105,7 @@ pub struct RenderedQuotaReportWindow {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuotaReportSort {
+    Current,
     Remaining,
     Profile,
     Auth,
@@ -115,16 +116,18 @@ pub enum QuotaReportSort {
 impl QuotaReportSort {
     pub fn next(self) -> Self {
         match self {
+            Self::Current => Self::Remaining,
             Self::Remaining => Self::Profile,
             Self::Profile => Self::Auth,
             Self::Auth => Self::Account,
             Self::Account => Self::Plan,
-            Self::Plan => Self::Remaining,
+            Self::Plan => Self::Current,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::Current => "current",
             Self::Remaining => "remaining",
             Self::Profile => "profile",
             Self::Auth => "auth",

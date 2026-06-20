@@ -105,7 +105,7 @@ Runtime logging and `prodex doctor --runtime` are non-core for execution, but cr
 
 They should stay accurate and cheap to maintain.
 
-The current enterprise hardening extends diagnostics into a stable metrics/export layer, while keeping the runtime proxy itself transport-transparent.
+The current operational hardening extends diagnostics into a stable metrics/export layer, while keeping the runtime proxy itself transport-transparent.
 
 ## Optional Optimizers
 
@@ -136,21 +136,21 @@ The safest first extractions are support domains that are not on the hot path:
 
 - `terminal_ui`: panel rendering and terminal layout helpers
 - `runtime_config`: runtime timeout, env override, and fault-injection helpers
-- `runtime_policy`: versioned local policy loading for enterprise-style deployments
+- `runtime_policy`: versioned local policy loading for admin-style deployments
 - `runtime_doctor`: runtime diagnostic summarization and rendering
 
 These modules reduce `main.rs` size and make it easier to reason about the runtime path without weakening behavior.
 
-## Enterprise Gaps
+## Admin And Observability Gaps
 
-`prodex` is still not a full enterprise control plane.
+`prodex` is still not a centralized control plane.
 
 What is already in place:
 
 - secret-management abstraction for `auth.json` and profile exports, plus global secret-backend selection
 - stable broker metrics export in JSON and Prometheus formats
 - runtime-aware diagnostics that surface broker metrics targets without changing proxy transport semantics
-- audit logging for enterprise operations, modeled as an append-only concern alongside runtime state rather than as part of transport handling, with logs following the resolved runtime log directory by default and `PRODEX_AUDIT_LOG_DIR` as the override
+- local structured audit logging for profile, rotation, and admin operations, modeled as an append-only concern alongside runtime state rather than as part of transport handling, with logs following the resolved runtime log directory by default and `PRODEX_AUDIT_LOG_DIR` as the override
 - `prodex audit` as a local, read-only CLI surface for browsing recent append-only audit events
 
 Planned next steps are:

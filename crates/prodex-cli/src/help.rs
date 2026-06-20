@@ -31,7 +31,11 @@ Examples:
   prodex login --device-auth
   prodex login --with-google
   prodex login --with-claude
-  prodex login --with-antigravity";
+  prodex login --with-antigravity
+
+Notes:
+  OpenAI/Codex, Google, Claude, and API-key login paths create or update Prodex profiles.
+  Antigravity login delegates to `agy auth login` and does not create a Prodex profile.";
 pub const CLI_QUOTA_AFTER_HELP: &str = "\
 Best practice:
   Use `prodex quota --all --detail` for the clearest live quota view across profiles.
@@ -48,8 +52,8 @@ Examples:
   prodex quota --raw --profile main
 
 Notes:
-  `prodex quota` supports OpenAI/Codex, Gemini OAuth, Anthropic OAuth, imported Copilot, DeepSeek API-key, local OpenAI-compatible, and custom provider snapshots.
-  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, or `local`.
+  `prodex quota` supports OpenAI/Codex, Gemini OAuth, Anthropic OAuth, imported Copilot, DeepSeek API-key, Antigravity CLI, local OpenAI-compatible, and custom provider snapshots.
+  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, `local`, or `agy`.
   Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, prodex shows a provider snapshot instead of failing the quota view.";
 pub const CLI_RUN_AFTER_HELP: &str = "\
@@ -63,7 +67,7 @@ Examples:
   prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 Notes:
-  Auto-rotate is enabled by default.
+  Eligible pre-commit rotation is allowed by default when another supported profile or key is available.
   Bare `prodex <args>` is treated as `prodex run <args>`.
   A lone session id is forwarded as `codex resume <session-id>`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Codex directly without quota preflight or the local auto-rotate proxy.";
@@ -95,10 +99,10 @@ Examples:
   prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 Notes:
-  Prodex launches Codex from a temporary overlay `CODEX_HOME` so Caveman stays isolated from the base profile.
+  Prodex launches Codex from a temporary Prodex overlay `CODEX_HOME`, then activates Caveman for that session.
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
-  Add optimizer prefixes before Codex args to enable launch overlays: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, `presidio`.
+  Add optimizer prefixes before Codex args to enable session tools in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, `presidio`.
   Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex tokensavior`, `prodex clawcompactor`, and `prodex mem` map to `prodex caveman <prefix>`.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
@@ -117,7 +121,7 @@ Examples:
 
 Notes:
   `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor --full-access`, with interactive Presidio and managed-Mem0 opt-in prompts before launch.
-  It always enables the Caveman overlay, RTK shell-command guidance, Super optimizer overlay, Smart Context, and launch-time full access.
+  It enables Caveman mode, Smart Context, launch-time full access, and the available Super optimizer tools in the Prodex overlay.
   Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access`.
   Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
   Empty input or `n` at the Mem0 prompt leaves prodex-memory disabled; use `--mem0` to enable managed Mem0 or the `mem` optimizer prefix for local SQLite memory.
@@ -126,10 +130,10 @@ Notes:
   Use `--url` to point Codex directly at a local OpenAI-compatible /v1 endpoint, for example a llama-server on port 8131.
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Use `--provider anthropic` to route through Anthropic's OpenAI-compatible Chat Completions API. Sign in with `prodex login --with-claude`, or supply `--api-key`, ANTHROPIC_API_KEY, or ANTHROPIC_API_KEYS.
-  Use `--provider copilot` to keep Codex/Super and route through a local Responses-to-Copilot adapter. Import Copilot profiles first for account rotation, or supply `--api-key`, GITHUB_COPILOT_API_KEY, or GITHUB_COPILOT_API_KEYS.
+  Use `--provider copilot` to keep Codex/Super and route through a local Responses-to-Copilot adapter. Import Copilot profiles first for account routing/rotation, or supply `--api-key`, GITHUB_COPILOT_API_KEY, or GITHUB_COPILOT_API_KEYS.
   Use `deepseek` or `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
-  Use `gemini` or `--provider gemini` to route through Gemini. Supply `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS; or sign in with Google via `prodex login`.
-  Add `--cli gemini` to launch Gemini CLI with its native tools in YOLO mode through Prodex OAuth account rotation. Override the binary with PRODEX_GEMINI_BIN.
+  Use `gemini` or `--provider gemini` to route through Gemini. Supply `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS; or sign in with Google via `prodex login --with-google`.
+  Add `--cli gemini` to launch Gemini CLI with its native tools in YOLO mode through Prodex OAuth profile routing. Override the binary with PRODEX_GEMINI_BIN.
   Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring auth and currently cannot use Prodex account rotation. Override the binary with PRODEX_AGY_BIN.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied optimizer prefixes.";

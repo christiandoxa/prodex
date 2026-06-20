@@ -23,7 +23,7 @@ mod presidio;
 #[command(
     name = "prodex",
     version,
-    about = "Manage multiple Codex profiles backed by isolated CODEX_HOME directories.",
+    about = "Manage multiple Codex account profiles with profile-local auth and shared Codex state.",
     after_help = CLI_TOP_LEVEL_AFTER_HELP
 )]
 pub struct Cli {
@@ -53,7 +53,7 @@ pub enum Commands {
     Info(InfoArgs),
     #[command(
         name = "log",
-        about = "Show the latest sent/received token counts or stream them live."
+        about = "Show the latest transcript text and token counts or stream them live."
     )]
     Log(LogArgs),
     #[command(
@@ -74,12 +74,12 @@ pub enum Commands {
     Setup(SetupArgs),
     #[command(
         subcommand,
-        about = "List optional Prodex capabilities and local availability.",
+        about = "List Prodex capabilities and local availability.",
         after_help = CLI_CAPABILITY_AFTER_HELP
     )]
     Capability(CapabilityCommands),
     #[command(
-        about = "Inspect structured enterprise audit events written to /tmp.",
+        about = "Inspect structured local audit events from the resolved audit log.",
         after_help = CLI_AUDIT_AFTER_HELP
     )]
     Audit(AuditArgs),
@@ -101,7 +101,7 @@ pub enum Commands {
     Presidio(PresidioCommands),
     #[command(
         trailing_var_arg = true,
-        about = "Run codex login inside a selected or auto-created profile.",
+        about = "Run provider login flows, using Prodex profiles where supported.",
         after_help = CLI_LOGIN_AFTER_HELP
     )]
     Login(CodexPassthroughArgs),
@@ -124,13 +124,13 @@ pub enum Commands {
     Dashboard(DashboardArgs),
     #[command(
         trailing_var_arg = true,
-        about = "Run codex through prodex with quota preflight and safe auto-rotate.",
+        about = "Run codex through prodex with quota preflight and eligible pre-commit rotation.",
         after_help = CLI_RUN_AFTER_HELP
     )]
     Run(RunArgs),
     #[command(
         trailing_var_arg = true,
-        about = "Run codex through prodex with the Caveman plugin active in a temporary overlay home.",
+        about = "Run codex through prodex with Caveman mode active in a temporary Prodex overlay home.",
         after_help = CLI_CAVEMAN_AFTER_HELP
     )]
     Caveman(CavemanArgs),
@@ -173,7 +173,7 @@ pub enum Commands {
     #[command(
         trailing_var_arg = true,
         visible_alias = "s",
-        about = "Alias for `prodex caveman rtk sqz tokensavior clawcompactor mem --full-access`.",
+        about = "Daily shortcut for Super optimizer tools, full access, and opt-in Presidio/memory prompts.",
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),
@@ -195,6 +195,8 @@ pub enum Commands {
     GeminiCompatRefresh(GeminiCompatRefreshArgs),
     #[command(name = "__memory-mcp", hide = true)]
     MemoryMcp(MemoryMcpArgs),
+    #[command(name = "__inspect-mcp", hide = true)]
+    InspectMcp(InspectMcpArgs),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -334,6 +336,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "__runtime-broker"
             | "__gemini-compat-refresh"
             | "__memory-mcp"
+            | "__inspect-mcp"
     )
 }
 

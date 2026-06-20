@@ -204,8 +204,34 @@
             apply_quota_watch_command(QuotaWatchCommand::Sort, 3, 10),
             QuotaWatchCommandOutcome::Sort
         ));
+        assert_eq!(QuotaReportSort::Current.next(), QuotaReportSort::Remaining);
         assert_eq!(QuotaReportSort::Remaining.next(), QuotaReportSort::Profile);
-        assert_eq!(QuotaReportSort::Plan.next(), QuotaReportSort::Remaining);
+        assert_eq!(QuotaReportSort::Plan.next(), QuotaReportSort::Current);
+    }
+
+    #[test]
+    fn all_quota_watch_current_sort_places_active_profile_first() {
+        let mut reports = vec![
+            test_quota_report("low-reset", Ok(test_usage("low@example.com"))),
+            test_quota_report("active-late", Ok(test_usage("active@example.com"))),
+        ];
+        reports[1].active = true;
+
+        let output = render_all_quota_watch_report_output(
+            &reports,
+            false,
+            0,
+            QuotaReportSort::Current,
+            QuotaProviderFilter::All,
+            false,
+        );
+
+        assert!(output.contains("sort: current"));
+        assert!(
+            output.find("active-late").unwrap() < output.find("low-reset").unwrap(),
+            "active profile should be rendered before other profiles"
+        );
+        assert!(output.contains(" * "));
     }
 
     #[test]

@@ -9,7 +9,7 @@ pub struct RunArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
-    /// Explicitly enable auto-rotate. This is the default behavior.
+    /// Allow eligible pre-commit rotation. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     pub auto_rotate: bool,
     /// Keep the selected profile fixed and fail instead of rotating.
@@ -40,7 +40,7 @@ pub struct ClaudeArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
-    /// Explicitly enable auto-rotate. This is the default behavior.
+    /// Allow eligible pre-commit rotation. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     pub auto_rotate: bool,
     /// Keep the selected profile fixed and fail instead of rotating.
@@ -65,7 +65,7 @@ pub struct CavemanArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
-    /// Explicitly enable auto-rotate. This is the default behavior.
+    /// Allow eligible pre-commit rotation. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     pub auto_rotate: bool,
     /// Keep the selected profile fixed and fail instead of rotating.
@@ -89,7 +89,7 @@ pub struct CavemanArgs {
     /// Enable Prodex Smart Context Autopilot in the runtime proxy.
     #[arg(skip)]
     pub smart_context: bool,
-    /// Enable the Prodex Super optimizer launch overlay.
+    /// Enable Super optimizer tools in the Prodex overlay.
     #[arg(skip)]
     pub super_optimizer_overlay: bool,
     /// External provider selected by a higher-level launch shortcut.
@@ -116,7 +116,7 @@ pub struct SuperArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
-    /// Explicitly enable auto-rotate. This is the default behavior.
+    /// Allow eligible pre-commit rotation. This is the default behavior.
     #[arg(long, conflicts_with = "no_auto_rotate")]
     pub auto_rotate: bool,
     /// Keep the selected profile fixed and fail instead of rotating.
@@ -219,6 +219,9 @@ pub struct MemoryMcpArgs {
     #[arg(long, value_name = "PATH")]
     pub store: Option<PathBuf>,
 }
+
+#[derive(Args, Debug)]
+pub struct InspectMcpArgs {}
 
 #[derive(Args, Debug)]
 pub struct ExposeArgs {
