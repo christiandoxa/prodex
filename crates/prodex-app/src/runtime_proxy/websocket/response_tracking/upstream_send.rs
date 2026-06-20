@@ -8,6 +8,7 @@ use super::{
     prepare_runtime_smart_context_websocket_text, runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_structured_log_message,
 };
+use crate::runtime_proxy::log_runtime_upstream_payload_snapshot;
 
 pub(super) struct RuntimeWebsocketUpstreamSendRequest<'a, 'socket> {
     pub(super) request_id: u64,
@@ -44,6 +45,14 @@ pub(super) fn send_runtime_websocket_upstream_request(
         handshake_request,
         shared,
         profile_name,
+    );
+    log_runtime_upstream_payload_snapshot(
+        shared,
+        request_id,
+        "websocket",
+        RuntimeRouteKind::Websocket,
+        profile_name,
+        upstream_request_text.as_bytes(),
     );
     if let Err(err) =
         upstream_socket.send(WsMessage::Text(upstream_request_text.into_owned().into()))

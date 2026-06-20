@@ -107,6 +107,14 @@ async fn send_runtime_proxy_upstream_request_with_events(
         events.route_kind,
         Some(profile_name),
     );
+    log_runtime_upstream_payload_snapshot(
+        shared,
+        request_id,
+        "http",
+        events.route_kind,
+        profile_name,
+        upstream_body.as_ref(),
+    );
 
     upstream_request = upstream_request
         .header("Authorization", format!("Bearer {}", auth.access_token))

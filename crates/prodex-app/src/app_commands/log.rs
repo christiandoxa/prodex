@@ -1,4 +1,5 @@
 use super::collect_recent_runtime_log_paths;
+use super::log_upstream::stream_upstream_payload_events;
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use prodex_app_reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
@@ -58,6 +59,7 @@ pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
             Ok(())
         }
         LogMode::Stream => stream_token_usage_events(args.json),
+        LogMode::Upstream => stream_upstream_payload_events(args.json),
     }
 }
 

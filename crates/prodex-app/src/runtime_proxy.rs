@@ -27,6 +27,7 @@ mod smart_context;
 mod standard;
 mod transport_failure;
 mod upstream;
+mod upstream_payload_log;
 mod websocket;
 mod websocket_message;
 
@@ -64,6 +65,7 @@ pub(crate) use self::smart_context::{
 pub(crate) use self::standard::*;
 pub(super) use self::transport_failure::*;
 pub(crate) use self::upstream::*;
+pub(crate) use self::upstream_payload_log::*;
 pub(crate) use self::websocket::*;
 use self::websocket_message::runtime_profile_uncached_auth_summary_for_selection;
 use self::websocket_message::{
