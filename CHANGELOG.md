@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.198.0 - 2026-06-20
+
+### Misc
+
+- Add upstream payload stream (`fcdd338`)
+
 ## 0.197.0 - 2026-06-20
 
 ### Misc
@@ -70,9 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Avoid redundant delete selector scan (`f5b4de8`)
 - Support codex 0.140.0 compatibility (`ab87d3d`)
-
-## 0.186.0 - 2026-06-15
-
-### Misc
-
-- Clean stale codex arg0 temp dirs (`599d788`)
