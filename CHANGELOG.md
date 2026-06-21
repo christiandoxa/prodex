@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.200.0 - 2026-06-21
+
+### CLI
+
+- Repair stale active profile selection (`e3c3b69`)
+
 ## 0.199.0 - 2026-06-21
 
 ### Runtime
@@ -69,9 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add gateway routing (`055b1f3`)
-
-## 0.188.0 - 2026-06-16
-
-### Runtime
-
-- Harden websocket smart context handling (`2c7584b`)
