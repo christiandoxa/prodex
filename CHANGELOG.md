@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.199.0 - 2026-06-21
+
+### Runtime
+
+- Standardize runtime support crates (`e19e728`)
+
 ## 0.198.0 - 2026-06-20
 
 ### Misc
@@ -69,10 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden websocket smart context handling (`2c7584b`)
-
-## 0.187.0 - 2026-06-16
-
-### Misc
-
-- Avoid redundant delete selector scan (`f5b4de8`)
-- Support codex 0.140.0 compatibility (`ab87d3d`)
