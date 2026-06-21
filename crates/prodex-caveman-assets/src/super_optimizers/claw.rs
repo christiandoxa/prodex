@@ -19,20 +19,29 @@ pub(super) fn configure_command_wrappers(
     if let Some(command) =
         super::find_optimizer_command("claw-compactor", path_dirs, optimizer_roots)
     {
-        super::write_shell_wrapper(&bin_dir.join("claw-compactor"), &command, &[])?;
-        super::write_shell_wrapper(&bin_dir.join("prodex-claw-compactor"), &command, &[])?;
+        let env = super::claw_compactor_state_env_from_env();
+        super::write_shell_wrapper_with_env(&bin_dir.join("claw-compactor"), &command, &[], &env)?;
+        super::write_shell_wrapper_with_env(
+            &bin_dir.join("prodex-claw-compactor"),
+            &command,
+            &[],
+            &env,
+        )?;
         write_auto_wrapper_for_binary(&bin_dir.join(AUTO_WRAPPER), &command)?;
         write_session_wrapper(&bin_dir.join(SESSION_WRAPPER))?;
     } else if let Some((python, script)) = find_script(optimizer_roots) {
-        super::write_shell_wrapper(
+        let env = super::claw_compactor_state_env_from_env();
+        super::write_shell_wrapper_with_env(
             &bin_dir.join("claw-compactor"),
             &python,
             &[script.to_string_lossy().as_ref()],
+            &env,
         )?;
-        super::write_shell_wrapper(
+        super::write_shell_wrapper_with_env(
             &bin_dir.join("prodex-claw-compactor"),
             &python,
             &[script.to_string_lossy().as_ref()],
+            &env,
         )?;
         write_auto_wrapper_for_script(&bin_dir.join(AUTO_WRAPPER), &python, &script)?;
         write_session_wrapper(&bin_dir.join(SESSION_WRAPPER))?;
@@ -115,9 +124,10 @@ fn find_script(optimizer_roots: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {
 
 fn write_auto_wrapper_for_binary(path: &Path, command: &Path) -> Result<()> {
     let command = shell_single_quote(&command.display().to_string());
+    let env_exports = super::shell_exports(&super::claw_compactor_state_env_from_env());
     let script = format!(
         r#"#!/usr/bin/env sh
-workspace="${{1:-$(pwd)}}"
+{env_exports}workspace="${{1:-$(pwd)}}"
 
 run_claw() {{
   target="$1"
@@ -189,9 +199,10 @@ printf '%s\n' 'CLAW_COMPACTOR_UNAVAILABLE'
 fn write_auto_wrapper_for_script(path: &Path, python: &Path, script_path: &Path) -> Result<()> {
     let python = shell_single_quote(&python.display().to_string());
     let script_path = shell_single_quote(&script_path.display().to_string());
+    let env_exports = super::shell_exports(&super::claw_compactor_state_env_from_env());
     let script = format!(
         r#"#!/usr/bin/env sh
-workspace="${{1:-$(pwd)}}"
+{env_exports}workspace="${{1:-$(pwd)}}"
 
 run_claw() {{
   target="$1"

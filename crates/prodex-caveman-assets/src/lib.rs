@@ -116,7 +116,11 @@ If a requested optimizer command or MCP server is unavailable, say so briefly an
 
 ## Installed Surfaces
 
-Prodex registers built-in `prodex-inspect`, `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout, and `prodex-memory` from the running Prodex binary only when memory is requested. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly. Prodex routes compatible token-savior cache/state and local memory under `PRODEX_HOME` (default `~/.prodex`) instead of the workspace; managed Mem0 mode still keeps Mem0 server data under `PRODEX_HOME`.
+Prodex registers built-in `prodex-inspect`, `prodex-sqz` when `sqz-mcp` is on `PATH` or under a managed optimizer checkout, `prodex-token-savior` when `token-savior` is on `PATH` or under a managed optimizer checkout, and `prodex-memory` from the running Prodex binary only when memory is requested. Managed roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Missing binaries are skipped silently so Super still launches cleanly. Prodex routes compatible optional-tool cache/state and local memory under `PRODEX_HOME` (default `~/.prodex`) instead of the workspace; managed Mem0 mode still keeps Mem0 server data under `PRODEX_HOME`.
+
+## Workspace Hygiene
+
+Optional optimizer state belongs under `PRODEX_HOME`, not in the user's current repository. Do not run initializer, installer, hook-writing, auto-merge, auto-compress, or memory-file mutation commands such as `rtk init`, `sqz init`, `claw-compactor install`, `claw-compactor auto`, or `--auto-merge` unless the user explicitly asked for that persistent workspace change. Reading, benchmarking, and summarizing the workspace is fine; creating or editing project files is not.
 
 ## AST Compression
 

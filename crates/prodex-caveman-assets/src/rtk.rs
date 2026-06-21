@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 use crate::localization::localize_text_file;
 use crate::{AGENTS_MD, PRODEX_RTK_CODEX_AWARENESS, RTK_MD};
 
+const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
+const RTK_STATE_DIR_NAME: &str = "rtk";
+
 pub fn configure_rtk_codex_home(codex_home: &Path) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let rtk_md_path = codex_home.join(RTK_MD);
@@ -169,8 +172,9 @@ fn write_rtk_command_wrapper(
 ) -> Result<()> {
     let rtk = shell_single_quote(&rtk.display().to_string());
     let command = shell_single_quote(&command.display().to_string());
+    let rtk_env = rtk_state_exports();
     let routing = if subcommands.is_empty() {
-        format!("export PRODEX_RTK_AUTO_WRAP_DEPTH=1\nexec {rtk} {command} \"$@\"\n")
+        format!("export PRODEX_RTK_AUTO_WRAP_DEPTH=1\n{rtk_env}exec {rtk} {command} \"$@\"\n")
     } else {
         let pattern = subcommands
             .iter()
@@ -178,7 +182,7 @@ fn write_rtk_command_wrapper(
             .collect::<Vec<_>>()
             .join("|");
         format!(
-            "for prodex_rtk_arg in \"$@\"; do\n  case \"$prodex_rtk_arg\" in\n    {pattern})\n      export PRODEX_RTK_AUTO_WRAP_DEPTH=1\n      exec {rtk} {command} \"$@\"\n      ;;\n  esac\ndone\nexec {command} \"$@\"\n",
+            "for prodex_rtk_arg in \"$@\"; do\n  case \"$prodex_rtk_arg\" in\n    {pattern})\n      export PRODEX_RTK_AUTO_WRAP_DEPTH=1\n      {rtk_env}exec {rtk} {command} \"$@\"\n      ;;\n  esac\ndone\nexec {command} \"$@\"\n",
         )
     };
     let script = format!(
@@ -192,8 +196,10 @@ fn write_shell_wrapper(path: &Path, command: &Path, args: &[&str]) -> Result<()>
         .iter()
         .map(|arg| format!(" {}", shell_single_quote(arg)))
         .collect::<String>();
+    let rtk_env = rtk_state_exports();
     let script = format!(
-        "#!/usr/bin/env sh\nexec {}{} \"$@\"\n",
+        "#!/usr/bin/env sh\n{}exec {}{} \"$@\"\n",
+        rtk_env,
         shell_single_quote(&command.display().to_string()),
         args
     );
@@ -210,6 +216,50 @@ fn write_unavailable_command_wrapper(path: &Path, command: &str) -> Result<()> {
 
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn rtk_state_exports() -> String {
+    let Some(root) =
+        prodex_home_from_env().map(|home| home.join("optimizer-state").join(RTK_STATE_DIR_NAME))
+    else {
+        return String::new();
+    };
+    [
+        ("RTK_DB_PATH", root.join("history.db")),
+        ("RTK_TEE_DIR", root.join("tee")),
+        ("RTK_AUDIT_DIR", root.join("audit")),
+    ]
+    .into_iter()
+    .map(|(key, value)| {
+        format!(
+            "export {}={}\n",
+            key,
+            shell_single_quote(&value.display().to_string())
+        )
+    })
+    .collect()
+}
+
+fn prodex_home_from_env() -> Option<PathBuf> {
+    env::var_os(PRODEX_HOME_ENV)
+        .map(PathBuf::from)
+        .map(absolutize_path_lossy)
+        .or_else(|| home_dir_from_env().map(|home| home.join(".prodex")))
+}
+
+fn absolutize_path_lossy(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    env::current_dir()
+        .map(|current_dir| current_dir.join(&path))
+        .unwrap_or(path)
+}
+
+fn home_dir_from_env() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
 }
 
 fn write_executable_script(path: &Path, script: &str) -> Result<()> {
@@ -262,6 +312,8 @@ mod tests {
         let script = fs::read_to_string(&wrapper).expect("wrapper should exist");
         assert!(script.contains("PRODEX_RTK_DISABLE_AUTO_WRAP"));
         assert!(script.contains("PRODEX_RTK_AUTO_WRAP_DEPTH"));
+        assert!(script.contains("RTK_DB_PATH"));
+        assert!(script.contains("optimizer-state/rtk/history.db"));
         assert!(script.contains("test|build|check"));
         assert!(script.contains("exec '/opt/rtk/bin/rtk' '/usr/bin/cargo' \"$@\""));
         assert!(script.contains("exec '/usr/bin/cargo' \"$@\""));
@@ -282,6 +334,7 @@ mod tests {
         .expect("wrapper should write");
 
         let script = fs::read_to_string(&wrapper).expect("wrapper should exist");
+        assert!(script.contains("RTK_DB_PATH"));
         assert!(script.contains("exec '/opt/rtk/bin/rtk' '/usr/bin/rg' \"$@\""));
         assert!(script.contains("exec '/usr/bin/rg' \"$@\""));
 

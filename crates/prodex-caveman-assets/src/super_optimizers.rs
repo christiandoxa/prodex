@@ -15,6 +15,8 @@ mod claw;
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
 const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
 const PRODEX_OPTIMIZERS_DIR_NAME: &str = "prodex-optimizers";
+const CLAW_COMPACTOR_STATE_DIR_NAME: &str = "claw-compactor";
+const SQZ_STATE_DIR_NAME: &str = "sqz";
 const TOKEN_SAVIOR_STATE_DIR_NAME: &str = "token-savior";
 const PRODEX_MEMORY_BACKEND_ENV: &str = "PRODEX_MEMORY_BACKEND";
 const PRODEX_MEM0_API_URL_ENV: &str = "PRODEX_MEM0_API_URL";
@@ -208,12 +210,14 @@ fn configure_super_optimizer_mcp_servers_with_sources(
         }
     };
     if let Some(command) = sqz_mcp_command {
+        let sqz_state = optimizer_state_dirs_from_env(SQZ_STATE_DIR_NAME);
+        let sqz_env = optimizer_state_env(sqz_state.as_ref());
         configure_stdio_mcp_server(
             &mut table,
             "prodex-sqz",
             command.to_path_buf(),
             &["--transport", "stdio"],
-            &[],
+            &sqz_env,
         );
     }
 
@@ -223,6 +227,9 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             .map(|path| path.display().to_string())
             .unwrap_or_default();
         let token_savior_state = token_savior_state_dirs_from_env();
+        if let Some(state_dirs) = token_savior_state.as_ref() {
+            write_token_savior_sitecustomize(state_dirs)?;
+        }
         let token_savior_env = token_savior_mcp_env(&workspace_roots, token_savior_state.as_ref());
         configure_stdio_mcp_server(
             &mut table,
@@ -269,16 +276,25 @@ fn configure_super_optimizer_command_wrappers(
 ) -> Result<()> {
     let bin_dir = codex_home.join("bin");
     if let Some(command) = find_optimizer_command("sqz", path_dirs, optimizer_roots) {
-        write_shell_wrapper(&bin_dir.join("sqz"), &command, &[])?;
-        write_shell_wrapper(&bin_dir.join("prodex-sqz-cli"), &command, &[])?;
+        let sqz_state = optimizer_state_dirs_from_env(SQZ_STATE_DIR_NAME);
+        let sqz_env = optimizer_state_env(sqz_state.as_ref());
+        write_shell_wrapper_with_env(&bin_dir.join("sqz"), &command, &[], &sqz_env)?;
+        write_shell_wrapper_with_env(&bin_dir.join("prodex-sqz-cli"), &command, &[], &sqz_env)?;
     }
     if let Some(command) = sqz_mcp_command {
-        write_shell_wrapper(&bin_dir.join("sqz-mcp"), command, &[])?;
+        let sqz_state = optimizer_state_dirs_from_env(SQZ_STATE_DIR_NAME);
+        let sqz_env = optimizer_state_env(sqz_state.as_ref());
+        write_shell_wrapper_with_env(&bin_dir.join("sqz-mcp"), command, &[], &sqz_env)?;
     }
     claw::configure_command_wrappers(&bin_dir, path_dirs, optimizer_roots)
 }
 
-fn write_shell_wrapper(path: &Path, command: &Path, args: &[&str]) -> Result<()> {
+pub(super) fn write_shell_wrapper_with_env(
+    path: &Path,
+    command: &Path,
+    args: &[&str],
+    env_vars: &[(&str, String)],
+) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -287,8 +303,10 @@ fn write_shell_wrapper(path: &Path, command: &Path, args: &[&str]) -> Result<()>
         .iter()
         .map(|arg| format!(" '{}'", arg.replace('\'', "'\\''")))
         .collect::<String>();
+    let exports = shell_exports(env_vars);
     let script = format!(
-        "#!/usr/bin/env sh\nexec '{}'{} \"$@\"\n",
+        "#!/usr/bin/env sh\n{}exec '{}'{} \"$@\"\n",
+        exports,
         command.display().to_string().replace('\'', "'\\''"),
         args
     );
@@ -303,6 +321,13 @@ fn write_shell_wrapper(path: &Path, command: &Path, args: &[&str]) -> Result<()>
             .with_context(|| format!("failed to chmod {}", path.display()))?;
     }
     Ok(())
+}
+
+pub(super) fn shell_exports(env_vars: &[(&str, String)]) -> String {
+    env_vars
+        .iter()
+        .map(|(key, value)| format!("export {}='{}'\n", key, value.replace('\'', "'\\''")))
+        .collect()
 }
 
 fn configure_stdio_mcp_server(
@@ -353,7 +378,17 @@ fn configure_stdio_mcp_server(
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TokenSaviorStateDirs {
     cache_dir: PathBuf,
+    python_path_dir: PathBuf,
     stats_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct OptimizerStateDirs {
+    home_dir: PathBuf,
+    data_dir: PathBuf,
+    config_dir: PathBuf,
+    state_dir: PathBuf,
+    cache_dir: PathBuf,
 }
 
 fn token_savior_mcp_env(
@@ -370,9 +405,14 @@ fn token_savior_mcp_env(
         ("WORKSPACE_ROOTS", workspace_roots.to_string()),
     ];
     if let Some(state_dirs) = state_dirs {
+        env_vars.extend(optimizer_state_env(Some(&state_dirs.optimizer_dirs())));
         env_vars.push((
             "TOKEN_SAVIOR_CACHE_DIR",
             state_dirs.cache_dir.display().to_string(),
+        ));
+        env_vars.push((
+            "PYTHONPATH",
+            pythonpath_with_prepend(&state_dirs.python_path_dir),
         ));
         env_vars.push((
             "TOKEN_SAVIOR_STATS_DIR",
@@ -390,6 +430,50 @@ fn token_savior_state_dirs_from_env() -> Option<TokenSaviorStateDirs> {
     Some(token_savior_state_dirs_from_prodex_home(&prodex_home))
 }
 
+pub(super) fn claw_compactor_state_env_from_env() -> Vec<(&'static str, String)> {
+    optimizer_state_env(optimizer_state_dirs_from_env(CLAW_COMPACTOR_STATE_DIR_NAME).as_ref())
+}
+
+fn prodex_home_from_env() -> Option<PathBuf> {
+    env::var_os(PRODEX_HOME_ENV)
+        .map(PathBuf::from)
+        .map(absolutize_path_lossy)
+        .or_else(|| home_dir_from_env().map(|home| home.join(".prodex")))
+}
+
+fn optimizer_state_dirs_from_env(name: &str) -> Option<OptimizerStateDirs> {
+    let prodex_home = prodex_home_from_env()?;
+    Some(optimizer_state_dirs_from_prodex_home(&prodex_home, name))
+}
+
+fn optimizer_state_dirs_from_prodex_home(prodex_home: &Path, name: &str) -> OptimizerStateDirs {
+    let root = prodex_home.join("optimizer-state").join(name);
+    OptimizerStateDirs {
+        home_dir: root.join("home"),
+        data_dir: root.join("data"),
+        config_dir: root.join("config"),
+        state_dir: root.join("state"),
+        cache_dir: root.join("cache"),
+    }
+}
+
+fn optimizer_state_env(state_dirs: Option<&OptimizerStateDirs>) -> Vec<(&'static str, String)> {
+    state_dirs
+        .map(|state_dirs| {
+            vec![
+                ("HOME", state_dirs.home_dir.display().to_string()),
+                ("XDG_DATA_HOME", state_dirs.data_dir.display().to_string()),
+                (
+                    "XDG_CONFIG_HOME",
+                    state_dirs.config_dir.display().to_string(),
+                ),
+                ("XDG_STATE_HOME", state_dirs.state_dir.display().to_string()),
+                ("XDG_CACHE_HOME", state_dirs.cache_dir.display().to_string()),
+            ]
+        })
+        .unwrap_or_default()
+}
+
 fn absolutize_path_lossy(path: PathBuf) -> PathBuf {
     if path.is_absolute() {
         return path;
@@ -400,14 +484,95 @@ fn absolutize_path_lossy(path: PathBuf) -> PathBuf {
 }
 
 fn token_savior_state_dirs_from_prodex_home(prodex_home: &Path) -> TokenSaviorStateDirs {
-    let root = prodex_home
-        .join("optimizer-state")
-        .join(TOKEN_SAVIOR_STATE_DIR_NAME);
+    let optimizer_dirs =
+        optimizer_state_dirs_from_prodex_home(prodex_home, TOKEN_SAVIOR_STATE_DIR_NAME);
+    let cache_dir = optimizer_dirs.cache_dir.clone();
     TokenSaviorStateDirs {
-        cache_dir: root.join("cache"),
-        stats_dir: root.join("stats"),
+        cache_dir,
+        python_path_dir: optimizer_dirs.state_dir.join("python"),
+        stats_dir: optimizer_dirs.state_dir.join("stats"),
     }
 }
+
+impl TokenSaviorStateDirs {
+    fn optimizer_dirs(&self) -> OptimizerStateDirs {
+        let root = self
+            .cache_dir
+            .parent()
+            .expect("token-savior cache dir should have state root")
+            .to_path_buf();
+        OptimizerStateDirs {
+            home_dir: root.join("home"),
+            data_dir: root.join("data"),
+            config_dir: root.join("config"),
+            state_dir: root.join("state"),
+            cache_dir: self.cache_dir.clone(),
+        }
+    }
+}
+
+fn pythonpath_with_prepend(path: &Path) -> String {
+    let mut paths = vec![path.to_path_buf()];
+    if let Some(existing) = env::var_os("PYTHONPATH")
+        && !existing.is_empty()
+    {
+        paths.extend(env::split_paths(&existing));
+    }
+    env::join_paths(paths)
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
+fn write_token_savior_sitecustomize(state_dirs: &TokenSaviorStateDirs) -> Result<()> {
+    fs::create_dir_all(&state_dirs.python_path_dir)
+        .with_context(|| format!("failed to create {}", state_dirs.python_path_dir.display()))?;
+    let sitecustomize_path = state_dirs.python_path_dir.join("sitecustomize.py");
+    fs::write(&sitecustomize_path, TOKEN_SAVIOR_SITECUSTOMIZE)
+        .with_context(|| format!("failed to write {}", sitecustomize_path.display()))?;
+    Ok(())
+}
+
+const TOKEN_SAVIOR_SITECUSTOMIZE: &str = r#"""Prodex token-savior compatibility shims."""
+
+import hashlib
+import os
+import re
+
+
+def _patch_cache_manager():
+    cache_dir = os.environ.get("TOKEN_SAVIOR_CACHE_DIR")
+    if not cache_dir:
+        return
+    try:
+        from token_savior.cache_ops import CacheManager
+    except Exception:
+        return
+
+    def _workspace_cache_dir(root_path):
+        absolute = os.path.abspath(os.path.expanduser(root_path))
+        digest = hashlib.sha256(absolute.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+        name = os.path.basename(absolute.rstrip(os.sep)) or "workspace"
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip(".-") or "workspace"
+        return os.path.join(os.path.expanduser(cache_dir), "projects", f"{slug}-{digest}")
+
+    def path(self):
+        project_cache_dir = _workspace_cache_dir(self.root_path)
+        new_path = os.path.join(project_cache_dir, CacheManager.FILENAME)
+        legacy = os.path.join(project_cache_dir, CacheManager.LEGACY_FILENAME)
+        if not os.path.exists(new_path) and os.path.exists(legacy):
+            try:
+                os.makedirs(project_cache_dir, exist_ok=True)
+                os.rename(legacy, new_path)
+            except OSError:
+                return legacy
+        os.makedirs(project_cache_dir, exist_ok=True)
+        return new_path
+
+    CacheManager.path = path
+
+
+_patch_cache_manager()
+"#;
 
 fn super_optimizer_mcp_servers_table(table: &mut toml::Table) -> Option<&mut toml::Table> {
     if !table.contains_key("mcp_servers") {

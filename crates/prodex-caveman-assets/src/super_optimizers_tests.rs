@@ -1,8 +1,9 @@
 use super::{
     SuperOptimizerMemoryConfig, configure_stdio_mcp_server,
-    configure_super_optimizer_mcp_servers_with_sources, find_managed_optimizer_command,
-    find_optimizer_command, python_venv_root_for_command, render_super_optimizer_awareness,
-    token_savior_mcp_env, token_savior_state_dirs_from_prodex_home,
+    configure_super_optimizer_command_wrappers, configure_super_optimizer_mcp_servers_with_sources,
+    find_managed_optimizer_command, find_optimizer_command, python_venv_root_for_command,
+    render_super_optimizer_awareness, token_savior_mcp_env,
+    token_savior_state_dirs_from_prodex_home, write_token_savior_sitecustomize,
 };
 use crate::toml_helpers::ensure_child_table;
 use std::env;
@@ -222,10 +223,35 @@ fn token_savior_mcp_env_routes_state_under_prodex_home() {
         value_for("TOKEN_SAVIOR_CACHE_DIR"),
         Some("/tmp/prodex-home/optimizer-state/token-savior/cache")
     );
+    assert!(
+        value_for("PYTHONPATH")
+            .expect("PYTHONPATH should include Prodex token-savior shim")
+            .starts_with("/tmp/prodex-home/optimizer-state/token-savior/state/python")
+    );
     assert_eq!(
         value_for("TOKEN_SAVIOR_STATS_DIR"),
-        Some("/tmp/prodex-home/optimizer-state/token-savior/stats")
+        Some("/tmp/prodex-home/optimizer-state/token-savior/state/stats")
     );
+}
+
+#[test]
+fn mcp_config_writes_token_savior_cache_shim_under_prodex_home() {
+    let prodex_home = temp_dir("prodex-home");
+    let state_dirs = token_savior_state_dirs_from_prodex_home(&prodex_home);
+
+    write_token_savior_sitecustomize(&state_dirs).expect("sitecustomize.py should be written");
+
+    let shim = prodex_home
+        .join("optimizer-state")
+        .join("token-savior")
+        .join("state")
+        .join("python")
+        .join("sitecustomize.py");
+    let shim_contents = fs::read_to_string(&shim).expect("sitecustomize.py should be written");
+    assert!(shim_contents.contains("TOKEN_SAVIOR_CACHE_DIR"));
+    assert!(shim_contents.contains("CacheManager.path = path"));
+
+    let _ = fs::remove_dir_all(prodex_home);
 }
 
 #[test]
@@ -409,6 +435,28 @@ fn mcp_config_registers_managed_sqz_when_path_is_empty() {
         .and_then(toml::Value::as_str);
     let expected_command = command.display().to_string();
     assert_eq!(command_value, Some(expected_command.as_str()));
+    let sqz_env = table
+        .get("mcp_servers")
+        .and_then(toml::Value::as_table)
+        .and_then(|servers| servers.get("prodex-sqz"))
+        .and_then(toml::Value::as_table)
+        .and_then(|server| server.get("env"))
+        .and_then(toml::Value::as_table)
+        .expect("prodex-sqz env should be registered");
+    assert!(
+        sqz_env
+            .get("XDG_CACHE_HOME")
+            .and_then(toml::Value::as_str)
+            .expect("sqz cache home should be set")
+            .contains("optimizer-state/sqz/cache")
+    );
+    assert!(
+        sqz_env
+            .get("HOME")
+            .and_then(toml::Value::as_str)
+            .expect("sqz home should be set")
+            .contains("optimizer-state/sqz/home")
+    );
     let memory_server = table
         .get("mcp_servers")
         .and_then(toml::Value::as_table)
@@ -417,6 +465,65 @@ fn mcp_config_registers_managed_sqz_when_path_is_empty() {
         memory_server.is_none(),
         "prodex-memory should stay disabled unless memory is requested"
     );
+
+    let _ = fs::remove_dir_all(codex_home);
+    let _ = fs::remove_dir_all(optimizer_root);
+}
+
+#[test]
+fn command_wrappers_route_optimizer_state_outside_workspace() {
+    let codex_home = temp_dir("codex-home-wrappers");
+    let optimizer_root = temp_dir("optimizer-root-wrappers");
+    let sqz = command_path(
+        optimizer_root
+            .join("sqz")
+            .join("target")
+            .join("release")
+            .join("sqz"),
+    );
+    let sqz_mcp = command_path(
+        optimizer_root
+            .join("sqz")
+            .join("target")
+            .join("release")
+            .join("sqz-mcp"),
+    );
+    let claw = command_path(
+        optimizer_root
+            .join("claw-compactor")
+            .join(".venv")
+            .join("bin")
+            .join("claw-compactor"),
+    );
+    fs::create_dir_all(sqz.parent().expect("sqz parent should exist"))
+        .expect("sqz parent should be created");
+    fs::create_dir_all(claw.parent().expect("claw parent should exist"))
+        .expect("claw parent should be created");
+    write_fake_executable(&sqz, "#!/usr/bin/env sh\nexit 0\n");
+    write_fake_sqz_mcp(&sqz_mcp);
+    write_fake_executable(&claw, "#!/usr/bin/env sh\nexit 0\n");
+
+    configure_super_optimizer_command_wrappers(
+        &codex_home,
+        &[],
+        std::slice::from_ref(&optimizer_root),
+        Some(&sqz_mcp),
+    )
+    .expect("command wrappers should write");
+
+    let sqz_wrapper =
+        fs::read_to_string(codex_home.join("bin").join("sqz")).expect("sqz wrapper should exist");
+    assert!(sqz_wrapper.contains("XDG_CACHE_HOME"));
+    assert!(sqz_wrapper.contains("optimizer-state/sqz/cache"));
+    let sqz_mcp_wrapper = fs::read_to_string(codex_home.join("bin").join("sqz-mcp"))
+        .expect("sqz-mcp wrapper should exist");
+    assert!(sqz_mcp_wrapper.contains("XDG_CACHE_HOME"));
+    assert!(sqz_mcp_wrapper.contains("optimizer-state/sqz/cache"));
+    let claw_wrapper = fs::read_to_string(codex_home.join("bin").join("prodex-claw-compactor"))
+        .expect("claw wrapper should exist");
+    assert!(claw_wrapper.contains("XDG_CACHE_HOME"));
+    assert!(claw_wrapper.contains("optimizer-state/claw-compactor/cache"));
+    assert!(claw_wrapper.contains("optimizer-state/claw-compactor/home"));
 
     let _ = fs::remove_dir_all(codex_home);
     let _ = fs::remove_dir_all(optimizer_root);
