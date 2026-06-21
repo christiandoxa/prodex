@@ -40,25 +40,63 @@ fn persist_codex_session_image_attachments_in_dir(
                 .extension()
                 .is_some_and(|extension| extension == "jsonl")
         {
-            persist_codex_session_file_image_attachments(codex_home, &path)?;
+            let _ = persist_codex_session_file_image_attachments(codex_home, &path)?;
         }
     }
 
     Ok(())
 }
 
-fn persist_codex_session_file_image_attachments(
+pub(crate) fn persist_codex_session_file_image_attachments(
     codex_home: &Path,
     session_file: &Path,
-) -> Result<()> {
+) -> Result<String> {
     let contents = fs::read_to_string(session_file)
         .with_context(|| format!("failed to read {}", session_file.display()))?;
     let rewritten = rewrite_codex_session_image_paths(codex_home, &contents)?;
     if rewritten != contents {
-        fs::write(session_file, rewritten)
+        fs::write(session_file, &rewritten)
             .with_context(|| format!("failed to write {}", session_file.display()))?;
     }
-    Ok(())
+    Ok(rewritten)
+}
+
+pub(crate) fn codex_session_image_attachments_are_stable(
+    codex_home: &Path,
+    contents: &str,
+) -> bool {
+    let stable_dir = codex_home.join(SESSION_IMAGE_ATTACHMENT_DIR);
+    let mut cursor = 0;
+
+    while let Some(relative_tag_start) = contents[cursor..].find(CODEX_IMAGE_TAG_PREFIX) {
+        let tag_start = cursor + relative_tag_start;
+        let Some(relative_tag_end) = contents[tag_start..].find('>') else {
+            break;
+        };
+        let tag_end = tag_start + relative_tag_end;
+        let tag = &contents[tag_start..tag_end];
+        let Some((relative_path_start, path_prefix, path_quote)) = image_tag_path_attr(tag) else {
+            cursor = tag_end;
+            continue;
+        };
+        let path_start = tag_start + relative_path_start + path_prefix.len();
+        let Some(relative_path_end) = contents[path_start..tag_end].find(path_quote) else {
+            cursor = tag_end;
+            continue;
+        };
+        let raw_path = &contents[path_start..path_start + relative_path_end];
+        let path = Path::new(raw_path);
+        let is_clipboard_path = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(CODEX_CLIPBOARD_PREFIX));
+        if path.is_absolute() && is_clipboard_path && !path.starts_with(&stable_dir) {
+            return false;
+        }
+        cursor = tag_end;
+    }
+
+    true
 }
 
 fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Result<String> {

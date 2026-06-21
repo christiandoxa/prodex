@@ -7,14 +7,14 @@ use std::path::{Path, PathBuf};
 const GEMINI_SETTINGS_FILE_LIMIT: usize = 512 * 1024;
 
 #[derive(Debug, Clone)]
-pub(crate) struct GeminiSettingsSource {
-    pub(crate) name: String,
-    pub(crate) directory: PathBuf,
-    pub(crate) value: serde_json::Value,
-    pub(crate) mcp_servers: BTreeMap<String, serde_json::Value>,
+pub struct GeminiSettingsSource {
+    pub name: String,
+    pub directory: PathBuf,
+    pub value: serde_json::Value,
+    pub mcp_servers: BTreeMap<String, serde_json::Value>,
 }
 
-pub(crate) fn gemini_settings_sources(cwd: Option<&Path>) -> Vec<GeminiSettingsSource> {
+pub fn gemini_settings_sources(cwd: Option<&Path>) -> Vec<GeminiSettingsSource> {
     let paths = gemini_settings_source_paths(cwd);
     let mut sources = Vec::new();
     for (name, path) in paths {
@@ -52,11 +52,11 @@ pub(crate) fn gemini_settings_sources(cwd: Option<&Path>) -> Vec<GeminiSettingsS
     sources
 }
 
-pub(crate) fn gemini_settings_source_paths(cwd: Option<&Path>) -> Vec<(String, PathBuf)> {
+pub fn gemini_settings_source_paths(cwd: Option<&Path>) -> Vec<(String, PathBuf)> {
     gemini_settings_source_paths_for(dirs::home_dir().as_deref(), cwd)
 }
 
-pub(crate) fn gemini_settings_source_paths_for(
+pub fn gemini_settings_source_paths_for(
     home: Option<&Path>,
     cwd: Option<&Path>,
 ) -> Vec<(String, PathBuf)> {
@@ -118,7 +118,7 @@ fn gemini_system_defaults_path() -> PathBuf {
         .join("system-defaults.json")
 }
 
-pub(crate) fn gemini_cli_config_home_for(home: Option<&Path>) -> Option<PathBuf> {
+pub fn gemini_cli_config_home_for(home: Option<&Path>) -> Option<PathBuf> {
     if let Some(root) = env::var_os("GEMINI_CLI_HOME")
         && !root.is_empty()
     {
@@ -127,7 +127,7 @@ pub(crate) fn gemini_cli_config_home_for(home: Option<&Path>) -> Option<PathBuf>
     home.map(|home| home.join(".gemini"))
 }
 
-pub(crate) fn parse_gemini_settings_json(text: &str) -> Option<serde_json::Value> {
+pub fn parse_gemini_settings_json(text: &str) -> Option<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .or_else(|| serde_json::from_str::<serde_json::Value>(&strip_json_comments(text)).ok())

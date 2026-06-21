@@ -1,9 +1,31 @@
 use super::*;
+use crate::image_attachments::{
+    codex_session_image_attachments_are_stable, persist_codex_session_file_image_attachments,
+};
 use chrono::{DateTime, Utc};
 use filetime::FileTime;
-use std::io::{BufRead, BufReader};
+use serde::{Deserialize, Serialize};
+use std::time::UNIX_EPOCH;
 
 const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
+const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 2;
+const SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-maintenance-v1.json";
+
+#[derive(Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+struct SessionMaintenanceCache {
+    version: u8,
+    files: BTreeMap<String, SessionFileFingerprint>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+struct SessionFileFingerprint {
+    len: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
+    changed_secs: i64,
+    changed_nanos: i64,
+    identity: u64,
+}
 
 pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
     create_codex_home_if_missing(codex_home)?;
@@ -14,18 +36,46 @@ pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result
     for entry in shared_codex_entries(paths, codex_home)? {
         ensure_shared_codex_entry(paths, codex_home, &entry)?;
     }
-    persist_codex_session_image_attachments(&paths.shared_codex_root)?;
-    restore_codex_session_modified_times(&paths.shared_codex_root)?;
+    maintain_managed_codex_sessions(paths)?;
 
     Ok(())
 }
 
-fn restore_codex_session_modified_times(codex_home: &Path) -> Result<()> {
-    restore_codex_session_modified_times_in_dir(&codex_home.join("sessions"))?;
-    restore_codex_session_modified_times_in_dir(&codex_home.join("archived_sessions"))
+pub fn maintain_managed_codex_sessions(paths: &AppPaths) -> Result<()> {
+    let cache_path = paths.root.join(SESSION_MAINTENANCE_CACHE_FILE);
+    let previous = load_session_maintenance_cache(&cache_path);
+    let mut next = SessionMaintenanceCache {
+        version: SESSION_MAINTENANCE_CACHE_VERSION,
+        files: BTreeMap::new(),
+    };
+
+    maintain_codex_sessions_in_dir(
+        &paths.shared_codex_root,
+        &paths.shared_codex_root.join("sessions"),
+        &previous,
+        &mut next,
+    )?;
+    maintain_codex_sessions_in_dir(
+        &paths.shared_codex_root,
+        &paths.shared_codex_root.join("archived_sessions"),
+        &previous,
+        &mut next,
+    )?;
+
+    if next != previous {
+        // The cache only avoids repeat work. A read-only or contended cache must never prevent
+        // attachment persistence, session ordering repair, or launch.
+        let _ = save_session_maintenance_cache(&cache_path, &next);
+    }
+    Ok(())
 }
 
-fn restore_codex_session_modified_times_in_dir(sessions_dir: &Path) -> Result<()> {
+fn maintain_codex_sessions_in_dir(
+    codex_home: &Path,
+    sessions_dir: &Path,
+    previous: &SessionMaintenanceCache,
+    next: &mut SessionMaintenanceCache,
+) -> Result<()> {
     if !sessions_dir.is_dir() {
         return Ok(());
     }
@@ -40,21 +90,116 @@ fn restore_codex_session_modified_times_in_dir(sessions_dir: &Path) -> Result<()
             .file_type()
             .with_context(|| format!("failed to read metadata for {}", path.display()))?;
         if file_type.is_dir() {
-            restore_codex_session_modified_times_in_dir(&path)?;
-        } else if file_type.is_file()
-            && path
+            maintain_codex_sessions_in_dir(codex_home, &path, previous, next)?;
+            continue;
+        }
+        if !file_type.is_file()
+            || !path
                 .extension()
                 .is_some_and(|extension| extension == "jsonl")
         {
-            restore_codex_session_file_modified_time(&path)?;
+            continue;
+        }
+
+        let key = path
+            .strip_prefix(codex_home)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        let before = session_file_fingerprint(&path)?;
+        if previous.version == SESSION_MAINTENANCE_CACHE_VERSION
+            && previous.files.get(&key) == Some(&before)
+        {
+            next.files.insert(key, before);
+            continue;
+        }
+
+        let contents = persist_codex_session_file_image_attachments(codex_home, &path)?;
+        restore_codex_session_file_modified_time(&path, &contents)?;
+        if codex_session_image_attachments_are_stable(codex_home, &contents) {
+            next.files.insert(key, session_file_fingerprint(&path)?);
         }
     }
 
     Ok(())
 }
 
-fn restore_codex_session_file_modified_time(session_file: &Path) -> Result<()> {
-    let Some(timestamp) = last_session_event_timestamp(session_file)? else {
+fn session_file_fingerprint(path: &Path) -> Result<SessionFileFingerprint> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
+    let modified = metadata
+        .modified()
+        .with_context(|| format!("failed to read modified time for {}", path.display()))?
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    #[cfg(unix)]
+    let (changed_secs, changed_nanos, identity) = {
+        use std::os::unix::fs::MetadataExt;
+        (metadata.ctime(), metadata.ctime_nsec(), metadata.ino())
+    };
+    #[cfg(not(unix))]
+    let (changed_secs, changed_nanos, identity) = (
+        i64::try_from(modified.as_secs()).unwrap_or(i64::MAX),
+        i64::from(modified.subsec_nanos()),
+        0,
+    );
+    Ok(SessionFileFingerprint {
+        len: metadata.len(),
+        modified_secs: modified.as_secs(),
+        modified_nanos: modified.subsec_nanos(),
+        changed_secs,
+        changed_nanos,
+        identity,
+    })
+}
+
+fn load_session_maintenance_cache(path: &Path) -> SessionMaintenanceCache {
+    fs::read(path)
+        .ok()
+        .and_then(|contents| serde_json::from_slice(&contents).ok())
+        .filter(|cache: &SessionMaintenanceCache| {
+            cache.version == SESSION_MAINTENANCE_CACHE_VERSION
+        })
+        .unwrap_or_default()
+}
+
+fn save_session_maintenance_cache(path: &Path, cache: &SessionMaintenanceCache) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let temp_path = path.with_extension(format!("{}.tmp", std::process::id()));
+    let contents =
+        serde_json::to_vec(cache).context("failed to serialize session maintenance cache")?;
+    fs::write(&temp_path, contents)
+        .with_context(|| format!("failed to write {}", temp_path.display()))?;
+    match fs::rename(&temp_path, path) {
+        Ok(()) => Ok(()),
+        Err(first_err) if path.exists() => {
+            fs::remove_file(path).with_context(|| {
+                format!(
+                    "failed to remove session maintenance cache {} after rename failed: {first_err}",
+                    path.display()
+                )
+            })?;
+            fs::rename(&temp_path, path).with_context(|| {
+                format!(
+                    "failed to replace session maintenance cache {} after initial rename failed: {first_err}",
+                    path.display()
+                )
+            })
+        }
+        Err(err) => Err(err).with_context(|| {
+            format!(
+                "failed to replace session maintenance cache {}",
+                path.display()
+            )
+        }),
+    }
+}
+
+fn restore_codex_session_file_modified_time(session_file: &Path, contents: &str) -> Result<()> {
+    let Some(timestamp) = last_session_event_timestamp(contents) else {
         return Ok(());
     };
     let metadata = fs::metadata(session_file)
@@ -74,20 +219,8 @@ fn restore_codex_session_file_modified_time(session_file: &Path) -> Result<()> {
     })
 }
 
-fn last_session_event_timestamp(session_file: &Path) -> Result<Option<DateTime<Utc>>> {
-    let file = fs::File::open(session_file)
-        .with_context(|| format!("failed to read {}", session_file.display()))?;
-    let reader = BufReader::new(file);
-    let mut timestamp = None;
-
-    for line in reader.lines() {
-        let line = line.with_context(|| format!("failed to read {}", session_file.display()))?;
-        if let Some(value) = session_line_timestamp(&line) {
-            timestamp = Some(value);
-        }
-    }
-
-    Ok(timestamp)
+fn last_session_event_timestamp(contents: &str) -> Option<DateTime<Utc>> {
+    contents.lines().filter_map(session_line_timestamp).last()
 }
 
 fn session_line_timestamp(line: &str) -> Option<DateTime<Utc>> {

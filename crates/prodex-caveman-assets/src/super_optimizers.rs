@@ -76,10 +76,12 @@ pub fn configure_super_optimizer_codex_home_with_options(
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let path_dirs = path_dirs_from_env();
     let optimizer_roots = managed_optimizer_roots();
+    let sqz_mcp_command = find_optimizer_command("sqz-mcp", &path_dirs, &optimizer_roots);
     let optimizers_path = codex_home.join(SUPER_OPTIMIZERS_MD);
     let awareness = render_super_optimizer_awareness(
         &path_dirs,
         &optimizer_roots,
+        sqz_mcp_command.as_deref(),
         presidio_enabled,
         memory_config,
     );
@@ -91,15 +93,22 @@ pub fn configure_super_optimizer_codex_home_with_options(
         codex_home,
         &path_dirs,
         &optimizer_roots,
+        sqz_mcp_command.as_deref(),
         memory_config,
     )?;
-    configure_super_optimizer_command_wrappers(codex_home, &path_dirs, &optimizer_roots)?;
+    configure_super_optimizer_command_wrappers(
+        codex_home,
+        &path_dirs,
+        &optimizer_roots,
+        sqz_mcp_command.as_deref(),
+    )?;
     claw::configure_session_hook(codex_home, &path_dirs, &optimizer_roots)
 }
 
 fn render_super_optimizer_awareness(
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
+    sqz_mcp_command: Option<&Path>,
     presidio_enabled: bool,
     memory_config: SuperOptimizerMemoryConfig<'_>,
 ) -> String {
@@ -111,9 +120,7 @@ fn render_super_optimizer_awareness(
     ));
     awareness.push_str(&format!(
         "- prodex-sqz MCP: {}\n",
-        availability_label(
-            find_optimizer_command("sqz-mcp", path_dirs, optimizer_roots).as_deref()
-        )
+        availability_label(sqz_mcp_command)
     ));
     awareness.push_str(&format!(
         "- prodex-token-savior MCP: {}\n",
@@ -185,6 +192,7 @@ fn configure_super_optimizer_mcp_servers_with_sources(
     codex_home: &Path,
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
+    sqz_mcp_command: Option<&Path>,
     memory_config: SuperOptimizerMemoryConfig<'_>,
 ) -> Result<()> {
     let config_path = codex_home.join("config.toml");
@@ -199,11 +207,11 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             _ => anyhow::bail!("{} did not parse as a TOML table", config_path.display()),
         }
     };
-    if let Some(command) = find_optimizer_command("sqz-mcp", path_dirs, optimizer_roots) {
+    if let Some(command) = sqz_mcp_command {
         configure_stdio_mcp_server(
             &mut table,
             "prodex-sqz",
-            command,
+            command.to_path_buf(),
             &["--transport", "stdio"],
             &[],
         );
@@ -257,13 +265,14 @@ fn configure_super_optimizer_command_wrappers(
     codex_home: &Path,
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
+    sqz_mcp_command: Option<&Path>,
 ) -> Result<()> {
     let bin_dir = codex_home.join("bin");
     if let Some(command) = find_optimizer_command("sqz", path_dirs, optimizer_roots) {
         write_shell_wrapper(&bin_dir.join("sqz"), &command, &[])?;
         write_shell_wrapper(&bin_dir.join("prodex-sqz-cli"), &command, &[])?;
     }
-    if let Some(command) = find_optimizer_command("sqz-mcp", path_dirs, optimizer_roots) {
+    if let Some(command) = sqz_mcp_command {
         write_shell_wrapper(&bin_dir.join("sqz-mcp"), &command, &[])?;
     }
     claw::configure_command_wrappers(&bin_dir, path_dirs, optimizer_roots)

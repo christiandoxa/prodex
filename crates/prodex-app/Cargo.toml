@@ -34,6 +34,9 @@ prodex_cli = { workspace = true }
 prodex_context = { workspace = true }
 prodex_core = { workspace = true }
 prodex_housekeeping = { workspace = true }
+prodex_mcp_stdio = { workspace = true }
+prodex_memory = { workspace = true }
+prodex_presidio = { workspace = true }
 prodex_profile_export = { workspace = true }
 prodex_profile_identity = { workspace = true }
 prodex_provider_core = { workspace = true }
@@ -50,6 +53,7 @@ rusqlite = { workspace = true }
 runtime_anthropic_crate = { workspace = true }
 prodex_runtime_doctor = { workspace = true }
 prodex_runtime_gemini = { workspace = true }
+prodex_runtime_gemini_cli_compat = { workspace = true }
 prodex_runtime_broker = { workspace = true }
 prodex_runtime_broker_log = { workspace = true }
 prodex_runtime_capabilities = { workspace = true }

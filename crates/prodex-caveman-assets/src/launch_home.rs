@@ -19,9 +19,30 @@ pub fn prepare_prodex_overlay_home(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true)
+}
+
+pub fn prepare_prodex_overlay_home_from_prepared_base(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+) -> Result<PathBuf> {
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false)
+}
+
+fn prepare_prodex_overlay_home_internal(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+    maintain_session_attachments: bool,
+) -> Result<PathBuf> {
     let overlay_home = create_temporary_prodex_overlay_home(managed_profiles_root)?;
     if let Err(err) = prodex_shared_codex_fs::copy_codex_home(base_codex_home, &overlay_home)
-        .and_then(|_| share_prodex_overlay_chat_history(base_codex_home, &overlay_home))
+        .and_then(|_| {
+            share_prodex_overlay_chat_history(
+                base_codex_home,
+                &overlay_home,
+                maintain_session_attachments,
+            )
+        })
         .and_then(|_| localize_prodex_overlay_rollout_state(&overlay_home))
         .and_then(|_| configure_prodex_overlay_home(&overlay_home))
     {
@@ -96,7 +117,11 @@ fn create_temporary_prodex_overlay_home(managed_profiles_root: &Path) -> Result<
     bail!("failed to allocate a temporary CODEX_HOME for Prodex overlay")
 }
 
-fn share_prodex_overlay_chat_history(base_codex_home: &Path, overlay_home: &Path) -> Result<()> {
+fn share_prodex_overlay_chat_history(
+    base_codex_home: &Path,
+    overlay_home: &Path,
+    maintain_session_attachments: bool,
+) -> Result<()> {
     link_prodex_overlay_shared_chat_file(
         &base_codex_home.join("history.jsonl"),
         &overlay_home.join("history.jsonl"),
@@ -109,7 +134,10 @@ fn share_prodex_overlay_chat_history(base_codex_home: &Path, overlay_home: &Path
         &base_codex_home.join("archived_sessions"),
         &overlay_home.join("archived_sessions"),
     )?;
-    prodex_shared_codex_fs::persist_codex_session_image_attachments(base_codex_home)
+    if maintain_session_attachments {
+        prodex_shared_codex_fs::persist_codex_session_image_attachments(base_codex_home)?;
+    }
+    Ok(())
 }
 
 fn link_prodex_overlay_shared_chat_file(source: &Path, link: &Path) -> Result<()> {

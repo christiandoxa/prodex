@@ -212,6 +212,19 @@ pub(super) fn prepare_prodex_overlay_home(
     paths: &AppPaths,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
+    let sessions_are_managed = prodex_core::same_path(
+        &base_codex_home.join("sessions"),
+        &paths.shared_codex_root.join("sessions"),
+    );
+    if sessions_are_managed {
+        // Recheck fingerprints immediately before linking history so concurrent session updates
+        // retain the same attachment-persistence behavior without rescanning every JSONL payload.
+        prodex_shared_codex_fs::maintain_managed_codex_sessions(paths)?;
+        return prodex_caveman_assets::prepare_prodex_overlay_home_from_prepared_base(
+            &paths.managed_profiles_root,
+            base_codex_home,
+        );
+    }
     prodex_caveman_assets::prepare_prodex_overlay_home(
         &paths.managed_profiles_root,
         base_codex_home,

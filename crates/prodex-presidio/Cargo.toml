@@ -1,0 +1,15 @@
+[package]
+name = "prodex-presidio"
+version.workspace = true
+edition.workspace = true
+description = "Presidio runtime configuration helpers for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+prodex_cli = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }

@@ -1,5 +1,6 @@
 use super::*;
 use filetime::FileTime;
+use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct PrepareTestDir {
@@ -131,6 +132,130 @@ fn prepare_managed_codex_home_restores_session_mtime_from_last_timestamp() {
         &fs::metadata(&session_file).expect("session metadata should read"),
     );
     assert_eq!(restored_mtime, expected_mtime);
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_only_reprocesses_changed_sessions() {
+    let temp_dir = PrepareTestDir::new("incremental-session-maintenance");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/21/rollout-session.jsonl");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(
+        &session_file,
+        "{\"timestamp\":\"2026-06-21T08:00:00Z\",\"type\":\"session_meta\"}\n",
+    )
+    .expect("session should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("first prepare should succeed");
+    let cache_path = paths.root.join(SESSION_MAINTENANCE_CACHE_FILE);
+    let first_cache = fs::read(&cache_path).expect("maintenance cache should exist");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("unchanged prepare should succeed");
+    assert_eq!(
+        fs::read(&cache_path).expect("maintenance cache should remain readable"),
+        first_cache
+    );
+
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&session_file)
+        .expect("session should open")
+        .write_all(b"{\"timestamp\":\"2026-06-21T08:05:00Z\",\"type\":\"response_item\"}\n")
+        .expect("session should append");
+    prepare_managed_codex_home(&paths, &codex_home).expect("changed prepare should succeed");
+
+    let restored_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&session_file).expect("session metadata should read"),
+    );
+    assert_eq!(restored_mtime, FileTime::from_unix_time(1_782_029_100, 0));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_retries_attachment_that_appears_later() {
+    let temp_dir = PrepareTestDir::new("late-session-attachment");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/21/rollout-session.jsonl");
+    let source = temp_dir.path.join("codex-clipboard-late.png");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"timestamp":"2026-06-21T08:00:00Z","text":"<image path=\"{}\">"}}"#,
+            source.display()
+        ),
+    )
+    .expect("session should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("first prepare should succeed");
+    let stable = paths
+        .shared_codex_root
+        .join("image_attachments/codex-clipboard-late.png");
+    assert!(!stable.exists());
+
+    fs::write(&source, b"late image").expect("late source should write");
+    prepare_managed_codex_home(&paths, &codex_home).expect("second prepare should retry");
+
+    assert_eq!(
+        fs::read(&stable).expect("stable image should exist"),
+        b"late image"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should read");
+    assert!(rewritten.contains(&stable.display().to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_ignores_cache_write_failure() {
+    let temp_dir = PrepareTestDir::new("cache-write-failure");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths.shared_codex_root.join("sessions/rollout.jsonl");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(
+        &session_file,
+        "{\"timestamp\":\"2026-06-21T08:00:00Z\",\"type\":\"session_meta\"}\n",
+    )
+    .expect("session should write");
+    fs::create_dir_all(paths.root.join(SESSION_MAINTENANCE_CACHE_FILE))
+        .expect("directory should block cache file writes");
+
+    prepare_managed_codex_home(&paths, &codex_home)
+        .expect("cache failure must not block managed home preparation");
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_detects_same_size_same_mtime_replacement() {
+    let temp_dir = PrepareTestDir::new("same-metadata-session-replacement");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths.shared_codex_root.join("sessions/rollout.jsonl");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    let first = "{\"timestamp\":\"2026-06-21T08:00:00Z\",\"type\":\"session_meta\"}\n";
+    let second = "{\"timestamp\":\"2026-06-21T09:00:00Z\",\"type\":\"session_meta\"}\n";
+    assert_eq!(first.len(), second.len());
+    fs::write(&session_file, first).expect("first session should write");
+    prepare_managed_codex_home(&paths, &codex_home).expect("first prepare should succeed");
+    let cached_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&session_file).expect("first metadata should read"),
+    );
+
+    fs::write(&session_file, second).expect("replacement session should write");
+    filetime::set_file_mtime(&session_file, cached_mtime).expect("mtime should match cache");
+    prepare_managed_codex_home(&paths, &codex_home).expect("replacement should be detected");
+
+    let restored_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&session_file).expect("replacement metadata should read"),
+    );
+    assert_eq!(restored_mtime, FileTime::from_unix_time(1_782_032_400, 0));
 }
 
 #[cfg(unix)]

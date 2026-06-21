@@ -3,7 +3,10 @@ use crate::{
     PresidioRedactArgs,
 };
 use anyhow::{Context, Result, bail};
-use reqwest::blocking::Client;
+use prodex_presidio::{
+    PresidioAnalyzerResult, PresidioHealth, presidio_analyze, presidio_anonymize,
+    presidio_http_client, probe_presidio_health, validate_presidio_url,
+};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -17,7 +20,6 @@ const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
 const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
 const DEFAULT_PRESIDIO_ANONYMIZER_URL: &str = "http://localhost:5001";
 const DEFAULT_PRESIDIO_LANGUAGE: &str = "en";
-const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const PRESIDIO_AUTO_START_ENV: &str = "PRODEX_PRESIDIO_AUTO_START";
 const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
 const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
@@ -47,30 +49,6 @@ impl Default for ProdexPresidioConfig {
             fail_mode: "open".to_string(),
         }
     }
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-struct PresidioAnalyzerResult {
-    start: usize,
-    end: usize,
-    score: f64,
-    entity_type: String,
-    // Add language field for multi-language merge
-    #[serde(default)]
-    language: String,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct PresidioAnonymizeResponse {
-    text: String,
-    #[serde(default)]
-    items: Vec<serde_json::Value>,
-}
-
-#[derive(Debug)]
-struct PresidioHealth {
-    ok: bool,
-    message: String,
 }
 
 pub(crate) fn handle_presidio(command: PresidioCommands) -> Result<()> {
@@ -410,75 +388,6 @@ fn presidio_redact_input_text(text: Option<String>, path: Option<PathBuf>) -> Re
     Ok(input)
 }
 
-fn presidio_analyze(
-    client: &Client,
-    analyzer_url: &str,
-    text: &str,
-    language: &str,
-) -> Result<Vec<PresidioAnalyzerResult>> {
-    let response = client
-        .post(presidio_endpoint(analyzer_url, "analyze"))
-        .json(&serde_json::json!({
-            "text": text,
-            "language": language,
-        }))
-        .send()
-        .context("failed to call Presidio Analyzer")?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().unwrap_or_default();
-        bail!("Presidio Analyzer returned {status}: {}", body.trim());
-    }
-    response
-        .json::<Vec<PresidioAnalyzerResult>>()
-        .context("failed to parse Presidio Analyzer response")
-}
-
-fn presidio_anonymize(
-    client: &Client,
-    anonymizer_url: &str,
-    text: &str,
-    analyzer_results: Vec<PresidioAnalyzerResult>,
-) -> Result<PresidioAnonymizeResponse> {
-    let response = client
-        .post(presidio_endpoint(anonymizer_url, "anonymize"))
-        .json(&serde_json::json!({
-            "text": text,
-            "analyzer_results": analyzer_results,
-        }))
-        .send()
-        .context("failed to call Presidio Anonymizer")?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().unwrap_or_default();
-        bail!("Presidio Anonymizer returned {status}: {}", body.trim());
-    }
-    response
-        .json::<PresidioAnonymizeResponse>()
-        .context("failed to parse Presidio Anonymizer response")
-}
-
-fn probe_presidio_health(client: &Client, base_url: &str) -> PresidioHealth {
-    match client.get(presidio_endpoint(base_url, "health")).send() {
-        Ok(response) => {
-            let status = response.status();
-            let message = response.text().unwrap_or_default();
-            PresidioHealth {
-                ok: status.is_success(),
-                message: if message.trim().is_empty() {
-                    status.to_string()
-                } else {
-                    format!("{status} {}", message.trim())
-                },
-            }
-        }
-        Err(err) => PresidioHealth {
-            ok: false,
-            message: err.to_string(),
-        },
-    }
-}
-
 fn presidio_auto_start_disabled() -> bool {
     env::var(PRESIDIO_AUTO_START_ENV)
         .ok()
@@ -547,14 +456,6 @@ fn presidio_health_label(health: &PresidioHealth) -> String {
     }
 }
 
-fn presidio_http_client() -> Result<Client> {
-    Client::builder()
-        .timeout(PRESIDIO_HTTP_TIMEOUT)
-        .no_proxy()
-        .build()
-        .context("failed to build Presidio HTTP client")
-}
-
 fn load_presidio_config(paths: &AppPaths) -> Result<Option<ProdexPresidioConfig>> {
     let path = presidio_config_path(paths);
     if !path.exists() {
@@ -577,21 +478,6 @@ fn save_presidio_config(paths: &AppPaths, config: &ProdexPresidioConfig) -> Resu
 
 fn presidio_config_path(paths: &AppPaths) -> PathBuf {
     paths.root.join(PRODEX_PRESIDIO_FILE_NAME)
-}
-
-fn validate_presidio_url(url: &str, field: &str) -> Result<()> {
-    let parsed = reqwest::Url::parse(url).with_context(|| format!("invalid {field}: {url}"))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        bail!("invalid {field}: scheme must be http or https");
-    }
-    if parsed.host_str().is_none() {
-        bail!("invalid {field}: host is required");
-    }
-    Ok(())
-}
-
-fn presidio_endpoint(base_url: &str, path: &str) -> String {
-    format!("{}/{}", base_url.trim_end_matches('/'), path)
 }
 
 fn normalize_languages(langs: Vec<String>) -> Vec<String> {

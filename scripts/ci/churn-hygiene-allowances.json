@@ -1,5 +1,18 @@
 [
   {
+    "id": "runtime-support-crate-extraction-0.199.0",
+    "requiredSubjects": [
+      "feat: standardize runtime support crates"
+    ],
+    "caps": {
+      "maxFiles": 60,
+      "maxBehaviorFiles": 40,
+      "maxLines": 7000,
+      "maxFileLines": 900
+    },
+    "reason": "Reviewed cross-cutting runtime support crate extraction, MCP stdio consolidation, Gemini compatibility relocation, Presidio runtime split, and launch/session maintenance refactors with local full test suite, format, prebuild, and diff checks."
+  },
+  {
     "id": "inspect-diagnostics-and-readme-presidio-0.197.0",
     "requiredSubjects": [
       "feat: add prodex inspect diagnostics"

@@ -1,0 +1,17 @@
+[package]
+name = "prodex-memory"
+version.workspace = true
+edition.workspace = true
+description = "Prodex local and Mem0-compatible memory MCP backend"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+prodex_mcp_stdio = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tiny_http = { workspace = true }

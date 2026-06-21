@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use prodex_core::{AppPaths, prodex_previous_default_shared_codex_root};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::io;
@@ -22,7 +22,7 @@ pub use self::image_attachments::persist_codex_session_image_attachments;
 use self::migration::*;
 pub use self::ops::create_codex_home_if_missing;
 use self::ops::*;
-pub use self::prepare::prepare_managed_codex_home;
+pub use self::prepare::{maintain_managed_codex_sessions, prepare_managed_codex_home};
 
 const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "sessions",

@@ -1702,6 +1702,9 @@ dependencies = [
  "prodex-context",
  "prodex-core",
  "prodex-housekeeping",
+ "prodex-mcp-stdio",
+ "prodex-memory",
+ "prodex-presidio",
  "prodex-profile-export",
  "prodex-profile-identity",
  "prodex-provider-core",
@@ -1716,6 +1719,7 @@ dependencies = [
  "prodex-runtime-cookies",
  "prodex-runtime-doctor",
  "prodex-runtime-gemini",
+ "prodex-runtime-gemini-cli-compat",
  "prodex-runtime-launch",
  "prodex-runtime-log",
  "prodex-runtime-metrics",
@@ -1832,6 +1836,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-mcp-stdio"
+version = "0.198.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+]
+
+[[package]]
+name = "prodex-memory"
+version = "0.198.0"
+dependencies = [
+ "anyhow",
+ "prodex-mcp-stdio",
+ "reqwest",
+ "rusqlite",
+ "serde_json",
+ "tiny_http",
+]
+
+[[package]]
+name = "prodex-presidio"
+version = "0.198.0"
+dependencies = [
+ "anyhow",
+ "prodex-cli",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "prodex-profile-export"
 version = "0.198.0"
 dependencies = [
@@ -1897,6 +1933,7 @@ version = "0.198.0"
 dependencies = [
  "anyhow",
  "base64",
+ "prodex-runtime-proxy",
  "serde_json",
 ]
 
@@ -1955,6 +1992,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "prodex-quota",
+ "prodex-runtime-proxy",
  "prodex-runtime-state",
  "prodex-terminal-ui",
  "serde",
@@ -1966,6 +2004,16 @@ name = "prodex-runtime-gemini"
 version = "0.198.0"
 dependencies = [
  "prodex-provider-core",
+]
+
+[[package]]
+name = "prodex-runtime-gemini-cli-compat"
+version = "0.198.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "serde_json",
+ "toml",
 ]
 
 [[package]]
@@ -2081,6 +2129,7 @@ dependencies = [
  "chrono",
  "filetime",
  "prodex-core",
+ "serde",
  "serde_json",
 ]
 

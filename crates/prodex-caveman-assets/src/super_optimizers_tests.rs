@@ -392,6 +392,7 @@ fn mcp_config_registers_managed_sqz_when_path_is_empty() {
         &codex_home,
         &[],
         std::slice::from_ref(&optimizer_root),
+        Some(&command),
         SuperOptimizerMemoryConfig::default(),
     )
     .expect("super optimizer MCP config should write");
@@ -430,6 +431,7 @@ fn mcp_config_registers_prodex_memory_when_enabled() {
         &codex_home,
         &[],
         &[],
+        None,
         SuperOptimizerMemoryConfig {
             enabled: true,
             ..Default::default()
@@ -478,6 +480,7 @@ fn super_optimizer_awareness_includes_dynamic_availability() {
     let awareness = render_super_optimizer_awareness(
         std::slice::from_ref(&path_root),
         std::slice::from_ref(&optimizer_root),
+        Some(&sqz),
         true,
         SuperOptimizerMemoryConfig::default(),
     );

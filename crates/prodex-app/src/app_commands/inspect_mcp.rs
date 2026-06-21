@@ -1,10 +1,11 @@
 use crate::{AppPaths, AppState, AppStateIoExt, ProfileProviderExt};
 use anyhow::{Context, Result};
 use prodex_cli::InspectMcpArgs;
+use prodex_mcp_stdio::{read_mcp_message, write_mcp_message};
 use serde_json::{Value, json};
 use std::env;
 use std::fs;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufReader, Read};
 use std::path::PathBuf;
 
 const RUNTIME_LATEST_POINTER: &str = "prodex-runtime-latest.path";
@@ -26,12 +27,6 @@ fn run_inspect_mcp_stdio() -> Result<()> {
         write_mcp_message(&mut writer, &response, framing)?;
     }
     Ok(())
-}
-
-#[derive(Clone, Copy)]
-enum McpMessageFraming {
-    JsonLine,
-    ContentLength,
 }
 
 fn handle_mcp_request(request: Value) -> Result<Option<Value>> {
@@ -235,69 +230,10 @@ fn read_file_tail_lossy(path: &PathBuf, max_bytes: usize) -> Result<String> {
     Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
-fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, McpMessageFraming)>> {
-    let mut first = String::new();
-    if reader.read_line(&mut first)? == 0 {
-        return Ok(None);
-    }
-    if first.trim().is_empty() {
-        return read_mcp_message(reader);
-    }
-    if first.to_ascii_lowercase().starts_with("content-length:") {
-        let mut content_length = parse_content_length(&first)?;
-        loop {
-            let mut header = String::new();
-            reader.read_line(&mut header)?;
-            let trimmed = header.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            if trimmed.to_ascii_lowercase().starts_with("content-length:") {
-                content_length = parse_content_length(trimmed)?;
-            }
-        }
-        let mut body = vec![0_u8; content_length];
-        reader.read_exact(&mut body)?;
-        let value = serde_json::from_slice(&body).context("failed to parse MCP JSON body")?;
-        return Ok(Some((value, McpMessageFraming::ContentLength)));
-    }
-    let value = serde_json::from_str(first.trim()).context("failed to parse MCP JSON line")?;
-    Ok(Some((value, McpMessageFraming::JsonLine)))
-}
-
-fn parse_content_length(line: &str) -> Result<usize> {
-    let (_, value) = line
-        .split_once(':')
-        .ok_or_else(|| anyhow::anyhow!("invalid Content-Length header"))?;
-    value
-        .trim()
-        .parse::<usize>()
-        .context("invalid Content-Length value")
-}
-
-fn write_mcp_message<W: Write>(
-    writer: &mut W,
-    response: &Value,
-    framing: McpMessageFraming,
-) -> Result<()> {
-    let body = serde_json::to_vec(response).context("failed to serialize MCP response")?;
-    match framing {
-        McpMessageFraming::JsonLine => {
-            writer.write_all(&body)?;
-            writer.write_all(b"\n")?;
-        }
-        McpMessageFraming::ContentLength => {
-            write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
-            writer.write_all(&body)?;
-        }
-    }
-    writer.flush()?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prodex_mcp_stdio::McpMessageFraming;
 
     #[test]
     fn inspect_mcp_initialize_returns_server_info() {

@@ -20,6 +20,9 @@ members = [
     "crates/prodex-context",
     "crates/prodex-core",
     "crates/prodex-housekeeping",
+    "crates/prodex-mcp-stdio",
+    "crates/prodex-memory",
+    "crates/prodex-presidio",
     "crates/prodex-profile-export",
     "crates/prodex-profile-identity",
     "crates/prodex-provider-core",
@@ -34,6 +37,7 @@ members = [
     "crates/prodex-runtime-claude",
     "crates/prodex-runtime-cookies",
     "crates/prodex-runtime-gemini",
+    "crates/prodex-runtime-gemini-cli-compat",
     "crates/prodex-runtime-launch",
     "crates/prodex-runtime-log",
     "crates/prodex-runtime-policy",
@@ -81,6 +85,9 @@ prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli", version = "0.
 prodex_context = { package = "prodex-context", path = "crates/prodex-context", version = "0.198.0" }
 prodex_core = { package = "prodex-core", path = "crates/prodex-core", version = "0.198.0" }
 prodex_housekeeping = { package = "prodex-housekeeping", path = "crates/prodex-housekeeping", version = "0.198.0" }
+prodex_mcp_stdio = { package = "prodex-mcp-stdio", path = "crates/prodex-mcp-stdio", version = "0.198.0" }
+prodex_memory = { package = "prodex-memory", path = "crates/prodex-memory", version = "0.198.0" }
+prodex_presidio = { package = "prodex-presidio", path = "crates/prodex-presidio", version = "0.198.0" }
 prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export", version = "0.198.0" }
 prodex_profile_identity = { package = "prodex-profile-identity", path = "crates/prodex-profile-identity", version = "0.198.0" }
 prodex_provider_core = { package = "prodex-provider-core", path = "crates/prodex-provider-core", version = "0.198.0" }
@@ -93,6 +100,7 @@ prodex_runtime_claude = { package = "prodex-runtime-claude", path = "crates/prod
 prodex_runtime_cookies = { package = "prodex-runtime-cookies", path = "crates/prodex-runtime-cookies", version = "0.198.0" }
 prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor", version = "0.198.0" }
 prodex_runtime_gemini = { package = "prodex-runtime-gemini", path = "crates/prodex-runtime-gemini", version = "0.198.0" }
+prodex_runtime_gemini_cli_compat = { package = "prodex-runtime-gemini-cli-compat", path = "crates/prodex-runtime-gemini-cli-compat", version = "0.198.0" }
 prodex_runtime_launch = { package = "prodex-runtime-launch", path = "crates/prodex-runtime-launch", version = "0.198.0" }
 prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy", version = "0.198.0" }
 prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.198.0" }
