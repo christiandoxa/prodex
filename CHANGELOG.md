@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.201.0 - 2026-06-21
+
+### CLI
+
+- Keep optimizer state out of worktrees (`3695eaf`)
+
 ## 0.200.0 - 2026-06-21
 
 ### CLI
@@ -69,9 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add provider gateway platform (`ee1a55b`)
-
-## 0.189.0 - 2026-06-17
-
-### Misc
-
-- Add gateway routing (`055b1f3`)
