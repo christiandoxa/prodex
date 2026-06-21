@@ -94,9 +94,9 @@ fn maintain_codex_sessions_in_dir(
             continue;
         }
         if !file_type.is_file()
-            || !path
+            || path
                 .extension()
-                .is_some_and(|extension| extension == "jsonl")
+                .is_none_or(|extension| extension != "jsonl")
         {
             continue;
         }
@@ -220,7 +220,10 @@ fn restore_codex_session_file_modified_time(session_file: &Path, contents: &str)
 }
 
 fn last_session_event_timestamp(contents: &str) -> Option<DateTime<Utc>> {
-    contents.lines().filter_map(session_line_timestamp).last()
+    contents
+        .lines()
+        .filter_map(session_line_timestamp)
+        .next_back()
 }
 
 fn session_line_timestamp(line: &str) -> Option<DateTime<Utc>> {

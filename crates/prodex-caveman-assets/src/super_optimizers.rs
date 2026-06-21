@@ -273,7 +273,7 @@ fn configure_super_optimizer_command_wrappers(
         write_shell_wrapper(&bin_dir.join("prodex-sqz-cli"), &command, &[])?;
     }
     if let Some(command) = sqz_mcp_command {
-        write_shell_wrapper(&bin_dir.join("sqz-mcp"), &command, &[])?;
+        write_shell_wrapper(&bin_dir.join("sqz-mcp"), command, &[])?;
     }
     claw::configure_command_wrappers(&bin_dir, path_dirs, optimizer_roots)
 }

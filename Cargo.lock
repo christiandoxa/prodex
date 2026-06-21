@@ -1933,7 +1933,6 @@ version = "0.199.0"
 dependencies = [
  "anyhow",
  "base64",
- "prodex-runtime-proxy",
  "serde_json",
 ]
 

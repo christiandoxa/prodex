@@ -491,7 +491,42 @@ pub fn parse_runtime_sse_payload(data_lines: &[String]) -> Option<serde_json::Va
     serde_json::from_str::<serde_json::Value>(payload).ok()
 }
 
-pub use runtime_proxy_crate::{extract_runtime_response_ids_from_value, push_runtime_response_id};
+pub fn push_runtime_response_id(response_ids: &mut Vec<String>, id: Option<&str>) {
+    if let Some(id) = id
+        && !response_ids.iter().any(|existing| existing == id)
+    {
+        response_ids.push(id.to_string());
+    }
+}
+
+pub fn extract_runtime_response_ids_from_value(value: &serde_json::Value) -> Vec<String> {
+    let mut response_ids = Vec::new();
+
+    push_runtime_response_id(
+        &mut response_ids,
+        value
+            .get("response")
+            .and_then(|response| response.get("id"))
+            .and_then(serde_json::Value::as_str),
+    );
+    push_runtime_response_id(
+        &mut response_ids,
+        value.get("response_id").and_then(serde_json::Value::as_str),
+    );
+
+    if value
+        .get("object")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|object| object == "response" || object.ends_with(".response"))
+    {
+        push_runtime_response_id(
+            &mut response_ids,
+            value.get("id").and_then(serde_json::Value::as_str),
+        );
+    }
+
+    response_ids
+}
 
 pub fn runtime_random_token(prefix: &str) -> String {
     let nanos = SystemTime::now()
