@@ -229,7 +229,7 @@ fn handle_codex_command_server_direct_passthrough(args: RunArgs) -> Result<()> {
 
 fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildProcessPlan> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    let state = AppState::load_and_repair(&paths)?;
     let selection = RuntimeLaunchSelection::resolve(
         &paths,
         &state,
@@ -269,7 +269,7 @@ struct RuntimeLaunchPreparationBuilder<'a> {
 impl<'a> RuntimeLaunchPreparationBuilder<'a> {
     fn from_request(request: RuntimeLaunchRequest<'a>) -> Result<Self> {
         let paths = AppPaths::discover()?;
-        let mut state = AppState::load(&paths)?;
+        let mut state = AppState::load_and_repair(&paths)?;
         let selection = select_runtime_launch_profile(&paths, &mut state, &request)?;
 
         Ok(Self {

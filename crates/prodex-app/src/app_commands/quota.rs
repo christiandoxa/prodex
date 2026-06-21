@@ -4,12 +4,14 @@ use crate::{
     AppPaths, AppState, AppStateIoExt, QuotaArgs, QuotaAuthFilter, QuotaProviderFilter,
     collect_quota_reports, collect_quota_reports_with_filters, fetch_profile_quota,
     fetch_profile_quota_json, print_quota_reports, print_stdout_line, quota_watch_enabled,
-    render_profile_quota_snapshot, resolve_profile_name, watch_all_quotas, watch_quota,
+    render_profile_quota_snapshot, repair_missing_active_profile_and_save, resolve_profile_name,
+    watch_all_quotas, watch_quota,
 };
 
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    let mut state = AppState::load_and_repair(&paths)?;
+    repair_missing_active_profile_and_save(&paths, &mut state)?;
     let auth_filter = args
         .auth
         .as_deref()

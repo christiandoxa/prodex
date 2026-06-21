@@ -19,6 +19,11 @@ pub(super) fn select_runtime_launch_profile(
         return Ok(selection);
     }
     if request.skip_quota_check {
+        if let Some(profile_name) =
+            persist_implicit_runtime_launch_profile_selection(state, &selection)
+        {
+            print_runtime_launch_auto_selected_profile(&profile_name);
+        }
         return Ok(selection);
     }
 
@@ -31,7 +36,32 @@ pub(super) fn select_runtime_launch_profile(
         run_selected_runtime_launch_preflight(paths, state, request, &mut selection)?;
     }
 
+    if let Some(profile_name) = persist_implicit_runtime_launch_profile_selection(state, &selection)
+    {
+        print_runtime_launch_auto_selected_profile(&profile_name);
+    }
     Ok(selection)
+}
+
+fn persist_implicit_runtime_launch_profile_selection(
+    state: &mut AppState,
+    selection: &RuntimeLaunchSelection,
+) -> Option<String> {
+    if !selection.profileless_local_home
+        && !selection.explicit_profile_requested
+        && state.active_profile.as_deref() != Some(selection.selected_profile_name.as_str())
+    {
+        state.active_profile = Some(selection.selected_profile_name.clone());
+        return Some(selection.selected_profile_name.clone());
+    }
+    None
+}
+
+fn print_runtime_launch_auto_selected_profile(profile_name: &str) {
+    print_wrapped_stderr(&section_header("Profile Selection"));
+    print_wrapped_stderr(&format!(
+        "Auto-selected profile '{profile_name}' because no active profile was available."
+    ));
 }
 
 fn run_auto_runtime_launch_preflight(

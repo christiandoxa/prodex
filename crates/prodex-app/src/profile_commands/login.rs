@@ -27,10 +27,10 @@ use crate::{
     ensure_managed_profiles_root, exit_with_status, fetch_profile_email, fetch_profile_identity,
     find_profile_by_identity, login_with_claude_oauth, login_with_google_oauth,
     managed_profile_home_path, persist_login_home, prepare_managed_codex_home, print_panel,
-    read_auth_summary, read_gemini_oauth_secret, remove_dir_if_exists, required_auth_json_text,
-    resolve_profile_name, run_child_plan, unique_profile_name_for_email,
-    update_existing_profile_auth, write_gemini_oauth_secret,
-    write_profile_openai_compatible_base_url,
+    read_auth_summary, read_gemini_oauth_secret, remove_dir_if_exists,
+    repair_missing_active_profile_and_save, required_auth_json_text, resolve_profile_name,
+    run_child_plan, unique_profile_name_for_email, update_existing_profile_auth,
+    write_gemini_oauth_secret, write_profile_openai_compatible_base_url,
 };
 use prodex_runtime_launch::ChildProcessPlan;
 
@@ -58,7 +58,7 @@ struct LoginRequest {
 
 pub(crate) fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
+    let mut state = AppState::load_and_repair(&paths)?;
     let login_request = resolve_login_request(args.profile.as_deref(), args.codex_args)?;
     if login_request.method == LoginMethod::Antigravity {
         if args.profile.is_some() {
@@ -788,7 +788,8 @@ fn sanitize_profile_slug(value: &str) -> String {
 
 pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    let mut state = AppState::load_and_repair(&paths)?;
+    repair_missing_active_profile_and_save(&paths, &mut state)?;
     let profile_name = resolve_profile_name(&state, args.selected_profile())?;
     let codex_home = state
         .profiles

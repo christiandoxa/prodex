@@ -4,6 +4,8 @@ use super::*;
 fn prepare_runtime_launch_enables_deepseek_rewrite_proxy_for_super_provider() {
     let root = temp_dir("profileless-deepseek-smart-context-proxy");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_root = root.join("shared-codex");
+    let _shared = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared_root.to_str().unwrap());
     let paths = AppPaths::discover().unwrap();
 
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
@@ -50,6 +52,8 @@ fn prepare_runtime_launch_enables_deepseek_rewrite_proxy_for_super_provider() {
 fn prepare_runtime_launch_enables_gemini_rewrite_proxy_for_api_key_provider() {
     let root = temp_dir("profileless-gemini-smart-context-proxy");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_root = root.join("shared-codex");
+    let _shared = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared_root.to_str().unwrap());
     let paths = AppPaths::discover().unwrap();
 
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {

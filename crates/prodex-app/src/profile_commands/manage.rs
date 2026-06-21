@@ -6,7 +6,8 @@ use crate::{
     collect_profile_summaries, copy_codex_home, create_codex_home_if_missing, default_codex_home,
     ensure_path_is_unique, fetch_profile_identity, find_profile_by_identity,
     managed_profile_home_path, prepare_managed_codex_home, print_blank_line, print_panel,
-    read_auth_json_text, resolve_profile_name, update_existing_profile_auth,
+    read_auth_json_text, repair_missing_active_profile_and_save, resolve_profile_name,
+    update_existing_profile_auth,
 };
 
 pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
@@ -18,7 +19,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     )?;
 
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
+    let mut state = AppState::load_and_repair(&paths)?;
 
     if state.profiles.contains_key(&args.name) {
         bail!("profile '{}' already exists", args.name);
@@ -187,7 +188,8 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
 
 pub(crate) fn handle_list_profiles() -> Result<()> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    let mut state = AppState::load_and_repair(&paths)?;
+    repair_missing_active_profile_and_save(&paths, &mut state)?;
 
     if state.profiles.is_empty() {
         let fields = vec![
@@ -255,7 +257,7 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
 
 pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
+    let mut state = AppState::load_and_repair(&paths)?;
     let name = resolve_profile_name(&state, selector.profile.as_deref())?;
     state.active_profile = Some(name.clone());
     state.save(&paths)?;
@@ -287,7 +289,8 @@ pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()>
 
 pub(crate) fn handle_current_profile() -> Result<()> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    let mut state = AppState::load_and_repair(&paths)?;
+    repair_missing_active_profile_and_save(&paths, &mut state)?;
 
     let Some(active) = state.active_profile.as_deref() else {
         let mut fields = vec![("Status".to_string(), "No active profile.".to_string())];

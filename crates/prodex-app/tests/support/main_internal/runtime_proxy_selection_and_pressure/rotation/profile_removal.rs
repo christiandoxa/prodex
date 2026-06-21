@@ -63,6 +63,79 @@ fn remove_profile_deletes_managed_home_by_default() {
 }
 
 #[test]
+fn remove_active_profile_selects_next_profile() {
+    let temp_dir = TestDir::isolated();
+    let prodex_home = temp_dir.path.join("prodex");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let main_home = paths.managed_profiles_root.join("main");
+    let second_home = paths.managed_profiles_root.join("second");
+    fs::create_dir_all(&main_home).expect("main home should exist");
+    fs::create_dir_all(&second_home).expect("second home should exist");
+    let now = Local::now().timestamp();
+
+    AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: None,
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::from([
+            ("main".to_string(), now - 1),
+            ("second".to_string(), now),
+        ]),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        )]),
+        session_profile_bindings: BTreeMap::from([(
+            "sess-second".to_string(),
+            ResponseProfileBinding {
+                profile_name: "second".to_string(),
+                bound_at: now,
+            },
+        )]),
+    }
+    .save(&paths)
+    .expect("state should save");
+
+    handle_remove_profile(RemoveProfileArgs {
+        name: Some("main".to_string()),
+        all: false,
+        delete_home: false,
+    })
+    .expect("active profile remove should succeed");
+
+    let reloaded = AppState::load(&paths).expect("state should reload");
+    assert_eq!(reloaded.active_profile.as_deref(), Some("second"));
+    assert!(!reloaded.profiles.contains_key("main"));
+    assert!(!reloaded.last_run_selected_at.contains_key("main"));
+    assert!(reloaded.response_profile_bindings.is_empty());
+    assert!(reloaded.session_profile_bindings.contains_key("sess-second"));
+    assert!(second_home.exists(), "remaining profile home should stay");
+}
+
+#[test]
 fn remove_all_profiles_rejects_delete_home_for_external_profiles() {
     let temp_dir = TestDir::isolated();
     let prodex_home = temp_dir.path.join("prodex");

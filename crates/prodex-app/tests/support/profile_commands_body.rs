@@ -11,6 +11,83 @@ mod import;
 #[path = "profile_commands_body/login.rs"]
 mod login;
 
+#[test]
+fn current_profile_auto_repairs_missing_active_profile() {
+    let root = ProfileCommandsTestDir::new("current-repair-missing-active");
+    let _env = ProfileCommandsTestEnv::new(&root.path);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    fs::create_dir_all(&paths.root).expect("prodex home should exist");
+    let profile_home = paths.managed_profiles_root.join("main");
+    profile_commands_write_profile_auth(&profile_home, "main");
+    let now = Local::now().timestamp();
+    fs::write(
+        &paths.state_file,
+        serde_json::to_string_pretty(&serde_json::json!({
+            "active_profile": "deleted",
+            "profiles": {
+                "main": {
+                    "codex_home": profile_home,
+                    "managed": true,
+                    "email": null,
+                    "provider_kind": "openai"
+                }
+            },
+            "last_run_selected_at": {
+                "deleted": now,
+                "main": now
+            },
+            "response_profile_bindings": {
+                "orphan": {
+                    "profile_name": "deleted",
+                    "bound_at": now
+                }
+            },
+            "session_profile_bindings": {}
+        }))
+        .expect("state should render"),
+    )
+    .expect("state should be written");
+
+    handle_current_profile().expect("current profile should auto-repair");
+
+    let state = AppState::load(&paths).expect("state should load");
+    assert_eq!(state.active_profile.as_deref(), Some("main"));
+    assert_eq!(
+        state.last_run_selected_at,
+        BTreeMap::from([("main".to_string(), now)])
+    );
+    assert!(state.response_profile_bindings.is_empty());
+}
+
+#[test]
+fn list_profiles_auto_selects_when_no_active_profile_exists() {
+    let root = ProfileCommandsTestDir::new("list-repair-no-active");
+    let _env = ProfileCommandsTestEnv::new(&root.path);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let profile_home = paths.managed_profiles_root.join("main");
+    profile_commands_write_profile_auth(&profile_home, "main");
+    AppState {
+        active_profile: None,
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home,
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("state should save");
+
+    handle_list_profiles().expect("list profiles should auto-select");
+
+    let state = AppState::load(&paths).expect("state should load");
+    assert_eq!(state.active_profile.as_deref(), Some("main"));
+}
+
 struct ProfileCommandsTestDir {
     path: PathBuf,
 }

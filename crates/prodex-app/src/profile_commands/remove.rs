@@ -48,7 +48,7 @@ fn persist_pruned_profile_runtime_sidecars(
 
 pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let mut state = AppState::load(&paths)?;
+    let mut state = AppState::load_and_repair(&paths)?;
 
     let target_names = prodex_profile_identity::resolve_remove_profile_targets(
         state

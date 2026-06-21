@@ -140,7 +140,25 @@ pub(crate) fn resolve_runtime_launch_profile_name(
     state: &AppState,
     requested: Option<&str>,
 ) -> Result<String> {
-    let profile_name = resolve_profile_name(state, requested)?;
+    let profile_name = match resolve_profile_name(state, requested) {
+        Ok(profile_name) => profile_name,
+        Err(_) if requested.is_none() => {
+            return active_profile_selection_order(state, "")
+                .into_iter()
+                .find(|candidate_name| {
+                    state
+                        .profiles
+                        .get(candidate_name)
+                        .is_some_and(|profile| profile.provider.supports_codex_runtime())
+                })
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no active profile selected and no Codex-compatible profiles are available; use `prodex use --profile <name>` or pass --profile"
+                    )
+                });
+        }
+        Err(err) => return Err(err),
+    };
     if requested.is_some() {
         return Ok(profile_name);
     }

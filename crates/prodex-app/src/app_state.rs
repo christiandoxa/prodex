@@ -43,6 +43,7 @@ impl ProfileProviderExt for ProfileProvider {
 pub(crate) trait AppStateIoExt: Sized {
     fn load_with_recovery(paths: &AppPaths) -> Result<RecoveredLoad<Self>>;
     fn load(paths: &AppPaths) -> Result<Self>;
+    fn load_and_repair(paths: &AppPaths) -> Result<Self>;
     fn save(&self, paths: &AppPaths) -> Result<()>;
 }
 
@@ -69,6 +70,25 @@ impl AppStateIoExt for AppState {
         Ok(Self::load_with_recovery(paths)?.value)
     }
 
+    fn load_and_repair(paths: &AppPaths) -> Result<Self> {
+        if !paths.state_file.exists() && !state_last_good_file_path(paths).exists() {
+            return Ok(Self::default());
+        }
+
+        let _lock = acquire_state_file_lock(paths)?;
+        let loaded = load_json_file_with_backup::<Self>(
+            &paths.state_file,
+            &state_last_good_file_path(paths),
+        )?;
+        let compacted = compact_app_state(loaded.value.clone(), Local::now().timestamp());
+        if compacted != loaded.value {
+            let json = serde_json::to_string_pretty(&compacted)
+                .context("failed to serialize prodex state")?;
+            write_state_json_atomic(paths, &json)?;
+        }
+        Ok(compacted)
+    }
+
     fn save(&self, paths: &AppPaths) -> Result<()> {
         let _lock = acquire_state_file_lock(paths)?;
         let existing = Self::load(paths)?;
@@ -81,4 +101,29 @@ impl AppStateIoExt for AppState {
         write_state_json_atomic(paths, &json)?;
         Ok(())
     }
+}
+
+pub(crate) fn repair_missing_active_profile(state: &mut AppState) -> Option<String> {
+    if state
+        .active_profile
+        .as_deref()
+        .is_some_and(|profile_name| state.profiles.contains_key(profile_name))
+    {
+        return None;
+    }
+
+    let selected = state.profiles.keys().next().cloned()?;
+    state.active_profile = Some(selected.clone());
+    Some(selected)
+}
+
+pub(crate) fn repair_missing_active_profile_and_save(
+    paths: &AppPaths,
+    state: &mut AppState,
+) -> Result<Option<String>> {
+    let repaired = repair_missing_active_profile(state);
+    if repaired.is_some() {
+        state.save(paths)?;
+    }
+    Ok(repaired)
 }
