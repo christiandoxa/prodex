@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.203.0 - 2026-06-22
+
+### Runtime
+
+- Skip websocket prewarm smart context rewrite (`9d1e927`)
+
+### Misc
+
+- Improve stream and upstream rendering (`1157571`)
+
 ## 0.202.0 - 2026-06-22
 
 ### Deps
@@ -74,9 +84,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Guide full optimizer stack (`465a339`)
-
-## 0.191.0 - 2026-06-18
-
-### Docs
-
-- Collapse detailed README sections (`3c4fe19`)
