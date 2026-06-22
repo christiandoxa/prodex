@@ -276,6 +276,24 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     }
 
     if transport == RuntimeSmartContextTransport::Websocket
+        && runtime_smart_context_websocket_generate_false_request(&request.body)
+    {
+        runtime_smart_context_log_prepare_fallback(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            profile_name,
+            request.body.len(),
+            "websocket_generate_false",
+        );
+        if let Some(body) = runtime_smart_context_minified_json_body_from_original(&request.body) {
+            return Cow::Owned(body);
+        }
+        return Cow::Borrowed(&request.body);
+    }
+
+    if transport == RuntimeSmartContextTransport::Websocket
         && request.body.len() > SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
     {
         if let Some(body) = runtime_smart_context_minified_json_body_from_original(&request.body) {
@@ -346,6 +364,14 @@ fn prepare_runtime_smart_context_body_safely<'a>(
             Cow::Borrowed(&request.body)
         }
     }
+}
+
+fn runtime_smart_context_websocket_generate_false_request(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    value.get("type").and_then(serde_json::Value::as_str) == Some("response.create")
+        && value.get("generate").and_then(serde_json::Value::as_bool) == Some(false)
 }
 
 fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
