@@ -2,6 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.202.0 - 2026-06-22
+
+### Deps
+
+- Bump redis from 0.32.7 to 1.2.4 in the cargo group (`7df2cfa`)
+
+### Misc
+
+- Merge pull request #21 from christiandoxa/dependabot/github_actions/github-actions-640176b5ab (`4b809c0`)
+- Merge pull request #20 from christiandoxa/dependabot/cargo/cargo-ce48053083 (`3f64fe8`)
+
 ## 0.201.0 - 2026-06-21
 
 ### CLI
@@ -69,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Docs
 
 - Collapse detailed README sections (`3c4fe19`)
-
-## 0.190.0 - 2026-06-17
-
-### Misc
-
-- Add provider gateway platform (`ee1a55b`)
