@@ -14,6 +14,7 @@ mod info;
 mod info_handler;
 mod inspect_mcp;
 mod log;
+mod log_format;
 mod log_upstream;
 mod mem0_memory;
 mod memory_mcp;

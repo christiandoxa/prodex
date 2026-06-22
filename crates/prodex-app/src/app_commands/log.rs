@@ -1,4 +1,5 @@
 use super::collect_recent_runtime_log_paths;
+use super::log_format::{current_log_width, render_log_block, render_text_body};
 use super::log_upstream::stream_upstream_payload_events;
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
@@ -223,18 +224,25 @@ fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -> Result<()
             .request
             .map(|request| request.to_string())
             .unwrap_or_else(|| "-".to_string());
-        println!(
-            "{} profile={} request={} transport={} source={} sent={} cached={} received={} reasoning={}",
-            event.timestamp,
-            event.profile,
-            request,
-            event.transport,
-            event.source,
-            event.input_tokens,
-            event.cached_input_tokens,
-            event.output_tokens,
-            event.reasoning_tokens,
-        );
+        let meta = [
+            ("profile", event.profile.clone()),
+            ("request", request),
+            ("transport", event.transport.clone()),
+            ("source", event.source.clone()),
+            ("sent", event.input_tokens.to_string()),
+            ("cached", event.cached_input_tokens.to_string()),
+            ("received", event.output_tokens.to_string()),
+            ("reasoning", event.reasoning_tokens.to_string()),
+        ];
+        for line in render_log_block(
+            &event.timestamp,
+            "stream usage",
+            &meta,
+            &[],
+            current_log_width(),
+        ) {
+            println!("{line}");
+        }
     }
     io::stdout()
         .flush()
@@ -242,9 +250,16 @@ fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -> Result<()
 }
 
 fn print_transcript_event(event: &TranscriptEvent) -> Result<()> {
-    println!("{} {}:", event.timestamp, event.source);
-    for line in event.text.lines() {
-        println!("  {line}");
+    let width = current_log_width();
+    let body = render_text_body(&event.text, width);
+    for line in render_log_block(
+        &event.timestamp,
+        &format!("stream {}", event.source),
+        &[],
+        &body,
+        width,
+    ) {
+        println!("{line}");
     }
     io::stdout()
         .flush()

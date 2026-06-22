@@ -1,9 +1,11 @@
 use super::collect_recent_runtime_log_paths;
+use super::log_format::{current_log_width, render_log_block, render_text_body};
 use crate::{prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use prodex_runtime_doctor::read_runtime_log_tail;
+use serde_json::Value;
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::env;
@@ -117,19 +119,19 @@ fn print_upstream_payload_event(event: &UpstreamPayloadEvent, json: bool) -> Res
             .request
             .map(|request| request.to_string())
             .unwrap_or_else(|| "-".to_string());
-        println!(
-            "{} upstream profile={} request={} transport={} route={} bytes={} logged={} truncated={}",
-            event.timestamp,
-            event.profile,
-            request,
-            event.transport,
-            event.route,
-            event.bytes,
-            event.logged_bytes,
-            event.truncated,
-        );
-        for line in event.payload.lines() {
-            println!("  {line}");
+        let width = current_log_width();
+        let meta = [
+            ("profile", event.profile.clone()),
+            ("request", request),
+            ("transport", event.transport.clone()),
+            ("route", event.route.clone()),
+            ("bytes", event.bytes.to_string()),
+            ("logged", event.logged_bytes.to_string()),
+            ("truncated", event.truncated.to_string()),
+        ];
+        let body = render_upstream_payload_lines(&event.payload, width);
+        for line in render_log_block(&event.timestamp, "upstream payload", &meta, &body, width) {
+            println!("{line}");
         }
     }
     io::stdout()
@@ -206,6 +208,223 @@ fn upstream_payload_event_from_runtime_line(line: &str) -> Option<UpstreamPayloa
     })
 }
 
+fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<Value>(payload) else {
+        return render_text_body(payload, width);
+    };
+
+    let mut lines = Vec::new();
+    if let Some(object) = value.as_object() {
+        let mut summary = Vec::new();
+        for key in [
+            "model",
+            "stream",
+            "store",
+            "tool_choice",
+            "parallel_tool_calls",
+            "prompt_cache_key",
+        ] {
+            if let Some(value) = object.get(key).and_then(short_json_value) {
+                summary.push(format!("{key}={value}"));
+            }
+        }
+        if !summary.is_empty() {
+            push_wrapped_line(&mut lines, &summary.join(" "), width);
+        }
+
+        if let Some(metadata) = object.get("client_metadata").and_then(Value::as_object) {
+            let mut metadata_fields = Vec::new();
+            for key in [
+                "session_id",
+                "thread_id",
+                "turn_id",
+                "x-codex-window-id",
+                "x-codex-installation-id",
+            ] {
+                if let Some(value) = metadata.get(key).and_then(Value::as_str) {
+                    metadata_fields.push(format!("{key}={value}"));
+                }
+            }
+            if !metadata_fields.is_empty() {
+                push_wrapped_line(
+                    &mut lines,
+                    &format!("client_metadata: {}", metadata_fields.join(" ")),
+                    width,
+                );
+            }
+        }
+
+        if let Some(instructions) = object.get("instructions").and_then(Value::as_str) {
+            push_text_block(&mut lines, "instructions", instructions, width);
+        }
+
+        if let Some(input) = object.get("input") {
+            render_input_value(&mut lines, input, width);
+        }
+
+        if let Some(tools) = object.get("tools").and_then(Value::as_array) {
+            let names = tools.iter().filter_map(tool_name).collect::<Vec<_>>();
+            let summary = if names.is_empty() {
+                format!("tools: {}", tools.len())
+            } else {
+                format!("tools: {} {}", tools.len(), names.join(", "))
+            };
+            push_wrapped_line(&mut lines, &summary, width);
+        }
+    }
+
+    if lines.is_empty() {
+        serde_json::to_string_pretty(&value)
+            .map(|pretty| render_text_body(&pretty, width))
+            .unwrap_or_else(|_| render_text_body(payload, width))
+    } else {
+        lines
+    }
+}
+
+fn render_input_value(lines: &mut Vec<String>, input: &Value, width: usize) {
+    match input {
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                render_input_item(lines, index, item, width);
+            }
+        }
+        Value::String(text) => push_text_block(lines, "input", text, width),
+        _ => push_text_block(
+            lines,
+            "input",
+            &serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string()),
+            width,
+        ),
+    }
+}
+
+fn render_input_item(lines: &mut Vec<String>, index: usize, item: &Value, width: usize) {
+    let Some(object) = item.as_object() else {
+        push_text_block(
+            lines,
+            &format!("input[{index}]"),
+            &readable_json_value(item),
+            width,
+        );
+        return;
+    };
+
+    let item_type = object
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("message");
+    let role = object
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or(item_type);
+    match item_type {
+        "function_call" => {
+            let name = object.get("name").and_then(Value::as_str).unwrap_or("tool");
+            let text = object
+                .get("arguments")
+                .map(readable_json_string_or_value)
+                .unwrap_or_default();
+            push_text_block(
+                lines,
+                &format!("input[{index}] tool-call:{name}"),
+                &text,
+                width,
+            );
+        }
+        "function_call_output" => {
+            let text = object
+                .get("output")
+                .map(readable_json_string_or_value)
+                .unwrap_or_default();
+            push_text_block(lines, &format!("input[{index}] tool-output"), &text, width);
+        }
+        _ => {
+            let text = object
+                .get("content")
+                .map(readable_content_text)
+                .filter(|text| !text.trim().is_empty())
+                .or_else(|| {
+                    object
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| readable_json_value(item));
+            push_text_block(lines, &format!("input[{index}] {role}"), &text, width);
+        }
+    }
+}
+
+fn readable_content_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(readable_content_text)
+            .filter(|text| !text.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Object(object) => object
+            .get("text")
+            .or_else(|| object.get("content"))
+            .or_else(|| object.get("input_text"))
+            .or_else(|| object.get("output_text"))
+            .map(readable_content_text)
+            .unwrap_or_else(|| readable_json_value(value)),
+        _ => readable_json_value(value),
+    }
+}
+
+fn readable_json_string_or_value(value: &Value) -> String {
+    if let Some(text) = value.as_str() {
+        return serde_json::from_str::<Value>(text)
+            .ok()
+            .and_then(|value| serde_json::to_string_pretty(&value).ok())
+            .unwrap_or_else(|| text.to_string());
+    }
+    readable_json_value(value)
+}
+
+fn readable_json_value(value: &Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn short_json_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) if value.len() <= 80 => Some(value.clone()),
+        Value::String(value) => Some(format!("{}...", value.chars().take(77).collect::<String>())),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn tool_name(value: &Value) -> Option<String> {
+    let object = value.as_object()?;
+    object
+        .get("name")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            object
+                .get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string)
+}
+
+fn push_text_block(lines: &mut Vec<String>, label: &str, text: &str, width: usize) {
+    lines.push(format!("{label}:"));
+    for line in render_text_body(text, width) {
+        lines.push(format!("  {line}"));
+    }
+}
+
+fn push_wrapped_line(lines: &mut Vec<String>, text: &str, width: usize) {
+    lines.extend(render_text_body(text, width));
+}
+
 struct ParsedRuntimeLogLine {
     timestamp: String,
     event: Option<String>,
@@ -258,7 +477,8 @@ fn parse_runtime_log_line(line: &str) -> Option<ParsedRuntimeLogLine> {
 mod tests {
     use super::{
         BASE64_STANDARD, FollowedLog, SystemTime, UNIX_EPOCH, env, fs,
-        read_new_upstream_payload_events, upstream_payload_event_from_runtime_line,
+        read_new_upstream_payload_events, render_upstream_payload_lines,
+        upstream_payload_event_from_runtime_line,
     };
     use base64::Engine;
     use std::io::Write;
@@ -304,6 +524,61 @@ mod tests {
         let event = upstream_payload_event_from_runtime_line(&line).unwrap();
         assert_eq!(event.request, Some(9));
         assert_eq!(event.payload, "{\"input\":\"hello <EMAIL_ADDRESS>\"}");
+    }
+
+    #[test]
+    fn renders_upstream_payload_as_readable_blocks() {
+        let payload = serde_json::json!({
+            "model": "gpt-5-codex",
+            "stream": true,
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "Please inspect the latest runtime log and make upstream output readable."
+                        }
+                    ]
+                },
+                {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\",\"workdir\":\"/repo\"}"
+                }
+            ],
+            "tools": [
+                { "type": "function", "name": "exec_command" },
+                { "type": "function", "name": "view_image" }
+            ],
+            "client_metadata": {
+                "session_id": "session-1",
+                "thread_id": "thread-1",
+                "turn_id": "turn-1"
+            }
+        })
+        .to_string();
+
+        let lines = render_upstream_payload_lines(&payload, 88);
+        let rendered = lines.join("\n");
+
+        assert!(rendered.contains("model=gpt-5-codex stream=true"));
+        assert!(rendered.contains("client_metadata: session_id=session-1 thread_id=thread-1"));
+        assert!(rendered.contains("input[0] user:"));
+        assert!(rendered.contains("Please inspect the latest runtime log"));
+        assert!(rendered.contains("input[1] tool-call:exec_command:"));
+        assert!(rendered.contains("\"cmd\": \"pwd\""));
+        assert!(rendered.contains("tools: 2 exec_command, view_image"));
+    }
+
+    #[test]
+    fn pretty_prints_unknown_json_payloads() {
+        let lines = render_upstream_payload_lines(r#"{"outer":{"inner":"value"}}"#, 80);
+        let rendered = lines.join("\n");
+
+        assert!(rendered.contains("\"outer\": {"));
+        assert!(rendered.contains("\"inner\": \"value\""));
     }
 
     #[test]
