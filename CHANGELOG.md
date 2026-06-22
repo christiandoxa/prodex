@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.204.0 - 2026-06-22
+
+### Runtime
+
+- Stabilize runtime profile reporting (`e960033`)
+
 ## 0.203.0 - 2026-06-22
 
 ### Runtime
@@ -78,9 +84,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Restore Anthropic crate boundary (`bf70a02`)
-
-## 0.192.0 - 2026-06-18
-
-### CLI
-
-- Guide full optimizer stack (`465a339`)
