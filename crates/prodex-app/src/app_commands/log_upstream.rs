@@ -1,5 +1,7 @@
 use super::collect_recent_runtime_log_paths;
-use super::log_format::{current_log_width, render_log_block, render_text_body};
+use super::log_format::{
+    current_log_width, local_log_timestamp, render_log_block, render_text_body,
+};
 use crate::{prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use base64::Engine;
@@ -170,7 +172,7 @@ fn upstream_payload_event_from_runtime_line(line: &str) -> Option<UpstreamPayloa
     let payload_bytes = BASE64_STANDARD.decode(payload_b64).ok()?;
     let payload = String::from_utf8_lossy(&payload_bytes).into_owned();
     Some(UpstreamPayloadEvent {
-        timestamp: parsed.timestamp,
+        timestamp: local_log_timestamp(&parsed.timestamp),
         request: parsed
             .fields
             .get("request")
@@ -476,7 +478,7 @@ fn parse_runtime_log_line(line: &str) -> Option<ParsedRuntimeLogLine> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BASE64_STANDARD, FollowedLog, SystemTime, UNIX_EPOCH, env, fs,
+        BASE64_STANDARD, FollowedLog, SystemTime, UNIX_EPOCH, env, fs, local_log_timestamp,
         read_new_upstream_payload_events, render_upstream_payload_lines,
         upstream_payload_event_from_runtime_line,
     };
@@ -492,7 +494,10 @@ mod tests {
         );
 
         let event = upstream_payload_event_from_runtime_line(&line).unwrap();
-        assert_eq!(event.timestamp, "2026-06-20 12:00:00.000 +07:00");
+        assert_eq!(
+            event.timestamp,
+            local_log_timestamp("2026-06-20 12:00:00.000 +07:00")
+        );
         assert_eq!(event.request, Some(9));
         assert_eq!(event.transport, "websocket");
         assert_eq!(event.route, "websocket");

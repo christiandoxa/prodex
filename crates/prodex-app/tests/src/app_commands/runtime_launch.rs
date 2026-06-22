@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "runtime_launch/arg0_cleanup.rs"]
 mod arg0_cleanup;
+#[path = "runtime_launch/preflight.rs"]
+mod preflight;
 #[path = "runtime_launch/profile_selection.rs"]
 mod profile_selection;
 #[path = "runtime_launch/provider_rewrite.rs"]
@@ -724,94 +726,6 @@ fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
     let message = format!("{err:#}");
     assert!(message.contains(SUPER_LOCAL_PROVIDER_ID));
     assert!(message.contains("prodex claude"));
-}
-
-#[test]
-fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
-    let report = RunProfileProbeReport {
-        name: "main".to_string(),
-        order_index: 0,
-        auth: AuthSummary {
-            label: "chatgpt".to_string(),
-            quota_compatible: true,
-        },
-        result: Ok(UsageResponse {
-            email: None,
-            plan_type: None,
-            rate_limit: None,
-            code_review_rate_limit: None,
-            additional_rate_limits: Vec::new(),
-        }),
-    };
-
-    let err = handle_no_ready_runtime_profiles(
-        &report,
-        "main",
-        &RuntimeLaunchRequest {
-            profile: None,
-            allow_auto_rotate: true,
-            skip_quota_check: false,
-            base_url: None,
-            upstream_no_proxy: false,
-            include_code_review: false,
-            smart_context_enabled: false,
-            presidio_redaction_enabled: false,
-            model_context_window_tokens: None,
-            gemini_thinking_budget_tokens: None,
-            force_runtime_proxy: false,
-            model_provider_override: None,
-            profile_v2_name: None,
-            external_provider: None,
-            external_provider_api_key: None,
-        },
-    )
-    .expect_err("blocked preflight should return an error instead of exiting");
-
-    let message = format!("{err:#}");
-    assert!(message.contains("quota preflight blocked profile 'main'"));
-    assert!(message.contains("no ready profile"));
-    assert_eq!(
-        err.downcast_ref::<crate::command_dispatch::ProdexCommandExit>()
-            .expect("blocked preflight should carry an explicit exit code")
-            .code(),
-        2
-    );
-}
-
-#[test]
-fn no_ready_runtime_profiles_continues_when_probe_failed() {
-    let report = RunProfileProbeReport {
-        name: "main".to_string(),
-        order_index: 0,
-        auth: AuthSummary {
-            label: "chatgpt".to_string(),
-            quota_compatible: true,
-        },
-        result: Err("network down".to_string()),
-    };
-
-    handle_no_ready_runtime_profiles(
-        &report,
-        "main",
-        &RuntimeLaunchRequest {
-            profile: None,
-            allow_auto_rotate: true,
-            skip_quota_check: false,
-            base_url: None,
-            upstream_no_proxy: false,
-            include_code_review: false,
-            smart_context_enabled: false,
-            presidio_redaction_enabled: false,
-            model_context_window_tokens: None,
-            gemini_thinking_budget_tokens: None,
-            force_runtime_proxy: false,
-            model_provider_override: None,
-            profile_v2_name: None,
-            external_provider: None,
-            external_provider_api_key: None,
-        },
-    )
-    .expect("probe failure should still continue without quota gate");
 }
 
 fn write_state(root: &Path, state: AppState) {

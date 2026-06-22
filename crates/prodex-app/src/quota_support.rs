@@ -15,9 +15,10 @@ use self::virtual_provider::collect_virtual_quota_reports;
 pub(super) use self::watch::*;
 pub(crate) use prodex_core::format_binary_resolution;
 pub(crate) use prodex_quota::{
-    AuthSummary, BlockedLimit, ExternalQuotaDetail, ExternalQuotaInfo, GeminiQuotaInfo,
-    QuotaAuthFilter, UsageAuth,
+    AuthSummary, ExternalQuotaDetail, ExternalQuotaInfo, GeminiQuotaInfo, QuotaAuthFilter,
+    UsageAuth,
 };
+use prodex_runtime_doctor::read_runtime_log_tail;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProviderQuotaSnapshot {
@@ -202,6 +203,7 @@ pub(crate) fn collect_quota_reports_with_filters(
     auth_filter: &QuotaAuthFilter,
     provider_filter: QuotaProviderFilter,
 ) -> Vec<QuotaReport> {
+    let current_profile = quota_current_profile_name(state);
     let jobs = state
         .profiles
         .iter()
@@ -212,7 +214,7 @@ pub(crate) fn collect_quota_reports_with_filters(
             let auth = profile.provider.auth_summary(&profile.codex_home);
             auth_filter.matches(&auth).then(|| QuotaFetchJob {
                 name: name.clone(),
-                active: state.active_profile.as_deref() == Some(name.as_str()),
+                active: current_profile.as_deref() == Some(name.as_str()),
                 auth,
                 provider: profile.provider.clone(),
                 codex_home: profile.codex_home.clone(),
@@ -248,6 +250,103 @@ pub(crate) fn collect_quota_reports_with_filters(
         provider_filter,
     ));
     reports
+}
+
+const QUOTA_RUNTIME_LOG_TAIL_BYTES: usize = 1024 * 1024;
+const QUOTA_RUNTIME_PROFILE_EVENTS: &[&str] = &["token_usage", "profile_commit"];
+
+fn quota_current_profile_name(state: &AppState) -> Option<String> {
+    quota_current_runtime_profile_name(state).or_else(|| quota_state_current_profile_name(state))
+}
+
+fn quota_state_current_profile_name(state: &AppState) -> Option<String> {
+    state
+        .last_run_selected_at
+        .iter()
+        .filter(|(profile_name, _)| state.profiles.contains_key(*profile_name))
+        .max_by(|(left_name, left_at), (right_name, right_at)| {
+            left_at
+                .cmp(right_at)
+                .then_with(|| left_name.cmp(right_name))
+        })
+        .map(|(profile_name, _)| profile_name.clone())
+        .or_else(|| {
+            state
+                .active_profile
+                .clone()
+                .filter(|profile_name| state.profiles.contains_key(profile_name))
+        })
+}
+
+fn quota_current_runtime_profile_name(state: &AppState) -> Option<String> {
+    quota_current_runtime_profile_name_from_paths(
+        state,
+        prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()),
+    )
+}
+
+fn quota_current_runtime_profile_name_from_paths<I>(state: &AppState, paths: I) -> Option<String>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let mut paths: Vec<PathBuf> = paths.into_iter().collect();
+    paths.sort_by(|left, right| {
+        let left_modified = left
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        let right_modified = right
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        left_modified
+            .cmp(&right_modified)
+            .then_with(|| left.cmp(right))
+    });
+
+    let mut current = None;
+    for path in paths {
+        let Ok(tail) = read_runtime_log_tail(&path, QUOTA_RUNTIME_LOG_TAIL_BYTES) else {
+            continue;
+        };
+        let tail = String::from_utf8_lossy(&tail);
+        for line in tail.lines() {
+            let Some(profile_name) = quota_runtime_profile_from_line(line) else {
+                continue;
+            };
+            if state.profiles.contains_key(profile_name.as_str()) {
+                current = Some(profile_name);
+            }
+        }
+    }
+    current
+}
+
+fn quota_runtime_profile_from_line(line: &str) -> Option<String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+        let event = value.get("event").and_then(serde_json::Value::as_str)?;
+        if !QUOTA_RUNTIME_PROFILE_EVENTS.contains(&event) {
+            return None;
+        }
+        return value
+            .get("fields")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|fields| fields.get("profile"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+    }
+
+    let message = line
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once("] ").map(|(_, message)| message))
+        .unwrap_or(line);
+    let event = runtime_proxy_crate::runtime_proxy_log_event(message)?;
+    if !QUOTA_RUNTIME_PROFILE_EVENTS.contains(&event) {
+        return None;
+    }
+    runtime_proxy_crate::runtime_proxy_log_fields(message)
+        .get("profile")
+        .cloned()
 }
 
 pub(crate) fn collect_profile_summaries(state: &AppState) -> Vec<ProfileSummaryReport> {
@@ -411,4 +510,115 @@ pub(crate) fn usage_url(base_url: &str) -> String {
 
 pub(crate) fn format_response_body(body: &[u8]) -> String {
     prodex_quota::format_response_body(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn profile(path: &str) -> ProfileEntry {
+        ProfileEntry {
+            codex_home: PathBuf::from(path),
+            managed: true,
+            email: None,
+            provider: ProfileProvider::Openai,
+        }
+    }
+
+    fn test_runtime_log_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("prodex-quota-test-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    #[test]
+    fn quota_current_profile_prefers_latest_runtime_selection() {
+        let state = AppState {
+            active_profile: Some("active".to_string()),
+            profiles: BTreeMap::from([
+                ("active".to_string(), profile("/tmp/active")),
+                ("runtime".to_string(), profile("/tmp/runtime")),
+            ]),
+            last_run_selected_at: BTreeMap::from([
+                ("active".to_string(), 10),
+                ("runtime".to_string(), 20),
+            ]),
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            quota_current_profile_name(&state).as_deref(),
+            Some("runtime")
+        );
+    }
+
+    #[test]
+    fn quota_current_profile_falls_back_to_active_profile() {
+        let state = AppState {
+            active_profile: Some("active".to_string()),
+            profiles: BTreeMap::from([("active".to_string(), profile("/tmp/active"))]),
+            last_run_selected_at: BTreeMap::from([("deleted".to_string(), 30)]),
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            quota_current_profile_name(&state).as_deref(),
+            Some("active")
+        );
+    }
+
+    #[test]
+    fn quota_current_profile_prefers_runtime_log_usage() {
+        let log_path = test_runtime_log_path("prodex-runtime-test.log");
+        let mut log = fs::File::create(&log_path).unwrap();
+        writeln!(
+            log,
+            "[2026-06-22 16:00:00.000 +07:00] token_usage request=1 route=websocket transport=websocket profile=runtime source=responses_websocket"
+        )
+        .unwrap();
+
+        let state = AppState {
+            active_profile: Some("active".to_string()),
+            profiles: BTreeMap::from([
+                ("active".to_string(), profile("/tmp/active")),
+                ("runtime".to_string(), profile("/tmp/runtime")),
+            ]),
+            last_run_selected_at: BTreeMap::from([("active".to_string(), 30)]),
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            quota_current_runtime_profile_name_from_paths(&state, vec![log_path]).as_deref(),
+            Some("runtime")
+        );
+    }
+
+    #[test]
+    fn quota_runtime_log_ignores_unknown_profiles() {
+        let log_path = test_runtime_log_path("prodex-runtime-test.log");
+        let mut log = fs::File::create(&log_path).unwrap();
+        writeln!(
+            log,
+            "[2026-06-22 16:00:00.000 +07:00] token_usage request=1 route=websocket transport=websocket profile=deleted source=responses_websocket"
+        )
+        .unwrap();
+
+        let state = AppState {
+            active_profile: Some("active".to_string()),
+            profiles: BTreeMap::from([("active".to_string(), profile("/tmp/active"))]),
+            ..AppState::default()
+        };
+
+        assert_eq!(
+            quota_current_runtime_profile_name_from_paths(&state, vec![log_path]),
+            None
+        );
+    }
 }

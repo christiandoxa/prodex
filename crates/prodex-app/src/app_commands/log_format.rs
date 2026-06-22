@@ -1,5 +1,18 @@
+use chrono::{DateTime, Local};
+
 pub(super) fn current_log_width() -> usize {
     terminal_ui::current_cli_width().max(60)
+}
+
+pub(super) fn local_log_timestamp(timestamp: &str) -> String {
+    parse_log_timestamp(timestamp)
+        .map(|datetime| {
+            datetime
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S%.3f %:z")
+                .to_string()
+        })
+        .unwrap_or_else(|| timestamp.to_string())
 }
 
 pub(super) fn render_log_block(
@@ -23,6 +36,13 @@ pub(super) fn render_log_block(
 pub(super) fn render_text_body(text: &str, width: usize) -> Vec<String> {
     let body_width = width.saturating_sub(4).max(20);
     terminal_ui::wrap_text(text, body_width)
+}
+
+fn parse_log_timestamp(timestamp: &str) -> Option<DateTime<chrono::FixedOffset>> {
+    DateTime::parse_from_rfc3339(timestamp)
+        .or_else(|_| DateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S%.f %:z"))
+        .or_else(|_| DateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S %:z"))
+        .ok()
 }
 
 fn render_header(timestamp: &str, title: &str, width: usize) -> String {
@@ -60,6 +80,7 @@ fn render_body(body: &[String], width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{DateTime, Local};
 
     #[test]
     fn renders_block_with_header_meta_and_body() {
@@ -79,5 +100,23 @@ mod tests {
         assert!(rendered.contains("profile=main"));
         assert!(rendered.contains("request=7"));
         assert!(rendered.contains("| hello terminal"));
+    }
+
+    #[test]
+    fn local_log_timestamp_converts_rfc3339_to_local_time() {
+        let input = "2026-06-20T01:00:00Z";
+        let expected = DateTime::parse_from_rfc3339(input)
+            .unwrap()
+            .with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M:%S%.3f %:z")
+            .to_string();
+
+        assert_eq!(local_log_timestamp(input), expected);
+        assert_ne!(local_log_timestamp(input), input);
+    }
+
+    #[test]
+    fn local_log_timestamp_keeps_unknown_values() {
+        assert_eq!(local_log_timestamp("-"), "-");
     }
 }

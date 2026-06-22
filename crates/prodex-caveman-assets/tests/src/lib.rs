@@ -86,6 +86,49 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
     let _ = fs::remove_dir_all(dir);
 }
 
+#[test]
+fn prepare_prodex_overlay_home_drops_inherited_codex_apps_cache() {
+    let managed = temp_dir("overlay-managed");
+    let base = temp_dir("overlay-base");
+    fs::create_dir_all(base.join("cache/codex_apps_server_info")).expect("server cache dir");
+    fs::create_dir_all(base.join("cache/codex_apps_tools")).expect("tools cache dir");
+    fs::create_dir_all(base.join("cache/codex_app_directory")).expect("directory cache dir");
+    fs::create_dir_all(base.join("cache/unrelated")).expect("unrelated cache dir");
+    fs::write(
+        base.join("cache/codex_apps_server_info/server.json"),
+        "{\"name\":\"codex-connectors-mcp\"}",
+    )
+    .expect("server cache");
+    fs::write(
+        base.join("cache/codex_apps_tools/tools.json"),
+        "{\"tools\":[]}",
+    )
+    .expect("tools cache");
+    fs::write(
+        base.join("cache/codex_app_directory/apps.json"),
+        "{\"apps\":[]}",
+    )
+    .expect("directory cache");
+    fs::write(base.join("cache/unrelated/keep.json"), "{}").expect("unrelated cache");
+
+    let overlay =
+        prepare_prodex_overlay_home(&managed, &base).expect("overlay home should be prepared");
+
+    assert!(!overlay.join("cache/codex_apps_server_info").exists());
+    assert!(!overlay.join("cache/codex_apps_tools").exists());
+    assert!(!overlay.join("cache/codex_app_directory").exists());
+    assert!(overlay.join("cache/unrelated/keep.json").is_file());
+    assert!(
+        base.join("cache/codex_apps_server_info/server.json")
+            .is_file()
+    );
+    assert!(base.join("cache/codex_apps_tools/tools.json").is_file());
+    assert!(base.join("cache/codex_app_directory/apps.json").is_file());
+
+    let _ = fs::remove_dir_all(managed);
+    let _ = fs::remove_dir_all(base);
+}
+
 #[cfg(unix)]
 #[test]
 fn configure_rtk_codex_home_localizes_agents_symlink() {

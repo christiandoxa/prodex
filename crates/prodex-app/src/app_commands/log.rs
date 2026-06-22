@@ -1,5 +1,7 @@
 use super::collect_recent_runtime_log_paths;
-use super::log_format::{current_log_width, render_log_block, render_text_body};
+use super::log_format::{
+    current_log_width, local_log_timestamp, render_log_block, render_text_body,
+};
 use super::log_upstream::stream_upstream_payload_events;
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
@@ -72,7 +74,8 @@ fn latest_token_usage_event() -> Option<InfoTokenUsageEvent> {
             Err(_) => continue,
         };
         for line in String::from_utf8_lossy(&tail).lines() {
-            let Some(event) = info_token_usage_event_from_line(line) else {
+            let Some(event) = info_token_usage_event_from_line(line).map(local_token_usage_event)
+            else {
                 continue;
             };
             if latest
@@ -172,7 +175,7 @@ fn read_new_token_usage_events(path: &Path, state: &mut FollowedLog, json: bool)
     state.pending.drain(..complete_len);
     for line in complete.lines() {
         if let Some(event) = info_token_usage_event_from_line(line) {
-            print_token_usage_event(&event, json)?;
+            print_token_usage_event(&local_token_usage_event(event), json)?;
         }
     }
     Ok(())
@@ -210,7 +213,7 @@ fn read_new_transcript_events(path: &Path, state: &mut FollowedLog) -> Result<()
     state.pending.drain(..complete_len);
     for line in complete.lines() {
         for event in transcript_events_from_session_line(line) {
-            print_transcript_event(&event)?;
+            print_transcript_event(&local_transcript_event(event))?;
         }
     }
     Ok(())
@@ -249,6 +252,11 @@ fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -> Result<()
         .context("failed to flush token log output")
 }
 
+fn local_token_usage_event(mut event: InfoTokenUsageEvent) -> InfoTokenUsageEvent {
+    event.timestamp = local_log_timestamp(&event.timestamp);
+    event
+}
+
 fn print_transcript_event(event: &TranscriptEvent) -> Result<()> {
     let width = current_log_width();
     let body = render_text_body(&event.text, width);
@@ -266,6 +274,11 @@ fn print_transcript_event(event: &TranscriptEvent) -> Result<()> {
         .context("failed to flush transcript log output")
 }
 
+fn local_transcript_event(mut event: TranscriptEvent) -> TranscriptEvent {
+    event.timestamp = local_log_timestamp(&event.timestamp);
+    event
+}
+
 fn latest_transcript_event() -> Result<Option<TranscriptEvent>> {
     let mut latest = None;
     for path in recent_session_log_paths()? {
@@ -275,6 +288,7 @@ fn latest_transcript_event() -> Result<Option<TranscriptEvent>> {
         };
         for line in String::from_utf8_lossy(&tail).lines() {
             for event in transcript_events_from_session_line(line) {
+                let event = local_transcript_event(event);
                 if latest
                     .as_ref()
                     .is_none_or(|current: &TranscriptEvent| event.timestamp >= current.timestamp)
@@ -345,6 +359,7 @@ fn transcript_events_from_session_line(line: &str) -> Vec<TranscriptEvent> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("-")
         .to_string();
+    let timestamp = local_log_timestamp(&timestamp);
     let Some(record_type) = value.get("type").and_then(serde_json::Value::as_str) else {
         return Vec::new();
     };
@@ -481,7 +496,7 @@ mod tests {
         assert_eq!(
             transcript_events_from_session_line(meta),
             vec![TranscriptEvent {
-                timestamp: "2026-06-20T01:00:00Z".to_string(),
+                timestamp: local_log_timestamp("2026-06-20T01:00:00Z"),
                 source: "prompt-engineering".to_string(),
                 text: "System prompt.".to_string(),
             }]
@@ -489,7 +504,7 @@ mod tests {
         assert_eq!(
             transcript_events_from_session_line(user),
             vec![TranscriptEvent {
-                timestamp: "2026-06-20T01:00:01Z".to_string(),
+                timestamp: local_log_timestamp("2026-06-20T01:00:01Z"),
                 source: "user".to_string(),
                 text: "Hello model.".to_string(),
             }]
@@ -497,7 +512,7 @@ mod tests {
         assert_eq!(
             transcript_events_from_session_line(assistant),
             vec![TranscriptEvent {
-                timestamp: "2026-06-20T01:00:02Z".to_string(),
+                timestamp: local_log_timestamp("2026-06-20T01:00:02Z"),
                 source: "assistant".to_string(),
                 text: "Hello user.".to_string(),
             }]
@@ -505,7 +520,7 @@ mod tests {
         assert_eq!(
             transcript_events_from_session_line(tool),
             vec![TranscriptEvent {
-                timestamp: "2026-06-20T01:00:03Z".to_string(),
+                timestamp: local_log_timestamp("2026-06-20T01:00:03Z"),
                 source: "tool-call:exec_command".to_string(),
                 text: "{\"cmd\":\"pwd\"}".to_string(),
             }]

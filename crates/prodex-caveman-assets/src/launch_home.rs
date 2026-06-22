@@ -37,6 +37,7 @@ fn prepare_prodex_overlay_home_internal(
     let overlay_home = create_temporary_prodex_overlay_home(managed_profiles_root)?;
     if let Err(err) = prodex_shared_codex_fs::copy_codex_home(base_codex_home, &overlay_home)
         .and_then(|_| {
+            remove_prodex_overlay_codex_apps_cache(&overlay_home)?;
             share_prodex_overlay_chat_history(
                 base_codex_home,
                 &overlay_home,
@@ -50,6 +51,26 @@ fn prepare_prodex_overlay_home_internal(
         return Err(err);
     }
     Ok(overlay_home)
+}
+
+fn remove_prodex_overlay_codex_apps_cache(codex_home: &Path) -> Result<()> {
+    for relative in [
+        "cache/codex_apps_server_info",
+        "cache/codex_apps_tools",
+        "cache/codex_app_directory",
+    ] {
+        let path = codex_home.join(relative);
+        if !path.exists() {
+            continue;
+        }
+        fs::remove_dir_all(&path).with_context(|| {
+            format!(
+                "failed to remove inherited Codex app connector cache {}",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 pub fn prepare_caveman_launch_home(
