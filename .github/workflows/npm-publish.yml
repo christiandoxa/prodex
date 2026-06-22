@@ -167,10 +167,22 @@ jobs:
             sleep "$((attempt * 10))"
           done
 
+      - name: Install Linux ARM cross compiler
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build prodex
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
           if [ "${{ matrix.use-cross }}" = "true" ]; then
             cross build --release --locked --target "${{ matrix.target }}"
           else
