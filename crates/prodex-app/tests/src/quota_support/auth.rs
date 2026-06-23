@@ -26,6 +26,25 @@ fn non_openai_model_provider_disables_quota_summary() {
     assert!(!summary.quota_compatible);
 }
 
+#[test]
+fn reset_credit_consume_response_defaults_missing_outcome_to_reset() {
+    let response: RateLimitResetCreditConsumeResponse =
+        serde_json::from_str(r#"{"rate_limit_reset_credits":{"available_count":0}}"#).unwrap();
+
+    assert_eq!(response.outcome, RateLimitResetCreditConsumeOutcome::Reset);
+}
+
+#[test]
+fn reset_credit_consume_response_preserves_explicit_outcome() {
+    let response: RateLimitResetCreditConsumeResponse =
+        serde_json::from_str(r#"{"outcome":"nothingToReset"}"#).unwrap();
+
+    assert_eq!(
+        response.outcome,
+        RateLimitResetCreditConsumeOutcome::NothingToReset
+    );
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!(
         "prodex-auth-summary-{name}-{}-{}",

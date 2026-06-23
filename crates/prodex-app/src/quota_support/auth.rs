@@ -34,7 +34,12 @@ pub(crate) enum RateLimitResetCreditConsumeOutcome {
 
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct RateLimitResetCreditConsumeResponse {
+    #[serde(default = "default_rate_limit_reset_credit_consume_outcome")]
     pub(crate) outcome: RateLimitResetCreditConsumeOutcome,
+}
+
+fn default_rate_limit_reset_credit_consume_outcome() -> RateLimitResetCreditConsumeOutcome {
+    RateLimitResetCreditConsumeOutcome::Reset
 }
 
 #[derive(Debug, Serialize)]
