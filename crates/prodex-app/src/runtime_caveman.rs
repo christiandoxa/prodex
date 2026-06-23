@@ -57,6 +57,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),
             allow_auto_rotate: !self.args.no_auto_rotate,
+            auto_redeem: self.args.auto_redeem,
             skip_quota_check: self.args.skip_quota_check,
             base_url: self.args.base_url.as_deref(),
             upstream_no_proxy: self.args.no_proxy,

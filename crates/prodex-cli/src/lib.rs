@@ -119,6 +119,11 @@ pub enum Commands {
     )]
     Quota(QuotaArgs),
     #[command(
+        about = "Redeem one reset credit manually for a named OpenAI/Codex profile.",
+        after_help = CLI_REDEEM_AFTER_HELP
+    )]
+    Redeem(RedeemArgs),
+    #[command(
         about = "Serve a local browser dashboard for profiles, active account, and quota usage."
     )]
     Dashboard(DashboardArgs),
@@ -316,6 +321,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "logout"
             | "update"
             | "quota"
+            | "redeem"
             | "dashboard"
             | "run"
             | "caveman"

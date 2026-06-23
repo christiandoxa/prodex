@@ -7,10 +7,11 @@ use crate::{
 };
 
 use super::{
-    RuntimeProfileInFlightGuard, RuntimeProxyRequest, RuntimeRotationProxyShared,
-    RuntimeUpstreamWebSocket, RuntimeWebsocketAttempt, RuntimeWebsocketConnectResult,
-    RuntimeWebsocketSessionState, acquire_runtime_profile_inflight_guard,
-    connect_runtime_proxy_upstream_websocket, runtime_proxy_log, runtime_proxy_log_field,
+    RuntimeAutoRedeemResetCreditOutcome, RuntimeProfileInFlightGuard, RuntimeProxyRequest,
+    RuntimeRotationProxyShared, RuntimeRouteKind, RuntimeUpstreamWebSocket,
+    RuntimeWebsocketAttempt, RuntimeWebsocketConnectResult, RuntimeWebsocketSessionState,
+    acquire_runtime_profile_inflight_guard, connect_runtime_proxy_upstream_websocket,
+    runtime_auto_redeem_usage_limit_reset_credit, runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_structured_log_message, runtime_websocket_precommit_hold_promotion_allowed,
     runtime_websocket_precommit_transport_retry_allowed,
 };
@@ -131,47 +132,72 @@ pub(super) fn start_runtime_websocket_upstream_session(
                 turn_state_override
             ),
         );
-        match connect_runtime_proxy_upstream_websocket(
-            request_id,
-            handshake_request,
-            shared,
-            profile_name,
-            turn_state_override,
-        ) {
-            Ok(RuntimeWebsocketConnectResult::Connected { socket, turn_state }) => (
-                socket,
-                turn_state,
-                Some(acquire_runtime_profile_inflight_guard(
-                    shared,
-                    profile_name,
-                    "websocket_session",
-                )?),
-            ),
-            Ok(RuntimeWebsocketConnectResult::QuotaBlocked(payload)) => {
-                return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
-                    RuntimeWebsocketAttempt::QuotaBlocked {
-                        profile_name: profile_name.to_string(),
-                        payload,
-                    },
-                ));
+        let mut auto_redeem_attempted = false;
+        loop {
+            match connect_runtime_proxy_upstream_websocket(
+                request_id,
+                handshake_request,
+                shared,
+                profile_name,
+                turn_state_override,
+            ) {
+                Ok(RuntimeWebsocketConnectResult::Connected { socket, turn_state }) => {
+                    break (
+                        socket,
+                        turn_state,
+                        Some(acquire_runtime_profile_inflight_guard(
+                            shared,
+                            profile_name,
+                            "websocket_session",
+                        )?),
+                    );
+                }
+                Ok(RuntimeWebsocketConnectResult::QuotaBlocked(payload)) => {
+                    if !auto_redeem_attempted
+                        && runtime_auto_redeem_usage_limit_reset_credit(
+                            shared,
+                            profile_name,
+                            RuntimeRouteKind::Websocket,
+                            "websocket_connect_quota_blocked",
+                            request_previous_response_id.is_none()
+                                && request_session_id.is_none()
+                                && request_turn_state.is_none(),
+                        )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+                    {
+                        auto_redeem_attempted = true;
+                        runtime_proxy_log(
+                            shared,
+                            format!(
+                                "request={request_id} transport=websocket quota_blocked_auto_redeemed_retry route=websocket"
+                            ),
+                        );
+                        continue;
+                    }
+                    return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
+                        RuntimeWebsocketAttempt::QuotaBlocked {
+                            profile_name: profile_name.to_string(),
+                            payload,
+                        },
+                    ));
+                }
+                Ok(RuntimeWebsocketConnectResult::Overloaded(payload)) => {
+                    return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
+                        RuntimeWebsocketAttempt::Overloaded {
+                            profile_name: profile_name.to_string(),
+                            payload,
+                        },
+                    ));
+                }
+                Err(_err) if precommit_transport_retry_allowed => {
+                    return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
+                        RuntimeWebsocketAttempt::TransportFailed {
+                            profile_name: profile_name.to_string(),
+                            stage: "connect",
+                        },
+                    ));
+                }
+                Err(err) => return Err(err),
             }
-            Ok(RuntimeWebsocketConnectResult::Overloaded(payload)) => {
-                return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
-                    RuntimeWebsocketAttempt::Overloaded {
-                        profile_name: profile_name.to_string(),
-                        payload,
-                    },
-                ));
-            }
-            Err(_err) if precommit_transport_retry_allowed => {
-                return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
-                    RuntimeWebsocketAttempt::TransportFailed {
-                        profile_name: profile_name.to_string(),
-                        stage: "connect",
-                    },
-                ));
-            }
-            Err(err) => return Err(err),
         }
     };
     runtime_set_upstream_websocket_io_timeout(

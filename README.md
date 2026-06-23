@@ -103,7 +103,7 @@ JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/response
 <details>
 <summary>Provider behavior details (advanced)</summary>
 
-The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth, Antigravity CLI, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers now have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, Antigravity CLI, local URLs, and Bedrock/custom Codex providers still skip OpenAI quota preflight.
+The auto-rotate proxy is intentionally conservative. It rotates only before a request or stream is committed, preserves `previous_response_id`, turn-state, and session affinity, and does not rotate mid-stream. Prodex does not auto-redeem reset credits by default. If you launch an OpenAI/Codex runtime path with `--auto-redeem`, Prodex may redeem one earned reset credit only when the weekly usage-limit window is exhausted, no other profile in the quota pool still has weekly quota remaining, and the weekly reset is not already imminent, then retries the same profile before rotating. It still does not redeem for merely critical/thin windows or 5h-only exhaustion. You can also run `prodex redeem <profile>` to send one explicit reset-credit consume request for a named OpenAI/Codex profile; the upstream backend decides whether that manual request applies, reports nothing-to-reset, or reports no-credit/already-redeemed. OpenAI/Codex remains the default quota-aware pool. Gemini OAuth, Antigravity CLI, imported Copilot profiles, Anthropic OAuth profiles, DeepSeek API keys, local OpenAI-compatible URLs, and Bedrock/custom Codex providers now have `prodex quota` views. Anthropic, DeepSeek, API-key Gemini, API-key Copilot, Antigravity CLI, local URLs, and Bedrock/custom Codex providers still skip OpenAI quota preflight.
 
 Runtime proxy design contract:
 
@@ -812,12 +812,13 @@ prodex quota --all --auth no-auth --once
 prodex quota --all --detail --provider openai
 prodex quota --all --provider deepseek --once
 prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
+prodex redeem main
 prodex dashboard
 ```
 
 The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, and `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider deepseek`, or `--provider local` to start locked to a single provider.
 
-For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them.
+For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, or add `--auto-redeem` to a runtime launch when you want Prodex to consider a guarded automatic redeem after every OpenAI/Codex profile is weekly-exhausted.
 
 `prodex dashboard` serves a local browser dashboard at `http://127.0.0.1:8765` by default. It shows profile/account settings, lets you switch or remove profile entries, and renders live usage from the same quota collectors used by `prodex quota`. Use `prodex dashboard --port 0` for an OS-selected free port, or pass `--base-url` for quota checks against a custom Codex-compatible backend. The dashboard has no password auth; keep it on localhost unless the network is trusted.
 

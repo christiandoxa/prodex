@@ -209,6 +209,7 @@ fn next_runtime_response_candidate_skips_auth_failed_profile() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(

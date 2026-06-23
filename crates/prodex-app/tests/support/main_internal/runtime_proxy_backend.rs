@@ -25,6 +25,8 @@ pub(super) struct RuntimeProxyBackend {
     responses_bodies: Arc<Mutex<Vec<String>>>,
     websocket_requests: Arc<Mutex<Vec<String>>>,
     usage_accounts: Arc<Mutex<Vec<String>>>,
+    reset_credit_consume_accounts: Arc<Mutex<Vec<String>>>,
+    reset_credit_consume_bodies: Arc<Mutex<Vec<String>>>,
     connection_threads: Arc<Mutex<Vec<JoinHandle<()>>>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -48,6 +50,7 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlyCompactPreviousResponseNotFound,
     HttpOnlyLargeCompactResponse,
     HttpOnlyUsageLimitMessage,
+    HttpOnlyUsageLimitAutoRedeem,
     HttpOnlyUsageLimitMessageLateReadyFifth,
     HttpOnlyUsageLimitUntilThird,
     HttpOnlyDelayedQuotaAfterOutputItemAdded,
@@ -141,6 +144,10 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_http_usage_limit_message() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
+    }
+
+    pub(super) fn start_http_usage_limit_auto_redeem() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitAutoRedeem)
     }
 
     pub(super) fn start_http_usage_limit_message_late_ready_fifth() -> Self {
@@ -277,6 +284,8 @@ impl RuntimeProxyBackend {
         let responses_bodies = Arc::new(Mutex::new(Vec::new()));
         let websocket_requests = Arc::new(Mutex::new(Vec::new()));
         let usage_accounts = Arc::new(Mutex::new(Vec::new()));
+        let reset_credit_consume_accounts = Arc::new(Mutex::new(Vec::new()));
+        let reset_credit_consume_bodies = Arc::new(Mutex::new(Vec::new()));
         let connection_threads = Arc::new(Mutex::new(Vec::new()));
         let shutdown_flag = Arc::clone(&shutdown);
         let responses_accounts_flag = Arc::clone(&responses_accounts);
@@ -284,6 +293,8 @@ impl RuntimeProxyBackend {
         let responses_bodies_flag = Arc::clone(&responses_bodies);
         let websocket_requests_flag = Arc::clone(&websocket_requests);
         let usage_accounts_flag = Arc::clone(&usage_accounts);
+        let reset_credit_consume_accounts_flag = Arc::clone(&reset_credit_consume_accounts);
+        let reset_credit_consume_bodies_flag = Arc::clone(&reset_credit_consume_bodies);
         let connection_threads_flag = Arc::clone(&connection_threads);
         let fault_script_flag = fault_script.as_ref().map(Arc::clone);
         let thread = thread::spawn(move || {
@@ -295,6 +306,10 @@ impl RuntimeProxyBackend {
                         let responses_bodies_flag = Arc::clone(&responses_bodies_flag);
                         let websocket_requests_flag = Arc::clone(&websocket_requests_flag);
                         let usage_accounts_flag = Arc::clone(&usage_accounts_flag);
+                        let reset_credit_consume_accounts_flag =
+                            Arc::clone(&reset_credit_consume_accounts_flag);
+                        let reset_credit_consume_bodies_flag =
+                            Arc::clone(&reset_credit_consume_bodies_flag);
                         let fault_script_flag = fault_script_flag.as_ref().map(Arc::clone);
                         let websocket_enabled = matches!(
                             mode,
@@ -331,12 +346,17 @@ impl RuntimeProxyBackend {
                             } else {
                                 handle_runtime_proxy_backend_request(
                                     stream,
-                                    &responses_accounts_flag,
-                                    &responses_headers_flag,
-                                    &responses_bodies_flag,
-                                    &usage_accounts_flag,
-                                    fault_script_flag.as_ref(),
-                                    mode,
+                                    RuntimeProxyBackendHttpContext {
+                                        responses_accounts: &responses_accounts_flag,
+                                        responses_headers: &responses_headers_flag,
+                                        responses_bodies: &responses_bodies_flag,
+                                        usage_accounts: &usage_accounts_flag,
+                                        reset_credit_consume_accounts:
+                                            &reset_credit_consume_accounts_flag,
+                                        reset_credit_consume_bodies: &reset_credit_consume_bodies_flag,
+                                        fault_script: fault_script_flag.as_ref(),
+                                        mode,
+                                    },
                                 );
                             }
                         });
@@ -361,6 +381,8 @@ impl RuntimeProxyBackend {
             responses_bodies,
             websocket_requests,
             usage_accounts,
+            reset_credit_consume_accounts,
+            reset_credit_consume_bodies,
             connection_threads,
             thread: Some(thread),
         }
@@ -402,6 +424,20 @@ impl RuntimeProxyBackend {
         self.usage_accounts
             .lock()
             .expect("usage_accounts poisoned")
+            .clone()
+    }
+
+    pub(super) fn reset_credit_consume_bodies(&self) -> Vec<String> {
+        self.reset_credit_consume_bodies
+            .lock()
+            .expect("reset_credit_consume_bodies poisoned")
+            .clone()
+    }
+
+    pub(super) fn reset_credit_consume_accounts(&self) -> Vec<String> {
+        self.reset_credit_consume_accounts
+            .lock()
+            .expect("reset_credit_consume_accounts poisoned")
             .clone()
     }
 }

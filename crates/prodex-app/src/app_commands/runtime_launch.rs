@@ -105,6 +105,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),
             allow_auto_rotate: !self.args.no_auto_rotate,
+            auto_redeem: self.args.auto_redeem,
             skip_quota_check: self.args.skip_quota_check,
             base_url: self
                 .args
@@ -575,6 +576,7 @@ fn start_dedicated_runtime_proxy_endpoint(
         upstream_base_url: runtime_upstream_base_url,
         include_code_review: request.include_code_review,
         upstream_no_proxy: request.upstream_no_proxy,
+        auto_redeem: request.auto_redeem,
         smart_context_enabled: request.smart_context_enabled,
         presidio_redaction_enabled: request.presidio_redaction_enabled,
         model_context_window_tokens,
@@ -609,6 +611,7 @@ fn start_fixed_runtime_proxy_endpoint(
         upstream_base_url: runtime_upstream_base_url,
         include_code_review: request.include_code_review,
         upstream_no_proxy: request.upstream_no_proxy,
+        auto_redeem: request.auto_redeem,
         smart_context_enabled: request.smart_context_enabled,
         presidio_redaction_enabled: request.presidio_redaction_enabled,
         model_context_window_tokens,

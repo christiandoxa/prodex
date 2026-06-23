@@ -249,6 +249,7 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
         upstream_base_url: args.upstream_base_url.clone(),
         include_code_review: args.include_code_review,
         upstream_no_proxy: args.upstream_no_proxy,
+        auto_redeem: false,
         smart_context_enabled: args.smart_context_enabled,
         presidio_redaction_enabled: false,
         model_context_window_tokens: args.model_context_window_tokens,

@@ -1,6 +1,5 @@
 use super::*;
 use std::ffi::OsString;
-
 #[path = "app_server.rs"]
 mod app_server;
 #[path = "cleanup.rs"]
@@ -11,6 +10,8 @@ mod dashboard;
 mod expose;
 #[path = "external_provider.rs"]
 mod external_provider;
+#[path = "redeem.rs"]
+mod redeem;
 #[path = "shortcuts.rs"]
 mod shortcuts;
 fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
@@ -20,7 +21,6 @@ fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
     };
     args.into_caveman_args()
 }
-
 fn parse_super_as_caveman_with_presidio_preference(args: &[&str]) -> CavemanArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
     let Commands::Super(args) = command else {
@@ -29,7 +29,6 @@ fn parse_super_as_caveman_with_presidio_preference(args: &[&str]) -> CavemanArgs
     let use_presidio = args.presidio_preference().unwrap_or(false);
     args.into_caveman_args_with_presidio(use_presidio)
 }
-
 fn os_args(args: &[&str]) -> Vec<OsString> {
     args.iter().map(OsString::from).collect()
 }
@@ -39,7 +38,6 @@ fn rendered_codex_args(args: &CavemanArgs) -> Vec<String> {
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect()
 }
-
 fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
     assert_eq!(left.profile, right.profile);
     assert_eq!(left.auto_rotate, right.auto_rotate);
@@ -59,7 +57,6 @@ fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
     assert_eq!(left.memory_backend, right.memory_backend);
     assert_eq!(left.codex_args, right.codex_args);
 }
-
 #[test]
 fn presidio_commands_parse_as_top_level_commands() {
     let command = parse_cli_command_from(["prodex", "presidio", "doctor", "--json"])
@@ -71,7 +68,6 @@ fn presidio_commands_parse_as_top_level_commands() {
             ..
         }))
     ));
-
     let command = parse_cli_command_from([
         "prodex",
         "presidio",
@@ -89,7 +85,6 @@ fn presidio_commands_parse_as_top_level_commands() {
         }))
     ));
 }
-
 #[test]
 fn doctor_install_parse_as_top_level_command() {
     let command = parse_cli_command_from(["prodex", "doctor", "--install"])
@@ -99,7 +94,6 @@ fn doctor_install_parse_as_top_level_command() {
     };
     assert!(args.install);
 }
-
 #[test]
 fn setup_parse_as_top_level_command() {
     let command =
@@ -119,7 +113,6 @@ fn setup_parse_as_top_level_command() {
     assert!(matches!(command, Commands::InspectMcp(_)));
     assert!(!should_default_cli_invocation_to_run(&os_args(&args)));
 }
-
 #[test]
 fn capability_list_parse_as_top_level_command() {
     let command = parse_cli_command_from(["prodex", "capability", "list", "--json"])
@@ -133,14 +126,12 @@ fn capability_list_parse_as_top_level_command() {
         "capability",
     ])));
 }
-
 #[test]
 fn super_and_s_parse_to_same_default_super_behavior() {
     let super_args = parse_super_as_caveman(&["prodex", "super"]);
     let alias_args = parse_super_as_caveman(&["prodex", "s"]);
     assert_same_caveman_args(super_args, alias_args);
 }
-
 #[test]
 fn super_and_s_parse_to_same_super_behavior_with_options() {
     let super_args = parse_super_as_caveman(&[
@@ -187,7 +178,6 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
     ]);
     assert_same_caveman_args(super_args, alias_args);
 }
-
 #[test]
 fn s_profile_shortcut_selects_profile() {
     let command = parse_cli_command_from(["prodex", "s", "--profile", "nama_profile"])
@@ -197,7 +187,6 @@ fn s_profile_shortcut_selects_profile() {
     };
     assert_eq!(args.profile.as_deref(), Some("nama_profile"));
 }
-
 #[test]
 fn super_default_keeps_all_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
@@ -216,19 +205,16 @@ fn super_default_keeps_all_super_prefixes() {
         ]
     );
 }
-
 #[test]
 fn super_and_s_enable_smart_context_autopilot() {
     assert!(parse_super_as_caveman(&["prodex", "super"]).smart_context);
     assert!(parse_super_as_caveman(&["prodex", "s"]).smart_context);
 }
-
 #[test]
 fn super_and_s_enable_super_optimizer_overlay() {
     assert!(parse_super_as_caveman(&["prodex", "super"]).super_optimizer_overlay);
     assert!(parse_super_as_caveman(&["prodex", "s"]).super_optimizer_overlay);
 }
-
 #[test]
 fn super_omits_presidio_prefix_until_prompt_opt_in() {
     let command = parse_cli_command_from(["prodex", "super", "exec", "hello"])
@@ -248,7 +234,6 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
         ])
     );
 }
-
 #[test]
 fn super_includes_presidio_prefix_when_opted_in() {
     let command = parse_cli_command_from(["prodex", "super", "exec", "hello"])
@@ -269,7 +254,6 @@ fn super_includes_presidio_prefix_when_opted_in() {
         ])
     );
 }
-
 #[test]
 fn super_presidio_flag_enables_presidio_without_prompt() {
     let args = parse_super_as_caveman_with_presidio_preference(&[
@@ -292,7 +276,6 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
         ])
     );
 }
-
 #[test]
 fn s_presidio_flag_matches_super_presidio_flag() {
     let super_args = parse_super_as_caveman_with_presidio_preference(&[
@@ -309,10 +292,8 @@ fn s_presidio_flag_matches_super_presidio_flag() {
         "exec",
         "hello",
     ]);
-
     assert_same_caveman_args(super_args, alias_args);
 }
-
 #[test]
 fn super_no_presidio_flag_disables_presidio_without_prompt() {
     let args = parse_super_as_caveman_with_presidio_preference(&[
@@ -322,7 +303,6 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
         "exec",
         "hello",
     ]);
-
     assert_eq!(
         args.codex_args,
         os_args(&[
@@ -335,7 +315,6 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
         ])
     );
 }
-
 #[test]
 fn super_mem0_flag_selects_managed_memory_backend() {
     let command = parse_cli_command_from(["prodex", "super", "--mem0", "exec", "hello"])
@@ -348,7 +327,6 @@ fn super_mem0_flag_selects_managed_memory_backend() {
     assert_eq!(caveman.memory_backend, SuperMemoryBackend::Mem0);
     assert!(caveman.codex_args.contains(&OsString::from("mem")));
 }
-
 #[test]
 fn super_no_mem0_flag_selects_sqlite_memory_backend() {
     let command = parse_cli_command_from(["prodex", "super", "--no-mem0", "exec", "hello"])
@@ -361,25 +339,21 @@ fn super_no_mem0_flag_selects_sqlite_memory_backend() {
     assert_eq!(caveman.memory_backend, SuperMemoryBackend::Sqlite);
     assert!(!caveman.codex_args.contains(&OsString::from("mem")));
 }
-
 #[test]
 fn super_mem0_flags_conflict() {
     assert!(parse_cli_command_from(["prodex", "super", "--mem0", "--no-mem0", "exec"]).is_err());
 }
-
 #[test]
 fn super_presidio_flags_conflict() {
     assert!(
         parse_cli_command_from(["prodex", "super", "--presidio", "--no-presidio", "exec"]).is_err()
     );
 }
-
 #[test]
 fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
     let args = parse_super_as_caveman(&["prodex", "super", "--url", "http://127.0.0.1:8131"]);
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8131/v1"));
 }
-
 #[test]
 fn super_url_local_provider_uses_openai_responses_wire_api() {
     let args = parse_super_as_caveman(&[
@@ -391,7 +365,6 @@ fn super_url_local_provider_uses_openai_responses_wire_api() {
         "qwen3-coder",
     ]);
     let rendered = rendered_codex_args(&args);
-
     assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
     assert!(rendered.contains(&"model=\"qwen3-coder\"".to_string()));
     assert!(rendered.contains(&"model_providers.prodex-local.wire_api=\"responses\"".to_string()));
@@ -399,7 +372,6 @@ fn super_url_local_provider_uses_openai_responses_wire_api() {
         rendered.contains(&"model_providers.prodex-local.supports_websockets=false".to_string())
     );
 }
-
 #[test]
 fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
     let args = parse_super_as_caveman(&[
@@ -414,7 +386,6 @@ fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
         "exec",
         "review",
     ]);
-
     assert_eq!(
         args.external_provider,
         Some(SuperExternalProvider::DeepSeek)
@@ -438,7 +409,6 @@ fn super_deepseek_provider_expands_to_local_responses_adapter_config() {
     assert!(rendered.contains(&"features.apps=false".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("ds-test-key")));
 }
-
 #[test]
 fn super_gemini_provider_expands_to_local_responses_adapter_config() {
     let args = parse_super_as_caveman(&[
@@ -451,7 +421,6 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
         "exec",
         "review",
     ]);
-
     assert_eq!(args.external_provider, Some(SuperExternalProvider::Gemini));
     assert_eq!(
         args.external_provider_api_key.as_deref(),
@@ -480,7 +449,6 @@ fn super_gemini_provider_expands_to_local_responses_adapter_config() {
     assert!(rendered.contains(&"features.image_generation=true".to_string()));
     assert!(!rendered.iter().any(|arg| arg.contains("gemini-test-key")));
 }
-
 #[test]
 fn caveman_command_keeps_smart_context_autopilot_disabled() {
     let command = parse_cli_command_from(["prodex", "caveman", "exec", "hello"])
@@ -488,11 +456,9 @@ fn caveman_command_keeps_smart_context_autopilot_disabled() {
     let Commands::Caveman(args) = command else {
         panic!("expected caveman command");
     };
-
     assert!(!args.smart_context);
     assert!(!args.super_optimizer_overlay);
 }
-
 #[test]
 fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
     for (command_name, expected) in [
@@ -526,7 +492,6 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
         );
     }
 }
-
 #[test]
 fn codex_remote_control_defaults_to_managed_run_passthrough() {
     assert!(should_default_cli_invocation_to_run(&os_args(&[
@@ -534,16 +499,13 @@ fn codex_remote_control_defaults_to_managed_run_passthrough() {
         "remote-control",
         "--help",
     ])));
-
     let command = parse_cli_command_from(["prodex", "remote-control", "--help"])
         .expect("remote-control should parse as run passthrough");
     let Commands::Run(args) = command else {
         panic!("expected run command");
     };
-
     assert_eq!(args.codex_args, os_args(&["remote-control", "--help"]));
 }
-
 #[test]
 fn codex_archive_commands_default_to_managed_run_passthrough() {
     for passthrough in [
@@ -553,12 +515,10 @@ fn codex_archive_commands_default_to_managed_run_passthrough() {
         let mut raw_args = vec![OsString::from("prodex")];
         raw_args.extend(passthrough.iter().map(|value| OsString::from(*value)));
         assert!(should_default_cli_invocation_to_run(&raw_args));
-
         let command = parse_cli_command_from(raw_args).expect("codex archive command should parse");
         let Commands::Run(args) = command else {
             panic!("expected run command");
         };
-
         assert_eq!(
             args.codex_args,
             passthrough
@@ -568,7 +528,6 @@ fn codex_archive_commands_default_to_managed_run_passthrough() {
         );
     }
 }
-
 #[test]
 fn codex_delete_defaults_to_managed_run_passthrough() {
     assert!(should_default_cli_invocation_to_run(&os_args(&[
@@ -576,20 +535,17 @@ fn codex_delete_defaults_to_managed_run_passthrough() {
         "delete",
         "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
     ])));
-
     let command =
         parse_cli_command_from(["prodex", "delete", "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
             .expect("codex delete should parse as run passthrough");
     let Commands::Run(args) = command else {
         panic!("expected run command");
     };
-
     assert_eq!(
         args.codex_args,
         os_args(&["delete", "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"])
     );
 }
-
 #[test]
 fn codex_exec_resume_output_schema_defaults_to_managed_run_passthrough() {
     assert!(should_default_cli_invocation_to_run(&os_args(&[
@@ -601,7 +557,6 @@ fn codex_exec_resume_output_schema_defaults_to_managed_run_passthrough() {
         "schema.json",
         "return json",
     ])));
-
     let command = parse_cli_command_from([
         "prodex",
         "exec",
@@ -615,7 +570,6 @@ fn codex_exec_resume_output_schema_defaults_to_managed_run_passthrough() {
     let Commands::Run(args) = command else {
         panic!("expected run command");
     };
-
     assert_eq!(
         args.codex_args,
         os_args(&[
@@ -628,24 +582,20 @@ fn codex_exec_resume_output_schema_defaults_to_managed_run_passthrough() {
         ])
     );
 }
-
 #[test]
 fn codex_command_server_subcommands_default_to_run_passthrough() {
     for subcommand in ["mcp-server", "app-server", "exec-server"] {
         assert!(should_default_cli_invocation_to_run(&os_args(&[
             "prodex", subcommand, "--help",
         ])));
-
         let command = parse_cli_command_from(["prodex", subcommand, "--help"])
             .expect("command-server subcommand should parse as run passthrough");
         let Commands::Run(args) = command else {
             panic!("expected run command");
         };
-
         assert_eq!(args.codex_args, os_args(&[subcommand, "--help"]));
     }
 }
-
 #[test]
 fn codex_mcp_server_meta_args_are_exact_run_passthrough() {
     let passthrough = [
@@ -656,17 +606,14 @@ fn codex_mcp_server_meta_args_are_exact_run_passthrough() {
         "--params",
         r#"{"_meta":{"trace_id":"trace-smoke"},"meta":{"compat":"codex-rust-v0.132.0"},"arguments":{"image":{"detail":"low"}}}"#,
     ];
-
     let mut argv = vec!["prodex"];
     argv.extend(passthrough);
     let command = parse_cli_command_from(argv).expect("mcp-server args should parse as run");
     let Commands::Run(args) = command else {
         panic!("expected run command");
     };
-
     assert_eq!(args.codex_args, os_args(&passthrough));
 }
-
 #[test]
 fn codex_command_server_detection_is_first_arg_only() {
     assert!(is_codex_command_server_subcommand(&os_args(&[
@@ -690,7 +637,6 @@ fn codex_command_server_detection_is_first_arg_only() {
     ])));
     assert!(!is_codex_command_server_subcommand(&[]));
 }
-
 #[test]
 fn session_list_parses_line_modes_and_filters() {
     let command = parse_cli_command_from([
@@ -710,7 +656,6 @@ fn session_list_parses_line_modes_and_filters() {
     let Commands::Session(SessionCommands::List(args)) = command else {
         panic!("expected session list command");
     };
-
     assert!(args.id_only);
     assert!(!args.resume_command);
     assert_eq!(args.profile.as_deref(), Some("main"));
@@ -736,7 +681,6 @@ fn session_current_parses_resume_command_filters_and_cwd() {
     let Commands::Session(SessionCommands::Current(args)) = command else {
         panic!("expected session current command");
     };
-
     assert!(!args.id_only);
     assert!(args.resume_command);
     assert_eq!(args.profile.as_deref(), Some("main"));
@@ -744,7 +688,6 @@ fn session_current_parses_resume_command_filters_and_cwd() {
     assert_eq!(args.cwd.as_deref(), Some(std::path::Path::new("/tmp/work")));
     assert!(!args.include_subagents);
 }
-
 #[test]
 fn session_line_modes_conflict_with_json_and_each_other() {
     assert!(parse_cli_command_from(["prodex", "session", "list", "--json", "--id-only"]).is_err());
@@ -759,7 +702,6 @@ fn session_line_modes_conflict_with_json_and_each_other() {
         .is_err()
     );
 }
-
 #[test]
 fn session_resume_parses_partial_id() {
     let command = parse_cli_command_from(["prodex", "session", "resume", "1234abcd"])
@@ -767,6 +709,5 @@ fn session_resume_parses_partial_id() {
     let Commands::Session(SessionCommands::Resume(args)) = command else {
         panic!("expected session resume command");
     };
-
     assert_eq!(args.id, "1234abcd");
 }

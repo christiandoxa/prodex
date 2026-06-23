@@ -142,11 +142,13 @@ pub(crate) fn runtime_precommit_quota_gate(
         runtime_proxy_responses_quota_critical_floor_percent(),
     ) {
         runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::Block { reason } => {
-            return Ok(RuntimePrecommitQuotaGateDecision::Block {
-                reason,
-                summary: initial_quota_summary,
-                source: initial_quota_source,
-            });
+            if !runtime_auto_redeem_precommit_reason_warrants_credit(reason) {
+                return Ok(RuntimePrecommitQuotaGateDecision::Block {
+                    reason,
+                    summary: initial_quota_summary,
+                    source: initial_quota_source,
+                });
+            }
         }
         runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::Continue
         | runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateInitialDecision::RefreshRequired => {}
@@ -180,6 +182,34 @@ pub(crate) fn runtime_precommit_quota_gate(
     ) {
         runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed => {}
         runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateFinalDecision::Block { reason } => {
+            if runtime_auto_redeem_precommit_reason_warrants_credit(reason)
+                && runtime_auto_redeem_usage_limit_reset_credit(
+                    shared,
+                    profile_name,
+                    route_kind,
+                    reprobe_context,
+                    !has_continuation_context,
+                )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+            {
+                let (redeemed_quota_summary, redeemed_quota_source) =
+                    ensure_runtime_profile_precommit_quota_ready(
+                        shared,
+                        profile_name,
+                        route_kind,
+                        reprobe_context,
+                        false,
+                    )?;
+                if prodex_runtime_quota::runtime_precommit_quota_gate_final_decision(
+                    redeemed_quota_summary,
+                    redeemed_quota_source,
+                    route_kind,
+                    has_alternative_quota_profile,
+                    runtime_proxy_responses_quota_critical_floor_percent(),
+                ) == runtime_proxy_crate::RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed
+                {
+                    return Ok(RuntimePrecommitQuotaGateDecision::Proceed);
+                }
+            }
             return Ok(RuntimePrecommitQuotaGateDecision::Block {
                 reason,
                 summary: quota_summary,

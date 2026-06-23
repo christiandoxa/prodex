@@ -30,6 +30,29 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
             RuntimeRouteKind::Standard,
         )?;
         if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted {
+            if runtime_auto_redeem_usage_limit_reset_credit(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Standard,
+                "standard_precommit",
+                request_session_id.is_none(),
+            )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+            {
+                let (redeemed_summary, _) = runtime_profile_quota_summary_for_route(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Standard,
+                )?;
+                if redeemed_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
+                    return attempt_runtime_noncompact_standard_request_with_policy(
+                        request_id,
+                        request,
+                        shared,
+                        profile_name,
+                        false,
+                    );
+                }
+            }
             runtime_proxy_log(
                 shared,
                 format!(
@@ -285,6 +308,29 @@ pub(super) fn attempt_runtime_standard_request(
     if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
         && !allow_quota_exhausted_send
     {
+        if runtime_auto_redeem_usage_limit_reset_credit(
+            shared,
+            profile_name,
+            RuntimeRouteKind::Compact,
+            "compact_precommit",
+            request_session_id.is_none(),
+        )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+        {
+            let (redeemed_summary, _) = runtime_profile_quota_summary_for_route(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Compact,
+            )?;
+            if redeemed_summary.route_band != RuntimeQuotaPressureBand::Exhausted {
+                return attempt_runtime_standard_request(
+                    request_id,
+                    request,
+                    shared,
+                    profile_name,
+                    allow_quota_exhausted_send,
+                );
+            }
+        }
         runtime_proxy_log(
             shared,
             format!(

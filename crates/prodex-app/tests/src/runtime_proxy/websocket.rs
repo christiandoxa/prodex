@@ -61,6 +61,7 @@ pub(super) fn websocket_test_shared(name: &str) -> RuntimeRotationProxyShared {
 
     RuntimeRotationProxyShared {
         upstream_no_proxy: false,
+        auto_redeem_enabled: false,
         async_client: reqwest::Client::new(),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_current_thread()

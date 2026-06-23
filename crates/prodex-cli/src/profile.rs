@@ -169,6 +169,19 @@ pub struct QuotaArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct RedeemArgs {
+    /// OpenAI/Codex profile whose reset credit should be redeemed.
+    #[arg(value_name = "PROFILE")]
+    pub profile: String,
+    /// Override the ChatGPT backend base URL used for the redeem request.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Bypass proxy environment variables for the upstream redeem request.
+    #[arg(long)]
+    pub no_proxy: bool,
+}
+
+#[derive(Args, Debug)]
 pub struct DashboardArgs {
     /// Interface to bind. Defaults to localhost only.
     #[arg(long, default_value = "127.0.0.1", value_name = "HOST")]

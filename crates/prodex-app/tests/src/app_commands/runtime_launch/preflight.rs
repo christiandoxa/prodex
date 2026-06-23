@@ -25,6 +25,7 @@ fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
         &RuntimeLaunchRequest {
             profile: None,
             allow_auto_rotate: true,
+            auto_redeem: false,
             skip_quota_check: false,
             base_url: None,
             upstream_no_proxy: false,
@@ -71,6 +72,7 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
         &RuntimeLaunchRequest {
             profile: None,
             allow_auto_rotate: true,
+            auto_redeem: false,
             skip_quota_check: false,
             base_url: None,
             upstream_no_proxy: false,
@@ -132,6 +134,7 @@ fn prepare_runtime_launch_uses_persisted_exhausted_quota_snapshot_before_network
     let err = match prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: false,
+        auto_redeem: false,
         skip_quota_check: false,
         base_url: Some("http://127.0.0.1:9"),
         upstream_no_proxy: true,
@@ -228,6 +231,7 @@ fn prepare_runtime_launch_auto_selects_ready_snapshot_before_current_network_pre
     let request = RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: false,
         base_url: Some("http://127.0.0.1:9"),
         upstream_no_proxy: true,

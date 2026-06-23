@@ -1,9 +1,10 @@
 use super::super::{
-    RuntimeCandidateAffinity, RuntimeResponseCandidateSelection,
-    build_runtime_proxy_json_error_response, bump_runtime_profile_bad_pairing_score,
-    bump_runtime_profile_health_score, commit_runtime_proxy_profile_selection_with_notice,
-    mark_runtime_profile_retry_backoff, release_runtime_auth_failed_affinity,
-    release_runtime_compact_lineage, release_runtime_quota_blocked_affinity,
+    RuntimeAutoRedeemResetCreditOutcome, RuntimeCandidateAffinity,
+    RuntimeResponseCandidateSelection, build_runtime_proxy_json_error_response,
+    bump_runtime_profile_bad_pairing_score, bump_runtime_profile_health_score,
+    commit_runtime_proxy_profile_selection_with_notice, mark_runtime_profile_retry_backoff,
+    release_runtime_auth_failed_affinity, release_runtime_compact_lineage,
+    release_runtime_quota_blocked_affinity, runtime_auto_redeem_usage_limit_reset_credit,
     runtime_candidate_has_hard_affinity, runtime_compact_route_followup_bound_profile,
     runtime_has_route_eligible_quota_fallback, runtime_profile_inflight_hard_limited_for_context,
     runtime_proxy_current_profile, runtime_proxy_local_selection_failure_message,
@@ -107,6 +108,7 @@ pub(super) fn proxy_runtime_compact_request(
         ));
     }
     let mut excluded_profiles = BTreeSet::new();
+    let mut auto_redeemed_profiles = BTreeSet::new();
     let mut conservative_overload_retried_profiles = BTreeSet::new();
     let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
     let mut saw_inflight_saturation = false;
@@ -343,6 +345,25 @@ pub(super) fn proxy_runtime_compact_request(
                 response,
                 overload,
             } => {
+                if !overload
+                    && !auto_redeemed_profiles.contains(&profile_name)
+                    && runtime_auto_redeem_usage_limit_reset_credit(
+                        shared,
+                        &profile_name,
+                        RuntimeRouteKind::Compact,
+                        "compact_quota_blocked",
+                        false,
+                    )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+                {
+                    auto_redeemed_profiles.insert(profile_name);
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http quota_blocked_auto_redeemed_retry route=compact"
+                        ),
+                    );
+                    continue;
+                }
                 let mut released_affinity = false;
                 let mut released_compact_lineage = false;
                 if !overload {

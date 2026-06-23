@@ -108,6 +108,7 @@ fn prepare_runtime_launch_persists_implicit_selection_when_none_is_active() {
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,
@@ -157,6 +158,7 @@ fn prepare_runtime_launch_replaces_deleted_active_profile_selection() {
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,

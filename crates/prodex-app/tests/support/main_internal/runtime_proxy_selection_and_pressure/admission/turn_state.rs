@@ -66,6 +66,7 @@ fn turn_state_affinity_prefers_bound_profile() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -179,6 +180,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(

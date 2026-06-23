@@ -57,6 +57,7 @@ fn test_runtime_broker_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
     };
 
     RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder()
             .build()

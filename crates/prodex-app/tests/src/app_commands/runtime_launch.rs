@@ -1,5 +1,4 @@
 use super::*;
-
 #[path = "runtime_launch/arg0_cleanup.rs"]
 mod arg0_cleanup;
 #[path = "runtime_launch/preflight.rs"]
@@ -14,7 +13,6 @@ mod routes;
 mod run_command_strategy;
 #[path = "runtime_launch/super_runtime.rs"]
 mod super_runtime;
-
 #[test]
 fn gateway_state_store_config_builds_postgres_backend_from_env() {
     let root = temp_dir("gateway-postgres-state-config");
@@ -27,9 +25,7 @@ fn gateway_state_store_config_builds_postgres_backend_from_env() {
     let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
     policy.state.backend = Some("postgres".to_string());
     policy.state.postgres_url_env = Some("PRODEX_GATEWAY_POSTGRES_URL_TEST".to_string());
-
     let store = gateway_state_store_config(&paths, &policy).unwrap();
-
     match store {
         RuntimeGatewayStateStore::Postgres { url, state_path } => {
             assert_eq!(url, "postgres://prodex:prodex@127.0.0.1:5432/prodex");
@@ -41,7 +37,6 @@ fn gateway_state_store_config_builds_postgres_backend_from_env() {
         other => panic!("expected postgres gateway state backend, got {other:?}"),
     }
 }
-
 #[test]
 fn gateway_state_store_config_builds_redis_backend_from_env() {
     let root = temp_dir("gateway-redis-state-config");
@@ -51,9 +46,7 @@ fn gateway_state_store_config_builds_redis_backend_from_env() {
     let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
     policy.state.backend = Some("redis".to_string());
     policy.state.redis_url_env = Some("PRODEX_GATEWAY_REDIS_URL_TEST".to_string());
-
     let store = gateway_state_store_config(&paths, &policy).unwrap();
-
     match store {
         RuntimeGatewayStateStore::Redis { url, state_path } => {
             assert_eq!(url, "redis://127.0.0.1:6379/0");
@@ -65,7 +58,6 @@ fn gateway_state_store_config_builds_redis_backend_from_env() {
         other => panic!("expected redis gateway state backend, got {other:?}"),
     }
 }
-
 #[test]
 fn gateway_sso_config_builds_trusted_proxy_settings_from_env() {
     let _sso = TestEnvVarGuard::set("PRODEX_GATEWAY_SSO_TOKEN_TEST", "sso-shared-secret");
@@ -73,15 +65,12 @@ fn gateway_sso_config_builds_trusted_proxy_settings_from_env() {
     policy.sso.proxy_token_env = Some("PRODEX_GATEWAY_SSO_TOKEN_TEST".to_string());
     policy.sso.user_header = Some("x-auth-request-email".to_string());
     policy.sso.default_role = Some("viewer".to_string());
-
     let config = gateway_sso_config(&policy).unwrap();
-
     assert!(config.proxy_token_hash.is_some());
     assert_eq!(config.token_header, "x-prodex-sso-token");
     assert_eq!(config.user_header, "x-auth-request-email");
     assert_eq!(config.default_role, RuntimeGatewayAdminRole::Viewer);
 }
-
 #[test]
 fn gateway_sso_config_builds_oidc_settings() {
     let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
@@ -92,10 +81,8 @@ fn gateway_sso_config_builds_oidc_settings() {
     policy.sso.oidc_role_claim = Some("roles".to_string());
     policy.sso.oidc_key_prefixes_claim = Some("teams".to_string());
     policy.sso.default_role = Some("viewer".to_string());
-
     let config = gateway_sso_config(&policy).unwrap();
     let oidc = config.oidc.expect("OIDC config should be present");
-
     assert_eq!(oidc.issuer, "https://idp.example");
     assert_eq!(oidc.audience, "prodex-gateway");
     assert_eq!(
@@ -107,7 +94,6 @@ fn gateway_sso_config_builds_oidc_settings() {
     assert_eq!(oidc.key_prefixes_claim, "teams");
     assert_eq!(config.default_role, RuntimeGatewayAdminRole::Viewer);
 }
-
 #[test]
 fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
     let root = temp_dir("skip-proxy-non-openai");
@@ -153,10 +139,10 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
             ..AppState::default()
         },
     );
-
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: Some("bedrock"),
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: false,
         base_url: None,
         upstream_no_proxy: false,
@@ -172,11 +158,9 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, bedrock_home);
     assert!(prepared.runtime_proxy.is_none());
 }
-
 #[test]
 fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
     let root = temp_dir("reject-claude-non-openai");
@@ -204,10 +188,10 @@ fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
             ..AppState::default()
         },
     );
-
     let err = match prepare_runtime_launch(RuntimeLaunchRequest {
         profile: Some("bedrock"),
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: false,
         base_url: None,
         upstream_no_proxy: false,
@@ -225,12 +209,10 @@ fn prepare_runtime_launch_rejects_claude_for_non_openai_model_provider() {
         Ok(_) => panic!("expected Claude launch to reject non-OpenAI model providers"),
         Err(err) => err,
     };
-
     let message = format!("{err:#}");
     assert!(message.contains("amazon-bedrock"));
     assert!(message.contains("prodex claude"));
 }
-
 #[test]
 fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection() {
     let root = temp_dir("dry-run-preview-no-selection-save");
@@ -276,10 +258,10 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
             ..AppState::default()
         },
     );
-
     let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: false,
         base_url: None,
         upstream_no_proxy: false,
@@ -295,7 +277,6 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, main_home);
     assert_eq!(
         prepared
@@ -313,7 +294,6 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
         "dry-run must not record launch selection"
     );
 }
-
 #[test]
 fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist() {
     let root = temp_dir("profileless-local-home");
@@ -321,10 +301,10 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
     let shared_root = root.join("shared-codex");
     let _shared = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared_root.to_str().unwrap());
     let paths = AppPaths::discover().unwrap();
-
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,
@@ -340,7 +320,6 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, paths.shared_codex_root);
     assert!(prepared.codex_home.is_dir());
     assert!(!prepared.managed);
@@ -350,7 +329,6 @@ fn prepare_runtime_launch_allows_profileless_local_home_when_no_profiles_exist()
         "profileless local launch should not persist synthetic profile selection"
     );
 }
-
 #[test]
 fn prepare_runtime_launch_profile_v2_config_enables_profileless_local_rewrite_proxy() {
     let root = temp_dir("profile-v2-profileless-local-smart-context-proxy");
@@ -364,10 +342,10 @@ fn prepare_runtime_launch_profile_v2_config_enables_profileless_local_rewrite_pr
         "model_provider = 'prodex-local'\n[model_providers.prodex-local]\nbase_url = 'http://127.0.0.1:8131/v1'\n",
     )
     .unwrap();
-
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,
@@ -383,7 +361,6 @@ fn prepare_runtime_launch_profile_v2_config_enables_profileless_local_rewrite_pr
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, paths.shared_codex_root);
     assert!(!prepared.managed);
     let runtime_proxy = prepared
@@ -399,7 +376,6 @@ fn prepare_runtime_launch_profile_v2_config_enables_profileless_local_rewrite_pr
         RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH
     );
 }
-
 #[test]
 fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_context() {
     let root = temp_dir("profileless-local-smart-context-proxy");
@@ -407,10 +383,10 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
     let shared_root = root.join("shared-codex");
     let _shared = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared_root.to_str().unwrap());
     let paths = AppPaths::discover().unwrap();
-
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: Some("http://127.0.0.1:8131/v1"),
         upstream_no_proxy: false,
@@ -426,7 +402,6 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, paths.shared_codex_root);
     assert!(prepared.codex_home.is_dir());
     assert!(!prepared.managed);
@@ -447,7 +422,6 @@ fn prepare_runtime_launch_enables_local_rewrite_proxy_for_prodex_local_smart_con
         "profileless local proxy launch should not persist synthetic profile selection"
     );
 }
-
 #[test]
 fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
     let root = temp_dir("profileless-local-preserve-profile");
@@ -470,10 +444,10 @@ fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
             ..AppState::default()
         },
     );
-
     let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,
@@ -489,12 +463,10 @@ fn prepare_runtime_launch_profileless_local_flag_preserves_existing_profiles() {
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, main_home);
     assert!(!prepared.managed);
     assert!(prepared.runtime_proxy.is_none());
 }
-
 #[test]
 fn prepare_runtime_launch_uses_profile_v2_model_provider_overlay() {
     let root = temp_dir("profile-v2-provider-overlay");
@@ -523,10 +495,10 @@ fn prepare_runtime_launch_uses_profile_v2_model_provider_overlay() {
             ..AppState::default()
         },
     );
-
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: Some("main"),
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,
@@ -542,11 +514,9 @@ fn prepare_runtime_launch_uses_profile_v2_model_provider_overlay() {
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, main_home);
     assert!(prepared.runtime_proxy.is_none());
 }
-
 #[test]
 fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_override() {
     let root = temp_dir("explicit-profile-local-override");
@@ -569,10 +539,10 @@ fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_overrid
             ..AppState::default()
         },
     );
-
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: Some("main"),
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,
@@ -588,12 +558,10 @@ fn prepare_runtime_launch_explicit_profile_keeps_profile_home_with_local_overrid
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, main_home);
     assert!(!prepared.managed);
     assert!(prepared.runtime_proxy.is_none());
 }
-
 #[test]
 fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
     let root = temp_dir("dry-run-skip-proxy-non-openai");
@@ -621,10 +589,10 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
             ..AppState::default()
         },
     );
-
     let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
         profile: Some("bedrock"),
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: false,
         base_url: None,
         upstream_no_proxy: false,
@@ -640,7 +608,6 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
         external_provider_api_key: None,
     })
     .unwrap();
-
     assert_eq!(prepared.codex_home, bedrock_home);
     assert!(prepared.runtime_proxy.is_none());
     let paths = AppPaths::discover().unwrap();
@@ -650,15 +617,14 @@ fn prepare_runtime_launch_dry_run_skips_proxy_for_non_openai_model_provider() {
         "dry-run must not record launch selection"
     );
 }
-
 #[test]
 fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_smart_context() {
     let root = temp_dir("dry-run-local-smart-context-proxy");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
-
     let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: Some("http://127.0.0.1:8131/v1"),
         upstream_no_proxy: false,
@@ -674,7 +640,6 @@ fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_
         external_provider_api_key: None,
     })
     .unwrap();
-
     let runtime_proxy = prepared
         .runtime_proxy
         .as_ref()
@@ -694,17 +659,16 @@ fn prepare_runtime_launch_dry_run_previews_local_rewrite_proxy_for_prodex_local_
         "dry-run local proxy preview must not persist synthetic profile selection"
     );
 }
-
 #[test]
 fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
     let root = temp_dir("profileless-local-force-proxy");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let shared_root = root.join("shared-codex");
     let _shared = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared_root.to_str().unwrap());
-
     let err = match prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,
@@ -722,23 +686,21 @@ fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
         Ok(_) => panic!("expected forced proxy launch to reject profileless local provider"),
         Err(err) => err,
     };
-
     let message = format!("{err:#}");
     assert!(message.contains(SUPER_LOCAL_PROVIDER_ID));
     assert!(message.contains("prodex claude"));
 }
-
 fn write_state(root: &Path, state: AppState) {
     fs::create_dir_all(root).unwrap();
     let paths = AppPaths::discover().unwrap();
     state.save(&paths).unwrap();
 }
-
 fn test_run_args(codex_args: Vec<OsString>) -> RunArgs {
     RunArgs {
         profile: None,
         auto_rotate: false,
         no_auto_rotate: false,
+        auto_redeem: false,
         skip_quota_check: false,
         full_access: false,
         base_url: None,
@@ -747,7 +709,6 @@ fn test_run_args(codex_args: Vec<OsString>) -> RunArgs {
         codex_args,
     }
 }
-
 fn temp_dir(name: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!(
         "prodex-runtime-launch-{name}-{}-{}",

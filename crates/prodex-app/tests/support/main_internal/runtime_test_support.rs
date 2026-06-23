@@ -231,9 +231,19 @@ pub(super) fn runtime_rotation_proxy_shared(
     runtime: RuntimeRotationState,
     active_request_limit: usize,
 ) -> RuntimeRotationProxyShared {
+    runtime_rotation_proxy_shared_with_auto_redeem(temp_dir, runtime, active_request_limit, false)
+}
+
+pub(super) fn runtime_rotation_proxy_shared_with_auto_redeem(
+    temp_dir: &TestDir,
+    runtime: RuntimeRotationState,
+    active_request_limit: usize,
+    auto_redeem_enabled: bool,
+) -> RuntimeRotationProxyShared {
     let active_request_limit = active_request_limit.max(1);
     RuntimeRotationProxyShared {
         upstream_no_proxy: false,
+        auto_redeem_enabled,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()

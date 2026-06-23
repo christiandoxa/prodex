@@ -60,6 +60,7 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -195,6 +196,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -316,6 +318,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -439,6 +442,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(

@@ -223,6 +223,12 @@ impl CommandExecute for QuotaArgs {
     }
 }
 
+impl CommandExecute for RedeemArgs {
+    fn execute(self) -> Result<()> {
+        handle_redeem(self)
+    }
+}
+
 impl CommandExecute for RemoveProfileArgs {
     fn execute(self) -> Result<()> {
         handle_remove_profile(self)
@@ -300,6 +306,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Logout(command) => RoutedCommand::new(command),
         Commands::Update(command) => RoutedCommand::new(command),
         Commands::Quota(command) => RoutedCommand::new(command),
+        Commands::Redeem(command) => RoutedCommand::new(command),
         Commands::Dashboard(command) => RoutedCommand::new(command),
         Commands::Run(command) => RoutedCommand::new(command),
         Commands::Caveman(command) => RoutedCommand::new(command),

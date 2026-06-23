@@ -15,6 +15,9 @@ pub struct RunArgs {
     /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     pub no_auto_rotate: bool,
+    /// Allow Prodex to redeem one earned reset credit automatically when all configured OpenAI/Codex profiles are weekly-exhausted.
+    #[arg(long)]
+    pub auto_redeem: bool,
     /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     pub skip_quota_check: bool,
@@ -46,6 +49,9 @@ pub struct ClaudeArgs {
     /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     pub no_auto_rotate: bool,
+    /// Allow Prodex to redeem one earned reset credit automatically when all configured OpenAI/Codex profiles are weekly-exhausted.
+    #[arg(long)]
+    pub auto_redeem: bool,
     /// Skip the preflight quota gate before launching Claude Code.
     #[arg(long)]
     pub skip_quota_check: bool,
@@ -71,6 +77,9 @@ pub struct CavemanArgs {
     /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     pub no_auto_rotate: bool,
+    /// Allow Prodex to redeem one earned reset credit automatically when all configured OpenAI/Codex profiles are weekly-exhausted.
+    #[arg(long)]
+    pub auto_redeem: bool,
     /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     pub skip_quota_check: bool,
@@ -122,6 +131,9 @@ pub struct SuperArgs {
     /// Keep the selected profile fixed and fail instead of rotating.
     #[arg(long)]
     pub no_auto_rotate: bool,
+    /// Allow Prodex to redeem one earned reset credit automatically when all configured OpenAI/Codex profiles are weekly-exhausted.
+    #[arg(long)]
+    pub auto_redeem: bool,
     /// Skip the preflight quota gate before launching codex.
     #[arg(long)]
     pub skip_quota_check: bool,
@@ -358,6 +370,7 @@ impl SuperArgs {
             profile: self.profile,
             auto_rotate: self.auto_rotate,
             no_auto_rotate: self.no_auto_rotate,
+            auto_redeem: self.auto_redeem,
             skip_quota_check,
             full_access: true,
             dry_run: self.dry_run,

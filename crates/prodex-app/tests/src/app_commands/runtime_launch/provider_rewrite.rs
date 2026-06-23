@@ -11,6 +11,7 @@ fn prepare_runtime_launch_enables_deepseek_rewrite_proxy_for_super_provider() {
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: Some("https://api.deepseek.com"),
         upstream_no_proxy: false,
@@ -59,6 +60,7 @@ fn prepare_runtime_launch_enables_gemini_rewrite_proxy_for_api_key_provider() {
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: Some("https://generativelanguage.googleapis.com/v1beta"),
         upstream_no_proxy: false,
@@ -137,6 +139,7 @@ fn prepare_runtime_launch_uses_gemini_oauth_profile_without_api_key() {
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: Some("https://generativelanguage.googleapis.com/v1beta"),
         upstream_no_proxy: false,

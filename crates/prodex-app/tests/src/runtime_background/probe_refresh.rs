@@ -15,6 +15,7 @@ fn test_runtime_probe_refresh_shared() -> RuntimeRotationProxyShared {
         std::env::temp_dir().join(format!("prodex-probe-refresh-unit-{}", std::process::id()));
     RuntimeRotationProxyShared {
         upstream_no_proxy: false,
+        auto_redeem_enabled: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_current_thread()

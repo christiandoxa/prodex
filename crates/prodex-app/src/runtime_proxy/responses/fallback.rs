@@ -103,6 +103,16 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
             profile_name,
             response,
         } => {
+            if runtime_auto_redeem_usage_limit_reset_credit(
+                fallback.shared,
+                &profile_name,
+                RuntimeRouteKind::Responses,
+                "responses_direct_fallback_quota_blocked",
+                false,
+            )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+            {
+                return Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue));
+            }
             mark_runtime_profile_retry_backoff(fallback.shared, &profile_name)?;
             if !affinity_state.quota_blocked_affinity_is_releasable(
                 &profile_name,

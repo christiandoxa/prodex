@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub struct RuntimeLaunchRequest<'a> {
     pub profile: Option<&'a str>,
     pub allow_auto_rotate: bool,
+    pub auto_redeem: bool,
     pub skip_quota_check: bool,
     pub base_url: Option<&'a str>,
     pub upstream_no_proxy: bool,

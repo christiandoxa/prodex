@@ -100,6 +100,7 @@ pub(crate) fn proxy_runtime_responses_request(
         explicit_request_session_id: explicit_request_session_id.as_ref(),
     })?;
     let mut excluded_profiles = BTreeSet::new();
+    let mut auto_redeemed_profiles = BTreeSet::new();
     let mut last_failure: Option<(RuntimeUpstreamFailureResponse, bool)> = None;
     let mut saw_inflight_saturation = false;
     let selection_started_at = Instant::now();
@@ -361,6 +362,24 @@ pub(crate) fn proxy_runtime_responses_request(
                         "request={request_id} transport=http quota_blocked profile={profile_name}"
                     ),
                 );
+                if !auto_redeemed_profiles.contains(&profile_name)
+                    && runtime_auto_redeem_usage_limit_reset_credit(
+                        shared,
+                        &profile_name,
+                        RuntimeRouteKind::Responses,
+                        "responses_quota_blocked",
+                        false,
+                    )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+                {
+                    auto_redeemed_profiles.insert(profile_name);
+                    runtime_proxy_log(
+                        shared,
+                        format!(
+                            "request={request_id} transport=http quota_blocked_auto_redeemed_retry route=responses"
+                        ),
+                    );
+                    continue;
+                }
                 let quota_message =
                     extract_runtime_proxy_quota_message_from_response_reply(&response);
                 mark_runtime_profile_quota_quarantine(

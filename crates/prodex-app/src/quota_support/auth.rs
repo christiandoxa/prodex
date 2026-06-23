@@ -2,7 +2,8 @@ use super::{
     CHATGPT_AUTH_REFRESH_CLIENT_ID, CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS,
     CHATGPT_AUTH_REFRESH_INTERVAL_DAYS, CHATGPT_AUTH_REFRESH_URL,
     CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV, build_upstream_blocking_http_client,
-    format_response_body, quota_base_url, read_auth_json_text, usage_url,
+    format_response_body, quota_base_url, rate_limit_reset_credit_consume_url, read_auth_json_text,
+    usage_url,
 };
 use anyhow::{Context, Result, bail};
 use chrono::Local;
@@ -22,12 +23,161 @@ struct ChatgptRefreshRequest<'a> {
     refresh_token: &'a str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum RateLimitResetCreditConsumeOutcome {
+    Reset,
+    NothingToReset,
+    NoCredit,
+    AlreadyRedeemed,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct RateLimitResetCreditConsumeResponse {
+    pub(crate) outcome: RateLimitResetCreditConsumeOutcome,
+}
+
+#[derive(Debug, Serialize)]
+struct RateLimitResetCreditConsumeRequest<'a> {
+    redeem_request_id: &'a str,
+}
+
+pub(crate) struct RateLimitResetCreditConsumeFlow<'a> {
+    codex_home: &'a Path,
+    consume_url: String,
+    client: Client,
+    auth: UsageAuth,
+    upstream_no_proxy: bool,
+}
+
 pub(super) struct UsageFetchFlow<'a> {
     codex_home: &'a Path,
     usage_url: String,
     client: Client,
     auth: UsageAuth,
     upstream_no_proxy: bool,
+}
+
+impl<'a> RateLimitResetCreditConsumeFlow<'a> {
+    pub(crate) fn new_with_proxy_policy(
+        codex_home: &'a Path,
+        base_url: Option<&str>,
+        upstream_no_proxy: bool,
+    ) -> Result<Self> {
+        let mut auth = read_usage_auth(codex_home)?;
+        if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp())
+            && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
+                codex_home,
+                Some(&auth),
+                upstream_no_proxy,
+            )
+        {
+            auth = outcome.auth;
+        }
+
+        Ok(Self {
+            codex_home,
+            consume_url: rate_limit_reset_credit_consume_url(&quota_base_url(base_url)),
+            client: build_upstream_blocking_http_client(
+                "rate-limit reset credit HTTP",
+                upstream_no_proxy,
+            )?,
+            auth,
+            upstream_no_proxy,
+        })
+    }
+
+    pub(crate) fn execute(
+        mut self,
+        redeem_request_id: &str,
+    ) -> Result<RateLimitResetCreditConsumeResponse> {
+        let (status, body) = self.send_with_unauthorized_retry(redeem_request_id)?;
+        self.ensure_success(status, &body)?;
+        serde_json::from_slice(&body).with_context(|| {
+            format!(
+                "invalid JSON returned by reset-credit backend for {}",
+                self.codex_home.display()
+            )
+        })
+    }
+
+    fn send_with_unauthorized_retry(
+        &mut self,
+        redeem_request_id: &str,
+    ) -> Result<(reqwest::StatusCode, Vec<u8>)> {
+        let mut response = self.send(redeem_request_id)?;
+        if response.0.as_u16() != 401 {
+            return Ok(response);
+        }
+
+        if self.reload_auth_after_unauthorized() {
+            response = self.send(redeem_request_id)?;
+            if response.0.as_u16() != 401 {
+                return Ok(response);
+            }
+        }
+
+        if self.refresh_auth_after_unauthorized() {
+            response = self.send(redeem_request_id)?;
+        }
+
+        Ok(response)
+    }
+
+    fn send(&self, redeem_request_id: &str) -> Result<(reqwest::StatusCode, Vec<u8>)> {
+        send_rate_limit_reset_credit_consume_request(
+            &self.client,
+            &self.consume_url,
+            &self.auth,
+            redeem_request_id,
+        )
+    }
+
+    fn reload_auth_after_unauthorized(&mut self) -> bool {
+        let Ok(latest) = read_usage_auth(self.codex_home) else {
+            return false;
+        };
+        if !usage_auth_changed(Some(&self.auth), &latest) {
+            return false;
+        }
+
+        self.auth = latest;
+        true
+    }
+
+    fn refresh_auth_after_unauthorized(&mut self) -> bool {
+        let Ok(outcome) = refresh_usage_auth_from_disk_with_proxy_policy(
+            self.codex_home,
+            Some(&self.auth),
+            self.upstream_no_proxy,
+        ) else {
+            return false;
+        };
+
+        self.auth = outcome.auth;
+        true
+    }
+
+    fn ensure_success(&self, status: reqwest::StatusCode, body: &[u8]) -> Result<()> {
+        if status.is_success() {
+            return Ok(());
+        }
+
+        let body_text = format_response_body(body);
+        if body_text.is_empty() {
+            bail!(
+                "request failed (HTTP {}) to {}",
+                status.as_u16(),
+                self.consume_url
+            );
+        }
+        bail!(
+            "request failed (HTTP {}) to {}: {}",
+            status.as_u16(),
+            self.consume_url,
+            body_text
+        );
+    }
 }
 
 impl<'a> UsageFetchFlow<'a> {
@@ -238,6 +388,34 @@ fn send_usage_request(
     let body = response
         .bytes()
         .context("failed to read quota response body")?
+        .to_vec();
+    Ok((status, body))
+}
+
+fn send_rate_limit_reset_credit_consume_request(
+    client: &Client,
+    consume_url: &str,
+    auth: &UsageAuth,
+    redeem_request_id: &str,
+) -> Result<(reqwest::StatusCode, Vec<u8>)> {
+    let mut request = client
+        .post(consume_url)
+        .header("Authorization", format!("Bearer {}", auth.access_token))
+        .header("User-Agent", "codex-cli")
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .json(&RateLimitResetCreditConsumeRequest { redeem_request_id });
+
+    if let Some(account_id) = auth.account_id.as_deref() {
+        request = request.header("ChatGPT-Account-Id", account_id);
+    }
+
+    let response = request
+        .send()
+        .with_context(|| format!("failed to request reset-credit endpoint {consume_url}"))?;
+    let status = response.status();
+    let body = response
+        .bytes()
+        .context("failed to read reset-credit response body")?
         .to_vec();
     Ok((status, body))
 }

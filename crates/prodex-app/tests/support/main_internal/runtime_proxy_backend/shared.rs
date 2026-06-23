@@ -30,6 +30,7 @@ pub(crate) fn runtime_proxy_backend_initial_response_id_for_account(
     account_id: &str,
 ) -> Option<&'static str> {
     match account_id {
+        "main-account" => Some("resp-main"),
         "second-account" => Some("resp-second"),
         "third-account" => Some("resp-third"),
         "fourth-account" => Some("resp-fourth"),

@@ -60,6 +60,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
         .expect("initial state save should succeed");
 
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -150,6 +151,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -239,6 +241,7 @@ fn response_affinity_skips_dead_continuation_status() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -335,6 +338,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -442,6 +446,7 @@ fn session_affinity_skips_stale_verified_continuation_status() {
     };
 
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(

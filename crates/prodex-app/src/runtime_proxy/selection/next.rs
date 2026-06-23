@@ -435,6 +435,31 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
     }
 
     if fallback.is_none() {
+        if let Some(auto_redeem_profile) =
+            runtime_best_auto_redeem_profile_name(shared, route_kind, excluded_profiles)?
+        {
+            let (quota_summary, quota_source) =
+                runtime_profile_quota_summary_for_route(shared, &auto_redeem_profile, route_kind)?;
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "selection_pick",
+                    runtime_selection_log_fields_with_quota(
+                        [
+                            runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                            runtime_proxy_log_field("profile", auto_redeem_profile.as_str()),
+                            runtime_proxy_log_field("mode", "auto_redeem"),
+                            runtime_proxy_log_field(
+                                "quota_source",
+                                runtime_selection_quota_source_label(quota_source),
+                            ),
+                        ],
+                        quota_summary,
+                    ),
+                ),
+            );
+            return Ok(Some(auto_redeem_profile));
+        }
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(

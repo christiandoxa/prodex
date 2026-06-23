@@ -35,6 +35,7 @@ fn prepare_runtime_launch_enables_runtime_proxy_for_openai_smart_context_single_
     let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,
@@ -92,6 +93,7 @@ fn prepare_runtime_launch_dry_run_previews_proxy_for_presidio_redaction() {
     let prepared = prepare_runtime_launch_dry_run(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: true,
+        auto_redeem: false,
         skip_quota_check: true,
         base_url: None,
         upstream_no_proxy: false,

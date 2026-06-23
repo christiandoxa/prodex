@@ -121,6 +121,7 @@ pub(super) fn bench_runtime_shared(
 ) -> RuntimeRotationProxyShared {
     let shared = RuntimeRotationProxyShared {
         upstream_no_proxy: false,
+        auto_redeem_enabled: false,
         async_client: reqwest::Client::builder()
             .build()
             .expect("benchmark async client should build"),

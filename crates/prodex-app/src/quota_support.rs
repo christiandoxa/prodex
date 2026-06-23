@@ -508,6 +508,15 @@ pub(crate) fn usage_url(base_url: &str) -> String {
     prodex_quota::usage_url(base_url)
 }
 
+pub(crate) fn rate_limit_reset_credit_consume_url(base_url: &str) -> String {
+    let base_url = base_url.trim_end_matches('/');
+    if base_url.contains("/backend-api") {
+        format!("{base_url}/wham/rate-limit-reset-credits/consume")
+    } else {
+        format!("{base_url}/api/codex/rate-limit-reset-credits/consume")
+    }
+}
+
 pub(crate) fn format_response_body(body: &[u8]) -> String {
     prodex_quota::format_response_body(body)
 }
@@ -571,6 +580,18 @@ mod tests {
         assert_eq!(
             quota_current_profile_name(&state).as_deref(),
             Some("active")
+        );
+    }
+
+    #[test]
+    fn reset_credit_consume_url_matches_backend_path_style() {
+        assert_eq!(
+            rate_limit_reset_credit_consume_url("https://chatgpt.com/backend-api"),
+            "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
+        );
+        assert_eq!(
+            rate_limit_reset_credit_consume_url("http://127.0.0.1:8080"),
+            "http://127.0.0.1:8080/api/codex/rate-limit-reset-credits/consume"
         );
     }
 

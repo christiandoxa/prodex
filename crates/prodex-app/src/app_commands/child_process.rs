@@ -191,6 +191,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     let request = RuntimeLaunchRequest {
         profile: args.profile.as_deref(),
         allow_auto_rotate: !args.no_auto_rotate,
+        auto_redeem: args.auto_redeem,
         skip_quota_check: args.skip_quota_check,
         base_url: args.base_url.as_deref(),
         upstream_no_proxy: args.no_proxy,

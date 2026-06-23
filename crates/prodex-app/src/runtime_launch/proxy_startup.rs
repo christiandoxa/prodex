@@ -131,6 +131,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_listen_addr(
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
+        auto_redeem: false,
         smart_context_enabled: false,
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
@@ -145,6 +146,7 @@ pub(crate) struct RuntimeRotationProxyStartOptions<'a> {
     pub(crate) upstream_base_url: String,
     pub(crate) include_code_review: bool,
     pub(crate) upstream_no_proxy: bool,
+    pub(crate) auto_redeem: bool,
     pub(crate) smart_context_enabled: bool,
     pub(crate) presidio_redaction_enabled: bool,
     pub(crate) model_context_window_tokens: Option<u64>,
@@ -161,6 +163,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         upstream_base_url,
         include_code_review,
         upstream_no_proxy,
+        auto_redeem,
         smart_context_enabled,
         presidio_redaction_enabled,
         model_context_window_tokens,
@@ -340,6 +343,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         .count();
     let shared = RuntimeRotationProxyShared {
         upstream_no_proxy,
+        auto_redeem_enabled: auto_redeem,
         async_client: build_runtime_upstream_async_http_client(upstream_no_proxy)?,
         async_runtime,
         log_path: log_path.clone(),

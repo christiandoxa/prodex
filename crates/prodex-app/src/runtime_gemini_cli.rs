@@ -23,6 +23,7 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),
             allow_auto_rotate: !self.args.no_auto_rotate,
+            auto_redeem: false,
             skip_quota_check: true,
             base_url: self
                 .args

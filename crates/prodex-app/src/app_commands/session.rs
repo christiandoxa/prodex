@@ -173,6 +173,7 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
         profile: None,
         auto_rotate: false,
         no_auto_rotate: false,
+        auto_redeem: false,
         skip_quota_check: false,
         full_access: false,
         base_url: None,

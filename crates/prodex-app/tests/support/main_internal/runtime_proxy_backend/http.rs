@@ -11,15 +11,32 @@ use compact::*;
 use responses::*;
 pub(crate) use write::*;
 
+pub(super) struct RuntimeProxyBackendHttpContext<'a> {
+    pub(super) responses_accounts: &'a Arc<Mutex<Vec<String>>>,
+    pub(super) responses_headers: &'a Arc<Mutex<Vec<BTreeMap<String, String>>>>,
+    pub(super) responses_bodies: &'a Arc<Mutex<Vec<String>>>,
+    pub(super) usage_accounts: &'a Arc<Mutex<Vec<String>>>,
+    pub(super) reset_credit_consume_accounts: &'a Arc<Mutex<Vec<String>>>,
+    pub(super) reset_credit_consume_bodies: &'a Arc<Mutex<Vec<String>>>,
+    pub(super) fault_script: Option<&'a Arc<Mutex<RuntimeProxyBackendFaultScript>>>,
+    pub(super) mode: RuntimeProxyBackendMode,
+}
+
 pub(super) fn handle_runtime_proxy_backend_request(
     mut stream: TcpStream,
-    responses_accounts: &Arc<Mutex<Vec<String>>>,
-    responses_headers: &Arc<Mutex<Vec<BTreeMap<String, String>>>>,
-    responses_bodies: &Arc<Mutex<Vec<String>>>,
-    usage_accounts: &Arc<Mutex<Vec<String>>>,
-    fault_script: Option<&Arc<Mutex<RuntimeProxyBackendFaultScript>>>,
-    mode: RuntimeProxyBackendMode,
+    context: RuntimeProxyBackendHttpContext<'_>,
 ) {
+    let RuntimeProxyBackendHttpContext {
+        responses_accounts,
+        responses_headers,
+        responses_bodies,
+        usage_accounts,
+        reset_credit_consume_accounts,
+        reset_credit_consume_bodies,
+        fault_script,
+        mode,
+    } = context;
+
     let request = match read_http_request(&mut stream) {
         Some(request) => request,
         None => return,
@@ -92,7 +109,27 @@ pub(super) fn handle_runtime_proxy_backend_request(
             .lock()
             .expect("usage_accounts poisoned")
             .push(account_id.clone());
-        handle_runtime_proxy_backend_usage_route(&account_id, mode)
+        let account_consume_count = reset_credit_consume_accounts
+            .lock()
+            .expect("reset_credit_consume_accounts poisoned")
+            .iter()
+            .filter(|consumed_account_id| *consumed_account_id == &account_id)
+            .count();
+        handle_runtime_proxy_backend_usage_route(
+            &account_id,
+            account_consume_count,
+            mode,
+        )
+    } else if path.ends_with("/backend-api/wham/rate-limit-reset-credits/consume") {
+        reset_credit_consume_accounts
+            .lock()
+            .expect("reset_credit_consume_accounts poisoned")
+            .push(account_id.clone());
+        reset_credit_consume_bodies
+            .lock()
+            .expect("reset_credit_consume_bodies poisoned")
+            .push(request_body);
+        handle_runtime_proxy_backend_reset_credit_consume_route(&account_id, mode)
     } else if path.ends_with("/backend-api/status") {
         responses_accounts
             .lock()
@@ -135,6 +172,12 @@ pub(super) fn handle_runtime_proxy_backend_request(
             &request,
             &request_body,
             turn_state.as_deref(),
+            reset_credit_consume_accounts
+                .lock()
+                .expect("reset_credit_consume_accounts poisoned")
+                .iter()
+                .filter(|consumed_account_id| *consumed_account_id == &account_id)
+                .count(),
             mode,
         )
     } else if path.ends_with("/backend-api/codex/responses/compact") {
@@ -167,6 +210,7 @@ pub(super) fn handle_runtime_proxy_backend_request(
 
 fn handle_runtime_proxy_backend_usage_route(
     account_id: &str,
+    reset_credit_consume_count: usize,
     mode: RuntimeProxyBackendMode,
 ) -> RuntimeProxyBackendHttpResponse {
     let body = match account_id {
@@ -178,6 +222,25 @@ fn handle_runtime_proxy_backend_usage_route(
         {
             runtime_proxy_usage_body_with_remaining("main@example.com", 0, 0)
         }
+        "main-account" if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitAutoRedeem) => {
+            let mut body: serde_json::Value =
+                serde_json::from_str(&runtime_proxy_usage_body_with_remaining(
+                    "main@example.com",
+                    if reset_credit_consume_count > 0 { 95 } else { 0 },
+                    if reset_credit_consume_count > 0 { 95 } else { 0 },
+                ))
+                .expect("usage fixture should parse");
+            if reset_credit_consume_count > 0 {
+                body["rate_limit"]["primary_window"]["reset_at"] =
+                    serde_json::json!(future_epoch(18_000));
+                body["rate_limit"]["secondary_window"]["reset_at"] =
+                    serde_json::json!(future_epoch(1_209_600));
+            }
+            body["rate_limit_reset_credits"] = serde_json::json!({
+                "available_count": if reset_credit_consume_count > 0 { 0 } else { 1 }
+            });
+            body.to_string()
+        }
         "main-account" => runtime_proxy_usage_body("main@example.com"),
         "second-account"
             if matches!(
@@ -187,6 +250,22 @@ fn handle_runtime_proxy_backend_usage_route(
         {
             runtime_proxy_usage_body_with_remaining("second@example.com", 0, 0)
         }
+        "second-account"
+            if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitAutoRedeem) =>
+        {
+            let mut body: serde_json::Value =
+                serde_json::from_str(&runtime_proxy_usage_body_with_remaining(
+                    "second@example.com",
+                    if reset_credit_consume_count > 0 { 95 } else { 0 },
+                    if reset_credit_consume_count > 0 { 95 } else { 0 },
+                ))
+                .expect("usage fixture should parse");
+            body["plan_type"] = serde_json::json!("prolite");
+            body["rate_limit_reset_credits"] = serde_json::json!({
+                "available_count": if reset_credit_consume_count > 0 { 0 } else { 1 }
+            });
+            body.to_string()
+        }
         "second-account" => runtime_proxy_usage_body("second@example.com"),
         "third-account"
             if matches!(
@@ -195,6 +274,9 @@ fn handle_runtime_proxy_backend_usage_route(
             ) =>
         {
             runtime_proxy_usage_body_with_remaining("third@example.com", 0, 0)
+        }
+        "third-account" if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitAutoRedeem) => {
+            runtime_proxy_usage_body_with_remaining("third@example.com", 0, 95)
         }
         "third-account" => runtime_proxy_usage_body("third@example.com"),
         "fourth-account"
@@ -216,6 +298,26 @@ fn handle_runtime_proxy_backend_usage_route(
         "HTTP/1.1 200 OK"
     } else {
         "HTTP/1.1 401 Unauthorized"
+    };
+    RuntimeProxyBackendHttpResponse::new(status, "application/json", body, None, None, None)
+}
+
+fn handle_runtime_proxy_backend_reset_credit_consume_route(
+    account_id: &str,
+    mode: RuntimeProxyBackendMode,
+) -> RuntimeProxyBackendHttpResponse {
+    let (status, body) = if matches!(account_id, "main-account" | "second-account")
+        && matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitAutoRedeem)
+    {
+        (
+            "HTTP/1.1 200 OK",
+            serde_json::json!({ "outcome": "reset" }).to_string(),
+        )
+    } else {
+        (
+            "HTTP/1.1 404 Not Found",
+            serde_json::json!({ "error": "not_found" }).to_string(),
+        )
     };
     RuntimeProxyBackendHttpResponse::new(status, "application/json", body, None, None, None)
 }

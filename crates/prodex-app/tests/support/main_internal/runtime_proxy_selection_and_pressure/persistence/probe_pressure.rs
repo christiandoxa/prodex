@@ -77,6 +77,7 @@ fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidat
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
@@ -283,6 +284,7 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(

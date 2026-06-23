@@ -167,6 +167,7 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
     );
     let runtime_shared = RuntimeRotationProxyShared {
         upstream_no_proxy,
+        auto_redeem_enabled: false,
         async_client: build_runtime_upstream_async_http_client(true)?,
         async_runtime,
         log_path: log_path.clone(),

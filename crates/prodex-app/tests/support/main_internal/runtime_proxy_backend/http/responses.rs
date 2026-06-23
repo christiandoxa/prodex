@@ -5,6 +5,7 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
     request: &str,
     request_body: &str,
     turn_state: Option<&str>,
+    reset_credit_consume_count: usize,
     mode: RuntimeProxyBackendMode,
 ) -> RuntimeProxyBackendHttpResponse {
     let previous_response_id = request_previous_response_id(request);
@@ -31,6 +32,12 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
                 None,
                 None,
             ),
+            "main-account"
+                if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitAutoRedeem)
+                    && reset_credit_consume_count > 0 =>
+            {
+                initial_account_response("main-account", mode)
+            }
             "main-account" => {
                 let body = if matches!(
                     mode,
