@@ -228,6 +228,7 @@
         );
 
         assert!(output.contains("sort: current"));
+        assert!(output.contains("\n\nsort: current"));
         assert!(
             output.find("active-late").unwrap() < output.find("low-reset").unwrap(),
             "active profile should be rendered before other profiles"
