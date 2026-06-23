@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.209.0 - 2026-06-23
+
+### Misc
+
+- Tolerate successful reset credit response (`db91125`)
+
 ## 0.208.0 - 2026-06-23
 
 ### Misc
@@ -80,9 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add upstream payload stream (`fcdd338`)
-
-## 0.197.0 - 2026-06-20
-
-### Misc
-
-- Add prodex inspect diagnostics (`0c500ab`)
