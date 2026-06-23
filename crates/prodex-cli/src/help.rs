@@ -61,10 +61,12 @@ pub const CLI_REDEEM_AFTER_HELP: &str = "\
 Examples:
   prodex redeem main
   prodex redeem iandoxa_yahoo.com
+  prodex redeem main --yes
   prodex redeem main --base-url https://chatgpt.com/backend-api
 
 Notes:
   Manual redeem sends one explicit reset-credit consume request for the named OpenAI/Codex profile.
+  If the 5h or weekly quota window resets within 1 hour, prodex asks before consuming a credit; pass `--yes` to skip that prompt.
   The backend decides whether a credit can be applied and may return nothing-to-reset, no-credit, or already-redeemed.";
 pub const CLI_RUN_AFTER_HELP: &str = "\
 Examples:

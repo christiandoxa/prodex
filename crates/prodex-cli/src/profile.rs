@@ -173,6 +173,9 @@ pub struct RedeemArgs {
     /// OpenAI/Codex profile whose reset credit should be redeemed.
     #[arg(value_name = "PROFILE")]
     pub profile: String,
+    /// Skip the near-reset confirmation prompt.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
     /// Override the ChatGPT backend base URL used for the redeem request.
     #[arg(long, value_name = "URL")]
     pub base_url: Option<String>,

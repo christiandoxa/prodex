@@ -17,6 +17,7 @@ fn redeem_command_parses_profile_and_base_url() {
         "--base-url",
         "http://127.0.0.1:8080",
         "--no-proxy",
+        "--yes",
     ])
     .expect("redeem command should parse");
     let Commands::Redeem(args) = command else {
@@ -25,6 +26,7 @@ fn redeem_command_parses_profile_and_base_url() {
     assert_eq!(args.profile, "iandoxa_yahoo.com");
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8080"));
     assert!(args.no_proxy);
+    assert!(args.yes);
 }
 
 #[test]

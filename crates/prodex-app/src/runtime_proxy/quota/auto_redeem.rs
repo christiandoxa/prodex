@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static RUNTIME_AUTO_REDEEM_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-const RUNTIME_AUTO_REDEEM_NATURAL_RESET_GRACE_SECONDS: i64 = 120;
+const RUNTIME_AUTO_REDEEM_NATURAL_RESET_GRACE_SECONDS: i64 = 5 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeAutoRedeemResetCreditOutcome {
