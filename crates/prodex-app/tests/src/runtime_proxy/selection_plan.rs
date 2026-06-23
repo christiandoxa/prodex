@@ -231,6 +231,7 @@ fn test_usage_with_main_windows(
             }),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     }
 }
@@ -255,6 +256,7 @@ fn test_usage_with_unbounded_main_windows(
             }),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     }
 }

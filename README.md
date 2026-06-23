@@ -817,6 +817,8 @@ prodex dashboard
 
 The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, and `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider deepseek`, or `--provider local` to start locked to a single provider.
 
+For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them.
+
 `prodex dashboard` serves a local browser dashboard at `http://127.0.0.1:8765` by default. It shows profile/account settings, lets you switch or remove profile entries, and renders live usage from the same quota collectors used by `prodex quota`. Use `prodex dashboard --port 0` for an OS-selected free port, or pass `--base-url` for quota checks against a custom Codex-compatible backend. The dashboard has no password auth; keep it on localhost unless the network is trusted.
 
 </details>

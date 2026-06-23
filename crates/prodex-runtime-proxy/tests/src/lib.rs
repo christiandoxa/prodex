@@ -17,6 +17,13 @@ fn normalizes_prodex_openai_mount_paths() {
         runtime_proxy_normalize_openai_path("/backend-api/codex/responses").as_ref(),
         "/backend-api/codex/responses"
     );
+    assert_eq!(
+        runtime_proxy_normalize_openai_path(
+            "/backend-api/prodex/realtime/calls?intent=quicksilver&architecture=avas",
+        )
+        .as_ref(),
+        "/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas"
+    );
 }
 
 #[test]

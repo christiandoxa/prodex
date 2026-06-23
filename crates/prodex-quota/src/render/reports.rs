@@ -150,7 +150,7 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
                 plan: display_optional(usage.plan_type.as_deref()).to_string(),
                 main: format_main_windows_compact(usage),
                 status,
-                resets: Some(format!("resets: {}", format_main_reset_summary(usage))),
+                resets: Some(format_openai_reset_summary(usage)),
             }
         }
         Ok(ProviderQuotaSnapshot::Copilot(info)) => QuotaReportViewData {
@@ -195,6 +195,17 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
             status: format!("Error: {}", first_line_of_error(err)),
             resets: Some("resets: unavailable".to_string()),
         },
+    }
+}
+
+fn format_openai_reset_summary(usage: &UsageResponse) -> String {
+    let reset_summary = format_main_reset_summary(usage);
+    match usage.rate_limit_reset_credits.as_ref() {
+        Some(credits) => format!(
+            "resets: {reset_summary}; reset credits: {} available",
+            credits.available_count
+        ),
+        None => format!("resets: {reset_summary}"),
     }
 }
 

@@ -32,6 +32,7 @@
             plan_type: Some("plus".to_string()),
             rate_limit: None,
             code_review_rate_limit: None,
+            rate_limit_reset_credits: None,
             additional_rate_limits: Vec::new(),
         })
     }

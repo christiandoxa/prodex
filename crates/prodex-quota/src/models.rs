@@ -206,8 +206,16 @@ pub struct UsageResponse {
     pub plan_type: Option<String>,
     pub rate_limit: Option<WindowPair>,
     pub code_review_rate_limit: Option<WindowPair>,
+    #[serde(default, alias = "rateLimitResetCredits")]
+    pub rate_limit_reset_credits: Option<RateLimitResetCreditsSummary>,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub additional_rate_limits: Vec<AdditionalRateLimit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RateLimitResetCreditsSummary {
+    #[serde(rename = "availableCount", alias = "available_count")]
+    pub available_count: i64,
 }
 
 pub fn usage_plan_capacity_pressure_scale_bps(usage: &UsageResponse) -> i64 {

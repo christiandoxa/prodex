@@ -28,6 +28,7 @@ fn usage_response(
             }),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     }
 }

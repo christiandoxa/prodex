@@ -374,6 +374,7 @@ fn runtime_launch_usage_from_snapshot(snapshot: &RuntimeProfileUsageSnapshot) ->
             )),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     }
 }

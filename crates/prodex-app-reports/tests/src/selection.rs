@@ -58,6 +58,7 @@ fn test_usage(remaining: i64) -> UsageResponse {
             secondary_window: Some(window(remaining, 604_800)),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     }
 }

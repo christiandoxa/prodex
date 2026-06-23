@@ -38,6 +38,7 @@ fn request_header_skip_list_preserves_codex_metadata_headers() {
         "x-codex-beta-features",
         "x-responsesapi-include-timing-metrics",
         "x-openai-internal-codex-responses-lite",
+        "x-codex-ws-stream-request-start-ms",
         "OpenAI-Beta",
         "User-Agent",
     ] {

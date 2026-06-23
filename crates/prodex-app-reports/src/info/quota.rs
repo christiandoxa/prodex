@@ -131,6 +131,7 @@ pub fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot)
             }),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     }
 }

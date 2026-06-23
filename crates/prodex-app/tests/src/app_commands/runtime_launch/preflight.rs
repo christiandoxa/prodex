@@ -14,6 +14,7 @@ fn no_ready_runtime_profiles_returns_error_for_blocked_report() {
             plan_type: None,
             rate_limit: None,
             code_review_rate_limit: None,
+            rate_limit_reset_credits: None,
             additional_rate_limits: Vec::new(),
         }),
     };

@@ -78,6 +78,7 @@ pub(super) fn usage_with_main_windows(
             }),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     }
 }

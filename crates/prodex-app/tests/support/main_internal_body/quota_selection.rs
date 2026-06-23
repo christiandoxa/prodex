@@ -28,6 +28,7 @@ fn blocks_when_main_window_is_exhausted() {
             secondary_window: None,
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     };
 
@@ -51,6 +52,7 @@ fn blocks_when_weekly_window_is_missing() {
             secondary_window: None,
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     };
 
@@ -90,6 +92,7 @@ fn main_reset_summary_lists_required_windows() {
             }),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     };
 
@@ -113,6 +116,7 @@ fn main_reset_summary_marks_missing_required_window() {
             secondary_window: None,
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     };
 

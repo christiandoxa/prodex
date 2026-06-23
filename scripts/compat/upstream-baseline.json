@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.140.0 release",
+      "baseline_source": "openai/codex rust-v0.142.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -48,7 +48,12 @@
             "stream_responses_websocket",
             "compact_conversation_history",
             "compact_input",
-            "client_metadata"
+            "client_metadata",
+            "X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY",
+            "x-codex-ws-stream-request-start-ms",
+            "item_ids_enabled",
+            "prepare_response_items_for_request",
+            "responses_request_properties_match"
           ]
         },
         {
@@ -78,7 +83,9 @@
             "CodexResponsesRequestKind",
             "to_responses_metadata",
             "responses_metadata_template",
-            "set_responsesapi_client_metadata"
+            "set_responsesapi_client_metadata",
+            "ThreadSource",
+            "thread_source"
           ]
         },
         {
@@ -105,7 +112,10 @@
             "client_metadata",
             "turn_metadata_payload",
             "X_CODEX_TURN_METADATA_HEADER",
-            "to_ascii_json_string"
+            "to_ascii_json_string",
+            "ThreadSource",
+            "THREAD_SOURCE_KEY",
+            "thread_source"
           ]
         },
         {
@@ -130,6 +140,22 @@
           ]
         },
         {
+          "path": "codex-rs/codex-api/src/endpoint/realtime_call.rs",
+          "reason": "Owns WebRTC realtime call creation, AVAS query parameters, backend/API request shape, and call-id Location parsing used before realtime sideband websocket attachment.",
+          "required_contains": [
+            "RealtimeCallClient",
+            "realtime/calls",
+            "create_with_session_and_headers",
+            "configure_realtime_call_request",
+            "intent",
+            "quicksilver",
+            "architecture",
+            "avas",
+            "validate_avas_session_config",
+            "AVAS realtime calls require realtime v1"
+          ]
+        },
+        {
           "path": "codex-rs/codex-api/src/sse/responses.rs",
           "reason": "Owns SSE Responses stream parsing, turn-state capture, completion boundary, and quota/error event interpretation.",
           "required_contains": [
@@ -144,7 +170,10 @@
             "x-reasoning-included",
             "X-Models-Etag",
             "insufficient_quota",
-            "rate_limit_exceeded"
+            "rate_limit_exceeded",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering"
           ]
         },
         {
@@ -175,7 +204,11 @@
             "x-reasoning-included",
             "x-models-etag",
             "parse_wrapped_websocket_error_event",
-            "websocket_connection_limit_reached"
+            "websocket_connection_limit_reached",
+            "serialize_websocket_request",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering"
           ]
         },
         {
@@ -214,7 +247,8 @@
         "x-openai-internal-codex-responses-lite",
         "ws_request_header_x_openai_internal_codex_responses_lite",
         "OpenAI-Beta",
-        "User-Agent"
+        "User-Agent",
+        "x-codex-ws-stream-request-start-ms"
       ],
       "proxy_replaced_headers": [
         "Authorization",
@@ -232,7 +266,8 @@
         "/responses",
         "/responses/compact",
         "/memories/trace_summarize",
-        "websocket_url_for_path(\"responses\")"
+        "websocket_url_for_path(\"responses\")",
+        "/realtime/calls"
       ],
       "expected_stream_events": [
         "response.created",
@@ -272,7 +307,10 @@
             "x-codex-turn-state",
             "openai-model",
             "x-reasoning-included",
-            "X-Models-Etag"
+            "X-Models-Etag",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering"
           ],
           "expected_routes_all": [
             "/responses"
@@ -339,7 +377,8 @@
             "x-responsesapi-include-timing-metrics",
             "x-openai-internal-codex-responses-lite",
             "ws_request_header_x_openai_internal_codex_responses_lite",
-            "x-client-request-id"
+            "x-client-request-id",
+            "x-codex-ws-stream-request-start-ms"
           ],
           "expected_headers_all": [
             "x-codex-installation-id",
@@ -352,7 +391,8 @@
             "x-responsesapi-include-timing-metrics",
             "x-openai-internal-codex-responses-lite",
             "ws_request_header_x_openai_internal_codex_responses_lite",
-            "x-client-request-id"
+            "x-client-request-id",
+            "x-codex-ws-stream-request-start-ms"
           ]
         },
         {
@@ -370,7 +410,8 @@
             "x-codex-beta-features",
             "x-openai-internal-codex-responses-lite",
             "ws_request_header_x_openai_internal_codex_responses_lite",
-            "OPENAI_BETA_HEADER"
+            "OPENAI_BETA_HEADER",
+            "x-codex-ws-stream-request-start-ms"
           ],
           "expected_headers_all": [
             "session_id",
@@ -380,7 +421,8 @@
             "x-codex-beta-features",
             "x-openai-internal-codex-responses-lite",
             "ws_request_header_x_openai_internal_codex_responses_lite",
-            "User-Agent"
+            "User-Agent",
+            "x-codex-ws-stream-request-start-ms"
           ]
         },
         {
@@ -408,6 +450,25 @@
             "RealtimeWsVersion::V1",
             "openai-alpha",
             "quicksilver=v1"
+          ]
+        },
+        {
+          "id": "realtime.call-avas-route",
+          "kind": "route",
+          "file": "codex-rs/codex-api/src/endpoint/realtime_call.rs",
+          "reason": "WebRTC realtime call setup must keep the AVAS realtime/calls route and quicksilver query contract that Prodex proxies before sideband websocket attach.",
+          "file_contains_all": [
+            "RealtimeCallClient",
+            "realtime/calls",
+            "create_with_session_and_headers",
+            "configure_realtime_call_request",
+            "intent",
+            "quicksilver",
+            "architecture",
+            "avas"
+          ],
+          "expected_routes_all": [
+            "/realtime/calls"
           ]
         },
         {
@@ -474,7 +535,9 @@
             "Turn",
             "Memory",
             "CodexResponsesMetadata",
-            "to_responses_metadata"
+            "to_responses_metadata",
+            "ThreadSource",
+            "thread_source"
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
@@ -496,7 +559,10 @@
             "CompactionStrategy",
             "CodexResponsesRequestKind",
             "turn_metadata_payload",
-            "X_CODEX_TURN_METADATA_HEADER"
+            "X_CODEX_TURN_METADATA_HEADER",
+            "ThreadSource",
+            "THREAD_SOURCE_KEY",
+            "thread_source"
           ],
           "expected_headers_all": [
             "x-codex-turn-metadata"
@@ -523,7 +589,10 @@
             "process_responses_event",
             "response.completed",
             "response.failed",
-            "response.metadata"
+            "response.metadata",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering"
           ],
           "expected_stream_events_all": [
             "response.created",
@@ -567,7 +636,11 @@
             "add_auth_headers",
             "x-codex-turn-state",
             "parse_wrapped_websocket_error_event",
-            "websocket_connection_limit_reached"
+            "websocket_connection_limit_reached",
+            "serialize_websocket_request",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering"
           ],
           "expected_routes_all": [
             "websocket_url_for_path(\"responses\")"
@@ -594,7 +667,10 @@
           "reason": "Websocket stream parsing must preserve response lifecycle and rate-limit events.",
           "file_contains_all": [
             "response.completed",
-            "codex.rate_limits"
+            "codex.rate_limits",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering"
           ],
           "expected_stream_events_all": [
             "response.created",
@@ -660,19 +736,19 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.140.0",
-      "name": "0.140.0",
-      "published_at": "2026-06-15T21:06:37Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.140.0",
+      "tag_name": "rust-v0.142.0",
+      "name": "0.142.0",
+      "published_at": "2026-06-22T22:19:53Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.0",
       "body_head": [
         "## New Features",
-        "- New custom TUI commands: `/usage` shows rate-limit info, `/goal` sets a persistent thread goal, `/import` attaches files/images through the composer, and `/delete` permanently deletes the current thread. (#28243, #28336, #27786, #27658)",
-        "- `codex delete` can permanently delete a stored session from the CLI. (#27658)",
-        "- Amazon Bedrock API-key authentication can now be managed by Codex, including profile import/export support. (#27249)",
-        "- CLI and MCP OAuth credentials can use encrypted local storage. (#27860, #27718)",
-        "## Bug Fixes",
-        "- Send request-scoped turn state over WebSocket and through compact requests. (#27588, #27548)",
-        "- Remove the experimental realtime voice controls from the TUI. (#27386)"
+        "- `/usage` can now show and redeem earned usage-limit reset credits, with confirmation, retry, and refreshed availability states. (#28154, #28793)",
+        "- `/plugins` now organizes remote plugins into OpenAI Curated, Workspace, and Shared with me sections, while eligible turns can recommend and install relevant plugins. (#26703, #28399, #28400, #27704, #28403)",
+        "- Configurable rollout token budgets track usage across agent threads, provide remaining-budget reminders, and abort turns when exhausted. (#28746, #28494, #28707, #29423)",
+        "- App-server clients can configure multi-agent delegation as disabled, explicit-request-only, or proactive at the thread and turn level. (#28685, #28792, #29324)",
+        "- Added an indexed web-search mode that permits live searches while restricting direct page access to server-approved URLs. (#28489)",
+        "- Codex can now receive scheduled UTC time reminders and query the current time directly, including through client-provided app-server clocks. (#28822, #28824, #28835, #29011)",
+        "## Bug Fixes"
       ]
     }
   },

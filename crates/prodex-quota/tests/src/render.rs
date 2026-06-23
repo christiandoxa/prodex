@@ -1,5 +1,5 @@
 use super::*;
-use crate::{AdditionalRateLimit, AuthSummary};
+use crate::{AdditionalRateLimit, AuthSummary, RateLimitResetCreditsSummary};
 use std::collections::BTreeMap;
 
 fn usage_with_main_windows(
@@ -24,6 +24,7 @@ fn usage_with_main_windows(
             }),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     }
 }
@@ -70,6 +71,7 @@ fn blocks_missing_required_main_window() {
             secondary_window: None,
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     };
 
@@ -92,6 +94,58 @@ fn compact_window_format_uses_scale_of_100() {
 }
 
 #[test]
+fn openai_quota_renders_rate_limit_reset_credits() {
+    let mut usage = usage_with_main_windows(0, 1_700_001_800, 80, 1_700_259_200);
+    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary { available_count: 2 });
+
+    let panel =
+        render_profile_quota_snapshot("main", &ProviderQuotaSnapshot::OpenAi(usage.clone()));
+    assert!(panel.contains("Reset credits"));
+    assert!(panel.contains("2 available"));
+
+    let overview =
+        render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 160);
+    assert!(overview.contains("reset credits: 2 available"));
+}
+
+#[test]
+fn openai_quota_deserializes_rate_limit_reset_credits() {
+    let camel_usage: UsageResponse = serde_json::from_value(serde_json::json!({
+        "email": "user@example.com",
+        "plan_type": "plus",
+        "rate_limit": null,
+        "code_review_rate_limit": null,
+        "rate_limit_reset_credits": {
+            "availableCount": 3
+        }
+    }))
+    .expect("usage response should deserialize reset credits");
+
+    assert_eq!(
+        camel_usage
+            .rate_limit_reset_credits
+            .as_ref()
+            .map(|credits| credits.available_count),
+        Some(3)
+    );
+
+    let snake_usage: UsageResponse = serde_json::from_value(serde_json::json!({
+        "rate_limit_reset_credits": {
+            "available_count": 4
+        }
+    }))
+    .expect("usage response should deserialize backend reset credits");
+
+    assert_eq!(
+        snake_usage
+            .rate_limit_reset_credits
+            .as_ref()
+            .map(|credits| credits.available_count),
+        Some(4)
+    );
+}
+
+#[test]
 fn quota_summary_marks_exhausted_window() {
     let usage = UsageResponse {
         email: None,
@@ -109,6 +163,7 @@ fn quota_summary_marks_exhausted_window() {
             }),
         }),
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     };
 
@@ -146,6 +201,7 @@ fn profile_quota_render_contains_core_fields() {
         plan_type: Some("plus".to_string()),
         rate_limit: None,
         code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
         additional_rate_limits: Vec::new(),
     };
 

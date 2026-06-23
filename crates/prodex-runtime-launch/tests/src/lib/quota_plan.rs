@@ -21,6 +21,7 @@ fn no_ready_runtime_profiles_plan_formats_blocked_report() {
                 secondary_window: None,
             }),
             code_review_rate_limit: None,
+            rate_limit_reset_credits: None,
             additional_rate_limits: Vec::new(),
         }),
     };
