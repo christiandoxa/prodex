@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.207.0 - 2026-06-23
+
+### Runtime
+
+- Add Codex feature override flags (`fdb1a5c`)
+
+### CLI
+
+- Space live controls from detail rows (`ebbab88`)
+
 ## 0.206.0 - 2026-06-23
 
 ### Misc
@@ -76,10 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Add runtime token log commands (`6ada09f`)
-
-## 0.195.0 - 2026-06-19
-
-### Misc
-
-- Satisfy super optimizer clippy gate (`6f97361`)
-- Stabilize super startup and resume ordering (`c9c9db3`)
