@@ -16,6 +16,81 @@ mod run_command_strategy;
 mod super_runtime;
 
 #[test]
+fn gateway_without_profile_auth_uses_openai_api_key_mode() {
+    let root = temp_dir("gateway-default-api-key-mode");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _api_key = TestEnvVarGuard::unset("OPENAI_API_KEY");
+    let _api_keys = TestEnvVarGuard::set("OPENAI_API_KEYS", "sk-test-first, sk-test-second");
+    let _base_url = TestEnvVarGuard::unset("OPENAI_BASE_URL");
+    let _gateway_token = TestEnvVarGuard::unset("PRODEX_GATEWAY_TOKEN");
+    let paths = AppPaths::discover().unwrap();
+
+    let config = resolve_gateway_launch_config(
+        &paths,
+        &GatewayArgs {
+            listen: Some("127.0.0.1:4100".to_string()),
+            provider: None,
+            base_url: None,
+            api_key: None,
+            profile_auth: false,
+            auth_token: None,
+            smart_context: false,
+            presidio: false,
+            no_presidio: false,
+        },
+        &prodex_runtime_policy::RuntimePolicyGatewaySettings::default(),
+    )
+    .unwrap();
+
+    assert_eq!(config.provider_name, None);
+    assert_eq!(config.listen_addr, "127.0.0.1:4100");
+    assert_eq!(config.auth_token_hash, None);
+    assert!(!config.auth_required);
+    match config.provider_options {
+        RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys } => {
+            assert_eq!(api_keys, ["sk-test-first", "sk-test-second"]);
+        }
+        _ => panic!("expected default gateway API-key mode"),
+    }
+}
+
+#[test]
+fn gateway_profile_auth_allows_startup_without_openai_api_key() {
+    let root = temp_dir("gateway-profile-auth-no-openai-api-key");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _api_key = TestEnvVarGuard::unset("OPENAI_API_KEY");
+    let _api_keys = TestEnvVarGuard::unset("OPENAI_API_KEYS");
+    let _base_url = TestEnvVarGuard::unset("OPENAI_BASE_URL");
+    let _gateway_token = TestEnvVarGuard::unset("PRODEX_GATEWAY_TOKEN");
+    let paths = AppPaths::discover().unwrap();
+
+    let config = resolve_gateway_launch_config(
+        &paths,
+        &GatewayArgs {
+            listen: Some("127.0.0.1:4100".to_string()),
+            provider: None,
+            base_url: None,
+            api_key: None,
+            profile_auth: true,
+            auth_token: None,
+            smart_context: false,
+            presidio: false,
+            no_presidio: false,
+        },
+        &prodex_runtime_policy::RuntimePolicyGatewaySettings::default(),
+    )
+    .unwrap();
+
+    assert_eq!(config.provider_name, None);
+    assert_eq!(config.listen_addr, "127.0.0.1:4100");
+    assert!(!config.auth_required);
+    assert!(matches!(
+        config.provider_options,
+        RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses
+    ));
+}
+
+#[test]
 fn gateway_state_store_config_builds_postgres_backend_from_env() {
     let root = temp_dir("gateway-postgres-state-config");
     let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());

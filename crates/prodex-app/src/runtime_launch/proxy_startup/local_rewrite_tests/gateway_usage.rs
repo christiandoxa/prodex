@@ -69,7 +69,7 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
         .body_rx
         .recv_timeout(Duration::from_secs(2))
         .expect("upstream should receive gateway request");
-    assert!(String::from_utf8_lossy(&upstream_body).contains("gpt-5.4"));
+    assert!(String::from_utf8_lossy(&upstream_body.body).contains("gpt-5.4"));
 
     let usage = client
         .get(format!(

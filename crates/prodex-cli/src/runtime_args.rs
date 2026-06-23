@@ -256,6 +256,13 @@ pub struct GatewayArgs {
     /// Provider API key. Prefer provider-specific env vars for shells/history.
     #[arg(long = "api-key", value_name = "KEY")]
     pub api_key: Option<String>,
+    /// Use Prodex OpenAI profiles for upstream /v1/responses auth instead of API keys.
+    #[arg(
+        long = "profile-auth",
+        default_value_t = false,
+        conflicts_with_all = ["api_key", "provider"]
+    )]
+    pub profile_auth: bool,
     /// Require this bearer token from gateway clients. Env fallback: PRODEX_GATEWAY_TOKEN.
     #[arg(long = "auth-token", value_name = "TOKEN")]
     pub auth_token: Option<String>,

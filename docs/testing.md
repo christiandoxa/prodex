@@ -99,6 +99,17 @@ The default output ranks labels by average runtime and includes suggested intege
 
 Use `npm run test:runtime-smoke` for a small local runtime invariant suite before broad runtime work. It runs curated log JSON/marker, header preservation, selection affinity, stale continuation, websocket local pressure, and tuning snapshot checks from the shared runtime manifest without changing the broad runtime or stress suites.
 
+Profile-backed gateway live smoke is local-only and must stay skipped in CI. CI coverage for `prodex gateway --profile-auth` uses pure mocks/fixtures; do not add real OpenAI/Codex credentials, profile tokens, or captured auth headers to source, fixtures, logs, or workflow configuration. To run a credentialed local smoke on a machine that already has Prodex OpenAI/Codex profiles configured, opt in explicitly and keep `CI` unset:
+
+```bash
+unset CI OPENAI_API_KEY
+PRODEX_PROFILE_AUTH_GATEWAY_SMOKE=1 \
+PRODEX_GATEWAY_TOKEN=local-client-token \
+  prodex gateway --profile-auth --listen 127.0.0.1:4100
+```
+
+Then send one `/v1/responses` request from a generic OpenAI-compatible client using `base_url` / `baseURL` `http://127.0.0.1:4100/v1` and the local gateway token when one is configured. The smoke must not run from CI; public PR verification relies on mock tests plus the repository secret-scan job.
+
 Use `npm run test:gemini-schema` after changing Gemini request, response, SSE, tool-schema, or Gemini Live translation code. It is offline and guards the Codex-to-Gemini schema snippets, response metadata mapping, SSE event surface, and Live event vocabulary.
 
 Use `PRODEX_LIVE_GEMINI=1 npm run test:gemini-live` only on machines with configured Gemini credentials. The default path sends one exact-response smoke request. Add `PRODEX_LIVE_GEMINI_EXTENDED=1` to cover exact shell output, file edits, `apply_patch`, reference-repo clone/inspection, optional-tool update discipline, semantic compact, and explicit `exec resume`; add `PRODEX_LIVE_GEMINI_MCP=1` or `PRODEX_LIVE_GEMINI_MULTIMODAL=1` when that environment should also exercise MCP or image-input paths. The live smoke compares the final Codex agent message exactly, so Gemini narration or bridge leakage fails the gate.

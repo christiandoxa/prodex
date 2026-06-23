@@ -28,7 +28,34 @@ pub(super) fn resolve_gateway_launch_config(
     let provider = args
         .provider
         .or_else(|| policy.provider.as_deref().and_then(gateway_policy_provider));
-    let provider_options = gateway_provider_options(provider, args.api_key.as_deref())?;
+    if args.profile_auth && provider.is_some() {
+        bail!(
+            "gateway --profile-auth is only supported for the default OpenAI-compatible provider"
+        );
+    }
+    if args.profile_auth
+        && args
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+    {
+        bail!("gateway --profile-auth and --api-key are mutually exclusive");
+    }
+    if args.profile_auth
+        && (env::var("OPENAI_API_KEY")
+            .ok()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+            || env::var("OPENAI_API_KEYS")
+                .ok()
+                .and_then(|value| gateway_api_keys_from_list(&value))
+                .is_some())
+    {
+        bail!("gateway --profile-auth and OPENAI_API_KEY(S) are mutually exclusive startup modes");
+    }
+    let provider_options =
+        gateway_provider_options(provider, args.api_key.as_deref(), args.profile_auth)?;
     let auth_token = args
         .auth_token
         .as_deref()
@@ -155,7 +182,7 @@ pub(super) fn resolve_gateway_launch_config(
 
     Ok(ResolvedGatewayLaunchConfig {
         provider_name: provider.map(SuperExternalProvider::as_str),
-        upstream_base_url: gateway_upstream_base_url(args, policy, provider)?,
+        upstream_base_url: gateway_upstream_base_url(args, policy, provider, args.profile_auth)?,
         provider_options,
         auth_token_hash: auth_token
             .as_deref()
@@ -641,6 +668,7 @@ fn gateway_upstream_base_url(
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     provider: Option<SuperExternalProvider>,
+    profile_auth: bool,
 ) -> Result<String> {
     let raw = args
         .base_url
@@ -656,6 +684,7 @@ fn gateway_upstream_base_url(
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
+        .or_else(|| profile_auth.then(|| "https://chatgpt.com/backend-api".to_string()))
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
     gateway_normalize_upstream_base_url(&raw, provider)
 }
@@ -683,7 +712,11 @@ fn gateway_normalize_upstream_base_url(
 fn gateway_provider_options(
     provider: Option<SuperExternalProvider>,
     api_key: Option<&str>,
+    profile_auth: bool,
 ) -> Result<RuntimeLocalRewriteProviderOptions> {
+    if profile_auth {
+        return Ok(RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses);
+    }
     match provider {
         Some(SuperExternalProvider::Anthropic) => {
             runtime_anthropic_api_keys_from_request_or_env(api_key)

@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn fresh_response_selection_uses_current_candidate_path_and_pool_member() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let profile_pool = {
+        let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+        runtime
+            .state
+            .profiles
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    };
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), RuntimeRouteKind::Responses),
+    )
+    .expect("fresh selection should succeed")
+    .expect("fresh selection should return a profile");
+
+    assert!(
+        profile_pool.contains(&selected),
+        "fresh selection must return a profile from the configured pool: selected={selected:?} pool={profile_pool:?}"
+    );
+    let log = std::fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(
+        log.contains("selection_plan route=responses")
+            && log.contains(format!("selection_pick route=responses profile={selected}").as_str()),
+        "fresh selection should leave observable evidence that it used the runtime candidate path: {log}"
+    );
+}
+
+#[test]
 fn response_selection_preserves_bound_previous_response_affinity_despite_quota() {
     let temp_dir = TestDir::isolated();
     let shared = runtime_shared_for_affinity_selection(

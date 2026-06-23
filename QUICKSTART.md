@@ -362,6 +362,32 @@ curl http://127.0.0.1:4000/v1/responses \
   -d '{"model":"prodex-fast","input":"hello"}'
 ```
 
+For generic OpenAI-compatible clients that should use Prodex's saved OpenAI/Codex profiles instead of an upstream API key, start the gateway explicitly in profile-backed mode:
+
+```bash
+unset OPENAI_API_KEY
+PRODEX_GATEWAY_TOKEN=local-client-token \
+  prodex gateway --profile-auth --listen 127.0.0.1:4100
+```
+
+Configure the client with `base_url` / `baseURL` set to `http://127.0.0.1:4100/v1` and a local bearer token only if the gateway was started with one:
+
+```js
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://127.0.0.1:4100/v1",
+  apiKey: process.env.PRODEX_GATEWAY_TOKEN ?? "local-dev-token",
+});
+
+await client.responses.create({
+  model: "gpt-5.5",
+  input: "hello from a generic client",
+});
+```
+
+Profile-backed gateway mode is limited to `/v1/responses`; local client auth is only a caller-auth check and never affects upstream profile choice.
+
 The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It emits `x-prodex-call-id`, writes `gateway_spend` events for request and response phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, and supports catalog-backed route strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`), static virtual keys with persisted request/spend usage and model/budget/RPM/TPM limits, file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, plus keyword/model, Presidio, and external webhook guardrails. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can inspect usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, read virtual-key usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, fetch the machine-readable gateway contract at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; policy/env-backed keys remain read-only, admin-managed key and SCIM user mutations are recorded in `prodex audit`, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix and tenant scopes.
 
 JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for gateway Responses, key, usage, billing ledger, metrics, and OpenAPI calls.

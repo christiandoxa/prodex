@@ -89,6 +89,33 @@ curl http://127.0.0.1:4000/v1/responses \
   -d '{"model":"prodex-fast","input":"hello"}'
 ```
 
+Profile-backed OpenAI Responses mode is explicit and does not require `OPENAI_API_KEY`:
+
+```bash
+unset OPENAI_API_KEY
+PRODEX_GATEWAY_TOKEN=local-client-token \
+  prodex gateway --profile-auth --listen 127.0.0.1:4100
+```
+
+Point any OpenAI-compatible Responses client at the local `/v1` base URL. The inbound bearer token only authenticates the local caller when configured; it never selects or influences the upstream Prodex profile.
+
+```js
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://127.0.0.1:4100/v1",
+  apiKey: process.env.PRODEX_GATEWAY_TOKEN ?? "local-dev-token",
+});
+
+const response = await client.responses.create({
+  model: "gpt-5.5",
+  input: "hello from a generic client",
+});
+console.log(response.output_text);
+```
+
+`--profile-auth` is scoped to `/v1/responses`. Prodex chooses and pins one eligible profile before the request or stream is committed, preserves existing Responses/session affinity for continuations, may rotate only on eligible pre-commit auth/quota/rate failures, and never rotates mid-stream.
+
 </details>
 
 <details>

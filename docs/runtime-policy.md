@@ -27,6 +27,16 @@ Defaults below are production defaults. Test builds use smaller timeouts and lim
 Native OpenAI-compatible upstreams are passed through for `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models`.
 Provider bridges translate `/v1/responses` where supported and pass native-compatible side endpoints through to the selected upstream.
 
+Profile-backed gateway auth is an explicit startup mode for generic OpenAI-compatible `/v1/responses` clients:
+
+```bash
+unset OPENAI_API_KEY
+PRODEX_GATEWAY_TOKEN=local-client-token \
+  prodex gateway --profile-auth --listen 127.0.0.1:4100
+```
+
+In this mode, Prodex uses the existing OpenAI/Codex profile pool and runtime proxy selection machinery instead of `OPENAI_API_KEY`. API-key-backed gateway mode remains the default when `--profile-auth` is absent, and the two upstream auth modes are mutually exclusive at startup. Client bearer auth remains optional on loopback and is only inbound caller auth; it does not pick, rank, or rotate upstream profiles. The profile-auth gateway scope is `/v1/responses` only: a profile is selected and pinned before request/stream commit, continuation fields reuse existing Responses/session affinity, pre-commit rotation is limited to eligible auth/quota/rate failures, and there is no mid-stream rotation.
+
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
 | `gateway.listen_addr` | none | `127.0.0.1:4000` | Gateway bind address. Non-loopback binds require `--auth-token`, `PRODEX_GATEWAY_TOKEN`, or `gateway.virtual_keys`. |

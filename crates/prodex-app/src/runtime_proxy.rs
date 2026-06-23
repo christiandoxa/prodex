@@ -38,6 +38,7 @@ pub(crate) use self::chain_log::*;
 pub(crate) use self::classification::*;
 pub(super) use self::continuation::*;
 pub(crate) use self::cookies::*;
+pub(crate) use self::dispatch::respond_runtime_responses_reply;
 pub(crate) use self::dispatch::*;
 pub(crate) use self::failure_response::*;
 pub(super) use self::health::*;

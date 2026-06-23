@@ -176,9 +176,44 @@ fn gateway_provider_args_parse_as_top_level_command() {
     assert_eq!(args.listen.as_deref(), Some("127.0.0.1:4100"));
     assert_eq!(args.provider, Some(SuperExternalProvider::Gemini));
     assert_eq!(args.api_key.as_deref(), Some("test-key"));
+    assert!(!args.profile_auth);
     assert_eq!(args.auth_token.as_deref(), Some("gateway-token"));
     assert!(args.smart_context);
     assert!(args.presidio);
+}
+
+#[test]
+fn gateway_profile_auth_arg_parses_and_conflicts_with_api_key_modes() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "gateway",
+        "--profile-auth",
+        "--listen",
+        "127.0.0.1:4100",
+    ])
+    .expect("profile-auth gateway command should parse");
+    let Commands::Gateway(args) = command else {
+        panic!("expected gateway command");
+    };
+    assert!(args.profile_auth);
+    assert_eq!(args.listen.as_deref(), Some("127.0.0.1:4100"));
+    assert!(args.api_key.is_none());
+    assert!(args.provider.is_none());
+
+    assert!(
+        parse_cli_command_from(["prodex", "gateway", "--profile-auth", "--api-key", "test"])
+            .is_err()
+    );
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "gateway",
+            "--profile-auth",
+            "--provider",
+            "gemini"
+        ])
+        .is_err()
+    );
 }
 
 #[test]

@@ -16,6 +16,7 @@ pub(crate) enum RuntimeLocalRewriteProviderOptions {
     OpenAiResponses {
         api_keys: Vec<String>,
     },
+    ProfileAuthOpenAiResponses,
     LocalEmbeddingsOnly {
         embedding_model: String,
     },
@@ -39,6 +40,7 @@ impl RuntimeLocalRewriteProviderOptions {
                 RuntimeProviderBridgeKind::Copilot
             }
             RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. }
+            | RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses
             | RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => {
                 RuntimeProviderBridgeKind::OpenAiResponses
             }

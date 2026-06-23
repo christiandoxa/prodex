@@ -312,6 +312,9 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 copilot_context: None,
             })
         }
+        RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses => {
+            anyhow::bail!("gateway profile-auth dispatch is handled by the runtime responses proxy")
+        }
         RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { embedding_model } => {
             let parts = if path_without_query(&request.path_and_query).ends_with("/embeddings") {
                 runtime_local_embeddings_response_parts(request, embedding_model)

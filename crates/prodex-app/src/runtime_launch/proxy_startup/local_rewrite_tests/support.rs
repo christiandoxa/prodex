@@ -1,5 +1,6 @@
 use crate::AppPaths;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use std::collections::BTreeMap;
 use std::fs;
 use std::net::SocketAddr;
 use std::sync::mpsc;
@@ -9,8 +10,21 @@ use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinySe
 
 pub(super) struct TestUpstream {
     pub(super) addr: SocketAddr,
-    pub(super) body_rx: mpsc::Receiver<Vec<u8>>,
+    pub(super) body_rx: mpsc::Receiver<TestUpstreamRequest>,
     _thread: thread::JoinHandle<()>,
+}
+
+pub(super) struct TestUpstreamRequest {
+    #[allow(dead_code)]
+    pub(super) path: String,
+    pub(super) headers: BTreeMap<String, String>,
+    pub(super) body: Vec<u8>,
+}
+
+pub(super) struct TestUpstreamResponse {
+    pub(super) status: u16,
+    pub(super) content_type: &'static str,
+    pub(super) body: String,
 }
 
 impl TestUpstream {
@@ -19,6 +33,19 @@ impl TestUpstream {
     }
 
     pub(super) fn start_n(request_count: usize) -> Self {
+        Self::start_responses(
+            (0..request_count)
+                .map(|_| TestUpstreamResponse {
+                    status: 200,
+                    content_type: "application/json",
+                    body: r#"{"id":"resp_test","usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#
+                        .to_string(),
+                })
+                .collect(),
+        )
+    }
+
+    pub(super) fn start_responses(responses: Vec<TestUpstreamResponse>) -> Self {
         let server = TinyServer::http("127.0.0.1:0").expect("test upstream should bind");
         let addr = server
             .server_addr()
@@ -26,20 +53,33 @@ impl TestUpstream {
             .expect("test upstream should expose TCP addr");
         let (body_tx, body_rx) = mpsc::channel();
         let thread = thread::spawn(move || {
-            for _ in 0..request_count {
+            for scripted in responses {
                 let mut request = server.recv().expect("test upstream should receive request");
                 let mut body = Vec::new();
                 request
                     .as_reader()
                     .read_to_end(&mut body)
                     .expect("test upstream should read request body");
-                let _ = body_tx.send(body);
-                let mut response = TinyResponse::from_string(
-                    r#"{"id":"resp_test","usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#,
-                )
-                .with_status_code(200);
+                let path = request.url().to_string();
+                let headers = request
+                    .headers()
+                    .iter()
+                    .map(|header| {
+                        (
+                            header.field.as_str().to_ascii_lowercase().to_string(),
+                            header.value.as_str().to_string(),
+                        )
+                    })
+                    .collect();
+                let _ = body_tx.send(TestUpstreamRequest {
+                    path,
+                    headers,
+                    body,
+                });
+                let mut response =
+                    TinyResponse::from_string(scripted.body).with_status_code(scripted.status);
                 response.add_header(
-                    TinyHeader::from_bytes("content-type", "application/json").unwrap(),
+                    TinyHeader::from_bytes("content-type", scripted.content_type).unwrap(),
                 );
                 let _ = request.respond(response);
             }
@@ -210,6 +250,25 @@ pub(super) fn app_paths_for_root(root: std::path::PathBuf) -> AppPaths {
         legacy_shared_codex_root: root.join("shared"),
         root,
     }
+}
+
+pub(super) fn write_openai_profile_auth_json(
+    codex_home: &std::path::Path,
+    access_token: &str,
+    account_id: &str,
+) {
+    fs::create_dir_all(codex_home).expect("profile auth home should be created");
+    fs::write(
+        codex_home.join("auth.json"),
+        serde_json::json!({
+            "tokens": {
+                "access_token": access_token,
+                "account_id": account_id,
+            }
+        })
+        .to_string(),
+    )
+    .expect("profile auth fixture should be written");
 }
 
 pub(super) fn wait_for_usage_file(path: &std::path::Path) -> serde_json::Value {

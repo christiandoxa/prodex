@@ -4,7 +4,8 @@ use super::local_rewrite::{
     RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,
 };
-use crate::AppState;
+use crate::{AppState, ProfileEntry, ProfileProvider, ResponseProfileBinding};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 mod deepseek;
@@ -15,6 +16,7 @@ mod gateway_admin_tenant_scope;
 mod gateway_state;
 mod gateway_usage;
 mod model_memory;
+mod profile_auth;
 mod support;
 
 use support::*;
@@ -196,10 +198,148 @@ fn gateway_guardrail_pii_redaction_rewrites_request_before_upstream() {
         .body_rx
         .recv_timeout(Duration::from_secs(2))
         .expect("upstream should receive redacted request");
-    let upstream_body = String::from_utf8(upstream_body).expect("upstream body should be utf8");
+    let upstream_body =
+        String::from_utf8(upstream_body.body).expect("upstream body should be utf8");
     assert!(upstream_body.contains("<redacted>"));
     assert!(!upstream_body.contains("alice@example.com"));
     assert!(!upstream_body.contains("4111-1111-1111-1111"));
+}
+
+#[test]
+fn gateway_profile_auth_continuations_use_existing_response_and_session_affinity() {
+    let root = temp_root("gateway-profile-auth-continuation-affinity");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(4);
+    let active_home = paths.managed_profiles_root.join("active");
+    let bound_home = paths.managed_profiles_root.join("bound");
+    write_openai_profile_auth_json(&active_home, "active-access-token", "active-account");
+    write_openai_profile_auth_json(&bound_home, "bound-access-token", "bound-account");
+    let bound_profile = ResponseProfileBinding {
+        profile_name: "bound".to_string(),
+        bound_at: 1,
+    };
+    let state = AppState {
+        active_profile: Some("active".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "active".to_string(),
+                ProfileEntry {
+                    codex_home: active_home,
+                    managed: true,
+                    email: Some("active@example.test".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "bound".to_string(),
+                ProfileEntry {
+                    codex_home: bound_home,
+                    managed: true,
+                    email: Some("bound@example.test".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp_bound".to_string(),
+            bound_profile.clone(),
+        )]),
+        session_profile_bindings: BTreeMap::from([("session_bound".to_string(), bound_profile)]),
+    };
+    let now = chrono::Local::now().timestamp();
+    std::fs::write(
+        paths.root.join("runtime-usage-snapshots.json"),
+        serde_json::json!({
+            "bound": {
+                "checked_at": now,
+                "five_hour_status": "Ready",
+                "five_hour_remaining_percent": 100,
+                "five_hour_reset_at": now + 3600,
+                "weekly_status": "Ready",
+                "weekly_remaining_percent": 100,
+                "weekly_reset_at": now + 3600,
+            }
+        })
+        .to_string(),
+    )
+    .expect("usage snapshot fixture should be written");
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &state,
+        upstream_base_url: format!("http://{}/backend-api", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses,
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("profile-auth gateway proxy should start without upstream API keys");
+
+    let client = reqwest::blocking::Client::new();
+    let session_response = client
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .header("session_id", "session_bound")
+        .json(&serde_json::json!({
+            "model": "gpt-5.4",
+            "input": "continue the session",
+        }))
+        .send()
+        .expect("session continuation should be sent");
+    assert_eq!(session_response.status().as_u16(), 200);
+
+    let previous_response = client
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .json(&serde_json::json!({
+            "model": "gpt-5.4",
+            "input": "continue the response",
+            "previous_response_id": "resp_bound",
+        }))
+        .send()
+        .expect("previous-response continuation should be sent");
+    assert_eq!(previous_response.status().as_u16(), 200);
+
+    let mut response_forwards = Vec::new();
+    for _ in 0..4 {
+        match upstream.body_rx.recv_timeout(Duration::from_millis(250)) {
+            Ok(request)
+                if request.path.ends_with("/codex/responses") && !request.body.is_empty() =>
+            {
+                response_forwards.push(request);
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    assert_eq!(
+        response_forwards.len(),
+        2,
+        "expected exactly the two client /responses forwards"
+    );
+    for request in response_forwards {
+        assert_eq!(
+            request.headers.get("authorization").map(String::as_str),
+            Some("Bearer bound-access-token")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("chatgpt-account-id")
+                .map(String::as_str),
+            Some("bound-account")
+        );
+    }
 }
 
 #[test]

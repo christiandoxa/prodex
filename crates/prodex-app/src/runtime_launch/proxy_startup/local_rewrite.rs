@@ -59,6 +59,7 @@ use super::provider_bridge::{
     runtime_provider_request_ledger_message,
 };
 use super::*;
+use crate::runtime_proxy::{proxy_runtime_responses_request, respond_runtime_responses_reply};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
@@ -165,6 +166,18 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
             .build()
             .context("failed to build runtime local rewrite async runtime")?,
     );
+    let profile_auth_enabled = matches!(
+        &provider,
+        RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses
+    );
+    let runtime_current_profile = runtime_local_rewrite_current_profile(&provider, state)?;
+    let persisted_usage_snapshots = if profile_auth_enabled {
+        load_runtime_usage_snapshots_with_recovery(paths, &state.profiles)
+            .map(|loaded| loaded.value)
+            .unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
     let runtime_shared = RuntimeRotationProxyShared {
         upstream_no_proxy,
         async_client: build_runtime_upstream_async_http_client(true)?,
@@ -183,13 +196,21 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
             state: state.clone(),
             upstream_base_url: upstream_base_url.clone(),
             include_code_review: false,
-            current_profile: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
-            profile_usage_auth: BTreeMap::new(),
+            current_profile: runtime_current_profile,
+            profile_usage_auth: if profile_auth_enabled {
+                load_runtime_profile_usage_auth_cache(state)
+            } else {
+                BTreeMap::new()
+            },
             turn_state_bindings: BTreeMap::new(),
-            session_id_bindings: BTreeMap::new(),
+            session_id_bindings: if profile_auth_enabled {
+                state.session_profile_bindings.clone()
+            } else {
+                BTreeMap::new()
+            },
             continuation_statuses: RuntimeContinuationStatuses::default(),
             profile_probe_cache: BTreeMap::new(),
-            profile_usage_snapshots: BTreeMap::new(),
+            profile_usage_snapshots: persisted_usage_snapshots,
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
@@ -354,6 +375,33 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         active_request_count: Arc::clone(&runtime_shared.active_request_count),
         owner_lock: None,
     })
+}
+
+fn runtime_local_rewrite_current_profile(
+    provider: &RuntimeLocalRewriteProviderOptions,
+    state: &AppState,
+) -> Result<String> {
+    if !matches!(
+        provider,
+        RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses
+    ) {
+        return Ok(RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
+    }
+    if let Some(active) = state.active_profile.as_deref()
+        && state
+            .profiles
+            .get(active)
+            .is_some_and(|profile| matches!(profile.provider, ProfileProvider::Openai))
+    {
+        return Ok(active.to_string());
+    }
+    state
+        .profiles
+        .iter()
+        .find_map(|(name, profile)| {
+            matches!(profile.provider, ProfileProvider::Openai).then(|| name.clone())
+        })
+        .context("gateway --profile-auth requires at least one OpenAI/Codex profile")
 }
 
 fn build_runtime_local_rewrite_http_client() -> Result<reqwest::blocking::Client> {
@@ -571,6 +619,57 @@ fn handle_runtime_local_rewrite_proxy_request(
         ));
         return;
     }
+    if matches!(
+        &shared.provider,
+        RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses
+    ) {
+        let (path, query) = match captured.path_and_query.split_once('?') {
+            Some((path, query)) => (path.to_string(), Some(query.to_string())),
+            None => (captured.path_and_query.clone(), None),
+        };
+        if path != "/v1/responses" {
+            let _ = request.respond(build_runtime_proxy_text_response(
+                404,
+                "gateway profile-auth mode only supports /v1/responses",
+            ));
+            return;
+        }
+        let mut runtime_request = captured;
+        runtime_request.path_and_query = match query {
+            Some(query) => format!(
+                "{}/responses?{}",
+                runtime_proxy_crate::RUNTIME_PROXY_OPENAI_MOUNT_PATH,
+                query
+            ),
+            None => format!(
+                "{}/responses",
+                runtime_proxy_crate::RUNTIME_PROXY_OPENAI_MOUNT_PATH
+            ),
+        };
+        let response =
+            match proxy_runtime_responses_request(request_id, &runtime_request, runtime_shared) {
+                Ok(response) => response,
+                Err(err) => {
+                    runtime_proxy_log(
+                        runtime_shared,
+                        runtime_proxy_structured_log_message(
+                            "profile_auth_gateway_responses_error",
+                            [
+                                runtime_proxy_log_field("request", request_id.to_string()),
+                                runtime_proxy_log_field("transport", "http"),
+                                runtime_proxy_log_field("error", format!("{err:#}")),
+                            ],
+                        ),
+                    );
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response_parts(
+                        502,
+                        &err.to_string(),
+                    ))
+                }
+            };
+        respond_runtime_responses_reply(request, response);
+        return;
+    }
     let route_load = shared
         .gateway_route_load
         .lock()
@@ -613,6 +712,7 @@ fn handle_runtime_local_rewrite_proxy_request(
             RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
             RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
             RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. } => "OpenAI",
+            RuntimeLocalRewriteProviderOptions::ProfileAuthOpenAiResponses => "OpenAI profile auth",
             RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => {
                 "Prodex local embeddings"
             }

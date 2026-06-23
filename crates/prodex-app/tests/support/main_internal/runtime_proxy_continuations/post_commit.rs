@@ -423,6 +423,110 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_sta
 }
 
 #[test]
+fn runtime_proxy_http_stream_keeps_selected_profile_after_commit_failure() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let _stream_idle_timeout_guard = ci_runtime_proxy_timeout_guard(
+        "PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS",
+        2_000,
+        5_000,
+    );
+
+    let temp_dir = TestDir::isolated();
+    let backend = RuntimeProxyBackend::start_http_delayed_quota_after_output_item_added();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let state = AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "main".to_string(),
+                ProfileEntry {
+                    codex_home: main_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home,
+                    managed: true,
+                    email: Some("second@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::new(),
+        response_profile_bindings: BTreeMap::from([(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        )]),
+        session_profile_bindings: BTreeMap::new(),
+    };
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    state.save(&paths).expect("failed to save initial state");
+
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
+        .expect("runtime proxy should start");
+    let response = Client::builder()
+        .build()
+        .expect("client")
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::json!({
+                "model": "gpt-5-codex",
+                "previous_response_id": "resp-main",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "fresh stream",
+                    }],
+                }],
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("responses request should succeed");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = read_runtime_http_stream_until(response, |body| {
+        body.contains("response.output_item.added") && body.contains("response.failed")
+    });
+    assert!(
+        body.contains("\"type\":\"response.output_item.added\""),
+        "stream should commit visible output before the failure: {body}"
+    );
+    assert!(
+        body.contains("You've hit your usage limit"),
+        "post-commit quota-shaped failure should be forwarded from the pinned profile: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()],
+        "selected profile must stay pinned after stream commit; no mid-stream rotation to the eligible second profile"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_quota_then_tool_output_fresh_fallback_error();
