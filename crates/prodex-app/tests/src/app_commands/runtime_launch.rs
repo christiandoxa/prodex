@@ -706,6 +706,7 @@ fn test_run_args(codex_args: Vec<OsString>) -> RunArgs {
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args,
     }
 }

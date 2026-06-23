@@ -20,8 +20,9 @@ pub(crate) struct CavemanLaunchStrategy {
 
 impl CavemanLaunchStrategy {
     pub(crate) fn new(args: CavemanArgs) -> Self {
+        let codex_feature_args = args.codex_args_with_feature_overrides();
         let (rtk_enabled, super_optimizer_prefix_enabled, memory_prefix_enabled, codex_args) =
-            runtime_caveman_extract_launch_prefixes(&args.codex_args);
+            runtime_caveman_extract_launch_prefixes(&codex_feature_args);
         let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
         let mut args = args;
         args.super_optimizer_overlay |= super_optimizer_prefix_enabled;

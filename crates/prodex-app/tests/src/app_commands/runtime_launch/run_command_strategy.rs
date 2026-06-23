@@ -39,6 +39,7 @@ fn run_strategy_resolves_codex_delete_partial_selector_before_launch() {
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from("delete"), OsString::from("019c9e3d")],
     })
     .unwrap();
@@ -125,6 +126,7 @@ fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from(session_id)],
     })
     .unwrap();
@@ -180,6 +182,7 @@ fn run_strategy_repairs_resume_session_metadata_prefix_before_provider_detection
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from(session_id)],
     })
     .unwrap();
@@ -224,6 +227,7 @@ fn run_strategy_repairs_resume_session_missing_metadata_before_codex_launch() {
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from(session_id)],
     })
     .unwrap();
@@ -331,6 +335,7 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from(session_id)],
     })
     .unwrap();
@@ -408,6 +413,7 @@ fn run_strategy_repairs_resume_session_in_managed_profile_after_shared_migration
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from(session_id)],
     })
     .unwrap();
@@ -459,6 +465,7 @@ fn run_strategy_auto_routes_explicit_exec_gemini_resume_sessions_to_provider_bri
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![
             OsString::from("exec"),
             OsString::from("resume"),
@@ -511,6 +518,7 @@ fn run_command_strategy_keeps_smart_context_autopilot_disabled() {
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from("exec"), OsString::from("hello")],
     })
     .unwrap();
@@ -530,6 +538,7 @@ fn run_command_strategy_carries_profile_v2_name() {
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![
             OsString::from("exec"),
             OsString::from("--profile"),

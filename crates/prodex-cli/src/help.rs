@@ -73,6 +73,9 @@ Examples:
   prodex super
   prodex exec \"review this repo\"
   prodex run --profile main
+  prodex run --web-search indexed
+  prodex run --rollout-budget-tokens 100000
+  prodex run --current-time-reminder
   prodex run exec \"review this repo\"
   prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
@@ -80,6 +83,7 @@ Notes:
   Eligible pre-commit rotation is allowed by default when another supported profile or key is available.
   Bare `prodex <args>` is treated as `prodex run <args>`.
   A lone session id is forwarded as `codex resume <session-id>`.
+  Codex runtime feature overrides are passed through with `-c`: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens`, and `--current-time-reminder`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Codex directly without quota preflight or the local auto-rotate proxy.";
 pub const CLI_CLAUDE_AFTER_HELP: &str = "\
 Examples:
@@ -105,12 +109,14 @@ Examples:
   prodex sqz
   prodex super
   prodex caveman --profile main
+  prodex caveman --web-search cached
   prodex caveman exec \"review latest diff in caveman mode\"
   prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 Notes:
   Prodex launches Codex from a temporary Prodex overlay `CODEX_HOME`, then activates Caveman for that session.
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
+  Codex runtime feature overrides from `prodex run` also work here.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
   Add optimizer prefixes before Codex args to enable session tools in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, `presidio`.
   Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex tokensavior`, `prodex clawcompactor`, and `prodex mem` map to `prodex caveman <prefix>`.
@@ -128,10 +134,13 @@ Examples:
   prodex super exec \"review latest diff in super mode\"
   prodex super 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
   prodex super --profile main
+  prodex super --web-search indexed
+  prodex super --rollout-budget-tokens 100000
 
 Notes:
   `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor --full-access`, with interactive Presidio and managed-Mem0 opt-in prompts before launch.
   It enables Caveman mode, Smart Context, launch-time full access, and the available Super optimizer tools in the Prodex overlay.
+  Codex runtime feature overrides from `prodex run` also work here; explicit `--web-search` overrides Super provider defaults.
   Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access`.
   Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
   Empty input or `n` at the Mem0 prompt leaves prodex-memory disabled; use `--mem0` to enable managed Mem0 or the `mem` optimizer prefix for local SQLite memory.

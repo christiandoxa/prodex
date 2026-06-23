@@ -872,6 +872,41 @@ unless Prodex explicitly owns that command.
 
 </details>
 
+<details>
+<summary>Codex runtime feature overrides and app-server compatibility (advanced)</summary>
+
+Prodex keeps recent Codex runtime switches as Codex-owned behavior by rendering launch flags into `codex -c ...` overrides on `prodex run`, `prodex caveman`, and `prodex super`:
+
+```bash
+prodex run --web-search indexed
+prodex run --web-search cached
+prodex run --web-search live
+prodex run --web-search disabled
+
+prodex run --rollout-budget-tokens 100000
+prodex run --rollout-budget-tokens 100000 --rollout-budget-reminders 75000,50000,25000
+
+prodex run --current-time-reminder
+prodex run --current-time-reminder --current-time-reminder-interval 2
+```
+
+`--web-search` maps to Codex's top-level `web_search = "disabled" | "cached" | "indexed" | "live"` setting. In Super provider mode, an explicit `--web-search` is appended after the provider default, so it overrides the default bridge choice.
+
+`--rollout-budget-tokens` enables Codex's `[features.rollout_budget]` config. If no reminder thresholds are supplied, Prodex provides valid 75%, 50%, and 25% remaining-token thresholds for the selected limit. Use `--rollout-budget-sampling-weight` and `--rollout-budget-prefill-weight` only when you need Codex's weighted accounting knobs.
+
+`--current-time-reminder` enables Codex's `[features.current_time_reminder]` config. The default system clock source is owned by Codex. `--current-time-clock-source external` is intended for Codex app-server clients that implement the upstream `currentTime/read` request.
+
+Codex `multiAgentMode` is an app-server/thread setting, not a normal TUI `config.toml` launch override. Prodex therefore does not invent a competing CLI config flag. Launch `prodex app-server` or `prodex run app-server` and pass upstream `multiAgentMode` values (`none`, `explicitRequestOnly`, or `proactive`) through the Codex app-server API.
+
+Codex plugin catalog commands are managed passthrough by default:
+
+```bash
+prodex plugin list
+prodex plugin marketplace
+```
+
+</details>
+
 ## Modes
 
 | Mode | Command | Description |

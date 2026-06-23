@@ -354,6 +354,7 @@ fn runtime_broker_and_update_commands_skip_prodex_update_notice() {
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from("hello")],
     });
 

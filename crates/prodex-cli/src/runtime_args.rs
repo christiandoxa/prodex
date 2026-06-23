@@ -1,3 +1,4 @@
+use crate::CodexRuntimeFeatureArgs;
 use clap::{ArgGroup, Args};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -33,6 +34,8 @@ pub struct RunArgs {
     /// Print resolved launch diagnostics without starting Codex.
     #[arg(long)]
     pub dry_run: bool,
+    #[command(flatten)]
+    pub codex_features: CodexRuntimeFeatureArgs,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
@@ -110,6 +113,8 @@ pub struct CavemanArgs {
     /// Local memory backend selected by a higher-level launch shortcut.
     #[arg(skip)]
     pub memory_backend: SuperMemoryBackend,
+    #[command(flatten)]
+    pub codex_features: CodexRuntimeFeatureArgs,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
@@ -199,6 +204,8 @@ pub struct SuperArgs {
         requires = "provider_or_url"
     )]
     pub local_auto_compact_token_limit: Option<usize>,
+    #[command(flatten)]
+    pub codex_features: CodexRuntimeFeatureArgs,
     /// Arguments passed through to `codex` after the implied optimizer prefixes.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
@@ -346,6 +353,7 @@ impl SuperArgs {
         let local_mode = self.url.is_some() || self.provider.is_some();
         let skip_quota_check = self.skip_quota_check || local_mode;
 
+        let feature_overrides = self.codex_features.to_codex_config_args();
         let mut codex_args = Vec::with_capacity(
             self.codex_args.len()
                 + 1
@@ -353,7 +361,8 @@ impl SuperArgs {
                 + usize::from(presidio)
                 + usize::from(mem0)
                 + local_provider_args.len()
-                + external_provider_args.len(),
+                + external_provider_args.len()
+                + feature_overrides.len(),
         );
         codex_args.push(OsString::from("rtk"));
         codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
@@ -365,6 +374,7 @@ impl SuperArgs {
         }
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
+        codex_args.extend(feature_overrides);
         codex_args.extend(self.codex_args);
         CavemanArgs {
             profile: self.profile,
@@ -387,9 +397,36 @@ impl SuperArgs {
             } else {
                 SuperMemoryBackend::Sqlite
             },
+            codex_features: CodexRuntimeFeatureArgs::default(),
             codex_args,
         }
     }
+}
+
+impl RunArgs {
+    pub fn codex_args_with_feature_overrides(&self) -> Vec<OsString> {
+        codex_args_with_feature_overrides(&self.codex_args, &self.codex_features)
+    }
+}
+
+impl CavemanArgs {
+    pub fn codex_args_with_feature_overrides(&self) -> Vec<OsString> {
+        codex_args_with_feature_overrides(&self.codex_args, &self.codex_features)
+    }
+}
+
+fn codex_args_with_feature_overrides(
+    codex_args: &[OsString],
+    features: &CodexRuntimeFeatureArgs,
+) -> Vec<OsString> {
+    let overrides = features.to_codex_config_args();
+    if overrides.is_empty() {
+        return codex_args.to_vec();
+    }
+    let mut args = Vec::with_capacity(codex_args.len() + overrides.len());
+    args.extend(codex_args.iter().cloned());
+    args.extend(overrides);
+    args
 }
 
 pub fn caveman_args_with_optimizer_prefix(mut args: CavemanArgs, prefix: &str) -> CavemanArgs {

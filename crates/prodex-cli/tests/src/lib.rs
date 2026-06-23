@@ -12,6 +12,8 @@ mod expose;
 mod external_provider;
 #[path = "redeem.rs"]
 mod redeem;
+#[path = "runtime_features.rs"]
+mod runtime_features;
 #[path = "shortcuts.rs"]
 mod shortcuts;
 fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {

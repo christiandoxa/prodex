@@ -34,7 +34,8 @@ struct RunCommandStrategy {
 
 impl RunCommandStrategy {
     fn new(args: RunArgs) -> Result<Self> {
-        let (dry_run_arg, codex_args) = extract_prodex_dry_run_flag(&args.codex_args);
+        let codex_feature_args = args.codex_args_with_feature_overrides();
+        let (dry_run_arg, codex_args) = extract_prodex_dry_run_flag(&codex_feature_args);
         let (mut codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
         let mut model_provider_override =

@@ -9,6 +9,7 @@ use crate::{
 };
 pub(crate) use prodex_app_reports::SessionReport;
 use prodex_app_reports::render_session_reports_output;
+use prodex_cli::CodexRuntimeFeatureArgs;
 
 pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
     match command {
@@ -179,6 +180,7 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
         base_url: None,
         no_proxy: false,
         dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from("resume"), OsString::from(report.id.clone())],
     })
 }

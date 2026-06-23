@@ -7,6 +7,7 @@ mod cleanup;
 mod help;
 mod profile;
 mod runtime_args;
+mod runtime_features;
 mod session_context;
 
 pub use cleanup::*;
@@ -15,6 +16,7 @@ use help::*;
 pub use presidio::*;
 pub use profile::*;
 pub use runtime_args::*;
+pub use runtime_features::*;
 pub use session_context::*;
 
 mod presidio;
