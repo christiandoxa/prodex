@@ -2,9 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.206.0 - 2026-06-23
+
+### Misc
+
+- Add reset credit redemption (`247a63c`)
+
 ## 0.205.0 - 2026-06-23
 
-- No grouped changes.
+### Deps
+
+- Update quinn-proto advisory (`4a6863d`)
 
 ## 0.204.0 - 2026-06-22
 
@@ -75,10 +83,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy super optimizer clippy gate (`6f97361`)
 - Stabilize super startup and resume ordering (`c9c9db3`)
-
-## 0.194.0 - 2026-06-19
-
-### Misc
-
-- Satisfy capability clippy gate (`82aedf8`)
-- Avoid Mem0 env secret scan false positive (`69f38ac`)
