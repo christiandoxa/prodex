@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.208.0 - 2026-06-23
+
+### Misc
+
+- Guard reset credit redemption (`ef0dd36`)
+
 ## 0.207.0 - 2026-06-23
 
 ### Runtime
@@ -80,9 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add prodex inspect diagnostics (`0c500ab`)
-
-## 0.196.0 - 2026-06-19
-
-### Runtime
-
-- Add runtime token log commands (`6ada09f`)
