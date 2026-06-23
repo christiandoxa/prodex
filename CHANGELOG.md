@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.205.0 - 2026-06-23
+
+- No grouped changes.
+
 ## 0.204.0 - 2026-06-22
 
 ### Runtime
@@ -78,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy capability clippy gate (`82aedf8`)
 - Avoid Mem0 env secret scan false positive (`69f38ac`)
-
-## 0.193.0 - 2026-06-19
-
-### Runtime
-
-- Restore Anthropic crate boundary (`bf70a02`)
