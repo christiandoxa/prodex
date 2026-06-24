@@ -199,6 +199,7 @@ fn smart_context_surgical_rehydrate_adds_lost_critical_ranges() {
         rehydrated_refs: 0,
         static_context_deltas: 0,
         repo_state_facts: 0,
+        ..RuntimeSmartContextTransformStats::default()
     };
 
     let (body, repaired_stats) = runtime_smart_context_try_surgical_rehydrate_critical_ranges(
@@ -431,6 +432,7 @@ fn smart_context_self_check_passes_through_growth_without_rehydrate() {
         rehydrated_refs: 0,
         static_context_deltas: 0,
         repo_state_facts: 0,
+        ..RuntimeSmartContextTransformStats::default()
     };
 
     assert_eq!(

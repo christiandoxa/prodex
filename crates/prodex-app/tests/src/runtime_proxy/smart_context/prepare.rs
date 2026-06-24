@@ -133,7 +133,7 @@ tail line";
 }
 
 #[test]
-fn smart_context_prepare_affinity_exactness_minifies_without_unsafe_rewrite() {
+fn smart_context_prepare_affinity_does_not_force_global_exact_passthrough() {
     for (name, request) in [
         (
             "previous",
@@ -205,19 +205,14 @@ fn smart_context_prepare_affinity_exactness_minifies_without_unsafe_rewrite() {
             value, original,
             "{name} affinity payload changed semantically"
         );
-        let text = String::from_utf8_lossy(prepared.as_ref());
-        assert!(
-            !text.contains("psc:") && !text.contains("prodex-artifact:"),
-            "{name} affinity payload should not be condensed: {text}"
-        );
         let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
         assert!(
-            log.contains("decision=require_exact"),
-            "{name} affinity exactness should be logged: {log}"
+            log.contains("reasons=affinity_pressure"),
+            "{name} affinity payload path should be eligible: {log}"
         );
         assert!(
-            !log.contains("decision=rewritten"),
-            "{name} affinity exactness should not rewrite: {log}"
+            !log.contains("decision=require_exact"),
+            "{name} affinity should not force full exact passthrough: {log}"
         );
     }
 }
@@ -492,7 +487,7 @@ fn smart_context_prepare_turn_state_only_affinity_rewrites_under_critical_pressu
 }
 
 #[test]
-fn smart_context_prepare_missing_rehydrate_ref_blocks_affinity_pressure_rewrite() {
+fn smart_context_prepare_missing_rehydrate_ref_allows_affinity_pressure_rewrite() {
     let shared = smart_context_test_shared("rewrite-affinity-missing-rehydrate");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
     smart_context_observe_minimal_budget(&shared);
@@ -517,10 +512,10 @@ fn smart_context_prepare_missing_rehydrate_ref_blocks_affinity_pressure_rewrite(
             .contains(missing_ref)
     );
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
-    assert!(log.contains("decision=require_exact"));
-    assert!(log.contains("reasons=previous_response,rehydrate"));
-    assert!(log.contains("policy_reasons=exactness_required,missing_rehydrate_refs"));
-    assert!(!log.contains("reasons=affinity_pressure"));
+    assert!(log.contains("decision=rewritten") || log.contains("decision=pass_through"));
+    assert!(log.contains("reasons=affinity_pressure"));
+    assert!(log.contains("policy_reasons=missing_rehydrate_refs,critical_budget"));
+    assert!(!log.contains("decision=require_exact"));
 }
 
 #[test]
@@ -613,4 +608,53 @@ fn smart_context_prepare_rewrite_preserves_static_prompt_prefix_text() {
             .unwrap()
             .contains("psc:")
     );
+}
+
+#[test]
+fn smart_context_prepare_canary_out_returns_original_body() {
+    let _canary = TestEnvVarGuard::set("PRODEX_SMART_CONTEXT_CANARY_PERCENT", "0");
+    let _shadow = TestEnvVarGuard::unset("PRODEX_SMART_CONTEXT_SHADOW");
+    let shared = smart_context_test_shared("rewrite-rollout-canary-out");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let request = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "error: canary path src/lib.rs:1:1\n".repeat(500)
+        }]
+    }));
+
+    let prepared =
+        prepare_runtime_smart_context_http_body(88, &request, &shared, RuntimeRouteKind::Responses);
+
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("reason=rollout_canary_out"));
+}
+
+#[test]
+fn smart_context_prepare_shadow_computes_but_returns_original_body() {
+    let _shadow = TestEnvVarGuard::set("PRODEX_SMART_CONTEXT_SHADOW", "1");
+    let _canary = TestEnvVarGuard::set("PRODEX_SMART_CONTEXT_CANARY_PERCENT", "100");
+    let shared = smart_context_test_shared("rewrite-rollout-shadow");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let request = smart_context_test_request(serde_json::json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "error: shadow path src/lib.rs:1:1\n".repeat(500)
+        }]
+    }));
+
+    let prepared =
+        prepare_runtime_smart_context_http_body(89, &request, &shared, RuntimeRouteKind::Responses);
+
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("rollout_mode=shadow"));
+    assert!(log.contains("decision=rewritten"));
 }

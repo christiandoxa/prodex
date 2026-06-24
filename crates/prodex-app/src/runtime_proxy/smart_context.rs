@@ -37,6 +37,7 @@ use runtime_rehydrate::*;
 use safety::*;
 use static_context::*;
 use std::borrow::Cow;
+use std::env;
 use std::path::PathBuf;
 use token_calibration::*;
 use tool_outputs::*;
@@ -320,6 +321,29 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         return Cow::Borrowed(&request.body);
     }
 
+    let rollout = runtime_smart_context_rollout_decision(
+        request_id,
+        request,
+        shared,
+        route_kind,
+        transport,
+        profile_name,
+    );
+    if rollout.mode == runtime_proxy_crate::SmartContextRolloutMode::Disabled
+        && rollout.reason == "canary_out"
+    {
+        runtime_smart_context_log_prepare_fallback(
+            request_id,
+            shared,
+            route_kind,
+            transport,
+            profile_name,
+            request.body.len(),
+            "rollout_canary_out",
+        );
+        return Cow::Borrowed(&request.body);
+    }
+
     let result = catch_runtime_smart_context_unwind_silently(|| {
         if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE") {
             std::panic::panic_any(RuntimeSmartContextInjectedPanic);
@@ -335,7 +359,13 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     });
 
     match result {
-        Ok(body) => body,
+        Ok(body) => {
+            if rollout.mode == runtime_proxy_crate::SmartContextRolloutMode::Shadow {
+                Cow::Borrowed(&request.body)
+            } else {
+                body
+            }
+        }
         Err(panic) => {
             let disabled_until = runtime_smart_context_disable_temporarily(shared, now);
             runtime_smart_context_log_panic(
@@ -364,6 +394,55 @@ fn prepare_runtime_smart_context_body_safely<'a>(
             Cow::Borrowed(&request.body)
         }
     }
+}
+
+fn runtime_smart_context_rollout_decision(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
+) -> runtime_proxy_crate::SmartContextRolloutDecision {
+    runtime_proxy_crate::smart_context_rollout_decision(
+        runtime_proxy_crate::SmartContextRolloutDecisionInput {
+            enabled: true,
+            explicit_exact_mode: runtime_smart_context_exact_header(request),
+            shadow_mode: runtime_smart_context_env_flag("PRODEX_SMART_CONTEXT_SHADOW"),
+            canary_percent: runtime_smart_context_env_percent(
+                "PRODEX_SMART_CONTEXT_CANARY_PERCENT",
+                100,
+            ),
+            stable_key: format!(
+                "{}:{}:{}:{}:{}",
+                shared.log_path.display(),
+                profile_name.unwrap_or("-"),
+                runtime_route_kind_label(route_kind),
+                transport.label(),
+                request_id
+            ),
+        },
+    )
+}
+
+pub(super) fn runtime_smart_context_env_flag(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+pub(super) fn runtime_smart_context_env_percent(name: &str, default: u8) -> u8 {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse::<u8>().ok())
+        .map(|value| value.min(100))
+        .unwrap_or(default)
 }
 
 fn runtime_smart_context_websocket_generate_false_request(body: &[u8]) -> bool {

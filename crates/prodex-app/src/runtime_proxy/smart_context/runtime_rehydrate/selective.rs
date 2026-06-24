@@ -176,7 +176,7 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_selective_r
         let Some(line_index) = store.line_index(&id) else {
             continue;
         };
-        let Some((appendix, range_count, token_cost)) =
+        let Some((appendix, range_count, token_cost, selection)) =
             runtime_smart_context_matching_semantic_range_appendix_with_budget(
                 &id,
                 line_index,
@@ -193,6 +193,8 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_selective_r
         next.push('\n');
         next.push_str(&appendix);
         rehydrated_ranges = rehydrated_ranges.saturating_add(range_count);
+        runtime_smart_context_record_candidate_selection_stats(stats, &selection);
+        stats.rehydration_token_cost = stats.rehydration_token_cost.saturating_add(token_cost);
         runtime_smart_context_consume_rehydrate_budget(remaining_tokens, token_cost);
         if *remaining_tokens == 0 {
             break;
@@ -325,6 +327,7 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_selective_r
         next.push('\n');
         next.push_str(&appendix);
         rehydrated_ranges = rehydrated_ranges.saturating_add(range_count);
+        stats.rehydration_token_cost = stats.rehydration_token_cost.saturating_add(token_cost);
         runtime_smart_context_consume_rehydrate_budget(remaining_tokens, token_cost);
         if *remaining_tokens == 0 {
             break;
@@ -336,4 +339,31 @@ pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_selective_r
         stats.rehydrated_refs = stats.rehydrated_refs.saturating_add(rehydrated_ranges);
     }
     rehydrated_ranges
+}
+
+fn runtime_smart_context_record_candidate_selection_stats(
+    stats: &mut RuntimeSmartContextTransformStats,
+    selection: &runtime_proxy_crate::SmartContextCandidateSelection,
+) {
+    stats.candidate_count = stats.candidate_count.saturating_add(selection.scores.len());
+    stats.selected_candidate_count = stats
+        .selected_candidate_count
+        .saturating_add(selection.selected_ids.len());
+    stats.rejected_candidate_count = stats
+        .rejected_candidate_count
+        .saturating_add(selection.omitted.len());
+    let selected = selection
+        .selected_ids
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let utility = selection
+        .scores
+        .iter()
+        .filter(|score| selected.contains(&score.id))
+        .fold(0u64, |total, score| {
+            total.saturating_add(score.utility_points)
+        });
+    stats.selected_candidate_utility_points = stats
+        .selected_candidate_utility_points
+        .saturating_add(utility);
 }

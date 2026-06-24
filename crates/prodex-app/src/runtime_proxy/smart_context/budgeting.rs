@@ -34,8 +34,19 @@ pub(super) fn runtime_smart_context_budget(
     } else {
         bucket_history
     };
-    let model_context_window_tokens =
-        configured_context_window_tokens.unwrap_or(SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS);
+    let registry_context_window =
+        runtime_proxy_crate::smart_context_model_context_window(model_name.as_deref());
+    let (model_context_window_tokens, model_context_window_source) =
+        if let Some(configured_context_window_tokens) = configured_context_window_tokens {
+            (configured_context_window_tokens, "launch_config")
+        } else if let Some(registry_context_window) = registry_context_window {
+            (
+                registry_context_window.tokens,
+                registry_context_window.source,
+            )
+        } else {
+            (SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS, "fallback")
+        };
     let observed_context_tokens_u64 = history
         .last()
         .and_then(|usage| runtime_proxy_crate::smart_context_observed_usage_context_tokens(*usage));
@@ -59,6 +70,7 @@ pub(super) fn runtime_smart_context_budget(
         },
     );
     let available_context_tokens = accounting.available_context_tokens;
+    let pressure = accounting.pressure;
     let mut policy = runtime_proxy_crate::smart_context_adaptive_budget_policy(
         runtime_proxy_crate::SmartContextAdaptiveBudgetPolicyInput {
             exactness_guard: input.exactness_guard,
@@ -88,11 +100,7 @@ pub(super) fn runtime_smart_context_budget(
         tier: policy.tier,
         policy,
         model_context_window_tokens,
-        model_context_window_source: if configured_context_window_tokens.is_some() {
-            "launch_config"
-        } else {
-            "fallback"
-        },
+        model_context_window_source,
         available_tokens,
         observed_context_tokens,
         token_usage_source: if observed_context_tokens.is_some() {
@@ -100,6 +108,7 @@ pub(super) fn runtime_smart_context_budget(
         } else {
             "estimated_body"
         },
+        pressure,
     }
 }
 

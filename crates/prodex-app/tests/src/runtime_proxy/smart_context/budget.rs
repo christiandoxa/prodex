@@ -35,6 +35,15 @@ fn smart_context_budget_uses_runtime_token_usage_observation() {
     assert_eq!(budget.token_usage_source, "runtime_usage");
     assert_eq!(budget.model_context_window_tokens, 32_000);
     assert_eq!(budget.model_context_window_source, "fallback");
+    assert_eq!(
+        budget.pressure.pressure_band,
+        runtime_proxy_crate::SmartContextPressureBand::Exhausted
+    );
+    assert_eq!(
+        budget.pressure.effective_usable_context_tokens,
+        Some(27_904)
+    );
+    assert_eq!(budget.pressure.pressure_basis_points, Some(11_467));
 }
 
 #[test]
@@ -71,6 +80,54 @@ fn smart_context_budget_uses_configured_model_context_window() {
     assert_eq!(budget.model_context_window_tokens, 64_000);
     assert_eq!(budget.model_context_window_source, "launch_config");
     assert_eq!(budget.observed_context_tokens, Some(32_000));
+}
+
+#[test]
+fn smart_context_budget_uses_model_registry_window_when_unconfigured() {
+    let shared = smart_context_test_shared("budget-model-registry-window");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, None, None);
+
+    let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: br#"{"model":"gpt-5.1-codex","input":"small current request body payload"}"#,
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
+
+    assert_eq!(budget.model_context_window_tokens, 200_000);
+    assert_eq!(budget.model_context_window_source, "model_registry");
+    assert_eq!(
+        budget.pressure.pressure_band,
+        runtime_proxy_crate::SmartContextPressureBand::Low
+    );
+}
+
+#[test]
+fn smart_context_budget_prefers_configured_window_over_model_registry() {
+    let shared = smart_context_test_shared("budget-config-over-registry");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(64_000), None);
+
+    let budget = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
+        shared: &shared,
+        body: br#"{"model":"gpt-5.1-codex","input":"small current request body payload"}"#,
+        route_kind: RuntimeRouteKind::Responses,
+        transport: RuntimeSmartContextTransport::Http,
+        profile_name: None,
+        exactness_guard: runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        missing_rehydrate_refs: Vec::new(),
+        static_context_changed: false,
+    });
+
+    assert_eq!(budget.model_context_window_tokens, 64_000);
+    assert_eq!(budget.model_context_window_source, "launch_config");
 }
 
 #[test]
@@ -359,6 +416,7 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
                 rewrite_kind: "rewritten".to_string(),
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
+                ..RuntimeSmartContextRewriteTelemetryRecord::default()
             });
         state
             .rewrite_telemetry_history
@@ -370,6 +428,7 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
                 rewrite_kind: "rewritten".to_string(),
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
+                ..RuntimeSmartContextRewriteTelemetryRecord::default()
             });
         state
             .rewrite_telemetry_history
@@ -381,6 +440,7 @@ fn smart_context_budget_relaxes_from_safe_saving_telemetry_ring() {
                 rewrite_kind: "pass_through".to_string(),
                 status: "noop".to_string(),
                 fallback_reason: None,
+                ..RuntimeSmartContextRewriteTelemetryRecord::default()
             });
     })
     .unwrap();
@@ -428,6 +488,7 @@ fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
                 rewrite_kind: "rewritten".to_string(),
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
+                ..RuntimeSmartContextRewriteTelemetryRecord::default()
             });
         state
             .rewrite_telemetry_history
@@ -439,6 +500,7 @@ fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
                 rewrite_kind: "rewritten".to_string(),
                 status: "ok_saved".to_string(),
                 fallback_reason: None,
+                ..RuntimeSmartContextRewriteTelemetryRecord::default()
             });
     })
     .unwrap();
@@ -472,6 +534,7 @@ fn smart_context_budget_tightens_for_marginal_or_fallback_telemetry() {
                 rewrite_kind: "self_check_passthrough".to_string(),
                 status: "critical_signal_loss".to_string(),
                 fallback_reason: Some("critical_signal_loss".to_string()),
+                ..RuntimeSmartContextRewriteTelemetryRecord::default()
             });
     })
     .unwrap();

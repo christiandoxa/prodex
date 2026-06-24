@@ -1,7 +1,17 @@
 use super::*;
 
+fn smart_context_enabled_from_default_super_shortcut() -> bool {
+    let command = parse_cli_command_from(["prodex", "s", "exec", "hi"])
+        .expect("default Super shortcut should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected Super command from prodex s");
+    };
+    args.into_caveman_args_with_choices(false, false)
+        .smart_context
+}
+
 #[test]
-fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
+fn default_super_shortcut_starts_smart_context_proxy_that_rewrites_large_tool_output() {
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let temp_dir = TestDir::new();
     let second_home = temp_dir.path.join("homes/second");
@@ -36,12 +46,12 @@ fn runtime_smart_context_proxy_rewrites_large_tool_output_and_logs_budget() {
         include_code_review: false,
         upstream_no_proxy: false,
         auto_redeem: false,
-        smart_context_enabled: true,
+        smart_context_enabled: smart_context_enabled_from_default_super_shortcut(),
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: None,
     })
-    .expect("runtime proxy should start with smart context enabled");
+    .expect("default Super runtime proxy should start with smart context enabled");
     let tool_output = (0..1900)
         .map(|index| format!("line {index}: repeated command output"))
         .collect::<Vec<_>>()

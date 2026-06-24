@@ -333,7 +333,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     }
     let path_aliases_used = runtime_smart_context_apply_path_aliases_to_generated_texts(&mut value);
     let generated_aliases_used = aliases_used || path_aliases_used;
-    let stats = outcome.stats.clone();
+    let mut stats = outcome.stats.clone();
     if stats.artifacts_stored > 0 {
         persist_runtime_smart_context_artifacts(shared);
     }
@@ -389,7 +389,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
     let critical_signal_check =
         runtime_smart_context_critical_signal_self_check(&request.body, &body);
     if critical_signal_check.has_loss()
-        && let Some((repaired_body, repaired_stats)) =
+        && let Some((repaired_body, mut repaired_stats)) =
             runtime_smart_context_try_surgical_rehydrate_critical_ranges(
                 &value,
                 shared,
@@ -399,6 +399,8 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
                 &stats,
             )
     {
+        repaired_stats.segment_rollback_count =
+            repaired_stats.segment_rollback_count.saturating_add(1);
         observe_runtime_smart_context_rewrite_safety(
             shared,
             RuntimeSmartContextRewriteSafetyObservation {
@@ -434,6 +436,7 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         critical_signal_check,
         &stats,
     ) {
+        stats.full_request_fallback_count = stats.full_request_fallback_count.saturating_add(1);
         observe_runtime_smart_context_rewrite_safety(
             shared,
             RuntimeSmartContextRewriteSafetyObservation {

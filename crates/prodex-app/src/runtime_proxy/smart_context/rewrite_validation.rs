@@ -298,6 +298,7 @@ pub(super) fn runtime_smart_context_regression_self_check(
             after_critical_signal_count: prodex_context::count_critical_signals(&after_text)
                 .total(),
             missing_rehydrate_refs,
+            unresolved_rehydrate_refs_are_segment_local: true,
         },
     )
 }

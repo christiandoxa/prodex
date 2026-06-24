@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct RuntimeSmartContextRewriteTelemetryRecord {
     pub(super) body_bytes_before: usize,
     pub(super) body_bytes_after: usize,
@@ -9,6 +9,22 @@ pub(super) struct RuntimeSmartContextRewriteTelemetryRecord {
     pub(super) rewrite_kind: String,
     pub(super) status: String,
     pub(super) fallback_reason: Option<String>,
+    pub(super) upstream_context_errors: u16,
+    pub(super) previous_response_not_found: bool,
+    pub(super) invalid_tool_call_continuation: bool,
+    pub(super) missing_artifact_requests: u16,
+    pub(super) repeated_tool_call_count: u16,
+    pub(super) model_reread_requests: u16,
+    pub(super) corrective_user_messages: u16,
+    pub(super) test_or_build_failed_after_rewrite: bool,
+    pub(super) task_completed: Option<bool>,
+    pub(super) additional_turns_before_task_completion: Option<u16>,
+    pub(super) final_total_input_tokens: Option<u64>,
+    pub(super) pressure_basis_points: Option<u32>,
+    pub(super) pressure_band: String,
+    pub(super) estimator_confidence: String,
+    pub(super) effective_usable_context_tokens: Option<u64>,
+    pub(super) absolute_safety_floor_tokens: u64,
 }
 
 pub(super) fn runtime_smart_context_rewrite_telemetry_samples(
@@ -39,6 +55,17 @@ fn runtime_smart_context_rewrite_telemetry_sample(
         estimated_tokens_after: record.estimated_tokens_after,
         safe: runtime_smart_context_rewrite_telemetry_record_safe_saved(record),
         fallback,
+        upstream_context_errors: record.upstream_context_errors,
+        previous_response_not_found: record.previous_response_not_found,
+        invalid_tool_call_continuation: record.invalid_tool_call_continuation,
+        missing_artifact_requests: record.missing_artifact_requests,
+        repeated_tool_call_count: record.repeated_tool_call_count,
+        model_reread_requests: record.model_reread_requests,
+        corrective_user_messages: record.corrective_user_messages,
+        test_or_build_failed_after_rewrite: record.test_or_build_failed_after_rewrite,
+        task_completed: record.task_completed,
+        additional_turns_before_task_completion: record.additional_turns_before_task_completion,
+        final_total_input_tokens: record.final_total_input_tokens,
     })
 }
 
@@ -46,12 +73,27 @@ fn runtime_smart_context_rewrite_telemetry_record_safe_saved(
     record: &RuntimeSmartContextRewriteTelemetryRecord,
 ) -> bool {
     record.fallback_reason.is_none()
+        && !runtime_smart_context_rewrite_telemetry_record_quality_risk(record)
         && matches!(record.rewrite_kind.as_str(), "rewritten" | "minified")
         && matches!(
             record.status.as_str(),
             "ok_saved" | "ok_surgical_rehydrate" | "ok_minified"
         )
         && record.estimated_tokens_after < record.estimated_tokens_before
+}
+
+fn runtime_smart_context_rewrite_telemetry_record_quality_risk(
+    record: &RuntimeSmartContextRewriteTelemetryRecord,
+) -> bool {
+    record.upstream_context_errors > 0
+        || record.previous_response_not_found
+        || record.invalid_tool_call_continuation
+        || record.missing_artifact_requests > 0
+        || record.repeated_tool_call_count > 0
+        || record.model_reread_requests > 0
+        || record.corrective_user_messages > 0
+        || record.test_or_build_failed_after_rewrite
+        || record.task_completed == Some(false)
 }
 
 pub(super) struct RuntimeSmartContextLogInput<'a> {
@@ -84,6 +126,24 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
         budget,
         self_check,
     } = input;
+    let rollout = runtime_proxy_crate::smart_context_rollout_decision(
+        runtime_proxy_crate::SmartContextRolloutDecisionInput {
+            enabled: true,
+            explicit_exact_mode: false,
+            shadow_mode: runtime_smart_context_env_flag("PRODEX_SMART_CONTEXT_SHADOW"),
+            canary_percent: runtime_smart_context_env_percent(
+                "PRODEX_SMART_CONTEXT_CANARY_PERCENT",
+                100,
+            ),
+            stable_key: format!(
+                "{}:{}:{}:{}",
+                shared.log_path.display(),
+                runtime_route_kind_label(route_kind),
+                transport.label(),
+                request_id
+            ),
+        },
+    );
     runtime_smart_context_record_rewrite_telemetry(
         shared,
         RuntimeSmartContextRewriteTelemetryRecord {
@@ -99,6 +159,26 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
             status: self_check.to_string(),
             fallback_reason: runtime_smart_context_telemetry_fallback_reason(decision, self_check)
                 .map(str::to_string),
+            upstream_context_errors: 0,
+            previous_response_not_found: false,
+            invalid_tool_call_continuation: false,
+            missing_artifact_requests: 0,
+            repeated_tool_call_count: 0,
+            model_reread_requests: 0,
+            corrective_user_messages: 0,
+            test_or_build_failed_after_rewrite: false,
+            task_completed: None,
+            additional_turns_before_task_completion: None,
+            final_total_input_tokens: None,
+            pressure_basis_points: budget.pressure.pressure_basis_points,
+            pressure_band: runtime_smart_context_pressure_band_label(budget.pressure.pressure_band)
+                .to_string(),
+            estimator_confidence: runtime_smart_context_estimator_confidence_label(
+                budget.pressure.estimator_confidence,
+            )
+            .to_string(),
+            effective_usable_context_tokens: budget.pressure.effective_usable_context_tokens,
+            absolute_safety_floor_tokens: budget.pressure.absolute_safety_floor_tokens,
         },
     );
     runtime_proxy_log(
@@ -162,11 +242,51 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
                 runtime_proxy_log_field("rewrite_kind", decision),
                 runtime_proxy_log_field("rewrite_status", self_check),
                 runtime_proxy_log_field(
+                    "rollout_mode",
+                    runtime_smart_context_rollout_mode_label(rollout.mode),
+                ),
+                runtime_proxy_log_field("rollout_reason", rollout.reason),
+                runtime_proxy_log_field("rollout_canary_bucket", rollout.canary_bucket.to_string()),
+                runtime_proxy_log_field(
+                    "rollout_canary_percent",
+                    rollout.canary_percent.to_string(),
+                ),
+                runtime_proxy_log_field(
                     "fallback_reason",
                     runtime_smart_context_telemetry_fallback_reason(decision, self_check)
                         .unwrap_or("-"),
                 ),
                 runtime_proxy_log_field("available_tokens", budget.available_tokens.to_string()),
+                runtime_proxy_log_field(
+                    "pressure_basis_points",
+                    budget
+                        .pressure
+                        .pressure_basis_points
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                ),
+                runtime_proxy_log_field(
+                    "pressure_band",
+                    runtime_smart_context_pressure_band_label(budget.pressure.pressure_band),
+                ),
+                runtime_proxy_log_field(
+                    "estimator_confidence",
+                    runtime_smart_context_estimator_confidence_label(
+                        budget.pressure.estimator_confidence,
+                    ),
+                ),
+                runtime_proxy_log_field(
+                    "effective_usable_context_tokens",
+                    budget
+                        .pressure
+                        .effective_usable_context_tokens
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                ),
+                runtime_proxy_log_field(
+                    "absolute_safety_floor_tokens",
+                    budget.pressure.absolute_safety_floor_tokens.to_string(),
+                ),
                 runtime_proxy_log_field(
                     "budget_mode",
                     runtime_smart_context_budget_mode_label(budget.policy.mode),
@@ -203,13 +323,90 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
                 ),
                 runtime_proxy_log_field("rehydrated_refs", stats.rehydrated_refs.to_string()),
                 runtime_proxy_log_field(
+                    "rehydration_token_cost",
+                    stats.rehydration_token_cost.to_string(),
+                ),
+                runtime_proxy_log_field(
                     "static_context_deltas",
                     stats.static_context_deltas.to_string(),
                 ),
                 runtime_proxy_log_field("repo_state_facts", stats.repo_state_facts.to_string()),
+                runtime_proxy_log_field("candidate_count", stats.candidate_count.to_string()),
+                runtime_proxy_log_field(
+                    "selected_candidate_count",
+                    stats.selected_candidate_count.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "rejected_candidate_count",
+                    stats.rejected_candidate_count.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "selected_candidate_utility_points",
+                    stats.selected_candidate_utility_points.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "transformed_segment_categories",
+                    runtime_smart_context_transformed_segment_categories(&stats),
+                ),
+                runtime_proxy_log_field(
+                    "segment_rollback_count",
+                    stats.segment_rollback_count.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "full_request_fallback_count",
+                    stats.full_request_fallback_count.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "artifact_hash_failures",
+                    stats.artifact_hash_failures.to_string(),
+                ),
+                runtime_proxy_log_field("task_quality_upstream_context_errors", "0"),
+                runtime_proxy_log_field("task_quality_previous_response_not_found", "false"),
+                runtime_proxy_log_field("task_quality_invalid_tool_call_continuation", "false"),
+                runtime_proxy_log_field("task_quality_missing_artifact_requests", "0"),
+                runtime_proxy_log_field("task_quality_repeated_tool_call_count", "0"),
+                runtime_proxy_log_field("task_quality_model_reread_requests", "0"),
+                runtime_proxy_log_field("task_quality_corrective_user_messages", "0"),
+                runtime_proxy_log_field("task_quality_test_or_build_failed_after_rewrite", "false"),
+                runtime_proxy_log_field("task_quality_task_completed", "unknown"),
+                runtime_proxy_log_field("task_quality_additional_turns_before_completion", "-"),
+                runtime_proxy_log_field("task_quality_final_total_input_tokens", "-"),
             ],
         ),
     );
+}
+
+fn runtime_smart_context_pressure_band_label(
+    value: runtime_proxy_crate::SmartContextPressureBand,
+) -> &'static str {
+    match value {
+        runtime_proxy_crate::SmartContextPressureBand::Unknown => "unknown",
+        runtime_proxy_crate::SmartContextPressureBand::Low => "low",
+        runtime_proxy_crate::SmartContextPressureBand::Moderate => "moderate",
+        runtime_proxy_crate::SmartContextPressureBand::High => "high",
+        runtime_proxy_crate::SmartContextPressureBand::Critical => "critical",
+        runtime_proxy_crate::SmartContextPressureBand::Exhausted => "exhausted",
+    }
+}
+
+fn runtime_smart_context_estimator_confidence_label(
+    value: runtime_proxy_crate::SmartContextEstimatorConfidence,
+) -> &'static str {
+    match value {
+        runtime_proxy_crate::SmartContextEstimatorConfidence::High => "high",
+        runtime_proxy_crate::SmartContextEstimatorConfidence::Medium => "medium",
+        runtime_proxy_crate::SmartContextEstimatorConfidence::Low => "low",
+    }
+}
+
+fn runtime_smart_context_rollout_mode_label(
+    mode: runtime_proxy_crate::SmartContextRolloutMode,
+) -> &'static str {
+    match mode {
+        runtime_proxy_crate::SmartContextRolloutMode::Apply => "apply",
+        runtime_proxy_crate::SmartContextRolloutMode::Shadow => "shadow",
+        runtime_proxy_crate::SmartContextRolloutMode::Disabled => "disabled",
+    }
 }
 
 fn runtime_smart_context_record_rewrite_telemetry(
@@ -302,6 +499,41 @@ fn runtime_smart_context_budget_policy_reason_labels(
         .join(",")
 }
 
+fn runtime_smart_context_transformed_segment_categories(
+    stats: &RuntimeSmartContextTransformStats,
+) -> String {
+    let mut categories = Vec::new();
+    if stats.tool_outputs_condensed > 0 {
+        categories.push("tool_output");
+    }
+    if stats.tool_call_args_condensed > 0 {
+        categories.push("tool_argument");
+    }
+    if stats.duplicate_texts > 0 || stats.cross_turn_duplicate_texts > 0 {
+        categories.push("duplicate_context");
+    }
+    if stats.repeat_tool_output_refs > 0 {
+        categories.push("repeat_tool_output");
+    }
+    if stats.blob_outputs_condensed > 0 {
+        categories.push("blob_output");
+    }
+    if stats.rehydrated_refs > 0 {
+        categories.push("rehydration");
+    }
+    if stats.static_context_deltas > 0 {
+        categories.push("static_context");
+    }
+    if stats.repo_state_facts > 0 {
+        categories.push("repo_state");
+    }
+    if categories.is_empty() {
+        "-".to_string()
+    } else {
+        categories.join(",")
+    }
+}
+
 pub(super) fn runtime_smart_context_rewrite_self_check(
     body_bytes_before: usize,
     body_bytes_after: usize,
@@ -360,7 +592,6 @@ pub(super) fn runtime_smart_context_reason_labels(
             runtime_proxy_crate::SmartContextExactnessReason::ToolOutputWithoutArtifact => {
                 "tool_output_without_artifact"
             }
-            runtime_proxy_crate::SmartContextExactnessReason::RehydrateRequired => "rehydrate",
         })
         .collect::<Vec<_>>()
         .join(",")

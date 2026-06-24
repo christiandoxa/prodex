@@ -53,6 +53,11 @@ fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
             last.fallback_reason.as_deref(),
             Some("critical_signal_loss")
         );
+        assert_eq!(last.pressure_band, "low");
+        assert_eq!(last.estimator_confidence, "medium");
+        assert_eq!(last.effective_usable_context_tokens, Some(27_904));
+        assert_eq!(last.absolute_safety_floor_tokens, 1_395);
+        assert!(last.pressure_basis_points.is_some());
     })
     .unwrap();
 
@@ -60,6 +65,49 @@ fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
     assert!(log_text.contains("estimated_tokens_before="));
     assert!(log_text.contains("rewrite_kind=self_check_passthrough"));
     assert!(log_text.contains("fallback_reason=critical_signal_loss"));
+    assert!(log_text.contains("task_quality_model_reread_requests=0"));
+    assert!(log_text.contains("task_quality_task_completed=unknown"));
+    assert!(log_text.contains("pressure_basis_points="));
+    assert!(log_text.contains("pressure_band=low"));
+    assert!(log_text.contains("estimator_confidence=medium"));
+    assert!(log_text.contains("effective_usable_context_tokens=27904"));
+    assert!(log_text.contains("absolute_safety_floor_tokens=1395"));
+    assert!(log_text.contains("candidate_count=0"));
+    assert!(log_text.contains("selected_candidate_count=0"));
+    assert!(log_text.contains("rejected_candidate_count=0"));
+    assert!(log_text.contains("selected_candidate_utility_points=0"));
+    assert!(log_text.contains("transformed_segment_categories=-"));
+    assert!(log_text.contains("segment_rollback_count=0"));
+    assert!(log_text.contains("full_request_fallback_count=0"));
+    assert!(log_text.contains("rehydration_token_cost=0"));
+    assert!(log_text.contains("artifact_hash_failures=0"));
+}
+
+#[test]
+fn smart_context_rewrite_telemetry_samples_preserve_quality_outcomes() {
+    let history = vec![RuntimeSmartContextRewriteTelemetryRecord {
+        body_bytes_before: 8_000,
+        body_bytes_after: 3_000,
+        estimated_tokens_before: 2_000,
+        estimated_tokens_after: 750,
+        rewrite_kind: "rewritten".to_string(),
+        status: "ok_saved".to_string(),
+        fallback_reason: None,
+        model_reread_requests: 1,
+        task_completed: Some(false),
+        final_total_input_tokens: Some(12_345),
+        pressure_band: "high".to_string(),
+        estimator_confidence: "low".to_string(),
+        ..RuntimeSmartContextRewriteTelemetryRecord::default()
+    }];
+
+    let samples = runtime_smart_context_rewrite_telemetry_samples(&history);
+
+    assert_eq!(samples.len(), 1);
+    assert_eq!(samples[0].model_reread_requests, 1);
+    assert_eq!(samples[0].task_completed, Some(false));
+    assert_eq!(samples[0].final_total_input_tokens, Some(12_345));
+    assert!(!samples[0].safe);
 }
 
 #[test]
@@ -75,6 +123,7 @@ fn smart_context_regression_fallback_exact_on_quality_risk() {
         rehydrated_refs: 0,
         static_context_deltas: 0,
         repo_state_facts: 0,
+        ..RuntimeSmartContextTransformStats::default()
     };
     let before = br#"{"input":[{"content":"error: failed\nsrc/main.rs:10:5"}]}"#;
     let after = br#"{"input":[{"content":"summary"}]}"#;

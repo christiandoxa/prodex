@@ -285,6 +285,45 @@ fn smart_context_selective_rehydrate_semantic_terms_cap_broad_matches() {
 }
 
 #[test]
+fn smart_context_selective_rehydrate_uses_diverse_candidate_selection() {
+    let long_error_a = "error[E0425]: cannot find value `missing` in this scope ".repeat(12);
+    let long_error_b = "error[E0425]: cannot find value `missing` in this scope ".repeat(12);
+    let dependency = "fn target_symbol() -> usize { helper_dependency_call() } ".repeat(12);
+    let artifact_text = format!("{long_error_a}\n{long_error_b}\n{dependency}\nunrelated tail");
+    let mut store = RuntimeSmartContextArtifactStore::default();
+    let artifact = store.insert_text(1, &artifact_text).unwrap();
+    let mut value = serde_json::json!({
+        "input": [{
+            "type": "message",
+            "content": format!("summary {}", runtime_smart_context_artifact_ref(&artifact.id))
+        }]
+    });
+    let mut stats = RuntimeSmartContextTransformStats::default();
+
+    let count = runtime_smart_context_selective_rehydrate_semantic_ranges_with_budget(
+        &mut value,
+        &store,
+        &runtime_proxy_crate::smart_context_exactness_guard(
+            runtime_proxy_crate::SmartContextExactnessInput::default(),
+        ),
+        &RuntimeSmartContextSelectiveRehydrateTerms {
+            error_codes: BTreeSet::from(["E0425".to_string()]),
+            test_symbols: BTreeSet::from(["target_symbol".to_string()]),
+            ..RuntimeSmartContextSelectiveRehydrateTerms::default()
+        },
+        500,
+        &mut stats,
+    );
+
+    let content = value["input"][0]["content"].as_str().unwrap();
+    assert_eq!(count, 2);
+    assert_eq!(stats.rehydrated_refs, 2);
+    assert!(content.contains("error[E0425]: cannot find value `missing`"));
+    assert!(content.contains("fn target_symbol() -> usize"));
+    assert!(!content.contains("unrelated tail"));
+}
+
+#[test]
 fn smart_context_selective_rehydrate_semantic_terms_respect_exactness_guard() {
     let artifact_text = "error[E0425]: hidden\nsrc/lib.rs:42:13";
     let mut store = RuntimeSmartContextArtifactStore::default();

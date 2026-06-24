@@ -36,8 +36,16 @@ pub(super) struct RuntimeSmartContextTransformStats {
     pub(super) repeat_tool_output_refs: usize,
     pub(super) blob_outputs_condensed: usize,
     pub(super) rehydrated_refs: usize,
+    pub(super) rehydration_token_cost: usize,
     pub(super) static_context_deltas: usize,
     pub(super) repo_state_facts: usize,
+    pub(super) candidate_count: usize,
+    pub(super) selected_candidate_count: usize,
+    pub(super) rejected_candidate_count: usize,
+    pub(super) selected_candidate_utility_points: u64,
+    pub(super) segment_rollback_count: usize,
+    pub(super) full_request_fallback_count: usize,
+    pub(super) artifact_hash_failures: usize,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -179,6 +187,7 @@ pub(super) struct RuntimeSmartContextBudget {
     pub(super) available_tokens: usize,
     pub(super) observed_context_tokens: Option<usize>,
     pub(super) token_usage_source: &'static str,
+    pub(super) pressure: runtime_proxy_crate::SmartContextPressureSnapshot,
 }
 
 pub(super) type RuntimeSmartContextBudgetInputs = (

@@ -169,6 +169,60 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
 }
 
 #[test]
+fn smart_context_websocket_unicode_static_context_does_not_enter_panic_cooldown() {
+    let shared = smart_context_test_shared("websocket-unicode-static-context");
+    register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
+    smart_context_observe_minimal_budget(&shared);
+    let request_text = serde_json::json!({
+        "type": "response.create",
+        "model": "gpt-5.5",
+        "instructions": "You are a senior engineer’s request handler.",
+        "previous_response_id": "resp_previous",
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": "call_big",
+                "output": "large websocket payload\n".repeat(256)
+            }
+        ],
+        "tools": [
+            {
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Patch files"
+            },
+            {
+                "type": "namespace",
+                "name": "mcp__prodex_sqz",
+                "tools": []
+            }
+        ]
+    })
+    .to_string();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let rewritten = prepare_runtime_smart_context_websocket_text(
+        46,
+        &request_text,
+        &handshake_request,
+        &shared,
+        "main",
+    );
+
+    assert!(matches!(rewritten, Cow::Owned(_) | Cow::Borrowed(_)));
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains("smart_context_autopilot"));
+    assert!(!log.contains("smart_context_panic"));
+    assert!(!log.contains("smart_context_disabled"));
+    assert!(!log.contains("reason=panic_cooldown"));
+}
+
+#[test]
 fn smart_context_panic_recovery_suppresses_only_smart_context_hook_output() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
