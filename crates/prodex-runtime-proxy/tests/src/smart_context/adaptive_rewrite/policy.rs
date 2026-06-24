@@ -116,6 +116,39 @@ fn adaptive_budget_policy_caps_rehydrate_budget_to_available_tokens() {
 }
 
 #[test]
+fn adaptive_budget_policy_tightens_missing_rehydrate_refs_without_exact_passthrough() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(64_000),
+            reserved_output_tokens: 4_096,
+            current_input_tokens: 48_000,
+            current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
+            observed_usage: Vec::new(),
+        });
+
+    let policy = smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {
+        exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
+        accounting,
+        recent_rewrite_safety: SmartContextRecentRewriteSafety::default(),
+        static_context_changed: false,
+        missing_rehydrate_refs: vec!["artifact-missing".to_string()],
+    });
+
+    assert_eq!(policy.tier, SmartContextTokenBudgetTier::Large);
+    assert_eq!(policy.mode, SmartContextBudgetMode::ArtifactCondensed);
+    assert_eq!(policy.max_inline_tool_output_bytes, 8 * 1024);
+    assert_eq!(policy.max_rehydrate_tokens, 4_000);
+    assert_eq!(
+        policy.reasons,
+        vec![
+            SmartContextBudgetPolicyReason::MissingRehydrateRefs,
+            SmartContextBudgetPolicyReason::ModerateBudget,
+        ]
+    );
+}
+
+#[test]
 fn adaptive_budget_policy_falls_back_exact_when_accounting_unknown_or_unsafe() {
     let unknown =
         smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {

@@ -95,3 +95,40 @@ fn render_exact_appendix_preserves_uncompactable_duplicate_refs() {
     );
     assert!(!appendix.contains("refs=psc:custom-id#L1-L1,L3-L3]"));
 }
+
+#[test]
+fn artifact_line_ref_compaction_fuzzes_malformed_and_boundary_ranges() {
+    for refs in [
+        vec!["psc:sc:abcdef#L1-L1".to_string()],
+        vec![
+            "psc:sc:abcdef#L1-L1".to_string(),
+            "psc:sc:abcdef#L2-L2".to_string(),
+        ],
+        vec![
+            "psc:sc:abcdef#L0-L1".to_string(),
+            "psc:sc:abcdef#L2-L1".to_string(),
+        ],
+        vec![
+            "prodex-artifact:sc:abcdef#lines=L1-L3,L4-L4".to_string(),
+            "psc:sc:abcdef#L5-L6".to_string(),
+        ],
+        vec![
+            "psc:not-scoped#L1-L1".to_string(),
+            "psc:not-scoped#L2-L2".to_string(),
+        ],
+        vec!["psc:sc:abcdef#L999999-L1000000".to_string()],
+        vec!["psc:sc:abcdef#not-a-range".to_string()],
+        vec!["plain text without a range".to_string()],
+    ] {
+        let compacted = smart_context_compact_line_refs_if_shorter(&refs);
+        assert!(!compacted.is_empty());
+        for reference in &refs {
+            assert!(
+                compacted.contains(reference)
+                    || compacted.contains("psc:sc:abcdef#")
+                    || compacted.contains("prodex-artifact:sc:abcdef#"),
+                "compaction lost traceability: refs={refs:?} compacted={compacted}"
+            );
+        }
+    }
+}

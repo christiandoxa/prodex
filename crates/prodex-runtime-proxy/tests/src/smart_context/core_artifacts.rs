@@ -35,6 +35,24 @@ fn structural_minify_json_body_passes_invalid_json_unchanged() {
 }
 
 #[test]
+fn structural_minify_json_body_fuzzes_malformed_json_without_rewrite() {
+    for body in [
+        b"".as_slice(),
+        b"{",
+        b"[",
+        b"{\"input\":",
+        b"{\"model\":\"gpt-5\",",
+        b"{\"input\":[{\"type\":\"function_call_output\",\"output\":\"unterminated}",
+        b"\xff\xfe{\"model\":\"gpt-5\"}",
+        b"{\"model\":\"bad\x07model\"}",
+    ] {
+        let minified = smart_context_structural_minify_json_body(body);
+        assert_eq!(minified.as_ref(), body);
+        let _ = smart_context_model_name_from_body(body);
+    }
+}
+
+#[test]
 fn model_name_helpers_extract_full_or_prefix_json_and_reject_invalid_names() {
     let full = br#"{"model":" gpt-5.5 ","input":[]}"#;
     let padded = format!(
@@ -58,7 +76,7 @@ fn model_name_helpers_extract_full_or_prefix_json_and_reject_invalid_names() {
 }
 
 #[test]
-fn exactness_guard_blocks_context_affinity_and_missing_rehydrate() {
+fn exactness_guard_blocks_context_affinity_but_not_missing_rehydrate() {
     let guard = smart_context_exactness_guard(SmartContextExactnessInput {
         previous_response_id: Some("resp_1".to_string()),
         turn_state: Some("turn_1".to_string()),
@@ -72,7 +90,6 @@ fn exactness_guard_blocks_context_affinity_and_missing_rehydrate() {
         vec![
             SmartContextExactnessReason::PreviousResponseAffinity,
             SmartContextExactnessReason::TurnStateAffinity,
-            SmartContextExactnessReason::RehydrateRequired,
         ]
     );
 }
@@ -246,6 +263,15 @@ fn volatile_command_output_normalizer_stabilizes_hash_only() {
         smart_context_hash_text(first),
         smart_context_hash_text(second)
     );
+}
+
+#[test]
+fn volatile_normalizer_handles_unicode_near_uuid_width_without_panicking() {
+    let text = "You are a senior engineer’s request handler";
+
+    let normalized = smart_context_normalize_volatile_static_context(text);
+
+    assert_eq!(normalized.as_ref(), text);
 }
 
 #[test]

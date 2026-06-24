@@ -49,9 +49,26 @@ pub(in crate::smart_context) fn smart_context_rewrite_policy_bucket_key_matches(
     let Some(sample) = sample else {
         return false;
     };
-    smart_context_rewrite_policy_field_matches(&target.route, &sample.route)
+    smart_context_rewrite_policy_optional_field_matches(&target.provider, &sample.provider)
+        && smart_context_rewrite_policy_field_matches(&target.route, &sample.route)
         && smart_context_rewrite_policy_model_matches(&target.model, &sample.model)
         && smart_context_rewrite_policy_field_matches(&target.profile, &sample.profile)
+        && smart_context_rewrite_policy_optional_field_matches(
+            &target.context_window_band,
+            &sample.context_window_band,
+        )
+        && smart_context_rewrite_policy_optional_field_matches(
+            &target.session_length_band,
+            &sample.session_length_band,
+        )
+        && smart_context_rewrite_policy_optional_field_matches(
+            &target.task_class,
+            &sample.task_class,
+        )
+        && smart_context_rewrite_policy_optional_field_matches(
+            &target.transform_category,
+            &sample.transform_category,
+        )
 }
 
 pub(in crate::smart_context) fn smart_context_rewrite_policy_field_matches(
@@ -59,6 +76,16 @@ pub(in crate::smart_context) fn smart_context_rewrite_policy_field_matches(
     sample: &Option<String>,
 ) -> bool {
     target.as_deref().is_some_and(non_empty) && target == sample
+}
+
+pub(in crate::smart_context) fn smart_context_rewrite_policy_optional_field_matches(
+    target: &Option<String>,
+    sample: &Option<String>,
+) -> bool {
+    target
+        .as_deref()
+        .filter(|value| non_empty(value))
+        .is_none_or(|_| target == sample)
 }
 
 pub(in crate::smart_context) fn smart_context_rewrite_policy_model_matches(
@@ -78,8 +105,23 @@ pub(in crate::smart_context) fn smart_context_rewrite_telemetry_sample_safe_save
     sample: &SmartContextRewriteTelemetrySample,
 ) -> bool {
     sample.safe
+        && !smart_context_rewrite_telemetry_sample_quality_risk(sample)
         && sample.estimated_tokens_after < sample.estimated_tokens_before
         && sample.body_bytes_after < sample.body_bytes_before
+}
+
+pub(in crate::smart_context) fn smart_context_rewrite_telemetry_sample_quality_risk(
+    sample: &SmartContextRewriteTelemetrySample,
+) -> bool {
+    sample.upstream_context_errors > 0
+        || sample.previous_response_not_found
+        || sample.invalid_tool_call_continuation
+        || sample.missing_artifact_requests > 0
+        || sample.repeated_tool_call_count > 0
+        || sample.model_reread_requests > 0
+        || sample.corrective_user_messages > 0
+        || sample.test_or_build_failed_after_rewrite
+        || sample.task_completed == Some(false)
 }
 
 pub(in crate::smart_context) fn smart_context_rewrite_telemetry_saved_tokens(
@@ -133,6 +175,7 @@ pub(in crate::smart_context) fn smart_context_transform_rewrite_safety_score_emp
         safe_samples: 0,
         fallback_samples: 0,
         unsafe_samples: 0,
+        quality_risk_samples: 0,
         weak_savings_samples: 0,
         saved_tokens: 0,
         average_body_ratio_percent: None,

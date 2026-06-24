@@ -50,6 +50,7 @@ fn smart_context_test_rewrite_bucket(
         route: Some(route.to_string()),
         model: Some(model.to_string()),
         profile: Some(profile.to_string()),
+        ..SmartContextRewritePolicyBucketKey::default()
     }
 }
 
@@ -93,5 +94,16 @@ fn smart_context_test_rewrite_telemetry_sample(
         estimated_tokens_after,
         safe: true,
         fallback: false,
+        upstream_context_errors: 0,
+        previous_response_not_found: false,
+        invalid_tool_call_continuation: false,
+        missing_artifact_requests: 0,
+        repeated_tool_call_count: 0,
+        model_reread_requests: 0,
+        corrective_user_messages: 0,
+        test_or_build_failed_after_rewrite: false,
+        task_completed: None,
+        additional_turns_before_task_completion: None,
+        final_total_input_tokens: None,
     }
 }

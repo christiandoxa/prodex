@@ -43,17 +43,27 @@ pub const SMART_CONTEXT_REWRITE_BUDGET_TIGHTEN_MIN_REHYDRATE_TOKENS: u64 = 1;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SmartContextRewritePolicyBucketKey {
+    pub provider: Option<String>,
     pub route: Option<String>,
     pub model: Option<String>,
     pub profile: Option<String>,
+    pub context_window_band: Option<String>,
+    pub session_length_band: Option<String>,
+    pub task_class: Option<String>,
+    pub transform_category: Option<String>,
 }
 
 impl From<SmartContextTokenCalibrationBucketKey> for SmartContextRewritePolicyBucketKey {
     fn from(value: SmartContextTokenCalibrationBucketKey) -> Self {
         Self {
+            provider: None,
             route: value.route,
             model: value.model,
             profile: value.profile,
+            context_window_band: None,
+            session_length_band: None,
+            task_class: None,
+            transform_category: None,
         }
     }
 }
@@ -74,6 +84,17 @@ pub struct SmartContextRewriteTelemetrySample {
     pub estimated_tokens_after: u64,
     pub safe: bool,
     pub fallback: bool,
+    pub upstream_context_errors: u16,
+    pub previous_response_not_found: bool,
+    pub invalid_tool_call_continuation: bool,
+    pub missing_artifact_requests: u16,
+    pub repeated_tool_call_count: u16,
+    pub model_reread_requests: u16,
+    pub corrective_user_messages: u16,
+    pub test_or_build_failed_after_rewrite: bool,
+    pub task_completed: Option<bool>,
+    pub additional_turns_before_task_completion: Option<u16>,
+    pub final_total_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -107,6 +128,7 @@ pub enum SmartContextTransformRewriteSafetyReason {
     RecentSafetyFallback,
     FallbackObserved,
     UnsafeSample,
+    TaskQualityRegression,
     WeakSavings,
     ModerateSavings,
     StableSavings,
@@ -135,6 +157,7 @@ pub struct SmartContextTransformRewriteSafetyScore {
     pub safe_samples: usize,
     pub fallback_samples: usize,
     pub unsafe_samples: usize,
+    pub quality_risk_samples: usize,
     pub weak_savings_samples: usize,
     pub saved_tokens: u64,
     pub average_body_ratio_percent: Option<usize>,

@@ -384,7 +384,7 @@ pub(in crate::smart_context) fn smart_context_uuid_len(
     if !smart_context_token_boundary(previous) || text.len() < 36 {
         return None;
     }
-    let candidate = &text[..36];
+    let candidate = text.get(..36)?;
     if !smart_context_uuid_token_exact(candidate) || !smart_context_after_token_boundary(text, 36) {
         return None;
     }

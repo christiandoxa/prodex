@@ -72,6 +72,54 @@ fn learned_rewrite_policy_tightens_for_confident_weak_matching_savings() {
 }
 
 #[test]
+fn learned_rewrite_policy_isolates_extended_quality_buckets() {
+    let mut target = smart_context_test_rewrite_bucket("responses", "gpt-5", "alpha");
+    target.provider = Some("openai".to_string());
+    target.context_window_band = Some("200k".to_string());
+    target.session_length_band = Some("long".to_string());
+    target.task_class = Some("refactor".to_string());
+    target.transform_category = Some("semantic_rehydrate".to_string());
+
+    let matching = target.clone();
+    let mut wrong_window = target.clone();
+    wrong_window.context_window_band = Some("32k".to_string());
+    let mut wrong_transform = target.clone();
+    wrong_transform.transform_category = Some("tool_output".to_string());
+
+    let learned = smart_context_test_learned_rewrite_policy(
+        Some(target),
+        SmartContextRecentRewriteSafety::default(),
+        vec![
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                matching.clone(),
+                smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000),
+            ),
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                matching,
+                smart_context_test_rewrite_telemetry_sample(8_000, 3_200, 2_000, 800),
+            ),
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                wrong_window,
+                SmartContextRewriteTelemetrySample {
+                    fallback: true,
+                    ..smart_context_test_rewrite_telemetry_sample(10_000, 9_000, 2_500, 2_400)
+                },
+            ),
+            smart_context_test_bucketed_rewrite_telemetry_sample(
+                wrong_transform,
+                SmartContextRewriteTelemetrySample {
+                    fallback: true,
+                    ..smart_context_test_rewrite_telemetry_sample(10_000, 9_000, 2_500, 2_400)
+                },
+            ),
+        ],
+    );
+
+    assert_eq!(learned.decision, SmartContextRewriteBudgetDecision::Relax);
+    assert_eq!(learned.matching_telemetry_samples, 2);
+}
+
+#[test]
 fn learned_rewrite_policy_exact_passes_through_without_bucket_confidence() {
     let learned = smart_context_test_learned_rewrite_policy(
         Some(smart_context_test_rewrite_bucket(

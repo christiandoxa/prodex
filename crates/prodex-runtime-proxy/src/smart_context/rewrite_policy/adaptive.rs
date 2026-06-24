@@ -63,7 +63,6 @@ pub fn smart_context_adaptive_budget_policy(
             reason,
             SmartContextBudgetPolicyReason::ExactnessRequired
                 | SmartContextBudgetPolicyReason::StaticContextChanged
-                | SmartContextBudgetPolicyReason::MissingRehydrateRefs
                 | SmartContextBudgetPolicyReason::UnknownTokenWindow
                 | SmartContextBudgetPolicyReason::UnsafeAccounting
         )
@@ -78,6 +77,8 @@ pub fn smart_context_adaptive_budget_policy(
         };
     }
 
+    let has_missing_rehydrate_refs =
+        reasons.contains(&SmartContextBudgetPolicyReason::MissingRehydrateRefs);
     let rewrite_budget_decision =
         smart_context_recent_rewrite_safety_budget_decision(&input.recent_rewrite_safety);
     let larger_preview_safe = rewrite_budget_decision == SmartContextRewriteBudgetDecision::Relax;
@@ -92,7 +93,11 @@ pub fn smart_context_adaptive_budget_policy(
             SmartContextBudgetPolicyReason::PlentyOfBudget,
         ),
         SmartContextTokenBudgetTier::Large => (
-            SmartContextBudgetMode::LargeLossless,
+            if has_missing_rehydrate_refs {
+                SmartContextBudgetMode::ArtifactCondensed
+            } else {
+                SmartContextBudgetMode::LargeLossless
+            },
             if larger_preview_safe {
                 64 * 1024
             } else {
@@ -113,6 +118,15 @@ pub fn smart_context_adaptive_budget_policy(
             1_000,
             SmartContextBudgetPolicyReason::CriticalBudget,
         ),
+    };
+    let (mode, max_inline_tool_output_bytes, max_rehydrate_tokens) = if has_missing_rehydrate_refs {
+        (
+            SmartContextBudgetMode::ArtifactCondensed,
+            max_inline_tool_output_bytes.min(8 * 1024),
+            max_rehydrate_tokens.min(4_000),
+        )
+    } else {
+        (mode, max_inline_tool_output_bytes, max_rehydrate_tokens)
     };
     reasons.push(tier_reason);
     if larger_preview_safe && matches!(tier, SmartContextTokenBudgetTier::Large) {

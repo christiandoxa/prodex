@@ -2,6 +2,7 @@ use super::*;
 use crate::smart_context::{
     smart_context_recent_rewrite_min_saved_tokens,
     smart_context_rewrite_telemetry_average_body_ratio_percent,
+    smart_context_rewrite_telemetry_sample_quality_risk,
     smart_context_rewrite_telemetry_sample_safe_saved,
     smart_context_rewrite_telemetry_saved_tokens,
     smart_context_transform_rewrite_safety_reasons_for_decision,
@@ -48,11 +49,16 @@ pub fn smart_context_transform_rewrite_safety_score(
         .count();
     let fallback_samples = recent.iter().filter(|sample| sample.fallback).count();
     let unsafe_samples = recent.iter().filter(|sample| !sample.safe).count();
+    let quality_risk_samples = recent
+        .iter()
+        .filter(|sample| smart_context_rewrite_telemetry_sample_quality_risk(sample))
+        .count();
     let weak_savings_samples = recent
         .iter()
         .filter(|sample| {
             !sample.fallback
                 && sample.safe
+                && !smart_context_rewrite_telemetry_sample_quality_risk(sample)
                 && !smart_context_rewrite_telemetry_sample_safe_saved(sample)
         })
         .count();
@@ -62,12 +68,19 @@ pub fn smart_context_transform_rewrite_safety_score(
     let average_body_ratio_percent = Some(average_body_ratio_percent_value);
     let mut reasons = Vec::new();
 
-    if fallback_samples > 0 || unsafe_samples > 0 || weak_savings_samples > 0 {
+    if fallback_samples > 0
+        || unsafe_samples > 0
+        || quality_risk_samples > 0
+        || weak_savings_samples > 0
+    {
         if fallback_samples > 0 {
             reasons.push(SmartContextTransformRewriteSafetyReason::FallbackObserved);
         }
         if unsafe_samples > 0 {
             reasons.push(SmartContextTransformRewriteSafetyReason::UnsafeSample);
+        }
+        if quality_risk_samples > 0 {
+            reasons.push(SmartContextTransformRewriteSafetyReason::TaskQualityRegression);
         }
         if weak_savings_samples > 0 {
             reasons.push(SmartContextTransformRewriteSafetyReason::WeakSavings);
@@ -81,6 +94,7 @@ pub fn smart_context_transform_rewrite_safety_score(
             safe_samples,
             fallback_samples,
             unsafe_samples,
+            quality_risk_samples,
             weak_savings_samples,
             saved_tokens,
             average_body_ratio_percent,
@@ -106,6 +120,7 @@ pub fn smart_context_transform_rewrite_safety_score(
             safe_samples,
             fallback_samples,
             unsafe_samples,
+            quality_risk_samples,
             weak_savings_samples,
             saved_tokens,
             average_body_ratio_percent,
@@ -140,6 +155,7 @@ pub fn smart_context_transform_rewrite_safety_score(
         safe_samples,
         fallback_samples,
         unsafe_samples,
+        quality_risk_samples,
         weak_savings_samples,
         saved_tokens,
         average_body_ratio_percent,

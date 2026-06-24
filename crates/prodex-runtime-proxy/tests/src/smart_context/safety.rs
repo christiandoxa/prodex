@@ -27,7 +27,7 @@ fn unsupported_json_shape_rejects_too_many_nodes() {
 }
 
 #[test]
-fn affinity_pressure_rewrite_allows_only_affinity_under_critical_pressure() {
+fn affinity_pressure_rewrite_allows_affinity_without_global_exact_passthrough() {
     let exactness = SmartContextExactnessGuard {
         decision: SmartContextExactnessDecision::RequireExact,
         reasons: vec![
@@ -39,8 +39,8 @@ fn affinity_pressure_rewrite_allows_only_affinity_under_critical_pressure() {
     assert!(smart_context_affinity_pressure_rewrite_allowed(
         SmartContextAffinityPressureRewriteInput {
             exactness_guard: &exactness,
-            tier: SmartContextTokenBudgetTier::Minimal,
-            available_tokens: 1_000,
+            tier: SmartContextTokenBudgetTier::Exact,
+            available_tokens: 100_000,
             policy_reasons: &[SmartContextBudgetPolicyReason::ExactnessRequired],
         },
     ));
@@ -49,8 +49,11 @@ fn affinity_pressure_rewrite_allows_only_affinity_under_critical_pressure() {
         SmartContextAffinityPressureRewriteInput {
             exactness_guard: &exactness,
             tier: SmartContextTokenBudgetTier::Large,
-            available_tokens: 0,
-            policy_reasons: &[SmartContextBudgetPolicyReason::ExactnessRequired],
+            available_tokens: 12_000,
+            policy_reasons: &[
+                SmartContextBudgetPolicyReason::ExactnessRequired,
+                SmartContextBudgetPolicyReason::ModerateBudget,
+            ],
         },
     ));
 }
@@ -83,7 +86,7 @@ fn affinity_pressure_rewrite_blocks_non_affinity_or_safety_reasons() {
         },
     ));
 
-    assert!(!smart_context_affinity_pressure_rewrite_allowed(
+    assert!(smart_context_affinity_pressure_rewrite_allowed(
         SmartContextAffinityPressureRewriteInput {
             exactness_guard: &affinity,
             tier: SmartContextTokenBudgetTier::Large,
@@ -104,4 +107,31 @@ fn affinity_pressure_rewrite_guard_preserves_reasons_but_allows_rewrite() {
 
     assert_eq!(rewritten.decision, SmartContextExactnessDecision::Allow);
     assert_eq!(rewritten.reasons, exactness.reasons);
+}
+
+#[test]
+fn segment_envelope_scopes_affinity_and_missing_rehydrate_locally() {
+    let affinity = smart_context_exactness_reason_segment_envelope(
+        SmartContextExactnessReason::PreviousResponseAffinity,
+    );
+    assert_eq!(
+        affinity.class,
+        SmartContextSegmentSafetyClass::ContinuationExact
+    );
+    assert_eq!(
+        affinity.failure_scope,
+        SmartContextSegmentFailureScope::SegmentLocal
+    );
+    assert!(affinity.requires_exact_segment());
+
+    let missing = smart_context_missing_rehydrate_ref_segment_envelope();
+    assert_eq!(
+        missing.class,
+        SmartContextSegmentSafetyClass::RehydratableExact
+    );
+    assert_eq!(
+        missing.failure_scope,
+        SmartContextSegmentFailureScope::SegmentLocal
+    );
+    assert!(missing.requires_exact_segment());
 }

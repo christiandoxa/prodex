@@ -42,6 +42,20 @@ fn rewrite_telemetry_budget_decision_tightens_after_fallback_or_weak_savings() {
 }
 
 #[test]
+fn rewrite_telemetry_budget_decision_tightens_after_quality_risk() {
+    let decision =
+        smart_context_rewrite_telemetry_budget_decision(SmartContextRewriteTelemetryBudgetInput {
+            telemetry_samples: vec![SmartContextRewriteTelemetrySample {
+                model_reread_requests: 1,
+                ..smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000)
+            }],
+            ..SmartContextRewriteTelemetryBudgetInput::default()
+        });
+
+    assert_eq!(decision, SmartContextRewriteBudgetDecision::Tighten);
+}
+
+#[test]
 fn rewrite_telemetry_budget_decision_keeps_neutral_for_moderate_safe_savings() {
     let decision =
         smart_context_rewrite_telemetry_budget_decision(SmartContextRewriteTelemetryBudgetInput {
@@ -130,6 +144,33 @@ fn per_transform_rewrite_safety_scores_categories_independently() {
     assert_eq!(
         cross_turn.reasons,
         vec![SmartContextTransformRewriteSafetyReason::FallbackObserved]
+    );
+}
+
+#[test]
+fn per_transform_rewrite_safety_tracks_quality_risk_separately() {
+    let scores = smart_context_per_transform_rewrite_safety_scores(
+        SmartContextPerTransformRewriteSafetyInput {
+            recent_rewrite_safety: Vec::new(),
+            telemetry_samples: vec![smart_context_test_transform_rewrite_telemetry_sample(
+                SmartContextTransformCategory::CommandOutputCache,
+                SmartContextRewriteTelemetrySample {
+                    corrective_user_messages: 1,
+                    ..smart_context_test_rewrite_telemetry_sample(10_000, 4_000, 2_500, 1_000)
+                },
+            )],
+        },
+    );
+    let command = smart_context_test_transform_score(
+        &scores,
+        SmartContextTransformCategory::CommandOutputCache,
+    );
+
+    assert_eq!(command.decision, SmartContextRewriteBudgetDecision::Tighten);
+    assert_eq!(command.quality_risk_samples, 1);
+    assert_eq!(
+        command.reasons,
+        vec![SmartContextTransformRewriteSafetyReason::TaskQualityRegression]
     );
 }
 

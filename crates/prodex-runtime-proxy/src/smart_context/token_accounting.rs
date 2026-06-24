@@ -227,6 +227,36 @@ pub enum SmartContextTokenAccountingRisk {
     UnknownCurrentRequestAccounting,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmartContextPressureBand {
+    Unknown,
+    Low,
+    Moderate,
+    High,
+    Critical,
+    Exhausted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SmartContextEstimatorConfidence {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextPressureSnapshot {
+    pub model_context_window_tokens: Option<u64>,
+    pub reserved_output_tokens: u64,
+    pub effective_usable_context_tokens: Option<u64>,
+    pub effective_used_tokens: u64,
+    pub pressure_basis_points: Option<u32>,
+    pub pressure_band: SmartContextPressureBand,
+    pub absolute_safety_floor_tokens: u64,
+    pub available_context_tokens: Option<u64>,
+    pub estimator_confidence: SmartContextEstimatorConfidence,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SmartContextObservedTokenAccountingInput {
     pub model_context_window_tokens: Option<u64>,
@@ -280,6 +310,7 @@ pub struct SmartContextObservedTokenAccounting {
     pub reserved_output_tokens: u64,
     pub available_context_tokens: Option<u64>,
     pub accounting_risks: Vec<SmartContextTokenAccountingRisk>,
+    pub pressure: SmartContextPressureSnapshot,
 }
 
 pub fn smart_context_observed_token_accounting(
@@ -359,6 +390,14 @@ pub fn smart_context_observed_token_accounting_with_calibration(
         input.reserved_output_tokens,
         effective_input_source,
     );
+    let pressure = smart_context_pressure_snapshot(SmartContextPressureSnapshotInput {
+        model_context_window_tokens: input.model_context_window_tokens,
+        reserved_output_tokens: input.reserved_output_tokens,
+        effective_input_tokens,
+        available_context_tokens,
+        effective_input_source,
+        accounting_risks: &accounting_risks,
+    });
 
     SmartContextObservedTokenAccounting {
         model_context_window_tokens: input.model_context_window_tokens,
@@ -381,7 +420,102 @@ pub fn smart_context_observed_token_accounting_with_calibration(
         reserved_output_tokens: input.reserved_output_tokens,
         available_context_tokens,
         accounting_risks,
+        pressure,
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmartContextPressureSnapshotInput<'a> {
+    pub model_context_window_tokens: Option<u64>,
+    pub reserved_output_tokens: u64,
+    pub effective_input_tokens: u64,
+    pub available_context_tokens: Option<u64>,
+    pub effective_input_source: SmartContextTokenAccountingSource,
+    pub accounting_risks: &'a [SmartContextTokenAccountingRisk],
+}
+
+pub fn smart_context_pressure_snapshot(
+    input: SmartContextPressureSnapshotInput<'_>,
+) -> SmartContextPressureSnapshot {
+    let effective_usable_context_tokens = input
+        .model_context_window_tokens
+        .and_then(|window| window.checked_sub(input.reserved_output_tokens));
+    let pressure_basis_points = effective_usable_context_tokens.and_then(|usable| {
+        (usable > 0).then(|| {
+            input
+                .effective_input_tokens
+                .saturating_mul(10_000)
+                .checked_div(usable)
+                .unwrap_or(u64::MAX)
+                .min(u32::MAX as u64) as u32
+        })
+    });
+    let pressure_band = smart_context_pressure_band(pressure_basis_points);
+    let estimator_confidence =
+        smart_context_estimator_confidence(input.effective_input_source, input.accounting_risks);
+
+    SmartContextPressureSnapshot {
+        model_context_window_tokens: input.model_context_window_tokens,
+        reserved_output_tokens: input.reserved_output_tokens,
+        effective_usable_context_tokens,
+        effective_used_tokens: input.effective_input_tokens,
+        pressure_basis_points,
+        pressure_band,
+        absolute_safety_floor_tokens: smart_context_absolute_safety_floor_tokens(
+            input.model_context_window_tokens,
+            input.reserved_output_tokens,
+        ),
+        available_context_tokens: input.available_context_tokens,
+        estimator_confidence,
+    }
+}
+
+pub fn smart_context_pressure_band(pressure_basis_points: Option<u32>) -> SmartContextPressureBand {
+    match pressure_basis_points {
+        None => SmartContextPressureBand::Unknown,
+        Some(value) if value >= 10_000 => SmartContextPressureBand::Exhausted,
+        Some(value) if value >= 9_000 => SmartContextPressureBand::Critical,
+        Some(value) if value >= 7_500 => SmartContextPressureBand::High,
+        Some(value) if value >= 5_000 => SmartContextPressureBand::Moderate,
+        Some(_) => SmartContextPressureBand::Low,
+    }
+}
+
+pub fn smart_context_estimator_confidence(
+    source: SmartContextTokenAccountingSource,
+    risks: &[SmartContextTokenAccountingRisk],
+) -> SmartContextEstimatorConfidence {
+    if risks.iter().any(|risk| {
+        matches!(
+            risk,
+            SmartContextTokenAccountingRisk::UnknownTokenWindow
+                | SmartContextTokenAccountingRisk::ZeroContextWindow
+                | SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow
+        )
+    }) {
+        return SmartContextEstimatorConfidence::Low;
+    }
+    match source {
+        SmartContextTokenAccountingSource::CurrentRequestTokens
+        | SmartContextTokenAccountingSource::ObservedHistory => {
+            SmartContextEstimatorConfidence::High
+        }
+        SmartContextTokenAccountingSource::CurrentRequestBodyEstimate => {
+            SmartContextEstimatorConfidence::Medium
+        }
+        SmartContextTokenAccountingSource::Unknown => SmartContextEstimatorConfidence::Low,
+    }
+}
+
+pub fn smart_context_absolute_safety_floor_tokens(
+    model_context_window_tokens: Option<u64>,
+    reserved_output_tokens: u64,
+) -> u64 {
+    let Some(window) = model_context_window_tokens else {
+        return 2_000;
+    };
+    let usable = window.saturating_sub(reserved_output_tokens);
+    (usable / 20).clamp(1_000, 8_000)
 }
 
 pub fn smart_context_observed_usage_context_tokens(usage: RuntimeTokenUsage) -> Option<u64> {

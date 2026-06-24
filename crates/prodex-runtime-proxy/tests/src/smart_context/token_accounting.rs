@@ -502,3 +502,99 @@ fn observed_token_accounting_uses_larger_history_to_avoid_underbudget() {
     assert_eq!(accounting.effective_input_tokens, 100_000);
     assert_eq!(accounting.available_context_tokens, Some(20_000));
 }
+
+#[test]
+fn pressure_snapshot_scales_by_model_relative_context_window() {
+    let low = smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+        model_context_window_tokens: Some(200_000),
+        reserved_output_tokens: 8_000,
+        current_input_tokens: 40_000,
+        current_request_body_bytes: 0,
+        current_request_estimated_tokens: None,
+        observed_usage: Vec::new(),
+    });
+    let critical =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(32_000),
+            reserved_output_tokens: 4_000,
+            current_input_tokens: 26_000,
+            current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
+            observed_usage: Vec::new(),
+        });
+    let exhausted =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(16_000),
+            reserved_output_tokens: 4_000,
+            current_input_tokens: 13_000,
+            current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
+            observed_usage: Vec::new(),
+        });
+
+    assert_eq!(low.pressure.pressure_band, SmartContextPressureBand::Low);
+    assert_eq!(low.pressure.pressure_basis_points, Some(2_083));
+    assert_eq!(
+        critical.pressure.pressure_band,
+        SmartContextPressureBand::Critical
+    );
+    assert_eq!(critical.pressure.pressure_basis_points, Some(9_285));
+    assert_eq!(
+        exhausted.pressure.pressure_band,
+        SmartContextPressureBand::Exhausted
+    );
+    assert_eq!(exhausted.pressure.pressure_basis_points, Some(10_833));
+}
+
+#[test]
+fn pressure_snapshot_reports_confidence_and_safety_floor() {
+    let observed =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(128_000),
+            reserved_output_tokens: 8_000,
+            current_input_tokens: 0,
+            current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
+            observed_usage: vec![RuntimeTokenUsage {
+                input_tokens: 64_000,
+                ..RuntimeTokenUsage::default()
+            }],
+        });
+    let estimated =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(128_000),
+            reserved_output_tokens: 8_000,
+            current_input_tokens: 0,
+            current_request_body_bytes: 40_000,
+            current_request_estimated_tokens: None,
+            observed_usage: Vec::new(),
+        });
+    let unknown_window =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: None,
+            reserved_output_tokens: 8_000,
+            current_input_tokens: 12_000,
+            current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
+            observed_usage: Vec::new(),
+        });
+
+    assert_eq!(
+        observed.pressure.estimator_confidence,
+        SmartContextEstimatorConfidence::High
+    );
+    assert_eq!(
+        estimated.pressure.estimator_confidence,
+        SmartContextEstimatorConfidence::Medium
+    );
+    assert_eq!(
+        unknown_window.pressure.estimator_confidence,
+        SmartContextEstimatorConfidence::Low
+    );
+    assert_eq!(observed.pressure.absolute_safety_floor_tokens, 6_000);
+    assert_eq!(
+        unknown_window.pressure.pressure_band,
+        SmartContextPressureBand::Unknown
+    );
+    assert_eq!(unknown_window.pressure.absolute_safety_floor_tokens, 2_000);
+}
