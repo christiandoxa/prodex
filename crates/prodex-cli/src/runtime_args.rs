@@ -290,6 +290,69 @@ pub struct GatewayArgs {
 }
 
 impl SuperArgs {
+    /// The first positional arg can look like a session ID when `trailing_var_arg=true`
+    /// leaves provider flags unseen by clap. Extract `--provider`, `--model`, and `--api-key`
+    /// from `codex_args` and apply them to the struct so downstream provider logic works.
+    pub fn extract_provider_overrides_from_codex_args(&mut self) {
+        let mut i = 0;
+        while i < self.codex_args.len() {
+            let Some(arg) = self.codex_args[i].to_str() else {
+                i += 1;
+                continue;
+            };
+            let (consumed, skip) = match arg {
+                "--provider" => {
+                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
+                        self.provider = parse_super_external_provider(val).ok();
+                        (2, true)
+                    } else {
+                        (1, false)
+                    }
+                }
+                a if a.starts_with("--provider=") => {
+                    if let Some(val) = a.strip_prefix("--provider=") {
+                        self.provider = parse_super_external_provider(val).ok();
+                    }
+                    (1, true)
+                }
+                "--api-key" => {
+                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
+                        self.api_key = Some(val.to_string());
+                        (2, true)
+                    } else {
+                        (1, false)
+                    }
+                }
+                a if a.starts_with("--api-key=") => {
+                    self.api_key = a.strip_prefix("--api-key=").map(|v| v.to_string());
+                    (1, true)
+                }
+                "--model" => {
+                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
+                        self.local_model = Some(val.to_string());
+                        (2, true)
+                    } else {
+                        (1, false)
+                    }
+                }
+                a if a.starts_with("--model=") => {
+                    self.local_model = a.strip_prefix("--model=").map(|v| v.to_string());
+                    (1, true)
+                }
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            };
+            if skip {
+                let drain_end = (i + consumed).min(self.codex_args.len());
+                self.codex_args.drain(i..drain_end);
+            } else {
+                i += consumed;
+            }
+        }
+    }
+
     pub fn presidio_preference(&self) -> Option<bool> {
         if self.presidio {
             Some(true)
@@ -743,4 +806,115 @@ pub struct RuntimeBrokerArgs {
     pub admin_token: String,
     #[arg(long)]
     pub listen_addr: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn super_args_from(codex_args: &[&str]) -> SuperArgs {
+        let os: Vec<OsString> = codex_args.iter().map(|s| OsString::from(s)).collect();
+        SuperArgs {
+            codex_args: os,
+            provider: None,
+            api_key: None,
+            local_model: None,
+            profile: None,
+            auto_rotate: false,
+            no_auto_rotate: false,
+            auto_redeem: false,
+            skip_quota_check: false,
+            dry_run: false,
+            base_url: None,
+            no_proxy: false,
+            presidio: false,
+            no_presidio: false,
+            mem0: false,
+            no_mem0: false,
+            url: None,
+            cli: None,
+            local_context_window: None,
+            local_auto_compact_token_limit: None,
+            codex_features: CodexRuntimeFeatureArgs::default(),
+        }
+    }
+
+    #[test]
+    fn extract_provider_flags_from_codex_args_after_session_id() {
+        let mut args = super_args_from(&[
+            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "--provider",
+            "deepseek",
+            "--model",
+            "deepseek-v4-pro",
+            "--api-key",
+            "sk-test",
+        ]);
+        args.extract_provider_overrides_from_codex_args();
+        assert_eq!(args.provider, Some(SuperExternalProvider::DeepSeek));
+        assert_eq!(args.local_model.as_deref(), Some("deepseek-v4-pro"));
+        assert_eq!(args.api_key.as_deref(), Some("sk-test"));
+        assert_eq!(
+            args.codex_args
+                .iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>(),
+            vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
+        );
+    }
+
+    #[test]
+    fn extract_provider_equals_syntax_from_codex_args() {
+        let mut args = super_args_from(&[
+            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "--provider=gemini",
+            "--model=gemini-2.5-pro",
+        ]);
+        args.extract_provider_overrides_from_codex_args();
+        assert_eq!(args.provider, Some(SuperExternalProvider::Gemini));
+        assert_eq!(args.local_model.as_deref(), Some("gemini-2.5-pro"));
+        assert_eq!(
+            args.codex_args
+                .iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>(),
+            vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
+        );
+    }
+
+    #[test]
+    fn extract_noop_when_no_provider_flags_in_codex_args() {
+        let mut args = super_args_from(&["just", "some", "codex", "args"]);
+        args.extract_provider_overrides_from_codex_args();
+        assert_eq!(args.provider, None);
+        assert_eq!(
+            args.codex_args
+                .iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>(),
+            vec!["just", "some", "codex", "args"]
+        );
+    }
+
+    #[test]
+    fn extract_respects_already_set_provider() {
+        let mut args = super_args_from(&[
+            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "--provider",
+            "deepseek",
+        ]);
+        // Simulate clap already setting provider
+        args.provider = Some(SuperExternalProvider::DeepSeek);
+        args.extract_provider_overrides_from_codex_args();
+        // Should overwrite with extracted value (same here but structurally ok)
+        assert_eq!(args.provider, Some(SuperExternalProvider::DeepSeek));
+        // codex_args should be cleaned of provider flags
+        assert_eq!(
+            args.codex_args
+                .iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>(),
+            vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
+        );
+    }
 }

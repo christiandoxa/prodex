@@ -273,7 +273,8 @@ impl CommandExecute for SetupArgs {
 }
 
 impl CommandExecute for SuperArgs {
-    fn execute(self) -> Result<()> {
+    fn execute(mut self) -> Result<()> {
+        self.extract_provider_overrides_from_codex_args();
         if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
             if matches!(self.cli, Some(SuperCliAgent::Gemini | SuperCliAgent::Agy)) {
                 bail!("--dry-run is not supported with native Google agent CLIs")
