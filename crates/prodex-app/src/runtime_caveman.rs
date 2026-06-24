@@ -317,6 +317,7 @@ mod tests {
         assert!(strategy.args.super_optimizer_overlay);
         assert!(!strategy.memory_enabled);
         assert!(strategy.args.smart_context);
+        assert!(strategy.runtime_request().smart_context_enabled);
         assert!(strategy.args.full_access);
         assert!(strategy.codex_args.contains(&OsString::from(
             "--dangerously-bypass-approvals-and-sandbox"

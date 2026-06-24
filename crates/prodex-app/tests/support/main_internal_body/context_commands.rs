@@ -60,6 +60,105 @@ fn context_compact_output_command_accepts_kind_limits_and_json() {
 }
 
 #[test]
+fn context_replay_report_command_accepts_path_and_json() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "context",
+        "replay-report",
+        "/tmp/smart-context-replay.json",
+        "--json",
+        "--strict",
+    ])
+    .expect("context replay-report command");
+    let Commands::Context(ContextCommands::ReplayReport(args)) = command else {
+        panic!("expected context replay-report command");
+    };
+    assert_eq!(
+        args.path.as_path(),
+        Path::new("/tmp/smart-context-replay.json")
+    );
+    assert!(args.json);
+    assert!(args.strict);
+}
+
+#[test]
+fn context_replay_report_fixture_renders_markdown() {
+    let corpus_text = include_str!(
+        "../../../../prodex-runtime-proxy/tests/fixtures/smart_context_replay_corpus.json"
+    );
+
+    let report = runtime_proxy_crate::smart_context_render_replay_corpus_markdown(corpus_text)
+        .expect("replay corpus should render");
+
+    assert!(report.contains("# Smart Context Replay Evaluation"));
+    assert!(report.contains("- passed: true"));
+    assert!(report.contains("- eligible_long_sessions: 12"));
+}
+
+#[test]
+fn context_replay_report_strict_rejects_failed_corpus() {
+    let temp_dir = TestDir::new();
+    let corpus_path = temp_dir.path.join("failed-replay.json");
+    fs::write(
+        &corpus_path,
+        r#"{
+  "metrics": [
+    {
+      "scenario_id": "failed",
+      "variant": "exact",
+      "eligible": true,
+      "turns": 30,
+      "input_tokens": 10000,
+      "total_tokens_until_completion": 11000,
+      "completion_success": true,
+      "test_or_build_passed": true,
+      "critical_signal_recall_percent": 100,
+      "continuation_integrity_percent": 100,
+      "tool_call_integrity_percent": 100,
+      "missing_context_recovery_turns": 0,
+      "full_request_fallback": false,
+      "unresolved_mandatory_artifact_refs": 0,
+      "corrupted_json": false,
+      "rewrite_overhead_ms": 0,
+      "explicit_exact_mode": false,
+      "unsafe_request": false
+    },
+    {
+      "scenario_id": "failed",
+      "variant": "optimized",
+      "eligible": true,
+      "turns": 30,
+      "input_tokens": 9800,
+      "total_tokens_until_completion": 10800,
+      "completion_success": false,
+      "test_or_build_passed": false,
+      "critical_signal_recall_percent": 99,
+      "continuation_integrity_percent": 100,
+      "tool_call_integrity_percent": 100,
+      "missing_context_recovery_turns": 1,
+      "full_request_fallback": true,
+      "unresolved_mandatory_artifact_refs": 0,
+      "corrupted_json": false,
+      "rewrite_overhead_ms": 12,
+      "explicit_exact_mode": false,
+      "unsafe_request": false
+    }
+  ]
+}"#,
+    )
+    .expect("failed corpus should be written");
+
+    let err = handle_context_replay_report(ContextReplayReportArgs {
+        path: corpus_path.clone(),
+        json: false,
+        strict: true,
+    })
+    .expect_err("strict failed corpus should fail");
+
+    assert!(err.to_string().contains("replay acceptance failed"));
+}
+
+#[test]
 fn context_audit_reports_shared_context_roots() {
     let temp_dir = TestDir::new();
     let root = temp_dir.path.join("codex");

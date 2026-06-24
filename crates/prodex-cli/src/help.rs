@@ -187,7 +187,10 @@ Examples:
   prodex context audit --limit 30
   prodex context audit --json
   prodex context compress ~/.codex/AGENTS.md --dry-run
-  prodex context compress ~/.codex/AGENTS.md";
+  prodex context compress ~/.codex/AGENTS.md
+  prodex context replay-report smart-context-replay.json
+  prodex context replay-report smart-context-replay.json --json
+  prodex context replay-report smart-context-replay.json --strict";
 pub const CLI_SESSION_AFTER_HELP: &str = "\
 Examples:
   prodex session list

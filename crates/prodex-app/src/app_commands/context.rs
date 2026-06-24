@@ -6,7 +6,8 @@ use std::path::PathBuf;
 
 use crate::{
     AppPaths, ContextAuditArgs, ContextCompactOutputArgs, ContextCompactOutputKind,
-    ContextCompressArgs, DEFAULT_CODEX_DIR, absolutize, current_cli_width, print_stdout_line,
+    ContextCompressArgs, ContextReplayReportArgs, DEFAULT_CODEX_DIR, absolutize, current_cli_width,
+    print_stdout_line,
 };
 
 pub(crate) use prodex_context::{
@@ -49,6 +50,37 @@ pub(crate) fn handle_context_compress(args: ContextCompressArgs) -> Result<()> {
         render_context_compress_report(&report, args.dry_run)
     };
     print_stdout_line(&json);
+    Ok(())
+}
+
+pub(crate) fn handle_context_replay_report(args: ContextReplayReportArgs) -> Result<()> {
+    let path = absolutize(args.path)?;
+    let input =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let evaluation = runtime_proxy_crate::smart_context_evaluate_replay_corpus_json(&input)
+        .with_context(|| {
+            format!(
+                "failed to evaluate Smart Context replay corpus {}",
+                path.display()
+            )
+        })?;
+
+    if args.json {
+        let json = serde_json::to_string_pretty(&evaluation)
+            .context("failed to serialize Smart Context replay evaluation")?;
+        print_stdout_line(&json);
+    } else {
+        let report =
+            runtime_proxy_crate::smart_context_render_replay_evaluation_markdown(&evaluation);
+        print_stdout_line(&report);
+    }
+
+    if args.strict && !evaluation.passed {
+        bail!(
+            "Smart Context replay acceptance failed for {}",
+            path.display()
+        );
+    }
     Ok(())
 }
 
