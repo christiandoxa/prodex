@@ -4,6 +4,7 @@ use super::local_rewrite::{
     RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,
 };
+use super::local_rewrite_copilot::RuntimeCopilotProviderAuth;
 use crate::AppState;
 use std::time::Duration;
 
@@ -18,6 +19,82 @@ mod model_memory;
 mod support;
 
 use support::*;
+
+#[test]
+fn copilot_transport_uses_copilot_api_headers_for_chat_completions() {
+    let root = temp_root("copilot-chat-headers");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start();
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: "http://127.0.0.1:9".to_string(),
+        provider: RuntimeLocalRewriteProviderOptions::Copilot {
+            auth: RuntimeCopilotProviderAuth::Profiles {
+                profiles: vec![super::local_rewrite_copilot::RuntimeCopilotProfileAuth {
+                    profile_name: "copilot-business".to_string(),
+                    api_key: "copilot-runtime-token".to_string(),
+                    api_url: format!("http://{}", upstream.addr),
+                }],
+            },
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("copilot local rewrite proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/chat/completions", proxy.listen_addr))
+        .header(reqwest::header::USER_AGENT, "codex-cli/0.1-test")
+        .json(&serde_json::json!({
+            "model": "codex",
+            "stream": false,
+            "messages": [
+                {"role": "user", "content": "run a tool"},
+                {"role": "assistant", "content": "done"}
+            ]
+        }))
+        .send()
+        .expect("copilot chat request should be sent");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let headers = upstream
+        .headers_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("upstream should receive Copilot headers");
+    let header = |name: &str| {
+        headers
+            .iter()
+            .find_map(|(key, value)| key.eq_ignore_ascii_case(name).then_some(value.as_str()))
+    };
+    assert_eq!(
+        header("authorization"),
+        Some("Bearer copilot-runtime-token")
+    );
+    assert_eq!(header("user-agent"), Some("GitHubCopilotChat/0.26.7"));
+    assert_eq!(header("copilot-integration-id"), Some("vscode-chat"));
+    assert_eq!(header("editor-plugin-version"), Some("copilot-chat/0.26.7"));
+    assert_eq!(header("openai-intent"), Some("conversation-panel"));
+    assert_eq!(header("x-github-api-version"), Some("2025-04-01"));
+    assert_eq!(
+        header("x-vscode-user-agent-library-version"),
+        Some("electron-fetch")
+    );
+    assert_eq!(header("x-initiator"), Some("agent"));
+}
 
 #[test]
 fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {

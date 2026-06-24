@@ -520,13 +520,20 @@ fn runtime_copilot_profiles_for_provider(
         let Some(profile) = state.profiles.get(&profile_name) else {
             continue;
         };
-        let ProfileProvider::Copilot { host, login, .. } = &profile.provider else {
+        let ProfileProvider::Copilot {
+            host,
+            login,
+            api_url,
+            ..
+        } = &profile.provider
+        else {
             continue;
         };
         match resolve_copilot_runtime_api_auth(host, login) {
             Ok(auth) => profiles.push(RuntimeCopilotProfileAuth {
                 profile_name: profile_name.clone(),
                 api_key: auth.api_key,
+                api_url: api_url.clone(),
             }),
             Err(err) => errors.push(format!("{profile_name}: {err:#}")),
         }

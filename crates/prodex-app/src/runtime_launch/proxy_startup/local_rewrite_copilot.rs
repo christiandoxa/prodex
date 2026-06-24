@@ -54,6 +54,7 @@ pub(crate) enum RuntimeCopilotProviderAuth {
 pub(crate) struct RuntimeCopilotProfileAuth {
     pub(crate) profile_name: String,
     pub(crate) api_key: String,
+    pub(crate) api_url: String,
 }
 
 #[derive(Clone)]
@@ -72,6 +73,7 @@ struct RuntimeCopilotOAuthPoolState {
 struct RuntimeCopilotSelectedAuth {
     profile_name: String,
     api_key: String,
+    api_url: Option<String>,
     hard_affinity: bool,
 }
 
@@ -112,19 +114,19 @@ pub(super) fn send_runtime_copilot_upstream_request(
     }
 
     let body = runtime_copilot_request_body_with_canonical_model(&body);
-    let upstream_url = runtime_local_rewrite_upstream_url(
-        &shared.upstream_base_url,
-        &shared.mount_path,
-        &request.path_and_query,
-    );
     let attempts = runtime_copilot_auth_attempts(auth, shared, &body)?;
     let attempt_count = attempts.len();
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
+        let upstream_url = runtime_local_rewrite_upstream_url(
+            runtime_copilot_upstream_base_url(shared, &selected),
+            &shared.mount_path,
+            &request.path_and_query,
+        );
         let response = send_runtime_local_rewrite_prepared_request(
             request_id,
             request,
             shared,
-            &upstream_url,
+            upstream_url.as_str(),
             body.clone(),
             RuntimeLocalRewritePreparedAuth::Copilot {
                 api_key: &selected.api_key,
@@ -190,14 +192,14 @@ fn send_runtime_copilot_responses_request(
         RuntimeProviderBridgeKind::Copilot,
         &model_selection.model,
     );
-    let upstream_url = runtime_openai_standard_provider_upstream_url(
-        RuntimeProviderBridgeKind::Copilot,
-        &shared.upstream_base_url,
-        &shared.mount_path,
-        &request.path_and_query,
-    );
 
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
+        let upstream_url = runtime_openai_standard_provider_upstream_url(
+            RuntimeProviderBridgeKind::Copilot,
+            runtime_copilot_upstream_base_url(shared, &selected),
+            &shared.mount_path,
+            &request.path_and_query,
+        );
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
             let translated = runtime_copilot_responses_chat_request_body(
@@ -213,7 +215,7 @@ fn send_runtime_copilot_responses_request(
                         request_id,
                         request,
                         shared,
-                        upstream_url: &upstream_url,
+                        upstream_url: upstream_url.as_str(),
                         body: translated.body,
                         provider_kind: RuntimeProviderBridgeKind::Copilot,
                         auth_label: selected.profile_name.as_str(),
@@ -336,6 +338,7 @@ fn runtime_copilot_auth_attempts(
                 .map(|(label, api_key)| RuntimeCopilotSelectedAuth {
                     profile_name: label,
                     api_key: api_key.to_string(),
+                    api_url: None,
                     hard_affinity: api_keys.len() <= 1,
                 })
                 .collect::<Vec<_>>();
@@ -370,6 +373,7 @@ impl RuntimeCopilotOAuthPool {
             return Ok(vec![RuntimeCopilotSelectedAuth {
                 profile_name,
                 api_key: profile.api_key,
+                api_url: Some(profile.api_url),
                 hard_affinity: true,
             }]);
         }
@@ -389,11 +393,24 @@ impl RuntimeCopilotOAuthPool {
                 RuntimeCopilotSelectedAuth {
                     profile_name: profile.profile_name,
                     api_key: profile.api_key,
+                    api_url: Some(profile.api_url),
                     hard_affinity: false,
                 }
             })
             .collect())
     }
+}
+
+fn runtime_copilot_upstream_base_url<'a>(
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    selected: &'a RuntimeCopilotSelectedAuth,
+) -> &'a str {
+    selected
+        .api_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .unwrap_or(shared.upstream_base_url.as_str())
 }
 
 impl RuntimeCopilotOAuthPoolState {

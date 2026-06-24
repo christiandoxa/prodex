@@ -10,6 +10,7 @@ fn copilot_profile(profile_name: &str) -> RuntimeCopilotProfileAuth {
     RuntimeCopilotProfileAuth {
         profile_name: profile_name.to_string(),
         api_key: format!("token-{profile_name}"),
+        api_url: format!("https://api.{profile_name}.githubcopilot.test"),
     }
 }
 
@@ -195,6 +196,10 @@ fn copilot_oauth_pool_rotates_fresh_requests() {
     let second = pool.select_attempts(&body, &[]).unwrap();
 
     assert_eq!(first[0].profile_name, "alpha");
+    assert_eq!(
+        first[0].api_url.as_deref(),
+        Some("https://api.alpha.githubcopilot.test")
+    );
     assert_eq!(first[1].profile_name, "beta");
     assert!(!first[0].hard_affinity);
     assert_eq!(second[0].profile_name, "beta");
@@ -214,6 +219,10 @@ fn copilot_oauth_pool_preserves_previous_response_affinity() {
 
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].profile_name, "beta");
+    assert_eq!(
+        attempts[0].api_url.as_deref(),
+        Some("https://api.beta.githubcopilot.test")
+    );
     assert!(attempts[0].hard_affinity);
 }
 

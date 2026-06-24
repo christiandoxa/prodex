@@ -10,6 +10,7 @@ use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinySe
 pub(super) struct TestUpstream {
     pub(super) addr: SocketAddr,
     pub(super) body_rx: mpsc::Receiver<Vec<u8>>,
+    pub(super) headers_rx: mpsc::Receiver<Vec<(String, String)>>,
     _thread: thread::JoinHandle<()>,
 }
 
@@ -25,14 +26,26 @@ impl TestUpstream {
             .to_ip()
             .expect("test upstream should expose TCP addr");
         let (body_tx, body_rx) = mpsc::channel();
+        let (headers_tx, headers_rx) = mpsc::channel();
         let thread = thread::spawn(move || {
             for _ in 0..request_count {
                 let mut request = server.recv().expect("test upstream should receive request");
+                let headers = request
+                    .headers()
+                    .iter()
+                    .map(|header| {
+                        (
+                            header.field.to_string().to_ascii_lowercase(),
+                            header.value.as_str().to_string(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 let mut body = Vec::new();
                 request
                     .as_reader()
                     .read_to_end(&mut body)
                     .expect("test upstream should read request body");
+                let _ = headers_tx.send(headers);
                 let _ = body_tx.send(body);
                 let mut response = TinyResponse::from_string(
                     r#"{"id":"resp_test","usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#,
@@ -47,6 +60,7 @@ impl TestUpstream {
         Self {
             addr,
             body_rx,
+            headers_rx,
             _thread: thread,
         }
     }

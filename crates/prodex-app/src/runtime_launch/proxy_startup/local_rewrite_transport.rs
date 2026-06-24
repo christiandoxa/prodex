@@ -111,13 +111,8 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                 .header("x-github-api-version", "2025-04-01")
                 .header("x-request-id", format!("prodex-{request_id}"))
                 .header("x-vscode-user-agent-library-version", "electron-fetch")
-                .header("X-Initiator", runtime_copilot_initiator_header(request));
-            if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
-                upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
-            } else {
-                upstream_request = upstream_request
-                    .header(reqwest::header::USER_AGENT, "GitHubCopilotChat/0.26.7");
-            }
+                .header("X-Initiator", runtime_copilot_initiator_header(request))
+                .header(reqwest::header::USER_AGENT, "GitHubCopilotChat/0.26.7");
             if runtime_copilot_request_has_vision_input(&body) {
                 upstream_request = upstream_request.header("copilot-vision-request", "true");
             }

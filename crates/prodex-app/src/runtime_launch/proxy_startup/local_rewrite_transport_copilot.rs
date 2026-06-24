@@ -28,6 +28,23 @@ fn runtime_copilot_request_has_agent_input(body: &[u8]) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return false;
     };
+    if value
+        .get("messages")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|messages| {
+            messages.iter().any(|message| {
+                message
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|role| {
+                        role.eq_ignore_ascii_case("assistant") || role.eq_ignore_ascii_case("tool")
+                    })
+            })
+        })
+    {
+        return true;
+    }
+
     value
         .get("input")
         .and_then(serde_json::Value::as_array)
@@ -78,5 +95,46 @@ fn runtime_copilot_value_contains_key(value: &serde_json::Value, needle: &str) -
                     .any(|value| runtime_copilot_value_contains_key(value, needle))
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(body: serde_json::Value) -> RuntimeProxyRequest {
+        RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/v1/chat/completions".to_string(),
+            headers: Vec::new(),
+            body: serde_json::to_vec(&body).unwrap(),
+        }
+    }
+
+    #[test]
+    fn copilot_initiator_header_detects_chat_agent_messages() {
+        let user = request(serde_json::json!({
+            "model": "gpt-5.1-codex",
+            "messages": [{"role": "user", "content": "hi"}]
+        }));
+        assert_eq!(runtime_copilot_initiator_header(&user), "user");
+
+        let assistant = request(serde_json::json!({
+            "model": "gpt-5.1-codex",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "hello"}
+            ]
+        }));
+        assert_eq!(runtime_copilot_initiator_header(&assistant), "agent");
+
+        let tool = request(serde_json::json!({
+            "model": "gpt-5.1-codex",
+            "messages": [
+                {"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "run", "arguments": "{}"}}]},
+                {"role": "tool", "tool_call_id": "call_1", "content": "ok"}
+            ]
+        }));
+        assert_eq!(runtime_copilot_initiator_header(&tool), "agent");
     }
 }
