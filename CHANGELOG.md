@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.210.0 - 2026-06-24
+
+### Runtime
+
+- Preserve upstream Codex backend metadata (`ebb8be5`)
+
 ## 0.209.0 - 2026-06-23
 
 ### Misc
@@ -80,9 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Standardize runtime support crates (`e19e728`)
-
-## 0.198.0 - 2026-06-20
-
-### Misc
-
-- Add upstream payload stream (`fcdd338`)
