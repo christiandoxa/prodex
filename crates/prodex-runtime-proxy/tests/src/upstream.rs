@@ -36,6 +36,7 @@ fn request_header_skip_list_preserves_codex_metadata_headers() {
         "x-codex-window-id",
         "x-client-request-id",
         "x-codex-beta-features",
+        "x-oai-attestation",
         "x-responsesapi-include-timing-metrics",
         "x-openai-internal-codex-responses-lite",
         "x-codex-ws-stream-request-start-ms",

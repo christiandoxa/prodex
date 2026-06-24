@@ -189,12 +189,6 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
             WsHeaderValue::from_str(&format!("Bearer {}", auth.access_token))
                 .context("failed to encode websocket authorization header")?,
         );
-        let user_agent =
-            runtime_proxy_effective_user_agent(&handshake_request.headers).unwrap_or("codex-cli");
-        request.headers_mut().insert(
-            WsHeaderName::from_static("user-agent"),
-            WsHeaderValue::from_str(user_agent).context("failed to encode websocket user-agent")?,
-        );
         if let Some(account_id) = auth.account_id.as_deref() {
             request.headers_mut().insert(
                 WsHeaderName::from_static("chatgpt-account-id"),

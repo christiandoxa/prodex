@@ -130,12 +130,6 @@ async fn send_runtime_proxy_upstream_request_with_events(
         upstream_request = upstream_request.header(reqwest::header::COOKIE, cookie_header);
     }
 
-    if let Some(user_agent) = runtime_proxy_effective_user_agent(&request.headers) {
-        upstream_request = upstream_request.header("User-Agent", user_agent);
-    } else {
-        upstream_request = upstream_request.header("User-Agent", "codex-cli");
-    }
-
     if let Some(account_id) = auth.account_id.as_deref() {
         upstream_request = upstream_request.header("ChatGPT-Account-Id", account_id);
     }
@@ -219,8 +213,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
 }
 
 pub(crate) use runtime_proxy_crate::{
-    runtime_proxy_effective_user_agent, runtime_proxy_upstream_url,
-    should_skip_runtime_request_header,
+    runtime_proxy_upstream_url, should_skip_runtime_request_header,
 };
 
 pub(super) fn runtime_proxy_upstream_websocket_url(

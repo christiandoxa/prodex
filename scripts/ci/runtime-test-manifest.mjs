@@ -316,6 +316,17 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
     ],
   },
   {
+    suite: "continuation-http-backend-passthrough",
+    label: "continuation http backend passthrough",
+    filters: [
+      {
+        id: "continuation-http-backend-passthrough",
+        filter: "main_internal_tests::runtime_proxy_continuations::http_backend_passthrough::",
+        label: "http-backend-passthrough",
+      },
+    ],
+  },
+  {
     suite: "continuation-websocket-precommit",
     label: "continuation websocket precommit",
     filters: [

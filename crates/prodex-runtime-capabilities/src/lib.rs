@@ -288,6 +288,7 @@ fn runtime_request_session_id_from_turn_metadata(request: &RuntimeProxyRequest) 
 
 fn runtime_request_explicit_session_id(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_proxy_request_header_value(&request.headers, "session_id")
+        .or_else(|| runtime_proxy_request_header_value(&request.headers, "session-id"))
         .or_else(|| runtime_proxy_request_header_value(&request.headers, "x-session-id"))
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -413,5 +414,44 @@ pub fn runtime_capability_log_safe_value(value: &str) -> String {
         "-".to_string()
     } else {
         sanitized
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compatibility_surface_detects_codex_session_id_header() {
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/backend-api/codex/responses/compact".to_string(),
+            headers: vec![("session-id".to_string(), " session-123 ".to_string())],
+            body: br#"{"input":[]}"#.to_vec(),
+        };
+
+        let surface = runtime_detect_request_compatibility_surface(&request, "request", "http");
+
+        assert_eq!(surface.route, "compact");
+        assert_eq!(surface.continuation, "session");
+    }
+
+    #[test]
+    fn explicit_session_headers_keep_legacy_precedence() {
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/backend-api/codex/responses".to_string(),
+            headers: vec![
+                ("x-session-id".to_string(), "x-session".to_string()),
+                ("session-id".to_string(), "codex-session".to_string()),
+                ("session_id".to_string(), "legacy-session".to_string()),
+            ],
+            body: Vec::new(),
+        };
+
+        assert_eq!(
+            runtime_request_explicit_session_id(&request).as_deref(),
+            Some("legacy-session")
+        );
     }
 }

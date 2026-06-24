@@ -5,7 +5,7 @@ use super::{
     runtime_gemini_should_inline_rate_limit_retry,
     runtime_gemini_should_rotate_after_quota_response,
 };
-use crate::{GeminiOAuthSecret, gemini_code_assist_endpoint};
+use crate::{GeminiOAuthSecret, RuntimeProxyRequest, gemini_code_assist_endpoint};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -103,6 +103,50 @@ fn gemini_oauth_pool_keeps_fresh_session_on_previous_profile() {
     assert_eq!(attempts[0].profile_name, "beta");
     assert!(attempts[0].hard_affinity);
     assert!(attempts[0].quota_fallback_allowed);
+}
+
+#[test]
+fn gemini_oauth_pool_uses_codex_session_id_header_for_model_scope() {
+    let pool = gemini_pool(&["alpha", "beta"]);
+    pool.remember_selected_model(Some("session:stable"), "gemini-2.5-pro");
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("session-id".to_string(), " stable ".to_string())],
+        body: Vec::new(),
+    };
+    let body = serde_json::to_vec(&serde_json::json!({"input": "fresh turn"})).unwrap();
+
+    let model_scope = pool.model_scope_for_request(&request, &body);
+
+    assert_eq!(model_scope.as_deref(), Some("session:stable"));
+    assert_eq!(
+        pool.selected_model_for_scope(model_scope.as_deref())
+            .as_deref(),
+        Some("gemini-2.5-pro")
+    );
+}
+
+#[test]
+fn gemini_oauth_pool_uses_client_metadata_session_for_model_scope() {
+    let pool = gemini_pool(&["alpha", "beta"]);
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let body = serde_json::to_vec(&serde_json::json!({
+        "input": "fresh turn",
+        "client_metadata": {
+            "session_id": "from-metadata"
+        }
+    }))
+    .unwrap();
+
+    let model_scope = pool.model_scope_for_request(&request, &body);
+
+    assert_eq!(model_scope.as_deref(), Some("session:from-metadata"));
 }
 
 #[test]

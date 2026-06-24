@@ -27,6 +27,47 @@ fn filters_text_response_headers_without_rewriting_values() {
 }
 
 #[test]
+fn preserves_codex_0142_backend_response_headers() {
+    let headers = runtime_forward_text_response_headers([
+        ("x-request-id", "req-0142"),
+        ("openai-model", "gpt-5"),
+        ("x-models-etag", "models-etag-0142"),
+        ("x-reasoning-included", "true"),
+        ("x-codex-primary-used-percent", "12.5"),
+        ("x-codex-primary-window-minutes", "60"),
+        ("x-codex-credits-has-credits", "true"),
+        ("x-codex-turn-state", "turn-state-0142"),
+        ("Content-Length", "999"),
+    ]);
+
+    assert_eq!(
+        headers,
+        vec![
+            ("x-request-id".to_string(), "req-0142".to_string()),
+            ("openai-model".to_string(), "gpt-5".to_string()),
+            ("x-models-etag".to_string(), "models-etag-0142".to_string()),
+            ("x-reasoning-included".to_string(), "true".to_string()),
+            (
+                "x-codex-primary-used-percent".to_string(),
+                "12.5".to_string()
+            ),
+            (
+                "x-codex-primary-window-minutes".to_string(),
+                "60".to_string()
+            ),
+            (
+                "x-codex-credits-has-credits".to_string(),
+                "true".to_string()
+            ),
+            (
+                "x-codex-turn-state".to_string(),
+                "turn-state-0142".to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
 fn filters_binary_response_headers_without_utf8_requirement() {
     let headers = runtime_forward_binary_response_headers([
         ("Date", b"today".as_slice()),

@@ -463,25 +463,11 @@ fn runtime_gemini_explicit_session_scope(
 }
 
 fn runtime_gemini_request_session_id(request: &RuntimeProxyRequest, body: &[u8]) -> Option<String> {
-    request
-        .headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("session_id"))
-        .map(|(_, value)| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            serde_json::from_slice::<serde_json::Value>(body)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("session_id")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::trim)
-                        .filter(|session_id| !session_id.is_empty())
-                        .map(str::to_string)
-                })
-        })
+    runtime_proxy_crate::runtime_request_session_id(request).or_else(|| {
+        serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| runtime_proxy_crate::runtime_request_session_id_from_value(&value))
+    })
 }
 
 impl RuntimeGeminiOAuthPoolState {
