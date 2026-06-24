@@ -2,6 +2,31 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.212.0 - Unreleased
+
+Changes after `0.211.0`.
+
+### Runtime
+
+- Stabilize history image attachment paths after child exit (`17b45be`)
+
+## 0.211.0 - 2026-06-24
+
+### Runtime
+
+- Harden runtime rewrites (`0902526`)
+
+### Docs
+
+- Document smart context command flow (`052db22`)
+
+### Misc
+
+- Tune rewrite policy accounting (`b3f5a94`)
+- Add replay metrics scaffold (`e81331f`)
+- Add candidate rollout primitives (`6a0d685`)
+- Align provider transport metadata (`e76e603`)
+
 ## 0.210.0 - 2026-06-24
 
 ### Runtime
@@ -80,9 +105,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Repair stale active profile selection (`e3c3b69`)
-
-## 0.199.0 - 2026-06-21
-
-### Runtime
-
-- Standardize runtime support crates (`e19e728`)
