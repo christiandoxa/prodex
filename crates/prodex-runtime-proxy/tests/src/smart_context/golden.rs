@@ -82,6 +82,7 @@ fn golden_prodex_s_and_super_rewrite_corpus_saves_tokens_preserves_signals_and_r
                 before_critical_signal_count: trace.critical_signal_count(before_text),
                 after_critical_signal_count: trace.critical_signal_count(after_text),
                 missing_rehydrate_refs,
+                unresolved_rehydrate_refs_are_segment_local: false,
             });
 
         assert_eq!(

@@ -90,7 +90,6 @@ pub enum SmartContextExactnessReason {
     TurnStateAffinity,
     SessionAffinity,
     ToolOutputWithoutArtifact,
-    RehydrateRequired,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -128,14 +127,6 @@ pub fn smart_context_exactness_guard(
     if input.tool_output_without_artifact {
         reasons.push(SmartContextExactnessReason::ToolOutputWithoutArtifact);
     }
-    if input
-        .missing_rehydrate_refs
-        .iter()
-        .any(|value| non_empty(value))
-    {
-        reasons.push(SmartContextExactnessReason::RehydrateRequired);
-    }
-
     SmartContextExactnessGuard {
         decision: if reasons.is_empty() {
             SmartContextExactnessDecision::Allow

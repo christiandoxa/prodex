@@ -47,7 +47,6 @@ pub fn smart_context_affinity_pressure_rewrite_allowed(
             .reasons
             .iter()
             .all(smart_context_exactness_reason_is_affinity)
-        && smart_context_budget_has_critical_pressure(input.tier, input.available_tokens)
         && !smart_context_budget_has_non_affinity_safety_block(input.policy_reasons)
 }
 
@@ -69,13 +68,6 @@ fn smart_context_exactness_reason_is_affinity(reason: &SmartContextExactnessReas
     )
 }
 
-fn smart_context_budget_has_critical_pressure(
-    tier: SmartContextTokenBudgetTier,
-    available_tokens: usize,
-) -> bool {
-    available_tokens == 0 || tier == SmartContextTokenBudgetTier::Minimal
-}
-
 fn smart_context_budget_has_non_affinity_safety_block(
     reasons: &[SmartContextBudgetPolicyReason],
 ) -> bool {
@@ -83,7 +75,6 @@ fn smart_context_budget_has_non_affinity_safety_block(
         matches!(
             reason,
             SmartContextBudgetPolicyReason::StaticContextChanged
-                | SmartContextBudgetPolicyReason::MissingRehydrateRefs
                 | SmartContextBudgetPolicyReason::UnknownTokenWindow
                 | SmartContextBudgetPolicyReason::UnsafeAccounting
         )

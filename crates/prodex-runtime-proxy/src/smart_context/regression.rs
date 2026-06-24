@@ -25,6 +25,7 @@ pub struct SmartContextRegressionSelfCheckInput {
     pub before_critical_signal_count: usize,
     pub after_critical_signal_count: usize,
     pub missing_rehydrate_refs: Vec<String>,
+    pub unresolved_rehydrate_refs_are_segment_local: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +58,7 @@ pub fn smart_context_regression_self_check(
         .missing_rehydrate_refs
         .iter()
         .any(|value| non_empty(value))
+        && !input.unresolved_rehydrate_refs_are_segment_local
     {
         reasons.push(SmartContextRegressionSelfCheckReason::MissingRehydrateRefs);
     }
