@@ -147,11 +147,19 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     }
 
     fn after_child_exit(&self, status: &std::process::ExitStatus) -> Result<()> {
+        maintain_shared_codex_sessions_after_child_exit();
         if status.success() {
             cleanup_codex_deleted_session_binding(self.delete_session_id.as_deref())?;
         }
         Ok(())
     }
+}
+
+fn maintain_shared_codex_sessions_after_child_exit() {
+    let Ok(paths) = AppPaths::discover() else {
+        return;
+    };
+    let _ = maintain_managed_codex_sessions(&paths);
 }
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {
