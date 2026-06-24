@@ -150,43 +150,21 @@ function resolveNativeCodexCommand() {
   };
 }
 
-function resolveCodexJsCommand() {
-  const packageRoot = resolveOpenAiCodexPackageRoot();
-  if (!packageRoot) {
-    process.stderr.write(
-      "Unable to locate @openai/codex. Reinstall @christiandoxa/prodex so its runtime dependency is present.\n",
-    );
-    process.exit(1);
-  }
-  const packageJsonPath = path.join(packageRoot, "package.json");
-
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-  if (typeof packageJson.bin === "string") {
-    return {
-      command: process.execPath,
-      args: [path.resolve(packageRoot, packageJson.bin), ...process.argv.slice(2)],
-      env: process.env,
-    };
-  }
-  if (packageJson.bin && typeof packageJson.bin === "object") {
-    const candidate = packageJson.bin.codex ?? Object.values(packageJson.bin)[0];
-    if (typeof candidate === "string") {
-      return {
-        command: process.execPath,
-        args: [path.resolve(packageRoot, candidate), ...process.argv.slice(2)],
-        env: process.env,
-      };
-    }
-  }
-  return {
-    command: process.execPath,
-    args: [path.resolve(packageRoot, "bin", "codex.js"), ...process.argv.slice(2)],
-    env: process.env,
-  };
-}
-
 function resolveCodexCommand() {
-  return resolveNativeCodexCommand() ?? resolveCodexJsCommand();
+  const nativeCommand = resolveNativeCodexCommand();
+  if (nativeCommand) {
+    return nativeCommand;
+  }
+
+  process.stderr.write(
+    [
+      "Unable to locate bundled Codex native package for this platform.",
+      "Reinstall @christiandoxa/prodex with optional dependencies enabled, or set PRODEX_CODEX_BIN to an existing Codex CLI.",
+      "Prodex does not fall back to @openai/codex/bin/codex.js because npm/Node version skew can make Codex load the wrong optional native package.",
+      "",
+    ].join("\n"),
+  );
+  process.exit(1);
 }
 
 const codexCommand = resolveCodexCommand();

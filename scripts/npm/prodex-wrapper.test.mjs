@@ -137,6 +137,7 @@ async function stageCodexShimInstall() {
     root,
     shimPath: path.join(mainPackageDir, "lib", "codex-shim.cjs"),
     nativeBinaryPath,
+    platformPackageDir,
     openAiCodexDir,
   };
 }
@@ -275,6 +276,25 @@ test("prodex Codex shim prefers direct native Codex package", async (t) => {
   assert.deepEqual(output.argv, ["run", "--probe"]);
   assert.equal(output.managedByNpm, "1");
   assert.equal(output.managedPackageRoot, await fs.realpath(install.openAiCodexDir));
+});
+
+test("prodex Codex shim fails fast when bundled native package is missing", async (t) => {
+  const install = await stageCodexShimInstall();
+  if (!install) {
+    t.skip("Codex shim native package test is only implemented for POSIX runners");
+    return;
+  }
+  t.after(() => fs.rm(install.root, { recursive: true, force: true }));
+  await fs.rm(install.platformPackageDir, { recursive: true, force: true });
+
+  const result = spawnSync(process.execPath, [install.shimPath, "--version"], {
+    encoding: "utf8",
+    env: cleanEnv({}),
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Unable to locate bundled Codex native package/);
+  assert.ok(result.stderr.includes("does not fall back to @openai/codex/bin/codex.js"));
+  assert.equal(result.stdout, "");
 });
 
 test("prodex Codex shim repairs non-executable native Codex binary", async (t) => {
