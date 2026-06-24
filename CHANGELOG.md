@@ -2,13 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.212.0 - Unreleased
+## 0.213.0 - Unreleased
 
 Changes after `0.211.0`.
 
 ### Runtime
 
 - Stabilize history image attachment paths after child exit (`17b45be`)
+
+### CLI
+
+- Extract provider flags from codex_args for session-id-first syntax (`f1783cd`)
 
 ## 0.211.0 - 2026-06-24
 
