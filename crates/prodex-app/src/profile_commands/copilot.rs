@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use crate::{
@@ -18,14 +17,16 @@ use crate::{
 pub(crate) use prodex_profile_export::CopilotUserInfo;
 use prodex_profile_export::{
     CopilotConfigFile, CopilotProfileImportStatePlan, CopilotProfileImportSummary,
-    copilot_account_key, copilot_platform_label, copilot_profile_import_summary_fields,
-    copilot_token_from_config, copilot_user_api_origin, default_copilot_models_api_url,
-    parse_copilot_config_file, parse_copilot_user_info_json_response,
-    parse_copilot_user_info_value, parse_copilot_version, plan_copilot_profile_import,
-    plan_copilot_profile_import_state, select_copilot_logged_in_user,
+    copilot_account_key, copilot_profile_import_summary_fields, copilot_token_from_config,
+    copilot_user_api_origin, default_copilot_models_api_url, parse_copilot_config_file,
+    parse_copilot_user_info_json_response, parse_copilot_user_info_value,
+    plan_copilot_profile_import, plan_copilot_profile_import_state, select_copilot_logged_in_user,
 };
 
 const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
+
+mod keychain;
+use keychain::{read_copilot_keychain_token, read_copilot_libsecret_token};
 
 #[derive(Debug, Clone)]
 pub(crate) struct CopilotRuntimeApiAuth {
@@ -257,120 +258,6 @@ fn discover_copilot_config_root() -> Result<PathBuf> {
             .context("failed to determine home directory")?
             .join(".copilot"),
     })
-}
-
-fn read_copilot_keychain_token(account_key: &str) -> Result<Option<String>> {
-    let keytar_path = discover_copilot_keytar_path()?;
-    let node_script = r#"
-const keytar = require(process.argv[1]);
-keytar.getPassword(process.argv[2], process.argv[3]).then(
-  token => process.stdout.write(token || ''),
-  err => { console.error(String(err)); process.exit(1); }
-);
-"#;
-    let output = Command::new("node")
-        .arg("-e")
-        .arg(node_script)
-        .arg(&keytar_path)
-        .arg(COPILOT_KEYCHAIN_SERVICE)
-        .arg(account_key)
-        .output()
-        .with_context(|| format!("failed to execute node for {}", keytar_path.display()))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.is_empty() {
-            bail!("node keychain lookup failed for {}", keytar_path.display());
-        }
-        bail!(
-            "node keychain lookup failed for {}: {}",
-            keytar_path.display(),
-            stderr
-        );
-    }
-    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok((!token.is_empty()).then_some(token))
-}
-
-/// Read a Copilot OAuth token from GNOME keyring via `secret-tool` (libsecret).
-///
-/// Copilot CLI v1.0.65+ stores OAuth tokens through the `rust-keyring` crate,
-/// which writes into the system keyring (GNOME keyring on Linux via libsecret).
-fn read_copilot_libsecret_token(account_key: &str) -> Result<Option<String>> {
-    match Command::new("secret-tool")
-        .arg("lookup")
-        .arg("service")
-        .arg(COPILOT_KEYCHAIN_SERVICE)
-        .arg("username")
-        .arg(account_key)
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            Ok((!token.is_empty()).then_some(token))
-        }
-        _ => Ok(None),
-    }
-}
-
-fn discover_copilot_keytar_path() -> Result<PathBuf> {
-    let mut candidates = Vec::new();
-    let keytar_suffix = PathBuf::from("prebuilds")
-        .join(copilot_platform_label())
-        .join("keytar.node");
-    for root in copilot_package_roots()? {
-        if !root.exists() {
-            continue;
-        }
-        for entry in
-            fs::read_dir(&root).with_context(|| format!("failed to read {}", root.display()))?
-        {
-            let entry = entry.with_context(|| format!("failed to read {}", root.display()))?;
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let keytar_path = path.join(&keytar_suffix);
-            if !keytar_path.is_file() {
-                continue;
-            }
-            let version = path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .map(parse_copilot_version)
-                .unwrap_or((0, 0, 0));
-            candidates.push((version, keytar_path));
-        }
-    }
-
-    candidates.sort_by_key(|(version, _)| *version);
-    candidates
-        .pop()
-        .map(|(_, path)| path)
-        .context("failed to locate the Copilot CLI keychain helper")
-}
-
-fn copilot_package_roots() -> Result<Vec<PathBuf>> {
-    let mut roots = BTreeSet::new();
-    let platform = copilot_platform_label();
-
-    if let Some(path) = env::var_os("COPILOT_CACHE_HOME") {
-        roots.insert(absolutize(PathBuf::from(path))?.join("pkg").join(platform));
-    }
-
-    let cache_home = env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| home_dir().map(|home| home.join(".cache")))
-        .context("failed to determine cache directory")?;
-    roots.insert(cache_home.join("copilot").join("pkg").join(platform));
-
-    if let Some(path) = env::var_os("COPILOT_HOME") {
-        roots.insert(absolutize(PathBuf::from(path))?.join("pkg").join(platform));
-    }
-    if let Some(home) = home_dir() {
-        roots.insert(home.join(".copilot").join("pkg").join(platform));
-    }
-
-    Ok(roots.into_iter().collect())
 }
 
 fn resolve_copilot_account_token_from_config(
