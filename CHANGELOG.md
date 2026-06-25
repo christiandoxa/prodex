@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.219.0 - 2026-06-25
+
+### Misc
+
+- Use native responses flow (`7fffe96`)
+
 ## 0.218.0 - 2026-06-25
 
 ### Misc
@@ -88,13 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Guard reset credit redemption (`ef0dd36`)
-
-## 0.207.0 - 2026-06-23
-
-### Runtime
-
-- Add Codex feature override flags (`fdb1a5c`)
-
-### CLI
-
-- Space live controls from detail rows (`ebbab88`)
