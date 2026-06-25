@@ -434,15 +434,14 @@ fn collect_copilot_runtime_models<'a>(
     match value {
         serde_json::Value::Object(object) => {
             for (key, nested) in object {
-                if key.eq_ignore_ascii_case("models")
+                if (key.eq_ignore_ascii_case("models")
                     || key.eq_ignore_ascii_case("available_models")
                     || key.eq_ignore_ascii_case("model_catalog")
-                    || key.eq_ignore_ascii_case("chat_models")
+                    || key.eq_ignore_ascii_case("chat_models"))
+                    && let Some(array) = nested.as_array()
                 {
-                    if let Some(array) = nested.as_array() {
-                        output.extend(array);
-                        continue;
-                    }
+                    output.extend(array);
+                    continue;
                 }
                 collect_copilot_runtime_models(nested, output);
             }
