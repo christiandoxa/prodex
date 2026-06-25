@@ -19,9 +19,10 @@ pub(crate) use prodex_profile_export::CopilotUserInfo;
 use prodex_profile_export::{
     CopilotConfigFile, CopilotProfileImportStatePlan, CopilotProfileImportSummary,
     copilot_account_key, copilot_platform_label, copilot_profile_import_summary_fields,
-    copilot_token_from_config, copilot_user_api_origin, parse_copilot_config_file,
-    parse_copilot_user_info_json_response, parse_copilot_user_info_value, parse_copilot_version,
-    plan_copilot_profile_import, plan_copilot_profile_import_state, select_copilot_logged_in_user,
+    copilot_token_from_config, copilot_user_api_origin, default_copilot_models_api_url,
+    parse_copilot_config_file, parse_copilot_user_info_json_response,
+    parse_copilot_user_info_value, parse_copilot_version, plan_copilot_profile_import,
+    plan_copilot_profile_import_state, select_copilot_logged_in_user,
 };
 
 const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
@@ -290,6 +291,27 @@ keytar.getPassword(process.argv[2], process.argv[3]).then(
     Ok((!token.is_empty()).then_some(token))
 }
 
+/// Read a Copilot OAuth token from GNOME keyring via `secret-tool` (libsecret).
+///
+/// Copilot CLI v1.0.65+ stores OAuth tokens through the `rust-keyring` crate,
+/// which writes into the system keyring (GNOME keyring on Linux via libsecret).
+fn read_copilot_libsecret_token(account_key: &str) -> Result<Option<String>> {
+    match Command::new("secret-tool")
+        .arg("lookup")
+        .arg("service")
+        .arg(COPILOT_KEYCHAIN_SERVICE)
+        .arg("username")
+        .arg(account_key)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok((!token.is_empty()).then_some(token))
+        }
+        _ => Ok(None),
+    }
+}
+
 fn discover_copilot_keytar_path() -> Result<PathBuf> {
     let mut candidates = Vec::new();
     let keytar_suffix = PathBuf::from("prebuilds")
@@ -359,6 +381,7 @@ fn resolve_copilot_account_token_from_config(
     let account_key = copilot_account_key(host, login);
     copilot_token_from_config(config, host, login)
         .or_else(|| read_copilot_keychain_token(&account_key).ok().flatten())
+        .or_else(|| read_copilot_libsecret_token(&account_key).ok().flatten())
         .context(format!(
             "failed to resolve the stored Copilot token for {} from config or keychain",
             account_key
@@ -402,39 +425,84 @@ fn refresh_copilot_runtime_api_auth(
         .send()
         .with_context(|| format!("failed to query {}", token_url))?;
     let status = response.status();
+    if status.is_success() {
+        let body = response
+            .bytes()
+            .with_context(|| format!("failed to read {}", token_url))?;
+        let value: serde_json::Value = serde_json::from_slice(&body)
+            .with_context(|| format!("failed to parse {token_url}"))?;
+        let api_key = value
+            .get("token")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(str::to_string)
+            .context("Copilot runtime token response did not contain token")?;
+        let model_catalog = copilot_runtime_model_catalog_from_token(&value);
+        return Ok(CopilotRuntimeApiAuth {
+            api_key,
+            model_catalog,
+        });
+    }
+    // /copilot_internal/v2/token was removed by GitHub.  Copilot CLI >= 1.0.65
+    // uses the OAuth token directly as a Bearer credential.  Fall back when the
+    // exchange endpoint returns 404 Not Found (not when a valid token is
+    // rejected with 401/403).
+    if status.as_u16() == 404 {
+        // Fetch models from the GitHub Copilot API with the OAuth token.
+        let api_url = default_copilot_models_api_url(host);
+        let models_url = format!("{api_url}/models");
+        let models_resp = client
+            .get(&models_url)
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Accept", "application/json")
+            .send()
+            .with_context(|| format!("failed to query {models_url}"))?;
+        let models_status = models_resp.status();
+        let models_body = models_resp
+            .bytes()
+            .with_context(|| format!("failed to read {models_url}"))?;
+        if !models_status.is_success() {
+            let body_text = format_response_body(&models_body);
+            if body_text.is_empty() {
+                bail!(
+                    "Copilot runtime token refresh failed: models endpoint returned HTTP {} at {}",
+                    models_status.as_u16(),
+                    models_url
+                );
+            }
+            bail!(
+                "Copilot runtime token refresh failed: models endpoint returned HTTP {} at {}: {}",
+                models_status.as_u16(),
+                models_url,
+                body_text
+            );
+        }
+        let models_value: serde_json::Value = serde_json::from_slice(&models_body)
+            .with_context(|| format!("failed to parse {models_url}"))?;
+        let model_catalog = copilot_runtime_model_catalog_from_token(&models_value);
+        return Ok(CopilotRuntimeApiAuth {
+            api_key: access_token.to_string(),
+            model_catalog,
+        });
+    }
     let body = response
         .bytes()
         .with_context(|| format!("failed to read {}", token_url))?;
-    if !status.is_success() {
-        let body_text = format_response_body(&body);
-        if body_text.is_empty() {
-            bail!(
-                "Copilot runtime token refresh failed (HTTP {}) at {}",
-                status.as_u16(),
-                token_url
-            );
-        }
+    let body_text = format_response_body(&body);
+    if body_text.is_empty() {
         bail!(
-            "Copilot runtime token refresh failed (HTTP {}) at {}: {}",
+            "Copilot runtime token refresh failed (HTTP {}) at {}",
             status.as_u16(),
-            token_url,
-            body_text
+            token_url
         );
     }
-    let value: serde_json::Value =
-        serde_json::from_slice(&body).with_context(|| format!("failed to parse {token_url}"))?;
-    let api_key = value
-        .get("token")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(str::to_string)
-        .context("Copilot runtime token response did not contain token")?;
-    let model_catalog = copilot_runtime_model_catalog_from_token(&value);
-    Ok(CopilotRuntimeApiAuth {
-        api_key,
-        model_catalog,
-    })
+    bail!(
+        "Copilot runtime token refresh failed (HTTP {}) at {}: {}",
+        status.as_u16(),
+        token_url,
+        body_text
+    )
 }
 
 fn copilot_runtime_model_catalog_from_token(value: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -448,12 +516,39 @@ fn copilot_runtime_model_catalog_from_token(value: &serde_json::Value) -> Vec<se
             model
                 .get("id")
                 .and_then(serde_json::Value::as_str)
-                .map(|id| seen.insert(id.to_ascii_lowercase()))
-                .unwrap_or(false)
+                .is_some_and(|id| !id.is_empty() && seen.insert(id.to_ascii_lowercase()))
         })
+        .map(|model| sanitize_copilot_catalog_entry(model))
         .collect()
 }
 
+/// Strip null-valued string fields from a catalog entry so downstream JSON
+/// parsers that reject null strings can load the catalog.
+fn sanitize_copilot_catalog_entry(mut entry: serde_json::Value) -> serde_json::Value {
+    let Some(_object) = entry.as_object_mut() else {
+        return entry;
+    };
+    // Recursively strip null values from nested capabilities before they reach
+    // downstream JSON parsers that reject null where a string/object is expected.
+    fn strip_nulls(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.retain(|_, v| !v.is_null());
+                for v in map.values_mut() {
+                    strip_nulls(v);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    strip_nulls(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    strip_nulls(&mut entry);
+    entry
+}
 fn collect_copilot_runtime_models<'a>(
     value: &'a serde_json::Value,
     output: &mut Vec<&'a serde_json::Value>,
@@ -464,7 +559,8 @@ fn collect_copilot_runtime_models<'a>(
                 if (key.eq_ignore_ascii_case("models")
                     || key.eq_ignore_ascii_case("available_models")
                     || key.eq_ignore_ascii_case("model_catalog")
-                    || key.eq_ignore_ascii_case("chat_models"))
+                    || key.eq_ignore_ascii_case("chat_models")
+                    || key.eq_ignore_ascii_case("data"))
                     && let Some(array) = nested.as_array()
                 {
                     output.extend(array);
@@ -505,6 +601,12 @@ fn copilot_runtime_model_catalog_entry(value: &serde_json::Value) -> Option<serd
         .or_else(|| object.get("context_window_tokens"))
         .or_else(|| object.get("max_context_tokens"))
         .or_else(|| object.get("max_input_tokens"))
+        .or_else(|| {
+            object
+                .get("capabilities")
+                .and_then(|c| c.get("limits"))
+                .and_then(|l| l.get("max_context_window_tokens"))
+        })
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(200_000);
     let mut entry = serde_json::json!({

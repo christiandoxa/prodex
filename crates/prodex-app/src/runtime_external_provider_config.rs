@@ -277,7 +277,7 @@ fn external_catalog_model(
         "default_service_tier": null,
         "availability_nux": null,
         "upgrade": null,
-        "base_instructions": null,
+        "base_instructions": "",
         "supports_reasoning_summaries": true,
         "default_reasoning_summary": "none",
         "support_verbosity": false,
