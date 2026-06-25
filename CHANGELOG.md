@@ -2,6 +2,18 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.216.0 - 2026-06-25
+
+### Runtime
+
+- Improve copilot runtime integration (`e381609`)
+
+### Misc
+
+- Support Copilot JSONC import (`879cf7b`)
+- Use explicit logout imports (`5a707c9`)
+- Satisfy copilot catalog lint (`10fa639`)
+
 ## 0.214.0 - 2026-06-25
 
 ### Misc
@@ -86,13 +98,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Stabilize runtime profile reporting (`e960033`)
-
-## 0.203.0 - 2026-06-22
-
-### Runtime
-
-- Skip websocket prewarm smart context rewrite (`9d1e927`)
-
-### Misc
-
-- Improve stream and upstream rendering (`1157571`)
