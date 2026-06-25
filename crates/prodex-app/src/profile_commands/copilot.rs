@@ -518,7 +518,7 @@ fn copilot_runtime_model_catalog_from_token(value: &serde_json::Value) -> Vec<se
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|id| !id.is_empty() && seen.insert(id.to_ascii_lowercase()))
         })
-        .map(|model| sanitize_copilot_catalog_entry(model))
+        .map(sanitize_copilot_catalog_entry)
         .collect()
 }
 
