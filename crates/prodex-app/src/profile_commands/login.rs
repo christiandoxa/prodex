@@ -14,6 +14,8 @@ mod claude;
 mod copilot_import;
 mod google;
 mod login_menu;
+mod profile_names;
+mod request;
 
 use self::api_key::*;
 use self::claude::*;
@@ -23,15 +25,16 @@ use self::login_menu::{
     LoginGuidanceKind, LoginMenuAction, login_prompt_is_interactive, prompt_login_menu_action,
     show_login_guidance,
 };
+use self::profile_names::*;
+use self::request::*;
 use super::write_secret_text_file;
 use crate::{
-    AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, LogoutArgs, ProfileEntry,
-    ProfileProvider, agy_bin, codex_child_plan, create_codex_home_if_missing,
-    ensure_managed_profiles_root, exit_with_status, fetch_profile_email, fetch_profile_identity,
-    find_profile_by_identity, login_with_claude_oauth, login_with_google_oauth,
-    managed_profile_home_path, persist_login_home, prepare_managed_codex_home, print_panel,
-    read_auth_summary, read_gemini_oauth_secret, remove_dir_if_exists,
-    repair_missing_active_profile_and_save, required_auth_json_text, resolve_profile_name,
+    AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
+    agy_bin, codex_child_plan, create_codex_home_if_missing, ensure_managed_profiles_root,
+    exit_with_status, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
+    login_with_claude_oauth, login_with_google_oauth, managed_profile_home_path,
+    persist_login_home, prepare_managed_codex_home, print_panel, read_auth_summary,
+    read_gemini_oauth_secret, remove_dir_if_exists, required_auth_json_text, resolve_profile_name,
     run_child_plan, unique_profile_name_for_email, update_existing_profile_auth,
     write_gemini_oauth_secret, write_profile_openai_compatible_base_url,
 };
@@ -701,46 +704,6 @@ fn normalize_optional_base_url(value: &str) -> Result<Option<String>> {
     Ok(Some(value.trim_end_matches('/').to_string()))
 }
 
-fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
-    if codex_args
-        .first()
-        .and_then(|arg| arg.to_str())
-        .is_some_and(|arg| arg == "status")
-    {
-        return LoginMethod::Status;
-    }
-    if codex_args.iter().any(|arg| arg == "--with-api-key") {
-        return LoginMethod::ApiKey;
-    }
-    if codex_args
-        .iter()
-        .any(|arg| arg == "--with-google" || arg == "--google")
-    {
-        return LoginMethod::Google;
-    }
-    if codex_args
-        .iter()
-        .any(|arg| arg == "--with-claude" || arg == "--claude")
-    {
-        return LoginMethod::Claude;
-    }
-    if codex_args.iter().any(|arg| {
-        arg == "--with-antigravity"
-            || arg == "--antigravity"
-            || arg == "--with-agy"
-            || arg == "--agy"
-    }) {
-        return LoginMethod::Antigravity;
-    }
-    if codex_args.iter().any(|arg| arg == "--with-access-token") {
-        return LoginMethod::AccessToken;
-    }
-    if codex_args.iter().any(|arg| arg == "--device-auth") {
-        return LoginMethod::DeviceCode;
-    }
-    LoginMethod::ChatGpt
-}
-
 fn success_exit_status() -> ExitStatus {
     ExitStatus::from_raw(0)
 }
@@ -770,75 +733,6 @@ fn run_antigravity_login(paths: &AppPaths) -> Result<ExitStatus> {
     let mut plan = ChildProcessPlan::new(agy_bin(), paths.shared_codex_root.clone());
     plan.args = vec![OsString::from("auth"), OsString::from("login")];
     run_child_plan(&plan, None)
-}
-
-fn default_api_key_profile_name(openai_base_url: Option<&str>) -> String {
-    openai_base_url
-        .and_then(|base_url| reqwest::Url::parse(base_url).ok())
-        .and_then(|url| url.host_str().map(ToOwned::to_owned))
-        .map(|host| sanitize_profile_slug(&format!("api_key_{host}")))
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "api_key".to_string())
-}
-
-fn unique_profile_name_for_slug(paths: &AppPaths, state: &AppState, slug: &str) -> String {
-    let base = sanitize_profile_slug(slug);
-    if profile_slug_is_available(paths, state, &base) {
-        return base;
-    }
-    for suffix in 2.. {
-        let candidate = format!("{base}-{suffix}");
-        if profile_slug_is_available(paths, state, &candidate) {
-            return candidate;
-        }
-    }
-    unreachable!("unbounded profile suffix search should always return")
-}
-
-fn profile_slug_is_available(paths: &AppPaths, state: &AppState, candidate: &str) -> bool {
-    !state.profiles.contains_key(candidate) && !paths.managed_profiles_root.join(candidate).exists()
-}
-
-fn sanitize_profile_slug(value: &str) -> String {
-    let mut slug = String::new();
-    for ch in value.trim().to_ascii_lowercase().chars() {
-        match ch {
-            'a'..='z' | '0'..='9' | '.' | '_' | '-' => slug.push(ch),
-            '@' => slug.push('_'),
-            _ => slug.push('-'),
-        }
-    }
-    let slug = slug.trim_matches(|ch| matches!(ch, '.' | '_' | '-'));
-    if slug.is_empty() || slug == "." || slug == ".." {
-        "api_key".to_string()
-    } else {
-        slug.to_string()
-    }
-}
-
-pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
-    let paths = AppPaths::discover()?;
-    let mut state = AppState::load_and_repair(&paths)?;
-    repair_missing_active_profile_and_save(&paths, &mut state)?;
-    let profile_name = resolve_profile_name(&state, args.selected_profile())?;
-    let codex_home = state
-        .profiles
-        .get(&profile_name)
-        .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    if !codex_home.provider.supports_codex_runtime() {
-        bail!(
-            "profile '{}' uses {}. `prodex logout` currently supports OpenAI/Codex profiles only.",
-            profile_name,
-            codex_home.provider.display_name()
-        );
-    }
-    let codex_home = codex_home.codex_home.clone();
-
-    let status = run_child_plan(
-        &codex_child_plan(codex_home.clone(), vec![OsString::from("logout")]),
-        None,
-    )?;
-    exit_with_status(status)
 }
 
 #[cfg(test)]

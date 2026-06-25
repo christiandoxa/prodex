@@ -8,6 +8,7 @@ mod anthropic;
 mod copilot;
 mod import_export;
 mod login;
+mod logout;
 mod manage;
 mod remove;
 
@@ -22,7 +23,8 @@ pub(crate) use self::import_export::{
     count_profile_import_auth_journals, handle_export_profiles, handle_import_current_profile,
     handle_import_profiles, repair_profile_import_auth_journals,
 };
-pub(crate) use self::login::{handle_codex_login, handle_codex_logout};
+pub(crate) use self::login::handle_codex_login;
+pub(crate) use self::logout::handle_codex_logout;
 pub(crate) use self::manage::{
     handle_add_profile, handle_current_profile, handle_list_profiles, handle_set_active_profile,
 };
