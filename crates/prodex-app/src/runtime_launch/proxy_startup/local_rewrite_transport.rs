@@ -104,15 +104,15 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                     "text/event-stream, application/json",
                 )
                 .bearer_auth(api_key)
-                .header("copilot-integration-id", "vscode-chat")
-                .header("editor-version", "vscode/1.95.0")
-                .header("editor-plugin-version", "copilot-chat/0.26.7")
+                .header("copilot-integration-id", "copilot-developer-cli")
                 .header("openai-intent", "conversation-panel")
                 .header("x-github-api-version", "2025-04-01")
                 .header("x-request-id", format!("prodex-{request_id}"))
-                .header("x-vscode-user-agent-library-version", "electron-fetch")
                 .header("X-Initiator", runtime_copilot_initiator_header(request))
-                .header(reqwest::header::USER_AGENT, "GitHubCopilotChat/0.26.7");
+                .header(
+                    reqwest::header::USER_AGENT,
+                    "copilot/1.0.65 (client/github/cli)",
+                );
             if runtime_copilot_request_has_vision_input(&body) {
                 upstream_request = upstream_request.header("copilot-vision-request", "true");
             }

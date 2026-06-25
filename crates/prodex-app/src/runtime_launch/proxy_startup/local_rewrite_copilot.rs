@@ -1,6 +1,8 @@
+#[cfg(test)]
 use super::super::copilot_instructions::{
     runtime_copilot_apply_custom_instructions, runtime_copilot_cached_workspace_custom_instructions,
 };
+#[cfg(test)]
 use super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekTranslatedRequest,
     runtime_chat_compatible_request_body,
@@ -20,7 +22,7 @@ use super::local_rewrite_search_fallback::{
 };
 use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_local_rewrite_api_key_attempts,
-    runtime_local_rewrite_upstream_url, runtime_openai_standard_provider_upstream_url,
+    runtime_local_rewrite_upstream_url,
 };
 use super::local_rewrite_transport_copilot::runtime_copilot_request_body_with_canonical_model;
 use super::provider_bridge::{
@@ -264,21 +266,13 @@ fn send_runtime_copilot_responses_request(
     );
 
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
-        let upstream_url = runtime_openai_standard_provider_upstream_url(
-            RuntimeProviderBridgeKind::Copilot,
+        let upstream_url = runtime_local_rewrite_upstream_url(
             runtime_copilot_upstream_base_url(shared, &selected),
             &shared.mount_path,
             &request.path_and_query,
         );
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
-            let translated = runtime_copilot_responses_chat_request_body(
-                &model_body,
-                &shared.deepseek_conversations,
-            )?;
-            if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                pending.insert(request_id, translated.messages);
-            }
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                     RuntimeLocalRewriteSearchFallbackRequest {
@@ -286,7 +280,7 @@ fn send_runtime_copilot_responses_request(
                         request,
                         shared,
                         upstream_url: upstream_url.as_str(),
-                        body: translated.body,
+                        body: model_body,
                         provider_kind: RuntimeProviderBridgeKind::Copilot,
                         auth_label: selected.profile_name.as_str(),
                         model,
@@ -365,6 +359,7 @@ fn send_runtime_copilot_responses_request(
     bail!("no Copilot model attempts were available")
 }
 
+#[cfg(test)]
 fn runtime_copilot_responses_chat_request_body(
     body: &[u8],
     conversations: &RuntimeDeepSeekConversationStore,

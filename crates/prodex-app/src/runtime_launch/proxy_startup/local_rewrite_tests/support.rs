@@ -11,6 +11,7 @@ pub(super) struct TestUpstream {
     pub(super) addr: SocketAddr,
     pub(super) body_rx: mpsc::Receiver<Vec<u8>>,
     pub(super) headers_rx: mpsc::Receiver<Vec<(String, String)>>,
+    pub(super) path_rx: mpsc::Receiver<String>,
     _thread: thread::JoinHandle<()>,
 }
 
@@ -27,9 +28,11 @@ impl TestUpstream {
             .expect("test upstream should expose TCP addr");
         let (body_tx, body_rx) = mpsc::channel();
         let (headers_tx, headers_rx) = mpsc::channel();
+        let (path_tx, path_rx) = mpsc::channel();
         let thread = thread::spawn(move || {
             for _ in 0..request_count {
                 let mut request = server.recv().expect("test upstream should receive request");
+                let path = request.url().to_string();
                 let headers = request
                     .headers()
                     .iter()
@@ -45,6 +48,7 @@ impl TestUpstream {
                     .as_reader()
                     .read_to_end(&mut body)
                     .expect("test upstream should read request body");
+                let _ = path_tx.send(path);
                 let _ = headers_tx.send(headers);
                 let _ = body_tx.send(body);
                 let mut response = TinyResponse::from_string(
@@ -61,6 +65,7 @@ impl TestUpstream {
             addr,
             body_rx,
             headers_rx,
+            path_rx,
             _thread: thread,
         }
     }

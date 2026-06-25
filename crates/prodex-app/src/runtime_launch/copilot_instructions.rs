@@ -1,4 +1,3 @@
-use super::proxy_startup::deepseek_rewrite::RuntimeDeepSeekTranslatedRequest;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,6 +6,10 @@ use std::sync::{Arc, OnceLock};
 const RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_FILES: usize = 32;
 const RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_FILE_BYTES: usize = 64 * 1024;
 const RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_TOTAL_BYTES: usize = 128 * 1024;
+#[cfg(test)]
+use super::proxy_startup::deepseek_rewrite::RuntimeDeepSeekTranslatedRequest;
+
+#[cfg(test)]
 pub(crate) const RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_HEADER: &str =
     "GitHub Copilot custom instructions compatibility";
 
@@ -63,6 +66,7 @@ pub(crate) fn runtime_copilot_init_current_workspace_custom_instructions() {
     let _ = runtime_copilot_workspace_custom_instructions_cache();
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_copilot_cached_workspace_custom_instructions() -> Option<&'static str> {
     runtime_copilot_workspace_custom_instructions_cache().as_deref()
 }
@@ -109,6 +113,7 @@ fn runtime_copilot_collect_instruction_paths(root: &Path, paths: &mut Vec<PathBu
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_copilot_apply_custom_instructions(
     translated: &mut RuntimeDeepSeekTranslatedRequest,
     instructions: &str,
@@ -131,6 +136,7 @@ pub(crate) fn runtime_copilot_apply_custom_instructions(
     Ok(())
 }
 
+#[cfg(test)]
 fn runtime_copilot_merge_custom_instructions_messages(
     messages: &mut Vec<serde_json::Value>,
     instructions: &str,
