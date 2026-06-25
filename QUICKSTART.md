@@ -17,7 +17,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex rtk` or default `prodex super` RTK shell-command guidance
 - Optional: `sqz-mcp`, `token-savior`, and `claw-compactor` if you want the matching `prodex sqz`, `prodex tokensavior`, or `prodex clawcompactor` optimizer tools
 
-If you install `@christiandoxa/prodex` from npm, Prodex uses its bundled `@openai/codex@latest` dependency by default so a broken or architecture-mismatched global `codex` on `PATH` does not affect `prodex run`. To deliberately use an external Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
+If you install `@christiandoxa/prodex` from npm, Prodex uses its bundled `@openai/codex@latest` dependency by default so a broken or architecture-mismatched global `codex` on `PATH` does not affect `prodex run`. If the bundled native Codex optional package is missing or not executable, Prodex falls back to an executable external `codex` on `PATH` and prints a notice before launch, including nvm-managed global Codex installs when the active nvm version's `bin` directory is on `PATH`. If neither bundled nor external Codex is usable, set `PRODEX_CODEX_AUTO_INSTALL=1` to let Prodex run `npm install -g @openai/codex@latest` once before retrying PATH resolution. To deliberately use an external Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
 ## Install
 
@@ -49,7 +49,7 @@ npm install -g @christiandoxa/prodex@0.213.0
 
 Dependency status in this repo:
 
-- The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest and is used by default; external Codex is opt-in through `PRODEX_CODEX_BIN` or `PRODEX_CODEX_RESOLUTION=external`
+- The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest and is used by default; external Codex is opt-in through `PRODEX_CODEX_BIN` or `PRODEX_CODEX_RESOLUTION=external`, and one-shot npm repair is opt-in through `PRODEX_CODEX_AUTO_INSTALL=1`
 - Source installs still use whatever `codex` binary is on your `PATH`
 - Packaged Codex runtime resources, including the Codex 0.136.0 and newer bundled zsh runtime helper, stay owned by the Codex package; Prodex does not override `zsh_path`
 - `prodex update` passes through to `codex update` directly without profile selection, quota preflight, or the local runtime proxy
@@ -173,7 +173,7 @@ printf 'context from stdin' | prodex run exec "summarize this"
 
 Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation. Prodex does not auto-redeem reset credits by default; add `--auto-redeem` when you want guarded automatic single reset-credit redemption only after the OpenAI/Codex weekly window is exhausted for every profile and the weekly reset is not already imminent. Manual `prodex redeem <profile>` is an explicit one-profile consume request; the upstream backend decides whether it applies or reports nothing-to-reset/no-credit.
 
-Recent Codex runtime feature switches are available on `prodex run`, `prodex caveman`, and `prodex super` as Codex config overrides: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens <tokens>`, and `--current-time-reminder`. Multi-agent `multiAgentMode` remains an upstream app-server/thread setting; use `prodex app-server` or `prodex run app-server` and pass `none`, `explicitRequestOnly`, or `proactive` through the Codex app-server API. Codex plugin catalog commands such as `prodex plugin list` are managed passthrough launches by default.
+Recent Codex runtime feature switches are available on `prodex run`, `prodex caveman`, and `prodex super` as Codex config overrides: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens <tokens>`, `--current-time-reminder`, and `--respect-system-proxy` / `--no-respect-system-proxy`. Multi-agent `multiAgentMode` remains an upstream app-server/thread setting; use `prodex app-server` or `prodex run app-server` and pass `none`, `explicitRequestOnly`, or `proactive` through the Codex app-server API. Codex plugin catalog commands such as `prodex plugin list` are managed passthrough launches by default.
 
 New Codex top-level subcommands stay on this managed path by default. For example, `prodex remote-control` is treated as `prodex run remote-control` unless Prodex explicitly adds its own command with that name. Codex-owned TUI commands such as `/usage`, `/goal`, `/import`, and `/delete` remain upstream behavior; `prodex delete <session>` passes through to Codex and prunes matching Prodex session affinity metadata after a successful delete.
 

@@ -278,7 +278,7 @@ test("prodex Codex shim prefers direct native Codex package", async (t) => {
   assert.equal(output.managedPackageRoot, await fs.realpath(install.openAiCodexDir));
 });
 
-test("prodex Codex shim fails fast when bundled native package is missing", async (t) => {
+test("prodex Codex shim fails fast when bundled native package is missing and no external codex exists", async (t) => {
   const install = await stageCodexShimInstall();
   if (!install) {
     t.skip("Codex shim native package test is only implemented for POSIX runners");
@@ -289,7 +289,7 @@ test("prodex Codex shim fails fast when bundled native package is missing", asyn
 
   const result = spawnSync(process.execPath, [install.shimPath, "--version"], {
     encoding: "utf8",
-    env: cleanEnv({}),
+    env: cleanEnv({ PATH: "" }),
   });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Unable to locate bundled Codex native package/);
@@ -313,4 +313,216 @@ test("prodex Codex shim repairs non-executable native Codex binary", async (t) =
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const mode = (await fs.stat(install.nativeBinaryPath)).mode;
   assert.ok(mode & 0o111);
+});
+
+test("codex shim falls back to external codex when bundled native binary is unusable", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX shell fixture only");
+    return;
+  }
+
+  const platformSpecs = {
+    linux: {
+      x64: ["@openai/codex-linux-x64", "x86_64-unknown-linux-musl", "codex"],
+      arm64: ["@openai/codex-linux-arm64", "aarch64-unknown-linux-musl", "codex"],
+    },
+    darwin: {
+      x64: ["@openai/codex-darwin-x64", "x86_64-apple-darwin", "codex"],
+      arm64: ["@openai/codex-darwin-arm64", "aarch64-apple-darwin", "codex"],
+    },
+  };
+  const spec = platformSpecs[process.platform]?.[process.arch];
+  if (!spec) {
+    t.skip(`unsupported fixture platform ${process.platform}/${process.arch}`);
+    return;
+  }
+
+  const [packageName, targetTriple, binaryFileName] = spec;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-codex-shim-fallback-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const shimPath = path.join(root, "codex-shim.cjs");
+  await fs.copyFile(path.join("npm", "prodex", "lib", "codex-shim.cjs"), shimPath);
+  await fs.chmod(shimPath, 0o755);
+
+  const packageRoot = path.join(root, "node_modules", ...packageName.split("/"));
+  await fs.mkdir(packageRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(packageRoot, "package.json"),
+    JSON.stringify({ name: packageName, version: "0.0.0-test" }),
+  );
+
+  // Simulate a corrupt optional native package: the expected native binary path
+  // exists but is not a regular executable file.
+  await fs.mkdir(path.join(packageRoot, "vendor", targetTriple, "bin", binaryFileName), {
+    recursive: true,
+  });
+
+  const shimDir = path.join(root, "shim-bin");
+  await fs.mkdir(shimDir);
+  await fs.writeFile(
+    path.join(shimDir, "codex"),
+    `#!/bin/sh\nexec node ${JSON.stringify(shimPath)} "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const brokenExternalDir = path.join(root, "broken-external-bin");
+  await fs.mkdir(brokenExternalDir);
+  await fs.writeFile(path.join(brokenExternalDir, "codex"), "not executable\n", {
+    mode: 0o644,
+  });
+
+  const externalDir = path.join(root, "external-bin");
+  await fs.mkdir(externalDir);
+  await fs.writeFile(
+    path.join(externalDir, "codex"),
+    '#!/bin/sh\necho "external codex $@"\n',
+    { mode: 0o755 },
+  );
+
+  const result = spawnSync(process.execPath, [shimPath, "--version"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: [shimDir, brokenExternalDir, externalDir].join(path.delimiter),
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /falling back to external codex from PATH/);
+  assert.match(result.stderr, /broken-external-bin.*not executable/);
+  assert.match(result.stdout, /external codex --version/);
+});
+
+test("codex shim resolves nvm-style global codex symlink after skipping Prodex shim", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("nvm POSIX layout fixture only");
+    return;
+  }
+
+  const platformSpecs = {
+    linux: {
+      x64: ["@openai/codex-linux-x64", "x86_64-unknown-linux-musl", "codex"],
+      arm64: ["@openai/codex-linux-arm64", "aarch64-unknown-linux-musl", "codex"],
+    },
+    darwin: {
+      x64: ["@openai/codex-darwin-x64", "x86_64-apple-darwin", "codex"],
+      arm64: ["@openai/codex-darwin-arm64", "aarch64-apple-darwin", "codex"],
+    },
+  };
+  const spec = platformSpecs[process.platform]?.[process.arch];
+  if (!spec) {
+    t.skip(`unsupported fixture platform ${process.platform}/${process.arch}`);
+    return;
+  }
+
+  const [packageName, targetTriple, binaryFileName] = spec;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-codex-shim-nvm-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const shimPath = path.join(root, "codex-shim.cjs");
+  await fs.copyFile(path.join("npm", "prodex", "lib", "codex-shim.cjs"), shimPath);
+  await fs.chmod(shimPath, 0o755);
+
+  const packageRoot = path.join(root, "node_modules", ...packageName.split("/"));
+  await fs.mkdir(packageRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(packageRoot, "package.json"),
+    JSON.stringify({ name: packageName, version: "0.0.0-test" }),
+  );
+  await fs.mkdir(path.join(packageRoot, "vendor", targetTriple, "bin", binaryFileName), {
+    recursive: true,
+  });
+
+  const shimDir = path.join(root, "prodex-shim-bin");
+  await fs.mkdir(shimDir);
+  await fs.writeFile(
+    path.join(shimDir, "codex"),
+    `#!/bin/sh\nexec node ${JSON.stringify(shimPath)} "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const nvmVersionRoot = path.join(root, ".nvm", "versions", "node", "v20.20.0");
+  const nvmBin = path.join(nvmVersionRoot, "bin");
+  const nvmCodexPackageBin = path.join(
+    nvmVersionRoot,
+    "lib",
+    "node_modules",
+    "@openai",
+    "codex",
+    "bin",
+  );
+  await fs.mkdir(nvmBin, { recursive: true });
+  await fs.mkdir(nvmCodexPackageBin, { recursive: true });
+  const nvmCodexJs = path.join(nvmCodexPackageBin, "codex.js");
+  await fs.writeFile(
+    nvmCodexJs,
+    '#!/usr/bin/env node\nconsole.log("nvm codex " + process.argv.slice(2).join(" "));\n',
+    { mode: 0o755 },
+  );
+  await fs.symlink(process.execPath, path.join(nvmBin, "node"));
+  await fs.symlink("../lib/node_modules/@openai/codex/bin/codex.js", path.join(nvmBin, "codex"));
+
+  const result = spawnSync(process.execPath, [shimPath, "--version"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: [shimDir, nvmBin].join(path.delimiter),
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /falling back to external codex from PATH/);
+  assert.match(result.stderr, /Prodex Codex shim/);
+  assert.match(result.stderr, /\.nvm\/versions\/node\/v20\.20\.0\/bin\/codex/);
+  assert.match(result.stdout, /nvm codex --version/);
+});
+
+test("codex shim can opt into npm installing external codex when none is found", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("npm auto-install fixture is only implemented for POSIX runners");
+    return;
+  }
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-codex-shim-autoinstall-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const shimPath = path.join(root, "codex-shim.cjs");
+  await fs.copyFile(path.join("npm", "prodex", "lib", "codex-shim.cjs"), shimPath);
+  await fs.chmod(shimPath, 0o755);
+
+  const binDir = path.join(root, "bin");
+  await ensureDir(binDir);
+  const fakeNpm = path.join(binDir, "npm");
+  await writeExecutable(
+    fakeNpm,
+    [
+      `#!${process.execPath}`,
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const expected = ['install', '-g', '@openai/codex@latest'];",
+      "if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) {",
+      "  console.error('unexpected npm args: ' + process.argv.slice(2).join(' '));",
+      "  process.exit(17);",
+      "}",
+      "const codex = path.join(process.env.PRODEX_TEST_NPM_INSTALL_BIN, 'codex');",
+      "fs.writeFileSync(codex, '#!/bin/sh\\necho npm-installed codex \"$@\"\\n');",
+      "fs.chmodSync(codex, 0o755);",
+      "",
+    ].join("\n"),
+  );
+
+  const result = spawnSync(process.execPath, [shimPath, "--version"], {
+    encoding: "utf8",
+    env: cleanEnv({
+      PATH: binDir,
+      PRODEX_CODEX_AUTO_INSTALL: "1",
+      PRODEX_TEST_NPM_INSTALL_BIN: binDir,
+    }),
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stderr, /attempting npm install because PRODEX_CODEX_AUTO_INSTALL=1/);
+  assert.match(result.stderr, /falling back to external codex from PATH/);
+  assert.match(result.stdout, /npm-installed codex --version/);
 });

@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.142.0 release",
+      "baseline_source": "openai/codex rust-v0.142.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -209,6 +209,61 @@
             "SafetyBuffering",
             "safety_buffering",
             "ResponseEvent::SafetyBuffering"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/config/mod.rs",
+          "reason": "Owns Codex feature config resolution and maps features.respect_system_proxy into auth route configuration used by Codex-owned auth clients.",
+          "required_contains": [
+            "respect_system_proxy",
+            "Feature::RespectSystemProxy",
+            "resolve_bootstrap_respect_system_proxy",
+            "AuthRouteConfig::respect_system_proxy",
+            "features.enabled",
+            "feature_requirements"
+          ]
+        },
+        {
+          "path": "codex-rs/features/src/lib.rs",
+          "reason": "Owns the upstream feature registry key for the opt-in auth system proxy feature exposed by Prodex as a Codex config override.",
+          "required_contains": [
+            "RespectSystemProxy",
+            "respect_system_proxy",
+            "key: \"respect_system_proxy\""
+          ]
+        },
+        {
+          "path": "codex-rs/codex-client/src/outbound_proxy.rs",
+          "reason": "Owns Codex auth/client outbound proxy routing semantics, including environment proxy fallback and the respect_system_proxy opt-in contract.",
+          "required_contains": [
+            "OutboundProxyConfig",
+            "respect_system_proxy",
+            "build_reqwest_client_for_route",
+            "ClientRouteClass",
+            "RouteFailureClass",
+            "SystemProxyDecision",
+            "resolve_system_proxy",
+            "resolve_platform_system_proxy",
+            "Sha256",
+            "no_proxy"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-client/src/outbound_proxy/windows.rs",
+          "reason": "Owns the Codex 0.142.1 Windows system proxy resolver added for PAC, WPAD, static proxy, bypass, and unsupported-scheme handling.",
+          "required_contains": [
+            "WinHttpGetIEProxyConfigForCurrentUser",
+            "WinHttpGetProxyForUrl",
+            "WINHTTP_AUTOPROXY_CONFIG_URL",
+            "WINHTTP_AUTOPROXY_AUTO_DETECT",
+            "WINHTTP_ACCESS_TYPE_NAMED_PROXY",
+            "WINHTTP_ACCESS_TYPE_NO_PROXY",
+            "proxy_list_decision",
+            "proxy_bypass_matches_origin",
+            "ParsedProxyListDecision",
+            "<local>",
+            "WinHttpOpen",
+            "GlobalFree"
           ]
         },
         {
@@ -736,19 +791,16 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.142.0",
-      "name": "0.142.0",
-      "published_at": "2026-06-22T22:19:53Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.0",
+      "tag_name": "rust-v0.142.1",
+      "name": "0.142.1",
+      "published_at": "2026-06-25T00:36:00Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.1",
       "body_head": [
         "## New Features",
-        "- `/usage` can now show and redeem earned usage-limit reset credits, with confirmation, retry, and refreshed availability states. (#28154, #28793)",
-        "- `/plugins` now organizes remote plugins into OpenAI Curated, Workspace, and Shared with me sections, while eligible turns can recommend and install relevant plugins. (#26703, #28399, #28400, #27704, #28403)",
-        "- Configurable rollout token budgets track usage across agent threads, provide remaining-budget reminders, and abort turns when exhausted. (#28746, #28494, #28707, #29423)",
-        "- App-server clients can configure multi-agent delegation as disabled, explicit-request-only, or proactive at the thread and turn level. (#28685, #28792, #29324)",
-        "- Added an indexed web-search mode that permits live searches while restricting direct page access to server-approved URLs. (#28489)",
-        "- Codex can now receive scheduled UTC time reminders and query the current time directly, including through client-provided app-server clocks. (#28822, #28824, #28835, #29011)",
-        "## Bug Fixes"
+        "- Added opt-in Windows system proxy support for authentication, including PAC, WPAD, static proxies, and bypass rules. (#26708)",
+        "## Changelog",
+        "Full Changelog: rust-v0.142.0...rust-v0.142.1",
+        "- #26708 PAC 3 - Add Windows system proxy resolver"
       ]
     }
   },

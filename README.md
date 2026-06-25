@@ -127,7 +127,7 @@ Runtime proxy design contract:
 npm install -g @christiandoxa/prodex
 ```
 
-The npm package uses its bundled `@openai/codex@latest` dependency by default. To deliberately use a separate Codex CLI from your machine, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`.
+The npm package uses its bundled `@openai/codex@latest` dependency by default. If the bundled native Codex optional package is missing or not executable, Prodex falls back to an executable external `codex` on `PATH` and prints a notice before launch. This includes nvm-managed global Codex installs when the active nvm version's `bin` directory is on `PATH`. If neither bundled nor external Codex is usable, set `PRODEX_CODEX_AUTO_INSTALL=1` to let Prodex run `npm install -g @openai/codex@latest` once before retrying PATH resolution. To deliberately pin a separate Codex CLI from your machine, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`.
 
 </details>
 
@@ -898,6 +898,7 @@ prodex run --rollout-budget-tokens 100000 --rollout-budget-reminders 75000,50000
 
 prodex run --current-time-reminder
 prodex run --current-time-reminder --current-time-reminder-interval 2
+prodex run --respect-system-proxy
 ```
 
 `--web-search` maps to Codex's top-level `web_search = "disabled" | "cached" | "indexed" | "live"` setting. In Super provider mode, an explicit `--web-search` is appended after the provider default, so it overrides the default bridge choice.
@@ -905,6 +906,8 @@ prodex run --current-time-reminder --current-time-reminder-interval 2
 `--rollout-budget-tokens` enables Codex's `[features.rollout_budget]` config. If no reminder thresholds are supplied, Prodex provides valid 75%, 50%, and 25% remaining-token thresholds for the selected limit. Use `--rollout-budget-sampling-weight` and `--rollout-budget-prefill-weight` only when you need Codex's weighted accounting knobs.
 
 `--current-time-reminder` enables Codex's `[features.current_time_reminder]` config. The default system clock source is owned by Codex. `--current-time-clock-source external` is intended for Codex app-server clients that implement the upstream `currentTime/read` request.
+
+`--respect-system-proxy` enables Codex's `[features.respect_system_proxy]` config when the bundled/upstream Codex supports it. Codex 0.142.1 uses this opt-in feature for Windows auth clients so PAC, WPAD, static system proxy, and bypass decisions can be honored. `--no-respect-system-proxy` renders an explicit false override for sessions that need the upstream default direct/env-proxy behavior.
 
 Codex `multiAgentMode` is an app-server/thread setting, not a normal TUI `config.toml` launch override. Prodex therefore does not invent a competing CLI config flag. Launch `prodex app-server` or `prodex run app-server` and pass upstream `multiAgentMode` values (`none`, `explicitRequestOnly`, or `proactive`) through the Codex app-server API.
 

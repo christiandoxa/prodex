@@ -813,7 +813,7 @@ mod tests {
     use super::*;
 
     fn super_args_from(codex_args: &[&str]) -> SuperArgs {
-        let os: Vec<OsString> = codex_args.iter().map(|s| OsString::from(s)).collect();
+        let os: Vec<OsString> = codex_args.iter().map(OsString::from).collect();
         SuperArgs {
             codex_args: os,
             provider: None,

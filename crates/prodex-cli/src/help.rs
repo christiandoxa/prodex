@@ -78,6 +78,7 @@ Examples:
   prodex run --web-search indexed
   prodex run --rollout-budget-tokens 100000
   prodex run --current-time-reminder
+  prodex run --respect-system-proxy
   prodex run exec \"review this repo\"
   prodex run 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
@@ -85,7 +86,7 @@ Notes:
   Eligible pre-commit rotation is allowed by default when another supported profile or key is available.
   Bare `prodex <args>` is treated as `prodex run <args>`.
   A lone session id is forwarded as `codex resume <session-id>`.
-  Codex runtime feature overrides are passed through with `-c`: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens`, and `--current-time-reminder`.
+  Codex runtime feature overrides are passed through with `-c`: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens`, `--current-time-reminder`, and `--respect-system-proxy` / `--no-respect-system-proxy`.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Codex directly without quota preflight or the local auto-rotate proxy.";
 pub const CLI_CLAUDE_AFTER_HELP: &str = "\
 Examples:

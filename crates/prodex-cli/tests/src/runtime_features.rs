@@ -26,6 +26,7 @@ fn run_command_renders_codex_runtime_feature_overrides() {
         "2",
         "--current-time-clock-source",
         "system",
+        "--respect-system-proxy",
         "exec",
         "hello",
     ])
@@ -50,6 +51,19 @@ fn run_command_renders_codex_runtime_feature_overrides() {
     assert!(
         rendered.contains(&"features.current_time_reminder.clock_source=\"system\"".to_string())
     );
+    assert!(rendered.contains(&"features.respect_system_proxy=true".to_string()));
+}
+
+#[test]
+fn run_command_renders_respect_system_proxy_disable_override() {
+    let command = parse_cli_command_from(["prodex", "run", "--no-respect-system-proxy", "hello"])
+        .expect("run command should parse");
+    let Commands::Run(args) = command else {
+        panic!("expected run command");
+    };
+
+    let rendered = rendered_os_args(&args.codex_args_with_feature_overrides());
+    assert!(rendered.contains(&"features.respect_system_proxy=false".to_string()));
 }
 
 #[test]

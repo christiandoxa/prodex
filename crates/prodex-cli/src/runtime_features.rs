@@ -32,6 +32,14 @@ pub struct CodexRuntimeFeatureArgs {
     /// Clock source for Codex current-time reminders.
     #[arg(long, value_name = "SOURCE", value_enum)]
     pub current_time_clock_source: Option<CodexCurrentTimeClockSource>,
+
+    /// Enable Codex auth clients to respect the OS system proxy when upstream Codex supports it.
+    #[arg(long, conflicts_with = "no_respect_system_proxy")]
+    pub respect_system_proxy: bool,
+
+    /// Disable Codex auth system-proxy routing even when the profile config enables it.
+    #[arg(long)]
+    pub no_respect_system_proxy: bool,
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +113,12 @@ impl CodexRuntimeFeatureArgs {
                     toml_string_literal(source.config_value())
                 ));
             }
+        }
+
+        if self.respect_system_proxy {
+            overrides.push("features.respect_system_proxy=true".to_string());
+        } else if self.no_respect_system_proxy {
+            overrides.push("features.respect_system_proxy=false".to_string());
         }
 
         let mut args = Vec::with_capacity(overrides.len() * 2);
