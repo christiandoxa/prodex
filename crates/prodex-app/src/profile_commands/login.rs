@@ -11,20 +11,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod api_key;
 mod claude;
+mod copilot_import;
 mod google;
 mod login_menu;
 
 use self::api_key::*;
 use self::claude::*;
+use self::copilot_import::*;
 use self::google::*;
 use self::login_menu::{
     LoginGuidanceKind, LoginMenuAction, login_prompt_is_interactive, prompt_login_menu_action,
     show_login_guidance,
 };
-use super::{handle_import_copilot_profile, write_secret_text_file};
+use super::write_secret_text_file;
 use crate::{
-    AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ImportProfileArgs, LogoutArgs,
-    ProfileEntry, ProfileProvider, agy_bin, codex_child_plan, create_codex_home_if_missing,
+    AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, LogoutArgs, ProfileEntry,
+    ProfileProvider, agy_bin, codex_child_plan, create_codex_home_if_missing,
     ensure_managed_profiles_root, exit_with_status, fetch_profile_email, fetch_profile_identity,
     find_profile_by_identity, login_with_claude_oauth, login_with_google_oauth,
     managed_profile_home_path, persist_login_home, prepare_managed_codex_home, print_panel,
@@ -74,13 +76,7 @@ pub(crate) fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
     let mut state = AppState::load_and_repair(&paths)?;
     let login_request = match resolve_login_request(args.profile.as_deref(), args.codex_args)? {
         ResolvedLoginRequest::Login(login_request) => login_request,
-        ResolvedLoginRequest::ImportCopilot => {
-            return handle_import_copilot_profile(&ImportProfileArgs {
-                path: PathBuf::from("copilot"),
-                name: None,
-                activate: false,
-            });
-        }
+        ResolvedLoginRequest::ImportCopilot => return handle_copilot_login_import(),
     };
     if login_request.method == LoginMethod::Antigravity {
         if args.profile.is_some() {
