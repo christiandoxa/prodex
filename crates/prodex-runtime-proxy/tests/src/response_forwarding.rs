@@ -37,6 +37,8 @@ fn preserves_codex_0142_backend_response_headers() {
         ("x-codex-primary-window-minutes", "60"),
         ("x-codex-credits-has-credits", "true"),
         ("x-codex-turn-state", "turn-state-0142"),
+        ("x-codex-safety-buffering-enabled", "true"),
+        ("x-codex-safety-buffering-faster-model", "gpt-5-mini"),
         ("Content-Length", "999"),
     ]);
 
@@ -62,6 +64,14 @@ fn preserves_codex_0142_backend_response_headers() {
             (
                 "x-codex-turn-state".to_string(),
                 "turn-state-0142".to_string()
+            ),
+            (
+                "x-codex-safety-buffering-enabled".to_string(),
+                "true".to_string()
+            ),
+            (
+                "x-codex-safety-buffering-faster-model".to_string(),
+                "gpt-5-mini".to_string()
             ),
         ]
     );

@@ -17,6 +17,10 @@ pub(super) const CAVEMAN_CORE_PLUGIN_FILES: &[EmbeddedCavemanFile] = &[
         contents: include_str!("../caveman_assets/assets/caveman.svg"),
     },
     EmbeddedCavemanFile {
+        relative_path: "assets/caveman-dark.svg",
+        contents: include_str!("../caveman_assets/assets/caveman-dark.svg"),
+    },
+    EmbeddedCavemanFile {
         relative_path: "skills/caveman/SKILL.md",
         contents: include_str!("../caveman_assets/skills/caveman/SKILL.md"),
     },

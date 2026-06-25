@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.142.1 release",
+      "baseline_source": "openai/codex rust-v0.142.2 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -156,6 +156,20 @@
           ]
         },
         {
+          "path": "codex-rs/codex-api/src/safety_buffering.rs",
+          "reason": "Owns server-provided safety-buffering treatment response headers that control Codex buffering UI visibility and faster-model metadata.",
+          "required_contains": [
+            "SafetyBufferingTreatment",
+            "X_CODEX_SAFETY_BUFFERING_ENABLED_HEADER",
+            "x-codex-safety-buffering-enabled",
+            "X_CODEX_SAFETY_BUFFERING_FASTER_MODEL_HEADER",
+            "x-codex-safety-buffering-faster-model",
+            "treatment_from_headers",
+            "show_buffering_ui",
+            "faster_model"
+          ]
+        },
+        {
           "path": "codex-rs/codex-api/src/sse/responses.rs",
           "reason": "Owns SSE Responses stream parsing, turn-state capture, completion boundary, and quota/error event interpretation.",
           "required_contains": [
@@ -173,7 +187,10 @@
             "rate_limit_exceeded",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering"
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
           ]
         },
         {
@@ -208,7 +225,10 @@
             "serialize_websocket_request",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering"
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
           ]
         },
         {
@@ -245,7 +265,28 @@
             "resolve_system_proxy",
             "resolve_platform_system_proxy",
             "Sha256",
-            "no_proxy"
+            "no_proxy",
+            "target_os = \"macos\"",
+            "mod macos"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-client/src/outbound_proxy/macos.rs",
+          "reason": "Owns the Codex 0.142.2 macOS system proxy resolver added for respect_system_proxy, including CFNetwork PAC/WPAD/static proxy handling and unsupported-scheme classification.",
+          "required_contains": [
+            "SCDynamicStoreBuilder",
+            "CFNetworkCopyProxiesForURL",
+            "CFNetworkExecuteProxyAutoConfigurationURL",
+            "CFNetworkExecuteProxyAutoConfigurationScript",
+            "PAC_EXECUTION_TIMEOUT",
+            "proxy_array_decision",
+            "proxy_entry_decision",
+            "kCFProxyTypeAutoConfigurationURL",
+            "kCFProxyTypeAutoConfigurationJavaScript",
+            "kCFProxyTypeHTTPS",
+            "kCFProxyTypeSOCKS",
+            "UnsupportedProxyScheme",
+            "RouteFailureClass"
           ]
         },
         {
@@ -264,6 +305,27 @@
             "<local>",
             "WinHttpOpen",
             "GlobalFree"
+          ]
+        },
+        {
+          "path": "codex-rs/core-plugins/src/manifest.rs",
+          "reason": "Owns local Codex plugin manifest parsing for interface logoDark dark-mode logo metadata used by embedded Prodex plugins.",
+          "required_contains": [
+            "RawPluginManifestInterface",
+            "logo_dark",
+            "logoDark",
+            "interface.logoDark",
+            "resolve_interface_asset_path",
+            "PluginManifestInterface"
+          ]
+        },
+        {
+          "path": "codex-rs/plugin/src/manifest.rs",
+          "reason": "Owns the shared parsed Codex plugin interface model, including dark-mode logo resource metadata.",
+          "required_contains": [
+            "PluginManifestInterface",
+            "logo_dark",
+            "pub logo_dark: Option<Resource>"
           ]
         },
         {
@@ -365,7 +427,10 @@
             "X-Models-Etag",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering"
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
           ],
           "expected_routes_all": [
             "/responses"
@@ -647,7 +712,10 @@
             "response.metadata",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering"
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
           ],
           "expected_stream_events_all": [
             "response.created",
@@ -695,7 +763,10 @@
             "serialize_websocket_request",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering"
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
           ],
           "expected_routes_all": [
             "websocket_url_for_path(\"responses\")"
@@ -725,7 +796,10 @@
             "codex.rate_limits",
             "SafetyBuffering",
             "safety_buffering",
-            "ResponseEvent::SafetyBuffering"
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
           ],
           "expected_stream_events_all": [
             "response.created",
@@ -737,6 +811,21 @@
             "response.completed",
             "response.failed",
             "codex.rate_limits"
+          ]
+        },
+        {
+          "id": "safety-buffering.response-header-treatment",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/safety_buffering.rs",
+          "reason": "Codex safety-buffering UI treatment is now controlled by response headers that Prodex must preserve transparently.",
+          "file_contains_all": [
+            "treatment_from_headers",
+            "X_CODEX_SAFETY_BUFFERING_ENABLED_HEADER",
+            "x-codex-safety-buffering-enabled",
+            "X_CODEX_SAFETY_BUFFERING_FASTER_MODEL_HEADER",
+            "x-codex-safety-buffering-faster-model",
+            "show_buffering_ui",
+            "faster_model"
           ]
         },
         {
@@ -787,20 +876,52 @@
             "Upgrade",
             "sec-websocket-*"
           ]
+        },
+        {
+          "id": "proxy.system-proxy-macos",
+          "kind": "capability_gate",
+          "file": "codex-rs/codex-client/src/outbound_proxy/macos.rs",
+          "reason": "respect_system_proxy support expanded from Windows to macOS in Codex 0.142.2; Prodex docs and launch overrides must keep that platform contract accurate.",
+          "file_contains_all": [
+            "SCDynamicStoreBuilder",
+            "CFNetworkCopyProxiesForURL",
+            "CFNetworkExecuteProxyAutoConfigurationURL",
+            "CFNetworkExecuteProxyAutoConfigurationScript",
+            "PAC_EXECUTION_TIMEOUT",
+            "proxy_array_decision",
+            "UnsupportedProxyScheme"
+          ]
+        },
+        {
+          "id": "plugins.dark-mode-logo",
+          "kind": "metadata_group",
+          "file": "codex-rs/core-plugins/src/manifest.rs",
+          "reason": "Codex 0.142.2 local plugin manifests can provide interface.logoDark; Prodex embedded Codex plugins should keep compatible metadata.",
+          "file_contains_all": [
+            "RawPluginManifestInterface",
+            "logo_dark",
+            "logoDark",
+            "interface.logoDark",
+            "resolve_interface_asset_path",
+            "PluginManifestInterface"
+          ]
         }
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.142.1",
-      "name": "0.142.1",
-      "published_at": "2026-06-25T00:36:00Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.1",
+      "tag_name": "rust-v0.142.2",
+      "name": "0.142.2",
+      "published_at": "2026-06-25T07:32:00Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.2",
       "body_head": [
         "## New Features",
-        "- Added opt-in Windows system proxy support for authentication, including PAC, WPAD, static proxies, and bypass rules. (#26708)",
-        "## Changelog",
-        "Full Changelog: rust-v0.142.0...rust-v0.142.1",
-        "- #26708 PAC 3 - Add Windows system proxy resolver"
+        "- MCP tools now use tool search by default when supported, improving tool discovery while preserving compatibility with older models and providers. (#29486)",
+        "- macOS authentication clients can honor system proxy, PAC, and WPAD settings when respect_system_proxy is enabled. (#26709)",
+        "- Plugins can provide dedicated dark-mode logos through local manifests and remote catalogs. (#29488)",
+        "- Apps can display richer safety-buffering UI using server-provided visibility and faster-model metadata. (#29473)",
+        "## Bug Fixes",
+        "- Remote plugin catalogs now return curated featured-plugin rankings. (#29485)",
+        "- Expired Amazon Bedrock credentials now produce actionable recovery guidance instead of a generic authorization error. (#28992)"
       ]
     }
   },

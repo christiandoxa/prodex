@@ -14,7 +14,6 @@ pub(super) use super::local_rewrite_copilot_bindings::{
     RuntimeCopilotBindingRecorder, RuntimeCopilotResponsesSseBindingReader,
     runtime_copilot_remember_bindings_from_responses_body,
 };
-use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_search_fallback::{
     RuntimeLocalRewritePreparedSendResult, RuntimeLocalRewriteSearchFallbackRequest,
     send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
@@ -22,13 +21,11 @@ use super::local_rewrite_search_fallback::{
 use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_local_rewrite_api_key_attempts,
     runtime_local_rewrite_upstream_url, runtime_openai_standard_provider_upstream_url,
-    send_runtime_local_rewrite_prepared_request,
 };
 use super::local_rewrite_transport_copilot::runtime_copilot_request_body_with_canonical_model;
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
-    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
-    runtime_provider_should_retry_with_next_model,
+    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_model_fallback_chain,
+    runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result, bail};
@@ -140,7 +137,17 @@ pub(super) fn send_runtime_copilot_upstream_request(
         return send_runtime_copilot_responses_request(request_id, request, shared, body, auth);
     }
 
-    let body = runtime_copilot_request_body_with_canonical_model(&body);
+    let model_selection = runtime_local_rewrite_model_selection(
+        shared,
+        RuntimeProviderBridgeKind::Copilot,
+        request,
+        &body,
+        prodex_cli::SUPER_COPILOT_DEFAULT_MODEL,
+    );
+    let model_chain = runtime_provider_model_fallback_chain(
+        RuntimeProviderBridgeKind::Copilot,
+        &model_selection.model,
+    );
     let attempts = runtime_copilot_auth_attempts(auth, shared, &body)?;
     let attempt_count = attempts.len();
     for (attempt_index, selected) in attempts.into_iter().enumerate() {
@@ -149,25 +156,68 @@ pub(super) fn send_runtime_copilot_upstream_request(
             &shared.mount_path,
             &request.path_and_query,
         );
-        let response = send_runtime_local_rewrite_prepared_request(
-            request_id,
-            request,
-            shared,
-            upstream_url.as_str(),
-            body.clone(),
-            RuntimeLocalRewritePreparedAuth::Copilot {
-                api_key: &selected.api_key,
-            },
-        )?;
-        let status = response.status().as_u16();
-        if status >= 400 && !selected.hard_affinity && attempt_index + 1 < attempt_count {
-            let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
-            let class = runtime_provider_error_class(
-                RuntimeProviderBridgeKind::Copilot,
-                status,
-                &parts.body,
-            );
-            if runtime_copilot_should_rotate_after_response(class) {
+        for (model_index, model) in model_chain.iter().enumerate() {
+            let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
+            let model_body = runtime_copilot_request_body_with_canonical_model(&model_body);
+            let send_result =
+                send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
+                    RuntimeLocalRewriteSearchFallbackRequest {
+                        request_id,
+                        request,
+                        shared,
+                        upstream_url: upstream_url.as_str(),
+                        body: model_body,
+                        provider_kind: RuntimeProviderBridgeKind::Copilot,
+                        auth_label: selected.profile_name.as_str(),
+                        model,
+                        auth_factory: || RuntimeLocalRewritePreparedAuth::Copilot {
+                            api_key: selected.api_key.as_str(),
+                        },
+                    },
+                )?;
+            let (status, parts, class) = match send_result {
+                RuntimeLocalRewritePreparedSendResult::Live(response) => {
+                    return Ok(RuntimeLocalRewriteUpstreamResult {
+                        response: RuntimeLocalRewriteUpstreamResponse::Live(
+                            RuntimeLocalRewriteLiveResponse::new(response),
+                        ),
+                        gemini_context: None,
+                        copilot_context: None,
+                    });
+                }
+                RuntimeLocalRewritePreparedSendResult::Error {
+                    status,
+                    parts,
+                    class,
+                } => (status, parts, class),
+            };
+            if model_index + 1 < model_chain.len()
+                && runtime_provider_should_retry_with_next_model(class)
+            {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_provider_model_fallback",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("provider", "copilot"),
+                            runtime_proxy_log_field("auth", selected.profile_name.as_str()),
+                            runtime_proxy_log_field("from_model", model.as_str()),
+                            runtime_proxy_log_field(
+                                "to_model",
+                                model_chain[model_index + 1].as_str(),
+                            ),
+                            runtime_proxy_log_field("status", status.to_string()),
+                            runtime_proxy_log_field("class", format!("{class:?}")),
+                        ],
+                    ),
+                );
+                continue;
+            }
+            if !selected.hard_affinity
+                && attempt_index + 1 < attempt_count
+                && runtime_copilot_should_rotate_after_response(class)
+            {
                 runtime_proxy_log(
                     &shared.runtime_shared,
                     runtime_proxy_structured_log_message(
@@ -180,7 +230,7 @@ pub(super) fn send_runtime_copilot_upstream_request(
                         ],
                     ),
                 );
-                continue;
+                break;
             }
             return Ok(RuntimeLocalRewriteUpstreamResult {
                 response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
@@ -188,13 +238,6 @@ pub(super) fn send_runtime_copilot_upstream_request(
                 copilot_context: None,
             });
         }
-        return Ok(RuntimeLocalRewriteUpstreamResult {
-            response: RuntimeLocalRewriteUpstreamResponse::Live(
-                RuntimeLocalRewriteLiveResponse::new(response),
-            ),
-            gemini_context: None,
-            copilot_context: None,
-        });
     }
     bail!("no Copilot auth attempts were available")
 }

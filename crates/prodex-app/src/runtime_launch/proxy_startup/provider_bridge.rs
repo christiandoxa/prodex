@@ -164,6 +164,20 @@ const RUNTIME_PROVIDER_ERROR_RULES: &[RuntimeProviderErrorRule] = &[
         cooldown_ms: 0,
     },
     RuntimeProviderErrorRule {
+        status: None,
+        code: Some("model_not_supported"),
+        text: None,
+        class: RuntimeProviderErrorClass::NotFound,
+        cooldown_ms: 0,
+    },
+    RuntimeProviderErrorRule {
+        status: None,
+        code: None,
+        text: Some("model is not supported"),
+        class: RuntimeProviderErrorClass::NotFound,
+        cooldown_ms: 0,
+    },
+    RuntimeProviderErrorRule {
         status: Some(500),
         code: None,
         text: None,

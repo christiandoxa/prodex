@@ -213,6 +213,60 @@ fn prepare_managed_codex_home_retries_attachment_that_appears_later() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_managed_codex_home_rescans_v2_cache_for_attachment_image_paths() {
+    let temp_dir = PrepareTestDir::new("v2-cache-attachment-image-rescan");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/25/rollout-session.jsonl");
+    let source = temp_dir
+        .path
+        .join("overlay/attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::create_dir_all(source.parent().expect("source parent")).expect("source parent");
+    fs::write(&source, b"goal resume image").expect("source image should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"timestamp":"2026-06-25T08:00:00Z","type":"event_msg","payload":{{"goal":{{"objective":"image file: {}"}}}}}}"#,
+            source.display()
+        ),
+    )
+    .expect("session should write");
+
+    let cache_key = session_file
+        .strip_prefix(&paths.shared_codex_root)
+        .expect("session should be under shared root")
+        .to_string_lossy()
+        .into_owned();
+    let stale_v2_cache = SessionMaintenanceCache {
+        version: 2,
+        files: BTreeMap::from([(cache_key, session_file_fingerprint(&session_file).unwrap())]),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    fs::write(
+        paths.root.join(SESSION_MAINTENANCE_CACHE_FILE),
+        serde_json::to_vec(&stale_v2_cache).expect("cache should serialize"),
+    )
+    .expect("stale cache should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("prepare should rescan old cache");
+
+    let stable = paths
+        .shared_codex_root
+        .join("attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    assert_eq!(
+        fs::read(&stable).expect("stable image attachment should exist"),
+        b"goal resume image"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should read");
+    assert!(rewritten.contains(&stable.display().to_string()));
+    assert!(!rewritten.contains(&source.display().to_string()));
+}
+
+#[cfg(unix)]
+#[test]
 fn prepare_managed_codex_home_ignores_cache_write_failure() {
     let temp_dir = PrepareTestDir::new("cache-write-failure");
     let paths = temp_dir.app_paths();

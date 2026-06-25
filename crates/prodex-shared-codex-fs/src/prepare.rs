@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::UNIX_EPOCH;
 
 const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
-const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 2;
+const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 3;
 const SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-maintenance-v1.json";
 
 #[derive(Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

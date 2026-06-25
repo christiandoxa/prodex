@@ -480,6 +480,18 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         CORE_TEXT_ENDPOINTS,
         []
     ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "gpt-4o",
+        "GPT-4o",
+        "Legacy GitHub Copilot model kept as a safe fallback.",
+        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
 ];
 const DEEPSEEK_MODELS: &[ProviderModelSpec] = &[
     model!(

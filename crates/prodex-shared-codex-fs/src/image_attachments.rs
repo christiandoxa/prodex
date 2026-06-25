@@ -4,6 +4,7 @@ const SESSION_IMAGE_ATTACHMENT_DIR: &str = "image_attachments";
 const SESSION_ATTACHMENT_DIR: &str = "attachments";
 const CODEX_ATTACHMENT_PATH_MARKER: &str = "/attachments/";
 const CODEX_PASTED_TEXT_PREFIX: &str = "pasted-text-";
+const CODEX_ATTACHMENT_IMAGE_PREFIX: &str = "image-";
 const CODEX_IMAGE_TAG_PREFIX: &str = "<image ";
 const CODEX_IMAGE_PATH_PREFIX: &str = r#"path=""#;
 const CODEX_IMAGE_PATH_ESCAPED_PREFIX: &str = r#"path=\""#;
@@ -104,7 +105,7 @@ pub(crate) fn codex_session_image_attachments_are_stable(
     while let Some((path_start, path_end)) = next_codex_session_attachment_path(contents, cursor) {
         let path = Path::new(&contents[path_start..path_end]);
         if path.is_absolute()
-            && pasted_text_attachment_path_suffix(path).is_some()
+            && codex_attachment_path_suffix(path).is_some()
             && !path.starts_with(&stable_attachment_dir)
         {
             return false;
@@ -117,7 +118,7 @@ pub(crate) fn codex_session_image_attachments_are_stable(
 
 fn rewrite_codex_session_attachment_paths(codex_home: &Path, contents: &str) -> Result<String> {
     let image_rewritten = rewrite_codex_session_image_paths(codex_home, contents)?;
-    rewrite_codex_session_pasted_text_paths(codex_home, &image_rewritten)
+    rewrite_codex_session_inline_attachment_paths(codex_home, &image_rewritten)
 }
 
 fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Result<String> {
@@ -189,13 +190,16 @@ fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<
     Ok(Some(destination.display().to_string()))
 }
 
-fn rewrite_codex_session_pasted_text_paths(codex_home: &Path, contents: &str) -> Result<String> {
+fn rewrite_codex_session_inline_attachment_paths(
+    codex_home: &Path,
+    contents: &str,
+) -> Result<String> {
     let mut output = String::with_capacity(contents.len());
     let mut cursor = 0;
 
     while let Some((path_start, path_end)) = next_codex_session_attachment_path(contents, cursor) {
         let raw_path = &contents[path_start..path_end];
-        let replacement = stable_codex_session_pasted_text_path(codex_home, raw_path)?;
+        let replacement = stable_codex_session_attachment_path(codex_home, raw_path)?;
         output.push_str(&contents[cursor..path_start]);
         output.push_str(replacement.as_deref().unwrap_or(raw_path));
         cursor = path_end;
@@ -246,7 +250,7 @@ fn is_codex_session_path_byte(byte: u8) -> bool {
     )
 }
 
-fn stable_codex_session_pasted_text_path(
+fn stable_codex_session_attachment_path(
     codex_home: &Path,
     raw_path: &str,
 ) -> Result<Option<String>> {
@@ -254,7 +258,7 @@ fn stable_codex_session_pasted_text_path(
     if !source.is_absolute() {
         return Ok(None);
     }
-    let Some(relative_attachment_path) = pasted_text_attachment_path_suffix(source) else {
+    let Some(relative_attachment_path) = codex_attachment_path_suffix(source) else {
         return Ok(None);
     };
     let destination = codex_home
@@ -269,7 +273,7 @@ fn stable_codex_session_pasted_text_path(
     Ok(Some(destination.display().to_string()))
 }
 
-fn pasted_text_attachment_path_suffix(path: &Path) -> Option<PathBuf> {
+fn codex_attachment_path_suffix(path: &Path) -> Option<PathBuf> {
     let components: Vec<_> = path.components().collect();
     let attachment_index = components
         .iter()
@@ -279,11 +283,25 @@ fn pasted_text_attachment_path_suffix(path: &Path) -> Option<PathBuf> {
     if components.get(attachment_index + 3).is_some() {
         return None;
     }
+    let id = id_component.as_os_str().to_str()?;
+    if id.trim().is_empty() || id.contains(std::path::MAIN_SEPARATOR) || id == "." || id == ".." {
+        return None;
+    }
     let file_name = file_component.as_os_str().to_str()?;
-    if !file_name.starts_with(CODEX_PASTED_TEXT_PREFIX) {
+    if file_name.trim().is_empty()
+        || file_name.contains(std::path::MAIN_SEPARATOR)
+        || file_name == "."
+        || file_name == ".."
+        || !codex_attachment_file_name_is_persistable(file_name)
+    {
         return None;
     }
     Some(PathBuf::from(id_component.as_os_str()).join(file_component.as_os_str()))
+}
+
+fn codex_attachment_file_name_is_persistable(file_name: &str) -> bool {
+    file_name.starts_with(CODEX_PASTED_TEXT_PREFIX)
+        || file_name.starts_with(CODEX_ATTACHMENT_IMAGE_PREFIX)
 }
 
 #[cfg(test)]

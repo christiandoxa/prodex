@@ -212,10 +212,27 @@ fn prepare_prodex_overlay_home_localizes_config_and_installs_plugin() {
             .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/.codex-plugin/plugin.json")
             .is_file()
     );
+    let codex_plugin_manifest = fs::read_to_string(
+        overlay_home.join(".tmp/marketplaces/prodex-caveman/plugins/caveman/.codex-plugin/plugin.json"),
+    )
+    .expect("Codex plugin manifest should read");
+    assert!(codex_plugin_manifest.contains("\"logoDark\": \"./assets/caveman-dark.svg\""));
+    assert!(
+        overlay_home
+            .join(".tmp/marketplaces/prodex-caveman/plugins/caveman/assets/caveman-dark.svg")
+            .is_file(),
+        "Codex 0.142.2 dark-mode plugin logo should install"
+    );
     assert!(
         overlay_home
             .join("plugins/cache/prodex-caveman/caveman/0.1.0/.codex-plugin/plugin.json")
             .is_file()
+    );
+    assert!(
+        overlay_home
+            .join("plugins/cache/prodex-caveman/caveman/0.1.0/assets/caveman-dark.svg")
+            .is_file(),
+        "Codex 0.142.2 dark-mode plugin logo should install in the cache"
     );
     assert!(
         overlay_home

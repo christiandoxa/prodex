@@ -19,10 +19,13 @@ pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<S
             _ => return non_empty_single(model),
         },
         ProviderId::Copilot => match lower.as_str() {
-            "" | "auto" | "default" => &[PRODEX_COPILOT_DEFAULT_MODEL, "gpt-5.5", "gpt-5.4"],
-            "codex" | "pro" => &["gpt-5.3-codex", "gpt-5.5", "gpt-5.4"],
-            "claude" | "sonnet" => &["claude-sonnet-4-6", "gpt-5.3-codex"],
-            "gemini" => &["gemini-3.1-pro-preview", "gpt-5.3-codex"],
+            "" | "auto" | "default" => &[PRODEX_COPILOT_DEFAULT_MODEL, "gpt-5.1-codex", "gpt-4o"],
+            "codex" | "pro" => &["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+            "gpt-5.5" => &["gpt-5.5", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+            "gpt-5.4" => &["gpt-5.4", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+            "gpt-5.3-codex" => &["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+            "claude" | "sonnet" => &["claude-sonnet-4-6", "gpt-5.3-codex", "gpt-5.1-codex"],
+            "gemini" => &["gemini-3.1-pro-preview", "gpt-5.3-codex", "gpt-5.1-codex"],
             _ => return non_empty_single(model),
         },
         ProviderId::Gemini => match lower.as_str() {

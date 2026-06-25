@@ -99,6 +99,19 @@ fn verify_codex_manifest() -> Result<()> {
     if value.get("skills").and_then(serde_json::Value::as_str) != Some("./skills/") {
         bail!("Codex Caveman manifest skills pointer must be ./skills/");
     }
+    if value
+        .pointer("/interface/logoDark")
+        .and_then(serde_json::Value::as_str)
+        != Some("./assets/caveman-dark.svg")
+    {
+        bail!("Codex Caveman manifest logoDark pointer must be ./assets/caveman-dark.svg");
+    }
+    if !CAVEMAN_CORE_PLUGIN_FILES
+        .iter()
+        .any(|file| file.relative_path == "assets/caveman-dark.svg")
+    {
+        bail!("Codex Caveman dark-mode logo asset is missing");
+    }
     Ok(())
 }
 

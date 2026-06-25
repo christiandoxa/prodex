@@ -230,7 +230,11 @@ fn provider_model_fallback_supports_aliases_and_combo() {
     );
     assert_eq!(
         runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, "codex"),
-        vec!["gpt-5.3-codex", "gpt-5.5", "gpt-5.4"]
+        vec!["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+    );
+    assert_eq!(
+        runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, "gpt-5.4"),
+        vec!["gpt-5.4", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
     );
 }
 
@@ -254,6 +258,23 @@ fn provider_error_rules_do_not_treat_generic_429_as_quota() {
     assert_eq!(
         runtime_provider_error_class(RuntimeProviderBridgeKind::DeepSeek, 401, b"{}"),
         RuntimeProviderErrorClass::Auth
+    );
+    let unsupported_model_body = serde_json::to_vec(&serde_json::json!({
+        "error": {
+            "message": "The requested model is not supported.",
+            "code": "model_not_supported",
+            "param": "model",
+            "type": "invalid_request_error"
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        runtime_provider_error_class(
+            RuntimeProviderBridgeKind::Copilot,
+            400,
+            &unsupported_model_body
+        ),
+        RuntimeProviderErrorClass::NotFound
     );
     let permission_body = serde_json::to_vec(&serde_json::json!({
         "error": {

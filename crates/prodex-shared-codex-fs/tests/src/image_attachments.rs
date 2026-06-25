@@ -151,6 +151,82 @@ fn persist_codex_session_pasted_text_paths_in_tool_arguments() {
 }
 
 #[test]
+fn persist_codex_session_attachment_image_paths_in_goal_resume_context() {
+    let temp_dir = ImageAttachmentTestDir::new("attachment-image-goal-resume");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/25");
+    let image_source = temp_dir
+        .path
+        .join("overlay/attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(image_source.parent().unwrap()).expect("image source dir should exist");
+    fs::write(&image_source, b"png attachment bytes").expect("image source should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"type":"event","payload":{{"content":[{{"type":"input_text","text":"resume goal with image file: {}"}}]}}}}"#,
+            image_source.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
+
+    let copied = codex_home.join("attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    assert_eq!(
+        fs::read(&copied).expect("copied image attachment should be readable"),
+        b"png attachment bytes"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(
+        rewritten.contains(&copied.display().to_string()),
+        "session should point at stable attachment image path: {rewritten}"
+    );
+    assert!(
+        !rewritten.contains(&image_source.display().to_string()),
+        "session should not retain ephemeral overlay image path: {rewritten}"
+    );
+}
+
+#[test]
+fn persist_codex_session_attachment_image_rewrites_to_existing_stable_copy_when_source_is_gone() {
+    let temp_dir = ImageAttachmentTestDir::new("attachment-image-source-gone");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/25");
+    let old_path = temp_dir
+        .path
+        .join("deleted-overlay/attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    let stable = codex_home.join("attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(stable.parent().unwrap()).expect("stable dir should exist");
+    fs::write(&stable, b"stable image attachment").expect("stable image should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"payload":{{"content":[{{"type":"input_text","text":"Resume goal with image file: {}"}}]}}}}"#,
+            old_path.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
+
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(
+        rewritten.contains(&stable.display().to_string()),
+        "session should use existing stable image attachment: {rewritten}"
+    );
+    assert!(
+        !rewritten.contains(&old_path.display().to_string()),
+        "session should not retain deleted overlay image path: {rewritten}"
+    );
+}
+
+#[test]
 fn persist_codex_session_pasted_text_rewrites_to_existing_stable_copy_when_source_is_gone() {
     let temp_dir = ImageAttachmentTestDir::new("pasted-text-source-gone");
     let codex_home = temp_dir.path.join("codex-home");
