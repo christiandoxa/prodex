@@ -1,5 +1,9 @@
-use super::*;
+use crate::{
+    AppPaths, AppState, AppStateIoExt, LogoutArgs, codex_child_plan, exit_with_status,
+    repair_missing_active_profile_and_save, resolve_profile_name, run_child_plan,
+};
 use anyhow::{Context, Result, bail};
+use std::ffi::OsString;
 
 pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
