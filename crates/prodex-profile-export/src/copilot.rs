@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::SummaryFields;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopilotConfigFile {
     #[serde(default)]
@@ -137,7 +137,62 @@ pub fn copilot_profile_import_summary_fields(
 }
 
 pub fn parse_copilot_config_file(raw: &str) -> Result<CopilotConfigFile> {
-    serde_json::from_str(raw).context("failed to parse Copilot config")
+    if raw.trim().is_empty() {
+        return Ok(CopilotConfigFile::default());
+    }
+
+    match serde_json::from_str(raw) {
+        Ok(config) => Ok(config),
+        Err(original_error) => {
+            let without_comments = strip_json_line_comments(raw);
+            if without_comments == raw || without_comments.trim().is_empty() {
+                return Err(original_error).context("failed to parse Copilot config");
+            }
+            serde_json::from_str(&without_comments).context("failed to parse Copilot config")
+        }
+    }
+}
+
+fn strip_json_line_comments(raw: &str) -> String {
+    let mut output = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while let Some(ch) = chars.next() {
+        if in_string {
+            output.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            output.push(ch);
+            continue;
+        }
+
+        if ch == '/' && chars.peek() == Some(&'/') {
+            let _ = chars.next();
+            for comment_ch in chars.by_ref() {
+                if comment_ch == '\n' {
+                    output.push('\n');
+                    break;
+                }
+            }
+            continue;
+        }
+
+        output.push(ch);
+    }
+
+    output
 }
 
 pub fn select_copilot_logged_in_user(config: &CopilotConfigFile) -> Option<CopilotConfigUser> {

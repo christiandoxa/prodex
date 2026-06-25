@@ -202,15 +202,42 @@ fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str
 
 fn resolve_copilot_import_context() -> Result<CopilotImportContext> {
     let config = read_copilot_config()?;
-    let user = select_copilot_logged_in_user(&config)
-        .context("no logged-in Copilot user found in config.json")?;
-    let token = resolve_copilot_account_token_from_config(&config, &user.host, &user.login)?;
+    let users = copilot_import_candidate_users(&config);
+    if users.is_empty() {
+        bail!("no logged-in Copilot user found in config.json");
+    }
 
-    Ok(CopilotImportContext {
-        host: user.host,
-        login: user.login,
-        token,
-    })
+    for user in &users {
+        if let Ok(token) =
+            resolve_copilot_account_token_from_config(&config, &user.host, &user.login)
+        {
+            return Ok(CopilotImportContext {
+                host: user.host.clone(),
+                login: user.login.clone(),
+                token,
+            });
+        }
+    }
+
+    bail!("failed to resolve a stored Copilot token for any logged-in user from config or keychain")
+}
+
+fn copilot_import_candidate_users(
+    config: &CopilotConfigFile,
+) -> Vec<prodex_profile_export::CopilotConfigUser> {
+    let mut users = Vec::new();
+    if let Some(user) = select_copilot_logged_in_user(config) {
+        users.push(user);
+    }
+    for user in &config.logged_in_users {
+        if !users
+            .iter()
+            .any(|existing| existing.host == user.host && existing.login == user.login)
+        {
+            users.push(user.clone());
+        }
+    }
+    users
 }
 
 fn read_copilot_config() -> Result<CopilotConfigFile> {
@@ -567,6 +594,33 @@ fn fetch_copilot_user_info_json_with_token(host: &str, token: &str) -> Result<se
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copilot_import_candidates_try_last_user_then_other_logged_in_users() {
+        let config = CopilotConfigFile {
+            last_logged_in_user: Some(prodex_profile_export::CopilotConfigUser {
+                host: "https://github.com".to_string(),
+                login: "missing-token".to_string(),
+            }),
+            logged_in_users: vec![
+                prodex_profile_export::CopilotConfigUser {
+                    host: "https://github.com".to_string(),
+                    login: "missing-token".to_string(),
+                },
+                prodex_profile_export::CopilotConfigUser {
+                    host: "https://github.com".to_string(),
+                    login: "usable".to_string(),
+                },
+            ],
+            copilot_tokens: Default::default(),
+        };
+
+        let users = copilot_import_candidate_users(&config);
+
+        assert_eq!(users.len(), 2);
+        assert_eq!(users[0].login, "missing-token");
+        assert_eq!(users[1].login, "usable");
+    }
 
     #[test]
     fn copilot_runtime_model_catalog_reads_token_models() {

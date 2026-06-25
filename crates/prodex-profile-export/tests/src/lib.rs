@@ -427,6 +427,46 @@ fn queued_auth_update_keeps_last_token_and_non_empty_email() {
 }
 
 #[test]
+fn copilot_config_parser_treats_empty_file_as_logged_out() {
+    let config = parse_copilot_config_file(" \n\t")
+        .expect("blank config should parse as empty Copilot state");
+
+    assert!(select_copilot_logged_in_user(&config).is_none());
+    assert!(config.logged_in_users.is_empty());
+    assert!(config.copilot_tokens.is_empty());
+}
+
+#[test]
+fn copilot_config_parser_accepts_copilot_jsonc_comments() {
+    let config = parse_copilot_config_file(
+        r#"// User settings belong in settings.json.
+// This file is managed by GitHub Copilot CLI.
+{
+  "lastLoggedInUser": {"host": "https://github.com", "login": "main"},
+  "loggedInUsers": [
+    {"host": "https://github.com", "login": "fallback"}
+  ],
+  "trustedFolders": ["https://example.test//literal-in-string"]
+}"#,
+    )
+    .expect("Copilot JSONC config should parse");
+
+    let user = select_copilot_logged_in_user(&config).expect("user should resolve");
+    assert_eq!(user.login, "main");
+}
+
+#[test]
+fn copilot_config_parser_keeps_invalid_non_empty_errors() {
+    let err = parse_copilot_config_file("not json")
+        .expect_err("non-empty invalid config should still fail");
+
+    assert!(
+        err.to_string().contains("failed to parse Copilot config"),
+        "unexpected error: {err:#}"
+    );
+}
+
+#[test]
 fn copilot_config_helpers_select_user_and_token() {
     let config = parse_copilot_config_file(
         r#"{
