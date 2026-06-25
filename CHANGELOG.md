@@ -2,7 +2,26 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.218.0 - 2026-06-25
+
+### Misc
+
+- Fall back from unsupported models (`6962024`)
+
+## 0.217.0 - 2026-06-25
+
+### Misc
+
+- Remove redundant closure in catalog sanitization (`6190f38`)
+- Add GNOME keyring token discovery and OAuth fallback (`b6bef0d`)
+
 ## 0.216.0 - 2026-06-25
+
+### Misc
+
+- Support Copilot JSONC import (`879cf7b`)
+
+## 0.215.0 - 2026-06-25
 
 ### Runtime
 
@@ -10,7 +29,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
-- Support Copilot JSONC import (`879cf7b`)
 - Use explicit logout imports (`5a707c9`)
 - Satisfy copilot catalog lint (`10fa639`)
 
@@ -80,21 +98,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Space live controls from detail rows (`ebbab88`)
-
-## 0.206.0 - 2026-06-23
-
-### Misc
-
-- Add reset credit redemption (`247a63c`)
-
-## 0.205.0 - 2026-06-23
-
-### Deps
-
-- Update quinn-proto advisory (`4a6863d`)
-
-## 0.204.0 - 2026-06-22
-
-### Runtime
-
-- Stabilize runtime profile reporting (`e960033`)
