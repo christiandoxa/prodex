@@ -2,17 +2,27 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.213.0 - Unreleased
+## 0.214.0 - 2026-06-25
 
-Changes after `0.211.0`.
+### Misc
+
+- Recover from missing bundled codex (`4489f90`)
+
+## 0.213.0 - 2026-06-24
+
+### CLI
+
+- Extract provider flags from codex_args for session-id-first syntax (`fa5127c`)
+
+### Misc
+
+- Fail fast when bundled Codex is missing (`12213ea`)
+
+## 0.212.0 - 2026-06-24
 
 ### Runtime
 
 - Stabilize history image attachment paths after child exit (`17b45be`)
-
-### CLI
-
-- Extract provider flags from codex_args for session-id-first syntax (`f1783cd`)
 
 ## 0.211.0 - 2026-06-24
 
@@ -86,26 +96,3 @@ Changes after `0.211.0`.
 ### Misc
 
 - Improve stream and upstream rendering (`1157571`)
-
-## 0.202.0 - 2026-06-22
-
-### Deps
-
-- Bump redis from 0.32.7 to 1.2.4 in the cargo group (`7df2cfa`)
-
-### Misc
-
-- Merge pull request #21 from christiandoxa/dependabot/github_actions/github-actions-640176b5ab (`4b809c0`)
-- Merge pull request #20 from christiandoxa/dependabot/cargo/cargo-ce48053083 (`3f64fe8`)
-
-## 0.201.0 - 2026-06-21
-
-### CLI
-
-- Keep optimizer state out of worktrees (`3695eaf`)
-
-## 0.200.0 - 2026-06-21
-
-### CLI
-
-- Repair stale active profile selection (`e3c3b69`)
