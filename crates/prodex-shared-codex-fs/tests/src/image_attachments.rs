@@ -108,3 +108,81 @@ fn prepare_managed_codex_home_persists_session_image_paths_in_shared_root() {
         paths.shared_codex_root.join("sessions")
     );
 }
+
+#[test]
+fn persist_codex_session_pasted_text_paths_in_tool_arguments() {
+    let temp_dir = ImageAttachmentTestDir::new("pasted-text-tool-args");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/24");
+    let paste_source = temp_dir
+        .path
+        .join("overlay/attachments/11111111-2222-4333-8444-555555555555/pasted-text-1.txt");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(paste_source.parent().unwrap()).expect("paste source dir should exist");
+    fs::write(&paste_source, b"important pasted context").expect("paste source should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"type":"response_item","payload":{{"arguments":"{{\"path\":\"{}\",\"max_bytes\":12000}}"}}}}"#,
+            paste_source.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
+
+    let copied =
+        codex_home.join("attachments/11111111-2222-4333-8444-555555555555/pasted-text-1.txt");
+    assert_eq!(
+        fs::read(&copied).expect("copied paste should be readable"),
+        b"important pasted context"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(
+        rewritten.contains(&copied.display().to_string()),
+        "session should point at stable pasted-text path: {rewritten}"
+    );
+    assert!(
+        !rewritten.contains(&paste_source.display().to_string()),
+        "session should not retain ephemeral overlay path: {rewritten}"
+    );
+}
+
+#[test]
+fn persist_codex_session_pasted_text_rewrites_to_existing_stable_copy_when_source_is_gone() {
+    let temp_dir = ImageAttachmentTestDir::new("pasted-text-source-gone");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/24");
+    let old_path = temp_dir
+        .path
+        .join("deleted-overlay/attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/pasted-text-1.txt");
+    let stable =
+        codex_home.join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/pasted-text-1.txt");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(stable.parent().unwrap()).expect("stable dir should exist");
+    fs::write(&stable, b"stable pasted context").expect("stable paste should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"payload":{{"content":[{{"type":"input_text","text":"Read {} before continuing."}}]}}}}"#,
+            old_path.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
+
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(
+        rewritten.contains(&stable.display().to_string()),
+        "session should use existing stable copy: {rewritten}"
+    );
+    assert!(
+        !rewritten.contains(&old_path.display().to_string()),
+        "session should not retain deleted overlay path: {rewritten}"
+    );
+}

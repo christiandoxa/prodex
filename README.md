@@ -975,7 +975,7 @@ prodex s
 prodex s exec "review this repo"
 ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6
 prodex profile import copilot
-prodex s --provider copilot --model gpt-5.1-codex
+prodex s --provider copilot --model gpt-5.3-codex
 DEEPSEEK_API_KEY=... prodex s deepseek --model deepseek-v4-pro
 prodex s gemini
 prodex super
@@ -1007,7 +1007,7 @@ Use `--provider copilot` when you want the Codex/Super front end with GitHub Cop
 
 ```bash
 prodex profile import copilot
-prodex s --provider copilot --model gpt-5.1-codex
+prodex s --provider copilot --model gpt-5.3-codex
 ```
 
 Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens from GitHub before launch, can rotate fresh native Responses requests across multiple eligible profiles, and binds streaming response IDs back to the owning profile for continuations. `GITHUB_COPILOT_API_KEY`, `GITHUB_COPILOT_API_KEYS`, or `--api-key` can be used when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.

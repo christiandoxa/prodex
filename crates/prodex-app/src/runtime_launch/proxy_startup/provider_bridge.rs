@@ -265,13 +265,14 @@ pub(super) fn runtime_provider_native_passthrough(
 
 pub(super) fn runtime_provider_models_buffered_response(
     kind: RuntimeProviderBridgeKind,
+    dynamic_catalog: Option<&[serde_json::Value]>,
     method: &str,
     path_and_query: &str,
 ) -> Option<RuntimeHeapTrimmedBufferedResponseParts> {
     if !method.eq_ignore_ascii_case("GET") {
         return None;
     }
-    let models = runtime_provider_model_catalog_json(kind);
+    let models = runtime_provider_model_catalog_json(kind, dynamic_catalog);
     if models.is_empty() {
         return None;
     }
@@ -285,7 +286,7 @@ pub(super) fn runtime_provider_models_buffered_response(
             Some(runtime_provider_json_response(200, body))
         }
         RuntimeProviderModelsPath::Single(model_id) => {
-            let model = runtime_provider_model_json_for(kind, model_id);
+            let model = runtime_provider_model_json_for(kind, dynamic_catalog, model_id);
             let status = if model.is_some() { 200 } else { 404 };
             let body = model.unwrap_or_else(|| {
                     serde_json::json!({

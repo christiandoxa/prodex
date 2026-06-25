@@ -1,7 +1,8 @@
 use super::super::copilot_instructions::runtime_copilot_init_current_workspace_custom_instructions;
 use super::deepseek_rewrite::*;
 use super::local_rewrite_copilot::{
-    RuntimeCopilotOAuthPool, runtime_copilot_oauth_pool_from_provider,
+    RuntimeCopilotOAuthPool, runtime_copilot_model_catalog_from_provider,
+    runtime_copilot_oauth_pool_from_provider,
 };
 use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_admin_response, runtime_gateway_request_path_is_admin,
@@ -626,8 +627,10 @@ fn handle_runtime_local_rewrite_proxy_request(
         ));
         return;
     }
+    let dynamic_model_catalog = runtime_copilot_model_catalog_from_provider(&shared.provider);
     if let Some(parts) = runtime_provider_models_buffered_response(
         shared.provider.bridge_kind(),
+        (!dynamic_model_catalog.is_empty()).then_some(dynamic_model_catalog.as_slice()),
         &captured.method,
         &captured.path_and_query,
     ) {

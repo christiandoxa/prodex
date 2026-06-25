@@ -107,6 +107,6 @@ fn fallback_chain_preserves_existing_gemini_aliases() {
     );
     assert_eq!(
         provider_model_fallback_chain(ProviderId::Copilot, "codex"),
-        vec!["gpt-5.1-codex", "gpt-5.3-codex", "gpt-5.4"]
+        vec!["gpt-5.3-codex", "gpt-5.5", "gpt-5.4"]
     );
 }

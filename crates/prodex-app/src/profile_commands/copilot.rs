@@ -29,6 +29,7 @@ const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
 #[derive(Debug, Clone)]
 pub(crate) struct CopilotRuntimeApiAuth {
     pub(crate) api_key: String,
+    pub(crate) model_catalog: Vec<serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -402,7 +403,98 @@ fn refresh_copilot_runtime_api_auth(
         .filter(|token| !token.is_empty())
         .map(str::to_string)
         .context("Copilot runtime token response did not contain token")?;
-    Ok(CopilotRuntimeApiAuth { api_key })
+    let model_catalog = copilot_runtime_model_catalog_from_token(&value);
+    Ok(CopilotRuntimeApiAuth {
+        api_key,
+        model_catalog,
+    })
+}
+
+fn copilot_runtime_model_catalog_from_token(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    let mut models = Vec::new();
+    collect_copilot_runtime_models(value, &mut models);
+    let mut seen = BTreeSet::new();
+    models
+        .into_iter()
+        .filter_map(copilot_runtime_model_catalog_entry)
+        .filter(|model| {
+            model
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(|id| seen.insert(id.to_ascii_lowercase()))
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
+fn collect_copilot_runtime_models<'a>(
+    value: &'a serde_json::Value,
+    output: &mut Vec<&'a serde_json::Value>,
+) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, nested) in object {
+                if key.eq_ignore_ascii_case("models")
+                    || key.eq_ignore_ascii_case("available_models")
+                    || key.eq_ignore_ascii_case("model_catalog")
+                    || key.eq_ignore_ascii_case("chat_models")
+                {
+                    if let Some(array) = nested.as_array() {
+                        output.extend(array);
+                        continue;
+                    }
+                }
+                collect_copilot_runtime_models(nested, output);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for nested in values {
+                collect_copilot_runtime_models(nested, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn copilot_runtime_model_catalog_entry(value: &serde_json::Value) -> Option<serde_json::Value> {
+    let object = value.as_object()?;
+    let id = object
+        .get("id")
+        .or_else(|| object.get("model"))
+        .or_else(|| object.get("slug"))
+        .or_else(|| object.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    let display_name = object
+        .get("name")
+        .or_else(|| object.get("display_name"))
+        .or_else(|| object.get("label"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(id);
+    let context_window = object
+        .get("context_window")
+        .or_else(|| object.get("context_window_tokens"))
+        .or_else(|| object.get("max_context_tokens"))
+        .or_else(|| object.get("max_input_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(200_000);
+    let mut entry = serde_json::json!({
+        "id": id,
+        "object": "model",
+        "owned_by": "github-copilot",
+        "display_name": display_name,
+        "description": format!("GitHub Copilot model available for this account: {display_name}."),
+        "context_window": context_window,
+        "input_cost_per_million_microusd": 0,
+        "output_cost_per_million_microusd": 0,
+    });
+    if let Some(capabilities) = object.get("capabilities") {
+        entry["capabilities"] = capabilities.clone();
+    }
+    Some(entry)
 }
 
 fn fetch_copilot_user_info(context: &CopilotImportContext) -> Result<CopilotUserInfo> {
@@ -471,4 +563,56 @@ fn fetch_copilot_user_info_json_with_token(host: &str, token: &str) -> Result<se
         );
     }
     parse_copilot_user_info_json_response(&body, &user_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copilot_runtime_model_catalog_reads_token_models() {
+        let value = serde_json::json!({
+            "token": "runtime-token",
+            "models": [
+                {
+                    "id": "gpt-5.1-codex",
+                    "name": "GPT-5.1 Codex",
+                    "context_window": 400000,
+                    "capabilities": { "tool_calls": true }
+                },
+                {
+                    "model": "claude-sonnet-4.5",
+                    "display_name": "Claude Sonnet 4.5",
+                    "max_context_tokens": 200000
+                }
+            ]
+        });
+
+        let catalog = copilot_runtime_model_catalog_from_token(&value);
+
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(catalog[0]["id"], "gpt-5.1-codex");
+        assert_eq!(catalog[0]["display_name"], "GPT-5.1 Codex");
+        assert_eq!(catalog[0]["context_window"], 400000);
+        assert_eq!(catalog[0]["capabilities"]["tool_calls"], true);
+        assert_eq!(catalog[1]["id"], "claude-sonnet-4.5");
+    }
+
+    #[test]
+    fn copilot_runtime_model_catalog_reads_nested_available_models() {
+        let value = serde_json::json!({
+            "token": "runtime-token",
+            "features": {
+                "available_models": [
+                    { "slug": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview" }
+                ]
+            }
+        });
+
+        let catalog = copilot_runtime_model_catalog_from_token(&value);
+
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0]["id"], "gemini-3.1-pro-preview");
+        assert_eq!(catalog[0]["display_name"], "Gemini 3.1 Pro Preview");
+    }
 }

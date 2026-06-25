@@ -11,8 +11,10 @@ use crate::{
     SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID,
     ensure_gemini_code_assist_project_if_missing, gemini_oauth_project_from_env,
     refresh_claude_oauth_secret_if_needed, resolve_copilot_runtime_api_auth, resolve_profile_name,
+    write_copilot_runtime_model_catalog,
 };
 use anyhow::{Context, Result, bail};
+use std::collections::BTreeSet;
 use std::env;
 use std::path::PathBuf;
 
@@ -434,6 +436,26 @@ fn runtime_external_provider_matches_profile(
     false
 }
 
+fn runtime_copilot_combined_model_catalog(
+    profiles: &[RuntimeCopilotProfileAuth],
+) -> Vec<serde_json::Value> {
+    let mut seen = BTreeSet::new();
+    let mut catalog = Vec::new();
+    for profile in profiles {
+        for model in &profile.model_catalog {
+            let Some(id) = model.get("id").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let id = id.trim();
+            if id.is_empty() || !seen.insert(id.to_ascii_lowercase()) {
+                continue;
+            }
+            catalog.push(model.clone());
+        }
+    }
+    catalog
+}
+
 fn runtime_anthropic_oauth_profiles_for_provider(
     state: &AppState,
     selection: &RuntimeLaunchSelection,
@@ -534,8 +556,16 @@ fn runtime_copilot_profiles_for_provider(
                 profile_name: profile_name.clone(),
                 api_key: auth.api_key,
                 api_url: api_url.clone(),
+                model_catalog: auth.model_catalog,
             }),
             Err(err) => errors.push(format!("{profile_name}: {err:#}")),
+        }
+    }
+
+    if !profiles.is_empty() {
+        let catalog = runtime_copilot_combined_model_catalog(&profiles);
+        if !catalog.is_empty() {
+            write_copilot_runtime_model_catalog(&selection.codex_home, &catalog)?;
         }
     }
 

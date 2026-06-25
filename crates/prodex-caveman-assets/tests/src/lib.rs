@@ -308,6 +308,10 @@ fn prepare_caveman_home_shares_base_chat_history() {
         base.join("history.jsonl")
     );
     assert_eq!(
+        fs::read_link(overlay.join("attachments")).expect("attachments should be a symlink"),
+        base.join("attachments")
+    );
+    assert_eq!(
         fs::read_link(overlay.join("sessions")).expect("sessions should be a symlink"),
         base.join("sessions")
     );

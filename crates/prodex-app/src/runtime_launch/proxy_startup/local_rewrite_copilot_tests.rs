@@ -11,6 +11,7 @@ fn copilot_profile(profile_name: &str) -> RuntimeCopilotProfileAuth {
         profile_name: profile_name.to_string(),
         api_key: format!("token-{profile_name}"),
         api_url: format!("https://api.{profile_name}.githubcopilot.test"),
+        model_catalog: Vec::new(),
     }
 }
 

@@ -6,6 +6,7 @@ use super::{
 const OPENAI_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
 const ANTHROPIC_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
 const COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
+const COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS: u64 = 1_000_000;
 const COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
 const COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS: u64 = 1_048_576;
 const DEEPSEEK_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
@@ -197,7 +198,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         "auto",
         "Copilot Auto",
         "GitHub Copilot alias routed through provider fallback.",
-        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
         CORE_TEXT_ENDPOINTS,
@@ -209,7 +210,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         "codex",
         "Copilot Codex",
         "GitHub Copilot Codex alias routed through provider fallback.",
-        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
         CORE_TEXT_ENDPOINTS,
@@ -218,14 +219,26 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
     model!(
         ProviderId::Copilot,
         "github-copilot",
-        "gpt-5.1-codex",
-        "GPT-5.1 Codex",
+        "gpt-5.3-codex",
+        "GPT-5.3 Codex",
         "GitHub Copilot model exposed through Prodex.",
-        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
         CORE_TEXT_ENDPOINTS,
         []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "gpt-5.5",
+        "GPT-5.5",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        ["best"]
     ),
     model!(
         ProviderId::Copilot,
@@ -233,7 +246,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         "gpt-5.4",
         "GPT-5.4",
         "GitHub Copilot model exposed through Prodex.",
-        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
         CORE_TEXT_ENDPOINTS,
@@ -242,8 +255,32 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
     model!(
         ProviderId::Copilot,
         "github-copilot",
-        "gpt-5.3-codex",
-        "GPT-5.3 Codex",
+        "gpt-5.4-mini",
+        "GPT-5.4 Mini",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        ["mini"]
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "gpt-5.4-nano",
+        "GPT-5.4 Nano",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        ["nano"]
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "gpt-5-mini",
+        "GPT-5 Mini",
         "GitHub Copilot model exposed through Prodex.",
         Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
         None,
@@ -257,11 +294,107 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         "claude-sonnet-4-6",
         "Claude Sonnet 4.6",
         "GitHub Copilot model exposed through Prodex.",
-        Some(COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS),
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
         CORE_TEXT_ENDPOINTS,
         ["claude", "sonnet"]
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "claude-opus-4-8",
+        "Claude Opus 4.8",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        ["opus"]
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "claude-opus-4-7",
+        "Claude Opus 4.7",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "claude-opus-4-6-fast",
+        "Claude Opus 4.6 Fast",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "claude-opus-4-6",
+        "Claude Opus 4.6",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "claude-opus-4-5",
+        "Claude Opus 4.5",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "claude-fable-5",
+        "Claude Fable 5",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "claude-sonnet-4-5",
+        "Claude Sonnet 4.5",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "claude-haiku-4-5",
+        "Claude Haiku 4.5",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        ["haiku"]
     ),
     model!(
         ProviderId::Copilot,
@@ -275,8 +408,79 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         CORE_TEXT_ENDPOINTS,
         ["gemini"]
     ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "gemini-2.5-pro",
+        "Gemini 2.5 Pro",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "gemini-3-flash",
+        "Gemini 3 Flash",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        ["flash"]
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "gemini-3.5-flash",
+        "Gemini 3.5 Flash",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "mai-code-1-flash",
+        "MAI-Code-1-Flash",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "raptor-mini",
+        "Raptor Mini",
+        "GitHub Copilot model exposed through Prodex.",
+        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
+    model!(
+        ProviderId::Copilot,
+        "github-copilot",
+        "gpt-5.1-codex",
+        "GPT-5.1 Codex",
+        "Legacy GitHub Copilot model kept for compatibility.",
+        Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        CORE_TEXT_ENDPOINTS,
+        []
+    ),
 ];
-
 const DEEPSEEK_MODELS: &[ProviderModelSpec] = &[
     model!(
         ProviderId::DeepSeek,

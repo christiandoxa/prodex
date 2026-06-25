@@ -24,7 +24,7 @@ pub use usage::{
 };
 
 pub const PRODEX_ANTHROPIC_DEFAULT_MODEL: &str = "claude-sonnet-4-6";
-pub const PRODEX_COPILOT_DEFAULT_MODEL: &str = "gpt-5.1-codex";
+pub const PRODEX_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
 pub const PRODEX_GEMINI_DEFAULT_MODEL: &str = "auto";
 pub const PRODEX_GEMINI_CHAT_COMPRESSION_MODEL: &str = "chat-compression-default";
 

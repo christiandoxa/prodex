@@ -13,11 +13,28 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const EXTERNAL_MODEL_CATALOG_FILE: &str = "prodex-external-provider-model-catalog.json";
+pub(crate) const COPILOT_RUNTIME_MODEL_CATALOG_FILE: &str =
+    "prodex-copilot-runtime-model-catalog.json";
 
 #[derive(Clone, Copy)]
 enum ExternalCatalogProvider {
     Anthropic,
     Copilot,
+}
+
+pub(crate) fn write_copilot_runtime_model_catalog(
+    codex_home: &Path,
+    model_catalog: &[serde_json::Value],
+) -> Result<()> {
+    fs::create_dir_all(codex_home)
+        .with_context(|| format!("failed to create {}", codex_home.display()))?;
+    let catalog_path = codex_home.join(COPILOT_RUNTIME_MODEL_CATALOG_FILE);
+    let catalog = json!({ "models": model_catalog });
+    let contents = serde_json::to_string_pretty(&catalog)
+        .context("failed to serialize Copilot model catalog")?;
+    fs::write(&catalog_path, contents)
+        .with_context(|| format!("failed to write {}", catalog_path.display()))?;
+    Ok(())
 }
 
 pub(crate) fn prepare_external_provider_catalog_codex_args(
@@ -132,7 +149,13 @@ fn write_external_model_catalog(
         .with_context(|| format!("failed to create {}", codex_home.display()))?;
     let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
     let catalog = json!({
-        "models": external_catalog_models(provider, model, context_window, auto_compact_token_limit)
+        "models": external_catalog_models(
+            codex_home,
+            provider,
+            model,
+            context_window,
+            auto_compact_token_limit,
+        )
     });
     let contents =
         serde_json::to_string_pretty(&catalog).context("failed to serialize provider catalog")?;
@@ -142,14 +165,19 @@ fn write_external_model_catalog(
 }
 
 fn external_catalog_models(
+    codex_home: &Path,
     provider: ExternalCatalogProvider,
     launch_model: &str,
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Vec<serde_json::Value> {
-    let mut models = Vec::with_capacity(provider.models().len() + 1);
+    let dynamic_models = external_dynamic_catalog_models(codex_home, provider);
+    let mut models = Vec::with_capacity(provider.models().len() + dynamic_models.len() + 1);
     let mut seen = BTreeSet::new();
-    for slug in std::iter::once(launch_model).chain(provider.models().iter().map(|model| model.0)) {
+    for slug in std::iter::once(launch_model)
+        .chain(dynamic_models.iter().map(|model| model.slug.as_str()))
+        .chain(provider.models().iter().map(|model| model.0))
+    {
         let slug = slug.trim();
         if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
             continue;
@@ -167,6 +195,48 @@ fn external_catalog_models(
         ));
     }
     models
+}
+
+#[derive(Clone, Debug)]
+struct ExternalDynamicCatalogModel {
+    slug: String,
+}
+
+fn external_dynamic_catalog_models(
+    codex_home: &Path,
+    provider: ExternalCatalogProvider,
+) -> Vec<ExternalDynamicCatalogModel> {
+    if !matches!(provider, ExternalCatalogProvider::Copilot) {
+        return Vec::new();
+    }
+    let catalog_path = codex_home.join(COPILOT_RUNTIME_MODEL_CATALOG_FILE);
+    let Ok(contents) = fs::read_to_string(catalog_path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) else {
+        return Vec::new();
+    };
+    let Some(models) = value.get("models").and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    let mut seen = BTreeSet::new();
+    models
+        .iter()
+        .filter_map(|model| {
+            let slug = model
+                .get("id")
+                .or_else(|| model.get("slug"))
+                .or_else(|| model.get("model"))
+                .and_then(serde_json::Value::as_str)?
+                .trim();
+            if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
+                return None;
+            }
+            Some(ExternalDynamicCatalogModel {
+                slug: slug.to_string(),
+            })
+        })
+        .collect()
 }
 
 fn external_catalog_model(
@@ -313,9 +383,14 @@ impl ExternalCatalogProvider {
                     "GitHub Copilot Codex alias routed through the Prodex Responses adapter.",
                 ),
                 (
-                    "gpt-5.1-codex",
-                    "GPT-5.1 Codex",
-                    "GPT-5.1 Codex routed through GitHub Copilot.",
+                    "gpt-5.3-codex",
+                    "GPT-5.3 Codex",
+                    "GPT-5.3 Codex routed through GitHub Copilot.",
+                ),
+                (
+                    "gpt-5.5",
+                    "GPT-5.5",
+                    "GPT-5.5 routed through GitHub Copilot.",
                 ),
                 (
                     "gpt-5.4",
@@ -323,9 +398,19 @@ impl ExternalCatalogProvider {
                     "GPT-5.4 routed through GitHub Copilot.",
                 ),
                 (
-                    "gpt-5.3-codex",
-                    "GPT-5.3 Codex",
-                    "GPT-5.3 Codex routed through GitHub Copilot.",
+                    "gpt-5.4-mini",
+                    "GPT-5.4 Mini",
+                    "GPT-5.4 Mini routed through GitHub Copilot.",
+                ),
+                (
+                    "gpt-5.4-nano",
+                    "GPT-5.4 Nano",
+                    "GPT-5.4 Nano routed through GitHub Copilot.",
+                ),
+                (
+                    "gpt-5-mini",
+                    "GPT-5 Mini",
+                    "GPT-5 Mini routed through GitHub Copilot.",
                 ),
                 (
                     "claude-sonnet-4-6",
@@ -333,9 +418,79 @@ impl ExternalCatalogProvider {
                     "Claude Sonnet 4.6 routed through GitHub Copilot.",
                 ),
                 (
+                    "claude-opus-4-8",
+                    "Claude Opus 4.8",
+                    "Claude Opus 4.8 routed through GitHub Copilot.",
+                ),
+                (
+                    "claude-opus-4-7",
+                    "Claude Opus 4.7",
+                    "Claude Opus 4.7 routed through GitHub Copilot.",
+                ),
+                (
+                    "claude-opus-4-6-fast",
+                    "Claude Opus 4.6 Fast",
+                    "Claude Opus 4.6 Fast routed through GitHub Copilot.",
+                ),
+                (
+                    "claude-opus-4-6",
+                    "Claude Opus 4.6",
+                    "Claude Opus 4.6 routed through GitHub Copilot.",
+                ),
+                (
+                    "claude-opus-4-5",
+                    "Claude Opus 4.5",
+                    "Claude Opus 4.5 routed through GitHub Copilot.",
+                ),
+                (
+                    "claude-fable-5",
+                    "Claude Fable 5",
+                    "Claude Fable 5 routed through GitHub Copilot.",
+                ),
+                (
+                    "claude-sonnet-4-5",
+                    "Claude Sonnet 4.5",
+                    "Claude Sonnet 4.5 routed through GitHub Copilot.",
+                ),
+                (
+                    "claude-haiku-4-5",
+                    "Claude Haiku 4.5",
+                    "Claude Haiku 4.5 routed through GitHub Copilot.",
+                ),
+                (
                     "gemini-3.1-pro-preview",
                     "Gemini 3.1 Pro Preview",
                     "Gemini 3.1 Pro Preview routed through GitHub Copilot.",
+                ),
+                (
+                    "gemini-2.5-pro",
+                    "Gemini 2.5 Pro",
+                    "Gemini 2.5 Pro routed through GitHub Copilot.",
+                ),
+                (
+                    "gemini-3-flash",
+                    "Gemini 3 Flash",
+                    "Gemini 3 Flash routed through GitHub Copilot.",
+                ),
+                (
+                    "gemini-3.5-flash",
+                    "Gemini 3.5 Flash",
+                    "Gemini 3.5 Flash routed through GitHub Copilot.",
+                ),
+                (
+                    "mai-code-1-flash",
+                    "MAI-Code-1-Flash",
+                    "MAI-Code-1-Flash routed through GitHub Copilot.",
+                ),
+                (
+                    "raptor-mini",
+                    "Raptor Mini",
+                    "Raptor Mini routed through GitHub Copilot.",
+                ),
+                (
+                    "gpt-5.1-codex",
+                    "GPT-5.1 Codex",
+                    "Legacy GPT-5.1 Codex entry kept for GitHub Copilot compatibility.",
                 ),
             ],
         }
@@ -400,7 +555,7 @@ mod tests {
             OsString::from("-c"),
             OsString::from("model_provider=\"prodex-copilot\""),
             OsString::from("-c"),
-            OsString::from("model=\"gpt-5.1-codex\""),
+            OsString::from("model=\"gpt-5.3-codex\""),
         ];
 
         let args = prepare_external_provider_catalog_codex_args(&codex_home, &user_args)
@@ -411,9 +566,41 @@ mod tests {
         let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
         let catalog: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
-        assert_eq!(catalog["models"][0]["slug"], "gpt-5.1-codex");
+        assert_eq!(catalog["models"][0]["slug"], "gpt-5.3-codex");
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
         assert_eq!(catalog["models"][0]["web_search_tool_type"], "text");
+    }
+
+    #[test]
+    fn external_provider_catalog_args_includes_copilot_runtime_token_catalog() {
+        let codex_home = temp_codex_home("copilot-dynamic");
+        write_copilot_runtime_model_catalog(
+            &codex_home,
+            &[json!({
+                "id": "copilot-account-only-model",
+                "object": "model",
+                "owned_by": "github-copilot"
+            })],
+        )
+        .expect("dynamic Copilot catalog should write");
+        let user_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-copilot\""),
+        ];
+
+        prepare_external_provider_catalog_codex_args(&codex_home, &user_args)
+            .expect("Copilot catalog should prepare");
+
+        let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
+        let catalog: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
+        assert!(
+            catalog["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|model| { model["slug"] == "copilot-account-only-model" })
+        );
     }
 
     #[test]

@@ -18,12 +18,13 @@ use self::api_key::*;
 use self::claude::*;
 use self::google::*;
 use self::login_menu::{
-    LoginMenuAction, login_prompt_is_interactive, prompt_login_menu_action, show_login_guidance,
+    LoginGuidanceKind, LoginMenuAction, login_prompt_is_interactive, prompt_login_menu_action,
+    show_login_guidance,
 };
-use super::write_secret_text_file;
+use super::{handle_import_copilot_profile, write_secret_text_file};
 use crate::{
-    AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, LogoutArgs, ProfileEntry,
-    ProfileProvider, agy_bin, codex_child_plan, create_codex_home_if_missing,
+    AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ImportProfileArgs, LogoutArgs,
+    ProfileEntry, ProfileProvider, agy_bin, codex_child_plan, create_codex_home_if_missing,
     ensure_managed_profiles_root, exit_with_status, fetch_profile_email, fetch_profile_identity,
     find_profile_by_identity, login_with_claude_oauth, login_with_google_oauth,
     managed_profile_home_path, persist_login_home, prepare_managed_codex_home, print_panel,
@@ -56,10 +57,31 @@ struct LoginRequest {
     api_key_profile_name: Option<String>,
 }
 
+enum ResolvedLoginRequest {
+    Login(LoginRequest),
+    ImportCopilot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptLoginSelection {
+    Method(LoginMethod),
+    Guidance(LoginGuidanceKind),
+    ImportCopilot,
+}
+
 pub(crate) fn handle_codex_login(args: CodexPassthroughArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let mut state = AppState::load_and_repair(&paths)?;
-    let login_request = resolve_login_request(args.profile.as_deref(), args.codex_args)?;
+    let login_request = match resolve_login_request(args.profile.as_deref(), args.codex_args)? {
+        ResolvedLoginRequest::Login(login_request) => login_request,
+        ResolvedLoginRequest::ImportCopilot => {
+            return handle_import_copilot_profile(&ImportProfileArgs {
+                path: PathBuf::from("copilot"),
+                name: None,
+                activate: false,
+            });
+        }
+    };
     if login_request.method == LoginMethod::Antigravity {
         if args.profile.is_some() {
             bail!("Antigravity login is global to the `agy` CLI and does not use Prodex profiles");
@@ -426,7 +448,7 @@ fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<Ex
 fn resolve_login_request(
     selected_profile: Option<&str>,
     codex_args: Vec<OsString>,
-) -> Result<LoginRequest> {
+) -> Result<ResolvedLoginRequest> {
     let (openai_base_url, openai_base_url_specified, codex_args) =
         extract_login_base_url(codex_args)?;
     let inferred_method = infer_login_method(&codex_args);
@@ -442,25 +464,26 @@ fn resolve_login_request(
         bail!("--base-url is only supported for API key login");
     }
 
-    Ok(LoginRequest {
+    Ok(ResolvedLoginRequest::Login(LoginRequest {
         method: inferred_method,
         codex_args,
         api_key: None,
         openai_base_url,
         openai_base_url_specified,
         api_key_profile_name: None,
-    })
+    }))
 }
 
 fn prompt_login_request(
     openai_base_url: Option<String>,
     openai_base_url_specified: bool,
     has_selected_profile: bool,
-) -> Result<LoginRequest> {
+) -> Result<ResolvedLoginRequest> {
     let method = loop {
-        match prompt_login_menu_action()? {
-            LoginMenuAction::Method(method) => break method,
-            LoginMenuAction::Guidance(kind) => show_login_guidance(kind)?,
+        match classify_login_menu_action(prompt_login_menu_action()?) {
+            PromptLoginSelection::Method(method) => break method,
+            PromptLoginSelection::Guidance(kind) => show_login_guidance(kind)?,
+            PromptLoginSelection::ImportCopilot => return Ok(ResolvedLoginRequest::ImportCopilot),
         }
     };
     login_request_for_method(
@@ -469,6 +492,17 @@ fn prompt_login_request(
         openai_base_url_specified,
         has_selected_profile,
     )
+    .map(ResolvedLoginRequest::Login)
+}
+
+fn classify_login_menu_action(action: LoginMenuAction) -> PromptLoginSelection {
+    match action {
+        LoginMenuAction::Method(method) => PromptLoginSelection::Method(method),
+        LoginMenuAction::Guidance(LoginGuidanceKind::CopilotImport) => {
+            PromptLoginSelection::ImportCopilot
+        }
+        LoginMenuAction::Guidance(kind) => PromptLoginSelection::Guidance(kind),
+    }
 }
 
 fn login_request_for_method(
@@ -809,4 +843,27 @@ pub(crate) fn handle_codex_logout(args: LogoutArgs) -> Result<()> {
         None,
     )?;
     exit_with_status(status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copilot_login_menu_selection_runs_import_instead_of_guidance() {
+        assert_eq!(
+            classify_login_menu_action(LoginMenuAction::Guidance(LoginGuidanceKind::CopilotImport)),
+            PromptLoginSelection::ImportCopilot
+        );
+    }
+
+    #[test]
+    fn api_key_guidance_still_shows_guidance() {
+        assert_eq!(
+            classify_login_menu_action(LoginMenuAction::Guidance(
+                LoginGuidanceKind::DeepSeekApiKey
+            )),
+            PromptLoginSelection::Guidance(LoginGuidanceKind::DeepSeekApiKey)
+        );
+    }
 }

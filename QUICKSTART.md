@@ -41,10 +41,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.214.0`:
+The current local version in this repo is `0.215.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.214.0
+npm install -g @christiandoxa/prodex@0.215.0
 ```
 
 Dependency status in this repo:
@@ -235,7 +235,7 @@ Use GitHub Copilot with the Codex/Super front end:
 
 ```bash
 prodex profile import copilot
-prodex s --provider copilot --model gpt-5.1-codex
+prodex s --provider copilot --model gpt-5.3-codex
 ```
 
 Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens before launch, can rotate fresh native Responses requests across multiple eligible profiles, and keeps `previous_response_id` continuations on the owning profile. `GITHUB_COPILOT_API_KEY` or `GITHUB_COPILOT_API_KEYS` is also accepted when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.

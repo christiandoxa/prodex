@@ -155,6 +155,10 @@ fn share_prodex_overlay_chat_history(
         &base_codex_home.join("archived_sessions"),
         &overlay_home.join("archived_sessions"),
     )?;
+    link_prodex_overlay_shared_chat_dir(
+        &base_codex_home.join("attachments"),
+        &overlay_home.join("attachments"),
+    )?;
     if maintain_session_attachments {
         prodex_shared_codex_fs::persist_codex_session_image_attachments(base_codex_home)?;
     }

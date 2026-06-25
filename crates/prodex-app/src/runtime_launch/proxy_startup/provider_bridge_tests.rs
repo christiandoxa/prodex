@@ -6,6 +6,7 @@ use super::*;
 fn gemini_models_endpoint_exposes_catalog_from_gemini_cli() {
     let parts = runtime_provider_models_buffered_response(
         RuntimeProviderBridgeKind::Gemini,
+        None,
         "GET",
         "/v1/models",
     )
@@ -29,6 +30,7 @@ fn gemini_models_endpoint_exposes_catalog_from_gemini_cli() {
 fn deepseek_models_endpoint_exposes_current_and_compat_models() {
     let parts = runtime_provider_models_buffered_response(
         RuntimeProviderBridgeKind::DeepSeek,
+        None,
         "GET",
         "/models",
     )
@@ -49,6 +51,7 @@ fn deepseek_models_endpoint_exposes_current_and_compat_models() {
 fn anthropic_and_copilot_models_endpoint_expose_provider_catalogs() {
     let anthropic = runtime_provider_models_buffered_response(
         RuntimeProviderBridgeKind::Anthropic,
+        None,
         "GET",
         "/v1/models",
     )
@@ -65,6 +68,7 @@ fn anthropic_and_copilot_models_endpoint_expose_provider_catalogs() {
 
     let copilot = runtime_provider_models_buffered_response(
         RuntimeProviderBridgeKind::Copilot,
+        None,
         "GET",
         "/models",
     )
@@ -78,6 +82,40 @@ fn anthropic_and_copilot_models_endpoint_expose_provider_catalogs() {
             .any(|model| model["id"] == prodex_cli::SUPER_COPILOT_DEFAULT_MODEL)
     );
     assert!(copilot_models.iter().any(|model| model["id"] == "codex"));
+}
+
+#[test]
+fn copilot_models_endpoint_prefers_dynamic_token_catalog() {
+    let dynamic = vec![serde_json::json!({
+        "id": "copilot-account-only-model",
+        "object": "model",
+        "owned_by": "github-copilot",
+        "display_name": "Account Only Model"
+    })];
+
+    let parts = runtime_provider_models_buffered_response(
+        RuntimeProviderBridgeKind::Copilot,
+        Some(&dynamic),
+        "GET",
+        "/v1/models",
+    )
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
+    let models = body["data"].as_array().unwrap();
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["id"], "copilot-account-only-model");
+
+    let single = runtime_provider_models_buffered_response(
+        RuntimeProviderBridgeKind::Copilot,
+        Some(&dynamic),
+        "GET",
+        "/v1/models/copilot-account-only-model",
+    )
+    .unwrap();
+    assert_eq!(single.status, 200);
+    let single_body: serde_json::Value = serde_json::from_slice(&single.body).unwrap();
+    assert_eq!(single_body["display_name"], "Account Only Model");
 }
 
 #[test]
@@ -192,7 +230,7 @@ fn provider_model_fallback_supports_aliases_and_combo() {
     );
     assert_eq!(
         runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, "codex"),
-        vec!["gpt-5.1-codex", "gpt-5.3-codex", "gpt-5.4"]
+        vec!["gpt-5.3-codex", "gpt-5.5", "gpt-5.4"]
     );
 }
 

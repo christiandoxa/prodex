@@ -35,6 +35,7 @@ fn copilot_transport_uses_copilot_api_headers_for_chat_completions() {
                     profile_name: "copilot-business".to_string(),
                     api_key: "copilot-runtime-token".to_string(),
                     api_url: format!("http://{}", upstream.addr),
+                    model_catalog: Vec::new(),
                 }],
             },
         },

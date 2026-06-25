@@ -524,10 +524,10 @@ pub const SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW: usize = 200_000;
 pub const SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT: usize = 180_000;
 pub const SUPER_COPILOT_PROVIDER_ID: &str = "prodex-copilot";
 const SUPER_COPILOT_PROVIDER_NAME: &str = "GitHub Copilot";
-pub const SUPER_COPILOT_DEFAULT_MODEL: &str = "gpt-5.1-codex";
+pub const SUPER_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
 const SUPER_COPILOT_DEFAULT_BASE_URL: &str = "https://api.githubcopilot.com";
-pub const SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW: usize = 200_000;
-pub const SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT: usize = 180_000;
+pub const SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW: usize = 1_000_000;
+pub const SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT: usize = 950_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExternalProvider {

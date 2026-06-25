@@ -35,7 +35,7 @@ use anyhow::{Context, Result, bail};
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 const RUNTIME_COPILOT_PROVIDER_BINDING_LIMIT: usize = 4096;
@@ -55,6 +55,7 @@ pub(crate) struct RuntimeCopilotProfileAuth {
     pub(crate) profile_name: String,
     pub(crate) api_key: String,
     pub(crate) api_url: String,
+    pub(crate) model_catalog: Vec<serde_json::Value>,
 }
 
 #[derive(Clone)]
@@ -81,6 +82,32 @@ struct RuntimeCopilotSelectedAuth {
 pub(super) struct RuntimeCopilotRequestContext {
     pub(super) profile_name: String,
     pub(super) binding_recorder: Option<RuntimeCopilotBindingRecorder>,
+}
+
+pub(super) fn runtime_copilot_model_catalog_from_provider(
+    provider: &RuntimeLocalRewriteProviderOptions,
+) -> Vec<serde_json::Value> {
+    let RuntimeLocalRewriteProviderOptions::Copilot {
+        auth: RuntimeCopilotProviderAuth::Profiles { profiles },
+    } = provider
+    else {
+        return Vec::new();
+    };
+    let mut seen = BTreeSet::new();
+    let mut catalog = Vec::new();
+    for profile in profiles {
+        for model in &profile.model_catalog {
+            let Some(id) = model.get("id").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            let id = id.trim();
+            if id.is_empty() || !seen.insert(id.to_ascii_lowercase()) {
+                continue;
+            }
+            catalog.push(model.clone());
+        }
+    }
+    catalog
 }
 
 pub(super) fn runtime_copilot_oauth_pool_from_provider(
