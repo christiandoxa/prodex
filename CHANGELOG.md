@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.220.0 - 2026-06-26
+
+### Misc
+
+- Stabilize copilot provider capabilities (`818a0b3`)
+
 ## 0.219.0 - 2026-06-25
 
 ### Misc
@@ -88,9 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Tolerate successful reset credit response (`db91125`)
-
-## 0.208.0 - 2026-06-23
-
-### Misc
-
-- Guard reset credit redemption (`ef0dd36`)
