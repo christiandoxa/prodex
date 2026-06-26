@@ -2,9 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.222.0 - Unreleased
-
-Changes after `0.221.0`.
+## 0.222.0 - 2026-06-26
 
 ### Misc
 
@@ -97,9 +95,3 @@ Changes after `0.221.0`.
 - Add replay metrics scaffold (`e81331f`)
 - Add candidate rollout primitives (`6a0d685`)
 - Align provider transport metadata (`e76e603`)
-
-## 0.210.0 - 2026-06-24
-
-### Runtime
-
-- Preserve upstream Codex backend metadata (`ebb8be5`)
