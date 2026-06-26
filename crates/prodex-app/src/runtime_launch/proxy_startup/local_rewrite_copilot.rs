@@ -24,7 +24,10 @@ use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_local_rewrite_api_key_attempts,
     runtime_local_rewrite_upstream_url,
 };
-use super::local_rewrite_transport_copilot::runtime_copilot_request_body_with_canonical_model;
+use super::local_rewrite_transport_copilot::{
+    runtime_copilot_request_body_with_canonical_model,
+    runtime_copilot_request_body_without_encrypted_content,
+};
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_model_fallback_chain,
     runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
@@ -273,6 +276,21 @@ fn send_runtime_copilot_responses_request(
         );
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
+            let (model_body, stripped_encrypted_content) =
+                runtime_copilot_request_body_without_encrypted_content(&model_body);
+            if stripped_encrypted_content {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_copilot_encrypted_content_stripped",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("profile", selected.profile_name.as_str()),
+                            runtime_proxy_log_field("model", model.as_str()),
+                        ],
+                    ),
+                );
+            }
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                     RuntimeLocalRewriteSearchFallbackRequest {

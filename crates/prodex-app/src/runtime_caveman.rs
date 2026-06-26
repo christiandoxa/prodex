@@ -432,6 +432,42 @@ mod tests {
     }
 
     #[test]
+    fn super_alias_keeps_optional_stack_for_copilot_provider() {
+        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
+            "prodex",
+            "s",
+            "--provider",
+            "copilot",
+            "--api-key",
+            "copilot-key",
+            "exec",
+            "hi",
+        ]));
+
+        assert_super_optional_stack(&strategy);
+        assert!(strategy.args.skip_quota_check);
+        assert_eq!(
+            strategy.args.external_provider,
+            Some(SuperExternalProvider::Copilot)
+        );
+        assert_eq!(
+            strategy.args.external_provider_api_key.as_deref(),
+            Some("copilot-key")
+        );
+        assert_eq!(
+            strategy.model_provider_override.as_deref(),
+            Some("prodex-copilot")
+        );
+        assert!(strategy.provider_runtime_uses_local_proxy_auth());
+        assert!(
+            strategy
+                .codex_args
+                .iter()
+                .any(|arg| arg.to_string_lossy() == "web_search=\"live\"")
+        );
+    }
+
+    #[test]
     fn super_provider_normalizes_bare_session_id_after_provider_config() {
         let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
             "prodex",

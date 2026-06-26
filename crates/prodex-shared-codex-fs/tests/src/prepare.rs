@@ -79,6 +79,17 @@ fn shared_codex_manifest_includes_plugin_marketplace_state() {
 }
 
 #[test]
+fn shared_codex_manifest_includes_attachment_dirs() {
+    let entries = shared_codex_manifest_entries();
+    for name in ["attachments", "image_attachments"] {
+        assert!(
+            entries.contains(&SharedCodexEntry::directory(name)),
+            "shared Codex manifest should include {name}"
+        );
+    }
+}
+
+#[test]
 fn shared_codex_manifest_keeps_cloud_config_bundle_cache_profile_local() {
     assert!(
         !shared_codex_manifest_entries()
@@ -209,6 +220,108 @@ fn prepare_managed_codex_home_retries_attachment_that_appears_later() {
     );
     let rewritten = fs::read_to_string(&session_file).expect("session should read");
     assert!(rewritten.contains(&stable.display().to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_shares_pasted_attachment_dirs() {
+    let temp_dir = PrepareTestDir::new("shared-pasted-attachments");
+    let paths = temp_dir.app_paths();
+    let first_home = temp_dir.path.join("first-profile-codex-home");
+    let second_home = temp_dir.path.join("second-profile-codex-home");
+
+    prepare_managed_codex_home(&paths, &first_home).expect("first home should prepare");
+    let pasted_text =
+        first_home.join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/pasted-text-1.txt");
+    let pasted_image =
+        first_home.join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/image-1.png");
+    fs::create_dir_all(pasted_text.parent().expect("attachment parent"))
+        .expect("attachment parent should create");
+    fs::write(&pasted_text, b"pasted text").expect("pasted text should write");
+    fs::write(&pasted_image, b"pasted image").expect("pasted image should write");
+
+    prepare_managed_codex_home(&paths, &second_home).expect("second home should prepare");
+
+    assert_eq!(
+        fs::read(
+            paths
+                .shared_codex_root
+                .join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/pasted-text-1.txt")
+        )
+        .expect("shared pasted text should exist"),
+        b"pasted text"
+    );
+    assert_eq!(
+        fs::read(second_home.join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/image-1.png"))
+            .expect("second home should see pasted image"),
+        b"pasted image"
+    );
+    assert_eq!(
+        fs::read_link(second_home.join("attachments")).expect("attachments should be symlinked"),
+        paths.shared_codex_root.join("attachments")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_existing_profile_attachment_dirs_to_shared() {
+    let temp_dir = PrepareTestDir::new("migrate-profile-attachments");
+    let paths = temp_dir.app_paths();
+    let first_home = temp_dir.path.join("first-profile-codex-home");
+    let second_home = temp_dir.path.join("second-profile-codex-home");
+    let local_pasted_text =
+        first_home.join("attachments/cccccccc-dddd-4eee-8fff-000000000000/pasted-text-1.txt");
+    let local_clipboard_image = first_home.join("image_attachments/codex-clipboard-local.png");
+    fs::create_dir_all(local_pasted_text.parent().expect("attachment parent"))
+        .expect("attachment parent should create");
+    fs::create_dir_all(
+        local_clipboard_image
+            .parent()
+            .expect("image attachment parent"),
+    )
+    .expect("image attachment parent should create");
+    fs::write(&local_pasted_text, b"legacy pasted text").expect("local pasted text should write");
+    fs::write(&local_clipboard_image, b"legacy clipboard image")
+        .expect("local clipboard image should write");
+
+    prepare_managed_codex_home(&paths, &first_home).expect("first home should migrate");
+    prepare_managed_codex_home(&paths, &second_home).expect("second home should prepare");
+
+    assert_eq!(
+        fs::read(
+            paths
+                .shared_codex_root
+                .join("attachments/cccccccc-dddd-4eee-8fff-000000000000/pasted-text-1.txt")
+        )
+        .expect("shared pasted text should exist"),
+        b"legacy pasted text"
+    );
+    assert_eq!(
+        fs::read(
+            paths
+                .shared_codex_root
+                .join("image_attachments/codex-clipboard-local.png")
+        )
+        .expect("shared clipboard image should exist"),
+        b"legacy clipboard image"
+    );
+    assert_eq!(
+        fs::read(
+            second_home.join("attachments/cccccccc-dddd-4eee-8fff-000000000000/pasted-text-1.txt")
+        )
+        .expect("second home should see migrated pasted text"),
+        b"legacy pasted text"
+    );
+    assert_eq!(
+        fs::read_link(first_home.join("attachments"))
+            .expect("first attachments should be symlinked"),
+        paths.shared_codex_root.join("attachments")
+    );
+    assert_eq!(
+        fs::read_link(first_home.join("image_attachments"))
+            .expect("first image attachments should be symlinked"),
+        paths.shared_codex_root.join("image_attachments")
+    );
 }
 
 #[cfg(unix)]

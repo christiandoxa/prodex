@@ -232,11 +232,32 @@ fn external_dynamic_catalog_models(
             if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
                 return None;
             }
+            if matches!(provider, ExternalCatalogProvider::Copilot)
+                && !copilot_dynamic_model_is_responses_compatible(provider, slug)
+            {
+                return None;
+            }
             Some(ExternalDynamicCatalogModel {
                 slug: slug.to_string(),
             })
         })
         .collect()
+}
+
+fn copilot_dynamic_model_is_responses_compatible(
+    provider: ExternalCatalogProvider,
+    slug: &str,
+) -> bool {
+    let lower = slug.trim().to_ascii_lowercase();
+    provider
+        .models()
+        .iter()
+        .any(|(model, _, _)| model.eq_ignore_ascii_case(&lower))
+        || lower.starts_with("gpt-5")
+        || lower.starts_with("claude-")
+        || lower.starts_with("gemini-")
+        || lower.starts_with("mai-")
+        || lower.starts_with("raptor-")
 }
 
 fn external_catalog_model(
@@ -259,6 +280,14 @@ fn external_catalog_model(
         "description": description,
         "default_reasoning_level": "high",
         "supported_reasoning_levels": [
+            {
+                "effort": "low",
+                "description": "Low reasoning effort"
+            },
+            {
+                "effort": "medium",
+                "description": "Medium reasoning effort"
+            },
             {
                 "effort": "high",
                 "description": "High reasoning effort"
@@ -572,15 +601,48 @@ mod tests {
     }
 
     #[test]
+    fn external_provider_catalog_args_write_full_copilot_reasoning_efforts() {
+        let codex_home = temp_codex_home("copilot-efforts");
+        let user_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-copilot\""),
+            OsString::from("-c"),
+            OsString::from("model=\"gpt-5.5\""),
+        ];
+
+        prepare_external_provider_catalog_codex_args(&codex_home, &user_args)
+            .expect("Copilot catalog should prepare");
+
+        let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
+        let catalog: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
+        assert_eq!(catalog["models"][0]["slug"], "gpt-5.5");
+        let efforts = catalog["models"][0]["supported_reasoning_levels"]
+            .as_array()
+            .expect("reasoning levels should be present")
+            .iter()
+            .map(|level| level["effort"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(efforts, vec!["low", "medium", "high", "xhigh"]);
+    }
+
+    #[test]
     fn external_provider_catalog_args_includes_copilot_runtime_token_catalog() {
         let codex_home = temp_codex_home("copilot-dynamic");
         write_copilot_runtime_model_catalog(
             &codex_home,
-            &[json!({
-                "id": "copilot-account-only-model",
-                "object": "model",
-                "owned_by": "github-copilot"
-            })],
+            &[
+                json!({
+                    "id": "gpt-5.6-account-only-model",
+                    "object": "model",
+                    "owned_by": "github-copilot"
+                }),
+                json!({
+                    "id": "gpt-4o",
+                    "object": "model",
+                    "owned_by": "github-copilot"
+                }),
+            ],
         )
         .expect("dynamic Copilot catalog should write");
         let user_args = vec![
@@ -599,7 +661,14 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|model| { model["slug"] == "copilot-account-only-model" })
+                .any(|model| { model["slug"] == "gpt-5.6-account-only-model" })
+        );
+        assert!(
+            !catalog["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|model| { model["slug"] == "gpt-4o" })
         );
     }
 

@@ -211,6 +211,14 @@ fn deepseek_catalog_model(
         "default_reasoning_level": "high",
         "supported_reasoning_levels": [
             {
+                "effort": "low",
+                "description": "DeepSeek low reasoning effort"
+            },
+            {
+                "effort": "medium",
+                "description": "DeepSeek medium reasoning effort"
+            },
+            {
                 "effort": "high",
                 "description": "DeepSeek high reasoning effort"
             },
@@ -306,10 +314,13 @@ mod tests {
                 .iter()
                 .any(|model| model["slug"] == "auto")
         );
-        assert_eq!(
-            catalog["models"][0]["supported_reasoning_levels"][1]["effort"],
-            "xhigh"
-        );
+        let efforts = catalog["models"][0]["supported_reasoning_levels"]
+            .as_array()
+            .expect("reasoning levels should be present")
+            .iter()
+            .map(|level| level["effort"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(efforts, vec!["low", "medium", "high", "xhigh"]);
 
         let _ = fs::remove_dir_all(codex_home);
     }

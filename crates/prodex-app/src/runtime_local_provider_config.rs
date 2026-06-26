@@ -141,6 +141,14 @@ fn local_catalog_model(
         "default_reasoning_level": "high",
         "supported_reasoning_levels": [
             {
+                "effort": "low",
+                "description": "Low reasoning effort"
+            },
+            {
+                "effort": "medium",
+                "description": "Medium reasoning effort"
+            },
+            {
                 "effort": "high",
                 "description": "High reasoning effort"
             },
@@ -198,6 +206,37 @@ mod tests {
         std::env::temp_dir().join(format!("prodex-local-provider-config-{name}-{stamp}"))
     }
 
+    fn catalog_path_from_args(args: &[OsString]) -> PathBuf {
+        let value = args
+            .windows(2)
+            .find_map(|window| {
+                (window[0] == "-c").then(|| window[1].to_string_lossy().into_owned())
+            })
+            .and_then(|arg| arg.strip_prefix("model_catalog_json=").map(str::to_string))
+            .expect("model_catalog_json override should be present");
+        PathBuf::from(value.trim_matches('"'))
+    }
+
+    fn catalog_efforts(path: &Path) -> Vec<String> {
+        let catalog: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        catalog["models"][0]["supported_reasoning_levels"]
+            .as_array()
+            .expect("reasoning levels should be present")
+            .iter()
+            .map(|level| level["effort"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn assert_contains_standard_efforts(efforts: &[String]) {
+        for expected in ["low", "medium", "high", "xhigh"] {
+            assert!(
+                efforts.iter().any(|effort| effort == expected),
+                "missing {expected} in {efforts:?}"
+            );
+        }
+    }
+
     #[test]
     fn local_provider_catalog_args_write_tool_capable_catalog() {
         let codex_home = temp_codex_home("catalog");
@@ -219,8 +258,41 @@ mod tests {
         assert_eq!(catalog["models"][0]["slug"], "local/qwen");
         assert_eq!(catalog["models"][0]["apply_patch_tool_type"], "freeform");
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
+        let efforts = catalog["models"][0]["supported_reasoning_levels"]
+            .as_array()
+            .expect("reasoning levels should be present")
+            .iter()
+            .map(|level| level["effort"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(efforts, vec!["low", "medium", "high", "xhigh"]);
 
         let _ = fs::remove_dir_all(codex_home);
+    }
+
+    #[test]
+    fn provider_capability_catalogs_expose_standard_reasoning_efforts() {
+        for (provider_id, model) in [
+            ("prodex-local", "local/qwen"),
+            ("prodex-copilot", "gpt-5.5"),
+            ("prodex-anthropic", "claude-sonnet-4-6"),
+            ("prodex-deepseek", "deepseek-v4-pro"),
+            ("prodex-gemini", "gemini-2.5-pro"),
+        ] {
+            let codex_home = temp_codex_home(provider_id);
+            let user_args = vec![
+                OsString::from("-c"),
+                OsString::from(format!("model_provider=\"{provider_id}\"")),
+                OsString::from("-c"),
+                OsString::from(format!("model=\"{model}\"")),
+            ];
+
+            let args = prepare_provider_capability_codex_args(&codex_home, &user_args)
+                .expect("provider catalog should prepare");
+            let catalog_path = catalog_path_from_args(&args);
+            assert_contains_standard_efforts(&catalog_efforts(&catalog_path));
+
+            let _ = fs::remove_dir_all(codex_home);
+        }
     }
 
     #[test]

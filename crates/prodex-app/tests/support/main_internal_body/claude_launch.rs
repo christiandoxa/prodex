@@ -254,6 +254,115 @@ fn prepare_prodex_overlay_home_localizes_config_and_installs_plugin() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn prepare_prodex_overlay_home_preserves_pasted_attachments_across_profile_resume() {
+    let _env_guard = TestEnvVarGuard::unset(PRODEX_CAVEMAN_FULL_ASSETS_ENV);
+    let temp_dir = TestDir::new();
+    let paths = AppPaths {
+        root: temp_dir.path.clone(),
+        state_file: temp_dir.path.join("state.json"),
+        managed_profiles_root: temp_dir.path.join("profiles"),
+        shared_codex_root: temp_dir.path.join(".codex"),
+        legacy_shared_codex_root: temp_dir.path.join("shared"),
+    };
+    let first_profile_home = paths.managed_profiles_root.join("first");
+    let second_profile_home = paths.managed_profiles_root.join("second");
+
+    prodex_shared_codex_fs::prepare_managed_codex_home(&paths, &first_profile_home)
+        .expect("first managed profile should prepare");
+    let first_overlay = prepare_prodex_overlay_home(&paths, &first_profile_home)
+        .expect("first Prodex overlay should prepare");
+
+    let attachment_id = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    let overlay_pasted_text = first_overlay
+        .join("attachments")
+        .join(attachment_id)
+        .join("pasted-text-1.txt");
+    let overlay_pasted_image = first_overlay
+        .join("attachments")
+        .join(attachment_id)
+        .join("image-1.png");
+    fs::create_dir_all(overlay_pasted_text.parent().expect("attachment parent"))
+        .expect("attachment parent should create");
+    fs::write(&overlay_pasted_text, b"pasted text from first overlay")
+        .expect("overlay pasted text should write");
+    fs::write(&overlay_pasted_image, b"pasted image from first overlay")
+        .expect("overlay pasted image should write");
+
+    let session_file = first_overlay.join("sessions/2026/06/26/rollout-session.jsonl");
+    fs::create_dir_all(session_file.parent().expect("session parent"))
+        .expect("session parent should create");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"timestamp":"2026-06-26T08:00:00Z","type":"response_item","payload":{{"text":"Pasted Content: {} and image {}"}}}}"#,
+            overlay_pasted_text.display(),
+            overlay_pasted_image.display()
+        ),
+    )
+    .expect("session should write through overlay symlink");
+
+    prodex_shared_codex_fs::maintain_managed_codex_sessions(&paths)
+        .expect("post-exit maintenance should stabilize attachment paths");
+    prodex_shared_codex_fs::prepare_managed_codex_home(&paths, &second_profile_home)
+        .expect("second managed profile should prepare");
+    let second_overlay = prepare_prodex_overlay_home(&paths, &second_profile_home)
+        .expect("second Prodex overlay should prepare");
+
+    let shared_pasted_text = paths
+        .shared_codex_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("pasted-text-1.txt");
+    let shared_pasted_image = paths
+        .shared_codex_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("image-1.png");
+    assert_eq!(
+        fs::read(&shared_pasted_text).expect("shared pasted text should remain readable"),
+        b"pasted text from first overlay"
+    );
+    assert_eq!(
+        fs::read(
+            second_overlay
+                .join("attachments")
+                .join(attachment_id)
+                .join("image-1.png")
+        )
+        .expect("resumed overlay should see pasted image"),
+        b"pasted image from first overlay"
+    );
+    assert_eq!(
+        fs::read_link(second_profile_home.join("attachments"))
+            .expect("second profile attachments should be shared"),
+        paths.shared_codex_root.join("attachments")
+    );
+    assert_eq!(
+        fs::read_link(second_overlay.join("attachments"))
+            .expect("second overlay attachments should point at second profile"),
+        second_profile_home.join("attachments")
+    );
+
+    let shared_session = paths
+        .shared_codex_root
+        .join("sessions/2026/06/26/rollout-session.jsonl");
+    let rewritten = fs::read_to_string(&shared_session).expect("shared session should read");
+    assert!(
+        rewritten.contains(&shared_pasted_text.display().to_string()),
+        "resume history should point at stable shared pasted text path: {rewritten}"
+    );
+    assert!(
+        rewritten.contains(&shared_pasted_image.display().to_string()),
+        "resume history should point at stable shared pasted image path: {rewritten}"
+    );
+    assert!(
+        !rewritten.contains(&first_overlay.display().to_string()),
+        "resume history must not retain first overlay path: {rewritten}"
+    );
+}
+
 #[test]
 fn prepare_prodex_overlay_home_can_install_full_caveman_assets() {
     let _env_guard = TestEnvVarGuard::set(PRODEX_CAVEMAN_FULL_ASSETS_ENV, "1");

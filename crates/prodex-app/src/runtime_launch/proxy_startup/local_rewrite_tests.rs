@@ -142,7 +142,24 @@ fn copilot_responses_route_preserves_responses_endpoint() {
         .json(&serde_json::json!({
             "model": "gpt-5.3-codex",
             "stream": false,
-            "input": "hello"
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "encrypted_content": "qAAA.VDK="
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "hello"},
+                        {
+                            "type": "input_image",
+                            "image_url": "data:image/png;base64,iVBORw0KGgo="
+                        }
+                    ]
+                }
+            ]
         }))
         .send()
         .expect("copilot responses request should be sent");
@@ -161,7 +178,141 @@ fn copilot_responses_route_preserves_responses_endpoint() {
     )
     .unwrap();
     assert_eq!(body["model"], "gpt-5.3-codex");
-    assert_eq!(body["input"], "hello");
+    assert_eq!(body["input"][0]["type"], "reasoning");
+    assert!(body["input"][0].get("encrypted_content").is_none());
+    assert_eq!(body["input"][1]["content"][0]["text"], "hello");
+    assert_eq!(
+        body["input"][1]["content"][1]["image_url"],
+        "data:image/png;base64,iVBORw0KGgo="
+    );
+}
+
+#[test]
+fn copilot_responses_route_preserves_codex_tool_surface() {
+    let root = temp_root("copilot-responses-tools");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start();
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: "http://127.0.0.1:9".to_string(),
+        provider: RuntimeLocalRewriteProviderOptions::Copilot {
+            auth: RuntimeCopilotProviderAuth::Profiles {
+                profiles: vec![super::local_rewrite_copilot::RuntimeCopilotProfileAuth {
+                    profile_name: "copilot-business".to_string(),
+                    api_key: "copilot-runtime-token".to_string(),
+                    api_url: format!("http://{}", upstream.addr),
+                    model_catalog: Vec::new(),
+                }],
+            },
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("copilot local rewrite proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .json(&serde_json::json!({
+            "model": "gpt-5.3-codex",
+            "stream": false,
+            "previous_response_id": "resp_previous",
+            "tool_choice": "auto",
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "search_context_size": "medium"
+                },
+                {
+                    "type": "function",
+                    "name": "shell",
+                    "description": "Run a shell command.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "cmd": {"type": "string"}
+                        },
+                        "required": ["cmd"],
+                        "additionalProperties": false
+                    }
+                },
+                {
+                    "type": "mcp_tool",
+                    "name": "mcp__prodex_sqz__compress",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"}
+                        },
+                        "required": ["text"]
+                    }
+                },
+                {
+                    "type": "custom",
+                    "name": "apply_patch",
+                    "description": "Apply a patch with raw grammar input."
+                }
+            ],
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "use tools"}]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_shell",
+                    "output": "ok"
+                },
+                {
+                    "type": "mcp_call_output",
+                    "call_id": "call_sqz",
+                    "output": "compressed"
+                }
+            ]
+        }))
+        .send()
+        .expect("copilot responses tool request should be sent");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let path = upstream
+        .path_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("upstream should receive Copilot request path");
+    assert_eq!(path, "/responses");
+    let body: serde_json::Value = serde_json::from_slice(
+        &upstream
+            .body_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("upstream should receive Copilot request body"),
+    )
+    .unwrap();
+
+    assert_eq!(body["model"], "gpt-5.3-codex");
+    assert_eq!(body["previous_response_id"], "resp_previous");
+    assert_eq!(body["tool_choice"], "auto");
+    assert_eq!(body["tools"][0]["type"], "web_search_preview");
+    assert_eq!(body["tools"][1]["name"], "shell");
+    assert_eq!(body["tools"][1]["parameters"]["required"][0], "cmd");
+    assert_eq!(body["tools"][2]["type"], "mcp_tool");
+    assert_eq!(body["tools"][2]["name"], "mcp__prodex_sqz__compress");
+    assert_eq!(body["tools"][3]["type"], "custom");
+    assert_eq!(body["tools"][3]["name"], "apply_patch");
+    assert_eq!(body["input"][1]["type"], "function_call_output");
+    assert_eq!(body["input"][2]["type"], "mcp_call_output");
 }
 
 #[test]

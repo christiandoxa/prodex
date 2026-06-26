@@ -27,6 +27,8 @@ pub use self::prepare::{maintain_managed_codex_sessions, prepare_managed_codex_h
 const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "sessions",
     "archived_sessions",
+    "attachments",
+    "image_attachments",
     "shell_snapshots",
     "memories",
     "memories_extensions",
