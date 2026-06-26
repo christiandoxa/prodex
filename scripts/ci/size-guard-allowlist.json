@@ -17,12 +17,12 @@
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
     "maxLines": 1071,
-    "reason": "Live quota TUI rendering, snapshot retention, terminal sizing, and fetch orchestration remain capped while the screen is split into narrower modules."
+    "reason": "Live quota ratatui rendering, snapshot retention, terminal sizing, and fetch orchestration remain capped while the screen is split into narrower modules."
   },
   {
     "file": "crates/prodex-app/src/app_commands/log.rs",
     "maxLines": 1004,
-    "reason": "Log command TUI rendering, filters, and table/detail behavior remain capped while renderer and query ownership are separated."
+    "reason": "Log command ratatui rendering, filters, and table/detail behavior remain capped while renderer and query ownership are separated."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
