@@ -1,7 +1,14 @@
-use crate::print::print_stdout_line;
+use crate::print::{print_stdout_line, print_wrapped_stderr};
 use crate::terminal::current_cli_width;
 use crate::text::{text_width, wrap_text};
 use crate::{CLI_LABEL_WIDTH, CLI_MAX_LABEL_WIDTH, CLI_MIN_LABEL_WIDTH};
+use ratatui::Terminal;
+use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use std::io::{self, IsTerminal};
 
 pub fn section_header(title: &str) -> String {
     section_header_with_width(title, current_cli_width())
@@ -130,11 +137,110 @@ fn panel_lines_with_layout(
 }
 
 pub fn print_panel(title: &str, fields: &[(String, String)]) {
-    for line in panel_lines_with_layout(title, fields, current_cli_width()) {
+    let total_width = current_cli_width();
+    let lines = panel_lines_with_layout(title, fields, total_width);
+    if print_panel_tui_stdout(title, &lines).is_ok() {
+        return;
+    }
+    for line in lines {
         print_stdout_line(&line);
     }
 }
 
 pub fn render_panel(title: &str, fields: &[(String, String)]) -> String {
     panel_lines_with_layout(title, fields, current_cli_width()).join("\n")
+}
+
+pub fn print_stderr_panel(title: &str, messages: &[String]) {
+    if print_panel_tui_stderr(title, messages).is_ok() {
+        return;
+    }
+    print_wrapped_stderr(&section_header(title));
+    for message in messages {
+        print_wrapped_stderr(message);
+    }
+}
+
+fn print_panel_tui_stdout(title: &str, lines: &[String]) -> anyhow::Result<()> {
+    if !io::stdout().is_terminal() || std::env::var_os("CODEX_CI").is_some() {
+        anyhow::bail!("stdout is not an interactive terminal");
+    }
+
+    let height = panel_inline_height(lines.len().saturating_add(2));
+    let mut terminal = Terminal::with_options(
+        CrosstermBackend::new(io::stdout()),
+        ratatui::TerminalOptions {
+            viewport: ratatui::Viewport::Inline(height),
+        },
+    )?;
+    draw_panel_terminal(&mut terminal, title, &lines[1..])?;
+    terminal.show_cursor()?;
+    Ok(())
+}
+
+fn print_panel_tui_stderr(title: &str, messages: &[String]) -> anyhow::Result<()> {
+    if !io::stderr().is_terminal() || std::env::var_os("CODEX_CI").is_some() {
+        anyhow::bail!("stderr is not an interactive terminal");
+    }
+
+    let body_lines = messages
+        .iter()
+        .flat_map(|message| wrap_text(message, current_cli_width().saturating_sub(4).max(1)))
+        .collect::<Vec<_>>();
+    let height = panel_inline_height(body_lines.len().saturating_add(4));
+    let mut terminal = Terminal::with_options(
+        CrosstermBackend::new(io::stderr()),
+        ratatui::TerminalOptions {
+            viewport: ratatui::Viewport::Inline(height),
+        },
+    )?;
+    draw_panel_terminal(&mut terminal, title, &body_lines)?;
+    terminal.show_cursor()?;
+    Ok(())
+}
+
+fn panel_inline_height(lines: usize) -> u16 {
+    lines.clamp(4, usize::from(u16::MAX)) as u16
+}
+
+fn draw_panel_terminal<B: Backend>(
+    terminal: &mut Terminal<B>,
+    title: &str,
+    body_lines: &[String],
+) -> anyhow::Result<()>
+where
+    B::Error: Send + Sync + 'static,
+{
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(Color::Rgb(92, 221, 229))
+                .add_modifier(Modifier::BOLD),
+        )]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Rgb(74, 103, 123))),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let rendered_body_lines = body_lines
+            .iter()
+            .map(|line| Line::from(line.clone()))
+            .collect::<Vec<_>>();
+        let body = Paragraph::new(Text::from(rendered_body_lines))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Rgb(74, 103, 123))),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    Ok(())
 }

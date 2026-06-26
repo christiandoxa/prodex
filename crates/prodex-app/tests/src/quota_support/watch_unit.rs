@@ -96,8 +96,24 @@
         assert_eq!(frame.updated, "2026-06-26 10:00:00 UTC");
         assert!(frame.body.contains("Quota Overview"));
         assert!(frame.body.contains("main"));
+        assert!(!frame.body.contains("sort: current"));
         assert!(frame.footer.contains("sort current"));
         assert!(frame.footer.contains("filter all"));
+    }
+
+    #[test]
+    fn profile_quota_watch_tui_frame_uses_ratatui_metadata() {
+        let frame = build_profile_quota_watch_tui_frame(
+            "main",
+            "2026-06-26 10:00:00 UTC",
+            Ok(test_usage("main@example.com")),
+        );
+
+        assert_eq!(frame.updated, "2026-06-26 10:00:00 UTC");
+        assert_eq!(frame.title, "Prodex Quota main");
+        assert!(frame.body.contains("Quota main"));
+        assert!(frame.body.contains("main@example.com"));
+        assert_eq!(frame.footer, "refresh 5s | q quit");
     }
 
     #[test]

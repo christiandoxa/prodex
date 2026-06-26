@@ -322,32 +322,28 @@ fn render_log_snapshot_tui(frame: &mut ratatui::Frame<'_>, items: &VecDeque<LogS
         .split(frame.area());
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Prodex Log Snapshot",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Prodex Log Snapshot", log_title_style()),
         Span::raw("  "),
-        Span::styled(
-            format!("{} event(s)", items.len()),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("{} event(s)", items.len()), log_muted_style()),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(log_border_style()),
     );
     frame.render_widget(header, chunks[0]);
 
-    let body = Paragraph::new(log_stream_tui_text(items, usize::from(chunks[1].height)))
-        .block(
-            Block::default()
-                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                .border_style(Style::default().fg(Color::Blue)),
-        )
-        .wrap(Wrap { trim: false });
+    let body = Paragraph::new(log_stream_tui_text(
+        items,
+        usize::from(chunks[1].height),
+        usize::from(chunks[1].width).saturating_sub(2).max(20),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+            .border_style(log_border_style()),
+    )
+    .wrap(Wrap { trim: false });
     frame.render_widget(body, chunks[1]);
 }
 
@@ -369,53 +365,51 @@ fn render_log_stream_tui(frame: &mut ratatui::Frame<'_>, items: &VecDeque<LogStr
         .split(frame.area());
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Prodex Log Stream",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Prodex Log Stream", log_title_style()),
         Span::raw("  "),
-        Span::styled(
-            format!("{} event(s)", items.len()),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("{} event(s)", items.len()), log_muted_style()),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(log_border_style()),
     );
     frame.render_widget(header, chunks[0]);
 
-    let body = Paragraph::new(log_stream_tui_text(items, usize::from(chunks[1].height)))
-        .block(
-            Block::default()
-                .borders(Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(Color::Blue)),
-        )
-        .wrap(Wrap { trim: false });
+    let body = Paragraph::new(log_stream_tui_text(
+        items,
+        usize::from(chunks[1].height),
+        usize::from(chunks[1].width).saturating_sub(2).max(20),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT)
+            .border_style(log_border_style()),
+    )
+    .wrap(Wrap { trim: false });
     frame.render_widget(body, chunks[1]);
 
     let footer = Paragraph::new(Line::styled(
         "live transcript + token usage | q quit",
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
+        log_footer_style(),
     ))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(log_border_style()),
     );
     frame.render_widget(footer, chunks[2]);
 }
 
-fn log_stream_tui_text(items: &VecDeque<LogStreamItem>, max_lines: usize) -> Text<'_> {
+fn log_stream_tui_text(
+    items: &VecDeque<LogStreamItem>,
+    max_lines: usize,
+    body_width: usize,
+) -> Text<'_> {
     if items.is_empty() {
         return Text::from(Line::styled(
             "Waiting for transcript or token usage events...",
-            Style::default().fg(Color::Gray),
+            log_muted_style(),
         ));
     }
 
@@ -427,10 +421,7 @@ fn log_stream_tui_text(items: &VecDeque<LogStreamItem>, max_lines: usize) -> Tex
         match item {
             LogStreamItem::Transcript(event) => {
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        event.timestamp.as_str(),
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled(event.timestamp.as_str(), log_muted_style()),
                     Span::raw(" "),
                     Span::styled(
                         format!("stream {}", event.source),
@@ -439,8 +430,8 @@ fn log_stream_tui_text(items: &VecDeque<LogStreamItem>, max_lines: usize) -> Tex
                             .add_modifier(Modifier::BOLD),
                     ),
                 ]));
-                for line in render_text_body(&event.text, 100) {
-                    lines.push(Line::raw(line));
+                for line in render_text_body(&event.text, body_width) {
+                    lines.push(Line::styled(line, Style::default().fg(Color::White)));
                 }
             }
             LogStreamItem::TokenUsage(event) => {
@@ -449,48 +440,45 @@ fn log_stream_tui_text(items: &VecDeque<LogStreamItem>, max_lines: usize) -> Tex
                     .map(|request| request.to_string())
                     .unwrap_or_else(|| "-".to_string());
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        event.timestamp.as_str(),
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled(event.timestamp.as_str(), log_muted_style()),
                     Span::raw(" "),
                     Span::styled(
                         "stream usage",
                         Style::default()
-                            .fg(Color::Magenta)
+                            .fg(Color::LightMagenta)
                             .add_modifier(Modifier::BOLD),
                     ),
                 ]));
                 lines.push(Line::from(vec![
-                    Span::styled("profile ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(event.profile.as_str()),
-                    Span::styled(" request ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(request),
-                    Span::styled(" transport ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(event.transport.as_str()),
-                    Span::styled(" source ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(event.source.as_str()),
+                    Span::styled("profile ", log_muted_style()),
+                    Span::styled(event.profile.as_str(), Style::default().fg(Color::White)),
+                    Span::styled(" request ", log_muted_style()),
+                    Span::styled(request, Style::default().fg(Color::White)),
+                    Span::styled(" transport ", log_muted_style()),
+                    Span::styled(event.transport.as_str(), Style::default().fg(Color::White)),
+                    Span::styled(" source ", log_muted_style()),
+                    Span::styled(event.source.as_str(), Style::default().fg(Color::White)),
                 ]));
                 lines.push(Line::from(vec![
-                    Span::styled("sent ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("sent ", log_muted_style()),
                     Span::styled(
                         event.input_tokens.to_string(),
                         Style::default().fg(Color::Green),
                     ),
-                    Span::styled(" cached ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(" cached ", log_muted_style()),
                     Span::styled(
                         event.cached_input_tokens.to_string(),
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(Color::LightCyan),
                     ),
-                    Span::styled(" received ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(" received ", log_muted_style()),
                     Span::styled(
                         event.output_tokens.to_string(),
                         Style::default().fg(Color::Yellow),
                     ),
-                    Span::styled(" reasoning ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(" reasoning ", log_muted_style()),
                     Span::styled(
                         event.reasoning_tokens.to_string(),
-                        Style::default().fg(Color::Magenta),
+                        Style::default().fg(Color::LightMagenta),
                     ),
                 ]));
             }
@@ -502,12 +490,32 @@ fn log_stream_tui_text(items: &VecDeque<LogStreamItem>, max_lines: usize) -> Tex
     Text::from(lines)
 }
 
+fn log_title_style() -> Style {
+    Style::default()
+        .fg(Color::Rgb(92, 221, 229))
+        .add_modifier(Modifier::BOLD)
+}
+
+fn log_border_style() -> Style {
+    Style::default().fg(Color::Rgb(74, 103, 123))
+}
+
+fn log_muted_style() -> Style {
+    Style::default().fg(Color::Rgb(150, 165, 176))
+}
+
+fn log_footer_style() -> Style {
+    Style::default()
+        .fg(Color::Rgb(235, 196, 109))
+        .add_modifier(Modifier::BOLD)
+}
+
 fn log_stream_source_color(source: &str) -> Color {
     match source {
-        "user" => Color::Green,
-        "assistant" => Color::Cyan,
-        "tool-output" => Color::Yellow,
-        source if source.starts_with("tool-call:") => Color::Magenta,
+        "user" => Color::Rgb(105, 214, 143),
+        "assistant" => Color::Rgb(92, 221, 229),
+        "tool-output" => Color::Rgb(235, 196, 109),
+        source if source.starts_with("tool-call:") => Color::Rgb(210, 150, 238),
         _ => Color::White,
     }
 }
@@ -947,7 +955,7 @@ mod tests {
     #[test]
     fn log_snapshot_tui_text_handles_empty_state() {
         let items = VecDeque::new();
-        let text = log_stream_tui_text(&items, 10);
+        let text = log_stream_tui_text(&items, 10, 80);
         let rendered = text
             .lines
             .iter()

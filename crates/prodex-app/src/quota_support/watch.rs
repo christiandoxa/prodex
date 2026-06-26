@@ -106,11 +106,6 @@ impl AllQuotaWatchRefresh {
     }
 }
 
-struct QuotaWatchInput {
-    tty: fs::File,
-    saved_stty_state: String,
-}
-
 struct QuotaWatchTui {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
 }
@@ -143,69 +138,6 @@ impl Drop for QuotaWatchTui {
         let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
         let _ = self.terminal.show_cursor();
     }
-}
-
-impl QuotaWatchInput {
-    fn open() -> Option<Self> {
-        let tty = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("/dev/tty")
-            .ok()?;
-        let saved_stty_state = quota_watch_stty_output(&tty, &["-g"])?.trim().to_string();
-        quota_watch_stty_apply(&tty, &["-icanon", "-echo", "min", "0", "time", "1"])?;
-        Some(Self {
-            tty,
-            saved_stty_state,
-        })
-    }
-
-    fn read_command(&mut self) -> Option<QuotaWatchCommand> {
-        let mut buf = [0_u8; 8];
-        let bytes_read = self.tty.read(&mut buf).ok()?;
-        if bytes_read == 0 {
-            return None;
-        }
-        let bytes = &buf[..bytes_read];
-        match bytes {
-            [b'q' | b'Q', ..] => Some(QuotaWatchCommand::Quit),
-            [b'k' | b'K', ..] => Some(QuotaWatchCommand::Up),
-            [b'j' | b'J', ..] => Some(QuotaWatchCommand::Down),
-            [b's' | b'S', ..] => Some(QuotaWatchCommand::Sort),
-            [b'f' | b'F', ..] => Some(QuotaWatchCommand::Filter),
-            [0x1b, b'[', b'A', ..] => Some(QuotaWatchCommand::Up),
-            [0x1b, b'[', b'B', ..] => Some(QuotaWatchCommand::Down),
-            _ => None,
-        }
-    }
-}
-
-impl Drop for QuotaWatchInput {
-    fn drop(&mut self) {
-        let _ = quota_watch_stty_apply(&self.tty, &[self.saved_stty_state.as_str()]);
-    }
-}
-
-fn quota_watch_stty_output(tty: &fs::File, args: &[&str]) -> Option<String> {
-    let output = Command::new("stty")
-        .args(args)
-        .stdin(tty.try_clone().ok()?)
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8(output.stdout).ok())
-        .flatten()
-}
-
-fn quota_watch_stty_apply(tty: &fs::File, args: &[&str]) -> Option<()> {
-    let output = Command::new("stty")
-        .args(args)
-        .stdin(tty.try_clone().ok()?)
-        .output()
-        .ok()?;
-    output.status.success().then_some(())
 }
 
 pub(crate) fn quota_watch_enabled(args: &QuotaArgs) -> bool {
@@ -437,8 +369,8 @@ fn filter_quota_reports_by_provider(
         .collect()
 }
 
-fn redraw_quota_watch(output: &str) -> Result<()> {
-    print!("\x1b[H\x1b[2J{output}");
+fn print_quota_watch_plain_snapshot(output: &str) -> Result<()> {
+    print!("{output}\n\n");
     io::stdout()
         .flush()
         .context("failed to flush quota watch output")?;
@@ -457,14 +389,60 @@ pub(crate) fn watch_quota(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<()> {
+    if io::stdout().is_terminal() && io::stdin().is_terminal() {
+        match watch_profile_quota_tui(profile_name, provider, codex_home, base_url) {
+            Ok(()) => return Ok(()),
+            Err(err) if std::env::var_os("PRODEX_TUI_STRICT").is_none() => {
+                eprintln!("prodex quota TUI unavailable, falling back to plain watch: {err:#}");
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
     loop {
         let output = render_profile_quota_watch_output(
             profile_name,
             &quota_watch_updated_at(),
             fetch_profile_quota(provider, codex_home, base_url).map_err(|err| err.to_string()),
         );
-        redraw_quota_watch(&output)?;
+        print_quota_watch_plain_snapshot(&output)?;
         thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
+    }
+}
+
+fn watch_profile_quota_tui(
+    profile_name: &str,
+    provider: &ProfileProvider,
+    codex_home: &Path,
+    base_url: Option<&str>,
+) -> Result<()> {
+    let mut tui = QuotaWatchTui::new()?;
+    loop {
+        let updated = quota_watch_updated_at();
+        let frame = build_profile_quota_watch_tui_frame(
+            profile_name,
+            &updated,
+            fetch_profile_quota(provider, codex_home, base_url).map_err(|err| err.to_string()),
+        );
+        tui.terminal
+            .draw(|area| render_all_quota_watch_tui(area, &frame))
+            .context("failed to draw quota TUI")?;
+
+        let refresh_at = quota_watch_next_refresh_at();
+        while Instant::now() < refresh_at {
+            if event::poll(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS))
+                .context("failed to poll quota TUI input")?
+            {
+                match event::read().context("failed to read quota TUI input")? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        _ => {}
+                    },
+                    Event::Resize(_, _) => break,
+                    _ => {}
+                }
+            }
+        }
     }
 }
 
@@ -511,10 +489,8 @@ fn watch_all_quotas_plain(
     provider_filter: QuotaProviderFilter,
     provider_filter_locked: bool,
 ) -> Result<()> {
-    let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
-    let mut sort = QuotaReportSort::Current;
-    let mut provider_filter = provider_filter;
+    let sort = QuotaReportSort::Current;
     let collection_provider_filter = if provider_filter_locked {
         provider_filter
     } else {
@@ -556,7 +532,7 @@ fn watch_all_quotas_plain(
                 provider_filter,
                 provider_filter_locked,
             );
-            redraw_quota_watch(&output)?;
+            print_quota_watch_plain_snapshot(&output)?;
             redraw_needed = false;
         }
 
@@ -571,34 +547,6 @@ fn watch_all_quotas_plain(
         {
             next_refresh_at = None;
             continue;
-        }
-
-        if let Some(command) = input.as_mut().and_then(QuotaWatchInput::read_command) {
-            match apply_quota_watch_command(
-                command,
-                scroll_offset,
-                quota_watch_max_scroll_offset(&snapshot, detail, provider_filter, sort),
-            ) {
-                QuotaWatchCommandOutcome::Continue(next_offset) => {
-                    if next_offset != scroll_offset {
-                        scroll_offset = next_offset;
-                        redraw_needed = true;
-                    }
-                }
-                QuotaWatchCommandOutcome::Sort => {
-                    sort = sort.next();
-                    scroll_offset = 0;
-                    redraw_needed = true;
-                }
-                QuotaWatchCommandOutcome::Filter => {
-                    if !provider_filter_locked {
-                        provider_filter = provider_filter.next();
-                        scroll_offset = 0;
-                        redraw_needed = true;
-                    }
-                }
-                QuotaWatchCommandOutcome::Quit => return Ok(()),
-            }
         }
 
         thread::sleep(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS));
@@ -763,7 +711,9 @@ fn build_all_quota_watch_tui_frame(
     snapshot: &AllQuotaWatchSnapshot,
     layout: AllQuotaWatchLayout,
 ) -> AllQuotaWatchTuiFrame {
-    let body = render_all_quota_watch_snapshot_with_layout(snapshot, layout);
+    let body = quota_watch_without_control_footer(&render_all_quota_watch_snapshot_with_layout(
+        snapshot, layout,
+    ));
     let provider_hint = if layout.provider_filter_locked {
         "provider fixed"
     } else {
@@ -774,11 +724,35 @@ fn build_all_quota_watch_tui_frame(
         title: "Prodex Quota".to_string(),
         body,
         footer: format!(
-            "sort {} | filter {} | s sort | {} | j/k or arrows scroll | q quit",
+            "s sort {} | filter {} | {} | j/k scroll | q quit",
             layout.sort.label(),
             layout.provider_filter.label(),
             provider_hint
         ),
+    }
+}
+
+fn quota_watch_without_control_footer(output: &str) -> String {
+    let mut lines = output.lines().map(str::to_string).collect::<Vec<_>>();
+    if lines.last().is_some_and(|line| line.starts_with("sort: ")) {
+        lines.pop();
+        if lines.last().is_some_and(|line| line.is_empty()) {
+            lines.pop();
+        }
+    }
+    lines.join("\n")
+}
+
+fn build_profile_quota_watch_tui_frame(
+    profile_name: &str,
+    updated: &str,
+    quota_result: std::result::Result<ProviderQuotaSnapshot, String>,
+) -> AllQuotaWatchTuiFrame {
+    AllQuotaWatchTuiFrame {
+        updated: updated.to_string(),
+        title: format!("Prodex Quota {profile_name}"),
+        body: render_profile_quota_watch_output(profile_name, updated, quota_result),
+        footer: "refresh 5s | q quit".to_string(),
     }
 }
 
@@ -793,19 +767,14 @@ fn render_all_quota_watch_tui(frame: &mut ratatui::Frame<'_>, data: &AllQuotaWat
         .split(frame.area());
 
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            data.title.as_str(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(data.title.as_str(), quota_watch_title_style()),
         Span::raw("  "),
-        Span::styled(data.updated.as_str(), Style::default().fg(Color::DarkGray)),
+        Span::styled(data.updated.as_str(), quota_watch_muted_style()),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(quota_watch_border_style()),
     );
     frame.render_widget(header, chunks[0]);
 
@@ -813,21 +782,19 @@ fn render_all_quota_watch_tui(frame: &mut ratatui::Frame<'_>, data: &AllQuotaWat
         .block(
             Block::default()
                 .borders(Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(quota_watch_border_style()),
         )
         .wrap(ratatui::widgets::Wrap { trim: false });
     frame.render_widget(body, chunks[1]);
 
     let footer = Paragraph::new(Line::styled(
         data.footer.as_str(),
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
+        quota_watch_footer_style(),
     ))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(quota_watch_border_style()),
     );
     frame.render_widget(footer, chunks[2]);
 }
@@ -843,33 +810,68 @@ fn quota_watch_tui_text(output: &str) -> Text<'_> {
 
 fn quota_watch_tui_spans(line: &str) -> Vec<Span<'_>> {
     if line.starts_with("== ") || line.starts_with("Quota Overview") {
+        return vec![Span::styled(line, quota_watch_title_style())];
+    }
+    if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
+        return vec![Span::styled(line, quota_watch_muted_style())];
+    }
+    if line.contains("Blocked:") || line.contains("Error:") {
+        return vec![Span::styled(
+            line,
+            Style::default().fg(Color::Rgb(255, 118, 118)),
+        )];
+    }
+    if line.contains("Ready") || line.contains("healthy") {
+        return vec![Span::styled(
+            line,
+            Style::default().fg(Color::Rgb(105, 214, 143)),
+        )];
+    }
+    if line.contains("thin") || line.contains("critical") || line.contains("exhausted") {
+        return vec![Span::styled(
+            line,
+            Style::default().fg(Color::Rgb(235, 196, 109)),
+        )];
+    }
+    if line.starts_with("PROFILE") {
         return vec![Span::styled(
             line,
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )];
-    }
-    if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
-        return vec![Span::styled(line, Style::default().fg(Color::DarkGray))];
-    }
-    if line.contains("Blocked:") || line.contains("Error:") {
-        return vec![Span::styled(line, Style::default().fg(Color::Red))];
-    }
-    if line.contains("Ready") || line.contains("healthy") {
-        return vec![Span::styled(line, Style::default().fg(Color::Green))];
-    }
-    if line.contains("thin") || line.contains("critical") || line.contains("exhausted") {
-        return vec![Span::styled(line, Style::default().fg(Color::Yellow))];
     }
     if line.starts_with("workspace:")
         || line.starts_with("resets:")
         || line.starts_with("status:")
+        || line.trim_start().starts_with("workspace:")
+        || line.trim_start().starts_with("resets:")
+        || line.trim_start().starts_with("status:")
         || line.starts_with("press ")
     {
-        return vec![Span::styled(line, Style::default().fg(Color::Gray))];
+        return vec![Span::styled(line, quota_watch_muted_style())];
     }
     vec![Span::raw(line)]
+}
+
+fn quota_watch_title_style() -> Style {
+    Style::default()
+        .fg(Color::Rgb(92, 221, 229))
+        .add_modifier(Modifier::BOLD)
+}
+
+fn quota_watch_border_style() -> Style {
+    Style::default().fg(Color::Rgb(74, 103, 123))
+}
+
+fn quota_watch_muted_style() -> Style {
+    Style::default().fg(Color::Rgb(150, 165, 176))
+}
+
+fn quota_watch_footer_style() -> Style {
+    Style::default()
+        .fg(Color::Rgb(235, 196, 109))
+        .add_modifier(Modifier::BOLD)
 }
 
 fn quota_watch_tui_report_lines(terminal_height: u16) -> Option<usize> {

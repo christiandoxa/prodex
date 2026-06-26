@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use terminal_ui::{print_wrapped_stderr, section_header};
+use terminal_ui::print_stderr_panel;
 
 pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> {
     if !prodex_update_notice::should_emit_update_notice(command) {
@@ -23,12 +23,16 @@ pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> 
     let current_version = prodex_update_notice::current_prodex_version();
     let update_command = prodex_update_notice::prodex_update_command_for_version(&latest_version);
     if print_update_notice_tui(current_version, &latest_version, &update_command).is_err() {
-        print_wrapped_stderr(&section_header("Update Available"));
-        print_wrapped_stderr(&format!(
-            "A newer prodex release is available: {} -> {}",
-            current_version, latest_version
-        ));
-        print_wrapped_stderr(&format!("Update with: {update_command}"));
+        print_stderr_panel(
+            "Update Available",
+            &[
+                format!(
+                    "A newer prodex release is available: {} -> {}",
+                    current_version, latest_version
+                ),
+                format!("Update with: {update_command}"),
+            ],
+        );
     }
     Ok(())
 }

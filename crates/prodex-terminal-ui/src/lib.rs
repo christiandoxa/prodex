@@ -19,7 +19,7 @@ pub use info::{
 };
 pub use panel::{
     FieldRowsBuilder, PanelBuilder, format_field_lines_with_layout, panel_label_width, print_panel,
-    render_panel, section_header, section_header_with_width,
+    print_stderr_panel, render_panel, section_header, section_header_with_width,
 };
 pub use print::{
     print_blank_line, print_stderr_line, print_stderr_prompt, print_stdout_line, print_stdout_text,

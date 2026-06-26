@@ -12,3 +12,4 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+ratatui = { workspace = true }

@@ -337,7 +337,6 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         }
 
         if local_rewrite_proxy_upstream_base_url(&self.selection, &self.request).is_some() {
-            print_wrapped_stderr(&section_header("Runtime Provider"));
             if let Some(provider) = self.request.external_provider {
                 let rotation = if runtime_external_provider_has_rotation_summary(provider) {
                     runtime_external_provider_rotation_summary(
@@ -350,22 +349,28 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
                 } else {
                     "Quota preflight and account rotation stay disabled.".to_string()
                 };
-                print_wrapped_stderr(&format!(
-                    "Using provider '{provider}' through the Smart Context rewrite proxy. {rotation}",
-                ));
+                print_stderr_panel(
+                    "Runtime Provider",
+                    &[format!(
+                        "Using provider '{provider}' through the Smart Context rewrite proxy. {rotation}",
+                    )],
+                );
             } else {
-                print_wrapped_stderr(
-                    "Using prodex-local through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.",
+                print_stderr_panel(
+                    "Runtime Provider",
+                    &["Using prodex-local through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.".to_string()],
                 );
             }
             return Ok(());
         }
 
-        print_wrapped_stderr(&section_header("Runtime Provider"));
-        print_wrapped_stderr(&format_runtime_provider_direct_launch_message(
-            setting.provider_id.as_str(),
-            setting.source.display_name(),
-        ));
+        print_stderr_panel(
+            "Runtime Provider",
+            &[format_runtime_provider_direct_launch_message(
+                setting.provider_id.as_str(),
+                setting.source.display_name(),
+            )],
+        );
         Ok(())
     }
 

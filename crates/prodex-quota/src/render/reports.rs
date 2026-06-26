@@ -401,9 +401,9 @@ fn render_quota_report_row(
 
 fn push_wrapped_quota_report_line(section: &mut Vec<String>, line: &str, total_width: usize) {
     section.extend(
-        wrap_text(line, total_width.saturating_sub(2).max(1))
+        wrap_text(line, total_width.saturating_sub(4).max(1))
             .into_iter()
-            .map(|line| format!("  {line}")),
+            .map(|line| format!("    {line}")),
     );
 }
 
