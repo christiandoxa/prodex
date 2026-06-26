@@ -63,8 +63,7 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
         String::from_utf8_lossy(&run.output.stderr)
     );
     assert!(
-        run.tty_output
-            .contains("Use Presidio for data safety?"),
+        run.tty_output.contains("Use Presidio for data safety?"),
         "PTY prompt output missing prompt: {}",
         run.tty_output
     );
