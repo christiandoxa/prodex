@@ -1,5 +1,10 @@
 use anyhow::Result;
 use chrono::Local;
+use crossterm::terminal;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, collect_active_runtime_log_paths,
@@ -148,6 +153,132 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             format_info_token_usage_summary(token_summary),
         ));
     }
-    print_panel("Info", &fields);
+    print_info_panel(&fields)?;
     Ok(())
+}
+
+fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
+    let height = info_panel_tui_height(fields);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        print_panel("Info", fields);
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Prodex Info",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("{} field(s)", fields.len()),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(info_panel_tui_text(fields))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn info_panel_tui_height(fields: &[(String, String)]) -> u16 {
+    let rows = fields.len().saturating_add(5).max(8);
+    let terminal_height = terminal::size()
+        .map(|(_, height)| usize::from(height))
+        .unwrap_or(24);
+    rows.min(terminal_height).max(1) as u16
+}
+
+fn info_panel_tui_text(fields: &[(String, String)]) -> Text<'static> {
+    let label_width = fields
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(24);
+    let mut lines = Vec::new();
+    for (label, value) in fields {
+        let color = info_panel_value_color(label, value);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{label:<label_width$} "),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(value.clone(), Style::default().fg(color)),
+        ]));
+    }
+    Text::from(lines)
+}
+
+fn info_panel_value_color(label: &str, value: &str) -> Color {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("error")
+        || lower.contains("missing")
+        || lower.contains("unavailable")
+        || lower.contains("exhausted")
+    {
+        Color::Red
+    } else if lower.contains("critical") || lower.contains("thin") || lower.contains("warning") {
+        Color::Yellow
+    } else if lower.contains("ready")
+        || lower.contains("healthy")
+        || lower.contains("up to date")
+        || label == "Active profile"
+    {
+        Color::Green
+    } else if label.contains("Runtime") || label.contains("Codex") {
+        Color::Cyan
+    } else {
+        Color::White
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn info_panel_tui_text_contains_fields() {
+        let fields = vec![
+            ("Active profile".to_string(), "main".to_string()),
+            ("Runtime logs".to_string(), "ready".to_string()),
+        ];
+        let text = format!("{:?}", info_panel_tui_text(&fields));
+        assert!(text.contains("Active profile"));
+        assert!(text.contains("main"));
+        assert!(text.contains("Runtime logs"));
+    }
+
+    #[test]
+    fn info_panel_value_color_highlights_status() {
+        assert_eq!(info_panel_value_color("x", "missing file"), Color::Red);
+        assert_eq!(info_panel_value_color("x", "critical load"), Color::Yellow);
+        assert_eq!(
+            info_panel_value_color("Active profile", "main"),
+            Color::Green
+        );
+    }
 }

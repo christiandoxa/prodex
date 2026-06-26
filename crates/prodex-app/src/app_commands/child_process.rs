@@ -1,4 +1,8 @@
 use anyhow::{Context, Result};
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io;
@@ -279,8 +283,113 @@ pub(crate) fn print_runtime_launch_dry_run(
         }
     ));
     output.push('\n');
-    print!("{output}");
+    print_runtime_launch_dry_run_report(flow, &output)?;
     Ok(())
+}
+
+fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
+    let height = runtime_launch_dry_run_tui_height(output);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        print!("{output}");
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Prodex Dry Run",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(flow.to_string(), Style::default().fg(Color::DarkGray)),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(runtime_launch_dry_run_tui_text(output))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn runtime_launch_dry_run_tui_height(output: &str) -> u16 {
+    let rows = output.lines().count().saturating_add(5).clamp(8, 32);
+    rows as u16
+}
+
+fn runtime_launch_dry_run_tui_text(output: &str) -> Text<'static> {
+    Text::from(
+        output
+            .lines()
+            .map(|line| {
+                if line.ends_with(':') {
+                    Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ))
+                } else if let Some((label, value)) = line.split_once(':') {
+                    let value_color = runtime_launch_dry_run_value_color(label, value);
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{label}:"),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            value.trim_start().to_string(),
+                            Style::default().fg(value_color),
+                        ),
+                    ])
+                } else {
+                    Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(Color::White),
+                    ))
+                }
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn runtime_launch_dry_run_value_color(label: &str, value: &str) -> Color {
+    let lower_label = label.to_ascii_lowercase();
+    let lower_value = value.to_ascii_lowercase();
+    if lower_value.contains("disabled") || lower_value.contains("removed") {
+        Color::Yellow
+    } else if lower_value.contains("enabled")
+        || lower_value.contains("ready")
+        || lower_value.contains("ok")
+        || lower_label.contains("proxy")
+    {
+        Color::Green
+    } else if lower_label.contains("command")
+        || lower_label.contains("binary")
+        || lower_label.contains("codex_home")
+    {
+        Color::Cyan
+    } else {
+        Color::White
+    }
 }
 
 fn profile_openai_compatible_dry_run_child(
@@ -317,4 +426,47 @@ fn runtime_proxy_codex_endpoint(
         realtime_ws_base_url: proxy.realtime_ws_base_url.as_deref(),
         realtime_ws_model: proxy.realtime_ws_model.as_deref(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_launch_dry_run_tui_text_keeps_report_content() {
+        let text = runtime_launch_dry_run_tui_text(
+            "Command: codex\nRuntime proxy: enabled\nPresidio redaction: disabled\n",
+        );
+        let rendered = text
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Command: codex"));
+        assert!(rendered.contains("Runtime proxy: enabled"));
+        assert!(rendered.contains("Presidio redaction: disabled"));
+    }
+
+    #[test]
+    fn runtime_launch_dry_run_value_color_highlights_status() {
+        assert_eq!(
+            runtime_launch_dry_run_value_color("Runtime proxy", "enabled"),
+            Color::Green
+        );
+        assert_eq!(
+            runtime_launch_dry_run_value_color("Presidio redaction", "disabled"),
+            Color::Yellow
+        );
+        assert_eq!(
+            runtime_launch_dry_run_value_color("Command", "codex"),
+            Color::Cyan
+        );
+    }
 }

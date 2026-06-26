@@ -1,4 +1,9 @@
 use anyhow::{Context, Result, bail};
+use crossterm::terminal;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::{
     AddProfileArgs, AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider,
@@ -9,6 +14,12 @@ use crate::{
     read_auth_json_text, repair_missing_active_profile_and_save, resolve_profile_name,
     update_existing_profile_auth,
 };
+
+#[derive(Debug, Clone)]
+struct ProfilePanel {
+    title: String,
+    fields: Vec<(String, String)>,
+}
 
 pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     prodex_profile_identity::validate_profile_name(&args.name)?;
@@ -105,7 +116,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         if state.active_profile.as_deref() == Some(updated.profile_name.as_str()) {
             fields.push(("Active".to_string(), updated.profile_name));
         }
-        print_panel("Profile Updated", &fields);
+        print_profile_panel("Profile Updated", &fields)?;
         return Ok(());
     }
 
@@ -181,7 +192,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     if state.active_profile.as_deref() == Some(args.name.as_str()) {
         fields.push(("Active".to_string(), args.name.clone()));
     }
-    print_panel("Profile Added", &fields);
+    print_profile_panel("Profile Added", &fields)?;
 
     Ok(())
 }
@@ -207,7 +218,7 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
                 "prodex profile import copilot".to_string(),
             ),
         ];
-        print_panel("Profiles", &fields);
+        print_profile_panel("Profiles", &fields)?;
         return Ok(());
     }
 
@@ -218,7 +229,10 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
             state.active_profile.as_deref().unwrap_or("-").to_string(),
         ),
     ];
-    print_panel("Profiles", &summary_fields);
+    let mut panels = vec![ProfilePanel {
+        title: "Profiles".to_string(),
+        fields: summary_fields,
+    }];
 
     for summary in collect_profile_summaries(&state) {
         let kind = if summary.managed {
@@ -227,7 +241,6 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
             "external"
         };
 
-        print_blank_line();
         let fields = vec![
             (
                 "Current".to_string(),
@@ -249,9 +262,13 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
             ),
             ("Path".to_string(), summary.codex_home.display().to_string()),
         ];
-        print_panel(&format!("Profile {}", summary.name), &fields);
+        panels.push(ProfilePanel {
+            title: format!("Profile {}", summary.name),
+            fields,
+        });
     }
 
+    print_profile_panels(&panels)?;
     Ok(())
 }
 
@@ -283,7 +300,7 @@ pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()>
             profile.codex_home.display().to_string(),
         ),
     ];
-    print_panel("Active Profile", &fields);
+    print_profile_panel("Active Profile", &fields)?;
     Ok(())
 }
 
@@ -303,7 +320,7 @@ pub(crate) fn handle_current_profile() -> Result<()> {
                 profile.codex_home.display().to_string(),
             ));
         }
-        print_panel("Active Profile", &fields);
+        print_profile_panel("Active Profile", &fields)?;
         return Ok(());
     };
 
@@ -339,6 +356,157 @@ pub(crate) fn handle_current_profile() -> Result<()> {
             profile.provider.auth_summary(&profile.codex_home).label,
         ),
     ];
-    print_panel("Active Profile", &fields);
+    print_profile_panel("Active Profile", &fields)?;
     Ok(())
+}
+
+pub(super) fn print_profile_panel(title: &str, fields: &[(String, String)]) -> Result<()> {
+    print_profile_panels(&[ProfilePanel {
+        title: title.to_string(),
+        fields: fields.to_vec(),
+    }])
+}
+
+fn print_profile_panels(panels: &[ProfilePanel]) -> Result<()> {
+    let height = profile_tui_height(panels);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        for (index, panel) in panels.iter().enumerate() {
+            if index > 0 {
+                print_blank_line();
+            }
+            print_panel(&panel.title, &panel.fields);
+        }
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Prodex Profiles",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("{} panel(s)", panels.len()),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(profile_tui_text(panels))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn profile_tui_height(panels: &[ProfilePanel]) -> u16 {
+    let rows = panels
+        .iter()
+        .map(|panel| panel.fields.len().saturating_add(2))
+        .sum::<usize>()
+        .saturating_add(4)
+        .max(8);
+    let terminal_height = terminal::size()
+        .map(|(_, height)| usize::from(height))
+        .unwrap_or(24);
+    rows.min(terminal_height).max(1) as u16
+}
+
+fn profile_tui_text(panels: &[ProfilePanel]) -> Text<'static> {
+    let mut lines = Vec::new();
+    for panel in panels {
+        if !lines.is_empty() {
+            lines.push(Line::raw(""));
+        }
+        lines.push(Line::styled(
+            panel.title.clone(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        let label_width = panel
+            .fields
+            .iter()
+            .map(|(label, _)| label.chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(22);
+        for (label, value) in &panel.fields {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{label:<label_width$} "),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    value.clone(),
+                    Style::default().fg(profile_value_color(label, value)),
+                ),
+            ]));
+        }
+    }
+    Text::from(lines)
+}
+
+fn profile_value_color(label: &str, value: &str) -> Color {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("no active") || lower.contains("missing") || lower.contains("error") {
+        Color::Red
+    } else if lower.contains("active") || lower == "yes" || label == "Active" {
+        Color::Green
+    } else if label == "Provider" || label == "Auth" || label == "Runtime route" {
+        Color::Cyan
+    } else if label == "Identity" {
+        Color::Yellow
+    } else {
+        Color::White
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_tui_text_contains_panel_fields() {
+        let panels = vec![ProfilePanel {
+            title: "Profiles".to_string(),
+            fields: vec![
+                ("Active".to_string(), "main".to_string()),
+                ("Provider".to_string(), "OpenAI".to_string()),
+            ],
+        }];
+        let text = format!("{:?}", profile_tui_text(&panels));
+        assert!(text.contains("Profiles"));
+        assert!(text.contains("main"));
+        assert!(text.contains("OpenAI"));
+    }
+
+    #[test]
+    fn profile_value_color_highlights_status() {
+        assert_eq!(profile_value_color("Active", "main"), Color::Green);
+        assert_eq!(
+            profile_value_color("Status", "No active profile."),
+            Color::Red
+        );
+        assert_eq!(profile_value_color("Provider", "OpenAI"), Color::Cyan);
+    }
 }

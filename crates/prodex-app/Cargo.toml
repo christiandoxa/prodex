@@ -21,6 +21,7 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
+crossterm = { workspace = true }
 dirs = { workspace = true }
 fs2 = { workspace = true }
 getrandom = { workspace = true }
@@ -48,6 +49,7 @@ postgres = { workspace = true }
 redaction = { workspace = true }
 redis = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
+ratatui = { workspace = true }
 rpassword = { workspace = true }
 rusqlite = { workspace = true }
 runtime_anthropic_crate = { workspace = true }

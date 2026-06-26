@@ -491,10 +491,6 @@ pub(crate) fn fetch_usage_json_with_proxy_policy(
     UsageFetchFlow::new_with_proxy_policy(codex_home, base_url, upstream_no_proxy)?.execute()
 }
 
-pub(crate) fn print_quota_reports(reports: &[QuotaReport], detail: bool) {
-    print_stdout_text(&render_quota_reports(reports, detail));
-}
-
 pub(crate) fn quota_base_url(explicit: Option<&str>) -> String {
     explicit
         .map(ToOwned::to_owned)

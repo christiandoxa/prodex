@@ -1,4 +1,17 @@
 use super::*;
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph};
+use std::io::IsTerminal;
+
 #[derive(Debug, Clone)]
 enum AllQuotaWatchSnapshot {
     Loading {
@@ -84,6 +97,40 @@ impl AllQuotaWatchRefresh {
 struct QuotaWatchInput {
     tty: fs::File,
     saved_stty_state: String,
+}
+
+struct QuotaWatchTui {
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+}
+
+impl QuotaWatchTui {
+    fn new() -> Result<Self> {
+        enable_raw_mode().context("failed to enable quota TUI raw mode")?;
+        let mut stdout = io::stdout();
+        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(err).context("failed to enter quota TUI alternate screen");
+        }
+        let backend = CrosstermBackend::new(stdout);
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(err) => {
+                let mut stdout = io::stdout();
+                let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                return Err(err).context("failed to initialize quota TUI terminal");
+            }
+        };
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for QuotaWatchTui {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
 }
 
 impl QuotaWatchInput {
@@ -249,6 +296,53 @@ fn render_all_quota_watch_snapshot(
     }
 }
 
+fn render_all_quota_watch_snapshot_with_layout(
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    scroll_offset: usize,
+    sort: QuotaReportSort,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
+    total_width: usize,
+    max_lines: Option<usize>,
+) -> String {
+    match snapshot {
+        AllQuotaWatchSnapshot::Loading { updated: _updated } => {
+            render_quota_watch_error_panel("Quota", "Loading quota data...")
+        }
+        AllQuotaWatchSnapshot::Reports {
+            updated: _updated,
+            profile_count: _profile_count,
+            reports,
+        } => render_all_quota_watch_report_output_with_layout(
+            reports,
+            detail,
+            scroll_offset,
+            sort,
+            provider_filter,
+            provider_filter_locked,
+            total_width,
+            max_lines,
+        ),
+        AllQuotaWatchSnapshot::Empty { updated: _updated } => {
+            render_quota_watch_error_panel("Quota", "No profiles configured")
+        }
+        AllQuotaWatchSnapshot::Error {
+            updated: _updated,
+            message,
+        } => render_quota_watch_error_panel("Quota", message),
+    }
+}
+
+fn quota_watch_snapshot_updated(snapshot: &AllQuotaWatchSnapshot) -> &str {
+    match snapshot {
+        AllQuotaWatchSnapshot::Loading { updated }
+        | AllQuotaWatchSnapshot::Reports { updated, .. }
+        | AllQuotaWatchSnapshot::Empty { updated }
+        | AllQuotaWatchSnapshot::Error { updated, .. } => updated,
+    }
+}
+
 fn render_all_quota_watch_report_output(
     reports: &[QuotaReport],
     detail: bool,
@@ -257,12 +351,34 @@ fn render_all_quota_watch_report_output(
     provider_filter: QuotaProviderFilter,
     provider_filter_locked: bool,
 ) -> String {
+    render_all_quota_watch_report_output_with_layout(
+        reports,
+        detail,
+        scroll_offset,
+        sort,
+        provider_filter,
+        provider_filter_locked,
+        current_cli_width(),
+        quota_watch_available_report_lines(""),
+    )
+}
+
+fn render_all_quota_watch_report_output_with_layout(
+    reports: &[QuotaReport],
+    detail: bool,
+    scroll_offset: usize,
+    sort: QuotaReportSort,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
+    total_width: usize,
+    max_lines: Option<usize>,
+) -> String {
     let filtered_reports = filter_quota_reports_by_provider(reports, provider_filter);
     let window = render_quota_reports_window_with_sort(
         &filtered_reports,
         detail,
-        quota_watch_available_report_lines(""),
-        current_cli_width(),
+        max_lines,
+        total_width,
         scroll_offset,
         true,
         sort,
@@ -367,6 +483,41 @@ pub(crate) fn watch_all_quotas(
     provider_filter: QuotaProviderFilter,
     provider_filter_locked: bool,
 ) -> Result<()> {
+    if io::stdout().is_terminal() && io::stdin().is_terminal() {
+        match watch_all_quotas_tui(
+            paths,
+            base_url,
+            detail,
+            auth_filter.clone(),
+            provider_filter,
+            provider_filter_locked,
+        ) {
+            Ok(()) => return Ok(()),
+            Err(err) if std::env::var_os("PRODEX_TUI_STRICT").is_none() => {
+                eprintln!("prodex quota TUI unavailable, falling back to plain watch: {err:#}");
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    watch_all_quotas_plain(
+        paths,
+        base_url,
+        detail,
+        auth_filter,
+        provider_filter,
+        provider_filter_locked,
+    )
+}
+
+fn watch_all_quotas_plain(
+    paths: &AppPaths,
+    base_url: Option<&str>,
+    detail: bool,
+    auth_filter: QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
+) -> Result<()> {
     let mut input = QuotaWatchInput::open();
     let mut scroll_offset = 0_usize;
     let mut sort = QuotaReportSort::Current;
@@ -461,6 +612,290 @@ pub(crate) fn watch_all_quotas(
     }
 }
 
+fn watch_all_quotas_tui(
+    paths: &AppPaths,
+    base_url: Option<&str>,
+    detail: bool,
+    auth_filter: QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
+) -> Result<()> {
+    let mut tui = QuotaWatchTui::new()?;
+    let mut scroll_offset = 0_usize;
+    let mut sort = QuotaReportSort::Current;
+    let mut provider_filter = provider_filter;
+    let collection_provider_filter = if provider_filter_locked {
+        provider_filter
+    } else {
+        QuotaProviderFilter::All
+    };
+    let mut snapshot = AllQuotaWatchSnapshot::Loading {
+        updated: quota_watch_updated_at(),
+    };
+    let mut refresh = AllQuotaWatchRefresh::new();
+    let _ = start_all_quota_watch_refresh(
+        &mut refresh,
+        paths,
+        base_url,
+        &auth_filter,
+        collection_provider_filter,
+    );
+    let mut redraw_needed = true;
+    let mut next_refresh_at = None;
+
+    loop {
+        if let Some(next_snapshot) = refresh.take_latest() {
+            snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
+            redraw_needed = true;
+            next_refresh_at = Some(quota_watch_next_refresh_at());
+        }
+
+        if redraw_needed {
+            let size = tui
+                .terminal
+                .size()
+                .context("failed to read quota TUI terminal size")?;
+            let max_lines = quota_watch_tui_report_lines(size.height);
+            scroll_offset =
+                scroll_offset.min(quota_watch_max_scroll_offset_for_snapshot_with_layout(
+                    &snapshot,
+                    detail,
+                    provider_filter,
+                    sort,
+                    max_lines,
+                    usize::from(size.width).saturating_sub(4),
+                ));
+            let frame = build_all_quota_watch_tui_frame(
+                &snapshot,
+                detail,
+                scroll_offset,
+                sort,
+                provider_filter,
+                provider_filter_locked,
+                usize::from(size.width).saturating_sub(4),
+                max_lines,
+            );
+            tui.terminal
+                .draw(|area| render_all_quota_watch_tui(area, &frame))
+                .context("failed to draw quota TUI")?;
+            redraw_needed = false;
+        }
+
+        if next_refresh_at.is_some_and(|refresh_at| Instant::now() >= refresh_at)
+            && start_all_quota_watch_refresh(
+                &mut refresh,
+                paths,
+                base_url,
+                &auth_filter,
+                collection_provider_filter,
+            )
+        {
+            next_refresh_at = None;
+            continue;
+        }
+
+        if event::poll(Duration::from_millis(QUOTA_WATCH_INPUT_POLL_MS))
+            .context("failed to poll quota TUI input")?
+        {
+            match event::read().context("failed to read quota TUI input")? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    let command = match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => Some(QuotaWatchCommand::Quit),
+                        KeyCode::Char('j') | KeyCode::Down => Some(QuotaWatchCommand::Down),
+                        KeyCode::Char('k') | KeyCode::Up => Some(QuotaWatchCommand::Up),
+                        KeyCode::Char('s') => Some(QuotaWatchCommand::Sort),
+                        KeyCode::Char('f') => Some(QuotaWatchCommand::Filter),
+                        _ => None,
+                    };
+                    let Some(command) = command else {
+                        continue;
+                    };
+                    match apply_quota_watch_command(
+                        command,
+                        scroll_offset,
+                        quota_watch_max_scroll_offset_for_snapshot_with_layout(
+                            &snapshot,
+                            detail,
+                            provider_filter,
+                            sort,
+                            quota_watch_tui_report_lines(
+                                tui.terminal.size().map(|size| size.height).unwrap_or(24),
+                            ),
+                            tui.terminal
+                                .size()
+                                .map(|size| usize::from(size.width).saturating_sub(4))
+                                .unwrap_or_else(|_| current_cli_width()),
+                        ),
+                    ) {
+                        QuotaWatchCommandOutcome::Continue(next_offset) => {
+                            if next_offset != scroll_offset {
+                                scroll_offset = next_offset;
+                                redraw_needed = true;
+                            }
+                        }
+                        QuotaWatchCommandOutcome::Sort => {
+                            sort = sort.next();
+                            scroll_offset = 0;
+                            redraw_needed = true;
+                        }
+                        QuotaWatchCommandOutcome::Filter => {
+                            if !provider_filter_locked {
+                                provider_filter = provider_filter.next();
+                                scroll_offset = 0;
+                                redraw_needed = true;
+                            }
+                        }
+                        QuotaWatchCommandOutcome::Quit => return Ok(()),
+                    }
+                }
+                Event::Resize(_, _) => {
+                    redraw_needed = true;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+struct AllQuotaWatchTuiFrame {
+    updated: String,
+    title: String,
+    body: String,
+    footer: String,
+}
+
+fn build_all_quota_watch_tui_frame(
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    scroll_offset: usize,
+    sort: QuotaReportSort,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
+    total_width: usize,
+    max_lines: Option<usize>,
+) -> AllQuotaWatchTuiFrame {
+    let body = render_all_quota_watch_snapshot_with_layout(
+        snapshot,
+        detail,
+        scroll_offset,
+        sort,
+        provider_filter,
+        provider_filter_locked,
+        total_width,
+        max_lines,
+    );
+    let provider_hint = if provider_filter_locked {
+        "provider fixed"
+    } else {
+        "f provider"
+    };
+    AllQuotaWatchTuiFrame {
+        updated: quota_watch_snapshot_updated(snapshot).to_string(),
+        title: "Prodex Quota".to_string(),
+        body,
+        footer: format!(
+            "sort {} | filter {} | s sort | {} | j/k or arrows scroll | q quit",
+            sort.label(),
+            provider_filter.label(),
+            provider_hint
+        ),
+    }
+}
+
+fn render_all_quota_watch_tui(frame: &mut ratatui::Frame<'_>, data: &AllQuotaWatchTuiFrame) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .split(frame.area());
+
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            data.title.as_str(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(data.updated.as_str(), Style::default().fg(Color::DarkGray)),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(header, chunks[0]);
+
+    let body = Paragraph::new(quota_watch_tui_text(&data.body))
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .border_style(Style::default().fg(Color::Blue)),
+        )
+        .wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(body, chunks[1]);
+
+    let footer = Paragraph::new(Line::styled(
+        data.footer.as_str(),
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(footer, chunks[2]);
+}
+
+fn quota_watch_tui_text(output: &str) -> Text<'_> {
+    Text::from(
+        output
+            .lines()
+            .map(|line| Line::from(quota_watch_tui_spans(line)))
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn quota_watch_tui_spans(line: &str) -> Vec<Span<'_>> {
+    if line.starts_with("== ") || line.starts_with("Quota Overview") {
+        return vec![Span::styled(
+            line,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )];
+    }
+    if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
+        return vec![Span::styled(line, Style::default().fg(Color::DarkGray))];
+    }
+    if line.contains("Blocked:") || line.contains("Error:") {
+        return vec![Span::styled(line, Style::default().fg(Color::Red))];
+    }
+    if line.contains("Ready") || line.contains("healthy") {
+        return vec![Span::styled(line, Style::default().fg(Color::Green))];
+    }
+    if line.contains("thin") || line.contains("critical") || line.contains("exhausted") {
+        return vec![Span::styled(line, Style::default().fg(Color::Yellow))];
+    }
+    if line.starts_with("workspace:")
+        || line.starts_with("resets:")
+        || line.starts_with("status:")
+        || line.starts_with("press ")
+    {
+        return vec![Span::styled(line, Style::default().fg(Color::Gray))];
+    }
+    vec![Span::raw(line)]
+}
+
+fn quota_watch_tui_report_lines(terminal_height: u16) -> Option<usize> {
+    Some(usize::from(terminal_height).saturating_sub(6).max(1))
+}
+
 fn start_all_quota_watch_refresh(
     refresh: &mut AllQuotaWatchRefresh,
     paths: &AppPaths,
@@ -508,6 +943,29 @@ fn quota_watch_max_scroll_offset(
     match snapshot {
         AllQuotaWatchSnapshot::Reports { reports, .. } => {
             quota_watch_max_scroll_offset_for_reports(reports, detail, provider_filter, sort)
+        }
+        _ => 0,
+    }
+}
+
+fn quota_watch_max_scroll_offset_for_snapshot_with_layout(
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    provider_filter: QuotaProviderFilter,
+    sort: QuotaReportSort,
+    max_lines: Option<usize>,
+    total_width: usize,
+) -> usize {
+    match snapshot {
+        AllQuotaWatchSnapshot::Reports { reports, .. } => {
+            quota_watch_max_scroll_offset_for_reports_with_layout(
+                reports,
+                detail,
+                provider_filter,
+                sort,
+                max_lines,
+                total_width,
+            )
         }
         _ => 0,
     }

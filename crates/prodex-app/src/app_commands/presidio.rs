@@ -1,12 +1,16 @@
 use crate::{
     AppPaths, PresidioCommands, PresidioDoctorArgs, PresidioEnableArgs, PresidioLanguageMode,
-    PresidioRedactArgs,
+    PresidioRedactArgs, print_launch_status,
 };
 use anyhow::{Context, Result, bail};
 use prodex_presidio::{
     PresidioAnalyzerResult, PresidioHealth, presidio_analyze, presidio_anonymize,
     presidio_http_client, probe_presidio_health, validate_presidio_url,
 };
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -25,6 +29,12 @@ const PRESIDIO_ANALYZER_CONTAINER: &str = "presidio-analyzer";
 const PRESIDIO_ANONYMIZER_CONTAINER: &str = "presidio-anonymizer";
 const PRESIDIO_ANALYZER_IMAGE: &str = "mcr.microsoft.com/presidio-analyzer:latest";
 const PRESIDIO_ANONYMIZER_IMAGE: &str = "mcr.microsoft.com/presidio-anonymizer:latest";
+
+#[derive(Debug, Clone)]
+struct PresidioPanel {
+    title: String,
+    fields: Vec<(String, String)>,
+}
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct ProdexPresidioConfig {
@@ -65,41 +75,41 @@ pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Res
     let config = load_presidio_config(paths)?.unwrap_or_default();
     let analyzer_url = config.analyzer_url;
     let anonymizer_url = config.anonymizer_url;
-    eprintln!(
-        "Prodex launch: Presidio redaction enabled; checking Analyzer={} Anonymizer={} ...",
+    print_launch_status(&format!(
+        "Presidio redaction enabled; checking Analyzer={} Anonymizer={} ...",
         analyzer_url, anonymizer_url
-    );
+    ));
     let client = presidio_http_client()?;
     let analyzer = probe_presidio_health(&client, &analyzer_url);
     let anonymizer = probe_presidio_health(&client, &anonymizer_url);
     if analyzer.ok && anonymizer.ok {
-        eprintln!("Prodex launch: Presidio services are ready.");
+        print_launch_status("Presidio services are ready.");
         return Ok(());
     }
 
     if presidio_auto_start_disabled() {
-        eprintln!(
-            "Prodex launch: Presidio auto-start disabled by {PRESIDIO_AUTO_START_ENV}=0; continuing with configured endpoints."
-        );
+        print_launch_status(&format!(
+            "Presidio auto-start disabled by {PRESIDIO_AUTO_START_ENV}=0; continuing with configured endpoints."
+        ));
         return Ok(());
     }
 
     if analyzer_url != DEFAULT_PRESIDIO_ANALYZER_URL
         || anonymizer_url != DEFAULT_PRESIDIO_ANONYMIZER_URL
     {
-        eprintln!(
-            "Prodex launch: Presidio uses custom endpoints; not starting Docker containers automatically."
+        print_launch_status(
+            "Presidio uses custom endpoints; not starting Docker containers automatically.",
         );
         return Ok(());
     }
 
     if !docker_available() {
-        eprintln!("Prodex launch: Docker is unavailable, so Presidio containers were not started.");
+        print_launch_status("Docker is unavailable, so Presidio containers were not started.");
         return Ok(());
     }
 
     if !analyzer.ok {
-        eprintln!("Prodex launch: starting Presidio Analyzer Docker container...");
+        print_launch_status("starting Presidio Analyzer Docker container...");
         ensure_presidio_container(
             PRESIDIO_ANALYZER_CONTAINER,
             PRESIDIO_ANALYZER_IMAGE,
@@ -107,7 +117,7 @@ pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Res
         )?;
     }
     if !anonymizer.ok {
-        eprintln!("Prodex launch: starting Presidio Anonymizer Docker container...");
+        print_launch_status("starting Presidio Anonymizer Docker container...");
         ensure_presidio_container(
             PRESIDIO_ANONYMIZER_CONTAINER,
             PRESIDIO_ANONYMIZER_IMAGE,
@@ -115,22 +125,22 @@ pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Res
         )?;
     }
 
-    eprintln!("Prodex launch: waiting for Presidio services to become ready...");
+    print_launch_status("waiting for Presidio services to become ready...");
     let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
         let analyzer = probe_presidio_health(&client, &analyzer_url);
         let anonymizer = probe_presidio_health(&client, &anonymizer_url);
         if analyzer.ok && anonymizer.ok {
-            eprintln!("Prodex launch: Presidio services are ready.");
+            print_launch_status("Presidio services are ready.");
             return Ok(());
         }
         thread::sleep(Duration::from_secs(2));
     }
 
-    eprintln!(
-        "Prodex launch: Presidio services did not become healthy before launch; continuing with runtime fail_mode={}.",
+    print_launch_status(&format!(
+        "Presidio services did not become healthy before launch; continuing with runtime fail_mode={}.",
         config.fail_mode
-    );
+    ));
     Ok(())
 }
 
@@ -174,9 +184,9 @@ fn handle_presidio_doctor(args: PresidioDoctorArgs) -> Result<()> {
         return Ok(());
     }
 
-    print_panel(
+    print_presidio_panel(
         "Presidio",
-        &[
+        vec![
             (
                 "Config".to_string(),
                 presidio_config_path(&paths).display().to_string(),
@@ -197,7 +207,7 @@ fn handle_presidio_doctor(args: PresidioDoctorArgs) -> Result<()> {
             ),
             ("Languages".to_string(), languages.join(", ")),
         ],
-    );
+    )?;
     Ok(())
 }
 
@@ -206,9 +216,9 @@ fn handle_presidio_status() -> Result<()> {
     let config = load_presidio_config(&paths)?.unwrap_or_default();
     let (languages, language_mode) = resolve_languages_and_mode(&config);
 
-    print_panel(
+    print_presidio_panel(
         "Presidio",
-        &[
+        vec![
             (
                 "Config".to_string(),
                 presidio_config_path(&paths).display().to_string(),
@@ -223,7 +233,7 @@ fn handle_presidio_status() -> Result<()> {
             ("Languages".to_string(), languages.join(", ")),
             ("Fail mode".to_string(), config.fail_mode),
         ],
-    );
+    )?;
     Ok(())
 }
 
@@ -254,9 +264,9 @@ fn handle_presidio_enable(args: PresidioEnableArgs) -> Result<()> {
         fail_mode: args.fail_mode.as_str().to_string(),
     };
     save_presidio_config(&paths, &config)?;
-    print_panel(
+    print_presidio_panel(
         "Presidio",
-        &[
+        vec![
             (
                 "Config".to_string(),
                 presidio_config_path(&paths).display().to_string(),
@@ -271,7 +281,7 @@ fn handle_presidio_enable(args: PresidioEnableArgs) -> Result<()> {
             ("Languages".to_string(), languages.join(", ")),
             ("Fail mode".to_string(), config.fail_mode),
         ],
-    );
+    )?;
     Ok(())
 }
 
@@ -280,17 +290,103 @@ fn handle_presidio_disable() -> Result<()> {
     let mut config = load_presidio_config(&paths)?.unwrap_or_default();
     config.enabled = false;
     save_presidio_config(&paths, &config)?;
-    print_panel(
+    print_presidio_panel(
         "Presidio",
-        &[
+        vec![
             (
                 "Config".to_string(),
                 presidio_config_path(&paths).display().to_string(),
             ),
             ("Enabled".to_string(), "false".to_string()),
         ],
-    );
+    )?;
     Ok(())
+}
+
+fn print_presidio_panel(title: &str, fields: Vec<(String, String)>) -> Result<()> {
+    let panel = PresidioPanel {
+        title: title.to_string(),
+        fields,
+    };
+    let height = presidio_tui_height(&panel);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        print_panel(&panel.title, &panel.fields);
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Prodex Presidio",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(&panel.title, Style::default().fg(Color::DarkGray)),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(presidio_tui_text(&panel))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn presidio_tui_height(panel: &PresidioPanel) -> u16 {
+    let rows = 4usize.saturating_add(panel.fields.len());
+    rows.clamp(6, 24) as u16
+}
+
+fn presidio_tui_text(panel: &PresidioPanel) -> Text<'static> {
+    let mut lines = Vec::with_capacity(panel.fields.len() + 1);
+    lines.push(Line::from(vec![Span::styled(
+        panel.title.clone(),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    for (label, value) in &panel.fields {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{label:>18} "),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(value.clone(), presidio_value_style(label, value)),
+        ]));
+    }
+    Text::from(lines)
+}
+
+fn presidio_value_style(label: &str, value: &str) -> Style {
+    let lower_label = label.to_ascii_lowercase();
+    let lower_value = value.to_ascii_lowercase();
+    if (lower_label.contains("health") && lower_value.starts_with("ok"))
+        || (lower_label == "enabled" && lower_value == "true")
+    {
+        Style::default().fg(Color::Green)
+    } else if lower_label.contains("health") && lower_value.starts_with("failed")
+        || lower_label == "enabled" && lower_value == "false"
+    {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::White)
+    }
 }
 
 fn handle_presidio_redact(args: PresidioRedactArgs) -> Result<()> {
@@ -614,4 +710,50 @@ fn merge_presidio_analyzer_results(
         merged.push(result);
     }
     merged
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presidio_tui_text_contains_fields() {
+        let panel = PresidioPanel {
+            title: "Presidio".to_string(),
+            fields: vec![
+                ("Enabled".to_string(), "true".to_string()),
+                ("Analyzer health".to_string(), "ok (ready)".to_string()),
+            ],
+        };
+
+        let text = presidio_tui_text(&panel);
+        let rendered = text
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Presidio"));
+        assert!(rendered.contains("Enabled"));
+        assert!(rendered.contains("ok (ready)"));
+        assert_eq!(presidio_tui_height(&panel), 6);
+    }
+
+    #[test]
+    fn presidio_value_style_highlights_status() {
+        assert_eq!(
+            presidio_value_style("Analyzer health", "ok (ready)").fg,
+            Some(Color::Green)
+        );
+        assert_eq!(
+            presidio_value_style("Enabled", "false").fg,
+            Some(Color::Yellow)
+        );
+    }
 }

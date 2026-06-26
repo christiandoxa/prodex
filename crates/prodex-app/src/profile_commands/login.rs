@@ -1,6 +1,17 @@
 use anyhow::{Context, Result, bail};
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 #[cfg(windows)]
@@ -27,16 +38,17 @@ use self::login_menu::{
 };
 use self::profile_names::*;
 use self::request::*;
+use super::manage::print_profile_panel;
 use super::write_secret_text_file;
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
     agy_bin, codex_child_plan, create_codex_home_if_missing, ensure_managed_profiles_root,
     exit_with_status, fetch_profile_email, fetch_profile_identity, find_profile_by_identity,
     login_with_claude_oauth, login_with_google_oauth, managed_profile_home_path,
-    persist_login_home, prepare_managed_codex_home, print_panel, read_auth_summary,
-    read_gemini_oauth_secret, remove_dir_if_exists, required_auth_json_text, resolve_profile_name,
-    run_child_plan, unique_profile_name_for_email, update_existing_profile_auth,
-    write_gemini_oauth_secret, write_profile_openai_compatible_base_url,
+    persist_login_home, prepare_managed_codex_home, read_auth_summary, read_gemini_oauth_secret,
+    remove_dir_if_exists, required_auth_json_text, resolve_profile_name, run_child_plan,
+    unique_profile_name_for_email, update_existing_profile_auth, write_gemini_oauth_secret,
+    write_profile_openai_compatible_base_url,
 };
 use prodex_runtime_launch::ChildProcessPlan;
 
@@ -250,7 +262,7 @@ fn finish_named_profile_login(
         ("Profile".to_string(), profile_name.to_string()),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 
@@ -364,7 +376,7 @@ fn finish_auto_login_for_existing_profile(
             updated.codex_home.display().to_string(),
         ),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 
@@ -400,7 +412,7 @@ fn finish_auto_login_for_new_profile(
         ("Profile".to_string(), profile_name),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 
@@ -609,10 +621,20 @@ fn login_request_for_method(
 }
 
 fn prompt_api_key() -> Result<String> {
-    let api_key = rpassword::prompt_password("OpenAI/OpenAI-compatible API key: ")
-        .context("failed to read API key")?
-        .trim()
-        .to_string();
+    let api_key = if io::stdin().is_terminal() && io::stderr().is_terminal() {
+        prompt_login_text_tui(
+            "Prodex Login",
+            "OpenAI/OpenAI-compatible API key",
+            "Paste the key for OpenAI or an OpenAI-compatible provider.",
+            None,
+            true,
+        )?
+    } else {
+        rpassword::prompt_password("OpenAI/OpenAI-compatible API key: ")
+            .context("failed to read API key")?
+    }
+    .trim()
+    .to_string();
     if api_key.is_empty() {
         bail!("API key cannot be empty");
     }
@@ -620,6 +642,17 @@ fn prompt_api_key() -> Result<String> {
 }
 
 fn prompt_openai_compatible_base_url() -> Result<Option<String>> {
+    if io::stdin().is_terminal() && io::stderr().is_terminal() {
+        let input = prompt_login_text_tui(
+            "Prodex Login",
+            "OpenAI-compatible base URL",
+            "Use the default OpenAI endpoint or enter a local/provider endpoint such as http://localhost:11434/v1.",
+            Some("https://api.openai.com/v1"),
+            false,
+        )?;
+        return normalize_optional_base_url(input.trim());
+    }
+
     let mut stderr = io::stderr();
     write!(
         stderr,
@@ -634,6 +667,22 @@ fn prompt_openai_compatible_base_url() -> Result<Option<String>> {
 }
 
 fn prompt_profile_name(default_profile_name: &str) -> Result<String> {
+    if io::stdin().is_terminal() && io::stderr().is_terminal() {
+        let input = prompt_login_text_tui(
+            "Prodex Login",
+            "Profile name",
+            "Leave empty to use the suggested managed profile name.",
+            Some(default_profile_name),
+            false,
+        )?;
+        let profile_name = input.trim();
+        return Ok(if profile_name.is_empty() {
+            default_profile_name.to_string()
+        } else {
+            sanitize_profile_slug(profile_name)
+        });
+    }
+
     let mut stderr = io::stderr();
     write!(stderr, "Profile name [{default_profile_name}]: ")?;
     stderr.flush()?;
@@ -647,6 +696,150 @@ fn prompt_profile_name(default_profile_name: &str) -> Result<String> {
     } else {
         sanitize_profile_slug(profile_name)
     })
+}
+
+struct LoginTextPromptTui {
+    terminal: Terminal<CrosstermBackend<io::Stderr>>,
+}
+
+impl LoginTextPromptTui {
+    fn new() -> Result<Self> {
+        enable_raw_mode().context("failed to enable login input TUI raw mode")?;
+        let mut stderr = io::stderr();
+        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(err).context("failed to enter login input TUI alternate screen");
+        }
+        let backend = CrosstermBackend::new(stderr);
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(err) => {
+                let mut stderr = io::stderr();
+                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                return Err(err).context("failed to initialize login input TUI terminal");
+            }
+        };
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for LoginTextPromptTui {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
+fn prompt_login_text_tui(
+    title: &str,
+    label: &str,
+    detail: &str,
+    default_value: Option<&str>,
+    secret: bool,
+) -> Result<String> {
+    let mut tui = LoginTextPromptTui::new()?;
+    let mut input = String::new();
+    loop {
+        tui.terminal.draw(|frame| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(5),
+                    Constraint::Length(3),
+                ])
+                .split(frame.area());
+            let header = Paragraph::new(Line::from(vec![
+                Span::styled(
+                    title.to_string(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(label.to_string(), Style::default().fg(Color::DarkGray)),
+            ]))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+            frame.render_widget(header, chunks[0]);
+
+            let display_value = if secret {
+                "*".repeat(input.chars().count())
+            } else if input.is_empty() {
+                default_value.unwrap_or("").to_string()
+            } else {
+                input.clone()
+            };
+            let value_style = if input.is_empty() && default_value.is_some() && !secret {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let body = Paragraph::new(vec![
+                Line::from(Span::styled(
+                    label.to_string(),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::raw(""),
+                Line::from(Span::styled(
+                    detail.to_string(),
+                    Style::default().fg(Color::Gray),
+                )),
+                Line::raw(""),
+                Line::from(vec![
+                    Span::styled("> ", Style::default().fg(Color::Cyan)),
+                    Span::styled(display_value, value_style),
+                    Span::styled("_", Style::default().fg(Color::Cyan)),
+                ]),
+            ])
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+            frame.render_widget(body, chunks[1]);
+
+            let footer = Paragraph::new(Line::from(vec![
+                Span::styled("enter", Style::default().fg(Color::Green)),
+                Span::raw(" accept  "),
+                Span::styled("backspace", Style::default().fg(Color::Yellow)),
+                Span::raw(" delete  "),
+                Span::styled("esc", Style::default().fg(Color::Yellow)),
+                Span::raw(" cancel"),
+            ]))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+            frame.render_widget(footer, chunks[2]);
+        })?;
+
+        if let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Enter => return Ok(input),
+                KeyCode::Esc => bail!("login input cancelled"),
+                KeyCode::Backspace => {
+                    input.pop();
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    bail!("login input cancelled");
+                }
+                KeyCode::Char(ch) => input.push(ch),
+                _ => {}
+            }
+        }
+    }
 }
 
 fn extract_login_base_url(

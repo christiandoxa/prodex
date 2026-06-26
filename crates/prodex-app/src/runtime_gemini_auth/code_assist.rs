@@ -2,8 +2,18 @@ use super::{
     GeminiOAuthSecret, gemini_oauth_project_from_env, normalize_gemini_project_id,
     refresh_gemini_oauth_secret_if_needed, write_gemini_oauth_secret,
 };
-use crate::print_wrapped_stderr;
 use anyhow::{Context, Result, bail};
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -485,19 +495,129 @@ pub(super) fn handle_gemini_validation(
     if matches!(mode, GeminiCodeAssistSetupMode::NonInteractive) {
         bail!("{}", gemini_validation_error_message(validation));
     }
-    print_wrapped_stderr(&gemini_validation_error_message(validation));
-    if let Some(url) = validation.url.as_deref() {
-        let _ = super::oauth::open_browser(url);
-    }
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         bail!("Gemini account validation requires an interactive terminal");
     }
-    print_wrapped_stderr("Press Enter when Gemini account verification is complete.");
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .context("failed to read Gemini account validation confirmation")?;
+    if let Some(url) = validation.url.as_deref() {
+        let _ = super::oauth::open_browser(url);
+    }
+    prompt_gemini_validation_tui(validation)?;
     Ok(())
+}
+
+struct GeminiValidationTui {
+    terminal: Terminal<CrosstermBackend<io::Stderr>>,
+}
+
+impl GeminiValidationTui {
+    fn new() -> Result<Self> {
+        enable_raw_mode().context("failed to enable Gemini validation TUI raw mode")?;
+        let mut stderr = io::stderr();
+        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(err).context("failed to enter Gemini validation TUI alternate screen");
+        }
+        let backend = CrosstermBackend::new(stderr);
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(err) => {
+                let mut stderr = io::stderr();
+                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                return Err(err).context("failed to initialize Gemini validation TUI terminal");
+            }
+        };
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for GeminiValidationTui {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
+fn prompt_gemini_validation_tui(validation: &GeminiCodeAssistValidation) -> Result<()> {
+    let message = gemini_validation_error_message(validation);
+    let mut tui = GeminiValidationTui::new()?;
+    loop {
+        tui.terminal.draw(|frame| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(5),
+                    Constraint::Length(3),
+                ])
+                .split(frame.area());
+            let header = Paragraph::new(Line::from(vec![
+                Span::styled(
+                    "Gemini Account Validation",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled("action required", Style::default().fg(Color::Yellow)),
+            ]))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+            frame.render_widget(header, chunks[0]);
+
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    message.clone(),
+                    Style::default().fg(Color::White),
+                )),
+                Line::raw(""),
+            ];
+            if let Some(url) = validation.url.as_deref() {
+                lines.push(Line::from(vec![
+                    Span::styled("Open ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(url.to_string(), Style::default().fg(Color::Green)),
+                ]));
+            }
+            if let Some(url) = validation.learn_more_url.as_deref() {
+                lines.push(Line::from(vec![
+                    Span::styled("Learn ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(url.to_string(), Style::default().fg(Color::Green)),
+                ]));
+            }
+            let body = Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::LEFT | Borders::RIGHT)
+                        .border_style(Style::default().fg(Color::Blue)),
+                )
+                .wrap(Wrap { trim: false });
+            frame.render_widget(body, chunks[1]);
+
+            let footer = Paragraph::new(Line::from(vec![
+                Span::styled("enter", Style::default().fg(Color::Green)),
+                Span::raw(" continue after verification  "),
+                Span::styled("esc", Style::default().fg(Color::Yellow)),
+                Span::raw(" continue"),
+            ]))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+            frame.render_widget(footer, chunks[2]);
+        })?;
+
+        if let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+            && matches!(key.code, KeyCode::Enter | KeyCode::Esc)
+        {
+            return Ok(());
+        }
+    }
 }
 
 pub(super) fn gemini_validation_error_message(validation: &GeminiCodeAssistValidation) -> String {

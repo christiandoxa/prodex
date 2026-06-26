@@ -1,8 +1,9 @@
+use super::super::manage::print_profile_panel;
 use super::super::write_secret_text_file;
 use super::{default_api_key_profile_name, unique_profile_name_for_slug};
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, create_codex_home_if_missing,
-    managed_profile_home_path, persist_login_home, prepare_managed_codex_home, print_panel,
+    managed_profile_home_path, persist_login_home, prepare_managed_codex_home,
     remove_dir_if_exists, update_existing_profile_auth, write_profile_openai_compatible_base_url,
 };
 use anyhow::{Context, Result, bail};
@@ -95,7 +96,7 @@ fn finish_api_key_login_for_existing_profile(
             updated.codex_home.display().to_string(),
         ),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 
@@ -136,7 +137,7 @@ fn finish_api_key_login_for_new_profile(
         ("Profile".to_string(), profile_name),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 

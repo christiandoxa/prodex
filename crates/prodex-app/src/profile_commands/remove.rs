@@ -1,3 +1,4 @@
+use super::manage::print_profile_panel;
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::fs;
@@ -6,7 +7,7 @@ use std::path::PathBuf;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, RemoveProfileArgs,
     audit_log_event_best_effort, load_runtime_continuation_journal_with_recovery,
-    load_runtime_continuations_with_recovery, print_panel, runtime_continuation_journal_file_path,
+    load_runtime_continuations_with_recovery, runtime_continuation_journal_file_path,
     runtime_continuation_journal_last_good_file_path, runtime_continuations_file_path,
     runtime_continuations_last_good_file_path, save_runtime_continuation_journal_for_profiles,
     save_runtime_continuations_for_profiles,
@@ -65,14 +66,14 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
     persist_pruned_profile_runtime_sidecars(&paths, &state.profiles)?;
 
     if args.all {
-        print_bulk_profile_removal_result(&state, &removed_profiles);
+        print_bulk_profile_removal_result(&state, &removed_profiles)?;
         return Ok(());
     }
 
     let Some(removed_profile) = removed_profiles.into_iter().next() else {
         bail!("internal error: single-profile removal did not remove a profile");
     };
-    print_single_profile_removal_result(&state, removed_profile);
+    print_single_profile_removal_result(&state, removed_profile)?;
 
     Ok(())
 }
@@ -137,7 +138,10 @@ fn prune_removed_profile_metadata(state: &mut AppState, target_names: &[String])
     state.active_profile = plan.active_profile;
 }
 
-fn print_bulk_profile_removal_result(state: &AppState, removed_profiles: &[RemovedProfileRecord]) {
+fn print_bulk_profile_removal_result(
+    state: &AppState,
+    removed_profiles: &[RemovedProfileRecord],
+) -> Result<()> {
     audit_log_event_best_effort(
         "profile",
         "remove",
@@ -182,10 +186,13 @@ fn print_bulk_profile_removal_result(state: &AppState, removed_profiles: &[Remov
                 .join(", "),
         ));
     }
-    print_panel("Profiles Removed", &fields);
+    print_profile_panel("Profiles Removed", &fields)
 }
 
-fn print_single_profile_removal_result(state: &AppState, removed_profile: RemovedProfileRecord) {
+fn print_single_profile_removal_result(
+    state: &AppState,
+    removed_profile: RemovedProfileRecord,
+) -> Result<()> {
     audit_log_event_best_effort(
         "profile",
         "remove",
@@ -220,5 +227,5 @@ fn print_single_profile_removal_result(state: &AppState, removed_profile: Remove
                 .unwrap_or_else(|| "cleared".to_string()),
         ),
     ];
-    print_panel("Profile Removed", &fields);
+    print_profile_panel("Profile Removed", &fields)
 }

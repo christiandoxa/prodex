@@ -2,7 +2,12 @@ use prodex_profile_export::{
     ImportedExistingProfileAuthUpdateJournal, ProfileImportAuthUpdatePlan, ProfileImportIdentity,
     ProfileImportPlanAction, ProfileImportPlanInput,
 };
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+use super::super::manage::print_profile_panel;
 use super::passwords::read_profile_export_payload;
 use super::secrets::write_secret_text_file;
 use super::*;
@@ -22,30 +27,30 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
 
     let bundle_path = absolutize(args.path)?;
     let (payload, encrypted) = read_profile_export_payload(&bundle_path)?;
-    print_stderr_line(&format!(
+    print_profile_import_progress(&format!(
         "Importing {} profile(s)...",
         payload.profiles.len()
-    ));
+    ))?;
     let source_active_profile = payload.active_profile.clone();
 
     let paths = AppPaths::discover()?;
     let mut state = AppState::load(&paths)?;
-    print_stderr_line("Checking existing profiles...");
+    print_profile_import_progress("Checking existing profiles...")?;
     let recovered_auth_updates = recover_imported_auth_update_journals(&paths, &mut state)?;
     if recovered_auth_updates > 0 {
-        print_stderr_line("Recovering interrupted profile import...");
+        print_profile_import_progress("Recovering interrupted profile import...")?;
         state
             .save(&paths)
             .context("failed to save recovered import auth rollback state")?;
     }
-    print_stderr_line("Staging imported profiles...");
+    print_profile_import_progress("Staging imported profiles...")?;
     let commit = import_profile_export_payload(&paths, &mut state, &payload)?;
-    print_stderr_line("Saving imported profiles...");
+    print_profile_import_progress("Saving imported profiles...")?;
     if let Err(err) = state.save(&paths) {
         rollback_imported_profiles(&mut state, &commit);
         return Err(err);
     }
-    print_stderr_line("Profile import complete.");
+    print_profile_import_progress("Profile import complete.")?;
     prodex_profile_export::cleanup_imported_auth_update_journals(&commit);
     audit_log_event_best_effort(
         "profile",
@@ -73,7 +78,50 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
             active_profile: state.active_profile.clone(),
         },
     );
-    print_panel("Profile Import", &fields);
+    print_profile_panel("Profile Import", &fields)?;
+    Ok(())
+}
+
+fn print_profile_import_progress(message: &str) -> Result<()> {
+    let Some(mut terminal) = crate::try_inline_stderr_terminal(5) else {
+        print_stderr_line(message);
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Profile Import",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled("progress", Style::default().fg(Color::DarkGray)),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(Line::from(vec![
+            Span::styled("Status ", Style::default().fg(Color::DarkGray)),
+            Span::styled(message.to_string(), Style::default().fg(Color::White)),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                .border_style(Style::default().fg(Color::Blue)),
+        )
+        .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
     Ok(())
 }
 

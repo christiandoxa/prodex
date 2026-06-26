@@ -1,8 +1,9 @@
+use super::super::manage::print_profile_panel;
 use super::unique_profile_name_for_slug;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider,
     claude_oauth_profile_identity, copy_claude_oauth_credentials, create_codex_home_if_missing,
-    managed_profile_home_path, prepare_managed_codex_home, print_panel, remove_dir_if_exists,
+    managed_profile_home_path, prepare_managed_codex_home, remove_dir_if_exists,
 };
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -64,7 +65,7 @@ pub(super) fn finish_named_anthropic_profile_login(
         ("Profile".to_string(), profile_name.to_string()),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 
@@ -126,7 +127,7 @@ fn finish_anthropic_login_for_existing_profile(
         ("Profile".to_string(), profile_name.to_string()),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 
@@ -174,6 +175,6 @@ fn finish_anthropic_login_for_new_profile(
         ("Profile".to_string(), profile_name),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }

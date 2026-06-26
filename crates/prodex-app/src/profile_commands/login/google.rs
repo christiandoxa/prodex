@@ -1,8 +1,9 @@
+use super::super::manage::print_profile_panel;
 use super::unique_profile_name_for_slug;
 use crate::{
     AppPaths, AppState, AppStateIoExt, GeminiOAuthSecret, ProfileEntry, ProfileProvider,
     create_codex_home_if_missing, managed_profile_home_path, prepare_managed_codex_home,
-    print_panel, remove_dir_if_exists, write_gemini_oauth_secret,
+    remove_dir_if_exists, write_gemini_oauth_secret,
 };
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -58,7 +59,7 @@ pub(super) fn finish_named_gemini_profile_login(
         ("Profile".to_string(), profile_name.to_string()),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 
@@ -112,7 +113,7 @@ fn finish_gemini_login_for_existing_profile(
         ("Profile".to_string(), profile_name.to_string()),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }
 
@@ -156,6 +157,6 @@ fn finish_gemini_login_for_new_profile(
         ("Profile".to_string(), profile_name),
         ("CODEX_HOME".to_string(), codex_home.display().to_string()),
     ];
-    print_panel("Login", &fields);
+    print_profile_panel("Login", &fields)?;
     Ok(())
 }

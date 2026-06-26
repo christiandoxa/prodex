@@ -1,11 +1,15 @@
 use anyhow::{Context, Result, bail};
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, QuotaArgs, QuotaAuthFilter, QuotaProviderFilter,
     collect_quota_reports, collect_quota_reports_with_filters, fetch_profile_quota,
-    fetch_profile_quota_json, print_quota_reports, print_stdout_line, quota_watch_enabled,
-    render_profile_quota_snapshot, repair_missing_active_profile_and_save, resolve_profile_name,
-    watch_all_quotas, watch_quota,
+    fetch_profile_quota_json, print_stdout_line, print_stdout_text, quota_watch_enabled,
+    render_profile_quota_snapshot, render_quota_reports, repair_missing_active_profile_and_save,
+    resolve_profile_name, watch_all_quotas, watch_quota,
 };
 
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
@@ -58,7 +62,7 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
                 provider_filter,
             )
         };
-        print_quota_reports(&reports, args.detail);
+        print_quota_human("Quota", &render_quota_reports(&reports, args.detail))?;
         return Ok(());
     }
 
@@ -87,6 +91,50 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
     }
 
     let quota = fetch_profile_quota(&profile.provider, &codex_home, args.base_url.as_deref())?;
-    print_stdout_line(&render_profile_quota_snapshot(&profile_name, &quota));
+    print_quota_human(
+        "Quota",
+        &render_profile_quota_snapshot(&profile_name, &quota),
+    )?;
+    Ok(())
+}
+
+fn print_quota_human(title: &str, output: &str) -> Result<()> {
+    let height = output.lines().count().saturating_add(4).clamp(6, 28) as u16;
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        print_stdout_text(output);
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Prodex Quota",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(title.to_string(), Style::default().fg(Color::DarkGray)),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(output.to_string())
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
     Ok(())
 }

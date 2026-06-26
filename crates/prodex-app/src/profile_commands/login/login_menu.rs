@@ -1,11 +1,21 @@
 use super::LoginMethod;
-use crate::{current_cli_width, terminal_height_lines};
 use anyhow::{Context, Result, bail};
-use std::io::{self, IsTerminal, Read, Write};
-use std::process::{Command, Stdio};
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+#[cfg(test)]
+use std::io::Read;
+use std::io::{self, IsTerminal, Write};
 
 const LOGIN_MENU_MIN_VISIBLE_ITEMS: usize = 3;
-const LOGIN_MENU_FALLBACK_ROWS: usize = 24;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LoginMenuAction {
@@ -49,6 +59,40 @@ enum LoginMenuKey {
     Cancel,
     Digit(usize),
     Ignore,
+}
+
+struct LoginMenuTui {
+    terminal: Terminal<CrosstermBackend<io::Stderr>>,
+}
+
+impl LoginMenuTui {
+    fn new() -> Result<Self> {
+        enable_raw_mode().context("failed to enable login TUI raw mode")?;
+        let mut stderr = io::stderr();
+        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(err).context("failed to enter login TUI alternate screen");
+        }
+        let backend = CrosstermBackend::new(stderr);
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(err) => {
+                let mut stderr = io::stderr();
+                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                return Err(err).context("failed to initialize login TUI terminal");
+            }
+        };
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for LoginMenuTui {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
 }
 
 pub(super) fn login_prompt_is_interactive() -> bool {
@@ -150,27 +194,35 @@ pub(super) fn prompt_login_menu_action() -> Result<LoginMenuAction> {
 
 fn prompt_login_menu_action_raw() -> Result<Option<LoginMenuAction>> {
     let entries = login_menu_entries();
-    let _raw_mode = match LoginRawMode::enter() {
-        Ok(raw_mode) => raw_mode,
+    let mut tui = match LoginMenuTui::new() {
+        Ok(tui) => tui,
         Err(_) => return Ok(None),
     };
-    let _screen = match LoginMenuScreen::enter() {
-        Ok(screen) => screen,
-        Err(_) => return Ok(None),
-    };
-    let stdin = io::stdin();
-    let mut stdin = stdin.lock();
     let mut selected = 0usize;
     let mut offset = 0usize;
 
     loop {
-        let layout = login_menu_layout_for_rows(
-            terminal_height_lines().unwrap_or(LOGIN_MENU_FALLBACK_ROWS),
-            entries.len(),
-        );
+        let size = tui
+            .terminal
+            .size()
+            .context("failed to read login TUI terminal size")?;
+        let layout = login_menu_layout_for_rows(usize::from(size.height), entries.len());
         offset = login_menu_window_offset(selected, offset, layout.visible_items, entries.len());
-        render_login_menu_to_stderr(entries, selected, offset, layout)?;
-        match read_login_menu_key(&mut stdin).context("failed to read login menu key")? {
+        tui.terminal
+            .draw(|frame| render_login_menu_tui(frame, entries, selected, offset, layout))
+            .context("failed to draw login TUI")?;
+        let key = loop {
+            match event::read().context("failed to read login TUI input")? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    break login_menu_key_from_event(key);
+                }
+                Event::Resize(_, _) => {
+                    break LoginMenuKey::Ignore;
+                }
+                _ => {}
+            }
+        };
+        match key {
             LoginMenuKey::Up => {
                 selected = selected.saturating_sub(1);
             }
@@ -200,6 +252,23 @@ fn prompt_login_menu_action_raw() -> Result<Option<LoginMenuAction>> {
             LoginMenuKey::Cancel => bail!("login cancelled"),
             LoginMenuKey::Ignore => {}
         }
+    }
+}
+
+fn login_menu_key_from_event(key: KeyEvent) -> LoginMenuKey {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => LoginMenuKey::Up,
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => LoginMenuKey::Down,
+        KeyCode::PageUp | KeyCode::Char('u') | KeyCode::Char('U') => LoginMenuKey::PageUp,
+        KeyCode::PageDown | KeyCode::Char('d') | KeyCode::Char('D') => LoginMenuKey::PageDown,
+        KeyCode::Home | KeyCode::Char('g') => LoginMenuKey::Home,
+        KeyCode::End | KeyCode::Char('G') => LoginMenuKey::End,
+        KeyCode::Enter => LoginMenuKey::Enter,
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => LoginMenuKey::Cancel,
+        KeyCode::Char(ch) if ('1'..='9').contains(&ch) => {
+            LoginMenuKey::Digit(ch.to_digit(10).unwrap_or(0) as usize)
+        }
+        _ => LoginMenuKey::Ignore,
     }
 }
 
@@ -307,25 +376,165 @@ fn login_menu_window_offset(
     }
 }
 
-fn render_login_menu_to_stderr(
+fn render_login_menu_tui(
+    frame: &mut ratatui::Frame<'_>,
     entries: &[LoginMenuEntry],
     selected: usize,
     offset: usize,
     layout: LoginMenuLayout,
-) -> Result<()> {
-    let lines = render_login_menu(entries, selected, offset, layout, current_cli_width());
-    let mut stderr = io::stderr();
-    write!(stderr, "\x1b[H\x1b[2J")?;
-    for (index, line) in lines.iter().enumerate() {
-        if index > 0 {
-            write!(stderr, "\r\n")?;
-        }
-        write!(stderr, "{line}")?;
-    }
-    stderr.flush()?;
-    Ok(())
+) {
+    let area = frame.area();
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(4),
+            Constraint::Length(if layout.compact { 5 } else { 7 }),
+        ])
+        .split(area);
+
+    let visible_items = layout.visible_items.max(1).min(entries.len().max(1));
+    let end = offset.saturating_add(visible_items).min(entries.len());
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Prodex Login - Select login method",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!(
+                "showing {}-{} of {}",
+                offset.saturating_add(1).min(entries.len()),
+                end,
+                entries.len()
+            ),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(header, chunks[0]);
+
+    let items = if entries.is_empty() {
+        vec![ListItem::new(Line::styled(
+            "No login methods available",
+            Style::default().fg(Color::Red),
+        ))]
+    } else {
+        entries
+            .iter()
+            .enumerate()
+            .take(end)
+            .skip(offset)
+            .map(|(index, entry)| {
+                let marker = if index == selected {
+                    ">"
+                } else if index == offset && offset > 0 {
+                    "^"
+                } else if index + 1 == end && end < entries.len() {
+                    "v"
+                } else {
+                    " "
+                };
+                let style = if index == selected {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("{marker} {:>2}. ", index + 1), style),
+                    Span::styled(entry.title, style),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("[{}]", entry.auth),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                ]))
+            })
+            .collect()
+    };
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(list, chunks[1]);
+
+    let detail = if entries.is_empty() {
+        Text::from(Line::styled(
+            "No login methods are registered.",
+            Style::default().fg(Color::Red),
+        ))
+    } else {
+        login_menu_detail_text(
+            &entries[selected.min(entries.len().saturating_sub(1))],
+            layout,
+        )
+    };
+    let detail = Paragraph::new(detail)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        )
+        .wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(detail, chunks[2]);
 }
 
+fn login_menu_detail_text(entry: &LoginMenuEntry, layout: LoginMenuLayout) -> Text<'static> {
+    if layout.compact {
+        return Text::from(vec![
+            Line::from(vec![
+                Span::styled("Provider ", Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.provider, Style::default().fg(Color::Green)),
+                Span::raw(" | "),
+                Span::styled(entry.auth, Style::default().fg(Color::Cyan)),
+            ]),
+            Line::from(vec![
+                Span::styled("Use ", Style::default().fg(Color::DarkGray)),
+                Span::raw(entry.usage),
+            ]),
+            Line::from(vec![
+                Span::styled("Cmd ", Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.command, Style::default().fg(Color::Yellow)),
+            ]),
+        ]);
+    }
+
+    Text::from(vec![
+        Line::from(vec![
+            Span::styled("Provider ", Style::default().fg(Color::DarkGray)),
+            Span::styled(entry.provider, Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("Auth     ", Style::default().fg(Color::DarkGray)),
+            Span::styled(entry.auth, Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("Use      ", Style::default().fg(Color::DarkGray)),
+            Span::raw(entry.usage),
+        ]),
+        Line::from(vec![
+            Span::styled("Command  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(entry.command, Style::default().fg(Color::Yellow)),
+        ]),
+        Line::from(Span::styled(
+            "Up/Down move | PageUp/PageDown scroll | Enter select | 1-9 quick select | q cancel",
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC),
+        )),
+    ])
+}
+
+#[cfg(test)]
 fn render_login_menu(
     entries: &[LoginMenuEntry],
     selected: usize,
@@ -406,6 +615,7 @@ fn render_login_menu(
     lines
 }
 
+#[cfg(test)]
 fn fit_login_menu_line(value: &str, width: usize) -> String {
     let width = width.max(4);
     let char_count = value.chars().count();
@@ -417,6 +627,7 @@ fn fit_login_menu_line(value: &str, width: usize) -> String {
     output
 }
 
+#[cfg(test)]
 fn read_login_menu_key<R: Read>(reader: &mut R) -> io::Result<LoginMenuKey> {
     let first = loop {
         if let Some(byte) = read_login_menu_byte(reader)? {
@@ -439,6 +650,7 @@ fn read_login_menu_key<R: Read>(reader: &mut R) -> io::Result<LoginMenuKey> {
     }
 }
 
+#[cfg(test)]
 fn read_login_menu_escape_key<R: Read>(reader: &mut R) -> io::Result<LoginMenuKey> {
     let Some(first) = read_login_menu_byte(reader)? else {
         return Ok(LoginMenuKey::Cancel);
@@ -474,6 +686,7 @@ fn read_login_menu_escape_key<R: Read>(reader: &mut R) -> io::Result<LoginMenuKe
     }
 }
 
+#[cfg(test)]
 fn read_login_menu_byte<R: Read>(reader: &mut R) -> io::Result<Option<u8>> {
     let mut byte = [0u8; 1];
     match reader.read(&mut byte) {
@@ -481,69 +694,6 @@ fn read_login_menu_byte<R: Read>(reader: &mut R) -> io::Result<Option<u8>> {
         Ok(_) => Ok(Some(byte[0])),
         Err(err) if err.kind() == io::ErrorKind::Interrupted => Ok(None),
         Err(err) => Err(err),
-    }
-}
-
-struct LoginRawMode {
-    saved_mode: String,
-}
-
-impl LoginRawMode {
-    fn enter() -> Result<Self> {
-        let output = Command::new("stty")
-            .arg("-g")
-            .stdin(Stdio::inherit())
-            .stderr(Stdio::null())
-            .output()
-            .context("failed to read terminal mode")?;
-        if !output.status.success() {
-            bail!("failed to read terminal mode");
-        }
-        let saved_mode = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if saved_mode.is_empty() {
-            bail!("terminal mode was empty");
-        }
-        let status = Command::new("stty")
-            .args(["raw", "-echo", "min", "0", "time", "1"])
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .context("failed to enable raw terminal mode")?;
-        if !status.success() {
-            bail!("failed to enable raw terminal mode");
-        }
-        Ok(Self { saved_mode })
-    }
-}
-
-impl Drop for LoginRawMode {
-    fn drop(&mut self) {
-        let _ = Command::new("stty")
-            .arg(&self.saved_mode)
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-}
-
-struct LoginMenuScreen;
-
-impl LoginMenuScreen {
-    fn enter() -> Result<Self> {
-        let mut stderr = io::stderr();
-        write!(stderr, "\x1b[?1049h\x1b[?25l")?;
-        stderr.flush()?;
-        Ok(Self)
-    }
-}
-
-impl Drop for LoginMenuScreen {
-    fn drop(&mut self) {
-        let mut stderr = io::stderr();
-        let _ = write!(stderr, "\x1b[?25h\x1b[?1049l");
-        let _ = stderr.flush();
     }
 }
 
@@ -637,6 +787,38 @@ mod login_menu_tests {
         assert_eq!(
             read_login_menu_key(&mut digit).unwrap(),
             LoginMenuKey::Digit(8)
+        );
+    }
+
+    #[test]
+    fn login_menu_maps_crossterm_keys() {
+        assert_eq!(
+            login_menu_key_from_event(KeyEvent::new(
+                KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE
+            )),
+            LoginMenuKey::Down
+        );
+        assert_eq!(
+            login_menu_key_from_event(KeyEvent::new(
+                KeyCode::Char('s'),
+                crossterm::event::KeyModifiers::NONE
+            )),
+            LoginMenuKey::Ignore
+        );
+        assert_eq!(
+            login_menu_key_from_event(KeyEvent::new(
+                KeyCode::Char('7'),
+                crossterm::event::KeyModifiers::NONE
+            )),
+            LoginMenuKey::Digit(7)
+        );
+        assert_eq!(
+            login_menu_key_from_event(KeyEvent::new(
+                KeyCode::Esc,
+                crossterm::event::KeyModifiers::NONE
+            )),
+            LoginMenuKey::Cancel
         );
     }
 }

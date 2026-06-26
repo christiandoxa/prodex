@@ -1,11 +1,12 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 
+use super::manage::print_profile_panel;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     claude_config_dir_from_env_or_default, claude_oauth_profile_identity,
     copy_claude_oauth_credentials, ensure_path_is_unique, managed_profile_home_path,
-    prepare_managed_codex_home, print_panel,
+    prepare_managed_codex_home,
 };
 
 pub(super) fn is_claude_import_source(path: &Path) -> bool {
@@ -88,7 +89,7 @@ pub(crate) fn handle_import_claude_profile(args: &ImportProfileArgs) -> Result<(
         }
     };
 
-    print_panel(
+    print_profile_panel(
         if updated_existing {
             "Profile Updated"
         } else {
@@ -110,7 +111,7 @@ pub(crate) fn handle_import_claude_profile(args: &ImportProfileArgs) -> Result<(
             ("Provider".to_string(), "Anthropic Claude".to_string()),
             ("Profile".to_string(), profile_name),
         ],
-    );
+    )?;
     Ok(())
 }
 

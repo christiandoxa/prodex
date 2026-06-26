@@ -6,13 +6,24 @@ use crate::{prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use prodex_runtime_doctor::read_runtime_log_tail;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 #[cfg(test)]
 use std::env;
 use std::fs;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -21,6 +32,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
+const UPSTREAM_TUI_EVENT_LIMIT: usize = 100;
 
 #[derive(Default)]
 struct FollowedLog {
@@ -41,7 +53,45 @@ struct UpstreamPayloadEvent {
     payload: String,
 }
 
+struct UpstreamPayloadTui {
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+}
+
+impl UpstreamPayloadTui {
+    fn new() -> Result<Self> {
+        enable_raw_mode().context("failed to enable upstream payload TUI raw mode")?;
+        let mut stdout = io::stdout();
+        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(err).context("failed to enter upstream payload TUI alternate screen");
+        }
+        let backend = CrosstermBackend::new(stdout);
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(err) => {
+                let mut stdout = io::stdout();
+                let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                return Err(err).context("failed to initialize upstream payload TUI terminal");
+            }
+        };
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for UpstreamPayloadTui {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
 pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
+    if !json && io::stdout().is_terminal() && io::stdin().is_terminal() {
+        return stream_upstream_payload_events_tui();
+    }
+
     if let Some(event) = latest_upstream_payload_event() {
         print_upstream_payload_event(&event, json)?;
     } else {
@@ -65,20 +115,73 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
     loop {
         for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
             let state = followed_runtime_logs.entry(path.clone()).or_default();
-            read_new_upstream_payload_events(&path, state, json)?;
+            for event in collect_new_upstream_payload_events(&path, state)? {
+                print_upstream_payload_event(&event, json)?;
+            }
         }
         thread::sleep(LOG_STREAM_POLL_INTERVAL);
     }
 }
 
-fn read_new_upstream_payload_events(
+fn stream_upstream_payload_events_tui() -> Result<()> {
+    let mut tui = UpstreamPayloadTui::new()?;
+    let mut events = VecDeque::<UpstreamPayloadEvent>::new();
+    if let Some(event) = latest_upstream_payload_event() {
+        push_upstream_payload_event(&mut events, event);
+    }
+
+    let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
+    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
+        let offset = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        followed_runtime_logs.insert(
+            path,
+            FollowedLog {
+                offset,
+                pending: String::new(),
+            },
+        );
+    }
+
+    loop {
+        for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
+            let state = followed_runtime_logs.entry(path.clone()).or_default();
+            for event in collect_new_upstream_payload_events(&path, state)? {
+                push_upstream_payload_event(&mut events, event);
+            }
+        }
+        tui.terminal.draw(|frame| {
+            render_upstream_payload_tui(frame, &events);
+        })?;
+        if event::poll(LOG_STREAM_POLL_INTERVAL)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+            && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+        {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn push_upstream_payload_event(
+    events: &mut VecDeque<UpstreamPayloadEvent>,
+    event: UpstreamPayloadEvent,
+) {
+    events.push_back(event);
+    while events.len() > UPSTREAM_TUI_EVENT_LIMIT {
+        events.pop_front();
+    }
+}
+
+fn collect_new_upstream_payload_events(
     path: &Path,
     state: &mut FollowedLog,
-    json: bool,
-) -> Result<()> {
+) -> Result<Vec<UpstreamPayloadEvent>> {
     let mut file = match fs::File::open(path) {
         Ok(file) => file,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => return Err(err).with_context(|| format!("failed to open {}", path.display())),
     };
     let len = file.metadata()?.len();
@@ -91,7 +194,7 @@ fn read_new_upstream_payload_events(
     file.read_to_end(&mut bytes)?;
     state.offset = state.offset.saturating_add(bytes.len() as u64);
     if bytes.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     state.pending.push_str(&String::from_utf8_lossy(&bytes));
@@ -101,16 +204,17 @@ fn read_new_upstream_payload_events(
         .map(|index| index + 1)
         .unwrap_or_default();
     if complete_len == 0 {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let complete = state.pending[..complete_len].to_string();
     state.pending.drain(..complete_len);
+    let mut events = Vec::new();
     for line in complete.lines() {
         if let Some(event) = upstream_payload_event_from_runtime_line(line) {
-            print_upstream_payload_event(&event, json)?;
+            events.push(event);
         }
     }
-    Ok(())
+    Ok(events)
 }
 
 fn print_upstream_payload_event(event: &UpstreamPayloadEvent, json: bool) -> Result<()> {
@@ -139,6 +243,132 @@ fn print_upstream_payload_event(event: &UpstreamPayloadEvent, json: bool) -> Res
     io::stdout()
         .flush()
         .context("failed to flush upstream log output")
+}
+
+fn render_upstream_payload_tui(
+    frame: &mut ratatui::Frame<'_>,
+    events: &VecDeque<UpstreamPayloadEvent>,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .split(frame.area());
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Prodex Upstream Payloads",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("{} event(s)", events.len()),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(header, chunks[0]);
+
+    let width = chunks[1].width.saturating_sub(4).max(24) as usize;
+    let body = Paragraph::new(upstream_payload_tui_text(events, width))
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .border_style(Style::default().fg(Color::Blue)),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(body, chunks[1]);
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("q", Style::default().fg(Color::Yellow)),
+        Span::raw(" quit  "),
+        Span::styled("esc", Style::default().fg(Color::Yellow)),
+        Span::raw(" close"),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(footer, chunks[2]);
+}
+
+fn upstream_payload_tui_text(
+    events: &VecDeque<UpstreamPayloadEvent>,
+    width: usize,
+) -> Text<'static> {
+    if events.is_empty() {
+        return Text::from(Line::from(Span::styled(
+            "Waiting for processed upstream payload events...",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let mut lines = Vec::new();
+    for (index, event) in events.iter().enumerate() {
+        if index > 0 {
+            lines.push(Line::raw(""));
+        }
+        let request = event
+            .request
+            .map(|request| request.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        lines.push(Line::from(vec![
+            Span::styled(
+                event.timestamp.clone(),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                "upstream payload",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("profile=", Style::default().fg(Color::DarkGray)),
+            Span::styled(event.profile.clone(), Style::default().fg(Color::Green)),
+            Span::raw(" "),
+            Span::styled("request=", Style::default().fg(Color::DarkGray)),
+            Span::raw(request),
+            Span::raw(" "),
+            Span::styled("transport=", Style::default().fg(Color::DarkGray)),
+            Span::raw(event.transport.clone()),
+            Span::raw(" "),
+            Span::styled("route=", Style::default().fg(Color::DarkGray)),
+            Span::raw(event.route.clone()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("bytes=", Style::default().fg(Color::DarkGray)),
+            Span::raw(event.bytes.to_string()),
+            Span::raw(" "),
+            Span::styled("logged=", Style::default().fg(Color::DarkGray)),
+            Span::raw(event.logged_bytes.to_string()),
+            Span::raw(" "),
+            Span::styled("truncated=", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                event.truncated.to_string(),
+                if event.truncated {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
+        ]));
+        for line in render_upstream_payload_lines(&event.payload, width) {
+            lines.push(Line::raw(line));
+        }
+    }
+    Text::from(lines)
 }
 
 fn latest_upstream_payload_event() -> Option<UpstreamPayloadEvent> {
@@ -478,8 +708,8 @@ fn parse_runtime_log_line(line: &str) -> Option<ParsedRuntimeLogLine> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BASE64_STANDARD, FollowedLog, SystemTime, UNIX_EPOCH, env, fs, local_log_timestamp,
-        read_new_upstream_payload_events, render_upstream_payload_lines,
+        BASE64_STANDARD, FollowedLog, SystemTime, UNIX_EPOCH, collect_new_upstream_payload_events,
+        env, fs, local_log_timestamp, render_upstream_payload_lines,
         upstream_payload_event_from_runtime_line,
     };
     use base64::Engine;
@@ -607,7 +837,8 @@ mod tests {
         )
         .unwrap();
         let mut state = FollowedLog::default();
-        read_new_upstream_payload_events(&path, &mut state, true).unwrap();
+        let events = collect_new_upstream_payload_events(&path, &mut state).unwrap();
+        assert!(events.is_empty());
         assert!(!state.pending.is_empty());
         fs::OpenOptions::new()
             .append(true)
@@ -615,7 +846,8 @@ mod tests {
             .unwrap()
             .write_all(b"\n")
             .unwrap();
-        read_new_upstream_payload_events(&path, &mut state, true).unwrap();
+        let events = collect_new_upstream_payload_events(&path, &mut state).unwrap();
+        assert_eq!(events.len(), 1);
         assert!(state.pending.is_empty());
         fs::remove_dir_all(root).unwrap();
     }

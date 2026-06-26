@@ -1,7 +1,18 @@
 use std::io::{self, IsTerminal};
 
 use anyhow::{Context, Result, bail};
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use prodex_quota::{UsageResponse, UsageWindow, format_precise_reset_time};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileProvider, RateLimitResetCreditConsumeFlow,
@@ -9,6 +20,7 @@ use crate::{
     print_stderr_line, print_stderr_prompt, print_stdout_line,
     repair_missing_active_profile_and_save,
 };
+use terminal_ui::print_panel;
 
 const MANUAL_REDEEM_NEAR_RESET_SECONDS: i64 = 60 * 60;
 
@@ -42,12 +54,11 @@ pub(crate) fn handle_redeem(args: RedeemArgs) -> Result<()> {
     )?
     .execute(&redeem_request_id)?;
 
-    print_stdout_line(&format!(
-        "profile={} outcome={} request_id={}",
-        args.profile,
+    print_redeem_result(
+        &args.profile,
         manual_redeem_outcome_label(response.outcome),
-        redeem_request_id
-    ));
+        &redeem_request_id,
+    );
     Ok(())
 }
 
@@ -76,13 +87,11 @@ fn confirm_manual_redeem_if_reset_near(
         );
     }
 
-    print_stderr_line(&format!(
-        "Profile '{}' has a {} reset near at {}.",
+    if !prompt_manual_redeem_confirmation(
         profile_name,
         near_reset.label,
-        format_precise_reset_time(Some(near_reset.reset_at))
-    ));
-    if !prompt_manual_redeem_confirmation()? {
+        &format_precise_reset_time(Some(near_reset.reset_at)),
+    )? {
         bail!("redeem cancelled");
     }
     Ok(())
@@ -125,7 +134,19 @@ struct ManualRedeemNearReset {
     reset_at: i64,
 }
 
-fn prompt_manual_redeem_confirmation() -> Result<bool> {
+fn prompt_manual_redeem_confirmation(
+    profile_name: &str,
+    reset_label: &str,
+    reset_time: &str,
+) -> Result<bool> {
+    if io::stdin().is_terminal() && io::stderr().is_terminal() {
+        return prompt_manual_redeem_confirmation_tui(profile_name, reset_label, reset_time);
+    }
+
+    print_stderr_line(&format!(
+        "Profile '{}' has a {} reset near at {}.",
+        profile_name, reset_label, reset_time
+    ));
     let mut input = String::new();
     loop {
         print_stderr_prompt("Redeem one reset credit anyway? [y/N]: ")?;
@@ -136,6 +157,199 @@ fn prompt_manual_redeem_confirmation() -> Result<bool> {
         match parse_manual_redeem_confirmation(&input) {
             Some(confirmed) => return Ok(confirmed),
             None => print_stderr_line("Please answer yes or no."),
+        }
+    }
+}
+
+fn print_redeem_result(profile_name: &str, outcome: &str, request_id: &str) {
+    if !io::stdout().is_terminal() {
+        print_stdout_line(&format!(
+            "profile={profile_name} outcome={outcome} request_id={request_id}"
+        ));
+        return;
+    }
+
+    let fields = vec![
+        ("Profile".to_string(), profile_name.to_string()),
+        ("Outcome".to_string(), outcome.to_string()),
+        ("Request".to_string(), request_id.to_string()),
+    ];
+    if print_redeem_result_tui(&fields).is_err() {
+        print_panel("Redeem", &fields);
+    }
+}
+
+fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(7) else {
+        anyhow::bail!("stdout is not an inline-capable terminal");
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Prodex Redeem",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled("reset credit", Style::default().fg(Color::DarkGray)),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let lines = fields
+            .iter()
+            .map(|(label, value)| {
+                Line::from(vec![
+                    Span::styled(format!("{label:>9} "), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        value.clone(),
+                        if label == "Outcome" {
+                            Style::default().fg(Color::Green)
+                        } else {
+                            Style::default().fg(Color::White)
+                        },
+                    ),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let body = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+struct RedeemPromptTui {
+    terminal: Terminal<CrosstermBackend<io::Stderr>>,
+}
+
+impl RedeemPromptTui {
+    fn new() -> Result<Self> {
+        enable_raw_mode().context("failed to enable redeem prompt TUI raw mode")?;
+        let mut stderr = io::stderr();
+        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(err).context("failed to enter redeem prompt TUI alternate screen");
+        }
+        let backend = CrosstermBackend::new(stderr);
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(err) => {
+                let mut stderr = io::stderr();
+                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                return Err(err).context("failed to initialize redeem prompt TUI terminal");
+            }
+        };
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for RedeemPromptTui {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
+fn prompt_manual_redeem_confirmation_tui(
+    profile_name: &str,
+    reset_label: &str,
+    reset_time: &str,
+) -> Result<bool> {
+    let mut tui = RedeemPromptTui::new()?;
+    loop {
+        tui.terminal.draw(|frame| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(4),
+                    Constraint::Length(3),
+                ])
+                .split(frame.area());
+            let header = Paragraph::new(Line::from(vec![
+                Span::styled(
+                    "Prodex Redeem",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled("manual reset credit", Style::default().fg(Color::DarkGray)),
+            ]))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+            frame.render_widget(header, chunks[0]);
+
+            let body = Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "Quota reset is near.",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::raw(""),
+                Line::from(format!(
+                    "Profile '{profile_name}' has a {reset_label} reset near at {reset_time}."
+                )),
+                Line::from("Redeem one reset credit anyway?"),
+            ])
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+            frame.render_widget(body, chunks[1]);
+
+            let footer = Paragraph::new(Line::from(vec![
+                Span::styled("y", Style::default().fg(Color::Green)),
+                Span::raw(" redeem  "),
+                Span::styled("n", Style::default().fg(Color::Yellow)),
+                Span::raw(" cancel  "),
+                Span::styled("enter", Style::default().fg(Color::Yellow)),
+                Span::raw(" cancel  "),
+                Span::styled("esc", Style::default().fg(Color::Yellow)),
+                Span::raw(" cancel"),
+            ]))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+            frame.render_widget(footer, chunks[2]);
+        })?;
+
+        if let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Enter | KeyCode::Esc => {
+                    return Ok(false);
+                }
+                _ => {}
+            }
         }
     }
 }

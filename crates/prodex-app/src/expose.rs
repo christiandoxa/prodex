@@ -2,9 +2,13 @@ use crate::ExposeArgs;
 use anyhow::{Context, Result};
 use base64::Engine;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::VecDeque;
 use std::env;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender, channel};
@@ -56,41 +60,38 @@ pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
         }
     });
 
-    println!("Prodex expose local URL:");
-    println!("  {local_url}");
-    println!("Access token:");
-    println!("  {}", shared.token);
-    println!("Security:");
-    println!(
-        "  loopback server, token path + query, CSP, origin check, max clients={}",
-        shared.max_clients
-    );
-
+    let mut tunnel_status = "disabled".to_string();
+    let mut tunnel_url = None;
     let mut tunnel = if args.no_tunnel {
         None
     } else {
         match start_cloudflared_tunnel(&format!("http://{listen_addr}")) {
             Ok(tunnel) => {
                 if let Some(url) = &tunnel.url {
-                    println!("Cloudflare tunnel URL:");
-                    println!(
-                        "  {url}/t/{token}?access_token={token}",
+                    tunnel_status = "ready".to_string();
+                    tunnel_url = Some(format!(
+                        "{url}/t/{token}?access_token={token}",
                         token = shared.token
-                    );
+                    ));
                 } else {
-                    println!("cloudflared started; waiting for public URL in its output.");
+                    tunnel_status = "cloudflared started; waiting for public URL".to_string();
                 }
                 Some(tunnel)
             }
             Err(err) => {
-                eprintln!("cloudflared unavailable: {err:#}");
-                eprintln!(
-                    "Install cloudflared or rerun with --no-tunnel for loopback-only access."
-                );
+                tunnel_status =
+                    format!("unavailable: {err:#}; install cloudflared or rerun with --no-tunnel");
                 None
             }
         }
     };
+    print_expose_status(
+        &local_url,
+        &shared.token,
+        shared.max_clients,
+        &tunnel_status,
+        tunnel_url.as_deref(),
+    )?;
 
     while shared.pty.running.load(Ordering::SeqCst) {
         thread::sleep(Duration::from_millis(250));
@@ -99,6 +100,131 @@ pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
         let _ = tunnel.child.kill();
     }
     Ok(())
+}
+
+fn print_expose_status(
+    local_url: &str,
+    token: &str,
+    max_clients: usize,
+    tunnel_status: &str,
+    tunnel_url: Option<&str>,
+) -> Result<()> {
+    let mut fields = vec![
+        ("Local URL".to_string(), local_url.to_string()),
+        ("Access token".to_string(), token.to_string()),
+        (
+            "Security".to_string(),
+            format!(
+                "loopback server, token path + query, CSP, origin check, max clients={max_clients}"
+            ),
+        ),
+        ("Tunnel".to_string(), tunnel_status.to_string()),
+    ];
+    if let Some(url) = tunnel_url {
+        fields.push(("Tunnel URL".to_string(), url.to_string()));
+    }
+
+    if !io::stdout().is_terminal() {
+        println!("Prodex expose local URL:");
+        println!("  {local_url}");
+        println!("Access token:");
+        println!("  {token}");
+        println!("Security:");
+        println!(
+            "  loopback server, token path + query, CSP, origin check, max clients={max_clients}"
+        );
+        println!("Tunnel:");
+        println!("  {tunnel_status}");
+        if let Some(url) = tunnel_url {
+            println!("Cloudflare tunnel URL:");
+            println!("  {url}");
+        }
+        return Ok(());
+    }
+
+    let height = (fields.len() + 4).clamp(7, 14) as u16;
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        println!("Prodex expose local URL:");
+        println!("  {local_url}");
+        println!("Access token:");
+        println!("  {token}");
+        println!("Security:");
+        println!(
+            "  loopback server, token path + query, CSP, origin check, max clients={max_clients}"
+        );
+        println!("Tunnel:");
+        println!("  {tunnel_status}");
+        if let Some(url) = tunnel_url {
+            println!("Cloudflare tunnel URL:");
+            println!("  {url}");
+        }
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Prodex Expose",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                "terminal sharing server",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(expose_status_tui_text(&fields))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn expose_value_style(label: &str, value: &str) -> Style {
+    if label == "Tunnel" && value == "ready" {
+        Style::default().fg(Color::Green)
+    } else if label == "Tunnel" && value.starts_with("unavailable") {
+        Style::default().fg(Color::Yellow)
+    } else if label.ends_with("URL") {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::White)
+    }
+}
+
+fn expose_status_tui_text(fields: &[(String, String)]) -> Text<'static> {
+    Text::from(
+        fields
+            .iter()
+            .map(|(label, value)| {
+                Line::from(vec![
+                    Span::styled(
+                        format!("{label:>12} "),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(value.clone(), expose_value_style(label, value)),
+                ])
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 struct ExposeShared {
@@ -459,5 +585,33 @@ mod tests {
             expose_find_trycloudflare_url(line).as_deref(),
             Some("https://demo.trycloudflare.com")
         );
+    }
+
+    #[test]
+    fn expose_status_tui_text_contains_server_fields() {
+        let fields = vec![
+            (
+                "Local URL".to_string(),
+                "http://127.0.0.1:7777/t/token?access_token=token".to_string(),
+            ),
+            ("Tunnel".to_string(), "ready".to_string()),
+        ];
+        let text = expose_status_tui_text(&fields);
+        let rendered = text
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Local URL"));
+        assert!(rendered.contains("127.0.0.1:7777"));
+        assert!(rendered.contains("Tunnel"));
+        assert_eq!(expose_value_style("Tunnel", "ready").fg, Some(Color::Green));
     }
 }

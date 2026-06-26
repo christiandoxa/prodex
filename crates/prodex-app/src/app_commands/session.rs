@@ -1,6 +1,12 @@
 use anyhow::{Context, Result};
+use crossterm::terminal;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use std::env;
 use std::ffi::OsString;
+use std::io::{self, IsTerminal};
 use std::path::Path;
 
 use crate::{
@@ -128,14 +134,141 @@ fn print_session_reports(
             let json = output_mode == SessionOutputMode::Json;
             let output = render_session_reports_output(reports, json, empty_message)
                 .context("failed to render session JSON")?;
-            if json || reports.is_empty() {
+            if json {
                 print_stdout_line(&output);
+            } else if io::stdout().is_terminal() {
+                render_session_reports_tui(reports, empty_message)?;
             } else {
                 print_stdout_text(&output);
             }
             Ok(())
         }
     }
+}
+
+fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) -> Result<()> {
+    let height = session_report_tui_height(reports);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        let output = render_session_reports_output(reports, false, empty_message)
+            .context("failed to render session fallback output")?;
+        print_stdout_text(&output);
+        return Ok(());
+    };
+    terminal
+        .draw(|frame| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(1),
+                    Constraint::Length(2),
+                ])
+                .split(frame.area());
+
+            let header = Paragraph::new(Line::from(vec![
+                Span::styled(
+                    "Prodex Sessions",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("{} session(s)", reports.len()),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+            frame.render_widget(header, chunks[0]);
+
+            if reports.is_empty() {
+                let empty = Paragraph::new(Line::styled(
+                    empty_message.to_string(),
+                    Style::default().fg(Color::Gray),
+                ))
+                .block(
+                    Block::default()
+                        .borders(Borders::LEFT | Borders::RIGHT)
+                        .border_style(Style::default().fg(Color::Blue)),
+                );
+                frame.render_widget(empty, chunks[1]);
+            } else {
+                let items = reports
+                    .iter()
+                    .map(session_report_tui_item)
+                    .collect::<Vec<_>>();
+                let list = List::new(items).block(
+                    Block::default()
+                        .borders(Borders::LEFT | Borders::RIGHT)
+                        .border_style(Style::default().fg(Color::Blue)),
+                );
+                frame.render_widget(list, chunks[1]);
+            }
+
+            let footer = Paragraph::new(Line::styled(
+                "use `prodex run <session-id>` to resume",
+                Style::default().fg(Color::Yellow),
+            ))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            );
+            frame.render_widget(footer, chunks[2]);
+        })
+        .context("failed to draw session report TUI")?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn session_report_tui_height(reports: &[SessionReport]) -> u16 {
+    let rows = reports.len().saturating_mul(4).saturating_add(5).max(8);
+    let terminal_height = terminal::size()
+        .map(|(_, height)| usize::from(height))
+        .unwrap_or(24);
+    rows.min(terminal_height).max(1) as u16
+}
+
+fn session_report_tui_item(report: &SessionReport) -> ListItem<'_> {
+    let title = report
+        .thread_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("Untitled session");
+    let updated = report.updated_at.as_deref().unwrap_or("-");
+    let profile = report.profile.as_deref().unwrap_or("-");
+    let cwd = report.cwd.as_deref().unwrap_or("-");
+    let provider = report.model_provider.as_deref().unwrap_or("-");
+    ListItem::new(Text::from(vec![
+        Line::from(vec![
+            Span::styled(
+                report.id.as_str(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(title.to_string(), Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![
+            Span::styled("updated ", Style::default().fg(Color::DarkGray)),
+            Span::raw(updated.to_string()),
+            Span::styled(" profile ", Style::default().fg(Color::DarkGray)),
+            Span::raw(profile.to_string()),
+            Span::styled(" provider ", Style::default().fg(Color::DarkGray)),
+            Span::raw(provider.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("cwd ", Style::default().fg(Color::DarkGray)),
+            Span::raw(cwd.to_string()),
+        ]),
+        Line::raw(""),
+    ]))
+    .style(Style::default())
 }
 
 fn print_session_lines(lines: impl IntoIterator<Item = String>) {
@@ -183,4 +316,38 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
         codex_features: CodexRuntimeFeatureArgs::default(),
         codex_args: vec![OsString::from("resume"), OsString::from(report.id.clone())],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_session_report(id: &str) -> SessionReport {
+        let mut report = SessionReport::from_path(Path::new(&format!("/tmp/{id}.jsonl")), 0);
+        prodex_app_reports::apply_session_json_line(
+            &mut report,
+            r#"{"timestamp":"2026-06-26T10:00:00Z","type":"session_meta","payload":{"thread_name":"Build UI","cwd":"/tmp/prodex"}}"#,
+        );
+        report.set_profile(Some("main".to_string()));
+        report.set_model_provider(Some("openai".to_string()));
+        report
+    }
+
+    #[test]
+    fn session_report_tui_height_scales_with_reports() {
+        assert!(session_report_tui_height(&[] as &[SessionReport]) >= 1);
+        let reports = vec![test_session_report("a"), test_session_report("b")];
+        assert!(usize::from(session_report_tui_height(&reports)) >= 8);
+    }
+
+    #[test]
+    fn session_report_tui_item_contains_key_fields() {
+        let report = test_session_report("session-1");
+        let item = session_report_tui_item(&report);
+        let text = format!("{item:?}");
+        assert!(text.contains("session-1"));
+        assert!(text.contains("Build UI"));
+        assert!(text.contains("main"));
+        assert!(text.contains("openai"));
+    }
 }

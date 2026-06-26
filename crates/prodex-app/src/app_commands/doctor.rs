@@ -1,5 +1,16 @@
 use super::*;
+use crossterm::terminal;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use redaction::{redaction_key_looks_sensitive, redaction_redacted_body_snippet};
+
+#[derive(Debug, Clone)]
+struct DoctorPanel {
+    title: String,
+    fields: Vec<(String, String)>,
+}
 
 pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
@@ -169,29 +180,35 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             state.active_profile.as_deref().unwrap_or("-").to_string(),
         ),
     ];
-    print_panel("Doctor", &summary_fields);
+    let mut panels = vec![DoctorPanel {
+        title: "Doctor".to_string(),
+        fields: summary_fields,
+    }];
+    let mut suggestion_lines = Vec::new();
 
     if args.install {
-        print_blank_line();
-        print_panel("Install Checks", &collect_install_check_rows(&paths));
+        panels.push(DoctorPanel {
+            title: "Install Checks".to_string(),
+            fields: collect_install_check_rows(&paths),
+        });
     }
 
     if args.runtime {
-        print_blank_line();
         let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
         let fields =
             runtime_doctor_fields_for_summary(&summary, &runtime_proxy_latest_log_pointer_path());
-        print_panel("Runtime Proxy", &fields);
+        panels.push(DoctorPanel {
+            title: "Runtime Proxy".to_string(),
+            fields,
+        });
         if args.suggest_policy {
-            print_blank_line();
             let suggestions = runtime_doctor_policy_suggestions(&summary);
-            for line in runtime_doctor_policy_suggestion_lines(&suggestions) {
-                print_stdout_line(&line);
-            }
+            suggestion_lines = runtime_doctor_policy_suggestion_lines(&suggestions);
         }
     }
 
     if state.profiles.is_empty() {
+        print_doctor_output(&panels, &suggestion_lines)?;
         return Ok(());
     }
 
@@ -202,7 +219,6 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             "external"
         };
 
-        print_blank_line();
         let mut fields = vec![
             (
                 "Current".to_string(),
@@ -299,10 +315,156 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                 }
             }
         }
-        print_panel(&format!("Profile {}", report.summary.name), &fields);
+        panels.push(DoctorPanel {
+            title: format!("Profile {}", report.summary.name),
+            fields,
+        });
     }
 
+    print_doctor_output(&panels, &suggestion_lines)?;
     Ok(())
+}
+
+fn print_doctor_output(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Result<()> {
+    let height = doctor_tui_height(panels, suggestion_lines);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        for (index, panel) in panels.iter().enumerate() {
+            if index > 0 {
+                print_blank_line();
+            }
+            print_panel(&panel.title, &panel.fields);
+        }
+        if !suggestion_lines.is_empty() {
+            print_blank_line();
+            for line in suggestion_lines {
+                print_stdout_line(line);
+            }
+        }
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(
+                "Prodex Doctor",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("{} panel(s)", panels.len()),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(doctor_tui_text(panels, suggestion_lines))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn doctor_tui_height(panels: &[DoctorPanel], suggestion_lines: &[String]) -> u16 {
+    let panel_rows = panels
+        .iter()
+        .map(|panel| panel.fields.len().saturating_add(2))
+        .sum::<usize>();
+    let rows = panel_rows
+        .saturating_add(suggestion_lines.len())
+        .saturating_add(5)
+        .max(8);
+    let terminal_height = terminal::size()
+        .map(|(_, height)| usize::from(height))
+        .unwrap_or(24);
+    rows.min(terminal_height).max(1) as u16
+}
+
+fn doctor_tui_text(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Text<'static> {
+    let mut lines = Vec::new();
+    for panel in panels {
+        if !lines.is_empty() {
+            lines.push(Line::raw(""));
+        }
+        lines.push(Line::styled(
+            panel.title.clone(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        let label_width = panel
+            .fields
+            .iter()
+            .map(|(label, _)| label.chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(24);
+        for (label, value) in &panel.fields {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{label:<label_width$} "),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    value.clone(),
+                    Style::default().fg(doctor_value_color(label, value)),
+                ),
+            ]));
+        }
+    }
+    if !suggestion_lines.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled(
+            "Policy Suggestions",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        for line in suggestion_lines {
+            lines.push(Line::styled(
+                line.clone(),
+                Style::default().fg(Color::White),
+            ));
+        }
+    }
+    Text::from(lines)
+}
+
+fn doctor_value_color(label: &str, value: &str) -> Color {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("error")
+        || lower.contains("missing")
+        || lower.contains("blocked")
+        || lower.contains("warning")
+        || lower.contains("orphan")
+    {
+        Color::Red
+    } else if lower.contains("critical") || lower.contains("thin") || lower.contains("degraded") {
+        Color::Yellow
+    } else if lower.contains("ready") || lower.contains("yes") || lower.contains("exists") {
+        Color::Green
+    } else if label.contains("Runtime") || label.contains("Quota") || label.contains("Main") {
+        Color::Cyan
+    } else {
+        Color::White
+    }
 }
 
 struct DoctorRedactedBundleContext<'a> {
@@ -486,4 +648,33 @@ fn import_auth_journals_json_value(
         "repaired": repaired.unwrap_or(0),
         "status": if orphan_count > 0 { "warning" } else { "ok" },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn doctor_tui_text_contains_panels_and_suggestions() {
+        let panels = vec![DoctorPanel {
+            title: "Doctor".to_string(),
+            fields: vec![
+                ("Runtime".to_string(), "ready".to_string()),
+                ("Quota".to_string(), "Blocked".to_string()),
+            ],
+        }];
+        let suggestions = vec!["increase active_request_limit".to_string()];
+        let text = format!("{:?}", doctor_tui_text(&panels, &suggestions));
+        assert!(text.contains("Doctor"));
+        assert!(text.contains("ready"));
+        assert!(text.contains("Blocked"));
+        assert!(text.contains("Policy Suggestions"));
+    }
+
+    #[test]
+    fn doctor_value_color_highlights_status() {
+        assert_eq!(doctor_value_color("Quota", "Blocked"), Color::Red);
+        assert_eq!(doctor_value_color("Runtime", "ready"), Color::Green);
+        assert_eq!(doctor_value_color("Runtime", "critical"), Color::Yellow);
+    }
 }

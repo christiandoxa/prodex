@@ -1,4 +1,9 @@
 use anyhow::Result;
+use crossterm::terminal;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, CleanupArgs, CleanupOlderThan,
@@ -79,8 +84,90 @@ pub(crate) fn handle_cleanup(args: CleanupArgs) -> Result<()> {
             summary.total_removed().to_string(),
         ),
     ];
-    print_panel("Cleanup", &fields);
+    print_cleanup_panel(&fields)?;
     Ok(())
+}
+
+fn print_cleanup_panel(fields: &[(String, String)]) -> Result<()> {
+    let height = cleanup_tui_height(fields);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        print_panel("Cleanup", fields);
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::styled(
+            "Prodex Cleanup",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+        let body = Paragraph::new(cleanup_tui_text(fields))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn cleanup_tui_height(fields: &[(String, String)]) -> u16 {
+    let rows = fields.len().saturating_add(5).max(8);
+    let terminal_height = terminal::size()
+        .map(|(_, height)| usize::from(height))
+        .unwrap_or(24);
+    rows.min(terminal_height).max(1) as u16
+}
+
+fn cleanup_tui_text(fields: &[(String, String)]) -> Text<'static> {
+    let label_width = fields
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(24);
+    Text::from(
+        fields
+            .iter()
+            .map(|(label, value)| {
+                Line::from(vec![
+                    Span::styled(
+                        format!("{label:<label_width$} "),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        value.clone(),
+                        Style::default().fg(cleanup_value_color(value)),
+                    ),
+                ])
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn cleanup_value_color(value: &str) -> Color {
+    if value.starts_with('0') || value.contains("clean") || value.contains("left untouched") {
+        Color::Green
+    } else if value.contains("removed") || value.parse::<usize>().unwrap_or(0) > 0 {
+        Color::Yellow
+    } else {
+        Color::White
+    }
 }
 
 fn cleanup_options_from_args(args: &CleanupArgs) -> ProdexCleanupOptions {
@@ -121,4 +208,33 @@ fn cleanup_duration_label(seconds: i64) -> String {
         return format!("{}m", seconds / MINUTE);
     }
     format!("{seconds}s")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_tui_text_contains_fields() {
+        let fields = vec![
+            (
+                "Runtime logs".to_string(),
+                "2 removed from /tmp".to_string(),
+            ),
+            ("Chat history".to_string(), "left untouched".to_string()),
+        ];
+        let text = format!("{:?}", cleanup_tui_text(&fields));
+        assert!(text.contains("Runtime logs"));
+        assert!(text.contains("left untouched"));
+    }
+
+    #[test]
+    fn cleanup_value_color_highlights_removed_counts() {
+        assert_eq!(cleanup_value_color("0"), Color::Green);
+        assert_eq!(cleanup_value_color("2"), Color::Yellow);
+        assert_eq!(
+            cleanup_value_color("removed stale latest-pointer file"),
+            Color::Yellow
+        );
+    }
 }

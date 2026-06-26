@@ -5,14 +5,25 @@ use super::log_format::{
 use super::log_upstream::stream_upstream_payload_events;
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
+use crossterm::cursor::{Hide, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use prodex_app_reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
 use prodex_core::AppPaths;
 use prodex_runtime_doctor::read_runtime_log_tail;
-use std::collections::BTreeMap;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use std::collections::{BTreeMap, VecDeque};
 #[cfg(test)]
 use std::env;
 use std::fs;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 #[cfg(test)]
@@ -23,6 +34,7 @@ const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const SESSION_SNAPSHOT_TAIL_BYTES: usize = 2 * 1024 * 1024;
 const SESSION_FOLLOW_LIMIT: usize = 32;
+const LOG_TUI_EVENT_LIMIT: usize = 200;
 
 #[derive(Default)]
 struct FollowedLog {
@@ -37,6 +49,46 @@ struct TranscriptEvent {
     text: String,
 }
 
+#[derive(Debug, Clone)]
+enum LogStreamItem {
+    Transcript(TranscriptEvent),
+    TokenUsage(InfoTokenUsageEvent),
+}
+
+struct LogStreamTui {
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+}
+
+impl LogStreamTui {
+    fn new() -> Result<Self> {
+        enable_raw_mode().context("failed to enable log stream TUI raw mode")?;
+        let mut stdout = io::stdout();
+        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(err).context("failed to enter log stream TUI alternate screen");
+        }
+        let backend = CrosstermBackend::new(stdout);
+        let terminal = match Terminal::new(backend) {
+            Ok(terminal) => terminal,
+            Err(err) => {
+                let mut stdout = io::stdout();
+                let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
+                let _ = disable_raw_mode();
+                return Err(err).context("failed to initialize log stream TUI terminal");
+            }
+        };
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for LogStreamTui {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
 pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
     match args.mode {
         LogMode::Last => {
@@ -49,17 +101,7 @@ pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
             }
             let transcript = latest_transcript_event()?;
             let token_usage = latest_token_usage_event();
-            if transcript.is_none() && token_usage.is_none() {
-                println!("No transcript or token usage events found.");
-                return Ok(());
-            }
-            if let Some(event) = transcript.as_ref() {
-                print_transcript_event(event)?;
-            }
-            if let Some(event) = token_usage.as_ref() {
-                print_token_usage_event(event, false)?;
-            }
-            Ok(())
+            print_log_snapshot(transcript.as_ref(), token_usage.as_ref())
         }
         LogMode::Stream => stream_token_usage_events(args.json),
         LogMode::Upstream => stream_upstream_payload_events(args.json),
@@ -90,6 +132,10 @@ fn latest_token_usage_event() -> Option<InfoTokenUsageEvent> {
 }
 
 fn stream_token_usage_events(json: bool) -> Result<()> {
+    if !json && io::stdout().is_terminal() && io::stdin().is_terminal() {
+        return stream_token_usage_events_tui();
+    }
+
     if !json && let Some(event) = latest_transcript_event()? {
         print_transcript_event(&event)?;
     }
@@ -143,48 +189,343 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
     }
 }
 
-fn read_new_token_usage_events(path: &Path, state: &mut FollowedLog, json: bool) -> Result<()> {
-    let mut file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(err).with_context(|| format!("failed to open {}", path.display())),
-    };
-    let len = file.metadata()?.len();
-    if len < state.offset {
-        state.offset = 0;
-        state.pending.clear();
+fn stream_token_usage_events_tui() -> Result<()> {
+    let mut tui = LogStreamTui::new()?;
+    let mut items = VecDeque::<LogStreamItem>::new();
+    if let Some(event) = latest_transcript_event()? {
+        push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
     }
-    file.seek(SeekFrom::Start(state.offset))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
-    state.offset = state.offset.saturating_add(bytes.len() as u64);
-    if bytes.is_empty() {
+    if let Some(event) = latest_token_usage_event() {
+        push_log_stream_item(&mut items, LogStreamItem::TokenUsage(event));
+    }
+
+    let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
+    for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
+        let offset = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        followed_runtime_logs.insert(
+            path,
+            FollowedLog {
+                offset,
+                pending: String::new(),
+            },
+        );
+    }
+    let mut followed_session_logs = BTreeMap::<PathBuf, FollowedLog>::new();
+    for path in recent_session_log_paths()? {
+        let offset = fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        followed_session_logs.insert(
+            path,
+            FollowedLog {
+                offset,
+                pending: String::new(),
+            },
+        );
+    }
+
+    loop {
+        for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
+            let state = followed_runtime_logs.entry(path.clone()).or_default();
+            for event in collect_new_token_usage_events(&path, state)? {
+                push_log_stream_item(&mut items, LogStreamItem::TokenUsage(event));
+            }
+        }
+        for path in recent_session_log_paths()? {
+            let state = followed_session_logs.entry(path.clone()).or_default();
+            for event in collect_new_transcript_events(&path, state)? {
+                push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
+            }
+        }
+
+        tui.terminal
+            .draw(|frame| render_log_stream_tui(frame, &items))
+            .context("failed to draw log stream TUI")?;
+
+        if event::poll(LOG_STREAM_POLL_INTERVAL).context("failed to poll log stream TUI input")? {
+            match event::read().context("failed to read log stream TUI input")? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    }
+}
+
+fn print_log_snapshot(
+    transcript: Option<&TranscriptEvent>,
+    token_usage: Option<&InfoTokenUsageEvent>,
+) -> Result<()> {
+    if io::stdout().is_terminal()
+        && let Some(mut terminal) =
+            crate::try_inline_stdout_terminal(log_snapshot_tui_height(transcript, token_usage))
+    {
+        let items = log_snapshot_items(transcript, token_usage);
+        terminal
+            .draw(|frame| render_log_snapshot_tui(frame, &items))
+            .context("failed to draw log snapshot TUI")?;
+        let _ = terminal.show_cursor();
         return Ok(());
     }
 
-    state.pending.push_str(&String::from_utf8_lossy(&bytes));
-    let complete_len = state
-        .pending
-        .rfind('\n')
-        .map(|index| index + 1)
-        .unwrap_or_default();
-    if complete_len == 0 {
+    if transcript.is_none() && token_usage.is_none() {
+        println!("No transcript or token usage events found.");
         return Ok(());
     }
-    let complete = state.pending[..complete_len].to_string();
-    state.pending.drain(..complete_len);
-    for line in complete.lines() {
-        if let Some(event) = info_token_usage_event_from_line(line) {
-            print_token_usage_event(&local_token_usage_event(event), json)?;
-        }
+    if let Some(event) = transcript {
+        print_transcript_event(event)?;
+    }
+    if let Some(event) = token_usage {
+        print_token_usage_event(event, false)?;
     }
     Ok(())
 }
 
-fn read_new_transcript_events(path: &Path, state: &mut FollowedLog) -> Result<()> {
+fn log_snapshot_items(
+    transcript: Option<&TranscriptEvent>,
+    token_usage: Option<&InfoTokenUsageEvent>,
+) -> VecDeque<LogStreamItem> {
+    let mut items = VecDeque::new();
+    if let Some(event) = transcript {
+        items.push_back(LogStreamItem::Transcript(event.clone()));
+    }
+    if let Some(event) = token_usage {
+        items.push_back(LogStreamItem::TokenUsage(event.clone()));
+    }
+    items
+}
+
+fn log_snapshot_tui_height(
+    transcript: Option<&TranscriptEvent>,
+    token_usage: Option<&InfoTokenUsageEvent>,
+) -> u16 {
+    let body_rows = if transcript.is_none() && token_usage.is_none() {
+        1
+    } else {
+        let transcript_rows = transcript
+            .map(|event| render_text_body(&event.text, 100).len().saturating_add(2))
+            .unwrap_or(0);
+        let usage_rows = token_usage.map(|_| 3).unwrap_or(0);
+        transcript_rows.saturating_add(usage_rows).saturating_add(1)
+    };
+    body_rows.saturating_add(4).clamp(8, 28) as u16
+}
+
+fn render_log_snapshot_tui(frame: &mut ratatui::Frame<'_>, items: &VecDeque<LogStreamItem>) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .split(frame.area());
+
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Prodex Log Snapshot",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("{} event(s)", items.len()),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(header, chunks[0]);
+
+    let body = Paragraph::new(log_stream_tui_text(items, usize::from(chunks[1].height)))
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                .border_style(Style::default().fg(Color::Blue)),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(body, chunks[1]);
+}
+
+fn push_log_stream_item(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem) {
+    items.push_back(item);
+    while items.len() > LOG_TUI_EVENT_LIMIT {
+        items.pop_front();
+    }
+}
+
+fn render_log_stream_tui(frame: &mut ratatui::Frame<'_>, items: &VecDeque<LogStreamItem>) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .split(frame.area());
+
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Prodex Log Stream",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("{} event(s)", items.len()),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(header, chunks[0]);
+
+    let body = Paragraph::new(log_stream_tui_text(items, usize::from(chunks[1].height)))
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT)
+                .border_style(Style::default().fg(Color::Blue)),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(body, chunks[1]);
+
+    let footer = Paragraph::new(Line::styled(
+        "live transcript + token usage | q quit",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    );
+    frame.render_widget(footer, chunks[2]);
+}
+
+fn log_stream_tui_text(items: &VecDeque<LogStreamItem>, max_lines: usize) -> Text<'_> {
+    if items.is_empty() {
+        return Text::from(Line::styled(
+            "Waiting for transcript or token usage events...",
+            Style::default().fg(Color::Gray),
+        ));
+    }
+
+    let mut lines = Vec::new();
+    for item in items {
+        if !lines.is_empty() {
+            lines.push(Line::raw(""));
+        }
+        match item {
+            LogStreamItem::Transcript(event) => {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        event.timestamp.as_str(),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("stream {}", event.source),
+                        Style::default()
+                            .fg(log_stream_source_color(&event.source))
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                for line in render_text_body(&event.text, 100) {
+                    lines.push(Line::raw(line));
+                }
+            }
+            LogStreamItem::TokenUsage(event) => {
+                let request = event
+                    .request
+                    .map(|request| request.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        event.timestamp.as_str(),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        "stream usage",
+                        Style::default()
+                            .fg(Color::Magenta)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("profile ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(event.profile.as_str()),
+                    Span::styled(" request ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(request),
+                    Span::styled(" transport ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(event.transport.as_str()),
+                    Span::styled(" source ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(event.source.as_str()),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("sent ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        event.input_tokens.to_string(),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::styled(" cached ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        event.cached_input_tokens.to_string(),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::styled(" received ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        event.output_tokens.to_string(),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled(" reasoning ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        event.reasoning_tokens.to_string(),
+                        Style::default().fg(Color::Magenta),
+                    ),
+                ]));
+            }
+        }
+    }
+    if lines.len() > max_lines {
+        lines.drain(..lines.len().saturating_sub(max_lines));
+    }
+    Text::from(lines)
+}
+
+fn log_stream_source_color(source: &str) -> Color {
+    match source {
+        "user" => Color::Green,
+        "assistant" => Color::Cyan,
+        "tool-output" => Color::Yellow,
+        source if source.starts_with("tool-call:") => Color::Magenta,
+        _ => Color::White,
+    }
+}
+
+fn read_new_token_usage_events(path: &Path, state: &mut FollowedLog, json: bool) -> Result<()> {
+    for event in collect_new_token_usage_events(path, state)? {
+        print_token_usage_event(&event, json)?;
+    }
+    Ok(())
+}
+
+fn collect_new_token_usage_events(
+    path: &Path,
+    state: &mut FollowedLog,
+) -> Result<Vec<InfoTokenUsageEvent>> {
     let mut file = match fs::File::open(path) {
         Ok(file) => file,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => return Err(err).with_context(|| format!("failed to open {}", path.display())),
     };
     let len = file.metadata()?.len();
@@ -197,7 +538,7 @@ fn read_new_transcript_events(path: &Path, state: &mut FollowedLog) -> Result<()
     file.read_to_end(&mut bytes)?;
     state.offset = state.offset.saturating_add(bytes.len() as u64);
     if bytes.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     state.pending.push_str(&String::from_utf8_lossy(&bytes));
@@ -207,16 +548,66 @@ fn read_new_transcript_events(path: &Path, state: &mut FollowedLog) -> Result<()
         .map(|index| index + 1)
         .unwrap_or_default();
     if complete_len == 0 {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let complete = state.pending[..complete_len].to_string();
     state.pending.drain(..complete_len);
+    let mut events = Vec::new();
     for line in complete.lines() {
-        for event in transcript_events_from_session_line(line) {
-            print_transcript_event(&local_transcript_event(event))?;
+        if let Some(event) = info_token_usage_event_from_line(line) {
+            events.push(local_token_usage_event(event));
         }
     }
+    Ok(events)
+}
+
+fn read_new_transcript_events(path: &Path, state: &mut FollowedLog) -> Result<()> {
+    for event in collect_new_transcript_events(path, state)? {
+        print_transcript_event(&event)?;
+    }
     Ok(())
+}
+
+fn collect_new_transcript_events(
+    path: &Path,
+    state: &mut FollowedLog,
+) -> Result<Vec<TranscriptEvent>> {
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err).with_context(|| format!("failed to open {}", path.display())),
+    };
+    let len = file.metadata()?.len();
+    if len < state.offset {
+        state.offset = 0;
+        state.pending.clear();
+    }
+    file.seek(SeekFrom::Start(state.offset))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    state.offset = state.offset.saturating_add(bytes.len() as u64);
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    state.pending.push_str(&String::from_utf8_lossy(&bytes));
+    let complete_len = state
+        .pending
+        .rfind('\n')
+        .map(|index| index + 1)
+        .unwrap_or_default();
+    if complete_len == 0 {
+        return Ok(Vec::new());
+    }
+    let complete = state.pending[..complete_len].to_string();
+    state.pending.drain(..complete_len);
+    let mut events = Vec::new();
+    for line in complete.lines() {
+        for event in transcript_events_from_session_line(line) {
+            events.push(local_transcript_event(event));
+        }
+    }
+    Ok(events)
 }
 
 fn print_token_usage_event(event: &InfoTokenUsageEvent, json: bool) -> Result<()> {
@@ -525,6 +916,51 @@ mod tests {
                 text: "{\"cmd\":\"pwd\"}".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn log_snapshot_items_preserve_transcript_and_usage_order() {
+        let transcript = TranscriptEvent {
+            timestamp: "2026-06-20 08:00:01".to_string(),
+            source: "assistant".to_string(),
+            text: "Hello user.".to_string(),
+        };
+        let usage = InfoTokenUsageEvent {
+            timestamp: "2026-06-20 08:00:02".to_string(),
+            request: Some(7),
+            transport: "http".to_string(),
+            profile: "main".to_string(),
+            source: "responses".to_string(),
+            input_tokens: 12,
+            cached_input_tokens: 3,
+            output_tokens: 4,
+            reasoning_tokens: 1,
+        };
+
+        let items = log_snapshot_items(Some(&transcript), Some(&usage));
+
+        assert_eq!(items.len(), 2);
+        assert!(matches!(items[0], LogStreamItem::Transcript(_)));
+        assert!(matches!(items[1], LogStreamItem::TokenUsage(_)));
+    }
+
+    #[test]
+    fn log_snapshot_tui_text_handles_empty_state() {
+        let items = VecDeque::new();
+        let text = log_stream_tui_text(&items, 10);
+        let rendered = text
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Waiting for transcript or token usage events"));
     }
 
     #[test]

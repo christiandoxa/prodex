@@ -1,13 +1,24 @@
 use crate::{claude_bin, codex_bin, default_memory_store_path, memory_store_ready};
 use anyhow::{Context, Result, bail};
+use crossterm::terminal;
 use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs, SuperDoctorArgs};
 use prodex_core::AppPaths;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use terminal_ui::{print_blank_line, print_panel, print_stdout_line};
+use terminal_ui::{print_panel, print_stdout_line};
+
+#[derive(Debug, Clone)]
+struct CapabilityPanel {
+    title: String,
+    fields: Vec<(String, String)>,
+}
 
 #[derive(Debug, Clone)]
 struct ProdexCapability {
@@ -58,7 +69,7 @@ fn handle_capability_list(args: CapabilityListArgs) -> Result<()> {
             )
         })
         .collect::<Vec<_>>();
-    print_panel("Capabilities", &fields);
+    print_capability_panel("Capabilities", &fields)?;
     Ok(())
 }
 
@@ -241,7 +252,7 @@ fn handle_super_doctor(args: SuperDoctorArgs) -> Result<()> {
                 )
             })
             .collect::<Vec<_>>();
-        print_panel("Super Doctor", &fields);
+        print_capability_panel("Super Doctor", &fields)?;
     }
 
     if args.strict && !ready {
@@ -285,9 +296,16 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
     } else {
         "Setup"
     };
-    print_panel(title, &setup_planned_actions(&paths));
-    print_blank_line();
-    print_panel("Install Checks", &install_rows);
+    print_capability_panels(&[
+        CapabilityPanel {
+            title: title.to_string(),
+            fields: setup_planned_actions(&paths),
+        },
+        CapabilityPanel {
+            title: "Install Checks".to_string(),
+            fields: install_rows.clone(),
+        },
+    ])?;
 
     if !args.dry_run {
         fs::create_dir_all(&paths.root)
@@ -302,6 +320,117 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_capability_panel(title: &str, fields: &[(String, String)]) -> Result<()> {
+    print_capability_panels(&[CapabilityPanel {
+        title: title.to_string(),
+        fields: fields.to_vec(),
+    }])
+}
+
+fn print_capability_panels(panels: &[CapabilityPanel]) -> Result<()> {
+    let height = capability_tui_height(panels);
+    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
+        for (index, panel) in panels.iter().enumerate() {
+            if index > 0 {
+                terminal_ui::print_blank_line();
+            }
+            print_panel(&panel.title, &panel.fields);
+        }
+        return Ok(());
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::styled(
+            "Prodex Capabilities",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue)),
+        );
+        frame.render_widget(header, chunks[0]);
+        let body = Paragraph::new(capability_tui_text(panels))
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    let _ = terminal.show_cursor();
+    Ok(())
+}
+
+fn capability_tui_height(panels: &[CapabilityPanel]) -> u16 {
+    let rows = panels
+        .iter()
+        .map(|panel| panel.fields.len().saturating_add(2))
+        .sum::<usize>()
+        .saturating_add(4)
+        .max(8);
+    let terminal_height = terminal::size()
+        .map(|(_, height)| usize::from(height))
+        .unwrap_or(24);
+    rows.min(terminal_height).max(1) as u16
+}
+
+fn capability_tui_text(panels: &[CapabilityPanel]) -> Text<'static> {
+    let mut lines = Vec::new();
+    for panel in panels {
+        if !lines.is_empty() {
+            lines.push(Line::raw(""));
+        }
+        lines.push(Line::styled(
+            panel.title.clone(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        let label_width = panel
+            .fields
+            .iter()
+            .map(|(label, _)| label.chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(24);
+        for (label, value) in &panel.fields {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{label:<label_width$} "),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    value.clone(),
+                    Style::default().fg(capability_value_color(value)),
+                ),
+            ]));
+        }
+    }
+    Text::from(lines)
+}
+
+fn capability_value_color(value: &str) -> Color {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("fail") || lower.contains("unavailable") {
+        Color::Red
+    } else if lower.contains("disabled") || lower.contains("not checked") {
+        Color::Yellow
+    } else if lower.contains("ok") || lower.contains("built-in") || lower.contains("ensure") {
+        Color::Green
+    } else {
+        Color::White
+    }
 }
 
 fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
@@ -624,11 +753,33 @@ fn command_status(command: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> String
 
 #[cfg(test)]
 mod tests {
-    use super::command_capability_probe_args;
+    use super::*;
 
     #[test]
     fn claw_compactor_capability_probe_uses_help() {
         assert_eq!(command_capability_probe_args("claw-compactor"), &["--help"]);
         assert_eq!(command_capability_probe_args("rtk"), &["--version"]);
+    }
+
+    #[test]
+    fn capability_tui_text_contains_panels() {
+        let panels = vec![CapabilityPanel {
+            title: "Capabilities".to_string(),
+            fields: vec![("rtk".to_string(), "ok (ready)".to_string())],
+        }];
+        let text = format!("{:?}", capability_tui_text(&panels));
+        assert!(text.contains("Capabilities"));
+        assert!(text.contains("rtk"));
+        assert!(text.contains("ok"));
+    }
+
+    #[test]
+    fn capability_value_color_highlights_status() {
+        assert_eq!(capability_value_color("fail (missing)"), Color::Red);
+        assert_eq!(
+            capability_value_color("disabled (not checked)"),
+            Color::Yellow
+        );
+        assert_eq!(capability_value_color("ok (built-in)"), Color::Green);
     }
 }

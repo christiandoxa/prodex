@@ -70,6 +70,35 @@
     }
 
     #[test]
+    fn all_quota_watch_tui_frame_uses_explicit_layout_and_metadata() {
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: 1,
+            reports: vec![test_quota_report(
+                "main",
+                Ok(test_usage("main@example.com")),
+            )],
+        };
+
+        let frame = build_all_quota_watch_tui_frame(
+            &snapshot,
+            false,
+            0,
+            QuotaReportSort::Current,
+            QuotaProviderFilter::All,
+            false,
+            80,
+            Some(8),
+        );
+
+        assert_eq!(frame.updated, "2026-06-26 10:00:00 UTC");
+        assert!(frame.body.contains("Quota Overview"));
+        assert!(frame.body.contains("main"));
+        assert!(frame.footer.contains("sort current"));
+        assert!(frame.footer.contains("filter all"));
+    }
+
+    #[test]
     fn quota_watch_max_scroll_offset_stops_at_last_visible_window() {
         let reports = (0..4)
             .map(|index| test_quota_report(&format!("profile-{index}"), Ok(test_usage("main"))))

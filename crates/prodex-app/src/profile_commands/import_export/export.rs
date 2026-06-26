@@ -1,3 +1,4 @@
+use super::super::manage::print_profile_panel;
 use super::passwords::{resolve_export_password, resolve_export_password_mode};
 use super::*;
 
@@ -43,7 +44,7 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
             active_profile: payload.active_profile.clone(),
         },
     );
-    print_panel("Profile Export", &fields);
+    print_profile_panel("Profile Export", &fields)?;
     Ok(())
 }
 

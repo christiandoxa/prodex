@@ -2,6 +2,7 @@ use super::{
     PreparedRuntimeLaunch, RuntimeLaunchPlan, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     cleanup_runtime_launch_plan, exit_with_status, prepare_runtime_launch, run_child_plan,
 };
+use crate::print_launch_status;
 use anyhow::Result;
 use std::process::ExitStatus;
 
@@ -119,15 +120,15 @@ where
 }
 
 fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
-    eprintln!("Prodex launch: preparing runtime and Prodex overlay...");
+    print_launch_status("preparing runtime and Prodex overlay...");
     if request.presidio_redaction_enabled {
-        eprintln!("Prodex launch: Presidio redaction requested; preparing local redaction proxy.");
+        print_launch_status("Presidio redaction requested; preparing local redaction proxy.");
     }
     if request.smart_context_enabled {
-        eprintln!("Prodex launch: Smart Context runtime proxy requested.");
+        print_launch_status("Smart Context runtime proxy requested.");
     }
     if request.model_provider_override.is_some() || request.external_provider.is_some() {
-        eprintln!("Prodex launch: local provider bridge requested.");
+        print_launch_status("local provider bridge requested.");
     }
 }
 
@@ -136,7 +137,7 @@ fn run_runtime_launch_execution(execution: RuntimeLaunchExecution) -> Result<Exi
         plan,
         runtime_proxy,
     } = execution;
-    eprintln!("Prodex launch: starting child process...");
+    print_launch_status("starting child process...");
     let status = run_child_plan(&plan.child, runtime_proxy.as_ref());
     drop(runtime_proxy);
     cleanup_runtime_launch_plan(&plan);

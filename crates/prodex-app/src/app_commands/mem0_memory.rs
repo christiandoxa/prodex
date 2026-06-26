@@ -1,5 +1,5 @@
 use super::runtime_launch;
-use crate::{AppPaths, RuntimeLaunchRequest, RuntimeRotationProxy};
+use crate::{AppPaths, RuntimeLaunchRequest, RuntimeRotationProxy, print_launch_status};
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use reqwest::blocking::Client;
@@ -42,9 +42,9 @@ pub(crate) fn start_managed_mem0_memory(
     paths: &AppPaths,
     request: &RuntimeLaunchRequest<'_>,
 ) -> Result<ManagedMem0Memory> {
-    eprintln!("Prodex launch: starting managed Mem0 memory via Docker...");
+    print_launch_status("starting managed Mem0 memory via Docker...");
     let gateway_token = random_url_safe_token("prodex-mem0")?;
-    eprintln!("Prodex launch: starting session-local Prodex gateway for Mem0...");
+    print_launch_status("starting session-local Prodex gateway for Mem0...");
     let gateway_proxy = runtime_launch::start_mem0_memory_gateway_for_runtime_request(
         paths,
         request,
@@ -56,33 +56,33 @@ pub(crate) fn start_managed_mem0_memory(
         MEM0_HOST_GATEWAY_NAME,
         gateway_proxy.listen_addr.port()
     );
-    eprintln!(
-        "Prodex launch: Mem0 gateway ready at http://127.0.0.1:{}.",
+    print_launch_status(&format!(
+        "Mem0 gateway ready at http://127.0.0.1:{}.",
         gateway_proxy.listen_addr.port()
-    );
+    ));
     let llm_model = select_mem0_memory_model(&gateway_proxy, &gateway_token)
         .unwrap_or_else(|| MEM0_DEFAULT_LLM_MODEL.to_string());
-    eprintln!(
-        "Prodex launch: Mem0 model={} embedder={}.",
+    print_launch_status(&format!(
+        "Mem0 model={} embedder={}.",
         llm_model, MEM0_EMBEDDER_MODEL
-    );
+    ));
     let root = paths.root.join("mem0");
     let checkout = root.join("mem0");
     let server_dir = checkout.join("server");
     if server_dir.join("docker-compose.yaml").is_file() {
-        eprintln!(
-            "Prodex launch: using existing Mem0 server checkout at {}.",
+        print_launch_status(&format!(
+            "using existing Mem0 server checkout at {}.",
             server_dir.display()
-        );
+        ));
     } else {
-        eprintln!(
-            "Prodex launch: cloning Mem0 OSS server into {}...",
+        print_launch_status(&format!(
+            "cloning Mem0 OSS server into {}...",
             checkout.display()
-        );
+        ));
     }
     ensure_mem0_checkout(&checkout)?;
     let secrets = load_or_create_mem0_secrets(&server_dir)?;
-    eprintln!("Prodex launch: writing Mem0 local .env and Docker override...");
+    print_launch_status("writing Mem0 local .env and Docker override...");
     write_mem0_env(
         &server_dir,
         &gateway_token,
@@ -92,13 +92,13 @@ pub(crate) fn start_managed_mem0_memory(
         MEM0_EMBEDDER_MODEL,
     )?;
     write_mem0_compose_override(&server_dir)?;
-    eprintln!(
-        "Prodex launch: starting Mem0 Docker Compose stack. First launch can build images and take several minutes..."
+    print_launch_status(
+        "starting Mem0 Docker Compose stack. First launch can build images and take several minutes...",
     );
     start_mem0_compose_stack(&server_dir)?;
-    eprintln!("Prodex launch: waiting for Mem0 API at {MEM0_API_URL}...");
+    print_launch_status(&format!("waiting for Mem0 API at {MEM0_API_URL}..."));
     wait_for_mem0_api(MEM0_API_URL, &secrets.admin_api_key)?;
-    eprintln!("Prodex launch: configuring Mem0 server to use Prodex gateway...");
+    print_launch_status("configuring Mem0 server to use Prodex gateway...");
     configure_mem0_server(
         MEM0_API_URL,
         &secrets.admin_api_key,
@@ -108,7 +108,7 @@ pub(crate) fn start_managed_mem0_memory(
         &llm_model,
         MEM0_EMBEDDER_MODEL,
     )?;
-    eprintln!("Prodex launch: managed Mem0 memory is ready at {MEM0_API_URL}.");
+    print_launch_status(&format!("managed Mem0 memory is ready at {MEM0_API_URL}."));
     Ok(ManagedMem0Memory {
         api_url: MEM0_API_URL.to_string(),
         api_key: secrets.admin_api_key,
@@ -349,14 +349,14 @@ impl DockerComposeCommand {
     }
 
     fn run(&self, server_dir: &Path, args: &[&str]) -> Result<()> {
-        eprintln!(
-            "Prodex launch: running `{}` in {} ...",
+        print_launch_status(&format!(
+            "running `{}` in {} ...",
             std::iter::once(self.display())
                 .chain(args.iter().map(|arg| (*arg).to_string()))
                 .collect::<Vec<_>>()
                 .join(" "),
             server_dir.display()
-        );
+        ));
         let status = Command::new(self.program)
             .args(&self.prefix_args)
             .args(args)

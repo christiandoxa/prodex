@@ -7,11 +7,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use super::manage::print_profile_panel;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     QUOTA_HTTP_CONNECT_TIMEOUT_MS, QUOTA_HTTP_READ_TIMEOUT_MS, absolutize,
     audit_log_event_best_effort, create_codex_home_if_missing, ensure_path_is_unique,
-    format_response_body, managed_profile_home_path, prepare_managed_codex_home, print_panel,
+    format_response_body, managed_profile_home_path, prepare_managed_codex_home,
 };
 
 pub(crate) use prodex_profile_export::CopilotUserInfo;
@@ -116,7 +117,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
                 active: state.active_profile.as_deref() == Some(existing_name.as_str()),
                 updated_existing: true,
             });
-            print_panel("Profile Updated", &fields);
+            print_profile_panel("Profile Updated", &fields)?;
             return Ok(());
         }
         CopilotProfileImportStatePlan::AddNew {
@@ -179,7 +180,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
         active: state.active_profile.as_deref() == Some(profile_name.as_str()),
         updated_existing: false,
     });
-    print_panel("Profile Added", &fields);
+    print_profile_panel("Profile Added", &fields)?;
     Ok(())
 }
 
