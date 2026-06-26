@@ -82,13 +82,15 @@
 
         let frame = build_all_quota_watch_tui_frame(
             &snapshot,
-            false,
-            0,
-            QuotaReportSort::Current,
-            QuotaProviderFilter::All,
-            false,
-            80,
-            Some(8),
+            AllQuotaWatchLayout {
+                detail: false,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Current,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 80,
+                max_lines: Some(8),
+            },
         );
 
         assert_eq!(frame.updated, "2026-06-26 10:00:00 UTC");

@@ -36,6 +36,16 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "rand/proptest/tempfile/export crypto currently span getrandom 0.2, 0.3, and 0.4.",
   },
   {
+    name: "hashbrown",
+    maxVersions: 2,
+    reason: "ratatui-core/kasuari and rusqlite/hashlink currently resolve separate hashbrown minor lines.",
+  },
+  {
+    name: "itertools",
+    maxVersions: 2,
+    reason: "ratatui-core/unicode-truncate and criterion benchmark tooling currently resolve separate itertools minor lines.",
+  },
+  {
     name: "rand_core",
     maxVersions: 3,
     reason: "crypto-common, rand/proptest, and JWT AWS-LC dependencies currently span rand_core 0.6, 0.9, and 0.10.",

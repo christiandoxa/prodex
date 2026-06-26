@@ -30,6 +30,18 @@ enum AllQuotaWatchSnapshot {
         message: String,
     },
 }
+
+#[derive(Clone, Copy)]
+struct AllQuotaWatchLayout {
+    detail: bool,
+    scroll_offset: usize,
+    sort: QuotaReportSort,
+    provider_filter: QuotaProviderFilter,
+    provider_filter_locked: bool,
+    total_width: usize,
+    max_lines: Option<usize>,
+}
+
 const QUOTA_WATCH_INPUT_POLL_MS: u64 = 100;
 enum QuotaWatchCommand {
     Up,
@@ -296,16 +308,9 @@ fn render_all_quota_watch_snapshot(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_all_quota_watch_snapshot_with_layout(
     snapshot: &AllQuotaWatchSnapshot,
-    detail: bool,
-    scroll_offset: usize,
-    sort: QuotaReportSort,
-    provider_filter: QuotaProviderFilter,
-    provider_filter_locked: bool,
-    total_width: usize,
-    max_lines: Option<usize>,
+    layout: AllQuotaWatchLayout,
 ) -> String {
     match snapshot {
         AllQuotaWatchSnapshot::Loading { updated: _updated } => {
@@ -315,16 +320,7 @@ fn render_all_quota_watch_snapshot_with_layout(
             updated: _updated,
             profile_count: _profile_count,
             reports,
-        } => render_all_quota_watch_report_output_with_layout(
-            reports,
-            detail,
-            scroll_offset,
-            sort,
-            provider_filter,
-            provider_filter_locked,
-            total_width,
-            max_lines,
-        ),
+        } => render_all_quota_watch_report_output_with_layout(reports, layout),
         AllQuotaWatchSnapshot::Empty { updated: _updated } => {
             render_quota_watch_error_panel("Quota", "No profiles configured")
         }
@@ -354,41 +350,36 @@ fn render_all_quota_watch_report_output(
 ) -> String {
     render_all_quota_watch_report_output_with_layout(
         reports,
-        detail,
-        scroll_offset,
-        sort,
-        provider_filter,
-        provider_filter_locked,
-        current_cli_width(),
-        quota_watch_available_report_lines(""),
+        AllQuotaWatchLayout {
+            detail,
+            scroll_offset,
+            sort,
+            provider_filter,
+            provider_filter_locked,
+            total_width: current_cli_width(),
+            max_lines: quota_watch_available_report_lines(""),
+        },
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_all_quota_watch_report_output_with_layout(
     reports: &[QuotaReport],
-    detail: bool,
-    scroll_offset: usize,
-    sort: QuotaReportSort,
-    provider_filter: QuotaProviderFilter,
-    provider_filter_locked: bool,
-    total_width: usize,
-    max_lines: Option<usize>,
+    layout: AllQuotaWatchLayout,
 ) -> String {
-    let filtered_reports = filter_quota_reports_by_provider(reports, provider_filter);
+    let filtered_reports = filter_quota_reports_by_provider(reports, layout.provider_filter);
     let window = render_quota_reports_window_with_sort(
         &filtered_reports,
-        detail,
-        max_lines,
-        total_width,
-        scroll_offset,
+        layout.detail,
+        layout.max_lines,
+        layout.total_width,
+        layout.scroll_offset,
         true,
-        sort,
+        layout.sort,
     );
 
     let mut output = quota_watch_without_interactive_scroll_notice(&window.output);
     output.push_str("\n\n");
-    let provider_hint = if provider_filter_locked {
+    let provider_hint = if layout.provider_filter_locked {
         "provider fixed"
     } else {
         "f provider"
@@ -398,8 +389,8 @@ fn render_all_quota_watch_report_output_with_layout(
         .unwrap_or_default();
     output.push_str(&format!(
         "sort: {} | filter: {}{} | s sort | {} | j/k/Up/Down scroll | q quit",
-        sort.label(),
-        provider_filter.label(),
+        layout.sort.label(),
+        layout.provider_filter.label(),
         range,
         provider_hint
     ));
@@ -669,13 +660,15 @@ fn watch_all_quotas_tui(
                 ));
             let frame = build_all_quota_watch_tui_frame(
                 &snapshot,
-                detail,
-                scroll_offset,
-                sort,
-                provider_filter,
-                provider_filter_locked,
-                usize::from(size.width).saturating_sub(4),
-                max_lines,
+                AllQuotaWatchLayout {
+                    detail,
+                    scroll_offset,
+                    sort,
+                    provider_filter,
+                    provider_filter_locked,
+                    total_width: usize::from(size.width).saturating_sub(4),
+                    max_lines,
+                },
             );
             tui.terminal
                 .draw(|area| render_all_quota_watch_tui(area, &frame))
@@ -766,28 +759,12 @@ struct AllQuotaWatchTuiFrame {
     footer: String,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_all_quota_watch_tui_frame(
     snapshot: &AllQuotaWatchSnapshot,
-    detail: bool,
-    scroll_offset: usize,
-    sort: QuotaReportSort,
-    provider_filter: QuotaProviderFilter,
-    provider_filter_locked: bool,
-    total_width: usize,
-    max_lines: Option<usize>,
+    layout: AllQuotaWatchLayout,
 ) -> AllQuotaWatchTuiFrame {
-    let body = render_all_quota_watch_snapshot_with_layout(
-        snapshot,
-        detail,
-        scroll_offset,
-        sort,
-        provider_filter,
-        provider_filter_locked,
-        total_width,
-        max_lines,
-    );
-    let provider_hint = if provider_filter_locked {
+    let body = render_all_quota_watch_snapshot_with_layout(snapshot, layout);
+    let provider_hint = if layout.provider_filter_locked {
         "provider fixed"
     } else {
         "f provider"
@@ -798,8 +775,8 @@ fn build_all_quota_watch_tui_frame(
         body,
         footer: format!(
             "sort {} | filter {} | s sort | {} | j/k or arrows scroll | q quit",
-            sort.label(),
-            provider_filter.label(),
+            layout.sort.label(),
+            layout.provider_filter.label(),
             provider_hint
         ),
     }

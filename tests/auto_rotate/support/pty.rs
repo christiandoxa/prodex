@@ -108,7 +108,11 @@ fn read_until_prompt(master: &mut File, prompt: &str, output: &mut String) {
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(10));
             }
-            Err(err) => panic!("failed to read pty output: {err}"),
+            Err(err) => {
+                panic!(
+                    "failed to read pty output before prompt {prompt:?}: {err}; output was {output:?}"
+                )
+            }
         }
     }
     panic!("timed out waiting for prompt {prompt:?}; output was {output:?}");

@@ -135,34 +135,6 @@ fn dashboard_url(addr: tiny_http::ListenAddr) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dashboard_status_tui_text_contains_url_and_warning() {
-        let text = dashboard_status_tui_text(
-            "http://127.0.0.1:8765",
-            Some("dashboard has no password auth"),
-        );
-        let rendered = text
-            .lines
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(rendered.contains("http://127.0.0.1:8765"));
-        assert!(rendered.contains("Warning"));
-        assert!(rendered.contains("dashboard has no password auth"));
-    }
-}
-
 impl DashboardServer {
     fn handle(&self, request: Request) -> Result<()> {
         let method = request.method().clone();
@@ -535,5 +507,33 @@ fn hex_value(byte: u8) -> Option<u8> {
         b'a'..=b'f' => Some(byte - b'a' + 10),
         b'A'..=b'F' => Some(byte - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dashboard_status_tui_text_contains_url_and_warning() {
+        let text = dashboard_status_tui_text(
+            "http://127.0.0.1:8765",
+            Some("dashboard has no password auth"),
+        );
+        let rendered = text
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("http://127.0.0.1:8765"));
+        assert!(rendered.contains("Warning"));
+        assert!(rendered.contains("dashboard has no password auth"));
     }
 }

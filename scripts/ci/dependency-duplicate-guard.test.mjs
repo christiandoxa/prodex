@@ -50,6 +50,18 @@ getrandom v0.3.4
 getrandom v0.4.2
     tempfile v3.27.0
 
+hashbrown v0.16.1
+    kasuari v0.4.12
+
+hashbrown v0.17.1
+    hashlink v0.12.0
+
+itertools v0.13.0
+    criterion v0.8.2
+
+itertools v0.14.0
+    ratatui-core v0.1.2
+
 rand v0.9.4
     provider crypto v0.1.0
 
@@ -97,6 +109,8 @@ test("default budget accepts current duplicate families", () => {
       ["digest", 2],
       ["fallible-iterator", 2],
       ["getrandom", 3],
+      ["hashbrown", 2],
+      ["itertools", 2],
       ["rand", 2],
       ["rand_core", 3],
       ["thiserror", 2],
