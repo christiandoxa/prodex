@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.221.0 - Unreleased
+
+Changes after `0.220.0`.
+
+### Misc
+
+- Rewrite all prodex-owned CLI output to ratatui TUI (`d4c60d5`)
+
 ## 0.220.0 - 2026-06-26
 
 ### Misc

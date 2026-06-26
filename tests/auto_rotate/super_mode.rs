@@ -51,7 +51,7 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
             ("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str()),
             ("PRODEX_PRESIDIO_AUTO_START", "0"),
         ],
-        "Use Presidio for data safety? [y/N] ",
+        "Use Presidio for data safety?",
         "y\n",
     );
 
@@ -64,7 +64,7 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
     );
     assert!(
         run.tty_output
-            .contains("Use Presidio for data safety? [y/N] "),
+            .contains("Use Presidio for data safety?"),
         "PTY prompt output missing prompt: {}",
         run.tty_output
     );

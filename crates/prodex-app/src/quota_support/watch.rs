@@ -296,6 +296,7 @@ fn render_all_quota_watch_snapshot(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_all_quota_watch_snapshot_with_layout(
     snapshot: &AllQuotaWatchSnapshot,
     detail: bool,
@@ -363,6 +364,7 @@ fn render_all_quota_watch_report_output(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_all_quota_watch_report_output_with_layout(
     reports: &[QuotaReport],
     detail: bool,
@@ -764,6 +766,7 @@ struct AllQuotaWatchTuiFrame {
     footer: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_all_quota_watch_tui_frame(
     snapshot: &AllQuotaWatchSnapshot,
     detail: bool,
