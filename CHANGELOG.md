@@ -2,12 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.221.0 - Unreleased
+## 0.222.0 - Unreleased
 
-Changes after `0.220.0`.
+Changes after `0.221.0`.
 
 ### Misc
 
+- Migrate legacy output to ratatui (`ce19af2`)
+
+## 0.221.0 - 2026-06-26
+
+### Misc
+
+- Fall back when super prompt tui cannot initialize (`ede5412`)
 - Rewrite all prodex-owned CLI output to ratatui TUI (`d4c60d5`)
 
 ## 0.220.0 - 2026-06-26
@@ -96,9 +103,3 @@ Changes after `0.220.0`.
 ### Runtime
 
 - Preserve upstream Codex backend metadata (`ebb8be5`)
-
-## 0.209.0 - 2026-06-23
-
-### Misc
-
-- Tolerate successful reset credit response (`db91125`)
