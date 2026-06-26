@@ -104,37 +104,37 @@ pub(crate) fn resolve_runtime_launch_profile_name(
 fn prompt_super_presidio_opt_in() -> Result<bool> {
     let stdin = io::stdin();
     let stderr = io::stderr();
-    if stdin.is_terminal() && stderr.is_terminal() {
-        return prompt_super_opt_in_tui(
+    let stdin_is_terminal = stdin.is_terminal();
+    let stderr_is_terminal = stderr.is_terminal();
+    if stdin_is_terminal
+        && stderr_is_terminal
+        && let Ok(enabled) = prompt_super_opt_in_tui(
             "Prodex Super",
             "Use Presidio for data safety?",
             "Presidio redacts sensitive text through the configured local Presidio services before runtime proxy forwarding.",
-        );
+        )
+    {
+        return Ok(enabled);
     }
-    prompt_super_presidio_opt_in_from(
-        stdin.is_terminal(),
-        stderr.is_terminal(),
-        stdin.lock(),
-        stderr,
-    )
+    prompt_super_presidio_opt_in_from(stdin_is_terminal, stderr_is_terminal, stdin.lock(), stderr)
 }
 
 fn prompt_super_mem0_opt_in() -> Result<bool> {
     let stdin = io::stdin();
     let stderr = io::stderr();
-    if stdin.is_terminal() && stderr.is_terminal() {
-        return prompt_super_opt_in_tui(
+    let stdin_is_terminal = stdin.is_terminal();
+    let stderr_is_terminal = stderr.is_terminal();
+    if stdin_is_terminal
+        && stderr_is_terminal
+        && let Ok(enabled) = prompt_super_opt_in_tui(
             "Prodex Super",
             "Enable prodex-memory via managed Mem0 Docker?",
             "Mem0 starts managed local services and a Prodex gateway so the Super overlay can keep session memory.",
-        );
+        )
+    {
+        return Ok(enabled);
     }
-    prompt_super_mem0_opt_in_from(
-        stdin.is_terminal(),
-        stderr.is_terminal(),
-        stdin.lock(),
-        stderr,
-    )
+    prompt_super_mem0_opt_in_from(stdin_is_terminal, stderr_is_terminal, stdin.lock(), stderr)
 }
 
 fn prompt_super_presidio_opt_in_from<R, W>(
