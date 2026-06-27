@@ -13,6 +13,9 @@ permissions:
   attestations: write
   artifact-metadata: write
 
+env:
+  CARGO_HTTP_MULTIPLEXING: "false"
+
 jobs:
   verify-ci:
     name: Verify CI is green
@@ -183,11 +186,17 @@ jobs:
             export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           fi
-          if [ "${{ matrix.use-cross }}" = "true" ]; then
-            cross build --release --locked --target "${{ matrix.target }}"
-          else
-            cargo build --release --locked --target "${{ matrix.target }}"
-          fi
+          for attempt in 1 2 3; do
+            if [ "${{ matrix.use-cross }}" = "true" ]; then
+              cross build --release --locked --target "${{ matrix.target }}" && exit 0
+            else
+              cargo build --release --locked --target "${{ matrix.target }}" && exit 0
+            fi
+            if [ "${attempt}" = "3" ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
 
       - name: Verify Linux GLIBC baseline
         if: ${{ contains(matrix.target, 'unknown-linux-gnu') }}
