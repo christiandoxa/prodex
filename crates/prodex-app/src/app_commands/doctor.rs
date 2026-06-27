@@ -432,9 +432,10 @@ fn doctor_value_color(label: &str, value: &str) -> Color {
         || lower.contains("blocked")
         || lower.contains("warning")
         || lower.contains("orphan")
+        || lower.contains("critical")
+        || lower.contains("thin")
+        || lower.contains("degraded")
     {
-        Color::Red
-    } else if lower.contains("critical") || lower.contains("thin") || lower.contains("degraded") {
         Color::Red
     } else if lower.contains("ready") || lower.contains("yes") || lower.contains("exists") {
         Color::Green

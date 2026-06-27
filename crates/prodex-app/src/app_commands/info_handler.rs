@@ -230,9 +230,10 @@ fn info_panel_value_color(label: &str, value: &str) -> Color {
         || lower.contains("missing")
         || lower.contains("unavailable")
         || lower.contains("exhausted")
+        || lower.contains("critical")
+        || lower.contains("thin")
+        || lower.contains("warning")
     {
-        Color::Red
-    } else if lower.contains("critical") || lower.contains("thin") || lower.contains("warning") {
         Color::Red
     } else if lower.contains("ready")
         || lower.contains("healthy")

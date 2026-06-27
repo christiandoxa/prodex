@@ -1,5 +1,18 @@
 [
   {
+    "id": "release-tui-and-codex-compat-0.223.0",
+    "requiredSubjects": [
+      "chore(release): prepare 0.223.0"
+    ],
+    "caps": {
+      "maxFiles": 48,
+      "maxBehaviorFiles": 36,
+      "maxLines": 2453,
+      "maxFileLines": 245
+    },
+    "reason": "Reviewed cross-cutting TUI cleanup, upstream Codex compatibility baseline refresh, and release metadata with local full test suite, focused login regression, format, clippy, and CI guard checks."
+  },
+  {
     "id": "runtime-support-crate-extraction-0.199.0",
     "requiredSubjects": [
       "feat: standardize runtime support crates"

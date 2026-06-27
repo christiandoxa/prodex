@@ -411,9 +411,11 @@ fn capability_tui_text(panels: &[CapabilityPanel]) -> Text<'static> {
 
 fn capability_value_color(value: &str) -> Color {
     let lower = value.to_ascii_lowercase();
-    if lower.contains("fail") || lower.contains("unavailable") {
-        Color::Red
-    } else if lower.contains("disabled") || lower.contains("not checked") {
+    if lower.contains("fail")
+        || lower.contains("unavailable")
+        || lower.contains("disabled")
+        || lower.contains("not checked")
+    {
         Color::Red
     } else if lower.contains("ok") || lower.contains("built-in") || lower.contains("ensure") {
         Color::Green

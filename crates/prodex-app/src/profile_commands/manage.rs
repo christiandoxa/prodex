@@ -651,9 +651,11 @@ fn profile_value_color(label: &str, value: &str) -> Color {
         Color::Red
     } else if lower.contains("active") || lower == "yes" || label == "Active" {
         Color::Green
-    } else if label == "Provider" || label == "Auth" || label == "Runtime route" {
-        Color::Cyan
-    } else if label == "Identity" {
+    } else if label == "Provider"
+        || label == "Auth"
+        || label == "Runtime route"
+        || label == "Identity"
+    {
         Color::Cyan
     } else {
         Color::Reset
