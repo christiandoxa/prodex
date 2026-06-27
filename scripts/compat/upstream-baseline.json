@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.142.2 release",
+      "baseline_source": "openai/codex rust-v0.142.3 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -120,12 +120,47 @@
         },
         {
           "path": "codex-rs/model-provider-info/src/lib.rs",
-          "reason": "Owns remote compaction capability gating for model providers; Prodex Gemini relies on the current OpenAI/Azure capability behavior to activate Codex native /responses/compact.",
+          "reason": "Owns remote compaction capability gating for model providers and Bedrock model ID constants. Prodex Gemini relies on the current OpenAI/Azure capability behavior, and Prodex Bedrock direct-launch docs/guards track the upstream static catalog contract.",
           "required_contains": [
             "ModelProviderInfo",
             "supports_remote_compaction",
             "is_openai()",
-            "is_azure_responses_provider"
+            "is_azure_responses_provider",
+            "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+            "openai.gpt-5.6-sol",
+            "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+            "openai.gpt-5.6-terra",
+            "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+            "openai.gpt-5.6-luna"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
+          "reason": "Owns the Codex static Amazon Bedrock model catalog. Prodex launches Bedrock/custom providers directly, so compatibility tracking must preserve the upstream GPT-5.6 Bedrock slugs, max reasoning effort, and default-only service-tier contract.",
+          "required_contains": [
+            "static_model_catalog",
+            "with_default_only_service_tier",
+            "gpt_5_6_bedrock_model",
+            "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+            "ReasoningEffort::Custom(\"max\".to_string())",
+            "Maximum reasoning depth for the hardest problems",
+            "model.additional_speed_tiers.clear()",
+            "model.service_tiers.clear()",
+            "model.default_service_tier = None"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/provider.rs",
+          "reason": "Owns the Codex model manager wiring for the static Amazon Bedrock catalog used by direct Bedrock launches.",
+          "required_contains": [
+            "amazon_bedrock_provider_creates_static_models_manager",
+            "openai.gpt-5.5",
+            "openai.gpt-5.4",
+            "openai.gpt-5.6-sol",
+            "openai.gpt-5.6-terra",
+            "openai.gpt-5.6-luna"
           ]
         },
         {
@@ -701,6 +736,39 @@
           ]
         },
         {
+          "id": "model-provider.bedrock-gpt-5-6-catalog",
+          "kind": "provider_catalog",
+          "file": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
+          "reason": "Codex 0.142.3 adds GPT-5.6 Sol/Terra/Luna Bedrock models by copying GPT-5.5 config, adding max reasoning effort, and keeping Bedrock service tiers default-only.",
+          "file_contains_all": [
+            "static_model_catalog",
+            "with_default_only_service_tier",
+            "gpt_5_6_bedrock_model",
+            "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+            "ReasoningEffort::Custom(\"max\".to_string())",
+            "Maximum reasoning depth for the hardest problems",
+            "model.additional_speed_tiers.clear()",
+            "model.service_tiers.clear()",
+            "model.default_service_tier = None"
+          ]
+        },
+        {
+          "id": "model-provider.bedrock-static-manager-models",
+          "kind": "provider_catalog",
+          "file": "codex-rs/model-provider/src/provider.rs",
+          "reason": "Codex 0.142.3 static Bedrock model manager must expose the existing GPT-5.5/GPT-5.4 IDs plus GPT-5.6 Sol/Terra/Luna.",
+          "file_contains_all": [
+            "amazon_bedrock_provider_creates_static_models_manager",
+            "openai.gpt-5.5",
+            "openai.gpt-5.4",
+            "openai.gpt-5.6-sol",
+            "openai.gpt-5.6-terra",
+            "openai.gpt-5.6-luna"
+          ]
+        },
+        {
           "id": "sse.responses-events",
           "kind": "event_group",
           "file": "codex-rs/codex-api/src/sse/responses.rs",
@@ -909,19 +977,15 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.142.2",
-      "name": "0.142.2",
-      "published_at": "2026-06-25T07:32:00Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.2",
+      "tag_name": "rust-v0.142.3",
+      "name": "0.142.3",
+      "published_at": "2026-06-26T21:29:20Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.3",
       "body_head": [
-        "## New Features",
-        "- MCP tools now use tool search by default when supported, improving tool discovery while preserving compatibility with older models and providers. (#29486)",
-        "- macOS authentication clients can honor system proxy, PAC, and WPAD settings when respect_system_proxy is enabled. (#26709)",
-        "- Plugins can provide dedicated dark-mode logos through local manifests and remote catalogs. (#29488)",
-        "- Apps can display richer safety-buffering UI using server-provided visibility and faster-model metadata. (#29473)",
-        "## Bug Fixes",
-        "- Remote plugin catalogs now return curated featured-plugin rankings. (#29485)",
-        "- Expired Amazon Bedrock credentials now produce actionable recovery guidance instead of a generic authorization error. (#28992)"
+        "## Chores",
+        "- Maintenance-only patch release with no user-facing changes since 0.142.2.",
+        "## Changelog",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.142.2...rust-v0.142.3"
       ]
     }
   },

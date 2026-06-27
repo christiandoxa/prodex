@@ -1,12 +1,8 @@
 use anyhow::{Context, Result, anyhow};
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::io::{self, IsTerminal};
 use std::net::SocketAddr;
+use terminal_ui::print_panel;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use crate::dashboard_html::DASHBOARD_HTML;
@@ -61,70 +57,16 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
 }
 
 fn print_dashboard_status(url: &str, warning: Option<&str>) -> Result<()> {
-    if !io::stdout().is_terminal() {
-        println!("Prodex dashboard: {url}");
-        if let Some(warning) = warning {
-            println!("Warning: {warning}.");
-        }
-        return Ok(());
-    }
-
-    let height = if warning.is_some() { 8 } else { 7 };
-    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        println!("Prodex dashboard: {url}");
-        if let Some(warning) = warning {
-            println!("Warning: {warning}.");
-        }
-        return Ok(());
-    };
-    terminal.draw(|frame| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(frame.area());
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Dashboard",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled("running", Style::default().fg(Color::Green)),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        );
-        frame.render_widget(header, chunks[0]);
-
-        let body = Paragraph::new(dashboard_status_tui_text(url, warning))
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(body, chunks[1]);
-    })?;
-    let _ = terminal.show_cursor();
+    print_panel("Dashboard", &dashboard_status_fields(url, warning));
     Ok(())
 }
 
-fn dashboard_status_tui_text(url: &str, warning: Option<&str>) -> Text<'static> {
-    let mut lines = vec![Line::from(vec![
-        Span::styled("URL     ", Style::default().fg(Color::DarkGray)),
-        Span::styled(url.to_string(), Style::default().fg(Color::Green)),
-    ])];
+fn dashboard_status_fields(url: &str, warning: Option<&str>) -> Vec<(String, String)> {
+    let mut fields = vec![("URL".to_string(), url.to_string())];
     if let Some(warning) = warning {
-        lines.push(Line::raw(""));
-        lines.push(Line::from(vec![
-            Span::styled("Warning ", Style::default().fg(Color::Yellow)),
-            Span::styled(warning.to_string(), Style::default().fg(Color::White)),
-        ]));
+        fields.push(("Warning".to_string(), warning.to_string()));
     }
-    Text::from(lines)
+    fields
 }
 
 fn dashboard_url(addr: tiny_http::ListenAddr) -> String {
@@ -515,25 +457,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dashboard_status_tui_text_contains_url_and_warning() {
-        let text = dashboard_status_tui_text(
+    fn dashboard_status_fields_contain_url_and_warning() {
+        let fields = dashboard_status_fields(
             "http://127.0.0.1:8765",
             Some("dashboard has no password auth"),
         );
-        let rendered = text
-            .lines
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
 
-        assert!(rendered.contains("http://127.0.0.1:8765"));
-        assert!(rendered.contains("Warning"));
-        assert!(rendered.contains("dashboard has no password auth"));
+        assert!(fields.contains(&("URL".to_string(), "http://127.0.0.1:8765".to_string())));
+        assert!(fields.contains(&(
+            "Warning".to_string(),
+            "dashboard has no password auth".to_string()
+        )));
     }
 }

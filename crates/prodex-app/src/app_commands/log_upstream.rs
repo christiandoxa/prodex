@@ -15,7 +15,6 @@ use prodex_runtime_doctor::read_runtime_log_tail;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use serde_json::Value;
@@ -29,6 +28,10 @@ use std::thread;
 use std::time::Duration;
 #[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
+use terminal_ui::{
+    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
+    tui_title_style,
+};
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
@@ -258,22 +261,14 @@ fn render_upstream_payload_tui(
         ])
         .split(frame.area());
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Prodex Upstream Payloads",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Prodex Upstream Payloads", tui_title_style()),
         Span::raw("  "),
-        Span::styled(
-            format!("{} event(s)", events.len()),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(format!("{} event(s)", events.len()), tui_secondary_style()),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(tui_border_style()),
     );
     frame.render_widget(header, chunks[0]);
 
@@ -282,21 +277,21 @@ fn render_upstream_payload_tui(
         .block(
             Block::default()
                 .borders(Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         )
         .wrap(Wrap { trim: false });
     frame.render_widget(body, chunks[1]);
 
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled("q", Style::default().fg(Color::Yellow)),
+        Span::styled("q", tui_hint_style()),
         Span::raw(" quit  "),
-        Span::styled("esc", Style::default().fg(Color::Yellow)),
+        Span::styled("esc", tui_hint_style()),
         Span::raw(" close"),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(tui_border_style()),
     );
     frame.render_widget(footer, chunks[2]);
 }
@@ -308,7 +303,7 @@ fn upstream_payload_tui_text(
     if events.is_empty() {
         return Text::from(Line::from(Span::styled(
             "Waiting for processed upstream payload events...",
-            Style::default().fg(Color::DarkGray),
+            tui_secondary_style(),
         )));
     }
 
@@ -322,45 +317,37 @@ fn upstream_payload_tui_text(
             .map(|request| request.to_string())
             .unwrap_or_else(|| "-".to_string());
         lines.push(Line::from(vec![
-            Span::styled(
-                event.timestamp.clone(),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(event.timestamp.clone(), tui_secondary_style()),
             Span::raw(" "),
-            Span::styled(
-                "upstream payload",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("upstream payload", tui_title_style()),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("profile=", Style::default().fg(Color::DarkGray)),
-            Span::styled(event.profile.clone(), Style::default().fg(Color::Green)),
+            Span::styled("profile=", tui_secondary_style()),
+            Span::styled(event.profile.clone(), tui_success_style()),
             Span::raw(" "),
-            Span::styled("request=", Style::default().fg(Color::DarkGray)),
+            Span::styled("request=", tui_secondary_style()),
             Span::raw(request),
             Span::raw(" "),
-            Span::styled("transport=", Style::default().fg(Color::DarkGray)),
+            Span::styled("transport=", tui_secondary_style()),
             Span::raw(event.transport.clone()),
             Span::raw(" "),
-            Span::styled("route=", Style::default().fg(Color::DarkGray)),
+            Span::styled("route=", tui_secondary_style()),
             Span::raw(event.route.clone()),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("bytes=", Style::default().fg(Color::DarkGray)),
+            Span::styled("bytes=", tui_secondary_style()),
             Span::raw(event.bytes.to_string()),
             Span::raw(" "),
-            Span::styled("logged=", Style::default().fg(Color::DarkGray)),
+            Span::styled("logged=", tui_secondary_style()),
             Span::raw(event.logged_bytes.to_string()),
             Span::raw(" "),
-            Span::styled("truncated=", Style::default().fg(Color::DarkGray)),
+            Span::styled("truncated=", tui_secondary_style()),
             Span::styled(
                 event.truncated.to_string(),
                 if event.truncated {
-                    Style::default().fg(Color::Yellow)
+                    tui_hint_style()
                 } else {
-                    Style::default().fg(Color::White)
+                    tui_primary_style()
                 },
             ),
         ]));

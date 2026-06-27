@@ -12,6 +12,10 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use std::io::{self, IsTerminal, Write};
+use terminal_ui::{
+    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
+    tui_title_style,
+};
 
 const LOGIN_MENU_MIN_VISIBLE_ITEMS: usize = 3;
 
@@ -394,27 +398,22 @@ fn render_login_menu_tui(
     let visible_items = layout.visible_items.max(1).min(entries.len().max(1));
     let end = offset.saturating_add(visible_items).min(entries.len());
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Prodex Login - Select login method",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Prodex Login", tui_title_style()),
         Span::raw("  "),
         Span::styled(
             format!(
-                "showing {}-{} of {}",
+                "methods {}-{} of {}",
                 offset.saturating_add(1).min(entries.len()),
                 end,
                 entries.len()
             ),
-            Style::default().fg(Color::DarkGray),
+            tui_secondary_style(),
         ),
     ]))
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(tui_border_style()),
     );
     frame.render_widget(header, chunks[0]);
 
@@ -440,11 +439,9 @@ fn render_login_menu_tui(
                     " "
                 };
                 let style = if index == selected {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                    tui_hint_style().add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::White)
+                    tui_primary_style()
                 };
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{marker} {:>2}. ", index + 1), style),
@@ -461,7 +458,7 @@ fn render_login_menu_tui(
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::LEFT | Borders::RIGHT)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(tui_border_style()),
     );
     frame.render_widget(list, chunks[1]);
 
@@ -480,7 +477,7 @@ fn render_login_menu_tui(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         )
         .wrap(ratatui::widgets::Wrap { trim: false });
     frame.render_widget(detail, chunks[2]);
@@ -490,41 +487,49 @@ fn login_menu_detail_text(entry: &LoginMenuEntry, layout: LoginMenuLayout) -> Te
     if layout.compact {
         return Text::from(vec![
             Line::from(vec![
-                Span::styled("Provider ", Style::default().fg(Color::DarkGray)),
-                Span::styled(entry.provider, Style::default().fg(Color::Green)),
+                Span::styled(
+                    "Select login method - Provide your own API key  ",
+                    tui_secondary_style(),
+                ),
+                Span::styled("Provider ", tui_secondary_style()),
+                Span::styled(entry.provider, tui_success_style()),
                 Span::raw(" | "),
                 Span::styled(entry.auth, Style::default().fg(Color::Cyan)),
             ]),
             Line::from(vec![
-                Span::styled("Use ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Use ", tui_secondary_style()),
                 Span::raw(entry.usage),
             ]),
             Line::from(vec![
-                Span::styled("Cmd ", Style::default().fg(Color::DarkGray)),
-                Span::styled(entry.command, Style::default().fg(Color::Yellow)),
+                Span::styled("Cmd ", tui_secondary_style()),
+                Span::styled(entry.command, tui_hint_style()),
             ]),
         ]);
     }
 
     Text::from(vec![
         Line::from(vec![
-            Span::styled("Provider ", Style::default().fg(Color::DarkGray)),
-            Span::styled(entry.provider, Style::default().fg(Color::Green)),
+            Span::styled(
+                "Select login method - Provide your own API key  ",
+                tui_secondary_style(),
+            ),
+            Span::styled("Provider ", tui_secondary_style()),
+            Span::styled(entry.provider, tui_success_style()),
         ]),
         Line::from(vec![
-            Span::styled("Auth     ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Auth     ", tui_secondary_style()),
             Span::styled(entry.auth, Style::default().fg(Color::Cyan)),
         ]),
         Line::from(vec![
-            Span::styled("Use      ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Use      ", tui_secondary_style()),
             Span::raw(entry.usage),
         ]),
         Line::from(vec![
-            Span::styled("Command  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(entry.command, Style::default().fg(Color::Yellow)),
+            Span::styled("Command  ", tui_secondary_style()),
+            Span::styled(entry.command, tui_hint_style()),
         ]),
         Line::from(Span::styled(
-            "Up/Down move | PageUp/PageDown scroll | Enter select | 1-9 quick select | q cancel",
+            "Select login method | Up/Down move | PageUp/PageDown scroll | Enter select | 1-9 quick select | q cancel",
             Style::default()
                 .fg(Color::Gray)
                 .add_modifier(Modifier::ITALIC),

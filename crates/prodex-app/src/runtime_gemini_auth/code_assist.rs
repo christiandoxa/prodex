@@ -11,7 +11,6 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use reqwest::blocking::Client;
@@ -21,6 +20,10 @@ use std::env;
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::time::Duration;
+use terminal_ui::{
+    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
+    tui_title_style,
+};
 
 const GEMINI_CODE_ASSIST_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com/v1internal";
 
@@ -553,60 +556,52 @@ fn prompt_gemini_validation_tui(validation: &GeminiCodeAssistValidation) -> Resu
                 ])
                 .split(frame.area());
             let header = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "Gemini Account Validation",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("Gemini Account Validation", tui_title_style()),
                 Span::raw("  "),
-                Span::styled("action required", Style::default().fg(Color::Yellow)),
+                Span::styled("action required", tui_hint_style()),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(header, chunks[0]);
 
             let mut lines = vec![
-                Line::from(Span::styled(
-                    message.clone(),
-                    Style::default().fg(Color::White),
-                )),
+                Line::from(Span::styled(message.clone(), tui_primary_style())),
                 Line::raw(""),
             ];
             if let Some(url) = validation.url.as_deref() {
                 lines.push(Line::from(vec![
-                    Span::styled("Open ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(url.to_string(), Style::default().fg(Color::Green)),
+                    Span::styled("Open ", tui_secondary_style()),
+                    Span::styled(url.to_string(), tui_success_style()),
                 ]));
             }
             if let Some(url) = validation.learn_more_url.as_deref() {
                 lines.push(Line::from(vec![
-                    Span::styled("Learn ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(url.to_string(), Style::default().fg(Color::Green)),
+                    Span::styled("Learn ", tui_secondary_style()),
+                    Span::styled(url.to_string(), tui_success_style()),
                 ]));
             }
             let body = Paragraph::new(lines)
                 .block(
                     Block::default()
                         .borders(Borders::LEFT | Borders::RIGHT)
-                        .border_style(Style::default().fg(Color::Blue)),
+                        .border_style(tui_border_style()),
                 )
                 .wrap(Wrap { trim: false });
             frame.render_widget(body, chunks[1]);
 
             let footer = Paragraph::new(Line::from(vec![
-                Span::styled("enter", Style::default().fg(Color::Green)),
+                Span::styled("enter", tui_success_style()),
                 Span::raw(" continue after verification  "),
-                Span::styled("esc", Style::default().fg(Color::Yellow)),
+                Span::styled("esc", tui_hint_style()),
                 Span::raw(" continue"),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(footer, chunks[2]);
         })?;

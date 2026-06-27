@@ -10,6 +10,7 @@ use crate::{
     ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS, ProdexCleanupOptions,
     perform_prodex_cleanup_with_options, print_panel, runtime_proxy_log_dir,
 };
+use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
 
 pub(crate) fn handle_cleanup(args: CleanupArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
@@ -99,23 +100,17 @@ fn print_cleanup_panel(fields: &[(String, String)]) -> Result<()> {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
-        let header = Paragraph::new(Line::styled(
-            "Prodex Cleanup",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .block(
+        let header = Paragraph::new(Line::styled("Prodex Cleanup", tui_title_style())).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
         let body = Paragraph::new(cleanup_tui_text(fields))
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
@@ -146,9 +141,7 @@ fn cleanup_tui_text(fields: &[(String, String)]) -> Text<'static> {
                 Line::from(vec![
                     Span::styled(
                         format!("{label:<label_width$} "),
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::BOLD),
+                        tui_secondary_style().add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         value.clone(),
@@ -164,9 +157,9 @@ fn cleanup_value_color(value: &str) -> Color {
     if value.starts_with('0') || value.contains("clean") || value.contains("left untouched") {
         Color::Green
     } else if value.contains("removed") || value.parse::<usize>().unwrap_or(0) > 0 {
-        Color::Yellow
+        Color::Red
     } else {
-        Color::White
+        Color::Reset
     }
 }
 
@@ -231,10 +224,10 @@ mod tests {
     #[test]
     fn cleanup_value_color_highlights_removed_counts() {
         assert_eq!(cleanup_value_color("0"), Color::Green);
-        assert_eq!(cleanup_value_color("2"), Color::Yellow);
+        assert_eq!(cleanup_value_color("2"), Color::Red);
         assert_eq!(
             cleanup_value_color("removed stale latest-pointer file"),
-            Color::Yellow
+            Color::Red
         );
     }
 }

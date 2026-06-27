@@ -21,6 +21,45 @@ fn field_layout_respects_requested_width() {
 }
 
 #[test]
+fn text_panel_renderer_adds_panel_header() {
+    let rendered = render_text_panel("Audit", "line one\nline two");
+    assert!(rendered.contains("[ Audit ]"));
+    assert!(rendered.contains("line one"));
+    assert!(rendered.contains("line two"));
+}
+
+#[test]
+fn tui_panel_styles_use_theme_safe_ansi_colors() {
+    use ratatui::style::Color;
+
+    assert_eq!(tui_title_style().fg, Some(Color::Cyan));
+    assert_eq!(tui_secondary_style().fg, Some(Color::DarkGray));
+    assert_eq!(tui_primary_style().fg, None);
+    assert_eq!(tui_border_style().fg, Some(Color::Cyan));
+    assert_eq!(tui_hint_style().fg, Some(Color::Cyan));
+    assert_eq!(tui_success_style().fg, Some(Color::Green));
+    assert_eq!(tui_error_style().fg, Some(Color::Red));
+}
+
+#[test]
+fn status_panel_draws_on_test_backend() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let backend = TestBackend::new(48, 5);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    draw_status_panel_terminal(
+        &mut terminal,
+        "Prodex Launch",
+        "preflight",
+        "Status",
+        "starting child process...",
+    )
+    .expect("draw status panel");
+}
+
+#[test]
 fn info_process_summary_preserves_pid_limit() {
     assert_eq!(
         format_info_process_summary_display(7, 2, 10..17, 6),

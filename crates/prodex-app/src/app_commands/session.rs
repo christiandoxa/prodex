@@ -8,6 +8,9 @@ use std::env;
 use std::ffi::OsString;
 use std::io::{self, IsTerminal};
 use std::path::Path;
+use terminal_ui::{
+    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_title_style,
+};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, RunArgs, SessionCommands, SessionResumeArgs, absolutize,
@@ -166,22 +169,17 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
                 .split(frame.area());
 
             let header = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "Prodex Sessions",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("Prodex Sessions", tui_title_style()),
                 Span::raw("  "),
                 Span::styled(
                     format!("{} session(s)", reports.len()),
-                    Style::default().fg(Color::DarkGray),
+                    tui_secondary_style(),
                 ),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(header, chunks[0]);
 
@@ -193,7 +191,7 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
                 .block(
                     Block::default()
                         .borders(Borders::LEFT | Borders::RIGHT)
-                        .border_style(Style::default().fg(Color::Blue)),
+                        .border_style(tui_border_style()),
                 );
                 frame.render_widget(empty, chunks[1]);
             } else {
@@ -204,19 +202,19 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
                 let list = List::new(items).block(
                     Block::default()
                         .borders(Borders::LEFT | Borders::RIGHT)
-                        .border_style(Style::default().fg(Color::Blue)),
+                        .border_style(tui_border_style()),
                 );
                 frame.render_widget(list, chunks[1]);
             }
 
             let footer = Paragraph::new(Line::styled(
                 "use `prodex run <session-id>` to resume",
-                Style::default().fg(Color::Yellow),
+                tui_hint_style(),
             ))
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(footer, chunks[2]);
         })
@@ -247,23 +245,21 @@ fn session_report_tui_item(report: &SessionReport) -> ListItem<'_> {
         Line::from(vec![
             Span::styled(
                 report.id.as_str(),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                tui_hint_style().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(title.to_string(), Style::default().fg(Color::White)),
+            Span::styled(title.to_string(), tui_primary_style()),
         ]),
         Line::from(vec![
-            Span::styled("updated ", Style::default().fg(Color::DarkGray)),
+            Span::styled("updated ", tui_secondary_style()),
             Span::raw(updated.to_string()),
-            Span::styled(" profile ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" profile ", tui_secondary_style()),
             Span::raw(profile.to_string()),
-            Span::styled(" provider ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" provider ", tui_secondary_style()),
             Span::raw(provider.to_string()),
         ]),
         Line::from(vec![
-            Span::styled("cwd ", Style::default().fg(Color::DarkGray)),
+            Span::styled("cwd ", tui_secondary_style()),
             Span::raw(cwd.to_string()),
         ]),
         Line::raw(""),

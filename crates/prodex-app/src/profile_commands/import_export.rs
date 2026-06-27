@@ -3,6 +3,7 @@ use super::*;
 mod export;
 mod import;
 mod passwords;
+mod progress;
 mod secrets;
 
 #[cfg(test)]

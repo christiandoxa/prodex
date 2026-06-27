@@ -2,12 +2,10 @@ use crate::audit_log::append_audit_event;
 use anyhow::Result;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use std::cell::RefCell;
 use std::env;
 use std::io::{self, IsTerminal};
+use terminal_ui::draw_status_panel_terminal;
 
 pub(crate) use prodex_core::{absolutize, default_codex_home};
 #[cfg(test)]
@@ -23,9 +21,13 @@ pub(crate) fn audit_log_event_best_effort(
 }
 
 pub(crate) fn print_launch_status(message: &str) {
-    if print_launch_status_tui(message).is_err() {
-        eprintln!("Prodex launch: {message}");
-    }
+    LAUNCH_STATUS_TUI.with(|state| {
+        let mut state = state.borrow_mut();
+        match state.render(message) {
+            Ok(()) => {}
+            Err(_) => eprintln!("Prodex launch: {message}"),
+        }
+    });
 }
 
 pub(crate) fn try_inline_stdout_terminal(
@@ -73,44 +75,39 @@ fn inline_tui_allowed() -> bool {
             .unwrap_or(true)
 }
 
-fn print_launch_status_tui(message: &str) -> Result<()> {
-    let Some(mut terminal) = try_inline_stderr_terminal(5) else {
-        anyhow::bail!("stderr is not a terminal");
-    };
-    terminal.draw(|frame| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(frame.area());
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Launch",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled("preflight", Style::default().fg(Color::DarkGray)),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        );
-        frame.render_widget(header, chunks[0]);
+thread_local! {
+    static LAUNCH_STATUS_TUI: RefCell<LaunchStatusTui> = RefCell::new(LaunchStatusTui::default());
+}
 
-        let body = Paragraph::new(Line::from(vec![
-            Span::styled("Status ", Style::default().fg(Color::DarkGray)),
-            Span::styled(message.to_string(), Style::default().fg(Color::White)),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                .border_style(Style::default().fg(Color::Blue)),
-        )
-        .wrap(Wrap { trim: false });
-        frame.render_widget(body, chunks[1]);
-    })?;
-    let _ = terminal.show_cursor();
-    Ok(())
+#[derive(Default)]
+struct LaunchStatusTui {
+    terminal: Option<Terminal<CrosstermBackend<io::Stderr>>>,
+    disabled: bool,
+}
+
+impl LaunchStatusTui {
+    fn render(&mut self, message: &str) -> Result<()> {
+        if self.disabled {
+            anyhow::bail!("launch status TUI disabled");
+        }
+        if self.terminal.is_none() {
+            self.terminal = try_inline_stderr_terminal(5);
+        }
+        let Some(terminal) = self.terminal.as_mut() else {
+            self.disabled = true;
+            anyhow::bail!("stderr is not an inline-capable terminal");
+        };
+        if let Err(err) = render_launch_status_tui(terminal, message) {
+            self.disabled = true;
+            anyhow::bail!(err);
+        }
+        Ok(())
+    }
+}
+
+fn render_launch_status_tui(
+    terminal: &mut Terminal<CrosstermBackend<io::Stderr>>,
+    message: &str,
+) -> Result<()> {
+    draw_status_panel_terminal(terminal, "Prodex Launch", "preflight", "Status", message)
 }

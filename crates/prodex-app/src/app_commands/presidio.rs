@@ -19,6 +19,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use terminal_ui::print_panel;
+use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
 
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
 const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
@@ -319,19 +320,14 @@ fn print_presidio_panel(title: &str, fields: Vec<(String, String)>) -> Result<()
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
         let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Presidio",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Prodex Presidio", tui_title_style()),
             Span::raw("  "),
-            Span::styled(&panel.title, Style::default().fg(Color::DarkGray)),
+            Span::styled(&panel.title, tui_secondary_style()),
         ]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
 
@@ -339,7 +335,7 @@ fn print_presidio_panel(title: &str, fields: Vec<(String, String)>) -> Result<()
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
@@ -357,16 +353,11 @@ fn presidio_tui_text(panel: &PresidioPanel) -> Text<'static> {
     let mut lines = Vec::with_capacity(panel.fields.len() + 1);
     lines.push(Line::from(vec![Span::styled(
         panel.title.clone(),
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
+        tui_primary_style().add_modifier(Modifier::BOLD),
     )]));
     for (label, value) in &panel.fields {
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("{label:>18} "),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("{label:>18} "), tui_secondary_style()),
             Span::styled(value.clone(), presidio_value_style(label, value)),
         ]));
     }
@@ -383,9 +374,9 @@ fn presidio_value_style(label: &str, value: &str) -> Style {
     } else if lower_label.contains("health") && lower_value.starts_with("failed")
         || lower_label == "enabled" && lower_value == "false"
     {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(Color::Red)
     } else {
-        Style::default().fg(Color::White)
+        tui_primary_style()
     }
 }
 
@@ -753,7 +744,7 @@ mod tests {
         );
         assert_eq!(
             presidio_value_style("Enabled", "false").fg,
-            Some(Color::Yellow)
+            Some(Color::Red)
         );
     }
 }

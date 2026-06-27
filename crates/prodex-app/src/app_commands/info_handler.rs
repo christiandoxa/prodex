@@ -5,6 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, collect_active_runtime_log_paths,
@@ -170,22 +171,14 @@ fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
             .split(frame.area());
 
         let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Info",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Prodex Info", tui_title_style()),
             Span::raw("  "),
-            Span::styled(
-                format!("{} field(s)", fields.len()),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("{} field(s)", fields.len()), tui_secondary_style()),
         ]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
 
@@ -193,7 +186,7 @@ fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
@@ -223,9 +216,7 @@ fn info_panel_tui_text(fields: &[(String, String)]) -> Text<'static> {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{label:<label_width$} "),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
+                tui_secondary_style().add_modifier(Modifier::BOLD),
             ),
             Span::styled(value.clone(), Style::default().fg(color)),
         ]));
@@ -242,7 +233,7 @@ fn info_panel_value_color(label: &str, value: &str) -> Color {
     {
         Color::Red
     } else if lower.contains("critical") || lower.contains("thin") || lower.contains("warning") {
-        Color::Yellow
+        Color::Red
     } else if lower.contains("ready")
         || lower.contains("healthy")
         || lower.contains("up to date")
@@ -252,7 +243,7 @@ fn info_panel_value_color(label: &str, value: &str) -> Color {
     } else if label.contains("Runtime") || label.contains("Codex") {
         Color::Cyan
     } else {
-        Color::White
+        Color::Reset
     }
 }
 
@@ -275,7 +266,7 @@ mod tests {
     #[test]
     fn info_panel_value_color_highlights_status() {
         assert_eq!(info_panel_value_color("x", "missing file"), Color::Red);
-        assert_eq!(info_panel_value_color("x", "critical load"), Color::Yellow);
+        assert_eq!(info_panel_value_color("x", "critical load"), Color::Red);
         assert_eq!(
             info_panel_value_color("Active profile", "main"),
             Color::Green

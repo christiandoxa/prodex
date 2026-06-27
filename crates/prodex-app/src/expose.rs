@@ -2,19 +2,16 @@ use crate::ExposeArgs;
 use anyhow::{Context, Result};
 use base64::Engine;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::VecDeque;
 use std::env;
-use std::io::{self, BufRead, IsTerminal, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use terminal_ui::print_panel;
 use tiny_http::Server as TinyServer;
 
 mod ui;
@@ -109,6 +106,18 @@ fn print_expose_status(
     tunnel_status: &str,
     tunnel_url: Option<&str>,
 ) -> Result<()> {
+    let fields = expose_status_fields(local_url, token, max_clients, tunnel_status, tunnel_url);
+    print_panel("Expose", &fields);
+    Ok(())
+}
+
+fn expose_status_fields(
+    local_url: &str,
+    token: &str,
+    max_clients: usize,
+    tunnel_status: &str,
+    tunnel_url: Option<&str>,
+) -> Vec<(String, String)> {
     let mut fields = vec![
         ("Local URL".to_string(), local_url.to_string()),
         ("Access token".to_string(), token.to_string()),
@@ -123,108 +132,7 @@ fn print_expose_status(
     if let Some(url) = tunnel_url {
         fields.push(("Tunnel URL".to_string(), url.to_string()));
     }
-
-    if !io::stdout().is_terminal() {
-        println!("Prodex expose local URL:");
-        println!("  {local_url}");
-        println!("Access token:");
-        println!("  {token}");
-        println!("Security:");
-        println!(
-            "  loopback server, token path + query, CSP, origin check, max clients={max_clients}"
-        );
-        println!("Tunnel:");
-        println!("  {tunnel_status}");
-        if let Some(url) = tunnel_url {
-            println!("Cloudflare tunnel URL:");
-            println!("  {url}");
-        }
-        return Ok(());
-    }
-
-    let height = (fields.len() + 4).clamp(7, 14) as u16;
-    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        println!("Prodex expose local URL:");
-        println!("  {local_url}");
-        println!("Access token:");
-        println!("  {token}");
-        println!("Security:");
-        println!(
-            "  loopback server, token path + query, CSP, origin check, max clients={max_clients}"
-        );
-        println!("Tunnel:");
-        println!("  {tunnel_status}");
-        if let Some(url) = tunnel_url {
-            println!("Cloudflare tunnel URL:");
-            println!("  {url}");
-        }
-        return Ok(());
-    };
-    terminal.draw(|frame| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(frame.area());
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Expose",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                "terminal sharing server",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        );
-        frame.render_widget(header, chunks[0]);
-
-        let body = Paragraph::new(expose_status_tui_text(&fields))
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(body, chunks[1]);
-    })?;
-    let _ = terminal.show_cursor();
-    Ok(())
-}
-
-fn expose_value_style(label: &str, value: &str) -> Style {
-    if label == "Tunnel" && value == "ready" {
-        Style::default().fg(Color::Green)
-    } else if label == "Tunnel" && value.starts_with("unavailable") {
-        Style::default().fg(Color::Yellow)
-    } else if label.ends_with("URL") {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default().fg(Color::White)
-    }
-}
-
-fn expose_status_tui_text(fields: &[(String, String)]) -> Text<'static> {
-    Text::from(
-        fields
-            .iter()
-            .map(|(label, value)| {
-                Line::from(vec![
-                    Span::styled(
-                        format!("{label:>12} "),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::styled(value.clone(), expose_value_style(label, value)),
-                ])
-            })
-            .collect::<Vec<_>>(),
-    )
+    fields
 }
 
 struct ExposeShared {
@@ -588,30 +496,22 @@ mod tests {
     }
 
     #[test]
-    fn expose_status_tui_text_contains_server_fields() {
-        let fields = vec![
-            (
-                "Local URL".to_string(),
-                "http://127.0.0.1:7777/t/token?access_token=token".to_string(),
-            ),
-            ("Tunnel".to_string(), "ready".to_string()),
-        ];
-        let text = expose_status_tui_text(&fields);
-        let rendered = text
-            .lines
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+    fn expose_status_fields_contain_server_fields() {
+        let fields = expose_status_fields(
+            "http://127.0.0.1:7777/t/token?access_token=token",
+            "token",
+            1,
+            "ready",
+            Some("https://demo.trycloudflare.com/t/token?access_token=token"),
+        );
 
-        assert!(rendered.contains("Local URL"));
-        assert!(rendered.contains("127.0.0.1:7777"));
-        assert!(rendered.contains("Tunnel"));
-        assert_eq!(expose_value_style("Tunnel", "ready").fg, Some(Color::Green));
+        assert!(fields.contains(&(
+            "Local URL".to_string(),
+            "http://127.0.0.1:7777/t/token?access_token=token".to_string()
+        )));
+        assert!(fields.contains(&("Tunnel".to_string(), "ready".to_string())));
+        assert!(fields.iter().any(|(label, value)| {
+            label == "Tunnel URL" && value.contains("demo.trycloudflare.com")
+        }));
     }
 }

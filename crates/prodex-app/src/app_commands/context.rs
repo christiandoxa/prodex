@@ -1,13 +1,9 @@
 use anyhow::{Context, Result, bail};
-use crossterm::terminal;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::fs;
 use std::io::IsTerminal;
 use std::io::{self, Read};
 use std::path::PathBuf;
+use terminal_ui::print_text_panel;
 
 use crate::{
     AppPaths, ContextAuditArgs, ContextCompactOutputArgs, ContextCompactOutputKind,
@@ -136,103 +132,6 @@ fn context_compact_output_kind(kind: ContextCompactOutputKind) -> CommandOutputK
 }
 
 fn print_context_human_output(title: &str, output: &str) -> Result<()> {
-    let height = context_tui_height(output);
-    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        print_stdout_line(output);
-        return Ok(());
-    };
-    terminal.draw(|frame| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(frame.area());
-        let header = Paragraph::new(Line::styled(
-            title.to_string(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        );
-        frame.render_widget(header, chunks[0]);
-
-        let body = Paragraph::new(context_tui_text(output))
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(body, chunks[1]);
-    })?;
-    let _ = terminal.show_cursor();
+    print_text_panel(title, output);
     Ok(())
-}
-
-fn context_tui_height(output: &str) -> u16 {
-    let rows = output.lines().count().saturating_add(4).max(8);
-    let terminal_height = terminal::size()
-        .map(|(_, height)| usize::from(height))
-        .unwrap_or(24);
-    rows.min(terminal_height).max(1) as u16
-}
-
-fn context_tui_text(output: &str) -> Text<'static> {
-    Text::from(
-        output
-            .lines()
-            .map(|line| Line::from(context_tui_spans(line)))
-            .collect::<Vec<_>>(),
-    )
-}
-
-fn context_tui_spans(line: &str) -> Vec<Span<'static>> {
-    if line.starts_with('#') || line.starts_with("== ") {
-        return vec![Span::styled(
-            line.to_string(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )];
-    }
-    let lower = line.to_ascii_lowercase();
-    if lower.contains("failed") || lower.contains("error") || lower.contains("over budget") {
-        return vec![Span::styled(
-            line.to_string(),
-            Style::default().fg(Color::Red),
-        )];
-    }
-    if lower.contains("warning") || lower.contains("duplicate") || lower.contains("truncated") {
-        return vec![Span::styled(
-            line.to_string(),
-            Style::default().fg(Color::Yellow),
-        )];
-    }
-    if lower.contains("passed") || lower.contains("saved") || lower.contains("compressed") {
-        return vec![Span::styled(
-            line.to_string(),
-            Style::default().fg(Color::Green),
-        )];
-    }
-    vec![Span::raw(line.to_string())]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn context_tui_text_contains_output() {
-        let text = format!("{:?}", context_tui_text("# Context\ncompressed output"));
-        assert!(text.contains("Context"));
-        assert!(text.contains("compressed output"));
-    }
-
-    #[test]
-    fn context_tui_height_is_positive() {
-        assert!(context_tui_height("one\ntwo") >= 1);
-    }
 }

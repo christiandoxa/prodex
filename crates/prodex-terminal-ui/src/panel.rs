@@ -14,6 +14,36 @@ pub fn section_header(title: &str) -> String {
     section_header_with_width(title, current_cli_width())
 }
 
+pub fn tui_title_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
+}
+
+pub fn tui_secondary_style() -> Style {
+    Style::default().fg(Color::DarkGray)
+}
+
+pub fn tui_primary_style() -> Style {
+    Style::default()
+}
+
+pub fn tui_border_style() -> Style {
+    Style::default().fg(Color::Cyan)
+}
+
+pub fn tui_hint_style() -> Style {
+    Style::default().fg(Color::Cyan)
+}
+
+pub fn tui_success_style() -> Style {
+    Style::default().fg(Color::Green)
+}
+
+pub fn tui_error_style() -> Style {
+    Style::default().fg(Color::Red)
+}
+
 pub fn section_header_with_width(title: &str, total_width: usize) -> String {
     let prefix = format!("[ {title} ] ");
     let width = text_width(&prefix);
@@ -151,6 +181,23 @@ pub fn render_panel(title: &str, fields: &[(String, String)]) -> String {
     panel_lines_with_layout(title, fields, current_cli_width()).join("\n")
 }
 
+pub fn render_text_panel(title: &str, body: &str) -> String {
+    let mut lines = vec![section_header(title)];
+    lines.extend(body.lines().map(str::to_string));
+    lines.join("\n")
+}
+
+pub fn print_text_panel(title: &str, body: &str) {
+    let body_lines = body.lines().map(str::to_string).collect::<Vec<_>>();
+    if print_panel_tui_stdout(title, &body_lines).is_ok() {
+        return;
+    }
+    print_stdout_line(&section_header(title));
+    for line in body.lines() {
+        print_stdout_line(line);
+    }
+}
+
 pub fn print_stderr_panel(title: &str, messages: &[String]) {
     if print_panel_tui_stderr(title, messages).is_ok() {
         return;
@@ -218,14 +265,12 @@ where
             .split(frame.area());
         let header = Paragraph::new(Line::from(vec![Span::styled(
             title.to_string(),
-            Style::default()
-                .fg(Color::Rgb(92, 221, 229))
-                .add_modifier(Modifier::BOLD),
+            tui_title_style(),
         )]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Rgb(74, 103, 123))),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
 
@@ -237,9 +282,51 @@ where
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Rgb(74, 103, 123))),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
+        frame.render_widget(body, chunks[1]);
+    })?;
+    Ok(())
+}
+
+pub fn draw_status_panel_terminal<B: Backend>(
+    terminal: &mut Terminal<B>,
+    title: &str,
+    phase: &str,
+    label: &str,
+    message: &str,
+) -> anyhow::Result<()>
+where
+    B::Error: Send + Sync + 'static,
+{
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .split(frame.area());
+        let header = Paragraph::new(Line::from(vec![
+            Span::styled(title.to_string(), tui_title_style()),
+            Span::raw("  "),
+            Span::styled(phase.to_string(), tui_secondary_style()),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(tui_border_style()),
+        );
+        frame.render_widget(header, chunks[0]);
+
+        let body = Paragraph::new(Line::from(vec![
+            Span::styled(format!("{label} "), tui_secondary_style()),
+            Span::styled(message.to_string(), tui_primary_style()),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                .border_style(tui_border_style()),
+        )
+        .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
     })?;
     Ok(())

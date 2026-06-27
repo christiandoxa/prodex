@@ -7,7 +7,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::ffi::OsString;
@@ -19,6 +19,9 @@ use std::os::windows::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::time::{SystemTime, UNIX_EPOCH};
+use terminal_ui::{
+    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_title_style,
+};
 
 mod api_key;
 mod claude;
@@ -752,19 +755,14 @@ fn prompt_login_text_tui(
                 ])
                 .split(frame.area());
             let header = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    title.to_string(),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(title.to_string(), tui_title_style()),
                 Span::raw("  "),
-                Span::styled(label.to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled(label.to_string(), tui_secondary_style()),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(header, chunks[0]);
 
@@ -776,49 +774,44 @@ fn prompt_login_text_tui(
                 input.clone()
             };
             let value_style = if input.is_empty() && default_value.is_some() && !secret {
-                Style::default().fg(Color::DarkGray)
+                tui_secondary_style()
             } else {
-                Style::default().fg(Color::White)
+                tui_primary_style()
             };
             let body = Paragraph::new(vec![
                 Line::from(Span::styled(
                     label.to_string(),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    tui_primary_style().add_modifier(Modifier::BOLD),
                 )),
                 Line::raw(""),
-                Line::from(Span::styled(
-                    detail.to_string(),
-                    Style::default().fg(Color::Gray),
-                )),
+                Line::from(Span::styled(detail.to_string(), tui_secondary_style())),
                 Line::raw(""),
                 Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Cyan)),
+                    Span::styled("> ", tui_hint_style()),
                     Span::styled(display_value, value_style),
-                    Span::styled("_", Style::default().fg(Color::Cyan)),
+                    Span::styled("_", tui_hint_style()),
                 ]),
             ])
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
             frame.render_widget(body, chunks[1]);
 
             let footer = Paragraph::new(Line::from(vec![
-                Span::styled("enter", Style::default().fg(Color::Green)),
+                Span::styled("enter", tui_hint_style()),
                 Span::raw(" accept  "),
-                Span::styled("backspace", Style::default().fg(Color::Yellow)),
+                Span::styled("backspace", tui_hint_style()),
                 Span::raw(" delete  "),
-                Span::styled("esc", Style::default().fg(Color::Yellow)),
+                Span::styled("esc", tui_hint_style()),
                 Span::raw(" cancel"),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(footer, chunks[2]);
         })?;

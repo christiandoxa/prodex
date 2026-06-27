@@ -8,6 +8,7 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
+use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
 
 use super::{collect_super_tool_statuses, render_super_tool_statuses};
 use crate::{
@@ -299,19 +300,14 @@ fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
         let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Dry Run",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Prodex Dry Run", tui_title_style()),
             Span::raw("  "),
-            Span::styled(flow.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(flow.to_string(), tui_secondary_style()),
         ]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
 
@@ -319,7 +315,7 @@ fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
@@ -339,20 +335,13 @@ fn runtime_launch_dry_run_tui_text(output: &str) -> Text<'static> {
             .lines()
             .map(|line| {
                 if line.ends_with(':') {
-                    Line::from(Span::styled(
-                        line.to_string(),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ))
+                    Line::from(Span::styled(line.to_string(), tui_title_style()))
                 } else if let Some((label, value)) = line.split_once(':') {
                     let value_color = runtime_launch_dry_run_value_color(label, value);
                     Line::from(vec![
                         Span::styled(
                             format!("{label}:"),
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::BOLD),
+                            tui_secondary_style().add_modifier(Modifier::BOLD),
                         ),
                         Span::raw(" "),
                         Span::styled(
@@ -361,10 +350,7 @@ fn runtime_launch_dry_run_tui_text(output: &str) -> Text<'static> {
                         ),
                     ])
                 } else {
-                    Line::from(Span::styled(
-                        line.to_string(),
-                        Style::default().fg(Color::White),
-                    ))
+                    Line::from(Span::styled(line.to_string(), tui_primary_style()))
                 }
             })
             .collect::<Vec<_>>(),
@@ -375,7 +361,7 @@ fn runtime_launch_dry_run_value_color(label: &str, value: &str) -> Color {
     let lower_label = label.to_ascii_lowercase();
     let lower_value = value.to_ascii_lowercase();
     if lower_value.contains("disabled") || lower_value.contains("removed") {
-        Color::Yellow
+        Color::Red
     } else if lower_value.contains("enabled")
         || lower_value.contains("ready")
         || lower_value.contains("ok")
@@ -388,7 +374,7 @@ fn runtime_launch_dry_run_value_color(label: &str, value: &str) -> Color {
     {
         Color::Cyan
     } else {
-        Color::White
+        Color::Reset
     }
 }
 
@@ -462,7 +448,7 @@ mod tests {
         );
         assert_eq!(
             runtime_launch_dry_run_value_color("Presidio redaction", "disabled"),
-            Color::Yellow
+            Color::Red
         );
         assert_eq!(
             runtime_launch_dry_run_value_color("Command", "codex"),

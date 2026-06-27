@@ -1,10 +1,6 @@
 use anyhow::Result;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use std::io::{self, IsTerminal};
 use std::path::Path;
+use terminal_ui::print_panel;
 
 pub(crate) use prodex_runtime_gemini_cli_compat::{
     GeminiSettingsSource, gemini_cli_config_home_for, gemini_settings_source_paths_for,
@@ -22,64 +18,15 @@ pub(crate) fn handle_gemini_compat_refresh(args: crate::GeminiCompatRefreshArgs)
 }
 
 fn print_gemini_compat_refresh_status(codex_home: &Path) -> Result<()> {
-    if !io::stdout().is_terminal() {
-        println!(
-            "Gemini CLI compatibility refreshed in {}",
-            codex_home.display()
-        );
-        return Ok(());
-    }
-
-    let Some(mut terminal) = crate::try_inline_stdout_terminal(7) else {
-        println!(
-            "Gemini CLI compatibility refreshed in {}",
-            codex_home.display()
-        );
-        return Ok(());
-    };
-    terminal.draw(|frame| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(frame.area());
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Gemini CLI Compatibility",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled("refreshed", Style::default().fg(Color::Green)),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        );
-        frame.render_widget(header, chunks[0]);
-
-        let body = Paragraph::new(gemini_compat_status_tui_text(codex_home))
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(body, chunks[1]);
-    })?;
-    let _ = terminal.show_cursor();
+    print_panel(
+        "Gemini CLI Compatibility",
+        &gemini_compat_status_fields(codex_home),
+    );
     Ok(())
 }
 
-fn gemini_compat_status_tui_text(codex_home: &Path) -> Text<'static> {
-    Text::from(Line::from(vec![
-        Span::styled("CODEX_HOME ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            codex_home.display().to_string(),
-            Style::default().fg(Color::White),
-        ),
-    ]))
+fn gemini_compat_status_fields(codex_home: &Path) -> Vec<(String, String)> {
+    vec![("CODEX_HOME".to_string(), codex_home.display().to_string())]
 }
 
 #[cfg(test)]
@@ -88,22 +35,10 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn gemini_compat_status_tui_text_contains_codex_home() {
+    fn gemini_compat_status_fields_contain_codex_home() {
         let codex_home = PathBuf::from("/tmp/prodex-gemini");
-        let text = gemini_compat_status_tui_text(&codex_home);
-        let rendered = text
-            .lines
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let fields = gemini_compat_status_fields(&codex_home);
 
-        assert!(rendered.contains("CODEX_HOME"));
-        assert!(rendered.contains("/tmp/prodex-gemini"));
+        assert!(fields.contains(&("CODEX_HOME".to_string(), "/tmp/prodex-gemini".to_string())));
     }
 }

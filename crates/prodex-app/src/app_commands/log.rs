@@ -29,6 +29,7 @@ use std::thread;
 #[cfg(test)]
 use std::time::SystemTime;
 use std::time::{Duration, UNIX_EPOCH};
+use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
@@ -431,7 +432,7 @@ fn log_stream_tui_text(
                     ),
                 ]));
                 for line in render_text_body(&event.text, body_width) {
-                    lines.push(Line::styled(line, Style::default().fg(Color::White)));
+                    lines.push(Line::styled(line, tui_primary_style()));
                 }
             }
             LogStreamItem::TokenUsage(event) => {
@@ -451,13 +452,13 @@ fn log_stream_tui_text(
                 ]));
                 lines.push(Line::from(vec![
                     Span::styled("profile ", log_muted_style()),
-                    Span::styled(event.profile.as_str(), Style::default().fg(Color::White)),
+                    Span::styled(event.profile.as_str(), tui_primary_style()),
                     Span::styled(" request ", log_muted_style()),
-                    Span::styled(request, Style::default().fg(Color::White)),
+                    Span::styled(request, tui_primary_style()),
                     Span::styled(" transport ", log_muted_style()),
-                    Span::styled(event.transport.as_str(), Style::default().fg(Color::White)),
+                    Span::styled(event.transport.as_str(), tui_primary_style()),
                     Span::styled(" source ", log_muted_style()),
-                    Span::styled(event.source.as_str(), Style::default().fg(Color::White)),
+                    Span::styled(event.source.as_str(), tui_primary_style()),
                 ]));
                 lines.push(Line::from(vec![
                     Span::styled("sent ", log_muted_style()),
@@ -473,7 +474,7 @@ fn log_stream_tui_text(
                     Span::styled(" received ", log_muted_style()),
                     Span::styled(
                         event.output_tokens.to_string(),
-                        Style::default().fg(Color::Yellow),
+                        Style::default().fg(Color::Green),
                     ),
                     Span::styled(" reasoning ", log_muted_style()),
                     Span::styled(
@@ -491,32 +492,28 @@ fn log_stream_tui_text(
 }
 
 fn log_title_style() -> Style {
-    Style::default()
-        .fg(Color::Rgb(92, 221, 229))
-        .add_modifier(Modifier::BOLD)
+    tui_title_style()
 }
 
 fn log_border_style() -> Style {
-    Style::default().fg(Color::Rgb(74, 103, 123))
+    tui_border_style()
 }
 
 fn log_muted_style() -> Style {
-    Style::default().fg(Color::Rgb(150, 165, 176))
+    tui_secondary_style()
 }
 
 fn log_footer_style() -> Style {
-    Style::default()
-        .fg(Color::Rgb(235, 196, 109))
-        .add_modifier(Modifier::BOLD)
+    tui_title_style()
 }
 
 fn log_stream_source_color(source: &str) -> Color {
     match source {
-        "user" => Color::Rgb(105, 214, 143),
-        "assistant" => Color::Rgb(92, 221, 229),
-        "tool-output" => Color::Rgb(235, 196, 109),
-        source if source.starts_with("tool-call:") => Color::Rgb(210, 150, 238),
-        _ => Color::White,
+        "user" => Color::Green,
+        "assistant" => Color::Cyan,
+        "tool-output" => Color::Magenta,
+        source if source.starts_with("tool-call:") => Color::Magenta,
+        _ => Color::Reset,
     }
 }
 

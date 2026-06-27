@@ -3,10 +3,12 @@ pub(crate) use prodex_update_notice::*;
 use anyhow::{Context, Result};
 use prodex_cli::Commands;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use terminal_ui::print_stderr_panel;
+use terminal_ui::{
+    print_stderr_panel, tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style,
+    tui_success_style, tui_title_style,
+};
 
 pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> {
     if !prodex_update_notice::should_emit_update_notice(command) {
@@ -52,19 +54,14 @@ fn print_update_notice_tui(
                 .constraints([Constraint::Length(3), Constraint::Min(1)])
                 .split(frame.area());
             let header = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "Prodex Update",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("Prodex Update", tui_title_style()),
                 Span::raw("  "),
-                Span::styled("available", Style::default().fg(Color::Yellow)),
+                Span::styled("available", tui_hint_style()),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(header, chunks[0]);
 
@@ -76,7 +73,7 @@ fn print_update_notice_tui(
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
             frame.render_widget(body, chunks[1]);
@@ -93,24 +90,15 @@ fn update_notice_tui_lines(
 ) -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
-            Span::styled("Current ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                current_version.to_string(),
-                Style::default().fg(Color::White),
-            ),
-            Span::styled(" Latest ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                latest_version.to_string(),
-                Style::default().fg(Color::Green),
-            ),
+            Span::styled("Current ", tui_secondary_style()),
+            Span::styled(current_version.to_string(), tui_primary_style()),
+            Span::styled(" Latest ", tui_secondary_style()),
+            Span::styled(latest_version.to_string(), tui_success_style()),
         ]),
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Update  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                update_command.to_string(),
-                Style::default().fg(Color::Yellow),
-            ),
+            Span::styled("Update  ", tui_secondary_style()),
+            Span::styled(update_command.to_string(), tui_hint_style()),
         ]),
     ]
 }

@@ -95,10 +95,43 @@
 
         assert_eq!(frame.updated, "2026-06-26 10:00:00 UTC");
         assert!(frame.body.contains("Quota Overview"));
+        assert!(!frame.body.contains("[ Quota Overview ]"));
+        assert!(!frame.body.contains("Quota Overview ] ==="));
+        let available_line = frame
+            .body
+            .lines()
+            .find(|line| line.starts_with("Available:"))
+            .expect("quota TUI frame should include an Available summary line");
+        assert!(
+            !available_line.contains("  "),
+            "Available summary should not use manual spacing: {available_line}"
+        );
         assert!(frame.body.contains("main"));
         assert!(!frame.body.contains("sort: current"));
         assert!(frame.footer.contains("sort current"));
         assert!(frame.footer.contains("filter all"));
+    }
+
+    #[test]
+    fn quota_human_tui_body_removes_manual_panel_headers_and_field_padding() {
+        let body = quota_human_tui_body(
+            "[ Quota main ] ================================================================\n\
+             Account:             main@example.com\n\
+             5h:                  80% left\n\
+             \n\
+             [ Quota Overview ] ==========================================================\n\
+             Available:           1/1 profile",
+        );
+
+        assert!(body.contains("Quota main"));
+        assert!(body.contains("Quota Overview"));
+        assert!(!body.contains("[ Quota main ]"));
+        assert!(!body.contains("[ Quota Overview ]"));
+        assert!(body.contains("Account: main@example.com"));
+        assert!(body.contains("5h: 80% left"));
+        assert!(body.contains("Available: 1/1 profile"));
+        assert!(!body.contains("Account:             main@example.com"));
+        assert!(!body.contains("Available:           1/1 profile"));
     }
 
     #[test]
@@ -112,6 +145,7 @@
         assert_eq!(frame.updated, "2026-06-26 10:00:00 UTC");
         assert_eq!(frame.title, "Prodex Quota main");
         assert!(frame.body.contains("Quota main"));
+        assert!(!frame.body.contains("[ Quota main ]"));
         assert!(frame.body.contains("main@example.com"));
         assert_eq!(frame.footer, "refresh 5s | q quit");
     }

@@ -2,13 +2,10 @@ use prodex_profile_export::{
     ImportedExistingProfileAuthUpdateJournal, ProfileImportAuthUpdatePlan, ProfileImportIdentity,
     ProfileImportPlanAction, ProfileImportPlanInput,
 };
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use super::super::manage::print_profile_panel;
 use super::passwords::read_profile_export_payload;
+use super::progress::print_profile_import_progress;
 use super::secrets::write_secret_text_file;
 use super::*;
 
@@ -79,49 +76,6 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
         },
     );
     print_profile_panel("Profile Import", &fields)?;
-    Ok(())
-}
-
-fn print_profile_import_progress(message: &str) -> Result<()> {
-    let Some(mut terminal) = crate::try_inline_stderr_terminal(5) else {
-        print_stderr_line(message);
-        return Ok(());
-    };
-    terminal.draw(|frame| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(frame.area());
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Profile Import",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled("progress", Style::default().fg(Color::DarkGray)),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
-        );
-        frame.render_widget(header, chunks[0]);
-
-        let body = Paragraph::new(Line::from(vec![
-            Span::styled("Status ", Style::default().fg(Color::DarkGray)),
-            Span::styled(message.to_string(), Style::default().fg(Color::White)),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                .border_style(Style::default().fg(Color::Blue)),
-        )
-        .wrap(Wrap { trim: false });
-        frame.render_widget(body, chunks[1]);
-    })?;
-    let _ = terminal.show_cursor();
     Ok(())
 }
 

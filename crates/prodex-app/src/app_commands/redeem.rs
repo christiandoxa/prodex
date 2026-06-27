@@ -20,7 +20,10 @@ use crate::{
     print_stderr_line, print_stderr_prompt, print_stdout_line,
     repair_missing_active_profile_and_save,
 };
-use terminal_ui::print_panel;
+use terminal_ui::{
+    print_panel, tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style,
+    tui_success_style, tui_title_style,
+};
 
 const MANUAL_REDEEM_NEAR_RESET_SECONDS: i64 = 60 * 60;
 
@@ -201,7 +204,7 @@ fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
 
@@ -213,9 +216,9 @@ fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
                     Span::styled(
                         value.clone(),
                         if label == "Outcome" {
-                            Style::default().fg(Color::Green)
+                            tui_success_style()
                         } else {
-                            Style::default().fg(Color::White)
+                            tui_primary_style()
                         },
                     ),
                 ])
@@ -225,7 +228,7 @@ fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
@@ -285,28 +288,21 @@ fn prompt_manual_redeem_confirmation_tui(
                 ])
                 .split(frame.area());
             let header = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "Prodex Redeem",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("Prodex Redeem", tui_title_style()),
                 Span::raw("  "),
-                Span::styled("manual reset credit", Style::default().fg(Color::DarkGray)),
+                Span::styled("manual reset credit", tui_secondary_style()),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(header, chunks[0]);
 
             let body = Paragraph::new(vec![
                 Line::from(Span::styled(
                     "Quota reset is near.",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
+                    tui_primary_style().add_modifier(Modifier::BOLD),
                 )),
                 Line::raw(""),
                 Line::from(format!(
@@ -317,25 +313,25 @@ fn prompt_manual_redeem_confirmation_tui(
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
             frame.render_widget(body, chunks[1]);
 
             let footer = Paragraph::new(Line::from(vec![
-                Span::styled("y", Style::default().fg(Color::Green)),
+                Span::styled("y", tui_success_style()),
                 Span::raw(" redeem  "),
-                Span::styled("n", Style::default().fg(Color::Yellow)),
+                Span::styled("n", tui_hint_style()),
                 Span::raw(" cancel  "),
-                Span::styled("enter", Style::default().fg(Color::Yellow)),
+                Span::styled("enter", tui_hint_style()),
                 Span::raw(" cancel  "),
-                Span::styled("esc", Style::default().fg(Color::Yellow)),
+                Span::styled("esc", tui_hint_style()),
                 Span::raw(" cancel"),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(footer, chunks[2]);
         })?;

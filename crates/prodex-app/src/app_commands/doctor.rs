@@ -5,6 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use redaction::{redaction_key_looks_sensitive, redaction_redacted_body_snippet};
+use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
 
 #[derive(Debug, Clone)]
 struct DoctorPanel {
@@ -348,22 +349,14 @@ fn print_doctor_output(panels: &[DoctorPanel], suggestion_lines: &[String]) -> R
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
         let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Doctor",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Prodex Doctor", tui_title_style()),
             Span::raw("  "),
-            Span::styled(
-                format!("{} panel(s)", panels.len()),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("{} panel(s)", panels.len()), tui_secondary_style()),
         ]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
 
@@ -371,7 +364,7 @@ fn print_doctor_output(panels: &[DoctorPanel], suggestion_lines: &[String]) -> R
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
@@ -401,12 +394,7 @@ fn doctor_tui_text(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Text<
         if !lines.is_empty() {
             lines.push(Line::raw(""));
         }
-        lines.push(Line::styled(
-            panel.title.clone(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ));
+        lines.push(Line::styled(panel.title.clone(), tui_title_style()));
         let label_width = panel
             .fields
             .iter()
@@ -418,9 +406,7 @@ fn doctor_tui_text(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Text<
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{label:<label_width$} "),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD),
+                    tui_secondary_style().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     value.clone(),
@@ -431,17 +417,9 @@ fn doctor_tui_text(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Text<
     }
     if !suggestion_lines.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(Line::styled(
-            "Policy Suggestions",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ));
+        lines.push(Line::styled("Policy Suggestions", tui_title_style()));
         for line in suggestion_lines {
-            lines.push(Line::styled(
-                line.clone(),
-                Style::default().fg(Color::White),
-            ));
+            lines.push(Line::styled(line.clone(), tui_primary_style()));
         }
     }
     Text::from(lines)
@@ -457,13 +435,13 @@ fn doctor_value_color(label: &str, value: &str) -> Color {
     {
         Color::Red
     } else if lower.contains("critical") || lower.contains("thin") || lower.contains("degraded") {
-        Color::Yellow
+        Color::Red
     } else if lower.contains("ready") || lower.contains("yes") || lower.contains("exists") {
         Color::Green
     } else if label.contains("Runtime") || label.contains("Quota") || label.contains("Main") {
         Color::Cyan
     } else {
-        Color::White
+        Color::Reset
     }
 }
 
@@ -675,6 +653,6 @@ mod tests {
     fn doctor_value_color_highlights_status() {
         assert_eq!(doctor_value_color("Quota", "Blocked"), Color::Red);
         assert_eq!(doctor_value_color("Runtime", "ready"), Color::Green);
-        assert_eq!(doctor_value_color("Runtime", "critical"), Color::Yellow);
+        assert_eq!(doctor_value_color("Runtime", "critical"), Color::Red);
     }
 }

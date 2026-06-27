@@ -1,15 +1,15 @@
 use anyhow::{Context, Result, bail};
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, QuotaArgs, QuotaAuthFilter, QuotaProviderFilter,
     collect_quota_reports, collect_quota_reports_with_filters, fetch_profile_quota,
-    fetch_profile_quota_json, print_stdout_line, print_stdout_text, quota_watch_enabled,
-    render_profile_quota_snapshot, render_quota_reports, repair_missing_active_profile_and_save,
-    resolve_profile_name, watch_all_quotas, watch_quota,
+    fetch_profile_quota_json, print_stdout_line, print_stdout_text, quota_human_tui_body,
+    quota_human_tui_text, quota_watch_enabled, render_profile_quota_snapshot, render_quota_reports,
+    repair_missing_active_profile_and_save, resolve_profile_name, watch_all_quotas, watch_quota,
 };
 
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
@@ -99,7 +99,8 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
 }
 
 fn print_quota_human(title: &str, output: &str) -> Result<()> {
-    let height = output.lines().count().saturating_add(4).clamp(6, 28) as u16;
+    let tui_body = quota_human_tui_body(output);
+    let height = tui_body.lines().count().saturating_add(4).clamp(6, 28) as u16;
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         print_stdout_text(output);
         return Ok(());
@@ -110,27 +111,22 @@ fn print_quota_human(title: &str, output: &str) -> Result<()> {
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
         let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Quota",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Prodex Quota", tui_title_style()),
             Span::raw("  "),
-            Span::styled(title.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(title.to_string(), tui_secondary_style()),
         ]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
 
-        let body = Paragraph::new(output.to_string())
+        let body = Paragraph::new(quota_human_tui_text(&tui_body))
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);

@@ -18,8 +18,11 @@ pub use info::{
     format_runtime_tuning_workers_display,
 };
 pub use panel::{
-    FieldRowsBuilder, PanelBuilder, format_field_lines_with_layout, panel_label_width, print_panel,
-    print_stderr_panel, render_panel, section_header, section_header_with_width,
+    FieldRowsBuilder, PanelBuilder, draw_status_panel_terminal, format_field_lines_with_layout,
+    panel_label_width, print_panel, print_stderr_panel, print_text_panel, render_panel,
+    render_text_panel, section_header, section_header_with_width, tui_border_style,
+    tui_error_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
+    tui_title_style,
 };
 pub use print::{
     print_blank_line, print_stderr_line, print_stderr_prompt, print_stdout_line, print_stdout_text,

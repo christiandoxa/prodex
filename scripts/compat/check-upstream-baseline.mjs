@@ -11,6 +11,8 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/turn_metadata.rs",
   "codex-rs/core/src/responses_metadata.rs",
   "codex-rs/model-provider-info/src/lib.rs",
+  "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
+  "codex-rs/model-provider/src/provider.rs",
   "codex-rs/core/src/realtime_conversation.rs",
   "codex-rs/codex-api/src/endpoint/realtime_call.rs",
   "codex-rs/codex-api/src/safety_buffering.rs",
@@ -130,6 +132,33 @@ const REQUIRED_FILE_CONTAINS = {
     "supports_remote_compaction",
     "is_openai()",
     "is_azure_responses_provider",
+    "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+    "openai.gpt-5.6-sol",
+    "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+    "openai.gpt-5.6-terra",
+    "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+    "openai.gpt-5.6-luna",
+  ],
+  "codex-rs/model-provider/src/amazon_bedrock/catalog.rs": [
+    "static_model_catalog",
+    "with_default_only_service_tier",
+    "gpt_5_6_bedrock_model",
+    "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+    "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+    "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+    "ReasoningEffort::Custom(\"max\".to_string())",
+    "Maximum reasoning depth for the hardest problems",
+    "model.additional_speed_tiers.clear()",
+    "model.service_tiers.clear()",
+    "model.default_service_tier = None",
+  ],
+  "codex-rs/model-provider/src/provider.rs": [
+    "amazon_bedrock_provider_creates_static_models_manager",
+    "openai.gpt-5.5",
+    "openai.gpt-5.4",
+    "openai.gpt-5.6-sol",
+    "openai.gpt-5.6-terra",
+    "openai.gpt-5.6-luna",
   ],
   "codex-rs/core/src/realtime_conversation.rs": [
     "ConversationStartTransport::Websocket",
@@ -595,6 +624,37 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "supports_remote_compaction",
       "is_openai()",
       "is_azure_responses_provider",
+    ],
+  },
+  {
+    id: "model-provider.bedrock-gpt-5-6-catalog",
+    kind: "provider_catalog",
+    file: "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
+    file_contains_all: [
+      "static_model_catalog",
+      "with_default_only_service_tier",
+      "gpt_5_6_bedrock_model",
+      "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+      "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+      "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+      "ReasoningEffort::Custom(\"max\".to_string())",
+      "Maximum reasoning depth for the hardest problems",
+      "model.additional_speed_tiers.clear()",
+      "model.service_tiers.clear()",
+      "model.default_service_tier = None",
+    ],
+  },
+  {
+    id: "model-provider.bedrock-static-manager-models",
+    kind: "provider_catalog",
+    file: "codex-rs/model-provider/src/provider.rs",
+    file_contains_all: [
+      "amazon_bedrock_provider_creates_static_models_manager",
+      "openai.gpt-5.5",
+      "openai.gpt-5.4",
+      "openai.gpt-5.6-sol",
+      "openai.gpt-5.6-terra",
+      "openai.gpt-5.6-luna",
     ],
   },
   {
@@ -1245,6 +1305,18 @@ function runSelfTest() {
     },
     expectedMessage:
       'codex.compatibility.semantic_checks.realtime.websocket-v1-alpha-header.file_contains_all missing "quicksilver=v1"',
+  });
+
+  assertSelfTestError({
+    name: "missing Bedrock GPT-5.6 catalog token",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "model-provider.bedrock-gpt-5-6-catalog");
+      check.file_contains_all = check.file_contains_all.filter(
+        (token) => token !== "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.model-provider.bedrock-gpt-5-6-catalog.file_contains_all missing "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID"',
   });
 
   assertSelfTestError({

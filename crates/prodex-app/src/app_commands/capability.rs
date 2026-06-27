@@ -12,7 +12,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use terminal_ui::{print_panel, print_stdout_line};
+use terminal_ui::{
+    print_panel, print_stdout_line, tui_border_style, tui_secondary_style, tui_title_style,
+};
 
 #[derive(Debug, Clone)]
 struct CapabilityPanel {
@@ -345,23 +347,17 @@ fn print_capability_panels(panels: &[CapabilityPanel]) -> Result<()> {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
-        let header = Paragraph::new(Line::styled(
-            "Prodex Capabilities",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .block(
+        let header = Paragraph::new(Line::styled("Prodex Capabilities", tui_title_style())).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue)),
+                .border_style(tui_border_style()),
         );
         frame.render_widget(header, chunks[0]);
         let body = Paragraph::new(capability_tui_text(panels))
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
@@ -389,12 +385,7 @@ fn capability_tui_text(panels: &[CapabilityPanel]) -> Text<'static> {
         if !lines.is_empty() {
             lines.push(Line::raw(""));
         }
-        lines.push(Line::styled(
-            panel.title.clone(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ));
+        lines.push(Line::styled(panel.title.clone(), tui_title_style()));
         let label_width = panel
             .fields
             .iter()
@@ -406,9 +397,7 @@ fn capability_tui_text(panels: &[CapabilityPanel]) -> Text<'static> {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{label:<label_width$} "),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD),
+                    tui_secondary_style().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     value.clone(),
@@ -425,11 +414,11 @@ fn capability_value_color(value: &str) -> Color {
     if lower.contains("fail") || lower.contains("unavailable") {
         Color::Red
     } else if lower.contains("disabled") || lower.contains("not checked") {
-        Color::Yellow
+        Color::Red
     } else if lower.contains("ok") || lower.contains("built-in") || lower.contains("ensure") {
         Color::Green
     } else {
-        Color::White
+        Color::Reset
     }
 }
 

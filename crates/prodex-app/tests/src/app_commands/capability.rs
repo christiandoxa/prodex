@@ -21,9 +21,6 @@ fn capability_tui_text_contains_panels() {
 #[test]
 fn capability_value_color_highlights_status() {
     assert_eq!(capability_value_color("fail (missing)"), Color::Red);
-    assert_eq!(
-        capability_value_color("disabled (not checked)"),
-        Color::Yellow
-    );
+    assert_eq!(capability_value_color("disabled (not checked)"), Color::Red);
     assert_eq!(capability_value_color("ok (built-in)"), Color::Green);
 }

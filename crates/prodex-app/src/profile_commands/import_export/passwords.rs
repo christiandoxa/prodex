@@ -16,6 +16,11 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::path::Path;
 use std::{env, io};
 
+use super::progress::print_profile_import_progress;
+use terminal_ui::{
+    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_title_style,
+};
+
 const PROFILE_EXPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_EXPORT_PASSWORD";
 const PROFILE_IMPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_IMPORT_PASSWORD";
 
@@ -110,64 +115,51 @@ fn prompt_profile_export_password_tui(title: &str, label: &str, detail: &str) ->
                 ])
                 .split(frame.area());
             let header = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    title.to_string(),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(title.to_string(), tui_title_style()),
                 Span::raw("  "),
-                Span::styled(label.to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled(label.to_string(), tui_secondary_style()),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(header, chunks[0]);
 
             let body = Paragraph::new(vec![
                 Line::from(Span::styled(
                     label.to_string(),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    tui_primary_style().add_modifier(Modifier::BOLD),
                 )),
                 Line::raw(""),
-                Line::from(Span::styled(
-                    detail.to_string(),
-                    Style::default().fg(Color::Gray),
-                )),
+                Line::from(Span::styled(detail.to_string(), tui_secondary_style())),
                 Line::raw(""),
                 Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Cyan)),
-                    Span::styled(
-                        "*".repeat(input.chars().count()),
-                        Style::default().fg(Color::White),
-                    ),
-                    Span::styled("_", Style::default().fg(Color::Cyan)),
+                    Span::styled("> ", tui_hint_style()),
+                    Span::styled("*".repeat(input.chars().count()), tui_primary_style()),
+                    Span::styled("_", tui_hint_style()),
                 ]),
             ])
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
             frame.render_widget(body, chunks[1]);
 
             let footer = Paragraph::new(Line::from(vec![
-                Span::styled("enter", Style::default().fg(Color::Green)),
+                Span::styled("enter", tui_hint_style()),
                 Span::raw(" accept  "),
-                Span::styled("backspace", Style::default().fg(Color::Yellow)),
+                Span::styled("backspace", tui_hint_style()),
                 Span::raw(" delete  "),
-                Span::styled("esc", Style::default().fg(Color::Yellow)),
+                Span::styled("esc", tui_hint_style()),
                 Span::raw(" cancel"),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(footer, chunks[2]);
         })?;
@@ -269,27 +261,25 @@ fn prompt_export_password_mode_tui() -> Result<bool> {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(header, chunks[0]);
 
             let body = Paragraph::new(vec![
                 Line::from(Span::styled(
                     "Password-protect export file containing profile tokens?",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
+                    tui_primary_style().add_modifier(Modifier::BOLD),
                 )),
                 Line::raw(""),
                 Line::from(Span::styled(
                     "Protected bundles require a password to import. Unprotected bundles are plain JSON and may contain reusable credentials.",
-                    Style::default().fg(Color::Gray),
+                    tui_secondary_style(),
                 )),
             ])
             .block(
                 Block::default()
                     .borders(Borders::LEFT | Borders::RIGHT)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             )
             .wrap(Wrap { trim: false });
             frame.render_widget(body, chunks[1]);
@@ -299,15 +289,15 @@ fn prompt_export_password_mode_tui() -> Result<bool> {
                 Span::raw(" protect  "),
                 Span::styled("enter", Style::default().fg(Color::Green)),
                 Span::raw(" protect  "),
-                Span::styled("n", Style::default().fg(Color::Yellow)),
+                Span::styled("n", tui_hint_style()),
                 Span::raw(" unprotected  "),
-                Span::styled("esc", Style::default().fg(Color::Yellow)),
+                Span::styled("esc", tui_hint_style()),
                 Span::raw(" unprotected"),
             ]))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(tui_border_style()),
             );
             frame.render_widget(footer, chunks[2]);
         })?;
@@ -325,12 +315,16 @@ fn prompt_export_password_mode_tui() -> Result<bool> {
 }
 
 pub(super) fn read_profile_export_payload(path: &Path) -> Result<(ProfileExportPayload, bool)> {
-    print_stderr_line("Reading profile export bundle...");
+    print_profile_import_status("Reading profile export bundle...");
     let (envelope, encrypted) = prodex_profile_export::read_profile_export_envelope(path)?;
     let payload = prodex_profile_export::decode_profile_export_envelope(envelope, || {
         let password = resolve_import_password()?;
-        print_stderr_line("Decrypting encrypted profile export...");
+        print_profile_import_status("Decrypting encrypted profile export...");
         Ok(password)
     })?;
     Ok((payload, encrypted))
+}
+
+fn print_profile_import_status(message: &str) {
+    let _ = print_profile_import_progress(message);
 }

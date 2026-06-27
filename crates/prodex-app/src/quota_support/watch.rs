@@ -11,6 +11,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::io::IsTerminal;
+use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
 
 #[derive(Debug, Clone)]
 enum AllQuotaWatchSnapshot {
@@ -711,8 +712,8 @@ fn build_all_quota_watch_tui_frame(
     snapshot: &AllQuotaWatchSnapshot,
     layout: AllQuotaWatchLayout,
 ) -> AllQuotaWatchTuiFrame {
-    let body = quota_watch_without_control_footer(&render_all_quota_watch_snapshot_with_layout(
-        snapshot, layout,
+    let body = quota_human_tui_body(&quota_watch_without_control_footer(
+        &render_all_quota_watch_snapshot_with_layout(snapshot, layout),
     ));
     let provider_hint = if layout.provider_filter_locked {
         "provider fixed"
@@ -743,6 +744,72 @@ fn quota_watch_without_control_footer(output: &str) -> String {
     lines.join("\n")
 }
 
+pub(crate) fn quota_human_tui_body(output: &str) -> String {
+    output
+        .lines()
+        .map(quota_human_tui_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn quota_human_tui_line(line: &str) -> String {
+    if let Some(title) = quota_section_header_title(line) {
+        return title.to_string();
+    }
+    if quota_human_tui_compact_label(line).is_some() {
+        return quota_compact_field_line(line);
+    }
+    line.to_string()
+}
+
+fn quota_section_header_title(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("[ ")?;
+    let (title, rest) = rest.split_once(" ]")?;
+    rest.trim_start()
+        .chars()
+        .all(|ch| ch == '=')
+        .then_some(title)
+}
+
+fn quota_human_tui_compact_label(line: &str) -> Option<&'static str> {
+    const LABELS: [&str; 23] = [
+        "Available",
+        "Last Updated",
+        "5h remaining pool",
+        "Weekly remaining pool",
+        "Remaining pool",
+        "Account",
+        "Plan",
+        "Status",
+        "Main",
+        "5h",
+        "Weekly",
+        "Reset credits",
+        "Auth",
+        "Provider",
+        "Reset",
+        "Project",
+        "Bucket",
+        "Quota",
+        "Rate groups",
+        "Model groups",
+        "Admin API",
+        "Model provider",
+        "Source",
+    ];
+    LABELS
+        .into_iter()
+        .find(|label| line.trim_start().starts_with(&format!("{label}:")))
+}
+
+fn quota_compact_field_line(line: &str) -> String {
+    let trimmed = line.trim_start();
+    let Some((label, value)) = trimmed.split_once(':') else {
+        return line.to_string();
+    };
+    format!("{label}: {}", value.trim_start())
+}
+
 fn build_profile_quota_watch_tui_frame(
     profile_name: &str,
     updated: &str,
@@ -751,7 +818,11 @@ fn build_profile_quota_watch_tui_frame(
     AllQuotaWatchTuiFrame {
         updated: updated.to_string(),
         title: format!("Prodex Quota {profile_name}"),
-        body: render_profile_quota_watch_output(profile_name, updated, quota_result),
+        body: quota_human_tui_body(&render_profile_quota_watch_output(
+            profile_name,
+            updated,
+            quota_result,
+        )),
         footer: "refresh 5s | q quit".to_string(),
     }
 }
@@ -778,7 +849,7 @@ fn render_all_quota_watch_tui(frame: &mut ratatui::Frame<'_>, data: &AllQuotaWat
     );
     frame.render_widget(header, chunks[0]);
 
-    let body = Paragraph::new(quota_watch_tui_text(&data.body))
+    let body = Paragraph::new(quota_human_tui_text(&data.body))
         .block(
             Block::default()
                 .borders(Borders::LEFT | Borders::RIGHT)
@@ -799,46 +870,49 @@ fn render_all_quota_watch_tui(frame: &mut ratatui::Frame<'_>, data: &AllQuotaWat
     frame.render_widget(footer, chunks[2]);
 }
 
-fn quota_watch_tui_text(output: &str) -> Text<'_> {
+pub(crate) fn quota_human_tui_text(output: &str) -> Text<'_> {
     Text::from(
         output
             .lines()
-            .map(|line| Line::from(quota_watch_tui_spans(line)))
+            .map(|line| Line::from(quota_human_tui_spans(line)))
             .collect::<Vec<_>>(),
     )
 }
 
-fn quota_watch_tui_spans(line: &str) -> Vec<Span<'_>> {
-    if line.starts_with("== ") || line.starts_with("Quota Overview") {
+fn quota_human_tui_spans(line: &str) -> Vec<Span<'_>> {
+    if line.starts_with("== ")
+        || line == "Quota Overview"
+        || line.starts_with("Quota ")
+        || line.ends_with("profiles")
+    {
         return vec![Span::styled(line, quota_watch_title_style())];
+    }
+    if quota_human_tui_compact_label(line).is_some() {
+        let Some((label, value)) = line.split_once(':') else {
+            return vec![Span::raw(line)];
+        };
+        return vec![
+            Span::styled(format!("{label}:"), tui_title_style()),
+            Span::raw(" "),
+            Span::raw(value.trim_start().to_string()),
+        ];
     }
     if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
         return vec![Span::styled(line, quota_watch_muted_style())];
     }
     if line.contains("Blocked:") || line.contains("Error:") {
-        return vec![Span::styled(
-            line,
-            Style::default().fg(Color::Rgb(255, 118, 118)),
-        )];
+        return vec![Span::styled(line, Style::default().fg(Color::Red))];
     }
     if line.contains("Ready") || line.contains("healthy") {
-        return vec![Span::styled(
-            line,
-            Style::default().fg(Color::Rgb(105, 214, 143)),
-        )];
+        return vec![Span::styled(line, Style::default().fg(Color::Green))];
     }
     if line.contains("thin") || line.contains("critical") || line.contains("exhausted") {
-        return vec![Span::styled(
-            line,
-            Style::default().fg(Color::Rgb(235, 196, 109)),
-        )];
+        return vec![Span::styled(line, Style::default().fg(Color::Red))];
     }
     if line.starts_with("PROFILE") {
         return vec![Span::styled(
             line,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
+            Style::default().add_modifier(Modifier::BOLD),
         )];
     }
     if line.starts_with("workspace:")
@@ -855,23 +929,19 @@ fn quota_watch_tui_spans(line: &str) -> Vec<Span<'_>> {
 }
 
 fn quota_watch_title_style() -> Style {
-    Style::default()
-        .fg(Color::Rgb(92, 221, 229))
-        .add_modifier(Modifier::BOLD)
+    tui_title_style()
 }
 
 fn quota_watch_border_style() -> Style {
-    Style::default().fg(Color::Rgb(74, 103, 123))
+    tui_border_style()
 }
 
 fn quota_watch_muted_style() -> Style {
-    Style::default().fg(Color::Rgb(150, 165, 176))
+    tui_secondary_style()
 }
 
 fn quota_watch_footer_style() -> Style {
-    Style::default()
-        .fg(Color::Rgb(235, 196, 109))
-        .add_modifier(Modifier::BOLD)
+    tui_title_style()
 }
 
 fn quota_watch_tui_report_lines(terminal_height: u16) -> Option<usize> {

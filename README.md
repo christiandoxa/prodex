@@ -1254,6 +1254,8 @@ Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex q
 
 If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy.
 
+Codex 0.142.3 expands the upstream Bedrock static catalog with `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`, and `openai.gpt-5.6-luna`. Prodex leaves those model IDs and Bedrock's default-only service-tier behavior owned by the direct Codex launch.
+
 Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
 
 `prodex quota` shows the configured provider metadata for those profiles instead of failing the view.
