@@ -124,6 +124,19 @@ pub(crate) fn render_quota_reports_window_with_sort(
     )
 }
 
+pub(crate) fn sorted_quota_report_indexes_by_sort(
+    reports: &[QuotaReport],
+    sort: QuotaReportSort,
+) -> Vec<usize> {
+    prodex_quota::sorted_quota_report_indexes_by(&render_quota_report_inputs(reports), sort)
+}
+
+pub(crate) fn quota_pool_summary_fields_for_reports(
+    reports: &[QuotaReport],
+) -> Vec<(String, String)> {
+    prodex_quota::quota_pool_summary_fields(&render_quota_report_inputs(reports))
+}
+
 #[cfg(test)]
 pub(crate) fn sort_quota_reports_for_display(reports: &[QuotaReport]) -> Vec<&QuotaReport> {
     let render_reports = render_quota_report_inputs(reports);
@@ -137,7 +150,6 @@ pub(crate) fn format_main_windows(usage: &UsageResponse) -> String {
     prodex_quota::format_main_windows(usage)
 }
 
-#[cfg(test)]
 pub(crate) fn format_main_windows_compact(usage: &UsageResponse) -> String {
     prodex_quota::format_main_windows_compact(usage)
 }

@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
 
-use super::{collect_super_tool_statuses, render_super_tool_statuses};
+use super::{
+    SuperMemoryStatusMode, collect_super_tool_statuses_with_memory_mode, render_super_tool_statuses,
+};
 use crate::{
     CavemanArgs, ChildProcessPlan, CodexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
@@ -213,10 +215,9 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
             .map(crate::SuperExternalProvider::as_str),
         external_provider_api_key: args.external_provider_api_key.as_deref(),
     };
-    let memory_backend = match (
-        memory_prefix_enabled || args.memory_backend == crate::SuperMemoryBackend::Mem0,
-        args.memory_backend,
-    ) {
+    let memory_enabled =
+        memory_prefix_enabled || args.memory_backend == crate::SuperMemoryBackend::Mem0;
+    let memory_backend = match (memory_enabled, args.memory_backend) {
         (false, _) => "disabled",
         (true, crate::SuperMemoryBackend::Sqlite) => "local sqlite",
         (true, crate::SuperMemoryBackend::Mem0) => "managed Mem0 Docker (would start)",
@@ -233,7 +234,13 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     );
     if super_optimizer_overlay {
         let paths = crate::AppPaths::discover()?;
-        let statuses = collect_super_tool_statuses(&paths, presidio_enabled);
+        let memory_mode = if memory_enabled {
+            SuperMemoryStatusMode::Selected(args.memory_backend)
+        } else {
+            SuperMemoryStatusMode::Disabled
+        };
+        let statuses =
+            collect_super_tool_statuses_with_memory_mode(&paths, presidio_enabled, memory_mode);
         extra_report.push('\n');
         extra_report.push_str(&render_super_tool_statuses(&statuses));
     }

@@ -275,6 +275,7 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
     assert!(hook_script.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(hook_script.contains("Ponytail applies smallest-correct-implementation pressure"));
     assert!(hook_script.contains("rtk <cmd>"));
     assert!(hook_script.contains("prodex-sqz"));
     assert!(hook_script.contains("prodex-token-savior"));
@@ -461,6 +462,7 @@ fn caveman_session_start_script_outputs_once_per_launch_home() {
     let first_stdout = String::from_utf8(first.stdout).expect("first stdout should be utf8");
     assert!(first_stdout.contains("CAVEMAN MODE ACTIVE"));
     assert!(first_stdout.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(first_stdout.contains("Ponytail applies smallest-correct-implementation pressure"));
     assert!(first_stdout.contains("prodex-sqz"));
     assert!(first_stdout.contains("prodex-token-savior"));
     assert!(first_stdout.contains("prodex-claw-compactor"));

@@ -148,9 +148,28 @@ pub(crate) struct SuperToolStatus {
     detail: String,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum SuperMemoryStatusMode {
+    Availability,
+    Disabled,
+    Selected(crate::SuperMemoryBackend),
+}
+
 pub(crate) fn collect_super_tool_statuses(
     paths: &AppPaths,
     check_presidio: bool,
+) -> Vec<SuperToolStatus> {
+    collect_super_tool_statuses_with_memory_mode(
+        paths,
+        check_presidio,
+        SuperMemoryStatusMode::Availability,
+    )
+}
+
+pub(crate) fn collect_super_tool_statuses_with_memory_mode(
+    paths: &AppPaths,
+    check_presidio: bool,
+    memory_mode: SuperMemoryStatusMode,
 ) -> Vec<SuperToolStatus> {
     let asset_report = prodex_caveman_assets::verify_embedded_caveman_assets();
     let mut rows = vec![
@@ -170,19 +189,19 @@ pub(crate) fn collect_super_tool_statuses(
         },
         command_tool_status("rtk", "rtk --version", "rtk", &["--version"]),
         command_tool_status("rtk-gain", "rtk gain", "rtk", &["gain"]),
-        command_tool_status(
+        optimizer_tool_status(
             "sqz-mcp",
             "sqz-mcp --transport stdio --help",
             "sqz-mcp",
             &["--transport", "stdio", "--help"],
         ),
-        command_tool_status(
+        optimizer_tool_status(
             "token-savior",
             "token-savior --version",
             "token-savior",
             &["--version"],
         ),
-        command_tool_status(
+        optimizer_tool_status(
             "claw-compactor",
             "claw-compactor --help",
             "claw-compactor",
@@ -197,7 +216,7 @@ pub(crate) fn collect_super_tool_statuses(
             detail: "Read-only MCP diagnostics for Prodex status, profiles, and latest runtime log"
                 .to_string(),
         },
-        memory_tool_status(paths),
+        memory_tool_status(paths, memory_mode),
         SuperToolStatus {
             name: "smart-context",
             check: "built-in",
@@ -585,7 +604,28 @@ fn command_probe_status(command: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> 
     }
 }
 
-fn memory_tool_status(paths: &AppPaths) -> SuperToolStatus {
+fn memory_tool_status(paths: &AppPaths, memory_mode: SuperMemoryStatusMode) -> SuperToolStatus {
+    match memory_mode {
+        SuperMemoryStatusMode::Disabled => {
+            return SuperToolStatus {
+                name: "prodex-memory",
+                check: "opt-in",
+                ready: true,
+                status: "disabled".to_string(),
+                detail: "prodex-memory is enabled only with the mem prefix or Super Mem0 opt-in"
+                    .to_string(),
+            };
+        }
+        SuperMemoryStatusMode::Selected(crate::SuperMemoryBackend::Mem0) => return SuperToolStatus {
+            name: "prodex-memory",
+            check: "managed Mem0 MCP env",
+            ready: true,
+            status: "ok (managed Mem0 selected)".to_string(),
+            detail: "Mem0 Docker services and session gateway start at launch; prodex-memory MCP receives managed Mem0 env".to_string(),
+        },
+        SuperMemoryStatusMode::Availability | SuperMemoryStatusMode::Selected(crate::SuperMemoryBackend::Sqlite) => {}
+    }
+
     let store = default_memory_store_path(paths);
     match memory_store_ready(&store) {
         Ok(()) => SuperToolStatus {
@@ -660,13 +700,53 @@ fn command_tool_status(
     command: &str,
     args: &[&str],
 ) -> SuperToolStatus {
-    match Command::new(command).args(args).output() {
+    command_path_tool_status(
+        name,
+        check,
+        PathBuf::from(command),
+        args,
+        format!("{command} was not found on PATH"),
+    )
+}
+
+fn optimizer_tool_status(
+    name: &'static str,
+    check: &'static str,
+    command: &str,
+    args: &[&str],
+) -> SuperToolStatus {
+    match find_optimizer_command_for_super_status(command) {
+        Some(path) => command_path_tool_status(
+            name,
+            check,
+            path,
+            args,
+            format!("{command} was not found on PATH or in managed optimizer roots"),
+        ),
+        None => SuperToolStatus {
+            name,
+            check,
+            ready: false,
+            status: "missing".to_string(),
+            detail: format!("{command} was not found on PATH or in managed optimizer roots"),
+        },
+    }
+}
+
+fn command_path_tool_status(
+    name: &'static str,
+    check: &'static str,
+    command: PathBuf,
+    args: &[&str],
+    missing_detail: String,
+) -> SuperToolStatus {
+    match Command::new(&command).args(args).output() {
         Ok(output) if output.status.success() => SuperToolStatus {
             name,
             check,
             ready: true,
             status: format!("ok ({})", first_output_line(&output).unwrap_or("available")),
-            detail: command_path_detail(command),
+            detail: format!("command={}", command.display()),
         },
         Ok(output) => SuperToolStatus {
             name,
@@ -682,7 +762,7 @@ fn command_tool_status(
             check,
             ready: false,
             status: format!("missing ({})", err.kind()),
-            detail: format!("{command} was not found on PATH"),
+            detail: missing_detail,
         },
     }
 }
@@ -698,23 +778,29 @@ fn first_output_line(output: &std::process::Output) -> Option<&str> {
         .find(|line| !line.is_empty())
 }
 
-fn command_path_detail(command: &str) -> String {
-    find_path_command(command)
-        .map(|path| format!("command={}", path.display()))
-        .unwrap_or_else(|| format!("command={command}"))
+fn find_optimizer_command_for_super_status(command: &str) -> Option<PathBuf> {
+    find_managed_optimizer_command_for_super_status(command)
+        .or_else(|| find_path_optimizer_command_for_super_status(command))
 }
 
-fn find_path_command(command: &str) -> Option<PathBuf> {
+fn find_managed_optimizer_command_for_super_status(command: &str) -> Option<PathBuf> {
+    managed_optimizer_roots_for_super_status()
+        .into_iter()
+        .flat_map(|root| managed_optimizer_command_candidates_for_super_status(&root, command))
+        .find(|candidate| optimizer_command_ready_for_super_status(command, candidate))
+}
+
+fn find_path_optimizer_command_for_super_status(command: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH")?;
     for dir in env::split_paths(&path) {
         let candidate = dir.join(command);
-        if executable_file(&candidate) {
+        if optimizer_command_ready_for_super_status(command, &candidate) {
             return Some(candidate);
         }
         #[cfg(windows)]
         {
             let candidate = dir.join(format!("{command}.exe"));
-            if executable_file(&candidate) {
+            if optimizer_command_ready_for_super_status(command, &candidate) {
                 return Some(candidate);
             }
         }
@@ -722,8 +808,113 @@ fn find_path_command(command: &str) -> Option<PathBuf> {
     None
 }
 
+fn managed_optimizer_roots_for_super_status() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(path) = env::var_os("PRODEX_OPTIMIZERS_HOME") {
+        push_unique_path(&mut roots, PathBuf::from(path));
+    }
+    if let Some(path) = env::var_os("XDG_DATA_HOME") {
+        push_unique_path(&mut roots, PathBuf::from(path).join("prodex-optimizers"));
+    }
+    if let Some(home) = dirs_home_dir() {
+        push_unique_path(
+            &mut roots,
+            home.join(".local").join("share").join("prodex-optimizers"),
+        );
+    }
+    roots
+}
+
+fn managed_optimizer_command_candidates_for_super_status(
+    root: &Path,
+    command: &str,
+) -> Vec<PathBuf> {
+    let mut candidates = vec![root.join(command)];
+    match command {
+        "sqz-mcp" | "sqz" => {
+            let checkout = root.join("sqz");
+            candidates.push(checkout.join(command));
+            candidates.push(checkout.join("target").join("release").join(command));
+            candidates.push(checkout.join("target").join("debug").join(command));
+        }
+        "token-savior" | "claw-compactor" => {
+            let checkout = root.join(command);
+            candidates.push(checkout.join(".venv").join("bin").join(command));
+            candidates.push(checkout.join("venv").join("bin").join(command));
+            candidates.push(checkout.join("bin").join(command));
+            candidates.push(checkout.join(command));
+        }
+        _ => {}
+    }
+    candidates
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
 fn executable_file(path: &Path) -> bool {
     path.is_file()
+}
+
+fn optimizer_command_ready_for_super_status(command: &str, path: &Path) -> bool {
+    executable_file(path)
+        && match command {
+            "sqz-mcp" => {
+                command_probe_success_for_super_status(path, &["--transport", "stdio", "--help"])
+            }
+            "token-savior" => token_savior_command_ready_for_super_status(path),
+            _ => true,
+        }
+}
+
+fn command_probe_success_for_super_status(path: &Path, args: &[&str]) -> bool {
+    Command::new(path)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn token_savior_command_ready_for_super_status(path: &Path) -> bool {
+    let Some(venv_root) = python_venv_root_for_super_status_command(path) else {
+        return true;
+    };
+    python_venv_has_module_for_super_status(venv_root, "mcp")
+}
+
+fn python_venv_root_for_super_status_command(path: &Path) -> Option<&Path> {
+    let bin_dir = path.parent()?;
+    let venv_root = bin_dir.parent()?;
+    let bin_name = bin_dir.file_name()?.to_str()?;
+    let venv_name = venv_root.file_name()?.to_str()?;
+    if matches!(bin_name, "bin" | "Scripts") && matches!(venv_name, ".venv" | "venv") {
+        Some(venv_root)
+    } else {
+        None
+    }
+}
+
+fn python_venv_has_module_for_super_status(venv_root: &Path, module_name: &str) -> bool {
+    let windows_site_packages = venv_root.join("Lib").join("site-packages");
+    if windows_site_packages.join(module_name).is_dir() {
+        return true;
+    }
+
+    let lib_dir = venv_root.join("lib");
+    let Ok(entries) = fs::read_dir(lib_dir) else {
+        return false;
+    };
+    entries.filter_map(|entry| entry.ok()).any(|entry| {
+        entry
+            .path()
+            .join("site-packages")
+            .join(module_name)
+            .is_dir()
+    })
 }
 
 fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {

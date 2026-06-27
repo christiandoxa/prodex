@@ -37,6 +37,46 @@
         })
     }
 
+    fn test_openai_usage_with_windows(
+        five_hour_used_percent: i64,
+        weekly_used_percent: i64,
+        reset_at: i64,
+    ) -> UsageResponse {
+        UsageResponse {
+            email: Some("main@example.com".to_string()),
+            plan_type: Some("plus".to_string()),
+            rate_limit: Some(WindowPair {
+                primary_window: Some(UsageWindow {
+                    used_percent: Some(five_hour_used_percent),
+                    reset_at: Some(reset_at),
+                    limit_window_seconds: Some(5 * 60 * 60),
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: Some(weekly_used_percent),
+                    reset_at: Some(reset_at),
+                    limit_window_seconds: Some(7 * 24 * 60 * 60),
+                }),
+            }),
+            code_review_rate_limit: None,
+            rate_limit_reset_credits: None,
+            additional_rate_limits: Vec::new(),
+        }
+    }
+
+    fn test_openai_quota_report(usage: UsageResponse) -> QuotaReport {
+        test_quota_report("main", Ok(ProviderQuotaSnapshot::OpenAi(usage)))
+    }
+
+    fn assert_refresh_interval_near(actual: Duration, expected_seconds: u64) {
+        let actual_seconds = actual.as_secs();
+        let jitter = (expected_seconds / 10).max(1);
+        assert!(
+            actual_seconds >= expected_seconds.saturating_sub(jitter)
+                && actual_seconds <= expected_seconds.saturating_add(jitter),
+            "expected {actual_seconds}s to be within +/-{jitter}s of {expected_seconds}s"
+        );
+    }
+
     fn test_gemini_quota(email: &str) -> ProviderQuotaSnapshot {
         ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
             email: Some(email.to_string()),
@@ -89,49 +129,85 @@
                 provider_filter: QuotaProviderFilter::All,
                 provider_filter_locked: false,
                 total_width: 80,
-                max_lines: Some(8),
+                max_lines: Some(20),
             },
         );
 
-        assert_eq!(frame.updated, "2026-06-26 10:00:00 UTC");
-        assert!(frame.body.contains("Quota Overview"));
+        assert_eq!(frame.title, "Prodex Quota");
+        assert_eq!(frame.body, "Quota Overview");
+        assert!(frame
+            .overview_fields
+            .iter()
+            .any(|(label, _)| label == "Last Updated"));
+        assert!(frame
+            .overview_fields
+            .iter()
+            .any(|(label, _)| label == "Available"));
         assert!(!frame.body.contains("[ Quota Overview ]"));
         assert!(!frame.body.contains("Quota Overview ] ==="));
-        let available_line = frame
-            .body
-            .lines()
-            .find(|line| line.starts_with("Available:"))
-            .expect("quota TUI frame should include an Available summary line");
-        assert!(
-            !available_line.contains("  "),
-            "Available summary should not use manual spacing: {available_line}"
-        );
-        assert!(frame.body.contains("main"));
+        assert!(!frame.body.contains("PROFILE"));
+        let table = frame
+            .table
+            .as_ref()
+            .expect("all quota TUI frame should include a ratatui table");
+        assert_eq!(table.rows.len(), 1);
+        assert_eq!(table.rows[0].profile, vec!["main".to_string()]);
+        assert_eq!(table.rows[0].account, vec!["main@example.com".to_string()]);
         assert!(!frame.body.contains("sort: current"));
+        assert!(frame.footer.contains("u update"));
         assert!(frame.footer.contains("sort current"));
         assert!(frame.footer.contains("filter all"));
     }
 
     #[test]
-    fn quota_human_tui_body_removes_manual_panel_headers_and_field_padding() {
-        let body = quota_human_tui_body(
-            "[ Quota main ] ================================================================\n\
-             Account:             main@example.com\n\
-             5h:                  80% left\n\
-             \n\
-             [ Quota Overview ] ==========================================================\n\
-             Available:           1/1 profile",
+    fn quota_human_tui_spans_use_readable_detail_color() {
+        let spans = quota_human_tui_spans(
+            "  resets: 5h 2026-06-28 01:44:03 +07:00 | weekly 2026-07-04 10:12:48 +07:00",
         );
 
-        assert!(body.contains("Quota main"));
-        assert!(body.contains("Quota Overview"));
-        assert!(!body.contains("[ Quota main ]"));
-        assert!(!body.contains("[ Quota Overview ]"));
-        assert!(body.contains("Account: main@example.com"));
-        assert!(body.contains("5h: 80% left"));
-        assert!(body.contains("Available: 1/1 profile"));
-        assert!(!body.contains("Account:             main@example.com"));
-        assert!(!body.contains("Available:           1/1 profile"));
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].style.fg, Some(Color::Gray));
+    }
+
+    #[test]
+    fn all_quota_watch_tui_loading_and_error_use_native_fields() {
+        let layout = AllQuotaWatchLayout {
+            detail: false,
+            scroll_offset: 0,
+            sort: QuotaReportSort::Current,
+            provider_filter: QuotaProviderFilter::All,
+            provider_filter_locked: false,
+            total_width: 80,
+            max_lines: Some(20),
+        };
+        let loading = build_all_quota_watch_tui_frame(
+            &AllQuotaWatchSnapshot::Loading {
+                updated: "2026-06-26 10:00:00 UTC".to_string(),
+            },
+            layout,
+        );
+        assert_eq!(loading.body, "Quota");
+        assert!(loading.table.is_none());
+        assert!(loading
+            .overview_fields
+            .iter()
+            .any(|(label, value)| label == "Status" && value == "Loading quota data..."));
+        assert!(!loading.body.contains("[ Quota ]"));
+
+        let error = build_all_quota_watch_tui_frame(
+            &AllQuotaWatchSnapshot::Error {
+                updated: "2026-06-26 10:00:01 UTC".to_string(),
+                message: "load failed".to_string(),
+            },
+            layout,
+        );
+        assert_eq!(error.body, "Quota");
+        assert!(error.table.is_none());
+        assert!(error
+            .overview_fields
+            .iter()
+            .any(|(label, value)| label == "Status" && value == "load failed"));
+        assert!(!error.body.contains("[ Quota ]"));
     }
 
     #[test]
@@ -142,12 +218,36 @@
             Ok(test_usage("main@example.com")),
         );
 
-        assert_eq!(frame.updated, "2026-06-26 10:00:00 UTC");
         assert_eq!(frame.title, "Prodex Quota main");
-        assert!(frame.body.contains("Quota main"));
+        assert_eq!(frame.body, "Quota main");
         assert!(!frame.body.contains("[ Quota main ]"));
-        assert!(frame.body.contains("main@example.com"));
+        assert!(frame
+            .overview_fields
+            .iter()
+            .any(|(label, value)| label == "Account" && value == "main@example.com"));
+        assert!(frame
+            .overview_fields
+            .iter()
+            .any(|(label, _)| label == "Last Updated"));
+        assert!(frame.table.is_none());
         assert_eq!(frame.footer, "refresh 5s | q quit");
+    }
+
+    #[test]
+    fn profile_quota_watch_tui_error_uses_native_fields() {
+        let frame = build_profile_quota_watch_tui_frame(
+            "main",
+            "2026-06-26 10:00:00 UTC",
+            Err("quota failed".to_string()),
+        );
+
+        assert_eq!(frame.body, "Quota main");
+        assert!(frame.table.is_none());
+        assert!(frame
+            .overview_fields
+            .iter()
+            .any(|(label, value)| label == "Status" && value == "quota failed"));
+        assert!(!frame.body.contains("[ Quota main ]"));
     }
 
     #[test]
@@ -221,6 +321,148 @@
         assert!(refresh.try_start(|| AllQuotaWatchSnapshot::Empty {
             updated: "third".to_string(),
         }));
+    }
+
+    #[test]
+    fn all_quota_watch_refresh_interval_slows_stable_detail_views() {
+        let now = Local::now().timestamp();
+        let reset_at = now + 60 * 60;
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "stable".to_string(),
+            profile_count: 1,
+            reports: vec![test_openai_quota_report(test_openai_usage_with_windows(
+                10, 20, reset_at,
+            ))],
+        };
+
+        assert_refresh_interval_near(
+            all_quota_watch_refresh_interval(&snapshot, true, now),
+            ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS,
+        );
+        assert_refresh_interval_near(
+            all_quota_watch_refresh_interval(&snapshot, false, now),
+            ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS,
+        );
+    }
+
+    #[test]
+    fn all_quota_watch_refresh_interval_stays_fast_for_blocked_accounts() {
+        let now = Local::now().timestamp();
+        let reset_at = now + 60 * 60;
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "blocked".to_string(),
+            profile_count: 1,
+            reports: vec![test_openai_quota_report(test_openai_usage_with_windows(
+                100, 20, reset_at,
+            ))],
+        };
+
+        assert_refresh_interval_near(
+            all_quota_watch_refresh_interval(&snapshot, true, now),
+            ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS,
+        );
+    }
+
+    #[test]
+    fn all_quota_watch_refresh_interval_stays_fast_for_reset_credits() {
+        let now = Local::now().timestamp();
+        let reset_at = now + 60 * 60;
+        let mut usage = test_openai_usage_with_windows(10, 20, reset_at);
+        usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
+            available_count: 1,
+            expires_at: None,
+            expires_at_ms: None,
+        });
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "credits".to_string(),
+            profile_count: 1,
+            reports: vec![test_openai_quota_report(usage)],
+        };
+
+        assert_refresh_interval_near(
+            all_quota_watch_refresh_interval(&snapshot, true, now),
+            ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS,
+        );
+    }
+
+    #[test]
+    fn all_quota_watch_refresh_interval_stays_fast_near_reset() {
+        let now = Local::now().timestamp();
+        let reset_at = now + ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS - 1;
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "near-reset".to_string(),
+            profile_count: 1,
+            reports: vec![test_openai_quota_report(test_openai_usage_with_windows(
+                10, 20, reset_at,
+            ))],
+        };
+
+        assert_eq!(
+            all_quota_watch_refresh_interval(&snapshot, true, now),
+            Duration::from_secs(ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS)
+        );
+    }
+
+    #[test]
+    fn all_quota_watch_refresh_interval_scales_with_profile_count() {
+        let now = Local::now().timestamp();
+        let reset_at = now + 60 * 60;
+        let reports = (0..50)
+            .map(|index| {
+                test_quota_report(
+                    &format!("profile-{index}"),
+                    Ok(ProviderQuotaSnapshot::OpenAi(test_openai_usage_with_windows(
+                        10, 20, reset_at,
+                    ))),
+                )
+            })
+            .collect::<Vec<_>>();
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "many".to_string(),
+            profile_count: reports.len(),
+            reports,
+        };
+
+        assert_refresh_interval_near(
+            all_quota_watch_refresh_interval(&snapshot, true, now),
+            50 * ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS,
+        );
+    }
+
+    #[test]
+    fn quota_watch_update_command_forces_refresh_action() {
+        assert!(matches!(
+            apply_quota_watch_command(QuotaWatchCommand::Update, 0, 0),
+            QuotaWatchCommandOutcome::Update
+        ));
+    }
+
+    #[test]
+    fn quota_watch_quit_key_accepts_ctrl_c_and_ctrl_z() {
+        assert!(quota_watch_quit_key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        )));
+        assert!(quota_watch_quit_key(KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::CONTROL,
+        )));
+        assert!(quota_watch_quit_key(KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+        )));
+        assert!(quota_watch_quit_key(KeyEvent::new(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )));
+        assert!(!quota_watch_quit_key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::NONE,
+        )));
+        assert!(!quota_watch_quit_key(KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::NONE,
+        )));
     }
 
     #[test]

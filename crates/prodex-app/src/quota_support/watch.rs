@@ -1,6 +1,6 @@
 use super::*;
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -9,7 +9,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
 use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
 
@@ -44,17 +45,26 @@ struct AllQuotaWatchLayout {
 }
 
 const QUOTA_WATCH_INPUT_POLL_MS: u64 = 100;
+const ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS: u64 = DEFAULT_WATCH_INTERVAL_SECONDS;
+const ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS: u64 = 10;
+const ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS: u64 = 45;
+const ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS: u64 = 90;
+const ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS: u64 = 2;
+const ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS: i64 = 2 * 60;
+const ALL_QUOTA_WATCH_NEAR_RESET_SECONDS: i64 = 15 * 60;
 enum QuotaWatchCommand {
     Up,
     Down,
     Sort,
     Filter,
+    Update,
     Quit,
 }
 enum QuotaWatchCommandOutcome {
     Continue(usize),
     Sort,
     Filter,
+    Update,
     Quit,
 }
 struct AllQuotaWatchRefresh {
@@ -241,38 +251,6 @@ fn render_all_quota_watch_snapshot(
     }
 }
 
-fn render_all_quota_watch_snapshot_with_layout(
-    snapshot: &AllQuotaWatchSnapshot,
-    layout: AllQuotaWatchLayout,
-) -> String {
-    match snapshot {
-        AllQuotaWatchSnapshot::Loading { updated: _updated } => {
-            render_quota_watch_error_panel("Quota", "Loading quota data...")
-        }
-        AllQuotaWatchSnapshot::Reports {
-            updated: _updated,
-            profile_count: _profile_count,
-            reports,
-        } => render_all_quota_watch_report_output_with_layout(reports, layout),
-        AllQuotaWatchSnapshot::Empty { updated: _updated } => {
-            render_quota_watch_error_panel("Quota", "No profiles configured")
-        }
-        AllQuotaWatchSnapshot::Error {
-            updated: _updated,
-            message,
-        } => render_quota_watch_error_panel("Quota", message),
-    }
-}
-
-fn quota_watch_snapshot_updated(snapshot: &AllQuotaWatchSnapshot) -> &str {
-    match snapshot {
-        AllQuotaWatchSnapshot::Loading { updated }
-        | AllQuotaWatchSnapshot::Reports { updated, .. }
-        | AllQuotaWatchSnapshot::Empty { updated }
-        | AllQuotaWatchSnapshot::Error { updated, .. } => updated,
-    }
-}
-
 fn render_all_quota_watch_report_output(
     reports: &[QuotaReport],
     detail: bool,
@@ -321,7 +299,7 @@ fn render_all_quota_watch_report_output_with_layout(
         .map(|range| format!(" | {range}"))
         .unwrap_or_default();
     output.push_str(&format!(
-        "sort: {} | filter: {}{} | s sort | {} | j/k/Up/Down scroll | q quit",
+        "sort: {} | filter: {}{} | u update | s sort | {} | j/k/Up/Down scroll | q quit",
         layout.sort.label(),
         layout.provider_filter.label(),
         range,
@@ -435,10 +413,11 @@ fn watch_profile_quota_tui(
                 .context("failed to poll quota TUI input")?
             {
                 match event::read().context("failed to read quota TUI input")? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        _ => {}
-                    },
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        if quota_watch_quit_key(key) {
+                            return Ok(());
+                        }
+                    }
                     Event::Resize(_, _) => break,
                     _ => {}
                 }
@@ -515,7 +494,7 @@ fn watch_all_quotas_plain(
         if let Some(next_snapshot) = refresh.take_latest() {
             snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
             redraw_needed = true;
-            next_refresh_at = Some(quota_watch_next_refresh_at());
+            next_refresh_at = Some(all_quota_watch_next_refresh_at(&snapshot, detail));
         }
 
         if redraw_needed {
@@ -589,7 +568,7 @@ fn watch_all_quotas_tui(
         if let Some(next_snapshot) = refresh.take_latest() {
             snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
             redraw_needed = true;
-            next_refresh_at = Some(quota_watch_next_refresh_at());
+            next_refresh_at = Some(all_quota_watch_next_refresh_at(&snapshot, detail));
         }
 
         if redraw_needed {
@@ -644,11 +623,12 @@ fn watch_all_quotas_tui(
             match event::read().context("failed to read quota TUI input")? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     let command = match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => Some(QuotaWatchCommand::Quit),
+                        _ if quota_watch_quit_key(key) => Some(QuotaWatchCommand::Quit),
                         KeyCode::Char('j') | KeyCode::Down => Some(QuotaWatchCommand::Down),
                         KeyCode::Char('k') | KeyCode::Up => Some(QuotaWatchCommand::Up),
                         KeyCode::Char('s') => Some(QuotaWatchCommand::Sort),
                         KeyCode::Char('f') => Some(QuotaWatchCommand::Filter),
+                        KeyCode::Char('u') | KeyCode::Char('U') => Some(QuotaWatchCommand::Update),
                         _ => None,
                     };
                     let Some(command) = command else {
@@ -689,6 +669,17 @@ fn watch_all_quotas_tui(
                                 redraw_needed = true;
                             }
                         }
+                        QuotaWatchCommandOutcome::Update => {
+                            if start_all_quota_watch_refresh(
+                                &mut refresh,
+                                paths,
+                                base_url,
+                                &auth_filter,
+                                collection_provider_filter,
+                            ) {
+                                next_refresh_at = None;
+                            }
+                        }
                         QuotaWatchCommandOutcome::Quit => return Ok(()),
                     }
                 }
@@ -701,31 +692,89 @@ fn watch_all_quotas_tui(
     }
 }
 
+fn quota_watch_quit_key(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
+        || (key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z')))
+}
+
 struct AllQuotaWatchTuiFrame {
-    updated: String,
     title: String,
     body: String,
+    overview_fields: Vec<(String, String)>,
+    table: Option<AllQuotaWatchTuiTable>,
     footer: String,
+}
+
+struct AllQuotaWatchTuiTable {
+    rows: Vec<AllQuotaWatchTuiRow>,
+}
+
+struct AllQuotaWatchTuiRow {
+    profile: Vec<String>,
+    current: Vec<String>,
+    auth: Vec<String>,
+    account: Vec<String>,
+    plan: Vec<String>,
+    remaining: Vec<String>,
 }
 
 fn build_all_quota_watch_tui_frame(
     snapshot: &AllQuotaWatchSnapshot,
     layout: AllQuotaWatchLayout,
 ) -> AllQuotaWatchTuiFrame {
-    let body = quota_human_tui_body(&quota_watch_without_control_footer(
-        &render_all_quota_watch_snapshot_with_layout(snapshot, layout),
-    ));
+    let (body, overview_fields, table) = match snapshot {
+        AllQuotaWatchSnapshot::Reports { reports, .. } => {
+            let filtered_reports =
+                filter_quota_reports_by_provider(reports, layout.provider_filter);
+            let window = render_quota_reports_window_with_sort(
+                &filtered_reports,
+                layout.detail,
+                layout.max_lines,
+                layout.total_width,
+                layout.scroll_offset,
+                true,
+                layout.sort,
+            );
+            (
+                "Quota Overview".to_string(),
+                quota_pool_summary_fields_for_reports(&filtered_reports),
+                Some(build_all_quota_watch_tui_table(
+                    &filtered_reports,
+                    layout,
+                    window.start_profile,
+                    window.shown_profiles,
+                )),
+            )
+        }
+        AllQuotaWatchSnapshot::Loading { updated } => (
+            "Quota".to_string(),
+            quota_watch_status_fields("Loading quota data...", updated),
+            None,
+        ),
+        AllQuotaWatchSnapshot::Empty { updated } => (
+            "Quota".to_string(),
+            quota_watch_status_fields("No profiles configured", updated),
+            None,
+        ),
+        AllQuotaWatchSnapshot::Error { updated, message } => (
+            "Quota".to_string(),
+            quota_watch_status_fields(message, updated),
+            None,
+        ),
+    };
     let provider_hint = if layout.provider_filter_locked {
         "provider fixed"
     } else {
         "f provider"
     };
     AllQuotaWatchTuiFrame {
-        updated: quota_watch_snapshot_updated(snapshot).to_string(),
         title: "Prodex Quota".to_string(),
         body,
+        overview_fields,
+        table,
         footer: format!(
-            "s sort {} | filter {} | {} | j/k scroll | q quit",
+            "u update | s sort {} | filter {} | {} | j/k scroll | q quit",
             layout.sort.label(),
             layout.provider_filter.label(),
             provider_hint
@@ -733,42 +782,228 @@ fn build_all_quota_watch_tui_frame(
     }
 }
 
-fn quota_watch_without_control_footer(output: &str) -> String {
-    let mut lines = output.lines().map(str::to_string).collect::<Vec<_>>();
-    if lines.last().is_some_and(|line| line.starts_with("sort: ")) {
-        lines.pop();
-        if lines.last().is_some_and(|line| line.is_empty()) {
-            lines.pop();
+fn quota_watch_status_fields(message: &str, updated: &str) -> Vec<(String, String)> {
+    vec![
+        ("Status".to_string(), message.to_string()),
+        ("Last Updated".to_string(), updated.to_string()),
+    ]
+}
+
+fn build_all_quota_watch_tui_table(
+    reports: &[QuotaReport],
+    layout: AllQuotaWatchLayout,
+    start_profile: usize,
+    shown_profiles: usize,
+) -> AllQuotaWatchTuiTable {
+    let duplicate_workspace_emails = quota_watch_duplicate_workspace_emails(reports);
+    let rows = sorted_quota_report_indexes_by_sort(reports, layout.sort)
+        .into_iter()
+        .skip(start_profile)
+        .take(shown_profiles)
+        .map(|index| {
+            build_all_quota_watch_tui_row(
+                &reports[index],
+                layout.detail,
+                &duplicate_workspace_emails,
+            )
+        })
+        .collect::<Vec<_>>();
+    AllQuotaWatchTuiTable { rows }
+}
+
+fn build_all_quota_watch_tui_row(
+    report: &QuotaReport,
+    detail: bool,
+    duplicate_workspace_emails: &BTreeSet<String>,
+) -> AllQuotaWatchTuiRow {
+    let view = quota_watch_report_view(report);
+    let mut account = vec![view.account];
+    if detail && quota_watch_should_show_workspace(report, duplicate_workspace_emails) {
+        account.push(format!(
+            "workspace: {}",
+            quota_watch_workspace_label(report)
+        ));
+    }
+    let mut remaining = vec![view.main, format!("status: {}", view.status)];
+    if detail && let Some(resets) = view.resets {
+        remaining.push(resets);
+    }
+    AllQuotaWatchTuiRow {
+        profile: vec![report.name.clone()],
+        current: vec![if report.active { "*" } else { "" }.to_string()],
+        auth: vec![report.auth.label.clone()],
+        account,
+        plan: vec![view.plan],
+        remaining,
+    }
+}
+
+struct QuotaWatchReportView {
+    account: String,
+    plan: String,
+    main: String,
+    status: String,
+    resets: Option<String>,
+}
+
+fn quota_watch_report_view(report: &QuotaReport) -> QuotaWatchReportView {
+    match &report.result {
+        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
+            let blocked = collect_blocked_limits(usage, false);
+            let status = if blocked.is_empty() {
+                "Ready".to_string()
+            } else {
+                format!("Blocked: {}", format_blocked_limits(&blocked))
+            };
+            QuotaWatchReportView {
+                account: quota_watch_optional(usage.email.as_deref()).to_string(),
+                plan: quota_watch_optional(usage.plan_type.as_deref()).to_string(),
+                main: format_main_windows_compact(usage),
+                status,
+                resets: Some(quota_watch_openai_reset_summary(usage)),
+            }
         }
+        Ok(ProviderQuotaSnapshot::Copilot(info)) => QuotaWatchReportView {
+            account: quota_watch_optional(info.login.as_deref()).to_string(),
+            plan: quota_watch_optional(
+                info.copilot_plan
+                    .as_deref()
+                    .or(info.access_type_sku.as_deref()),
+            )
+            .to_string(),
+            main: format_copilot_main_quota(info),
+            status: format_copilot_quota_status(info),
+            resets: Some(format_copilot_reset_summary(info).map_or_else(
+                || "resets: unavailable".to_string(),
+                |value| format!("resets: {value}"),
+            )),
+        },
+        Ok(ProviderQuotaSnapshot::Gemini(info)) => QuotaWatchReportView {
+            account: quota_watch_optional(info.email.as_deref()).to_string(),
+            plan: quota_watch_optional(info.plan.as_deref()).to_string(),
+            main: format_gemini_main_quota(info),
+            status: format_gemini_quota_status(info),
+            resets: Some(format_gemini_reset_summary(info).map_or_else(
+                || "resets: unavailable".to_string(),
+                |value| format!("resets: {value}"),
+            )),
+        },
+        Ok(ProviderQuotaSnapshot::External(info)) => QuotaWatchReportView {
+            account: quota_watch_optional(info.account.as_deref()).to_string(),
+            plan: quota_watch_optional(info.plan.as_deref()).to_string(),
+            main: info.main.clone(),
+            status: info.status.clone(),
+            resets: Some(info.reset.as_ref().map_or_else(
+                || "resets: unavailable".to_string(),
+                |value| format!("resets: {value}"),
+            )),
+        },
+        Err(err) => QuotaWatchReportView {
+            account: "-".to_string(),
+            plan: "-".to_string(),
+            main: "-".to_string(),
+            status: format!("Error: {}", first_line_of_error(err)),
+            resets: Some("resets: unavailable".to_string()),
+        },
     }
-    lines.join("\n")
 }
 
-pub(crate) fn quota_human_tui_body(output: &str) -> String {
-    output
-        .lines()
-        .map(quota_human_tui_line)
+fn quota_watch_openai_reset_summary(usage: &UsageResponse) -> String {
+    let reset_summary = prodex_quota::format_main_reset_summary(usage);
+    match usage.rate_limit_reset_credits.as_ref() {
+        Some(credits) => {
+            let mut credit_summary = format!("{} available", credits.available_count);
+            if let Some(expires_at) = credits.expiration_epoch_seconds() {
+                credit_summary.push_str(&format!(
+                    ", expires {}",
+                    prodex_quota::format_precise_reset_time(Some(expires_at))
+                ));
+            }
+            format!("resets: {reset_summary}; reset credits: {credit_summary}")
+        }
+        None => format!("resets: {reset_summary}"),
+    }
+}
+
+fn quota_watch_optional(value: Option<&str>) -> &str {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("-")
+}
+
+fn quota_watch_duplicate_workspace_emails(reports: &[QuotaReport]) -> BTreeSet<String> {
+    let mut workspace_ids_by_email = BTreeMap::<String, BTreeSet<String>>::new();
+    for report in reports {
+        let Some(email) = quota_watch_openai_email(report) else {
+            continue;
+        };
+        let Some(workspace_id) = report
+            .workspace_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|workspace_id| !workspace_id.is_empty())
+        else {
+            continue;
+        };
+        workspace_ids_by_email
+            .entry(email.trim().to_ascii_lowercase())
+            .or_default()
+            .insert(workspace_id.to_string());
+    }
+    workspace_ids_by_email
+        .into_iter()
+        .filter_map(|(email, workspace_ids)| (workspace_ids.len() > 1).then_some(email))
+        .collect()
+}
+
+fn quota_watch_openai_email(report: &QuotaReport) -> Option<&str> {
+    match report.result.as_ref().ok()? {
+        ProviderQuotaSnapshot::OpenAi(usage) => usage
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|email| !email.is_empty()),
+        ProviderQuotaSnapshot::Copilot(_)
+        | ProviderQuotaSnapshot::Gemini(_)
+        | ProviderQuotaSnapshot::External(_) => None,
+    }
+}
+
+fn quota_watch_should_show_workspace(
+    report: &QuotaReport,
+    duplicate_workspace_emails: &BTreeSet<String>,
+) -> bool {
+    quota_watch_openai_email(report)
+        .map(|email| email.trim().to_ascii_lowercase())
+        .is_some_and(|email| duplicate_workspace_emails.contains(&email))
+}
+
+fn quota_watch_workspace_label(report: &QuotaReport) -> String {
+    report
+        .workspace_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|workspace_id| !workspace_id.is_empty())
+        .map(quota_watch_short_workspace_id)
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn quota_watch_short_workspace_id(workspace_id: &str) -> String {
+    let chars = workspace_id.chars().collect::<Vec<_>>();
+    if chars.len() <= 24 {
+        return workspace_id.to_string();
+    }
+    let prefix = chars.iter().take(12).collect::<String>();
+    let suffix = chars
+        .iter()
+        .rev()
+        .take(6)
         .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn quota_human_tui_line(line: &str) -> String {
-    if let Some(title) = quota_section_header_title(line) {
-        return title.to_string();
-    }
-    if quota_human_tui_compact_label(line).is_some() {
-        return quota_compact_field_line(line);
-    }
-    line.to_string()
-}
-
-fn quota_section_header_title(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("[ ")?;
-    let (title, rest) = rest.split_once(" ]")?;
-    rest.trim_start()
-        .chars()
-        .all(|ch| ch == '=')
-        .then_some(title)
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
 }
 
 fn quota_human_tui_compact_label(line: &str) -> Option<&'static str> {
@@ -802,61 +1037,157 @@ fn quota_human_tui_compact_label(line: &str) -> Option<&'static str> {
         .find(|label| line.trim_start().starts_with(&format!("{label}:")))
 }
 
-fn quota_compact_field_line(line: &str) -> String {
-    let trimmed = line.trim_start();
-    let Some((label, value)) = trimmed.split_once(':') else {
-        return line.to_string();
-    };
-    format!("{label}: {}", value.trim_start())
-}
-
 fn build_profile_quota_watch_tui_frame(
     profile_name: &str,
     updated: &str,
     quota_result: std::result::Result<ProviderQuotaSnapshot, String>,
 ) -> AllQuotaWatchTuiFrame {
+    let (body, overview_fields) = match quota_result {
+        Ok(snapshot) => (
+            format!("Quota {profile_name}"),
+            quota_watch_profile_fields(updated, &snapshot),
+        ),
+        Err(err) => (
+            format!("Quota {profile_name}"),
+            quota_watch_status_fields(&err, updated),
+        ),
+    };
     AllQuotaWatchTuiFrame {
-        updated: updated.to_string(),
         title: format!("Prodex Quota {profile_name}"),
-        body: quota_human_tui_body(&render_profile_quota_watch_output(
-            profile_name,
-            updated,
-            quota_result,
-        )),
+        body,
+        overview_fields,
+        table: None,
         footer: "refresh 5s | q quit".to_string(),
+    }
+}
+
+fn quota_watch_profile_fields(
+    updated: &str,
+    snapshot: &ProviderQuotaSnapshot,
+) -> Vec<(String, String)> {
+    match snapshot {
+        ProviderQuotaSnapshot::OpenAi(usage) => {
+            let blocked = collect_blocked_limits(usage, false);
+            let status = if blocked.is_empty() {
+                "Ready".to_string()
+            } else {
+                format!("Blocked: {}", format_blocked_limits(&blocked))
+            };
+            vec![
+                (
+                    "Account".to_string(),
+                    quota_watch_optional(usage.email.as_deref()).to_string(),
+                ),
+                (
+                    "Plan".to_string(),
+                    quota_watch_optional(usage.plan_type.as_deref()).to_string(),
+                ),
+                ("Status".to_string(), status),
+                ("Main".to_string(), format_main_windows(usage)),
+                (
+                    "Reset".to_string(),
+                    quota_watch_openai_reset_summary(usage)
+                        .trim_start_matches("resets: ")
+                        .to_string(),
+                ),
+                ("Last Updated".to_string(), updated.to_string()),
+            ]
+        }
+        ProviderQuotaSnapshot::Copilot(info) => vec![
+            (
+                "Account".to_string(),
+                quota_watch_optional(info.login.as_deref()).to_string(),
+            ),
+            (
+                "Plan".to_string(),
+                quota_watch_optional(
+                    info.copilot_plan
+                        .as_deref()
+                        .or(info.access_type_sku.as_deref()),
+                )
+                .to_string(),
+            ),
+            ("Status".to_string(), format_copilot_quota_status(info)),
+            ("Main".to_string(), format_copilot_main_quota(info)),
+            (
+                "Reset".to_string(),
+                format_copilot_reset_summary(info).unwrap_or_else(|| "unavailable".to_string()),
+            ),
+            ("Last Updated".to_string(), updated.to_string()),
+        ],
+        ProviderQuotaSnapshot::Gemini(info) => vec![
+            (
+                "Account".to_string(),
+                quota_watch_optional(info.email.as_deref()).to_string(),
+            ),
+            (
+                "Plan".to_string(),
+                quota_watch_optional(info.plan.as_deref()).to_string(),
+            ),
+            ("Status".to_string(), format_gemini_quota_status(info)),
+            ("Main".to_string(), format_gemini_main_quota(info)),
+            (
+                "Reset".to_string(),
+                format_gemini_reset_summary(info).unwrap_or_else(|| "unavailable".to_string()),
+            ),
+            ("Last Updated".to_string(), updated.to_string()),
+        ],
+        ProviderQuotaSnapshot::External(info) => vec![
+            (
+                "Account".to_string(),
+                quota_watch_optional(info.account.as_deref()).to_string(),
+            ),
+            (
+                "Plan".to_string(),
+                quota_watch_optional(info.plan.as_deref()).to_string(),
+            ),
+            ("Status".to_string(), info.status.clone()),
+            ("Main".to_string(), info.main.clone()),
+            (
+                "Reset".to_string(),
+                info.reset
+                    .clone()
+                    .unwrap_or_else(|| "unavailable".to_string()),
+            ),
+            ("Last Updated".to_string(), updated.to_string()),
+        ],
     }
 }
 
 fn render_all_quota_watch_tui(frame: &mut ratatui::Frame<'_>, data: &AllQuotaWatchTuiFrame) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Length(3)])
         .split(frame.area());
 
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled(data.title.as_str(), quota_watch_title_style()),
-        Span::raw("  "),
-        Span::styled(data.updated.as_str(), quota_watch_muted_style()),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(quota_watch_border_style()),
-    );
-    frame.render_widget(header, chunks[0]);
+    let body_block = Block::default()
+        .title(Line::styled(data.title.as_str(), quota_watch_title_style()))
+        .borders(Borders::ALL)
+        .border_style(quota_watch_border_style());
+    let body_area = body_block.inner(chunks[0]);
+    frame.render_widget(body_block, chunks[0]);
 
-    let body = Paragraph::new(quota_human_tui_text(&data.body))
-        .block(
-            Block::default()
-                .borders(Borders::LEFT | Borders::RIGHT)
-                .border_style(quota_watch_border_style()),
-        )
-        .wrap(ratatui::widgets::Wrap { trim: false });
-    frame.render_widget(body, chunks[1]);
+    if let Some(table) = &data.table {
+        let overview_height = u16::try_from(data.overview_fields.len().saturating_add(2))
+            .unwrap_or(body_area.height)
+            .min(body_area.height);
+        let body_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(overview_height), Constraint::Min(1)])
+            .split(body_area);
+        let overview = Paragraph::new(quota_watch_fields_text(&data.body, &data.overview_fields))
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        frame.render_widget(overview, body_chunks[0]);
+        render_all_quota_watch_tui_table(frame, body_chunks[1], table);
+    } else if !data.overview_fields.is_empty() {
+        let body = Paragraph::new(quota_watch_fields_text(&data.body, &data.overview_fields))
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        frame.render_widget(body, body_area);
+    } else {
+        let body = Paragraph::new(quota_human_tui_text(&data.body))
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        frame.render_widget(body, body_area);
+    }
 
     let footer = Paragraph::new(Line::styled(
         data.footer.as_str(),
@@ -867,7 +1198,120 @@ fn render_all_quota_watch_tui(frame: &mut ratatui::Frame<'_>, data: &AllQuotaWat
             .borders(Borders::ALL)
             .border_style(quota_watch_border_style()),
     );
-    frame.render_widget(footer, chunks[2]);
+    frame.render_widget(footer, chunks[1]);
+}
+
+pub(crate) fn render_all_quota_reports_once_tui(
+    frame: &mut ratatui::Frame<'_>,
+    reports: &[QuotaReport],
+    detail: bool,
+) {
+    let area = frame.area();
+    let snapshot = AllQuotaWatchSnapshot::Reports {
+        updated: quota_watch_updated_at(),
+        profile_count: reports.len(),
+        reports: reports.to_vec(),
+    };
+    let data = build_all_quota_watch_tui_frame(
+        &snapshot,
+        AllQuotaWatchLayout {
+            detail,
+            scroll_offset: 0,
+            sort: QuotaReportSort::Remaining,
+            provider_filter: QuotaProviderFilter::All,
+            provider_filter_locked: false,
+            total_width: usize::from(area.width).saturating_sub(4),
+            max_lines: quota_watch_tui_report_lines(area.height),
+        },
+    );
+    render_all_quota_watch_tui(frame, &data);
+}
+
+pub(crate) fn render_profile_quota_once_tui(
+    frame: &mut ratatui::Frame<'_>,
+    profile_name: &str,
+    quota: ProviderQuotaSnapshot,
+) {
+    let data =
+        build_profile_quota_watch_tui_frame(profile_name, &quota_watch_updated_at(), Ok(quota));
+    render_all_quota_watch_tui(frame, &data);
+}
+
+fn render_all_quota_watch_tui_table(
+    frame: &mut ratatui::Frame<'_>,
+    area: ratatui::layout::Rect,
+    table: &AllQuotaWatchTuiTable,
+) {
+    let header = Row::new(["PROFILE", "CUR", "AUTH", "ACCOUNT", "PLAN", "REMAINING"])
+        .style(quota_watch_title_style())
+        .bottom_margin(1);
+    let rows = table
+        .rows
+        .iter()
+        .map(|row| {
+            let height = [
+                row.profile.len(),
+                row.current.len(),
+                row.auth.len(),
+                row.account.len(),
+                row.plan.len(),
+                row.remaining.len(),
+            ]
+            .into_iter()
+            .max()
+            .unwrap_or(1)
+            .max(1);
+            Row::new(vec![
+                quota_watch_table_cell(&row.profile),
+                quota_watch_table_cell(&row.current),
+                quota_watch_table_cell(&row.auth),
+                quota_watch_table_cell(&row.account),
+                quota_watch_table_cell(&row.plan),
+                quota_watch_table_cell(&row.remaining),
+            ])
+            .height(u16::try_from(height).unwrap_or(u16::MAX))
+            .bottom_margin(1)
+        })
+        .collect::<Vec<_>>();
+    let widths = [
+        Constraint::Percentage(23),
+        Constraint::Length(3),
+        Constraint::Length(7),
+        Constraint::Percentage(24),
+        Constraint::Length(8),
+        Constraint::Percentage(43),
+    ];
+    let widget = Table::new(rows, widths)
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(quota_watch_border_style()),
+        )
+        .column_spacing(1)
+        .style(Style::default());
+    frame.render_widget(widget, area);
+}
+
+fn quota_watch_table_cell(lines: &[String]) -> Cell<'_> {
+    Cell::from(Text::from(
+        lines
+            .iter()
+            .map(|line| Line::from(quota_human_tui_spans(line)))
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn quota_watch_fields_text(title: &str, fields: &[(String, String)]) -> Text<'static> {
+    let mut lines = vec![Line::styled(title.to_string(), quota_watch_title_style())];
+    lines.extend(fields.iter().map(|(label, value)| {
+        Line::from(vec![
+            Span::styled(format!("{label}:"), tui_title_style()),
+            Span::raw(" "),
+            Span::raw(value.clone()),
+        ])
+    }));
+    Text::from(lines)
 }
 
 pub(crate) fn quota_human_tui_text(output: &str) -> Text<'_> {
@@ -921,11 +1365,17 @@ fn quota_human_tui_spans(line: &str) -> Vec<Span<'_>> {
         || line.trim_start().starts_with("workspace:")
         || line.trim_start().starts_with("resets:")
         || line.trim_start().starts_with("status:")
-        || line.starts_with("press ")
     {
+        return vec![Span::styled(line, quota_watch_detail_style())];
+    }
+    if line.starts_with("press ") || line.trim_start().starts_with("press ") {
         return vec![Span::styled(line, quota_watch_muted_style())];
     }
     vec![Span::raw(line)]
+}
+
+fn quota_watch_detail_style() -> Style {
+    Style::default().fg(Color::Gray)
 }
 
 fn quota_watch_title_style() -> Style {
@@ -945,7 +1395,7 @@ fn quota_watch_footer_style() -> Style {
 }
 
 fn quota_watch_tui_report_lines(terminal_height: u16) -> Option<usize> {
-    Some(usize::from(terminal_height).saturating_sub(6).max(1))
+    Some(usize::from(terminal_height).saturating_sub(5).max(1))
 }
 
 fn start_all_quota_watch_refresh(
@@ -984,6 +1434,147 @@ fn load_all_quota_watch_snapshot(
 
 fn quota_watch_next_refresh_at() -> Instant {
     Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
+}
+
+fn all_quota_watch_next_refresh_at(snapshot: &AllQuotaWatchSnapshot, detail: bool) -> Instant {
+    Instant::now() + all_quota_watch_refresh_interval(snapshot, detail, Local::now().timestamp())
+}
+
+fn all_quota_watch_refresh_interval(
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    now: i64,
+) -> Duration {
+    match snapshot {
+        AllQuotaWatchSnapshot::Reports { reports, .. } => {
+            all_quota_watch_reports_refresh_interval(reports, detail, now)
+        }
+        AllQuotaWatchSnapshot::Empty { .. } => {
+            Duration::from_secs(ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS)
+        }
+        AllQuotaWatchSnapshot::Loading { .. } | AllQuotaWatchSnapshot::Error { .. } => {
+            Duration::from_secs(ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS)
+        }
+    }
+}
+
+fn all_quota_watch_reports_refresh_interval(
+    reports: &[QuotaReport],
+    detail: bool,
+    now: i64,
+) -> Duration {
+    let signal = reports
+        .iter()
+        .map(|report| report_quota_refresh_signal(report, now))
+        .max()
+        .unwrap_or(QuotaRefreshSignal::Stable);
+
+    let base = match signal {
+        QuotaRefreshSignal::Imminent => ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS,
+        QuotaRefreshSignal::Watch => ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS,
+        QuotaRefreshSignal::Stable => {
+            if detail {
+                ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS
+            } else {
+                ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS
+            }
+        }
+    };
+    let scaled = base.max(
+        u64::try_from(reports.len())
+            .unwrap_or(u64::MAX)
+            .saturating_mul(ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS),
+    );
+    Duration::from_secs(quota_watch_jittered_interval_seconds(scaled, now))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum QuotaRefreshSignal {
+    Stable,
+    Watch,
+    Imminent,
+}
+
+fn report_quota_refresh_signal(report: &QuotaReport, now: i64) -> QuotaRefreshSignal {
+    let Ok(snapshot) = &report.result else {
+        return QuotaRefreshSignal::Watch;
+    };
+    match snapshot {
+        ProviderQuotaSnapshot::OpenAi(usage) => openai_usage_quota_refresh_signal(usage, now),
+        ProviderQuotaSnapshot::Copilot(info) => info
+            .limited_user_reset_date
+            .as_deref()
+            .and_then(parse_quota_reset_epoch)
+            .map(|reset_at| quota_reset_refresh_signal(reset_at, now))
+            .unwrap_or(QuotaRefreshSignal::Stable),
+        ProviderQuotaSnapshot::Gemini(info) => info
+            .buckets
+            .iter()
+            .filter_map(|bucket| {
+                bucket
+                    .reset_time
+                    .as_deref()
+                    .and_then(parse_quota_reset_epoch)
+                    .map(|reset_at| quota_reset_refresh_signal(reset_at, now))
+            })
+            .max()
+            .unwrap_or(QuotaRefreshSignal::Stable),
+        ProviderQuotaSnapshot::External(_) => QuotaRefreshSignal::Stable,
+    }
+}
+
+fn openai_usage_quota_refresh_signal(usage: &UsageResponse, now: i64) -> QuotaRefreshSignal {
+    if !collect_blocked_limits(usage, false).is_empty() {
+        return QuotaRefreshSignal::Watch;
+    }
+    if usage
+        .rate_limit_reset_credits
+        .as_ref()
+        .is_some_and(|credits| credits.available_count > 0)
+    {
+        return QuotaRefreshSignal::Watch;
+    }
+    main_quota_reset_refresh_signal(usage, now)
+}
+
+fn main_quota_reset_refresh_signal(usage: &UsageResponse, now: i64) -> QuotaRefreshSignal {
+    usage
+        .rate_limit
+        .as_ref()
+        .into_iter()
+        .flat_map(|pair| [&pair.primary_window, &pair.secondary_window])
+        .flatten()
+        .filter_map(|window| window.reset_at)
+        .map(|reset_at| quota_reset_refresh_signal(reset_at, now))
+        .max()
+        .unwrap_or(QuotaRefreshSignal::Stable)
+}
+
+fn quota_reset_refresh_signal(reset_at: i64, now: i64) -> QuotaRefreshSignal {
+    if reset_at <= now + ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS {
+        QuotaRefreshSignal::Imminent
+    } else if reset_at <= now + ALL_QUOTA_WATCH_NEAR_RESET_SECONDS {
+        QuotaRefreshSignal::Watch
+    } else {
+        QuotaRefreshSignal::Stable
+    }
+}
+
+fn quota_watch_jittered_interval_seconds(seconds: u64, now: i64) -> u64 {
+    if seconds <= ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS {
+        return seconds;
+    }
+    let jitter_span = (seconds / 10).max(1);
+    let bucket = now.unsigned_abs() % (jitter_span.saturating_mul(2).saturating_add(1));
+    let delta = i64::try_from(bucket).unwrap_or(0) - i64::try_from(jitter_span).unwrap_or(0);
+    seconds.saturating_add_signed(delta).max(1)
+}
+
+fn parse_quota_reset_epoch(value: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|datetime| datetime.timestamp())
+        .ok()
+        .or_else(|| value.trim().parse::<i64>().ok())
 }
 
 fn quota_watch_max_scroll_offset(
@@ -1129,8 +1720,9 @@ fn apply_quota_watch_command(
         QuotaWatchCommand::Down => QuotaWatchCommandOutcome::Continue(
             scroll_offset.saturating_add(1).min(max_scroll_offset),
         ),
-        QuotaWatchCommand::Filter => QuotaWatchCommandOutcome::Filter,
         QuotaWatchCommand::Sort => QuotaWatchCommandOutcome::Sort,
+        QuotaWatchCommand::Filter => QuotaWatchCommandOutcome::Filter,
+        QuotaWatchCommand::Update => QuotaWatchCommandOutcome::Update,
         QuotaWatchCommand::Quit => QuotaWatchCommandOutcome::Quit,
     }
 }

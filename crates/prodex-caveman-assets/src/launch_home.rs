@@ -105,7 +105,7 @@ if [ -e "$marker" ]; then
   exit 0
 fi
 : > "$marker" 2>/dev/null || exit 0
-printf '%s\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE. Use visible rtk <cmd> for noisy shell output, prodex-sqz for repeated/large context, prodex-token-savior for code navigation, and prodex-claw-compactor for workspace summaries. Presidio is opt-in only.'
+printf '%s\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE. Ponytail applies smallest-correct-implementation pressure. Use visible rtk <cmd> for noisy shell output, prodex-sqz for repeated/large context, prodex-token-savior for code navigation, and prodex-claw-compactor for workspace summaries. Presidio is opt-in only.'
 "#
     );
     write_executable_script(&script_path, &script)

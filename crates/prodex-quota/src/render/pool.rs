@@ -132,6 +132,34 @@ pub(super) fn render_quota_pool_summary_lines(
     aggregate: &QuotaPoolAggregate,
     total_width: usize,
 ) -> Vec<String> {
+    let fields = quota_pool_summary_fields_for_aggregate(aggregate);
+    let label_width = fields
+        .iter()
+        .map(|(label, _)| text_width(label) + 1)
+        .max()
+        .unwrap_or(CLI_LABEL_WIDTH)
+        .min(total_width.saturating_sub(2).max(1));
+    let mut lines = Vec::new();
+
+    for (label, value) in fields {
+        lines.extend(format_field_lines_with_layout(
+            &label,
+            &value,
+            total_width,
+            label_width,
+        ));
+    }
+
+    lines
+}
+
+pub fn quota_pool_summary_fields(reports: &[QuotaReport]) -> Vec<(String, String)> {
+    quota_pool_summary_fields_for_aggregate(&collect_quota_pool_aggregate(reports))
+}
+
+fn quota_pool_summary_fields_for_aggregate(
+    aggregate: &QuotaPoolAggregate,
+) -> Vec<(String, String)> {
     let mut fields = vec![
         (
             "Available".to_string(),
@@ -193,24 +221,7 @@ pub(super) fn render_quota_pool_summary_lines(
             ),
         ]);
     }
-    let label_width = fields
-        .iter()
-        .map(|(label, _)| text_width(label) + 1)
-        .max()
-        .unwrap_or(CLI_LABEL_WIDTH)
-        .min(total_width.saturating_sub(2).max(1));
-    let mut lines = Vec::new();
-
-    for (label, value) in fields {
-        lines.extend(format_field_lines_with_layout(
-            &label,
-            &value,
-            total_width,
-            label_width,
-        ));
-    }
-
-    lines
+    fields
 }
 
 pub fn format_info_pool_remaining(

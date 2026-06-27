@@ -173,6 +173,7 @@ fn prepare_prodex_overlay_home_localizes_config_and_installs_plugin() {
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
     assert!(hook_script.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(hook_script.contains("Ponytail applies smallest-correct-implementation pressure"));
     assert!(hook_script.contains("rtk <cmd>"));
     assert!(hook_script.contains("prodex-sqz"));
     assert!(hook_script.contains("prodex-token-savior"));

@@ -610,6 +610,7 @@ fn super_optimizer_overlay_installs_ponytail_checkout_when_available() {
     let codex_home = temp_dir("codex-home-ponytail");
     let optimizer_root = temp_dir("optimizer-root-ponytail");
     let checkout = optimizer_root.join("ponytail");
+    fs::create_dir_all(&codex_home).expect("codex home");
     fs::create_dir_all(checkout.join(".codex-plugin")).expect("plugin dir");
     fs::create_dir_all(checkout.join("hooks")).expect("hooks dir");
     fs::create_dir_all(checkout.join("skills/ponytail")).expect("skills dir");
@@ -628,6 +629,11 @@ fn super_optimizer_overlay_installs_ponytail_checkout_when_available() {
         "---\nname: ponytail\n---\n",
     )
     .expect("skill");
+    fs::write(
+        codex_home.join("config.toml"),
+        "[features]\nplugins = false\n",
+    )
+    .expect("config");
 
     install_ponytail_plugin(&codex_home, &checkout).expect("ponytail should install");
 
@@ -642,6 +648,8 @@ fn super_optimizer_overlay_installs_ponytail_checkout_when_available() {
             .is_file()
     );
     let config = fs::read_to_string(codex_home.join("config.toml")).expect("config");
+    assert!(config.contains("[features]"));
+    assert!(config.contains("plugins = true"));
     assert!(config.contains("[plugins.\"ponytail@ponytail\"]"));
     assert!(config.contains("enabled = true"));
     let awareness = render_super_optimizer_awareness(
