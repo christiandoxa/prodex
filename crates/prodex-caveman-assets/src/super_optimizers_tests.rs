@@ -1,8 +1,8 @@
 use super::{
     SuperOptimizerMemoryConfig, configure_stdio_mcp_server,
     configure_super_optimizer_command_wrappers, configure_super_optimizer_mcp_servers_with_sources,
-    find_managed_optimizer_command, find_optimizer_command, python_venv_root_for_command,
-    render_super_optimizer_awareness, token_savior_mcp_env,
+    find_managed_optimizer_command, find_optimizer_command, ponytail::install_ponytail_plugin,
+    python_venv_root_for_command, render_super_optimizer_awareness, token_savior_mcp_env,
     token_savior_state_dirs_from_prodex_home, write_token_savior_sitecustomize,
 };
 use crate::toml_helpers::ensure_child_table;
@@ -588,6 +588,7 @@ fn super_optimizer_awareness_includes_dynamic_availability() {
         std::slice::from_ref(&path_root),
         std::slice::from_ref(&optimizer_root),
         Some(&sqz),
+        Some(&optimizer_root.join("ponytail")),
         true,
         SuperOptimizerMemoryConfig::default(),
     );
@@ -595,10 +596,64 @@ fn super_optimizer_awareness_includes_dynamic_availability() {
     assert!(awareness.contains("- rtk: yes"));
     assert!(awareness.contains("- prodex-sqz MCP: yes"));
     assert!(awareness.contains("- prodex-token-savior MCP: no"));
+    assert!(awareness.contains("- ponytail plugin: yes"));
     assert!(awareness.contains("- prodex-memory MCP: disabled"));
     assert!(awareness.contains("- prodex-memory backend: disabled"));
     assert!(awareness.contains("- presidio: enabled"));
 
     let _ = fs::remove_dir_all(path_root);
+    let _ = fs::remove_dir_all(optimizer_root);
+}
+
+#[test]
+fn super_optimizer_overlay_installs_ponytail_checkout_when_available() {
+    let codex_home = temp_dir("codex-home-ponytail");
+    let optimizer_root = temp_dir("optimizer-root-ponytail");
+    let checkout = optimizer_root.join("ponytail");
+    fs::create_dir_all(checkout.join(".codex-plugin")).expect("plugin dir");
+    fs::create_dir_all(checkout.join("hooks")).expect("hooks dir");
+    fs::create_dir_all(checkout.join("skills/ponytail")).expect("skills dir");
+    fs::write(
+        checkout.join(".codex-plugin/plugin.json"),
+        r#"{"name":"ponytail","version":"4.8.3","hooks":"./hooks/claude-codex-hooks.json","skills":"./skills/"}"#,
+    )
+    .expect("plugin json");
+    fs::write(
+        checkout.join("hooks/claude-codex-hooks.json"),
+        r#"{"hooks":{"SessionStart":[]}}"#,
+    )
+    .expect("hooks json");
+    fs::write(
+        checkout.join("skills/ponytail/SKILL.md"),
+        "---\nname: ponytail\n---\n",
+    )
+    .expect("skill");
+
+    install_ponytail_plugin(&codex_home, &checkout).expect("ponytail should install");
+
+    assert!(
+        codex_home
+            .join("plugins/cache/ponytail/ponytail/4.8.3/.codex-plugin/plugin.json")
+            .is_file()
+    );
+    assert!(
+        codex_home
+            .join(".tmp/marketplaces/ponytail/hooks/claude-codex-hooks.json")
+            .is_file()
+    );
+    let config = fs::read_to_string(codex_home.join("config.toml")).expect("config");
+    assert!(config.contains("[plugins.\"ponytail@ponytail\"]"));
+    assert!(config.contains("enabled = true"));
+    let awareness = render_super_optimizer_awareness(
+        &[],
+        std::slice::from_ref(&optimizer_root),
+        None,
+        Some(&checkout),
+        false,
+        SuperOptimizerMemoryConfig::default(),
+    );
+    assert!(awareness.contains("- ponytail plugin: yes"));
+
+    let _ = fs::remove_dir_all(codex_home);
     let _ = fs::remove_dir_all(optimizer_root);
 }

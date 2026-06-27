@@ -3,7 +3,7 @@ use clap::{ArgGroup, Args};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-pub const SUPER_OPTIMIZER_PREFIXES: [&str; 3] = ["sqz", "tokensavior", "clawcompactor"];
+pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "ponytail"];
 
 #[derive(Args, Debug)]
 pub struct RunArgs {

@@ -201,10 +201,16 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
 fn format_openai_reset_summary(usage: &UsageResponse) -> String {
     let reset_summary = format_main_reset_summary(usage);
     match usage.rate_limit_reset_credits.as_ref() {
-        Some(credits) => format!(
-            "resets: {reset_summary}; reset credits: {} available",
-            credits.available_count
-        ),
+        Some(credits) => {
+            let mut credit_summary = format!("{} available", credits.available_count);
+            if let Some(expires_at) = credits.expiration_epoch_seconds() {
+                credit_summary.push_str(&format!(
+                    ", expires {}",
+                    format_precise_reset_time(Some(expires_at))
+                ));
+            }
+            format!("resets: {reset_summary}; reset credits: {credit_summary}")
+        }
         None => format!("resets: {reset_summary}"),
     }
 }

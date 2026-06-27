@@ -188,6 +188,7 @@ pub(crate) fn collect_super_tool_statuses(
             "claw-compactor",
             &["--help"],
         ),
+        ponytail_tool_status(paths),
         SuperToolStatus {
             name: "prodex-inspect",
             check: "built-in",
@@ -440,7 +441,7 @@ fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
         ),
         (
             "Optional tools".to_string(),
-            "probe codex, claude, rtk, sqz-mcp, token-savior, claw-compactor, prodex-inspect, prodex-memory"
+            "probe codex, claude, rtk, sqz-mcp, token-savior, claw-compactor, ponytail, prodex-inspect, prodex-memory"
                 .to_string(),
         ),
     ]
@@ -479,6 +480,12 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             "optimizer",
             Some("claw-compactor"),
             "local deterministic code-summary aid",
+        ),
+        capability(
+            "ponytail",
+            "optimizer-plugin",
+            None,
+            "managed checkout loaded as a Codex plugin in Prodex overlays",
         ),
         ProdexCapability {
             name: "prodex-inspect",
@@ -599,6 +606,52 @@ fn memory_tool_status(paths: &AppPaths) -> SuperToolStatus {
             detail: format!("{err:#}"),
         },
     }
+}
+
+fn ponytail_tool_status(_paths: &AppPaths) -> SuperToolStatus {
+    let candidates = [
+        env::var_os("PRODEX_OPTIMIZERS_HOME").map(PathBuf::from),
+        env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .map(|path| path.join("prodex-optimizers")),
+        dirs_home_dir().map(|home| home.join(".local").join("share").join("prodex-optimizers")),
+    ];
+    let checkout = candidates
+        .into_iter()
+        .flatten()
+        .map(|root| root.join("ponytail"))
+        .find(|checkout| {
+            checkout.join(".codex-plugin").join("plugin.json").is_file()
+                && checkout
+                    .join("hooks")
+                    .join("claude-codex-hooks.json")
+                    .is_file()
+                && checkout.join("skills").is_dir()
+        });
+    match checkout {
+        Some(path) => SuperToolStatus {
+            name: "ponytail",
+            check: "managed checkout",
+            ready: true,
+            status: format!("ok ({})", path.display()),
+            detail: "Ponytail checkout will be installed into Prodex overlay plugin cache"
+                .to_string(),
+        },
+        None => SuperToolStatus {
+            name: "ponytail",
+            check: "managed checkout",
+            ready: false,
+            status: "missing".to_string(),
+            detail: "expected checkout at $PRODEX_OPTIMIZERS_HOME/ponytail, $XDG_DATA_HOME/prodex-optimizers/ponytail, or ~/.local/share/prodex-optimizers/ponytail; install with `git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail`"
+                .to_string(),
+        },
+    }
+}
+
+fn dirs_home_dir() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
 }
 
 fn command_tool_status(

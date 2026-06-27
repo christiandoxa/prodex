@@ -37,10 +37,14 @@ pub fn render_profile_quota_with_width(
         fields.push(("Code review".to_string(), format_window_pair(code_review)));
     }
     if let Some(reset_credits) = usage.rate_limit_reset_credits.as_ref() {
-        fields.push((
-            "Reset credits".to_string(),
-            format!("{} available", reset_credits.available_count),
-        ));
+        let mut reset_credit_value = format!("{} available", reset_credits.available_count);
+        if let Some(expires_at) = reset_credits.expiration_epoch_seconds() {
+            reset_credit_value.push_str(&format!(
+                "; expires {}",
+                format_precise_reset_time(Some(expires_at))
+            ));
+        }
+        fields.push(("Reset credits".to_string(), reset_credit_value));
     }
 
     fields.extend(format_additional_limits(usage));

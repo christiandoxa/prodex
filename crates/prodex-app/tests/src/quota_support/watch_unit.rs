@@ -318,6 +318,39 @@
     }
 
     #[test]
+    fn all_quota_watch_detail_renders_openai_reset_credit_expiration() {
+        let expires_at = 1_700_086_400;
+        let usage = UsageResponse {
+            email: Some("main@example.com".to_string()),
+            plan_type: Some("plus".to_string()),
+            rate_limit: None,
+            code_review_rate_limit: None,
+            rate_limit_reset_credits: Some(prodex_quota::RateLimitResetCreditsSummary {
+                available_count: 1,
+                expires_at: Some(expires_at),
+                expires_at_ms: None,
+            }),
+            additional_rate_limits: Vec::new(),
+        };
+
+        let output = render_all_quota_watch_report_output(
+            &[test_quota_report("main", Ok(ProviderQuotaSnapshot::OpenAi(usage)))],
+            true,
+            0,
+            QuotaReportSort::Current,
+            QuotaProviderFilter::OpenAi,
+            false,
+        );
+
+        assert!(output.contains("filter: openai"));
+        let expires_display = format_precise_reset_time(Some(expires_at));
+        assert!(output.contains("reset credits: 1 available, expires"));
+        for part in expires_display.split_whitespace() {
+            assert!(output.contains(part), "missing {part:?} in output:\n{output}");
+        }
+    }
+
+    #[test]
     fn quota_watch_filter_command_cycles_provider_filter() {
         assert!(matches!(
             apply_quota_watch_command(QuotaWatchCommand::Filter, 3, 10),

@@ -170,6 +170,13 @@ pub enum Commands {
     )]
     ClawCompactor(CavemanArgs),
     #[command(
+        name = "ponytail",
+        trailing_var_arg = true,
+        about = "Shortcut for `prodex caveman ponytail`.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    Ponytail(CavemanArgs),
+    #[command(
         name = "mem",
         visible_alias = "memory",
         trailing_var_arg = true,
@@ -333,6 +340,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "token-savior"
             | "clawcompactor"
             | "claw-compactor"
+            | "ponytail"
             | "mem"
             | "memory"
             | "super"

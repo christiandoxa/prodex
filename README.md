@@ -144,7 +144,7 @@ If you install from source, make sure the `codex` binary in your `PATH` is alrea
 
 ## Optional tools
 
-`prodex` can run without RTK, SQZ, token-savior, claw-compactor, Presidio, or prodex-memory. `prodex-inspect` is a built-in read-only MCP server for profile/runtime diagnostics and is auto-registered in Prodex overlay sessions. `prodex-memory` is built in and opt-in through the `mem` prefix or managed Mem0 Super prompt.
+`prodex` can run without RTK, SQZ, token-savior, claw-compactor, Ponytail, Presidio, or prodex-memory. `prodex-inspect` is a built-in read-only MCP server for profile/runtime diagnostics and is auto-registered in Prodex overlay sessions. `prodex-memory` is built in and opt-in through the `mem` prefix or managed Mem0 Super prompt.
 
 Install them only if you want to use commands such as:
 
@@ -156,6 +156,7 @@ prodex rtk
 prodex sqz
 prodex tokensavior
 prodex clawcompactor
+prodex ponytail
 prodex mem
 prodex s doctor
 prodex presidio doctor
@@ -164,6 +165,30 @@ prodex gateway --provider gemini
 prodex s
 prodex super
 ```
+
+</details>
+
+<details>
+<summary>Install Ponytail</summary>
+
+Ponytail is used by `prodex ponytail` and by Super mode when a Ponytail checkout is available under a managed optimizer root. Prodex installs the checkout into the temporary Codex overlay marketplace/cache for that session, enables `ponytail@ponytail`, and leaves the base Codex profile unchanged.
+
+Recommended source checkout:
+
+```bash
+git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail
+```
+
+Then launch:
+
+```bash
+prodex ponytail
+prodex caveman ponytail
+prodex rtk caveman ponytail
+prodex s
+```
+
+Ponytail's Codex plugin uses Node.js lifecycle hooks. If `node` is not on the non-interactive shell `PATH`, Ponytail skills remain installed but the always-on hook activation may stay quiet.
 
 </details>
 
@@ -708,7 +733,7 @@ prodex s expose
 `prodex super` expands to:
 
 ```bash
-prodex caveman rtk sqz tokensavior clawcompactor --full-access
+prodex caveman rtk sqz tokensavior clawcompactor ponytail --full-access
 ```
 
 <details>
@@ -717,7 +742,7 @@ prodex caveman rtk sqz tokensavior clawcompactor --full-access
 Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps the expansion above. If you answer `y`, it is equivalent to:
 
 ```bash
-prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access
+prodex caveman rtk sqz tokensavior clawcompactor ponytail presidio --full-access
 ```
 
 Use `prodex super --presidio` to enable Presidio without prompting, or `prodex super --no-presidio` to skip the prompt and keep Presidio disabled. Presidio enables runtime request-body and WebSocket text redaction through local Presidio for the session when services are healthy; service failures follow `fail_mode`. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
@@ -756,10 +781,11 @@ Super instructs Codex to use the available local optimizer stack where it fits t
 - token-savior handles symbol lookup, caller/context navigation, duplicate/dead-code checks, and API-impact searches before broad source reads when token-savior is available.
 - prodex-inspect provides read-only MCP diagnostics for Prodex status, profiles, and latest runtime log tail.
 - claw-compactor handles workspace-level summary or benchmark requests through `prodex-claw-compactor` / `prodex-claw-compactor-auto` when available; treat its output as overview context and reread exact source before edits.
+- Ponytail loads the local `DietrichGebert/ponytail` Codex plugin into the temporary overlay when the checkout exists under a managed optimizer root, adding smallest-correct-implementation pressure without changing the base Codex profile.
 - prodex-memory provides local Mem0-style memory through the `mem` prefix with SQLite, or through managed Mem0 OSS Docker when you opt in with the Super prompt or `--mem0`; neither path uses Mem0 Cloud auth or `MEM0_API_KEY`.
 - Presidio stays optional and only runs when you opt in with the Super prompt or `--presidio`.
 
-Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
+Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Put Ponytail at `~/.local/share/prodex-optimizers/ponytail` with `git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail`.
 The generated `SUPER_OPTIMIZERS.md` overlay includes an `Available Now` section so the model can see which MCP servers and wrappers were actually discovered for that session.
 
 </details>
@@ -828,7 +854,7 @@ prodex dashboard
 
 The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, and `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider deepseek`, or `--provider local` to start locked to a single provider.
 
-For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt. Add `--auto-redeem` to a runtime launch when you want Prodex to consider a guarded automatic redeem after every OpenAI/Codex profile is weekly-exhausted.
+For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them, including credit expiry when the backend includes it. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt. Add `--auto-redeem` to a runtime launch when you want Prodex to consider a guarded automatic redeem after every OpenAI/Codex profile is weekly-exhausted.
 
 `prodex dashboard` serves a local browser dashboard at `http://127.0.0.1:8765` by default. It shows profile/account settings, lets you switch or remove profile entries, and renders live usage from the same quota collectors used by `prodex quota`. Use `prodex dashboard --port 0` for an OS-selected free port, or pass `--base-url` for quota checks against a custom Codex-compatible backend. The dashboard has no password auth; keep it on localhost unless the network is trusted.
 
@@ -950,6 +976,7 @@ prodex rtk
 prodex sqz
 prodex tokensavior
 prodex clawcompactor
+prodex ponytail
 prodex mem
 prodex caveman --dry-run
 prodex s doctor
@@ -961,7 +988,7 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex caveman` runs Codex with Caveman mode active in a temporary Prodex overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
-Add optimizer prefixes before Codex args when you want Prodex to enable a specific session tool in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, or `presidio`. Top-level shortcuts such as `prodex rtk`, `prodex sqz`, and `prodex mem` map to `prodex caveman <prefix>`.
+Add optimizer prefixes before Codex args when you want Prodex to enable a specific session tool in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `ponytail`, `mem`, or `presidio`. Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex ponytail`, and `prodex mem` map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
@@ -1073,11 +1100,11 @@ Note that the default Microsoft Presidio Docker images typically only support En
 
 It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
 
-The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, exposes `sqz` and `claw-compactor` wrappers when discoverable, routes compatible optimizer cache/state under `PRODEX_HOME` instead of the workspace, and uses a dedicated runtime proxy for local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
+The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, loads Ponytail from a managed checkout when available, exposes `sqz` and `claw-compactor` wrappers when discoverable, routes compatible optimizer cache/state under `PRODEX_HOME` instead of the workspace, and uses a dedicated runtime proxy for local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
 
 RTK handles upstream/input command output before it enters the context window, using visible `rtk <cmd>` commands and overlay auto-wrappers when available. Auto-wrappers are only a backstop; write `rtk <cmd>` explicitly when you want the TUI/transcript to show RTK usage. SQZ handles downstream/context reuse after content is already in the session, using `prodex-sqz` when the MCP server is available.
 
-Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
+Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`; Ponytail is expected at `ponytail/` inside one of those roots.
 
 </details>
 

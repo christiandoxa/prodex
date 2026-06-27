@@ -324,6 +324,9 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::ClawCompactor(command) => {
             RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "clawcompactor"))
         }
+        Commands::Ponytail(command) => {
+            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "ponytail"))
+        }
         Commands::Mem(command) => {
             RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "mem"))
         }

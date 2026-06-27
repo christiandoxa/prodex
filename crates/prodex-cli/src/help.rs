@@ -121,8 +121,8 @@ Notes:
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
   Codex runtime feature overrides from `prodex run` also work here.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
-  Add optimizer prefixes before Codex args to enable session tools in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `mem`, `presidio`.
-  Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex tokensavior`, `prodex clawcompactor`, and `prodex mem` map to `prodex caveman <prefix>`.
+  Add optimizer prefixes before Codex args to enable session tools in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `ponytail`, `mem`, `presidio`.
+  Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex tokensavior`, `prodex clawcompactor`, `prodex ponytail`, and `prodex mem` map to `prodex caveman <prefix>`.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:
@@ -141,10 +141,10 @@ Examples:
   prodex super --rollout-budget-tokens 100000
 
 Notes:
-  `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor --full-access`, with interactive Presidio and managed-Mem0 opt-in prompts before launch.
+  `prodex super` is a shortcut for `prodex caveman rtk sqz tokensavior clawcompactor ponytail --full-access`, with interactive Presidio and managed-Mem0 opt-in prompts before launch.
   It enables Caveman mode, Smart Context, launch-time full access, and the available Super optimizer tools in the Prodex overlay.
   Codex runtime feature overrides from `prodex run` also work here; explicit `--web-search` overrides Super provider defaults.
-  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor presidio --full-access`.
+  Empty input or `n` keeps Presidio disabled; answer `y` to make it equivalent to `prodex caveman rtk sqz tokensavior clawcompactor ponytail presidio --full-access`.
   Use `--presidio` or `--no-presidio` to make the Presidio choice non-interactive. With default endpoints, Presidio opt-in best-effort starts local Docker services unless PRODEX_PRESIDIO_AUTO_START=0.
   Empty input or `n` at the Mem0 prompt leaves prodex-memory disabled; use `--mem0` to enable managed Mem0 or the `mem` optimizer prefix for local SQLite memory.
   Managed Mem0 uses Docker Compose and a session-local Prodex gateway; launch prints Docker progress, and if no upstream provider API key is available, Prodex serves local embeddings for Mem0.

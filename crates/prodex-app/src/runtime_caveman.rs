@@ -248,6 +248,10 @@ pub(crate) fn runtime_caveman_extract_launch_prefixes(
                 remaining.remove(0);
                 continue;
             }
+            if prefix == "caveman" {
+                remaining.remove(0);
+                continue;
+            }
             if runtime_caveman_memory_prefix(prefix) {
                 super_optimizer_overlay = true;
                 memory_enabled = true;
@@ -290,7 +294,7 @@ pub(crate) fn runtime_caveman_extract_presidio_prefix(
 fn runtime_caveman_super_optimizer_prefix(prefix: &str) -> bool {
     matches!(
         prefix,
-        "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor"
+        "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor" | "ponytail"
     )
 }
 
@@ -527,6 +531,7 @@ mod tests {
                 OsString::from("sqz"),
                 OsString::from("tokensavior"),
                 OsString::from("clawcompactor"),
+                OsString::from("ponytail"),
                 OsString::from("mem"),
                 OsString::from("--full-access"),
                 OsString::from("exec"),
@@ -543,6 +548,26 @@ mod tests {
                 OsString::from("exec"),
                 OsString::from("hi")
             ]
+        );
+    }
+
+    #[test]
+    fn caveman_launch_prefixes_allow_rtk_caveman_ponytail_combo() {
+        let (rtk_enabled, super_optimizer_overlay, memory_enabled, codex_args) =
+            runtime_caveman_extract_launch_prefixes(&[
+                OsString::from("rtk"),
+                OsString::from("caveman"),
+                OsString::from("ponytail"),
+                OsString::from("exec"),
+                OsString::from("hi"),
+            ]);
+
+        assert!(rtk_enabled);
+        assert!(super_optimizer_overlay);
+        assert!(!memory_enabled);
+        assert_eq!(
+            codex_args,
+            vec![OsString::from("exec"), OsString::from("hi")]
         );
     }
 

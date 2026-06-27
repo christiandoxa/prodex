@@ -206,6 +206,7 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_full_super_prefix_
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
+            OsString::from("ponytail"),
             OsString::from("exec"),
             OsString::from("review this repo")
         ]

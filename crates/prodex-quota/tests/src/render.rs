@@ -96,7 +96,11 @@ fn compact_window_format_uses_scale_of_100() {
 #[test]
 fn openai_quota_renders_rate_limit_reset_credits() {
     let mut usage = usage_with_main_windows(0, 1_700_001_800, 80, 1_700_259_200);
-    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary { available_count: 2 });
+    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary {
+        available_count: 2,
+        expires_at: None,
+        expires_at_ms: None,
+    });
 
     let panel =
         render_profile_quota_snapshot("main", &ProviderQuotaSnapshot::OpenAi(usage.clone()));
@@ -109,6 +113,25 @@ fn openai_quota_renders_rate_limit_reset_credits() {
 }
 
 #[test]
+fn openai_quota_renders_rate_limit_reset_credit_expiration() {
+    let mut usage = usage_with_main_windows(0, 1_700_001_800, 80, 1_700_259_200);
+    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary {
+        available_count: 2,
+        expires_at: Some(1_700_086_400),
+        expires_at_ms: None,
+    });
+
+    let expires_at = format_precise_reset_time(Some(1_700_086_400));
+    let panel =
+        render_profile_quota_snapshot("main", &ProviderQuotaSnapshot::OpenAi(usage.clone()));
+    assert!(panel.contains(&format!("2 available; expires {expires_at}")));
+
+    let overview =
+        render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 160);
+    assert!(overview.contains(&format!("reset credits: 2 available, expires {expires_at}")));
+}
+
+#[test]
 fn openai_quota_deserializes_rate_limit_reset_credits() {
     let camel_usage: UsageResponse = serde_json::from_value(serde_json::json!({
         "email": "user@example.com",
@@ -116,32 +139,54 @@ fn openai_quota_deserializes_rate_limit_reset_credits() {
         "rate_limit": null,
         "code_review_rate_limit": null,
         "rate_limit_reset_credits": {
-            "availableCount": 3
+            "availableCount": 3,
+            "expiresAt": 1700086400
         }
     }))
     .expect("usage response should deserialize reset credits");
 
+    let camel_credits = camel_usage
+        .rate_limit_reset_credits
+        .as_ref()
+        .expect("camel reset credits");
+    assert_eq!(camel_credits.available_count, 3);
     assert_eq!(
-        camel_usage
-            .rate_limit_reset_credits
-            .as_ref()
-            .map(|credits| credits.available_count),
-        Some(3)
+        camel_credits.expiration_epoch_seconds(),
+        Some(1_700_086_400)
     );
 
     let snake_usage: UsageResponse = serde_json::from_value(serde_json::json!({
         "rate_limit_reset_credits": {
-            "available_count": 4
+            "available_count": 4,
+            "expires_at": "2023-11-15T22:13:20Z"
         }
     }))
     .expect("usage response should deserialize backend reset credits");
 
+    let snake_credits = snake_usage
+        .rate_limit_reset_credits
+        .as_ref()
+        .expect("snake reset credits");
+    assert_eq!(snake_credits.available_count, 4);
     assert_eq!(
-        snake_usage
+        snake_credits.expiration_epoch_seconds(),
+        Some(1_700_086_400)
+    );
+
+    let millis_usage: UsageResponse = serde_json::from_value(serde_json::json!({
+        "rate_limit_reset_credits": {
+            "available_count": 5,
+            "expires_at_ms": 1700086400000_i64
+        }
+    }))
+    .expect("usage response should deserialize millisecond reset-credit expiration");
+
+    assert_eq!(
+        millis_usage
             .rate_limit_reset_credits
             .as_ref()
-            .map(|credits| credits.available_count),
-        Some(4)
+            .and_then(RateLimitResetCreditsSummary::expiration_epoch_seconds),
+        Some(1_700_086_400)
     );
 }
 

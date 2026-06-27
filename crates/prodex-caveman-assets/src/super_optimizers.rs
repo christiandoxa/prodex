@@ -11,10 +11,11 @@ use crate::toml_helpers::ensure_child_table;
 use crate::{AGENTS_MD, PRODEX_SUPER_OPTIMIZER_AWARENESS, SUPER_OPTIMIZERS_MD};
 
 mod claw;
+mod discovery;
+mod ponytail;
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
 const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
-const PRODEX_OPTIMIZERS_DIR_NAME: &str = "prodex-optimizers";
 const CLAW_COMPACTOR_STATE_DIR_NAME: &str = "claw-compactor";
 const SQZ_STATE_DIR_NAME: &str = "sqz";
 const TOKEN_SAVIOR_STATE_DIR_NAME: &str = "token-savior";
@@ -76,14 +77,16 @@ pub fn configure_super_optimizer_codex_home_with_options(
     memory_config: SuperOptimizerMemoryConfig<'_>,
 ) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
-    let path_dirs = path_dirs_from_env();
-    let optimizer_roots = managed_optimizer_roots();
+    let path_dirs = discovery::path_dirs_from_env();
+    let optimizer_roots = discovery::managed_optimizer_roots();
     let sqz_mcp_command = find_optimizer_command("sqz-mcp", &path_dirs, &optimizer_roots);
+    let ponytail_checkout = ponytail::find_ponytail_checkout(&optimizer_roots);
     let optimizers_path = codex_home.join(SUPER_OPTIMIZERS_MD);
     let awareness = render_super_optimizer_awareness(
         &path_dirs,
         &optimizer_roots,
         sqz_mcp_command.as_deref(),
+        ponytail_checkout.as_deref(),
         presidio_enabled,
         memory_config,
     );
@@ -104,6 +107,9 @@ pub fn configure_super_optimizer_codex_home_with_options(
         &optimizer_roots,
         sqz_mcp_command.as_deref(),
     )?;
+    if let Some(checkout) = ponytail_checkout {
+        ponytail::install_ponytail_plugin(codex_home, &checkout)?;
+    }
     claw::configure_session_hook(codex_home, &path_dirs, &optimizer_roots)
 }
 
@@ -111,6 +117,7 @@ fn render_super_optimizer_awareness(
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
     sqz_mcp_command: Option<&Path>,
+    ponytail_checkout: Option<&Path>,
     presidio_enabled: bool,
     memory_config: SuperOptimizerMemoryConfig<'_>,
 ) -> String {
@@ -135,6 +142,10 @@ fn render_super_optimizer_awareness(
         availability_label(
             find_optimizer_command("claw-compactor", path_dirs, optimizer_roots).as_deref()
         )
+    ));
+    awareness.push_str(&format!(
+        "- ponytail plugin: {}\n",
+        availability_label(ponytail_checkout)
     ));
     let memory_availability = if memory_config.enabled {
         availability_label(find_prodex_memory_command().as_deref())
@@ -426,7 +437,7 @@ fn token_savior_state_dirs_from_env() -> Option<TokenSaviorStateDirs> {
     let prodex_home = env::var_os(PRODEX_HOME_ENV)
         .map(PathBuf::from)
         .map(absolutize_path_lossy)
-        .or_else(|| home_dir_from_env().map(|home| home.join(".prodex")))?;
+        .or_else(|| discovery::home_dir_from_env().map(|home| home.join(".prodex")))?;
     Some(token_savior_state_dirs_from_prodex_home(&prodex_home))
 }
 
@@ -438,7 +449,7 @@ fn prodex_home_from_env() -> Option<PathBuf> {
     env::var_os(PRODEX_HOME_ENV)
         .map(PathBuf::from)
         .map(absolutize_path_lossy)
-        .or_else(|| home_dir_from_env().map(|home| home.join(".prodex")))
+        .or_else(|| discovery::home_dir_from_env().map(|home| home.join(".prodex")))
 }
 
 fn optimizer_state_dirs_from_env(name: &str) -> Option<OptimizerStateDirs> {
@@ -626,7 +637,7 @@ fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
 
 fn find_managed_optimizer_command(command: &str, optimizer_roots: &[PathBuf]) -> Option<PathBuf> {
     for root in optimizer_roots {
-        for candidate in managed_optimizer_command_candidates(root, command) {
+        for candidate in discovery::managed_optimizer_command_candidates(root, command) {
             if optimizer_command_ready(command, &candidate) {
                 return Some(candidate);
             }
@@ -697,105 +708,6 @@ fn python_venv_has_module(venv_root: &Path, module_name: &str) -> bool {
             .join(module_name)
             .is_dir()
     })
-}
-
-fn path_dirs_from_env() -> Vec<PathBuf> {
-    env::var_os("PATH")
-        .map(|path| env::split_paths(&path).collect())
-        .unwrap_or_default()
-}
-
-fn managed_optimizer_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(path) = env::var_os(PRODEX_OPTIMIZERS_HOME_ENV) {
-        push_unique_path(&mut roots, PathBuf::from(path));
-    }
-    if let Some(path) = env::var_os("XDG_DATA_HOME") {
-        push_unique_path(
-            &mut roots,
-            PathBuf::from(path).join(PRODEX_OPTIMIZERS_DIR_NAME),
-        );
-    }
-    if let Some(home) = home_dir_from_env() {
-        push_unique_path(
-            &mut roots,
-            home.join(".local")
-                .join("share")
-                .join(PRODEX_OPTIMIZERS_DIR_NAME),
-        );
-    }
-    roots
-}
-
-fn home_dir_from_env() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
-}
-
-fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
-    if !paths.iter().any(|existing| existing == &path) {
-        paths.push(path);
-    }
-}
-
-fn managed_optimizer_command_candidates(root: &Path, command: &str) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    push_command_candidate(&mut candidates, root.join(command));
-    match command {
-        "sqz-mcp" => {
-            push_sqz_workspace_candidates(&mut candidates, root, command);
-        }
-        "sqz" => {
-            push_sqz_workspace_candidates(&mut candidates, root, command);
-        }
-        "token-savior" => {
-            push_python_tool_candidates(&mut candidates, root, "token-savior", command);
-        }
-        "claw-compactor" => {
-            push_python_tool_candidates(&mut candidates, root, "claw-compactor", command);
-        }
-        _ => {}
-    }
-    candidates
-}
-
-fn push_sqz_workspace_candidates(candidates: &mut Vec<PathBuf>, root: &Path, command: &str) {
-    let checkout = root.join("sqz");
-    push_command_candidate(candidates, checkout.join(command));
-    push_command_candidate(
-        candidates,
-        checkout.join("target").join("release").join(command),
-    );
-    push_command_candidate(
-        candidates,
-        checkout.join("target").join("debug").join(command),
-    );
-}
-
-fn push_python_tool_candidates(
-    candidates: &mut Vec<PathBuf>,
-    root: &Path,
-    checkout_name: &str,
-    command: &str,
-) {
-    let checkout = root.join(checkout_name);
-    push_command_candidate(candidates, checkout.join(".venv").join("bin").join(command));
-    push_command_candidate(candidates, checkout.join("venv").join("bin").join(command));
-    push_command_candidate(candidates, checkout.join("bin").join(command));
-    push_command_candidate(candidates, checkout.join(command));
-}
-
-fn push_command_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
-    candidates.push(path.clone());
-    #[cfg(windows)]
-    if path.extension().is_none() {
-        if let Some(file_name) = path.file_name() {
-            let mut exe_name = file_name.to_os_string();
-            exe_name.push(".exe");
-            candidates.push(path.with_file_name(exe_name));
-        }
-    }
 }
 
 fn executable_file(path: &Path) -> bool {

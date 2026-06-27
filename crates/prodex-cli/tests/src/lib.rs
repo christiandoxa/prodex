@@ -202,6 +202,7 @@ fn super_default_keeps_all_super_prefixes() {
             OsString::from("sqz"),
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
+            OsString::from("ponytail"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -231,6 +232,7 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
             "sqz",
             "tokensavior",
             "clawcompactor",
+            "ponytail",
             "exec",
             "hello",
         ])
@@ -250,6 +252,7 @@ fn super_includes_presidio_prefix_when_opted_in() {
             "sqz",
             "tokensavior",
             "clawcompactor",
+            "ponytail",
             "presidio",
             "exec",
             "hello",
@@ -272,6 +275,7 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
             "sqz",
             "tokensavior",
             "clawcompactor",
+            "ponytail",
             "presidio",
             "exec",
             "hello",
@@ -312,6 +316,7 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
             "sqz",
             "tokensavior",
             "clawcompactor",
+            "ponytail",
             "exec",
             "hello",
         ])
@@ -470,6 +475,7 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
         ("token-savior", "tokensavior"),
         ("clawcompactor", "clawcompactor"),
         ("claw-compactor", "clawcompactor"),
+        ("ponytail", "ponytail"),
         ("mem", "mem"),
         ("memory", "mem"),
     ] {
@@ -484,6 +490,7 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
             | Commands::Sqz(args)
             | Commands::TokenSavior(args)
             | Commands::ClawCompactor(args)
+            | Commands::Ponytail(args)
             | Commands::Mem(args) => args,
             other => panic!("expected optimizer shortcut command, got {other:?}"),
         };

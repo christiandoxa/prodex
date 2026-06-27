@@ -259,8 +259,11 @@ fn runtime_auto_redeem_disabled_by_default_does_not_consume_credit() {
         serde_json::from_str(&runtime_proxy_usage_body_with_remaining("main@example.com", 0, 0))
             .expect("exhausted usage should parse");
     exhausted_usage.plan_type = Some("plus".to_string());
-    exhausted_usage.rate_limit_reset_credits =
-        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1 });
+    exhausted_usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
+        available_count: 1,
+        expires_at: None,
+        expires_at_ms: None,
+    });
     let now = Local::now().timestamp();
     let shared = runtime_rotation_proxy_shared(
         &temp_dir,
@@ -344,8 +347,11 @@ fn runtime_responses_auto_redeem_pool_prefers_plus_before_prolite() {
         serde_json::from_str(&runtime_proxy_usage_body_with_remaining("second@example.com", 0, 0))
             .expect("prolite usage should parse");
     prolite_usage.plan_type = Some("prolite".to_string());
-    prolite_usage.rate_limit_reset_credits =
-        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1 });
+    prolite_usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
+        available_count: 1,
+        expires_at: None,
+        expires_at_ms: None,
+    });
     let now = Local::now().timestamp();
     let shared = runtime_rotation_proxy_shared_with_auto_redeem(
         &temp_dir,
@@ -455,8 +461,11 @@ fn runtime_auto_redeem_waits_while_another_profile_has_weekly_remaining() {
         serde_json::from_str(&runtime_proxy_usage_body_with_remaining("second@example.com", 0, 0))
             .expect("exhausted usage should parse");
     exhausted_usage.plan_type = Some("plus".to_string());
-    exhausted_usage.rate_limit_reset_credits =
-        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1 });
+    exhausted_usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
+        available_count: 1,
+        expires_at: None,
+        expires_at_ms: None,
+    });
     let now = Local::now().timestamp();
     let shared = runtime_rotation_proxy_shared_with_auto_redeem(
         &temp_dir,
