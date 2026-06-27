@@ -1,5 +1,18 @@
 [
   {
+    "id": "quota-native-ratatui-and-release-0.225.0",
+    "requiredSubjects": [
+      "feat(quota): render quota views with native ratatui"
+    ],
+    "caps": {
+      "maxFiles": 24,
+      "maxBehaviorFiles": 13,
+      "maxLines": 1800,
+      "maxFileLines": 850
+    },
+    "reason": "Reviewed quota TUI native ratatui conversion, capability dry-run status cleanup, Ponytail plugin defaults, and 0.225.0 release metadata with local full test suite, format, lockfile refresh, and diff checks."
+  },
+  {
     "id": "release-tui-and-codex-compat-0.223.0",
     "requiredSubjects": [
       "chore(release): prepare 0.223.0"
