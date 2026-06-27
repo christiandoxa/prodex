@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.224.0 - 2026-06-27
+
+### Misc
+
+- Add ponytail optimizer and reset credit expiry (`c6d3497`)
+
 ## 0.223.0 - 2026-06-27
 
 - No grouped changes.
@@ -76,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Fail fast when bundled Codex is missing (`12213ea`)
-
-## 0.212.0 - 2026-06-24
-
-### Runtime
-
-- Stabilize history image attachment paths after child exit (`17b45be`)
