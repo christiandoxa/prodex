@@ -31,6 +31,7 @@ mod inspect_mcp;
 mod log;
 mod log_format;
 mod log_upstream;
+mod log_upstream_payload;
 mod mem0_memory;
 mod memory_mcp;
 mod presidio;

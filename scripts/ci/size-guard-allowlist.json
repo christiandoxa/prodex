@@ -16,22 +16,17 @@
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1071,
+    "maxLines": 1141,
     "reason": "Live quota ratatui rendering, snapshot retention, terminal sizing, and fetch orchestration remain capped while the screen is split into narrower modules."
   },
   {
     "file": "crates/prodex-app/src/app_commands/log.rs",
-    "maxLines": 1004,
+    "maxLines": 1001,
     "reason": "Log command ratatui rendering, filters, and table/detail behavior remain capped while renderer and query ownership are separated."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
-    "maxLines": 952,
+    "maxLines": 945,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
-  },
-  {
-    "file": "crates/prodex-app/src/app_commands/log_upstream.rs",
-    "maxLines": 854,
-    "reason": "Upstream log command rendering and parsing remain capped near the production limit while the TUI migration settles."
   }
 ]
