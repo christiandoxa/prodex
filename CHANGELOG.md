@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.228.0 - 2026-06-28
+
+### CLI
+
+- Keep weekly quota pool visible (`7e7bb53`)
+
+### Claude
+
+- Add codebase memory MCP integration (`0ac78f3`)
+
 ## 0.227.0 - 2026-06-28
 
 ### CLI
@@ -70,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Remove redundant closure in catalog sanitization (`6190f38`)
 - Add GNOME keyring token discovery and OAuth fallback (`b6bef0d`)
-
-## 0.216.0 - 2026-06-25
-
-### Misc
-
-- Support Copilot JSONC import (`879cf7b`)
