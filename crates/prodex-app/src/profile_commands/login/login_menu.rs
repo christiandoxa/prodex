@@ -8,13 +8,13 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use std::io::{self, IsTerminal, Write};
 use terminal_ui::{
-    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
-    tui_title_style,
+    tui_border_style, tui_detail_style, tui_error_style, tui_hint_style, tui_primary_style,
+    tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 const LOGIN_MENU_MIN_VISIBLE_ITEMS: usize = 3;
@@ -420,7 +420,7 @@ fn render_login_menu_tui(
     let items = if entries.is_empty() {
         vec![ListItem::new(Line::styled(
             "No login methods available",
-            Style::default().fg(Color::Red),
+            tui_error_style(),
         ))]
     } else {
         entries
@@ -447,10 +447,7 @@ fn render_login_menu_tui(
                     Span::styled(format!("{marker} {:>2}. ", index + 1), style),
                     Span::styled(entry.title, style),
                     Span::raw(" "),
-                    Span::styled(
-                        format!("[{}]", entry.auth),
-                        Style::default().fg(Color::Cyan),
-                    ),
+                    Span::styled(format!("[{}]", entry.auth), tui_hint_style()),
                 ]))
             })
             .collect()
@@ -465,7 +462,7 @@ fn render_login_menu_tui(
     let detail = if entries.is_empty() {
         Text::from(Line::styled(
             "No login methods are registered.",
-            Style::default().fg(Color::Red),
+            tui_error_style(),
         ))
     } else {
         login_menu_detail_text(
@@ -494,7 +491,7 @@ fn login_menu_detail_text(entry: &LoginMenuEntry, layout: LoginMenuLayout) -> Te
                 Span::styled("Provider ", tui_secondary_style()),
                 Span::styled(entry.provider, tui_success_style()),
                 Span::raw(" | "),
-                Span::styled(entry.auth, Style::default().fg(Color::Cyan)),
+                Span::styled(entry.auth, tui_hint_style()),
             ]),
             Line::from(vec![
                 Span::styled("Use ", tui_secondary_style()),
@@ -518,7 +515,7 @@ fn login_menu_detail_text(entry: &LoginMenuEntry, layout: LoginMenuLayout) -> Te
         ]),
         Line::from(vec![
             Span::styled("Auth     ", tui_secondary_style()),
-            Span::styled(entry.auth, Style::default().fg(Color::Cyan)),
+            Span::styled(entry.auth, tui_hint_style()),
         ]),
         Line::from(vec![
             Span::styled("Use      ", tui_secondary_style()),
@@ -530,9 +527,7 @@ fn login_menu_detail_text(entry: &LoginMenuEntry, layout: LoginMenuLayout) -> Te
         ]),
         Line::from(Span::styled(
             "Select login method | Up/Down move | PageUp/PageDown scroll | Enter select | 1-9 quick select | q cancel",
-            Style::default()
-                .fg(Color::Gray)
-                .add_modifier(Modifier::ITALIC),
+            tui_detail_style().add_modifier(Modifier::ITALIC),
         )),
     ])
 }

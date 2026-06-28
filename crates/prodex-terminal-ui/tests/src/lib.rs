@@ -33,11 +33,16 @@ fn tui_panel_styles_use_theme_safe_ansi_colors() {
     use ratatui::style::Color;
 
     assert_eq!(tui_title_style().fg, Some(Color::Cyan));
-    assert_eq!(tui_secondary_style().fg, Some(Color::DarkGray));
+    assert_eq!(tui_secondary_style().fg, Some(Color::Gray));
+    assert_eq!(tui_muted_style().fg, Some(Color::Gray));
+    assert_eq!(tui_detail_style().fg, Some(Color::Gray));
     assert_eq!(tui_primary_style().fg, None);
     assert_eq!(tui_border_style().fg, Some(Color::Cyan));
     assert_eq!(tui_hint_style().fg, Some(Color::Cyan));
     assert_eq!(tui_success_style().fg, Some(Color::Green));
+    assert_eq!(tui_metric_style().fg, Some(Color::Green));
+    assert_eq!(tui_accent_style().fg, Some(Color::LightCyan));
+    assert_eq!(tui_tool_style().fg, Some(Color::LightMagenta));
     assert_eq!(tui_error_style().fg, Some(Color::Red));
 }
 

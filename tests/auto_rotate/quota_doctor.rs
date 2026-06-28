@@ -230,8 +230,9 @@ fn quota_all_detail_shows_main_reset_times() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Quota Overview"));
     assert!(stdout.contains("REMAINING"));
-    assert!(stdout.contains("status: Blocked: 5h exhausted until "));
-    assert!(stdout.contains("status: Ready"));
+    assert!(stdout.contains("STATUS"));
+    assert!(stdout.contains("Blocked 5h"));
+    assert!(stdout.contains("Ready"));
     assert!(stdout.contains("resets: 5h "));
     assert!(stdout.contains("| weekly "));
 }

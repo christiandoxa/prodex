@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use crossterm::terminal;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use std::env;
@@ -9,7 +9,8 @@ use std::ffi::OsString;
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use terminal_ui::{
-    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_title_style,
+    tui_border_style, tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style,
+    tui_title_style,
 };
 
 use crate::{
@@ -184,15 +185,13 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
             frame.render_widget(header, chunks[0]);
 
             if reports.is_empty() {
-                let empty = Paragraph::new(Line::styled(
-                    empty_message.to_string(),
-                    Style::default().fg(Color::Gray),
-                ))
-                .block(
-                    Block::default()
-                        .borders(Borders::LEFT | Borders::RIGHT)
-                        .border_style(tui_border_style()),
-                );
+                let empty =
+                    Paragraph::new(Line::styled(empty_message.to_string(), tui_detail_style()))
+                        .block(
+                            Block::default()
+                                .borders(Borders::LEFT | Borders::RIGHT)
+                                .border_style(tui_border_style()),
+                        );
                 frame.render_widget(empty, chunks[1]);
             } else {
                 let items = reports

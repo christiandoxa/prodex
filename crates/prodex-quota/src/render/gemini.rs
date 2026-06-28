@@ -82,7 +82,7 @@ pub fn format_gemini_quota_status(info: &GeminiQuotaInfo) -> String {
     if blocked.is_empty() {
         "Ready".to_string()
     } else {
-        format!("Blocked ({})", blocked.join(", "))
+        "Blocked".to_string()
     }
 }
 
@@ -92,11 +92,11 @@ pub fn format_gemini_bucket_summary(bucket: &GeminiQuotaBucket) -> String {
         Some(GeminiBucketRemaining {
             remaining,
             total: Some(total),
-        }) => format!("{label} {remaining}/{total} left"),
+        }) => format!("{label} {remaining}/{total}"),
         Some(GeminiBucketRemaining {
             remaining,
             total: None,
-        }) => format!("{label} {remaining} left"),
+        }) => format!("{label} {remaining}"),
         None => format!("{label} quota unknown"),
     }
 }
@@ -113,9 +113,9 @@ pub fn format_gemini_main_quota(info: &GeminiQuotaInfo) -> String {
     if let Some(percent) = percents.iter().copied().min() {
         let bucket_count = info.buckets.len();
         return if bucket_count == 1 {
-            format!("gemini {percent}% left")
+            format!("gemini {percent}%")
         } else {
-            format!("gemini {percent}% left ({bucket_count} buckets)")
+            format!("gemini {percent}% ({bucket_count} buckets)")
         };
     }
 
@@ -129,7 +129,7 @@ pub fn format_gemini_main_quota(info: &GeminiQuotaInfo) -> String {
         "gemini quota unknown".to_string()
     } else {
         format!(
-            "gemini {} left",
+            "gemini {}",
             known_amounts.iter().copied().min().unwrap_or(0)
         )
     }

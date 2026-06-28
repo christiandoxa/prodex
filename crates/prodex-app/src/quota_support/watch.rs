@@ -7,12 +7,15 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
-use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{
+    tui_border_style, tui_detail_style, tui_error_style, tui_muted_style, tui_success_style,
+    tui_title_style,
+};
 
 #[derive(Debug, Clone)]
 enum AllQuotaWatchSnapshot {
@@ -716,6 +719,7 @@ struct AllQuotaWatchTuiRow {
     auth: Vec<String>,
     account: Vec<String>,
     plan: Vec<String>,
+    status: Vec<String>,
     remaining: Vec<String>,
 }
 
@@ -824,17 +828,18 @@ fn build_all_quota_watch_tui_row(
             quota_watch_workspace_label(report)
         ));
     }
-    let mut remaining = vec![view.main, format!("status: {}", view.status)];
+    let mut profile = vec![report.name.clone()];
     if detail && let Some(resets) = view.resets {
-        remaining.push(resets);
+        profile.push(resets);
     }
     AllQuotaWatchTuiRow {
-        profile: vec![report.name.clone()],
+        profile,
         current: vec![if report.active { "*" } else { "" }.to_string()],
         auth: vec![report.auth.label.clone()],
         account,
         plan: vec![view.plan],
-        remaining,
+        status: vec![view.status],
+        remaining: vec![view.main],
     }
 }
 
@@ -848,21 +853,13 @@ struct QuotaWatchReportView {
 
 fn quota_watch_report_view(report: &QuotaReport) -> QuotaWatchReportView {
     match &report.result {
-        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
-            let blocked = collect_blocked_limits(usage, false);
-            let status = if blocked.is_empty() {
-                "Ready".to_string()
-            } else {
-                format!("Blocked: {}", format_blocked_limits(&blocked))
-            };
-            QuotaWatchReportView {
-                account: quota_watch_optional(usage.email.as_deref()).to_string(),
-                plan: quota_watch_optional(usage.plan_type.as_deref()).to_string(),
-                main: format_main_windows_compact(usage),
-                status,
-                resets: Some(quota_watch_openai_reset_summary(usage)),
-            }
-        }
+        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => QuotaWatchReportView {
+            account: quota_watch_optional(usage.email.as_deref()).to_string(),
+            plan: quota_watch_optional(usage.plan_type.as_deref()).to_string(),
+            main: format_main_windows_compact(usage),
+            status: format_openai_quota_status(usage),
+            resets: Some(quota_watch_openai_reset_summary(usage)),
+        },
         Ok(ProviderQuotaSnapshot::Copilot(info)) => QuotaWatchReportView {
             account: quota_watch_optional(info.login.as_deref()).to_string(),
             plan: quota_watch_optional(
@@ -902,7 +899,7 @@ fn quota_watch_report_view(report: &QuotaReport) -> QuotaWatchReportView {
             account: "-".to_string(),
             plan: "-".to_string(),
             main: "-".to_string(),
-            status: format!("Error: {}", first_line_of_error(err)),
+            status: format_quota_error_status(err),
             resets: Some("resets: unavailable".to_string()),
         },
     }
@@ -1067,12 +1064,6 @@ fn quota_watch_profile_fields(
 ) -> Vec<(String, String)> {
     match snapshot {
         ProviderQuotaSnapshot::OpenAi(usage) => {
-            let blocked = collect_blocked_limits(usage, false);
-            let status = if blocked.is_empty() {
-                "Ready".to_string()
-            } else {
-                format!("Blocked: {}", format_blocked_limits(&blocked))
-            };
             vec![
                 (
                     "Account".to_string(),
@@ -1082,7 +1073,7 @@ fn quota_watch_profile_fields(
                     "Plan".to_string(),
                     quota_watch_optional(usage.plan_type.as_deref()).to_string(),
                 ),
-                ("Status".to_string(), status),
+                ("Status".to_string(), format_openai_quota_status(usage)),
                 ("Main".to_string(), format_main_windows(usage)),
                 (
                     "Reset".to_string(),
@@ -1242,9 +1233,17 @@ fn render_all_quota_watch_tui_table(
     area: ratatui::layout::Rect,
     table: &AllQuotaWatchTuiTable,
 ) {
-    let header = Row::new(["PROFILE", "CUR", "AUTH", "ACCOUNT", "PLAN", "REMAINING"])
-        .style(quota_watch_title_style())
-        .bottom_margin(1);
+    let header = Row::new([
+        "PROFILE",
+        "CUR",
+        "AUTH",
+        "ACCOUNT",
+        "PLAN",
+        "STATUS",
+        "REMAINING",
+    ])
+    .style(quota_watch_title_style())
+    .bottom_margin(1);
     let rows = table
         .rows
         .iter()
@@ -1255,6 +1254,7 @@ fn render_all_quota_watch_tui_table(
                 row.auth.len(),
                 row.account.len(),
                 row.plan.len(),
+                row.status.len(),
                 row.remaining.len(),
             ]
             .into_iter()
@@ -1267,6 +1267,7 @@ fn render_all_quota_watch_tui_table(
                 quota_watch_table_cell(&row.auth),
                 quota_watch_table_cell(&row.account),
                 quota_watch_table_cell(&row.plan),
+                quota_watch_table_cell(&row.status),
                 quota_watch_table_cell(&row.remaining),
             ])
             .height(u16::try_from(height).unwrap_or(u16::MAX))
@@ -1277,9 +1278,10 @@ fn render_all_quota_watch_tui_table(
         Constraint::Percentage(23),
         Constraint::Length(3),
         Constraint::Length(7),
-        Constraint::Percentage(24),
+        Constraint::Percentage(20),
         Constraint::Length(8),
-        Constraint::Percentage(43),
+        Constraint::Percentage(20),
+        Constraint::Percentage(37),
     ];
     let widget = Table::new(rows, widths)
         .header(header)
@@ -1344,14 +1346,14 @@ fn quota_human_tui_spans(line: &str) -> Vec<Span<'_>> {
     if line.chars().all(|ch| ch == '-' || ch.is_whitespace()) {
         return vec![Span::styled(line, quota_watch_muted_style())];
     }
-    if line.contains("Blocked:") || line.contains("Error:") {
-        return vec![Span::styled(line, Style::default().fg(Color::Red))];
+    if line.contains("Blocked") || line.contains("Error") {
+        return vec![Span::styled(line, tui_error_style())];
     }
     if line.contains("Ready") || line.contains("healthy") {
-        return vec![Span::styled(line, Style::default().fg(Color::Green))];
+        return vec![Span::styled(line, tui_success_style())];
     }
     if line.contains("thin") || line.contains("critical") || line.contains("exhausted") {
-        return vec![Span::styled(line, Style::default().fg(Color::Red))];
+        return vec![Span::styled(line, tui_error_style())];
     }
     if line.starts_with("PROFILE") {
         return vec![Span::styled(
@@ -1375,7 +1377,7 @@ fn quota_human_tui_spans(line: &str) -> Vec<Span<'_>> {
 }
 
 fn quota_watch_detail_style() -> Style {
-    Style::default().fg(Color::Gray)
+    tui_detail_style()
 }
 
 fn quota_watch_title_style() -> Style {
@@ -1387,7 +1389,7 @@ fn quota_watch_border_style() -> Style {
 }
 
 fn quota_watch_muted_style() -> Style {
-    tui_secondary_style()
+    tui_muted_style()
 }
 
 fn quota_watch_footer_style() -> Style {
@@ -1414,7 +1416,7 @@ fn start_all_quota_watch_refresh(
 }
 
 fn quota_watch_updated_at() -> String {
-    Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string()
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 fn load_all_quota_watch_snapshot(

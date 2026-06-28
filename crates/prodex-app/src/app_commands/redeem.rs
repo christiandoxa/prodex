@@ -10,7 +10,7 @@ use prodex_quota::{UsageResponse, UsageWindow, format_precise_reset_time};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
@@ -21,8 +21,8 @@ use crate::{
     repair_missing_active_profile_and_save,
 };
 use terminal_ui::{
-    print_panel, tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style,
-    tui_success_style, tui_title_style,
+    print_panel, tui_border_style, tui_detail_style, tui_hint_style, tui_primary_style,
+    tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 const MANUAL_REDEEM_NEAR_RESET_SECONDS: i64 = 60 * 60;
@@ -192,14 +192,9 @@ fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
         let header = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Prodex Redeem",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Prodex Redeem", tui_title_style()),
             Span::raw("  "),
-            Span::styled("reset credit", Style::default().fg(Color::DarkGray)),
+            Span::styled("reset credit", tui_detail_style()),
         ]))
         .block(
             Block::default()
@@ -212,7 +207,7 @@ fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
             .iter()
             .map(|(label, value)| {
                 Line::from(vec![
-                    Span::styled(format!("{label:>9} "), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{label:>9} "), tui_detail_style()),
                     Span::styled(
                         value.clone(),
                         if label == "Outcome" {

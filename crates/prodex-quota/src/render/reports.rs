@@ -16,6 +16,7 @@ struct QuotaReportColumnWidths {
     auth: usize,
     account: usize,
     plan: usize,
+    status: usize,
     remaining: usize,
 }
 
@@ -103,11 +104,11 @@ pub fn render_quota_reports_window_with_sort(
 }
 
 fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
-    const MIN_WIDTHS: [usize; 6] = [12, 3, 4, 14, 4, 13];
-    const EXTRA_WEIGHTS: [usize; 6] = [12, 1, 3, 13, 4, 18];
-    const DISTRIBUTION_ORDER: [usize; 6] = [5, 3, 0, 4, 2, 1];
+    const MIN_WIDTHS: [usize; 7] = [12, 3, 4, 14, 4, 8, 13];
+    const EXTRA_WEIGHTS: [usize; 7] = [12, 1, 3, 13, 4, 8, 18];
+    const DISTRIBUTION_ORDER: [usize; 7] = [6, 3, 0, 5, 4, 2, 1];
 
-    let gap_width = text_width(CLI_TABLE_GAP) * 5;
+    let gap_width = text_width(CLI_TABLE_GAP) * 6;
     let min_total = MIN_WIDTHS.iter().sum::<usize>();
     let available = total_width.saturating_sub(gap_width).max(min_total);
 
@@ -132,27 +133,20 @@ fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
         auth: widths[2],
         account: widths[3],
         plan: widths[4],
-        remaining: widths[5],
+        status: widths[5],
+        remaining: widths[6],
     }
 }
 
 fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
     match &report.result {
-        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => {
-            let blocked = collect_blocked_limits(usage, false);
-            let status = if blocked.is_empty() {
-                "Ready".to_string()
-            } else {
-                format!("Blocked: {}", format_blocked_limits(&blocked))
-            };
-            QuotaReportViewData {
-                email: display_optional(usage.email.as_deref()).to_string(),
-                plan: display_optional(usage.plan_type.as_deref()).to_string(),
-                main: format_main_windows_compact(usage),
-                status,
-                resets: Some(format_openai_reset_summary(usage)),
-            }
-        }
+        Ok(ProviderQuotaSnapshot::OpenAi(usage)) => QuotaReportViewData {
+            email: display_optional(usage.email.as_deref()).to_string(),
+            plan: display_optional(usage.plan_type.as_deref()).to_string(),
+            main: format_main_windows_compact(usage),
+            status: format_openai_quota_status(usage),
+            resets: Some(format_openai_reset_summary(usage)),
+        },
         Ok(ProviderQuotaSnapshot::Copilot(info)) => QuotaReportViewData {
             email: display_optional(info.login.as_deref()).to_string(),
             plan: display_optional(
@@ -192,7 +186,7 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
             email: "-".to_string(),
             plan: "-".to_string(),
             main: "-".to_string(),
-            status: format!("Error: {}", first_line_of_error(err)),
+            status: format_quota_error_status(err),
             resets: Some("resets: unavailable".to_string()),
         },
     }
@@ -217,18 +211,20 @@ fn format_openai_reset_summary(usage: &UsageResponse) -> String {
 
 fn render_quota_report_header(column_widths: QuotaReportColumnWidths) -> String {
     format!(
-        "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<main_w$}",
+        "{:<name_w$}  {:<act_w$}  {:<auth_w$}  {:<email_w$}  {:<plan_w$}  {:<status_w$}  {:<main_w$}",
         "PROFILE",
         "CUR",
         "AUTH",
         "ACCOUNT",
         "PLAN",
+        "STATUS",
         "REMAINING",
         name_w = column_widths.profile,
         act_w = column_widths.current,
         auth_w = column_widths.auth,
         email_w = column_widths.account,
         plan_w = column_widths.plan,
+        status_w = column_widths.status,
         main_w = column_widths.remaining,
     )
 }
@@ -287,13 +283,8 @@ fn render_quota_report_section(
             total_width,
         );
     }
-    push_wrapped_quota_report_line(
-        &mut section,
-        &format!("status: {}", view.status),
-        total_width,
-    );
     if detail && let Some(resets) = view.resets.as_deref() {
-        push_wrapped_quota_report_line(&mut section, resets, total_width);
+        section.extend(wrap_text(resets, total_width.max(1)));
     }
     section.push(String::new());
     section
@@ -384,7 +375,7 @@ fn render_quota_report_row(
 ) -> String {
     let active = if report.active { "*" } else { "" };
     format!(
-        "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<main_w$}",
+        "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<status_w$}{}{:<main_w$}",
         fit_cell(&report.name, column_widths.profile),
         CLI_TABLE_GAP,
         fit_cell(active, column_widths.current),
@@ -395,12 +386,15 @@ fn render_quota_report_row(
         CLI_TABLE_GAP,
         fit_cell(&view.plan, column_widths.plan),
         CLI_TABLE_GAP,
+        fit_cell(&view.status, column_widths.status),
+        CLI_TABLE_GAP,
         fit_cell(&view.main, column_widths.remaining),
         name_w = column_widths.profile,
         act_w = column_widths.current,
         auth_w = column_widths.auth,
         email_w = column_widths.account,
         plan_w = column_widths.plan,
+        status_w = column_widths.status,
         main_w = column_widths.remaining,
     )
 }

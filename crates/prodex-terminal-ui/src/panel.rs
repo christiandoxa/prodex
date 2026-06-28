@@ -21,7 +21,15 @@ pub fn tui_title_style() -> Style {
 }
 
 pub fn tui_secondary_style() -> Style {
-    Style::default().fg(Color::DarkGray)
+    Style::default().fg(Color::Gray)
+}
+
+pub fn tui_muted_style() -> Style {
+    tui_secondary_style()
+}
+
+pub fn tui_detail_style() -> Style {
+    tui_secondary_style()
 }
 
 pub fn tui_primary_style() -> Style {
@@ -42,6 +50,18 @@ pub fn tui_success_style() -> Style {
 
 pub fn tui_error_style() -> Style {
     Style::default().fg(Color::Red)
+}
+
+pub fn tui_metric_style() -> Style {
+    tui_success_style()
+}
+
+pub fn tui_accent_style() -> Style {
+    Style::default().fg(Color::LightCyan)
+}
+
+pub fn tui_tool_style() -> Style {
+    Style::default().fg(Color::LightMagenta)
 }
 
 pub fn section_header_with_width(title: &str, total_width: usize) -> String {

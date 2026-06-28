@@ -29,7 +29,10 @@ use std::thread;
 #[cfg(test)]
 use std::time::SystemTime;
 use std::time::{Duration, UNIX_EPOCH};
-use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{
+    tui_accent_style, tui_border_style, tui_metric_style, tui_muted_style, tui_primary_style,
+    tui_title_style, tui_tool_style,
+};
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
@@ -462,25 +465,13 @@ fn log_stream_tui_text(
                 ]));
                 lines.push(Line::from(vec![
                     Span::styled("sent ", log_muted_style()),
-                    Span::styled(
-                        event.input_tokens.to_string(),
-                        Style::default().fg(Color::Green),
-                    ),
+                    Span::styled(event.input_tokens.to_string(), tui_metric_style()),
                     Span::styled(" cached ", log_muted_style()),
-                    Span::styled(
-                        event.cached_input_tokens.to_string(),
-                        Style::default().fg(Color::LightCyan),
-                    ),
+                    Span::styled(event.cached_input_tokens.to_string(), tui_accent_style()),
                     Span::styled(" received ", log_muted_style()),
-                    Span::styled(
-                        event.output_tokens.to_string(),
-                        Style::default().fg(Color::Green),
-                    ),
+                    Span::styled(event.output_tokens.to_string(), tui_metric_style()),
                     Span::styled(" reasoning ", log_muted_style()),
-                    Span::styled(
-                        event.reasoning_tokens.to_string(),
-                        Style::default().fg(Color::LightMagenta),
-                    ),
+                    Span::styled(event.reasoning_tokens.to_string(), tui_tool_style()),
                 ]));
             }
         }
@@ -500,7 +491,7 @@ fn log_border_style() -> Style {
 }
 
 fn log_muted_style() -> Style {
-    tui_secondary_style()
+    tui_muted_style()
 }
 
 fn log_footer_style() -> Style {

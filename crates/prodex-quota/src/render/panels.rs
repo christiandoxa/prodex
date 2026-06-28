@@ -13,12 +13,6 @@ pub fn render_profile_quota_with_width(
     usage: &UsageResponse,
     total_width: usize,
 ) -> String {
-    let blocked = collect_blocked_limits(usage, false);
-    let status = if blocked.is_empty() {
-        "Ready".to_string()
-    } else {
-        format!("Blocked ({})", format_blocked_limits(&blocked))
-    };
     let mut fields = vec![
         ("Profile".to_string(), profile_name.to_string()),
         (
@@ -29,7 +23,7 @@ pub fn render_profile_quota_with_width(
             "Plan".to_string(),
             display_optional(usage.plan_type.as_deref()).to_string(),
         ),
-        ("Status".to_string(), status),
+        ("Status".to_string(), format_openai_quota_status(usage)),
         ("Main".to_string(), format_main_windows(usage)),
     ];
 

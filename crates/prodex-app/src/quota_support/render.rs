@@ -180,6 +180,14 @@ pub(crate) fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
     prodex_quota::format_blocked_limits(blocked)
 }
 
+pub(crate) fn format_openai_quota_status(usage: &UsageResponse) -> String {
+    prodex_quota::format_openai_quota_status(usage)
+}
+
+pub(crate) fn format_quota_error_status(error: &str) -> String {
+    prodex_quota::format_quota_error_status(error)
+}
+
 #[cfg(test)]
 pub(crate) fn window_label(seconds: Option<i64>) -> String {
     prodex_quota::window_label(seconds)

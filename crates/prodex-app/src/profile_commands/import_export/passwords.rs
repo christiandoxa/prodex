@@ -10,7 +10,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::path::Path;
@@ -18,7 +18,8 @@ use std::{env, io};
 
 use super::progress::print_profile_import_progress;
 use terminal_ui::{
-    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_title_style,
+    tui_border_style, tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style,
+    tui_success_style, tui_title_style,
 };
 
 const PROFILE_EXPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_EXPORT_PASSWORD";
@@ -249,14 +250,9 @@ fn prompt_export_password_mode_tui() -> Result<bool> {
                 ])
                 .split(frame.area());
             let header = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "Profile Export",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("Profile Export", tui_title_style()),
                 Span::raw("  "),
-                Span::styled("bundle protection", Style::default().fg(Color::DarkGray)),
+                Span::styled("bundle protection", tui_detail_style()),
             ]))
             .block(
                 Block::default()
@@ -285,9 +281,9 @@ fn prompt_export_password_mode_tui() -> Result<bool> {
             frame.render_widget(body, chunks[1]);
 
             let footer = Paragraph::new(Line::from(vec![
-                Span::styled("y", Style::default().fg(Color::Green)),
+                Span::styled("y", tui_success_style()),
                 Span::raw(" protect  "),
-                Span::styled("enter", Style::default().fg(Color::Green)),
+                Span::styled("enter", tui_success_style()),
                 Span::raw(" protect  "),
                 Span::styled("n", tui_hint_style()),
                 Span::raw(" unprotected  "),

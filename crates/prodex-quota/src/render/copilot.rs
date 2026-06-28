@@ -33,14 +33,7 @@ pub fn format_copilot_quota_status(info: &CopilotQuotaInfo) -> String {
     if blocked.is_empty() {
         "Ready".to_string()
     } else {
-        format!(
-            "Blocked ({})",
-            blocked
-                .into_iter()
-                .map(|feature| format!("{feature} exhausted"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        "Blocked".to_string()
     }
 }
 
@@ -50,8 +43,8 @@ pub fn format_copilot_main_quota(info: &CopilotQuotaInfo) -> String {
         .filter_map(|(feature, label)| {
             let remaining = copilot_remaining_quota(info, feature)?;
             Some(match copilot_total_quota(info, feature) {
-                Some(total) => format!("{label} {remaining}/{total} left"),
-                None => format!("{label} {remaining} left"),
+                Some(total) => format!("{label} {remaining}/{total}"),
+                None => format!("{label} {remaining}"),
             })
         })
         .collect::<Vec<_>>();

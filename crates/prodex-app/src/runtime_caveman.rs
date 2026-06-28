@@ -326,6 +326,11 @@ mod tests {
         assert!(strategy.codex_args.contains(&OsString::from(
             "--dangerously-bypass-approvals-and-sandbox"
         )));
+        assert!(
+            strategy
+                .codex_args
+                .contains(&OsString::from("--dangerously-bypass-hook-trust"))
+        );
         for extracted_prefix in ["rtk", "sqz", "tokensavior", "clawcompactor", "presidio"] {
             assert!(
                 !strategy
@@ -348,6 +353,7 @@ mod tests {
             strategy.codex_args,
             vec![
                 OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+                OsString::from("--dangerously-bypass-hook-trust"),
                 OsString::from("exec"),
                 OsString::from("hi")
             ]

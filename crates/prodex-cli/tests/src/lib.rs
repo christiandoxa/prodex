@@ -203,6 +203,7 @@ fn super_default_keeps_all_super_prefixes() {
             OsString::from("tokensavior"),
             OsString::from("clawcompactor"),
             OsString::from("ponytail"),
+            OsString::from("--dangerously-bypass-hook-trust"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -233,6 +234,7 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
             "tokensavior",
             "clawcompactor",
             "ponytail",
+            "--dangerously-bypass-hook-trust",
             "exec",
             "hello",
         ])
@@ -254,6 +256,7 @@ fn super_includes_presidio_prefix_when_opted_in() {
             "clawcompactor",
             "ponytail",
             "presidio",
+            "--dangerously-bypass-hook-trust",
             "exec",
             "hello",
         ])
@@ -277,6 +280,7 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
             "clawcompactor",
             "ponytail",
             "presidio",
+            "--dangerously-bypass-hook-trust",
             "exec",
             "hello",
         ])
@@ -317,6 +321,7 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
             "tokensavior",
             "clawcompactor",
             "ponytail",
+            "--dangerously-bypass-hook-trust",
             "exec",
             "hello",
         ])

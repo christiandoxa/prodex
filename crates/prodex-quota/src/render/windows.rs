@@ -317,7 +317,7 @@ pub fn format_window_status_compact(window: &UsageWindow) -> String {
     match window.used_percent {
         Some(used) => {
             let remaining = remaining_percent(Some(used));
-            format!("{label} {remaining}% left")
+            format!("{label} {remaining}%")
         }
         None => format!("{label} ?"),
     }
@@ -456,6 +456,99 @@ pub fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
         .join(", ")
 }
 
+pub fn format_openai_quota_status(usage: &UsageResponse) -> String {
+    let blocked = collect_blocked_limits(usage, false);
+    if blocked.is_empty() {
+        "Ready".to_string()
+    } else {
+        format_blocked_quota_status(&blocked)
+    }
+}
+
+pub fn format_blocked_quota_status(blocked: &[BlockedLimit]) -> String {
+    if blocked
+        .iter()
+        .any(|limit| limit.message.to_ascii_lowercase().contains("5h"))
+    {
+        "Blocked 5h".to_string()
+    } else if blocked
+        .iter()
+        .any(|limit| limit.message.to_ascii_lowercase().contains("weekly"))
+    {
+        "Blocked weekly".to_string()
+    } else {
+        "Blocked".to_string()
+    }
+}
+
+pub fn format_quota_error_status(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("401") || lower.contains("unauthorized") {
+        "Blocked unauthorized".to_string()
+    } else {
+        format!("Error {}", quota_error_summary(error))
+    }
+}
+
+fn quota_error_summary(error: &str) -> String {
+    let first_line = first_line_of_error(error);
+    if first_line.is_empty() || first_line == "-" {
+        return "unknown".to_string();
+    }
+    let lower = first_line.to_ascii_lowercase();
+    if lower.contains("unavailable") {
+        "unavailable".to_string()
+    } else if lower.contains("missing")
+        || lower.contains("not configured")
+        || lower.contains("config")
+    {
+        "config".to_string()
+    } else if lower.contains("500")
+        || lower.contains("502")
+        || lower.contains("503")
+        || lower.contains("504")
+        || lower.contains("server")
+    {
+        "server".to_string()
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        "timeout".to_string()
+    } else if lower.contains("dns")
+        || lower.contains("tls")
+        || lower.contains("certificate")
+        || lower.contains("network")
+    {
+        "network".to_string()
+    } else if lower.contains("proxy") {
+        "proxy".to_string()
+    } else if lower.contains("refused") || lower.contains("connect") {
+        "connection".to_string()
+    } else if lower.contains("invalid auth")
+        || lower.contains("invalid token")
+        || lower.contains("bad credentials")
+        || lower.contains("credential")
+    {
+        "invalid auth".to_string()
+    } else if lower.contains("429") || lower.contains("rate limit") {
+        "rate limit".to_string()
+    } else if lower.contains("parse")
+        || lower.contains("deserialize")
+        || lower.contains("decode")
+        || lower.contains("invalid json")
+    {
+        "parse".to_string()
+    } else if lower.contains("empty") {
+        "empty".to_string()
+    } else if lower.contains("cancel") {
+        "cancelled".to_string()
+    } else if lower.contains("403") || lower.contains("forbidden") {
+        "forbidden".to_string()
+    } else if lower.contains("404") || lower.contains("not found") {
+        "not found".to_string()
+    } else {
+        first_line
+    }
+}
+
 pub fn remaining_percent(used_percent: Option<i64>) -> i64 {
     let Some(used) = used_percent else {
         return 0;
@@ -482,15 +575,15 @@ pub fn window_label(seconds: Option<i64>) -> String {
 }
 
 pub fn format_reset_time(epoch: Option<i64>) -> String {
-    format_local_epoch(epoch, "%Y-%m-%d %H:%M %:z")
+    format_local_epoch(epoch, "%Y-%m-%d %H:%M")
 }
 
 pub fn format_precise_reset_time(epoch: Option<i64>) -> String {
-    format_local_epoch(epoch, "%Y-%m-%d %H:%M:%S %:z")
+    format_local_epoch(epoch, "%Y-%m-%d %H:%M:%S")
 }
 
 pub fn format_quota_snapshot_time(epoch: Option<i64>) -> String {
-    format_local_epoch(epoch, "%Y-%m-%d %H:%M:%S %:z")
+    format_local_epoch(epoch, "%Y-%m-%d %H:%M:%S")
 }
 
 fn format_local_epoch(epoch: Option<i64>, pattern: &str) -> String {

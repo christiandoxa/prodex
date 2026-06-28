@@ -78,6 +78,50 @@ fn blocks_missing_required_main_window() {
     let blocked = collect_blocked_limits(&usage, false);
     assert_eq!(blocked.len(), 1);
     assert_eq!(blocked[0].message, "weekly quota unavailable");
+    assert_eq!(format_openai_quota_status(&usage), "Blocked weekly");
+}
+
+#[test]
+fn openai_quota_status_uses_short_blocked_labels() {
+    assert_eq!(
+        format_openai_quota_status(&usage_with_main_windows(
+            0,
+            1_700_001_800,
+            80,
+            1_700_259_200
+        )),
+        "Blocked 5h"
+    );
+    assert_eq!(
+        format_openai_quota_status(&usage_with_main_windows(
+            80,
+            1_700_001_800,
+            0,
+            1_700_259_200
+        )),
+        "Blocked weekly"
+    );
+    assert_eq!(
+        format_quota_error_status("HTTP 401"),
+        "Blocked unauthorized"
+    );
+    assert_eq!(
+        format_quota_error_status("quota unavailable in test"),
+        "Error unavailable"
+    );
+    for (input, expected) in [
+        ("HTTP 500 internal server error", "Error server"),
+        ("dns lookup failed", "Error network"),
+        ("invalid token in auth file", "Error invalid auth"),
+        ("failed to parse quota json", "Error parse"),
+        ("missing config.toml", "Error config"),
+        ("proxy handshake failed", "Error proxy"),
+        ("empty quota response body", "Error empty"),
+        ("request cancelled", "Error cancelled"),
+        ("", "Error unknown"),
+    ] {
+        assert_eq!(format_quota_error_status(input), expected);
+    }
 }
 
 #[test]
@@ -88,7 +132,7 @@ fn compact_window_format_uses_scale_of_100() {
         limit_window_seconds: Some(18_000),
     };
 
-    assert_eq!(format_window_status_compact(&window), "5h 63% left");
+    assert_eq!(format_window_status_compact(&window), "5h 63%");
     assert!(format_window_status(&window).contains("63% left"));
     assert!(format_window_status(&window).contains("37% used"));
 }
@@ -110,6 +154,24 @@ fn openai_quota_renders_rate_limit_reset_credits() {
     let overview =
         render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 160);
     assert!(overview.contains("reset credits: 2 available"));
+}
+
+#[test]
+fn quota_reports_put_status_in_column_and_resets_on_left_detail_line() {
+    let usage = usage_with_main_windows(20, 1_700_001_800, 10, 1_700_259_200);
+
+    let output = render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 100);
+    let mut lines = output.lines();
+    let header = lines.find(|line| line.contains("PROFILE")).expect("header");
+    let row = lines.find(|line| line.contains("main")).expect("row");
+    let resets = lines
+        .find(|line| line.starts_with("resets:"))
+        .expect("resets");
+
+    assert!(header.contains("STATUS"));
+    assert!(row.contains("Ready"));
+    assert!(!output.contains("status: Ready"));
+    assert!(resets.contains("5h"));
 }
 
 #[test]
@@ -253,7 +315,7 @@ fn profile_quota_render_contains_core_fields() {
     let rendered = render_profile_quota_with_width("main", &usage, 80);
     assert!(rendered.contains("Quota main"));
     assert!(rendered.contains("me@example.com"));
-    assert!(rendered.contains("5h quota unavailable"));
+    assert!(rendered.contains("Blocked 5h"));
 }
 
 #[test]
@@ -348,13 +410,13 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         ),
     ];
 
-    let output = render_quota_reports_with_line_limit(&reports, false, Some(16));
+    let output = render_quota_reports_with_line_limit(&reports, false, Some(14));
 
     assert!(output.contains("ready-early"));
     assert!(output.contains("ready-late"));
-    assert!(!output.contains("blocked"));
+    assert!(output.contains("blocked"));
     assert!(!output.contains("error"));
-    assert!(output.contains("\n\nshowing top 2 of 4 profiles"));
+    assert!(output.contains("\n\nshowing top 3 of 4 profiles"));
 }
 
 #[test]
@@ -389,16 +451,17 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
 
     assert_eq!(window.start_profile, 1);
     assert_eq!(window.total_profiles, 4);
-    assert_eq!(window.shown_profiles, 2);
+    assert_eq!(window.shown_profiles, 3);
     assert_eq!(window.hidden_before, 1);
-    assert_eq!(window.hidden_after, 1);
+    assert_eq!(window.hidden_after, 0);
     assert!(window.output.contains("ready-late"));
     assert!(window.output.contains("blocked"));
+    assert!(window.output.contains("error"));
     assert!(!window.output.contains("ready-early"));
     assert!(
         window
             .output
-            .contains("\n\npress Up/Down to scroll profiles (2-3 of 4; 1 above, 1 below)")
+            .contains("\n\npress Up/Down to scroll profiles (2-4 of 4; 1 above, 0 below)")
     );
 }
 
@@ -477,9 +540,10 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
     assert!(output.contains("copilot-main"));
     assert!(output.contains("copilot-user"));
     assert!(output.contains("individual"));
-    assert!(output.contains("chat 450/500 left"));
-    assert!(output.contains("comp 4000/4000 left"));
-    assert!(output.contains("status: Ready"));
+    assert!(output.contains("chat 450/500"));
+    assert!(output.contains("comp 4000/4000"));
+    assert!(output.contains("Ready"));
+    assert!(!output.contains("status: Ready"));
     assert!(output.contains("resets: monthly 2026-05-09"));
     assert!(!output.contains("GitHub Copilot profiles do not expose ChatGPT quota"));
 }
@@ -550,8 +614,9 @@ fn quota_reports_render_gemini_code_assist_buckets() {
     assert!(output.contains("gemini-user@example.com"));
     assert!(output.contains("pro"));
     assert!(!output.contains("proj-1"));
-    assert!(output.contains("gemini 50% left"));
-    assert!(output.contains("status: Ready"));
+    assert!(output.contains("gemini 50%"));
+    assert!(output.contains("Ready"));
+    assert!(!output.contains("status: Ready"));
     assert!(output.contains("resets: 2026-05-09T00:00:00Z"));
 
     let panel = render_profile_quota_snapshot("gemini-main", reports[0].result.as_ref().unwrap());
@@ -561,9 +626,9 @@ fn quota_reports_render_gemini_code_assist_buckets() {
     assert!(panel.contains("Project"));
     assert!(panel.contains("proj-1"));
     assert!(panel.contains("Main"));
-    assert!(panel.contains("gemini 50% left"));
+    assert!(panel.contains("gemini 50%"));
     assert!(panel.contains("Bucket 1"));
-    assert!(panel.contains("gemini-2.5-pro 50/100 left"));
+    assert!(panel.contains("gemini-2.5-pro 50/100"));
 }
 
 #[test]
@@ -613,8 +678,8 @@ fn quota_reports_aggregate_gemini_remaining_buckets() {
     assert!(output.contains(&format_info_pool_remaining(80, 1, None)));
     assert!(!output.contains("5h remaining pool:"));
     assert!(!output.contains("Weekly remaining pool:"));
-    assert!(output.contains("gemini 80% left (3 buckets)"));
-    assert!(!output.contains("gemini-2.5-flash 100/100 left |"));
+    assert!(output.contains("gemini 80% (3 buckets)"));
+    assert!(!output.contains("gemini-2.5-flash 100/100 |"));
 }
 
 #[test]
@@ -650,7 +715,8 @@ fn quota_reports_render_external_provider_snapshots() {
     assert!(output.contains("deepseek"));
     assert!(output.contains("api-key"));
     assert!(output.contains("USD 12.50"));
-    assert!(output.contains("status: Ready"));
+    assert!(output.contains("Ready"));
+    assert!(!output.contains("status: Ready"));
 
     let panel = render_profile_quota_snapshot("deepseek", reports[0].result.as_ref().unwrap());
     assert!(panel.contains("Quota deepseek"));

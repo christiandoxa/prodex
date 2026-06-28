@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "ponytail"];
+const CODEX_BYPASS_HOOK_TRUST_ARG: &str = "--dangerously-bypass-hook-trust";
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
@@ -420,6 +421,7 @@ impl SuperArgs {
         let mut codex_args = Vec::with_capacity(
             self.codex_args.len()
                 + 1
+                + 1
                 + SUPER_OPTIMIZER_PREFIXES.len()
                 + usize::from(presidio)
                 + usize::from(mem0)
@@ -435,6 +437,7 @@ impl SuperArgs {
         if presidio {
             codex_args.push(OsString::from("presidio"));
         }
+        codex_args.push(OsString::from(CODEX_BYPASS_HOOK_TRUST_ARG));
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
         codex_args.extend(feature_overrides);

@@ -8,7 +8,7 @@ use prodex_presidio::{
     presidio_http_client, probe_presidio_health, validate_presidio_url,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::env;
@@ -19,7 +19,10 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use terminal_ui::print_panel;
-use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{
+    tui_border_style, tui_error_style, tui_primary_style, tui_secondary_style, tui_success_style,
+    tui_title_style,
+};
 
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
 const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
@@ -370,11 +373,11 @@ fn presidio_value_style(label: &str, value: &str) -> Style {
     if (lower_label.contains("health") && lower_value.starts_with("ok"))
         || (lower_label == "enabled" && lower_value == "true")
     {
-        Style::default().fg(Color::Green)
+        tui_success_style()
     } else if lower_label.contains("health") && lower_value.starts_with("failed")
         || lower_label == "enabled" && lower_value == "false"
     {
-        Style::default().fg(Color::Red)
+        tui_error_style()
     } else {
         tui_primary_style()
     }

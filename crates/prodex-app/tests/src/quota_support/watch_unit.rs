@@ -1,4 +1,5 @@
     use super::*;
+    use ratatui::style::Color;
 
     fn test_quota_report(
         name: &str,
@@ -114,10 +115,11 @@
         let snapshot = AllQuotaWatchSnapshot::Reports {
             updated: "2026-06-26 10:00:00 UTC".to_string(),
             profile_count: 1,
-            reports: vec![test_quota_report(
-                "main",
-                Ok(test_usage("main@example.com")),
-            )],
+            reports: vec![test_openai_quota_report(test_openai_usage_with_windows(
+                20,
+                10,
+                1_700_001_800,
+            ))],
         };
 
         let frame = build_all_quota_watch_tui_frame(
@@ -153,6 +155,8 @@
         assert_eq!(table.rows.len(), 1);
         assert_eq!(table.rows[0].profile, vec!["main".to_string()]);
         assert_eq!(table.rows[0].account, vec!["main@example.com".to_string()]);
+        assert_eq!(table.rows[0].status, vec!["Ready".to_string()]);
+        assert_eq!(table.rows[0].remaining, vec!["5h 80% | weekly 90%".to_string()]);
         assert!(!frame.body.contains("sort: current"));
         assert!(frame.footer.contains("u update"));
         assert!(frame.footer.contains("sort current"));
@@ -160,9 +164,40 @@
     }
 
     #[test]
+    fn all_quota_watch_tui_detail_places_resets_under_profile() {
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: 1,
+            reports: vec![test_openai_quota_report(test_openai_usage_with_windows(
+                20,
+                10,
+                1_700_001_800,
+            ))],
+        };
+
+        let frame = build_all_quota_watch_tui_frame(
+            &snapshot,
+            AllQuotaWatchLayout {
+                detail: true,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Current,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 80,
+                max_lines: Some(20),
+            },
+        );
+        let row = &frame.table.as_ref().expect("table").rows[0];
+
+        assert!(row.profile.iter().any(|line| line.starts_with("resets:")));
+        assert_eq!(row.status, vec!["Ready".to_string()]);
+        assert_eq!(row.remaining, vec!["5h 80% | weekly 90%".to_string()]);
+    }
+
+    #[test]
     fn quota_human_tui_spans_use_readable_detail_color() {
         let spans = quota_human_tui_spans(
-            "  resets: 5h 2026-06-28 01:44:03 +07:00 | weekly 2026-07-04 10:12:48 +07:00",
+            "  resets: 5h 2026-06-28 01:44:03 | weekly 2026-07-04 10:12:48",
         );
 
         assert_eq!(spans.len(), 1);
