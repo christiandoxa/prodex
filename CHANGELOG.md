@@ -2,6 +2,27 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.227.0 - 2026-06-28
+
+### CLI
+
+- Preserve compact quota tui separators (`a19aac9`)
+- Refine quota status summaries (`613d8ab`)
+
+### Claude
+
+- Harden super optimizer mcp tools (`09a5cc3`)
+
+## 0.226.0 - 2026-06-28
+
+- No grouped changes.
+
+## 0.225.0 - 2026-06-27
+
+### CLI
+
+- Render quota views with native ratatui (`a6a766d`)
+
 ## 0.224.0 - 2026-06-27
 
 ### Misc
@@ -55,30 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Support Copilot JSONC import (`879cf7b`)
-
-## 0.215.0 - 2026-06-25
-
-### Runtime
-
-- Improve copilot runtime integration (`e381609`)
-
-### Misc
-
-- Use explicit logout imports (`5a707c9`)
-- Satisfy copilot catalog lint (`10fa639`)
-
-## 0.214.0 - 2026-06-25
-
-### Misc
-
-- Recover from missing bundled codex (`4489f90`)
-
-## 0.213.0 - 2026-06-24
-
-### CLI
-
-- Extract provider flags from codex_args for session-id-first syntax (`fa5127c`)
-
-### Misc
-
-- Fail fast when bundled Codex is missing (`12213ea`)
