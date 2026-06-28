@@ -11,13 +11,13 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 920,
+    "maxLines": 912,
     "reason": "SuperArgs provider-flag extraction for trailing-var-arg session-ID-first syntax coexists with struct definition and tests; tightly coupled arg-parsing surface."
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1733,
-    "reason": "Live quota ratatui rendering, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
+    "maxLines": 1735,
+    "reason": "Live quota ratatui rendering, status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
   },
   {
     "file": "crates/prodex-app/src/app_commands/capability.rs",
@@ -26,7 +26,7 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/log.rs",
-    "maxLines": 1001,
+    "maxLines": 992,
     "reason": "Log command ratatui rendering, filters, and table/detail behavior remain capped while renderer and query ownership are separated."
   },
   {
