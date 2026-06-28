@@ -171,7 +171,7 @@ fn image_tag_path_attr(tag: &str) -> Option<(usize, &'static str, &'static str)>
 
 fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<Option<String>> {
     let source = Path::new(raw_path);
-    if !source.is_absolute() || !source.is_file() {
+    if !source.is_absolute() {
         return Ok(None);
     }
     let Some(file_name) = source.file_name().and_then(|name| name.to_str()) else {
@@ -185,6 +185,9 @@ fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<
         .join(SESSION_IMAGE_ATTACHMENT_DIR)
         .join(file_name);
     if !destination.is_file() {
+        if !source.is_file() {
+            return Ok(None);
+        }
         copy_shared_codex_file(source, &destination)?;
     }
     Ok(Some(destination.display().to_string()))

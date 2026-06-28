@@ -68,6 +68,42 @@ fn persist_codex_session_image_attachments_rewrites_escaped_session_path() {
     assert!(!rewritten.contains(&image_source.display().to_string()));
 }
 
+#[test]
+fn persist_codex_session_image_attachments_rewrites_to_existing_stable_copy_when_source_is_gone() {
+    let temp_dir = ImageAttachmentTestDir::new("clipboard-image-source-gone");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/10");
+    let old_path = temp_dir
+        .path
+        .join("deleted-overlay/codex-clipboard-test.png");
+    let stable = codex_home.join("image_attachments/codex-clipboard-test.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(stable.parent().unwrap()).expect("stable dir should exist");
+    fs::write(&stable, b"stable png bytes").expect("stable image should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"payload":{{"content":[{{"type":"input_text","text":"<image path=\"{}\">"}}]}}}}"#,
+            old_path.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("image attachments should persist");
+
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(
+        rewritten.contains(&stable.display().to_string()),
+        "session should use existing stable clipboard image: {rewritten}"
+    );
+    assert!(
+        !rewritten.contains(&old_path.display().to_string()),
+        "session should not retain deleted clipboard path: {rewritten}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn prepare_managed_codex_home_persists_session_image_paths_in_shared_root() {
