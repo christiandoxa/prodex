@@ -1,5 +1,4 @@
 use anyhow::{Result, bail};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -90,6 +89,7 @@ pub struct QuotaReport {
     pub active: bool,
     pub auth: AuthSummary,
     pub workspace_id: Option<String>,
+    pub workspace_name: Option<String>,
     pub result: std::result::Result<ProviderQuotaSnapshot, String>,
     pub fetched_at: i64,
 }
@@ -217,87 +217,6 @@ pub struct UsageResponse {
 pub struct RateLimitResetCreditsSummary {
     #[serde(rename = "availableCount", alias = "available_count")]
     pub available_count: i64,
-    #[serde(
-        default,
-        rename = "expiresAt",
-        alias = "expires_at",
-        alias = "expire_at",
-        alias = "expiration",
-        alias = "expires",
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_epoch_seconds"
-    )]
-    pub expires_at: Option<i64>,
-    #[serde(
-        default,
-        rename = "expiresAtMs",
-        alias = "expires_at_ms",
-        alias = "expire_at_ms",
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_epoch_milliseconds"
-    )]
-    pub expires_at_ms: Option<i64>,
-}
-
-impl RateLimitResetCreditsSummary {
-    pub fn expiration_epoch_seconds(&self) -> Option<i64> {
-        self.expires_at
-            .or_else(|| self.expires_at_ms.map(|millis| millis.div_euclid(1_000)))
-    }
-}
-
-fn deserialize_optional_epoch_seconds<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<i64>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
-    Ok(value.as_ref().and_then(parse_epoch_seconds_value))
-}
-
-fn deserialize_optional_epoch_milliseconds<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<i64>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
-    Ok(value.as_ref().and_then(parse_epoch_milliseconds_value))
-}
-
-fn parse_epoch_seconds_value(value: &serde_json::Value) -> Option<i64> {
-    match value {
-        serde_json::Value::Number(number) => number
-            .as_i64()
-            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok()))
-            .or_else(|| number.as_f64().map(|value| value.trunc() as i64)),
-        serde_json::Value::String(value) => parse_epoch_seconds_string(value),
-        _ => None,
-    }
-}
-
-fn parse_epoch_milliseconds_value(value: &serde_json::Value) -> Option<i64> {
-    match value {
-        serde_json::Value::Number(number) => number
-            .as_i64()
-            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok()))
-            .or_else(|| number.as_f64().map(|value| value.trunc() as i64)),
-        serde_json::Value::String(value) => value.trim().parse::<i64>().ok(),
-        _ => None,
-    }
-}
-
-fn parse_epoch_seconds_string(value: &str) -> Option<i64> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed.parse::<i64>().ok().or_else(|| {
-        DateTime::parse_from_rfc3339(trimmed)
-            .map(|datetime| datetime.with_timezone(&Utc).timestamp())
-            .ok()
-    })
 }
 
 pub fn usage_plan_capacity_pressure_scale_bps(usage: &UsageResponse) -> i64 {

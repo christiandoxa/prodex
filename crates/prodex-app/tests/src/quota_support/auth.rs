@@ -45,6 +45,50 @@ fn reset_credit_consume_response_preserves_explicit_outcome() {
     );
 }
 
+#[test]
+fn accounts_response_extracts_workspace_names() {
+    let list: ChatgptAccountsResponse = serde_json::from_str(
+        r#"{"accounts":[{"id":"acct_personal","structure":"personal"},{"id":"acct_team","name":"Team Workspace","structure":"workspace"}]}"#,
+    )
+    .unwrap();
+    let accounts = list.accounts();
+    assert_eq!(accounts[0].display_name().as_deref(), Some("Personal"));
+    assert_eq!(
+        accounts[1].display_name().as_deref(),
+        Some("Team Workspace")
+    );
+
+    let map: ChatgptAccountsResponse = serde_json::from_str(
+        r#"{"account_ordering":["acct_team"],"accounts":{"acct_team":{"account":{"account_id":"acct_team","name":"Team Workspace","structure":"workspace"}}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        map.accounts()[0].display_name().as_deref(),
+        Some("Team Workspace")
+    );
+
+    let unordered_map: ChatgptAccountsResponse = serde_json::from_str(
+        r#"{"accounts":{"acct_team":{"account":{"account_id":"acct_team","name":"Team Workspace","structure":"workspace"}}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        unordered_map.accounts()[0].display_name().as_deref(),
+        Some("Team Workspace")
+    );
+}
+
+#[test]
+fn accounts_check_url_matches_codex_backend_style() {
+    assert_eq!(
+        chatgpt_accounts_check_url("https://chatgpt.com/backend-api"),
+        "https://chatgpt.com/backend-api/wham/accounts/check"
+    );
+    assert_eq!(
+        chatgpt_accounts_check_url("http://127.0.0.1:8080"),
+        "http://127.0.0.1:8080/api/codex/accounts/check"
+    );
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!(
         "prodex-auth-summary-{name}-{}-{}",

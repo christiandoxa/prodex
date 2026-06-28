@@ -16,6 +16,7 @@ fn render_quota_report_input(report: &QuotaReport) -> prodex_quota::QuotaReport 
         active: report.active,
         auth: report.auth.clone(),
         workspace_id: report.workspace_id.clone(),
+        workspace_name: report.workspace_name.clone(),
         result: report
             .result
             .as_ref()

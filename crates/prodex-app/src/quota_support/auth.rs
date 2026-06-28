@@ -12,6 +12,7 @@ use prodex_core::AppPaths;
 use prodex_quota::{AuthSummary, UsageAuth, UsageAuthSyncOutcome, UsageAuthSyncSource};
 use prodex_shared_types::StoredAuth;
 use reqwest::blocking::Client;
+use serde::Deserialize;
 use serde::Serialize;
 use std::env;
 use std::path::Path;
@@ -36,6 +37,12 @@ pub(crate) enum RateLimitResetCreditConsumeOutcome {
 pub(crate) struct RateLimitResetCreditConsumeResponse {
     #[serde(default = "default_rate_limit_reset_credit_consume_outcome")]
     pub(crate) outcome: RateLimitResetCreditConsumeOutcome,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChatgptWorkspaceSummary {
+    pub(crate) account_id: String,
+    pub(crate) name: Option<String>,
 }
 
 fn default_rate_limit_reset_credit_consume_outcome() -> RateLimitResetCreditConsumeOutcome {
@@ -320,6 +327,159 @@ pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
     let stored_auth: StoredAuth = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", auth_location.display()))?;
     prodex_quota::usage_auth_from_stored_auth(&stored_auth)
+}
+
+pub(crate) fn read_profile_workspace_from_auth(
+    codex_home: &Path,
+    base_url: Option<&str>,
+) -> Result<Option<ChatgptWorkspaceSummary>> {
+    let auth = read_usage_auth(codex_home)?;
+    let Some(account_id) = auth
+        .account_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+    else {
+        return Ok(None);
+    };
+    let fallback = || {
+        Some(ChatgptWorkspaceSummary {
+            account_id: account_id.clone(),
+            name: None,
+        })
+    };
+    let Ok(client) = build_upstream_blocking_http_client("accounts HTTP", false) else {
+        return Ok(fallback());
+    };
+    let accounts_url = chatgpt_accounts_check_url(&quota_base_url(base_url));
+    let mut request = client
+        .get(&accounts_url)
+        .header("Authorization", format!("Bearer {}", auth.access_token))
+        .header("User-Agent", "codex-cli");
+    request = request.header("ChatGPT-Account-Id", &account_id);
+    let Ok(response) = request.send() else {
+        return Ok(fallback());
+    };
+    let status = response.status();
+    let Ok(body) = response.bytes() else {
+        return Ok(fallback());
+    };
+    if !status.is_success() {
+        return Ok(fallback());
+    }
+    let Ok(accounts) = serde_json::from_slice::<ChatgptAccountsResponse>(&body) else {
+        return Ok(fallback());
+    };
+    Ok(accounts
+        .accounts()
+        .into_iter()
+        .find(|account| account.id == account_id.as_str())
+        .map(|account| ChatgptWorkspaceSummary {
+            name: account.display_name(),
+            account_id: account.id,
+        })
+        .or_else(fallback))
+}
+
+fn chatgpt_accounts_check_url(base_url: &str) -> String {
+    let base_url = base_url.trim_end_matches('/');
+    if base_url.contains("/backend-api") {
+        format!("{base_url}/wham/accounts/check")
+    } else {
+        format!("{base_url}/api/codex/accounts/check")
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatgptAccountsResponse {
+    #[serde(default)]
+    accounts: ChatgptAccounts,
+    #[serde(default)]
+    account_ordering: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ChatgptAccounts {
+    List(Vec<ChatgptAccountEntry>),
+    Map(std::collections::HashMap<String, ChatgptAccountWrapper>),
+}
+
+impl Default for ChatgptAccounts {
+    fn default() -> Self {
+        Self::List(Vec::new())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatgptAccountWrapper {
+    account: ChatgptAccountInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatgptAccountInfo {
+    account_id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    structure: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatgptAccountEntry {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    structure: Option<String>,
+}
+
+impl ChatgptAccountsResponse {
+    fn accounts(self) -> Vec<ChatgptAccountEntry> {
+        match self.accounts {
+            ChatgptAccounts::List(accounts) => accounts,
+            ChatgptAccounts::Map(mut accounts) => {
+                let ordered = self
+                    .account_ordering
+                    .iter()
+                    .filter_map(|account_id| accounts.remove(account_id))
+                    .collect::<Vec<_>>();
+                let entries = if ordered.is_empty() {
+                    accounts.into_values().collect()
+                } else {
+                    ordered
+                };
+                entries
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let account = entry.account;
+                        Some(ChatgptAccountEntry {
+                            id: account.account_id?,
+                            name: account.name,
+                            structure: account.structure,
+                        })
+                    })
+                    .collect()
+            }
+        }
+    }
+}
+
+impl ChatgptAccountEntry {
+    fn display_name(&self) -> Option<String> {
+        self.name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                self.structure
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|structure| structure.eq_ignore_ascii_case("personal"))
+                    .map(|_| "Personal".to_string())
+            })
+    }
 }
 
 pub(crate) fn usage_auth_needs_proactive_refresh(auth: &UsageAuth, now: i64) -> bool {

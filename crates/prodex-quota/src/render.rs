@@ -1,6 +1,5 @@
 use chrono::{Local, TimeZone};
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
 use terminal_ui::{
     CLI_LABEL_WIDTH, CLI_TABLE_GAP, current_cli_width, fit_cell, format_field_lines_with_layout,
     panel_label_width, section_header_with_width, text_width, wrap_text,

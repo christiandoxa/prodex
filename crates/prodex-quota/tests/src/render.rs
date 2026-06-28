@@ -38,6 +38,7 @@ fn openai_report(name: &str, usage: UsageResponse) -> QuotaReport {
             quota_compatible: true,
         },
         workspace_id: None,
+        workspace_name: None,
         result: Ok(ProviderQuotaSnapshot::OpenAi(usage)),
         fetched_at: 1_700_000_000,
     }
@@ -106,8 +107,16 @@ fn openai_quota_status_uses_short_blocked_labels() {
         "Blocked unauthorized"
     );
     assert_eq!(
+        format_quota_error_detail("HTTP 401 unauthorized"),
+        "error: unauthorized"
+    );
+    assert_eq!(
         format_quota_error_status("quota unavailable in test"),
         "Error unavailable"
+    );
+    assert_eq!(
+        format_quota_error_detail("quota unavailable in test"),
+        "error: unavailable"
     );
     for (input, expected) in [
         ("HTTP 500 internal server error", "Error server"),
@@ -140,11 +149,7 @@ fn compact_window_format_uses_scale_of_100() {
 #[test]
 fn openai_quota_renders_rate_limit_reset_credits() {
     let mut usage = usage_with_main_windows(0, 1_700_001_800, 80, 1_700_259_200);
-    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary {
-        available_count: 2,
-        expires_at: None,
-        expires_at_ms: None,
-    });
+    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary { available_count: 2 });
 
     let panel =
         render_profile_quota_snapshot("main", &ProviderQuotaSnapshot::OpenAi(usage.clone()));
@@ -175,25 +180,6 @@ fn quota_reports_put_status_in_column_and_resets_on_left_detail_line() {
 }
 
 #[test]
-fn openai_quota_renders_rate_limit_reset_credit_expiration() {
-    let mut usage = usage_with_main_windows(0, 1_700_001_800, 80, 1_700_259_200);
-    usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary {
-        available_count: 2,
-        expires_at: Some(1_700_086_400),
-        expires_at_ms: None,
-    });
-
-    let expires_at = format_precise_reset_time(Some(1_700_086_400));
-    let panel =
-        render_profile_quota_snapshot("main", &ProviderQuotaSnapshot::OpenAi(usage.clone()));
-    assert!(panel.contains(&format!("2 available; expires {expires_at}")));
-
-    let overview =
-        render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 160);
-    assert!(overview.contains(&format!("reset credits: 2 available, expires {expires_at}")));
-}
-
-#[test]
 fn openai_quota_deserializes_rate_limit_reset_credits() {
     let camel_usage: UsageResponse = serde_json::from_value(serde_json::json!({
         "email": "user@example.com",
@@ -201,8 +187,7 @@ fn openai_quota_deserializes_rate_limit_reset_credits() {
         "rate_limit": null,
         "code_review_rate_limit": null,
         "rate_limit_reset_credits": {
-            "availableCount": 3,
-            "expiresAt": 1700086400
+            "availableCount": 3
         }
     }))
     .expect("usage response should deserialize reset credits");
@@ -212,15 +197,10 @@ fn openai_quota_deserializes_rate_limit_reset_credits() {
         .as_ref()
         .expect("camel reset credits");
     assert_eq!(camel_credits.available_count, 3);
-    assert_eq!(
-        camel_credits.expiration_epoch_seconds(),
-        Some(1_700_086_400)
-    );
 
     let snake_usage: UsageResponse = serde_json::from_value(serde_json::json!({
         "rate_limit_reset_credits": {
-            "available_count": 4,
-            "expires_at": "2023-11-15T22:13:20Z"
+            "available_count": 4
         }
     }))
     .expect("usage response should deserialize backend reset credits");
@@ -230,26 +210,6 @@ fn openai_quota_deserializes_rate_limit_reset_credits() {
         .as_ref()
         .expect("snake reset credits");
     assert_eq!(snake_credits.available_count, 4);
-    assert_eq!(
-        snake_credits.expiration_epoch_seconds(),
-        Some(1_700_086_400)
-    );
-
-    let millis_usage: UsageResponse = serde_json::from_value(serde_json::json!({
-        "rate_limit_reset_credits": {
-            "available_count": 5,
-            "expires_at_ms": 1700086400000_i64
-        }
-    }))
-    .expect("usage response should deserialize millisecond reset-credit expiration");
-
-    assert_eq!(
-        millis_usage
-            .rate_limit_reset_credits
-            .as_ref()
-            .and_then(RateLimitResetCreditsSummary::expiration_epoch_seconds),
-        Some(1_700_086_400)
-    );
 }
 
 #[test]
@@ -299,6 +259,8 @@ fn quota_pool_available_count_excludes_blocked_profiles() {
 
     assert!(output.contains("Available:"));
     assert!(output.contains("1/2 profile"));
+    assert!(output.contains("Usable now:"));
+    assert!(output.contains("5h 80% | weekly 95% across 1 ready profile(s)"));
 }
 
 #[test]
@@ -401,6 +363,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
                 quota_compatible: true,
             },
             workspace_id: None,
+            workspace_name: None,
             result: Err("boom".to_string()),
             fetched_at: 1_700_000_000,
         },
@@ -410,7 +373,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         ),
     ];
 
-    let output = render_quota_reports_with_line_limit(&reports, false, Some(14));
+    let output = render_quota_reports_with_line_limit(&reports, false, Some(15));
 
     assert!(output.contains("ready-early"));
     assert!(output.contains("ready-late"));
@@ -438,6 +401,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
                 quota_compatible: true,
             },
             workspace_id: None,
+            workspace_name: None,
             result: Err("boom".to_string()),
             fetched_at: 1_700_000_000,
         },
@@ -466,7 +430,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
 }
 
 #[test]
-fn quota_reports_detail_shows_workspace_only_for_duplicate_account_email() {
+fn quota_reports_detail_shows_workspace_for_all_openai_profiles() {
     let mut first_usage = usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800);
     first_usage.email = Some("same@example.com".to_string());
     let mut second_usage = usage_with_main_windows(80, 1_700_003_600, 88, 1_700_086_400);
@@ -487,6 +451,7 @@ fn quota_reports_detail_shows_workspace_only_for_duplicate_account_email() {
         openai_report("solo", solo_usage),
     ];
     reports[0].workspace_id = Some("acct_workspace_one_123456789".to_string());
+    reports[0].workspace_name = Some("Personal".to_string());
     reports[1].workspace_id = Some("acct_workspace_two_987654321".to_string());
     reports[2].workspace_id = Some("acct_same_workspace".to_string());
     reports[3].workspace_id = Some("acct_same_workspace".to_string());
@@ -494,10 +459,11 @@ fn quota_reports_detail_shows_workspace_only_for_duplicate_account_email() {
 
     let output = render_quota_reports_with_layout(&reports, true, None, 160);
 
-    assert!(output.contains("workspace: acct_workspa...456789"));
+    assert!(output.contains("workspace: Personal"));
+    assert!(!output.contains("workspace: acct_workspa...456789"));
     assert!(output.contains("workspace: acct_workspa...654321"));
-    assert!(!output.contains("workspace: acct_same_workspace"));
-    assert!(!output.contains("workspace: acct_solo"));
+    assert!(output.contains("workspace: acct_same_workspace"));
+    assert!(output.contains("workspace: acct_solo"));
 }
 
 #[test]
@@ -515,6 +481,7 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
                 quota_compatible: false,
             },
             workspace_id: None,
+            workspace_name: None,
             result: Ok(ProviderQuotaSnapshot::Copilot(CopilotQuotaInfo {
                 login: Some("copilot-user".to_string()),
                 access_type_sku: Some("free_limited_copilot".to_string()),
@@ -558,6 +525,7 @@ fn quota_reports_aggregate_copilot_remaining_pool() {
             quota_compatible: false,
         },
         workspace_id: None,
+        workspace_name: None,
         result: Ok(ProviderQuotaSnapshot::Copilot(CopilotQuotaInfo {
             login: Some("copilot-user".to_string()),
             access_type_sku: Some("free_limited_copilot".to_string()),
@@ -593,6 +561,7 @@ fn quota_reports_render_gemini_code_assist_buckets() {
             quota_compatible: true,
         },
         workspace_id: None,
+        workspace_name: None,
         result: Ok(ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
             email: Some("gemini-user@example.com".to_string()),
             plan: Some("pro".to_string()),
@@ -641,6 +610,7 @@ fn quota_reports_aggregate_gemini_remaining_buckets() {
             quota_compatible: true,
         },
         workspace_id: None,
+        workspace_name: None,
         result: Ok(ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
             email: Some("gemini-user@example.com".to_string()),
             plan: Some("pro".to_string()),
@@ -692,6 +662,7 @@ fn quota_reports_render_external_provider_snapshots() {
             quota_compatible: false,
         },
         workspace_id: None,
+        workspace_name: None,
         result: Ok(ProviderQuotaSnapshot::External(ExternalQuotaInfo {
             provider: "DeepSeek".to_string(),
             account: None,

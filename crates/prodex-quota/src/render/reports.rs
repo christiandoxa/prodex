@@ -75,9 +75,7 @@ pub fn render_quota_reports_window_with_sort(
         render_quota_pool_summary_lines(&collect_quota_pool_aggregate(reports), total_width);
     let sections = build_quota_report_sections(reports, column_widths, detail, total_width, sort);
     let header = render_quota_report_header(column_widths);
-    let has_pool_summary = !pool_summary.is_empty();
-    let mut output =
-        render_quota_report_window_header(total_width, &pool_summary, &header, has_pool_summary);
+    let mut output = render_quota_report_window_header(total_width, &pool_summary, &header);
     let total_profiles = sections.len();
     let start_profile = if total_profiles == 0 {
         0
@@ -187,7 +185,7 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
             plan: "-".to_string(),
             main: "-".to_string(),
             status: format_quota_error_status(err),
-            resets: Some("resets: unavailable".to_string()),
+            resets: Some(format_quota_error_detail(err)),
         },
     }
 }
@@ -195,16 +193,10 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
 fn format_openai_reset_summary(usage: &UsageResponse) -> String {
     let reset_summary = format_main_reset_summary(usage);
     match usage.rate_limit_reset_credits.as_ref() {
-        Some(credits) => {
-            let mut credit_summary = format!("{} available", credits.available_count);
-            if let Some(expires_at) = credits.expiration_epoch_seconds() {
-                credit_summary.push_str(&format!(
-                    ", expires {}",
-                    format_precise_reset_time(Some(expires_at))
-                ));
-            }
-            format!("resets: {reset_summary}; reset credits: {credit_summary}")
-        }
+        Some(credits) => format!(
+            "resets: {reset_summary}; reset credits: {} available",
+            credits.available_count
+        ),
         None => format!("resets: {reset_summary}"),
     }
 }
@@ -233,13 +225,9 @@ fn render_quota_report_window_header(
     total_width: usize,
     pool_summary: &[String],
     header: &str,
-    has_pool_summary: bool,
 ) -> Vec<String> {
     let mut output = vec![section_header_with_width("Quota Overview", total_width)];
     output.extend(pool_summary.iter().cloned());
-    if has_pool_summary {
-        output.push(String::new());
-    }
     output.push(header.to_string());
     output.push("-".repeat(text_width(header)));
     output
@@ -252,18 +240,9 @@ fn build_quota_report_sections(
     total_width: usize,
     sort: QuotaReportSort,
 ) -> Vec<Vec<String>> {
-    let duplicate_workspace_emails = quota_report_duplicate_workspace_emails(reports);
     sort_quota_reports_for_display_with_sort(reports, sort)
         .into_iter()
-        .map(|report| {
-            render_quota_report_section(
-                report,
-                column_widths,
-                detail,
-                total_width,
-                &duplicate_workspace_emails,
-            )
-        })
+        .map(|report| render_quota_report_section(report, column_widths, detail, total_width))
         .collect()
 }
 
@@ -272,11 +251,10 @@ fn render_quota_report_section(
     column_widths: QuotaReportColumnWidths,
     detail: bool,
     total_width: usize,
-    duplicate_workspace_emails: &BTreeSet<String>,
 ) -> Vec<String> {
     let view = quota_report_view_data(report);
     let mut section = vec![render_quota_report_row(report, column_widths, &view)];
-    if detail && quota_report_should_show_workspace(report, duplicate_workspace_emails) {
+    if detail && quota_report_should_show_workspace(report) {
         push_wrapped_quota_report_line(
             &mut section,
             &format!("workspace: {}", quota_report_workspace_label(report)),
@@ -288,31 +266,6 @@ fn render_quota_report_section(
     }
     section.push(String::new());
     section
-}
-
-fn quota_report_duplicate_workspace_emails(reports: &[QuotaReport]) -> BTreeSet<String> {
-    let mut workspace_ids_by_email = BTreeMap::<String, BTreeSet<String>>::new();
-    for report in reports {
-        let Some(email) = quota_report_openai_email(report) else {
-            continue;
-        };
-        let Some(workspace_id) = report
-            .workspace_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|workspace_id| !workspace_id.is_empty())
-        else {
-            continue;
-        };
-        workspace_ids_by_email
-            .entry(normalize_email(email))
-            .or_default()
-            .insert(workspace_id.to_string());
-    }
-    workspace_ids_by_email
-        .into_iter()
-        .filter_map(|(email, workspace_ids)| (workspace_ids.len() > 1).then_some(email))
-        .collect()
 }
 
 fn quota_report_openai_email(report: &QuotaReport) -> Option<&str> {
@@ -328,16 +281,29 @@ fn quota_report_openai_email(report: &QuotaReport) -> Option<&str> {
     }
 }
 
-fn quota_report_should_show_workspace(
-    report: &QuotaReport,
-    duplicate_workspace_emails: &BTreeSet<String>,
-) -> bool {
-    quota_report_openai_email(report)
-        .map(normalize_email)
-        .is_some_and(|email| duplicate_workspace_emails.contains(&email))
+fn quota_report_should_show_workspace(report: &QuotaReport) -> bool {
+    quota_report_openai_email(report).is_some()
+        && (report
+            .workspace_name
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|name| !name.is_empty())
+            || report
+                .workspace_id
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|id| !id.is_empty()))
 }
 
 fn quota_report_workspace_label(report: &QuotaReport) -> String {
+    if let Some(name) = report
+        .workspace_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        return name.to_string();
+    }
     report
         .workspace_id
         .as_deref()
@@ -362,10 +328,6 @@ fn short_workspace_id(workspace_id: &str) -> String {
         .rev()
         .collect::<String>();
     format!("{prefix}...{suffix}")
-}
-
-fn normalize_email(email: &str) -> String {
-    email.trim().to_ascii_lowercase()
 }
 
 fn render_quota_report_row(

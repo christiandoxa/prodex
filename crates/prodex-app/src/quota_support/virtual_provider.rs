@@ -109,6 +109,7 @@ fn virtual_quota_report_with_provider(
         },
         provider,
         workspace_id: None,
+        workspace_name: None,
         result,
         fetched_at: Local::now().timestamp(),
     }

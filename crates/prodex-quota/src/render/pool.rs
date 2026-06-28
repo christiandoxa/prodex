@@ -5,9 +5,12 @@ pub(super) struct QuotaPoolAggregate {
     total_profiles: usize,
     available_profiles: usize,
     profiles_with_data: usize,
+    ready_profiles_with_data: usize,
     main_profiles_with_data: usize,
     five_hour_pool_remaining: i64,
     weekly_pool_remaining: i64,
+    ready_five_hour_pool_remaining: i64,
+    ready_weekly_pool_remaining: i64,
     main_pool_remaining: i64,
     earliest_five_hour_reset_at: Option<i64>,
     earliest_weekly_reset_at: Option<i64>,
@@ -42,6 +45,11 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
                 aggregate.profiles_with_data += 1;
                 aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
                 aggregate.weekly_pool_remaining += weekly.remaining_percent;
+                if collect_blocked_limits(usage, false).is_empty() {
+                    aggregate.ready_profiles_with_data += 1;
+                    aggregate.ready_five_hour_pool_remaining += five_hour.remaining_percent;
+                    aggregate.ready_weekly_pool_remaining += weekly.remaining_percent;
+                }
                 if five_hour.reset_at != i64::MAX {
                     aggregate.earliest_five_hour_reset_at = Some(
                         aggregate
@@ -174,6 +182,14 @@ fn quota_pool_summary_fields_for_aggregate(
         ),
     ];
     if aggregate.profiles_with_data > 0 {
+        fields.push((
+            "Usable now".to_string(),
+            format_ready_pool_remaining(
+                aggregate.ready_five_hour_pool_remaining,
+                aggregate.ready_weekly_pool_remaining,
+                aggregate.ready_profiles_with_data,
+            ),
+        ));
         fields.extend([
             (
                 "5h remaining pool".to_string(),
@@ -222,6 +238,19 @@ fn quota_pool_summary_fields_for_aggregate(
         ]);
     }
     fields
+}
+
+fn format_ready_pool_remaining(
+    five_hour_remaining: i64,
+    weekly_remaining: i64,
+    ready_profiles: usize,
+) -> String {
+    if ready_profiles == 0 {
+        return "Unavailable".to_string();
+    }
+    format!(
+        "5h {five_hour_remaining}% | weekly {weekly_remaining}% across {ready_profiles} ready profile(s)"
+    )
 }
 
 pub fn format_info_pool_remaining(

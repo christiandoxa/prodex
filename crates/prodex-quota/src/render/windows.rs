@@ -490,6 +490,16 @@ pub fn format_quota_error_status(error: &str) -> String {
     }
 }
 
+pub fn format_quota_error_detail(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    let summary = if lower.contains("401") || lower.contains("unauthorized") {
+        "unauthorized".to_string()
+    } else {
+        quota_error_summary(error)
+    };
+    format!("error: {summary}")
+}
+
 fn quota_error_summary(error: &str) -> String {
     let first_line = first_line_of_error(error);
     if first_line.is_empty() || first_line == "-" {
