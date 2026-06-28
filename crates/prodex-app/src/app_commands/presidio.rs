@@ -8,6 +8,8 @@ use prodex_presidio::{
     presidio_http_client, probe_presidio_health, validate_presidio_url,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
+#[cfg(test)]
+use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
