@@ -69,7 +69,7 @@ fn compact_window_format_uses_scale_of_100() {
         limit_window_seconds: Some(18_000),
     };
 
-    assert_eq!(format_window_status_compact(&window), "5h 63% left");
+    assert_eq!(format_window_status_compact(&window), "5h 63%");
     assert!(format_window_status(&window).contains("63% left"));
     assert!(format_window_status(&window).contains("37% used"));
 }

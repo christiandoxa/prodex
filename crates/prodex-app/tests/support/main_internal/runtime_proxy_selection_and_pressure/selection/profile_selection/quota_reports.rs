@@ -159,13 +159,13 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         },
     ];
 
-    let output = render_quota_reports_with_line_limit(&reports, false, Some(16));
+    let output = render_quota_reports_with_line_limit(&reports, false, Some(14));
 
     assert!(output.contains("ready-early"));
     assert!(output.contains("ready-late"));
-    assert!(!output.contains("blocked"));
+    assert!(output.contains("blocked"));
     assert!(!output.contains("error"));
-    assert!(output.contains("\n\nshowing top 2 of 4 profiles"));
+    assert!(output.contains("\n\nshowing top 3 of 4 profiles"));
 }
 
 #[test]
@@ -345,9 +345,10 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
     assert!(output.contains("copilot-main"));
     assert!(output.contains("copilot-user"));
     assert!(output.contains("individual"));
-    assert!(output.contains("chat 450/500 left"));
-    assert!(output.contains("comp 4000/4000 left"));
-    assert!(output.contains("status: Ready"));
+    assert!(output.contains("chat 450/500"));
+    assert!(output.contains("comp 4000/4000"));
+    assert!(output.contains("Ready"));
+    assert!(!output.contains("status: Ready"));
     assert!(output.contains("resets: monthly 2026-05-09"));
     assert!(!output.contains("GitHub Copilot profiles do not expose ChatGPT quota"));
 }
@@ -415,15 +416,16 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
 
     assert_eq!(window.start_profile, 1);
     assert_eq!(window.total_profiles, 4);
-    assert_eq!(window.shown_profiles, 2);
+    assert_eq!(window.shown_profiles, 3);
     assert_eq!(window.hidden_before, 1);
-    assert_eq!(window.hidden_after, 1);
+    assert_eq!(window.hidden_after, 0);
     assert!(window.output.contains("ready-late"));
     assert!(window.output.contains("blocked"));
+    assert!(window.output.contains("error"));
     assert!(!window.output.contains("ready-early"));
     assert!(
         window
             .output
-            .contains("\n\npress Up/Down to scroll profiles (2-3 of 4; 1 above, 1 below)")
+            .contains("\n\npress Up/Down to scroll profiles (2-4 of 4; 1 above, 0 below)")
     );
 }
