@@ -16,7 +16,7 @@
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1735,
+    "maxLines": 1733,
     "reason": "Live quota ratatui rendering, status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
   },
   {

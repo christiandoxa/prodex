@@ -51,7 +51,7 @@ fn status_panel_draws_on_test_backend() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    let backend = TestBackend::new(48, 5);
+    let backend = TestBackend::new(48, 3);
     let mut terminal = Terminal::new(backend).expect("terminal");
 
     draw_status_panel_terminal(

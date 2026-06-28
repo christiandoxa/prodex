@@ -19,9 +19,8 @@ use crate::{
     ProfileProviderExt, ProfileSelector, absolutize, audit_log_event_best_effort,
     collect_profile_summaries, copy_codex_home, create_codex_home_if_missing, default_codex_home,
     ensure_path_is_unique, fetch_profile_identity, find_profile_by_identity,
-    managed_profile_home_path, prepare_managed_codex_home, print_blank_line, print_panel,
-    read_auth_json_text, repair_missing_active_profile_and_save, resolve_profile_name,
-    update_existing_profile_auth,
+    managed_profile_home_path, prepare_managed_codex_home, print_panel, read_auth_json_text,
+    repair_missing_active_profile_and_save, resolve_profile_name, update_existing_profile_auth,
 };
 
 #[derive(Debug, Clone)]
@@ -385,10 +384,7 @@ fn print_profile_panels(panels: &[ProfilePanel]) -> Result<()> {
 
     let height = profile_tui_height(panels);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        for (index, panel) in panels.iter().enumerate() {
-            if index > 0 {
-                print_blank_line();
-            }
+        for panel in panels {
             print_panel(&panel.title, &panel.fields);
         }
         return Ok(());
@@ -599,12 +595,7 @@ fn profile_scroll_footer(scroll_offset: usize, max_scroll: usize) -> String {
 }
 
 fn profile_tui_height(panels: &[ProfilePanel]) -> u16 {
-    let rows = panels
-        .iter()
-        .map(|panel| panel.fields.len().saturating_add(2))
-        .sum::<usize>()
-        .saturating_add(4)
-        .max(8);
+    let rows = profile_tui_lines(panels).len().saturating_add(4).max(4);
     let terminal_height = terminal::size()
         .map(|(_, height)| usize::from(height))
         .unwrap_or(24);
@@ -618,9 +609,6 @@ fn profile_tui_text(panels: &[ProfilePanel]) -> Text<'static> {
 fn profile_tui_lines(panels: &[ProfilePanel]) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for panel in panels {
-        if !lines.is_empty() {
-            lines.push(Line::raw(""));
-        }
         lines.push(Line::styled(panel.title.clone(), tui_title_style()));
         let label_width = panel
             .fields
@@ -679,6 +667,25 @@ mod tests {
         assert!(text.contains("Profiles"));
         assert!(text.contains("main"));
         assert!(text.contains("OpenAI"));
+    }
+
+    #[test]
+    fn profile_tui_lines_do_not_pad_between_panels() {
+        let panels = vec![
+            ProfilePanel {
+                title: "One".to_string(),
+                fields: vec![("Active".to_string(), "main".to_string())],
+            },
+            ProfilePanel {
+                title: "Two".to_string(),
+                fields: vec![("Provider".to_string(), "OpenAI".to_string())],
+            },
+        ];
+
+        let lines = profile_tui_lines(&panels);
+        assert_eq!(lines.len(), 4);
+        assert!(!format!("{:?}", lines[2]).contains("\"\""));
+        assert!(format!("{:?}", lines[2]).contains("Two"));
     }
 
     #[test]

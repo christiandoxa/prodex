@@ -321,33 +321,22 @@ where
     B::Error: Send + Sync + 'static,
 {
     terminal.draw(|frame| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(frame.area());
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled(title.to_string(), tui_title_style()),
-            Span::raw("  "),
-            Span::styled(phase.to_string(), tui_secondary_style()),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
-        frame.render_widget(header, chunks[0]);
-
         let body = Paragraph::new(Line::from(vec![
             Span::styled(format!("{label} "), tui_secondary_style()),
             Span::styled(message.to_string(), tui_primary_style()),
         ]))
         .block(
             Block::default()
-                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
+                .title(Line::from(vec![
+                    Span::styled(title.to_string(), tui_title_style()),
+                    Span::raw("  "),
+                    Span::styled(phase.to_string(), tui_secondary_style()),
+                ]))
+                .borders(Borders::ALL)
                 .border_style(tui_border_style()),
         )
         .wrap(Wrap { trim: false });
-        frame.render_widget(body, chunks[1]);
+        frame.render_widget(body, frame.area());
     })?;
     Ok(())
 }

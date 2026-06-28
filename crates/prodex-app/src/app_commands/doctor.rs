@@ -329,10 +329,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
 fn print_doctor_output(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Result<()> {
     let height = doctor_tui_height(panels, suggestion_lines);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        for (index, panel) in panels.iter().enumerate() {
-            if index > 0 {
-                print_blank_line();
-            }
+        for panel in panels {
             print_panel(&panel.title, &panel.fields);
         }
         if !suggestion_lines.is_empty() {
@@ -374,14 +371,11 @@ fn print_doctor_output(panels: &[DoctorPanel], suggestion_lines: &[String]) -> R
 }
 
 fn doctor_tui_height(panels: &[DoctorPanel], suggestion_lines: &[String]) -> u16 {
-    let panel_rows = panels
-        .iter()
-        .map(|panel| panel.fields.len().saturating_add(2))
-        .sum::<usize>();
-    let rows = panel_rows
-        .saturating_add(suggestion_lines.len())
-        .saturating_add(5)
-        .max(8);
+    let rows = doctor_tui_text(panels, suggestion_lines)
+        .lines
+        .len()
+        .saturating_add(4)
+        .max(4);
     let terminal_height = terminal::size()
         .map(|(_, height)| usize::from(height))
         .unwrap_or(24);
@@ -391,9 +385,6 @@ fn doctor_tui_height(panels: &[DoctorPanel], suggestion_lines: &[String]) -> u16
 fn doctor_tui_text(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Text<'static> {
     let mut lines = Vec::new();
     for panel in panels {
-        if !lines.is_empty() {
-            lines.push(Line::raw(""));
-        }
         lines.push(Line::styled(panel.title.clone(), tui_title_style()));
         let label_width = panel
             .fields
@@ -648,6 +639,24 @@ mod tests {
         assert!(text.contains("ready"));
         assert!(text.contains("Blocked"));
         assert!(text.contains("Policy Suggestions"));
+    }
+
+    #[test]
+    fn doctor_tui_text_does_not_pad_between_panels() {
+        let panels = vec![
+            DoctorPanel {
+                title: "One".to_string(),
+                fields: vec![("Runtime".to_string(), "ready".to_string())],
+            },
+            DoctorPanel {
+                title: "Two".to_string(),
+                fields: vec![("Quota".to_string(), "Ready".to_string())],
+            },
+        ];
+
+        let lines = doctor_tui_text(&panels, &[]).lines;
+        assert_eq!(lines.len(), 4);
+        assert!(format!("{:?}", lines[2]).contains("Two"));
     }
 
     #[test]

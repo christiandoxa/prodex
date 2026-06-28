@@ -101,8 +101,8 @@ fn quota_reports_detail_shows_workspace_only_for_duplicate_account_email() {
 
     assert!(output.contains("workspace: acct_workspa...456789"));
     assert!(output.contains("workspace: acct_workspa...654321"));
-    assert!(!output.contains("workspace: acct_same_workspace"));
-    assert!(!output.contains("workspace: acct_solo"));
+    assert!(output.contains("workspace: acct_same_workspace"));
+    assert!(output.contains("workspace: acct_solo"));
 }
 
 #[test]
@@ -298,7 +298,7 @@ fn quota_reports_include_pool_summary_lines() {
     assert!(output.contains("Weekly remaining pool:"));
     assert!(output.contains(&format_info_pool_remaining(135, 2, Some(five_hour_reset))));
     assert!(output.contains(&format_info_pool_remaining(135, 2, Some(weekly_reset))));
-    assert!(output.contains("\n\nPROFILE"));
+    assert!(output.contains("\nPROFILE"));
 }
 
 #[test]

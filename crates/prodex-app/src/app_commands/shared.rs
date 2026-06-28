@@ -91,7 +91,7 @@ impl LaunchStatusTui {
             anyhow::bail!("launch status TUI disabled");
         }
         if self.terminal.is_none() {
-            self.terminal = try_inline_stderr_terminal(5);
+            self.terminal = try_inline_stderr_terminal(3);
         }
         let Some(terminal) = self.terminal.as_mut() else {
             self.disabled = true;

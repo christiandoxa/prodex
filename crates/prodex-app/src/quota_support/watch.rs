@@ -9,8 +9,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
-use std::collections::{BTreeMap, BTreeSet};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use std::io::IsTerminal;
 use terminal_ui::{
     tui_border_style, tui_detail_style, tui_error_style, tui_muted_style, tui_success_style,
@@ -721,6 +720,7 @@ struct AllQuotaWatchTuiRow {
     plan: Vec<String>,
     status: Vec<String>,
     remaining: Vec<String>,
+    detail: Vec<String>,
 }
 
 fn build_all_quota_watch_tui_frame(
@@ -799,47 +799,44 @@ fn build_all_quota_watch_tui_table(
     start_profile: usize,
     shown_profiles: usize,
 ) -> AllQuotaWatchTuiTable {
-    let duplicate_workspace_emails = quota_watch_duplicate_workspace_emails(reports);
     let rows = sorted_quota_report_indexes_by_sort(reports, layout.sort)
         .into_iter()
         .skip(start_profile)
         .take(shown_profiles)
-        .map(|index| {
-            build_all_quota_watch_tui_row(
-                &reports[index],
-                layout.detail,
-                &duplicate_workspace_emails,
-            )
-        })
+        .map(|index| build_all_quota_watch_tui_row(&reports[index], layout.detail))
         .collect::<Vec<_>>();
     AllQuotaWatchTuiTable { rows }
 }
 
-fn build_all_quota_watch_tui_row(
-    report: &QuotaReport,
-    detail: bool,
-    duplicate_workspace_emails: &BTreeSet<String>,
-) -> AllQuotaWatchTuiRow {
+fn build_all_quota_watch_tui_row(report: &QuotaReport, detail: bool) -> AllQuotaWatchTuiRow {
     let view = quota_watch_report_view(report);
-    let mut account = vec![view.account];
-    if detail && quota_watch_should_show_workspace(report, duplicate_workspace_emails) {
-        account.push(format!(
+    let account = vec![view.account];
+    let mut detail_line = Vec::new();
+    if detail && quota_watch_should_show_workspace(report) {
+        detail_line.push(format!(
             "workspace: {}",
             quota_watch_workspace_label(report)
         ));
     }
-    let mut profile = vec![report.name.clone()];
     if detail && let Some(resets) = view.resets {
-        profile.push(resets);
+        let reset = quota_watch_reset_detail(&resets);
+        detail_line.insert(0, reset.windows);
+        if let Some(credits) = reset.credits {
+            detail_line.push(credits);
+        }
     }
     AllQuotaWatchTuiRow {
-        profile,
+        profile: vec![report.name.clone()],
         current: vec![if report.active { "*" } else { "" }.to_string()],
         auth: vec![report.auth.label.clone()],
         account,
         plan: vec![view.plan],
         status: vec![view.status],
         remaining: vec![view.main],
+        detail: (!detail_line.is_empty())
+            .then(|| detail_line.join(" | "))
+            .into_iter()
+            .collect(),
     }
 }
 
@@ -900,7 +897,7 @@ fn quota_watch_report_view(report: &QuotaReport) -> QuotaWatchReportView {
             plan: "-".to_string(),
             main: "-".to_string(),
             status: format_quota_error_status(err),
-            resets: Some("resets: unavailable".to_string()),
+            resets: Some(prodex_quota::format_quota_error_detail(err)),
         },
     }
 }
@@ -908,17 +905,37 @@ fn quota_watch_report_view(report: &QuotaReport) -> QuotaWatchReportView {
 fn quota_watch_openai_reset_summary(usage: &UsageResponse) -> String {
     let reset_summary = prodex_quota::format_main_reset_summary(usage);
     match usage.rate_limit_reset_credits.as_ref() {
-        Some(credits) => {
-            let mut credit_summary = format!("{} available", credits.available_count);
-            if let Some(expires_at) = credits.expiration_epoch_seconds() {
-                credit_summary.push_str(&format!(
-                    ", expires {}",
-                    prodex_quota::format_precise_reset_time(Some(expires_at))
-                ));
-            }
-            format!("resets: {reset_summary}; reset credits: {credit_summary}")
-        }
+        Some(credits) => format!(
+            "resets: {reset_summary}; reset credits: {} available",
+            credits.available_count
+        ),
         None => format!("resets: {reset_summary}"),
+    }
+}
+
+struct QuotaWatchResetDetail {
+    windows: String,
+    credits: Option<String>,
+}
+
+fn quota_watch_reset_detail(resets: &str) -> QuotaWatchResetDetail {
+    if resets.trim_start().starts_with("error:") {
+        return QuotaWatchResetDetail {
+            windows: resets.to_string(),
+            credits: None,
+        };
+    }
+    let (windows, credits) = resets
+        .strip_prefix("resets: ")
+        .unwrap_or(resets)
+        .split_once("; reset credits:")
+        .map_or(
+            (resets.strip_prefix("resets: ").unwrap_or(resets), None),
+            |(left, right)| (left, Some(right.trim())),
+        );
+    QuotaWatchResetDetail {
+        windows: format!("resets: {windows}"),
+        credits: credits.map(|credits| format!("reset credits: {credits}")),
     }
 }
 
@@ -927,31 +944,6 @@ fn quota_watch_optional(value: Option<&str>) -> &str {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("-")
-}
-
-fn quota_watch_duplicate_workspace_emails(reports: &[QuotaReport]) -> BTreeSet<String> {
-    let mut workspace_ids_by_email = BTreeMap::<String, BTreeSet<String>>::new();
-    for report in reports {
-        let Some(email) = quota_watch_openai_email(report) else {
-            continue;
-        };
-        let Some(workspace_id) = report
-            .workspace_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|workspace_id| !workspace_id.is_empty())
-        else {
-            continue;
-        };
-        workspace_ids_by_email
-            .entry(email.trim().to_ascii_lowercase())
-            .or_default()
-            .insert(workspace_id.to_string());
-    }
-    workspace_ids_by_email
-        .into_iter()
-        .filter_map(|(email, workspace_ids)| (workspace_ids.len() > 1).then_some(email))
-        .collect()
 }
 
 fn quota_watch_openai_email(report: &QuotaReport) -> Option<&str> {
@@ -967,40 +959,28 @@ fn quota_watch_openai_email(report: &QuotaReport) -> Option<&str> {
     }
 }
 
-fn quota_watch_should_show_workspace(
-    report: &QuotaReport,
-    duplicate_workspace_emails: &BTreeSet<String>,
-) -> bool {
-    quota_watch_openai_email(report)
-        .map(|email| email.trim().to_ascii_lowercase())
-        .is_some_and(|email| duplicate_workspace_emails.contains(&email))
+fn quota_watch_should_show_workspace(report: &QuotaReport) -> bool {
+    quota_watch_openai_email(report).is_some()
+        && (report
+            .workspace_name
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|name| !name.is_empty())
+            || report
+                .workspace_id
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|id| !id.is_empty()))
 }
 
 fn quota_watch_workspace_label(report: &QuotaReport) -> String {
     report
-        .workspace_id
+        .workspace_name
         .as_deref()
         .map(str::trim)
-        .filter(|workspace_id| !workspace_id.is_empty())
-        .map(quota_watch_short_workspace_id)
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
-fn quota_watch_short_workspace_id(workspace_id: &str) -> String {
-    let chars = workspace_id.chars().collect::<Vec<_>>();
-    if chars.len() <= 24 {
-        return workspace_id.to_string();
-    }
-    let prefix = chars.iter().take(12).collect::<String>();
-    let suffix = chars
-        .iter()
-        .rev()
-        .take(6)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    format!("{prefix}...{suffix}")
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| report.name.trim())
+        .to_string()
 }
 
 fn quota_human_tui_compact_label(line: &str) -> Option<&'static str> {
@@ -1159,17 +1139,26 @@ fn render_all_quota_watch_tui(frame: &mut ratatui::Frame<'_>, data: &AllQuotaWat
     frame.render_widget(body_block, chunks[0]);
 
     if let Some(table) = &data.table {
-        let overview_height = u16::try_from(data.overview_fields.len().saturating_add(2))
-            .unwrap_or(body_area.height)
-            .min(body_area.height);
+        let overview_height =
+            quota_watch_overview_height(data.overview_fields.len(), body_area.height);
         let body_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(overview_height), Constraint::Min(1)])
+            .constraints([
+                Constraint::Length(overview_height),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ])
             .split(body_area);
         let overview = Paragraph::new(quota_watch_fields_text(&data.body, &data.overview_fields))
             .wrap(ratatui::widgets::Wrap { trim: false });
         frame.render_widget(overview, body_chunks[0]);
-        render_all_quota_watch_tui_table(frame, body_chunks[1], table);
+        frame.render_widget(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(quota_watch_border_style()),
+            body_chunks[1],
+        );
+        render_all_quota_watch_tui_table(frame, body_chunks[2], table);
     } else if !data.overview_fields.is_empty() {
         let body = Paragraph::new(quota_watch_fields_text(&data.body, &data.overview_fields))
             .wrap(ratatui::widgets::Wrap { trim: false });
@@ -1233,75 +1222,79 @@ fn render_all_quota_watch_tui_table(
     area: ratatui::layout::Rect,
     table: &AllQuotaWatchTuiTable,
 ) {
-    let header = Row::new([
-        "PROFILE",
-        "CUR",
-        "AUTH",
-        "ACCOUNT",
-        "PLAN",
-        "STATUS",
-        "REMAINING",
-    ])
-    .style(quota_watch_title_style())
-    .bottom_margin(1);
-    let rows = table
-        .rows
-        .iter()
-        .map(|row| {
-            let height = [
-                row.profile.len(),
-                row.current.len(),
-                row.auth.len(),
-                row.account.len(),
-                row.plan.len(),
-                row.status.len(),
-                row.remaining.len(),
-            ]
-            .into_iter()
-            .max()
-            .unwrap_or(1)
-            .max(1);
-            Row::new(vec![
-                quota_watch_table_cell(&row.profile),
-                quota_watch_table_cell(&row.current),
-                quota_watch_table_cell(&row.auth),
-                quota_watch_table_cell(&row.account),
-                quota_watch_table_cell(&row.plan),
-                quota_watch_table_cell(&row.status),
-                quota_watch_table_cell(&row.remaining),
-            ])
-            .height(u16::try_from(height).unwrap_or(u16::MAX))
-            .bottom_margin(1)
-        })
-        .collect::<Vec<_>>();
-    let widths = [
-        Constraint::Percentage(23),
-        Constraint::Length(3),
-        Constraint::Length(7),
-        Constraint::Percentage(20),
-        Constraint::Length(8),
-        Constraint::Percentage(20),
-        Constraint::Percentage(37),
-    ];
-    let widget = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::TOP)
-                .border_style(quota_watch_border_style()),
-        )
-        .column_spacing(1)
-        .style(Style::default());
+    let text = quota_watch_table_text(table);
+    let widget = Paragraph::new(text).wrap(ratatui::widgets::Wrap { trim: false });
     frame.render_widget(widget, area);
 }
 
-fn quota_watch_table_cell(lines: &[String]) -> Cell<'_> {
-    Cell::from(Text::from(
-        lines
-            .iter()
-            .map(|line| Line::from(quota_human_tui_spans(line)))
-            .collect::<Vec<_>>(),
-    ))
+fn quota_watch_overview_height(field_count: usize, max_height: u16) -> u16 {
+    u16::try_from(field_count)
+        .unwrap_or(max_height)
+        .min(max_height)
+}
+
+fn quota_watch_table_text(table: &AllQuotaWatchTuiTable) -> Text<'static> {
+    let mut lines = vec![Line::styled(
+        format!(
+            "{:<24} {:<3} {:<7} {:<24} {:<8} {:<15} {}",
+            "PROFILE", "CUR", "AUTH", "ACCOUNT", "PLAN", "STATUS", "REMAINING"
+        ),
+        quota_watch_title_style(),
+    )];
+    for row in &table.rows {
+        lines.push(quota_watch_table_main_line(row));
+        for detail in &row.detail {
+            lines.push(Line::styled(detail.clone(), quota_watch_detail_style()));
+        }
+        lines.push(Line::raw(""));
+    }
+    Text::from(lines)
+}
+
+fn quota_watch_table_main_line(row: &AllQuotaWatchTuiRow) -> Line<'static> {
+    let status = quota_watch_first_cell(&row.status);
+    let cell = quota_watch_table_cell_text;
+    Line::from(vec![
+        Span::raw(cell(quota_watch_first_cell(&row.profile), 24)),
+        Span::raw(" "),
+        Span::raw(cell(quota_watch_first_cell(&row.current), 3)),
+        Span::raw(" "),
+        Span::raw(cell(quota_watch_first_cell(&row.auth), 7)),
+        Span::raw(" "),
+        Span::raw(cell(quota_watch_first_cell(&row.account), 24)),
+        Span::raw(" "),
+        Span::raw(cell(quota_watch_first_cell(&row.plan), 8)),
+        Span::raw(" "),
+        Span::styled(cell(status, 15), quota_watch_status_style(status)),
+        Span::raw(" "),
+        Span::raw(quota_watch_first_cell(&row.remaining).to_string()),
+    ])
+}
+
+fn quota_watch_table_cell_text(value: &str, width: usize) -> String {
+    let mut value = value.trim().to_string();
+    if value.chars().count() > width {
+        value = value
+            .chars()
+            .take(width.saturating_sub(1))
+            .collect::<String>();
+        value.push('~');
+    }
+    format!("{value:<width$}")
+}
+
+fn quota_watch_status_style(status: &str) -> Style {
+    if status.contains("Blocked") || status.contains("Error") {
+        tui_error_style()
+    } else if status.contains("Ready") || status.contains("healthy") {
+        tui_success_style()
+    } else {
+        Style::default()
+    }
+}
+
+fn quota_watch_first_cell(lines: &[String]) -> &str {
+    lines.first().map(String::as_str).unwrap_or("")
 }
 
 fn quota_watch_fields_text(title: &str, fields: &[(String, String)]) -> Text<'static> {
@@ -1362,11 +1355,15 @@ fn quota_human_tui_spans(line: &str) -> Vec<Span<'_>> {
         )];
     }
     if line.starts_with("workspace:")
+        || line.starts_with("error:")
         || line.starts_with("resets:")
         || line.starts_with("status:")
+        || line.starts_with("reset credits:")
         || line.trim_start().starts_with("workspace:")
+        || line.trim_start().starts_with("error:")
         || line.trim_start().starts_with("resets:")
         || line.trim_start().starts_with("status:")
+        || line.trim_start().starts_with("reset credits:")
     {
         return vec![Span::styled(line, quota_watch_detail_style())];
     }
@@ -1732,4 +1729,5 @@ fn apply_quota_watch_command(
 #[cfg(test)]
 mod tests {
     include!("../../tests/src/quota_support/watch_unit.rs");
+    include!("../../tests/src/quota_support/watch_tui_table_unit.rs");
 }

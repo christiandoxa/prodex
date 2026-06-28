@@ -22,6 +22,7 @@
             },
             provider,
             workspace_id: None,
+            workspace_name: None,
             result,
             fetched_at: 1_700_000_000,
         }
@@ -108,6 +109,12 @@
         });
 
         assert_eq!(range.as_deref(), Some("10-12/12; 9 above, 0 below"));
+    }
+
+    #[test]
+    fn quota_watch_overview_height_has_no_extra_spacer_line() {
+        assert_eq!(quota_watch_overview_height(5, 20), 5);
+        assert_eq!(quota_watch_overview_height(5, 4), 4);
     }
 
     #[test]
@@ -374,8 +381,6 @@
         let mut usage = test_openai_usage_with_windows(10, 20, reset_at);
         usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
             available_count: 1,
-            expires_at: None,
-            expires_at_ms: None,
         });
         let snapshot = AllQuotaWatchSnapshot::Reports {
             updated: "credits".to_string(),
@@ -561,39 +566,6 @@
             "active profile should be rendered before other profiles"
         );
         assert!(output.contains(" * "));
-    }
-
-    #[test]
-    fn all_quota_watch_detail_renders_openai_reset_credit_expiration() {
-        let expires_at = 1_700_086_400;
-        let usage = UsageResponse {
-            email: Some("main@example.com".to_string()),
-            plan_type: Some("plus".to_string()),
-            rate_limit: None,
-            code_review_rate_limit: None,
-            rate_limit_reset_credits: Some(prodex_quota::RateLimitResetCreditsSummary {
-                available_count: 1,
-                expires_at: Some(expires_at),
-                expires_at_ms: None,
-            }),
-            additional_rate_limits: Vec::new(),
-        };
-
-        let output = render_all_quota_watch_report_output(
-            &[test_quota_report("main", Ok(ProviderQuotaSnapshot::OpenAi(usage)))],
-            true,
-            0,
-            QuotaReportSort::Current,
-            QuotaProviderFilter::OpenAi,
-            false,
-        );
-
-        assert!(output.contains("filter: openai"));
-        let expires_display = format_precise_reset_time(Some(expires_at));
-        assert!(output.contains("reset credits: 1 available, expires"));
-        for part in expires_display.split_whitespace() {
-            assert!(output.contains(part), "missing {part:?} in output:\n{output}");
-        }
     }
 
     #[test]

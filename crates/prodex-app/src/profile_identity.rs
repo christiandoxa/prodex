@@ -86,10 +86,6 @@ pub(crate) fn fetch_profile_identity(codex_home: &Path) -> Result<ProfileIdentit
     Ok(identity)
 }
 
-pub(crate) fn read_profile_account_id_from_auth(codex_home: &Path) -> Result<Option<String>> {
-    Ok(read_profile_identity_from_auth(codex_home)?.account_id)
-}
-
 fn read_profile_identity_from_auth(codex_home: &Path) -> Result<ProfileIdentity> {
     let auth_location = secret_store::auth_json_path(codex_home);
 
