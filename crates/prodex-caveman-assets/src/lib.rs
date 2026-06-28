@@ -23,7 +23,7 @@ pub use rtk::configure_rtk_codex_home;
 pub use super_optimizers::{
     SuperOptimizerMemoryConfig, configure_super_optimizer_codex_home,
     configure_super_optimizer_codex_home_with_options,
-    configure_super_optimizer_codex_home_with_presidio,
+    configure_super_optimizer_codex_home_with_presidio, super_optimizer_command_ready,
 };
 
 pub const PRODEX_CAVEMAN_MARKETPLACE_NAME: &str = "prodex-caveman";

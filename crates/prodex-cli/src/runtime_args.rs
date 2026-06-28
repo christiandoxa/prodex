@@ -243,6 +243,20 @@ pub struct MemoryMcpArgs {
 pub struct InspectMcpArgs {}
 
 #[derive(Args, Debug)]
+pub struct McpJsonlBridgeArgs {
+    /// JSON-lines MCP server command to bridge to Codex stdio framing.
+    #[arg(value_name = "COMMAND")]
+    pub command: PathBuf,
+    /// Arguments passed to the JSON-lines MCP server.
+    #[arg(
+        value_name = "ARGS",
+        trailing_var_arg = true,
+        allow_hyphen_values = true
+    )]
+    pub args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
 pub struct ExposeArgs {
     /// Shell command to run inside the exposed PTY. Defaults to $SHELL or sh.
     #[arg(long, value_name = "COMMAND")]

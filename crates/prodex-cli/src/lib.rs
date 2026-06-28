@@ -211,6 +211,8 @@ pub enum Commands {
     MemoryMcp(MemoryMcpArgs),
     #[command(name = "__inspect-mcp", hide = true)]
     InspectMcp(InspectMcpArgs),
+    #[command(name = "__mcp-jsonl-bridge", hide = true)]
+    McpJsonlBridge(McpJsonlBridgeArgs),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -353,6 +355,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "__gemini-compat-refresh"
             | "__memory-mcp"
             | "__inspect-mcp"
+            | "__mcp-jsonl-bridge"
     )
 }
 

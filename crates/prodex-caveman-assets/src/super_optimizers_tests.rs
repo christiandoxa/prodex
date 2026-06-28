@@ -58,7 +58,34 @@ fn write_fake_executable(path: &Path, script: &str) {
 fn write_fake_sqz_mcp(path: &Path) {
     write_fake_executable(
         path,
-        "#!/usr/bin/env sh\nprintf '%s\\n' 'Usage: sqz-mcp [--transport stdio|sse]'\n",
+        r#"#!/usr/bin/env sh
+case "$*" in
+  *--help*) printf '%s\n' 'Usage: sqz-mcp [--transport stdio|sse]'; exit 0 ;;
+esac
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{"listChanged":false}},"protocolVersion":"2024-11-05","serverInfo":{"name":"sqz-mcp","version":"test"}}}' ;;
+    *'"method":"tools/list"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"sqz_read_file","inputSchema":{"type":"object"}}]}}' ;;
+  esac
+done
+"#,
+    );
+}
+
+fn write_fake_token_savior(path: &Path) {
+    write_fake_executable(
+        path,
+        r#"#!/usr/bin/env sh
+case "$*" in
+  *--version*) printf '%s\n' 'token-savior test'; exit 0 ;;
+esac
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{"listChanged":false}},"protocolVersion":"2024-11-05","serverInfo":{"name":"token-savior","version":"test"}}}' ;;
+    *'"method":"tools/list"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"list_projects","inputSchema":{"type":"object"}}]}}' ;;
+  esac
+done
+"#,
     );
 }
 
@@ -69,7 +96,7 @@ fn stdio_mcp_server_config_adds_missing_entry() {
         &mut table,
         "prodex-sqz",
         PathBuf::from("/tmp/sqz-mcp"),
-        &["--transport", "stdio"],
+        &["--transport".to_string(), "stdio".to_string()],
         &[],
     );
 
@@ -96,7 +123,7 @@ fn stdio_mcp_server_config_adds_missing_entry() {
 }
 
 #[test]
-fn stdio_mcp_server_config_preserves_existing_entries() {
+fn stdio_mcp_server_config_replaces_existing_prodex_entry() {
     let mut table = toml::Table::new();
     let mcp_servers = ensure_child_table(&mut table, "mcp_servers");
     mcp_servers.insert(
@@ -107,6 +134,18 @@ fn stdio_mcp_server_config_preserves_existing_entries() {
                 "command".to_string(),
                 toml::Value::String("/custom/sqz-mcp".to_string()),
             );
+            table.insert(
+                "args".to_string(),
+                toml::Value::Array(vec![toml::Value::String("--old".to_string())]),
+            );
+            table.insert(
+                "env".to_string(),
+                toml::Value::Table({
+                    let mut env = toml::Table::new();
+                    env.insert("STALE".to_string(), toml::Value::String("1".to_string()));
+                    env
+                }),
+            );
             table
         }),
     );
@@ -116,7 +155,7 @@ fn stdio_mcp_server_config_preserves_existing_entries() {
         &mut table,
         "prodex-sqz",
         PathBuf::from("/tmp/sqz-mcp"),
-        &["--transport", "stdio"],
+        &["--transport".to_string(), "stdio".to_string()],
         &[],
     );
 
@@ -130,13 +169,25 @@ fn stdio_mcp_server_config_preserves_existing_entries() {
         .expect("sqz server should still exist");
     assert_eq!(
         server.get("command").and_then(toml::Value::as_str),
-        Some("/custom/sqz-mcp")
+        Some("/tmp/sqz-mcp")
+    );
+    let args = server
+        .get("args")
+        .and_then(toml::Value::as_array)
+        .expect("sqz args should be rewritten")
+        .iter()
+        .map(|arg| arg.as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(args, vec!["--transport", "stdio"]);
+    assert!(
+        server.get("env").is_none(),
+        "stale env should not survive when current registration has none"
     );
     assert!(mcp_servers.contains_key("custom"));
 }
 
 #[test]
-fn stdio_mcp_server_config_merges_env_into_existing_entry() {
+fn stdio_mcp_server_config_replaces_existing_env() {
     let mut table = toml::Table::new();
     let mcp_servers = ensure_child_table(&mut table, "mcp_servers");
     mcp_servers.insert(
@@ -185,16 +236,13 @@ fn stdio_mcp_server_config_merges_env_into_existing_entry() {
         .expect("token-savior server should exist");
     assert_eq!(
         server.get("command").and_then(toml::Value::as_str),
-        Some("/custom/token-savior")
+        Some("/tmp/token-savior")
     );
     let env = server
         .get("env")
         .and_then(toml::Value::as_table)
         .expect("token-savior env should exist");
-    assert_eq!(
-        env.get("CUSTOM_ENV").and_then(toml::Value::as_str),
-        Some("preserved")
-    );
+    assert_eq!(env.get("CUSTOM_ENV").and_then(toml::Value::as_str), None);
     assert_eq!(
         env.get("TOKEN_SAVIOR_PROFILE")
             .and_then(toml::Value::as_str),
@@ -266,7 +314,7 @@ fn stdio_mcp_server_config_skips_non_table_mcp_servers() {
         &mut table,
         "prodex-sqz",
         PathBuf::from("/tmp/sqz-mcp"),
-        &["--transport", "stdio"],
+        &["--transport".to_string(), "stdio".to_string()],
         &[],
     );
 
@@ -315,8 +363,8 @@ fn token_savior_discovery_prefers_managed_venv_over_path() {
             .expect("managed parent should exist"),
     )
     .expect("managed parent should be created");
-    fs::write(&path_command, "").expect("path command should be written");
-    fs::write(&managed_command, "").expect("managed command should be written");
+    write_fake_token_savior(&path_command);
+    write_fake_token_savior(&managed_command);
     write_fake_mcp_package_for_venv_command(&managed_command);
 
     assert_eq!(
@@ -352,8 +400,8 @@ fn token_savior_discovery_skips_managed_venv_without_mcp_and_falls_back_to_path(
             .expect("managed parent should exist"),
     )
     .expect("managed parent should be created");
-    fs::write(&path_command, "").expect("path command should be written");
-    fs::write(&managed_command, "").expect("managed command should be written");
+    write_fake_token_savior(&path_command);
+    write_fake_token_savior(&managed_command);
 
     assert_eq!(
         find_optimizer_command(
@@ -386,8 +434,8 @@ fn managed_token_savior_discovery_prefers_venv_binary() {
     .expect("checkout parent should be created");
     fs::create_dir_all(venv_command.parent().expect("venv parent should exist"))
         .expect("venv parent should be created");
-    fs::write(&checkout_command, "").expect("checkout command should be written");
-    fs::write(&venv_command, "").expect("venv command should be written");
+    write_fake_token_savior(&checkout_command);
+    write_fake_token_savior(&venv_command);
     write_fake_mcp_package_for_venv_command(&venv_command);
 
     assert_eq!(
@@ -426,21 +474,36 @@ fn mcp_config_registers_managed_sqz_when_path_is_empty() {
     let config =
         fs::read_to_string(codex_home.join("config.toml")).expect("config.toml should exist");
     let table = toml::from_str::<toml::Value>(&config).expect("config should parse");
-    let command_value = table
+    let server = table
         .get("mcp_servers")
         .and_then(toml::Value::as_table)
         .and_then(|servers| servers.get("prodex-sqz"))
         .and_then(toml::Value::as_table)
-        .and_then(|server| server.get("command"))
-        .and_then(toml::Value::as_str);
+        .expect("prodex-sqz should be registered");
+    let command_value = server.get("command").and_then(toml::Value::as_str);
     let expected_command = command.display().to_string();
-    assert_eq!(command_value, Some(expected_command.as_str()));
-    let sqz_env = table
-        .get("mcp_servers")
-        .and_then(toml::Value::as_table)
-        .and_then(|servers| servers.get("prodex-sqz"))
-        .and_then(toml::Value::as_table)
-        .and_then(|server| server.get("env"))
+    assert_eq!(
+        command_value,
+        Some(env::current_exe().unwrap().to_str().unwrap())
+    );
+    let args = server
+        .get("args")
+        .and_then(toml::Value::as_array)
+        .expect("bridge args should be registered")
+        .iter()
+        .map(|arg| arg.as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        args,
+        vec![
+            "__mcp-jsonl-bridge",
+            expected_command.as_str(),
+            "--transport",
+            "stdio"
+        ]
+    );
+    let sqz_env = server
+        .get("env")
         .and_then(toml::Value::as_table)
         .expect("prodex-sqz env should be registered");
     assert!(

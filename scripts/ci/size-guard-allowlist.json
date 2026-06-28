@@ -11,7 +11,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 912,
+    "maxLines": 926,
     "reason": "SuperArgs provider-flag extraction for trailing-var-arg session-ID-first syntax coexists with struct definition and tests; tightly coupled arg-parsing surface."
   },
   {
@@ -21,7 +21,7 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/capability.rs",
-    "maxLines": 991,
+    "maxLines": 914,
     "reason": "Capability report rendering, dry-run command probing, and provider capability summaries remain capped while command execution probes are split from presentation."
   },
   {

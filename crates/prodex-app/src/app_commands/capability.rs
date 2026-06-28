@@ -189,24 +189,13 @@ pub(crate) fn collect_super_tool_statuses_with_memory_mode(
         },
         command_tool_status("rtk", "rtk --version", "rtk", &["--version"]),
         command_tool_status("rtk-gain", "rtk gain", "rtk", &["gain"]),
-        optimizer_tool_status(
-            "sqz-mcp",
-            "sqz-mcp --transport stdio --help",
-            "sqz-mcp",
-            &["--transport", "stdio", "--help"],
-        ),
+        optimizer_tool_status("sqz-mcp", "sqz-mcp MCP tools/list", "sqz-mcp"),
         optimizer_tool_status(
             "token-savior",
-            "token-savior --version",
+            "token-savior MCP tools/list",
             "token-savior",
-            &["--version"],
         ),
-        optimizer_tool_status(
-            "claw-compactor",
-            "claw-compactor --help",
-            "claw-compactor",
-            &["--help"],
-        ),
+        optimizer_tool_status("claw-compactor", "claw-compactor --help", "claw-compactor"),
         ponytail_tool_status(paths),
         SuperToolStatus {
             name: "prodex-inspect",
@@ -354,10 +343,7 @@ fn print_capability_panel(title: &str, fields: &[(String, String)]) -> Result<()
 fn print_capability_panels(panels: &[CapabilityPanel]) -> Result<()> {
     let height = capability_tui_height(panels);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        for (index, panel) in panels.iter().enumerate() {
-            if index > 0 {
-                terminal_ui::print_blank_line();
-            }
+        for panel in panels {
             print_panel(&panel.title, &panel.fields);
         }
         return Ok(());
@@ -387,12 +373,11 @@ fn print_capability_panels(panels: &[CapabilityPanel]) -> Result<()> {
 }
 
 fn capability_tui_height(panels: &[CapabilityPanel]) -> u16 {
-    let rows = panels
-        .iter()
-        .map(|panel| panel.fields.len().saturating_add(2))
-        .sum::<usize>()
+    let rows = capability_tui_text(panels)
+        .lines
+        .len()
         .saturating_add(4)
-        .max(8);
+        .max(4);
     let terminal_height = terminal::size()
         .map(|(_, height)| usize::from(height))
         .unwrap_or(24);
@@ -402,9 +387,6 @@ fn capability_tui_height(panels: &[CapabilityPanel]) -> u16 {
 fn capability_tui_text(panels: &[CapabilityPanel]) -> Text<'static> {
     let mut lines = Vec::new();
     for panel in panels {
-        if !lines.is_empty() {
-            lines.push(Line::raw(""));
-        }
         lines.push(Line::styled(panel.title.clone(), tui_title_style()));
         let label_width = panel
             .fields
@@ -713,16 +695,15 @@ fn optimizer_tool_status(
     name: &'static str,
     check: &'static str,
     command: &str,
-    args: &[&str],
 ) -> SuperToolStatus {
     match find_optimizer_command_for_super_status(command) {
-        Some(path) => command_path_tool_status(
+        Some(path) => SuperToolStatus {
             name,
             check,
-            path,
-            args,
-            format!("{command} was not found on PATH or in managed optimizer roots"),
-        ),
+            ready: true,
+            status: format!("ok ({})", path.display()),
+            detail: format!("{command} is invokable from the Super overlay"),
+        },
         None => SuperToolStatus {
             name,
             check,
@@ -855,66 +836,8 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
-fn executable_file(path: &Path) -> bool {
-    path.is_file()
-}
-
 fn optimizer_command_ready_for_super_status(command: &str, path: &Path) -> bool {
-    executable_file(path)
-        && match command {
-            "sqz-mcp" => {
-                command_probe_success_for_super_status(path, &["--transport", "stdio", "--help"])
-            }
-            "token-savior" => token_savior_command_ready_for_super_status(path),
-            _ => true,
-        }
-}
-
-fn command_probe_success_for_super_status(path: &Path, args: &[&str]) -> bool {
-    Command::new(path)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-fn token_savior_command_ready_for_super_status(path: &Path) -> bool {
-    let Some(venv_root) = python_venv_root_for_super_status_command(path) else {
-        return true;
-    };
-    python_venv_has_module_for_super_status(venv_root, "mcp")
-}
-
-fn python_venv_root_for_super_status_command(path: &Path) -> Option<&Path> {
-    let bin_dir = path.parent()?;
-    let venv_root = bin_dir.parent()?;
-    let bin_name = bin_dir.file_name()?.to_str()?;
-    let venv_name = venv_root.file_name()?.to_str()?;
-    if matches!(bin_name, "bin" | "Scripts") && matches!(venv_name, ".venv" | "venv") {
-        Some(venv_root)
-    } else {
-        None
-    }
-}
-
-fn python_venv_has_module_for_super_status(venv_root: &Path, module_name: &str) -> bool {
-    let windows_site_packages = venv_root.join("Lib").join("site-packages");
-    if windows_site_packages.join(module_name).is_dir() {
-        return true;
-    }
-
-    let lib_dir = venv_root.join("lib");
-    let Ok(entries) = fs::read_dir(lib_dir) else {
-        return false;
-    };
-    entries.filter_map(|entry| entry.ok()).any(|entry| {
-        entry
-            .path()
-            .join("site-packages")
-            .join(module_name)
-            .is_dir()
-    })
+    prodex_caveman_assets::super_optimizer_command_ready(command, path)
 }
 
 fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {

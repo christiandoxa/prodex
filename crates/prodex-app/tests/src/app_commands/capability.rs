@@ -19,6 +19,24 @@ fn capability_tui_text_contains_panels() {
 }
 
 #[test]
+fn capability_tui_text_does_not_pad_between_panels() {
+    let panels = vec![
+        CapabilityPanel {
+            title: "One".to_string(),
+            fields: vec![("rtk".to_string(), "ok".to_string())],
+        },
+        CapabilityPanel {
+            title: "Two".to_string(),
+            fields: vec![("codex".to_string(), "ok".to_string())],
+        },
+    ];
+
+    let lines = capability_tui_text(&panels).lines;
+    assert_eq!(lines.len(), 4);
+    assert!(format!("{:?}", lines[2]).contains("Two"));
+}
+
+#[test]
 fn capability_value_color_highlights_status() {
     assert_eq!(capability_value_color("fail (missing)"), Color::Red);
     assert_eq!(capability_value_color("disabled (not checked)"), Color::Red);
@@ -36,19 +54,6 @@ fn super_status_managed_optimizer_candidates_match_overlay_layouts() {
 
     let candidates = managed_optimizer_command_candidates_for_super_status(&root, "claw-compactor");
     assert!(candidates.contains(&root.join("claw-compactor/.venv/bin/claw-compactor")));
-}
-
-#[test]
-fn super_status_token_savior_readiness_detects_venv_layout() {
-    let path = PathBuf::from("/tmp/prodex-optimizers/token-savior/.venv/bin/token-savior");
-    assert_eq!(
-        python_venv_root_for_super_status_command(&path),
-        Some(Path::new("/tmp/prodex-optimizers/token-savior/.venv"))
-    );
-    assert!(!python_venv_has_module_for_super_status(
-        Path::new("/tmp/prodex-missing-venv"),
-        "mcp"
-    ));
 }
 
 #[test]

@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
+use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use crate::localization::localize_text_file;
 use crate::toml_helpers::ensure_child_table;
@@ -223,13 +225,12 @@ fn configure_super_optimizer_mcp_servers_with_sources(
     if let Some(command) = sqz_mcp_command {
         let sqz_state = optimizer_state_dirs_from_env(SQZ_STATE_DIR_NAME);
         let sqz_env = optimizer_state_env(sqz_state.as_ref());
-        configure_stdio_mcp_server(
-            &mut table,
-            "prodex-sqz",
-            command.to_path_buf(),
-            &["--transport", "stdio"],
-            &sqz_env,
-        );
+        let Some((bridge, bridge_args)) =
+            mcp_jsonl_bridge_command_args(command, &["--transport", "stdio"])
+        else {
+            return Ok(());
+        };
+        configure_stdio_mcp_server(&mut table, "prodex-sqz", bridge, &bridge_args, &sqz_env);
     }
 
     if let Some(command) = find_optimizer_command("token-savior", path_dirs, optimizer_roots) {
@@ -242,11 +243,14 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             write_token_savior_sitecustomize(state_dirs)?;
         }
         let token_savior_env = token_savior_mcp_env(&workspace_roots, token_savior_state.as_ref());
+        let Some((bridge, bridge_args)) = mcp_jsonl_bridge_command_args(&command, &[]) else {
+            return Ok(());
+        };
         configure_stdio_mcp_server(
             &mut table,
             "prodex-token-savior",
-            command,
-            &[],
+            bridge,
+            &bridge_args,
             &token_savior_env,
         );
     }
@@ -258,7 +262,7 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             &mut table,
             "prodex-memory",
             command,
-            &["__memory-mcp"],
+            &["__memory-mcp".to_string()],
             &memory_env,
         );
     }
@@ -267,7 +271,7 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             &mut table,
             "prodex-inspect",
             command,
-            &["__inspect-mcp"],
+            &["__inspect-mcp".to_string()],
             &[],
         );
     }
@@ -345,14 +349,13 @@ fn configure_stdio_mcp_server(
     table: &mut toml::Table,
     server_name: &str,
     command: PathBuf,
-    args: &[&str],
+    args: &[String],
     env_vars: &[(&str, String)],
 ) {
     let Some(mcp_servers) = super_optimizer_mcp_servers_table(table) else {
         return;
     };
-    let is_new_server = !mcp_servers.contains_key(server_name);
-    let server = if is_new_server {
+    let server = if !mcp_servers.contains_key(server_name) {
         ensure_child_table(mcp_servers, server_name)
     } else {
         match mcp_servers.get_mut(server_name) {
@@ -360,29 +363,30 @@ fn configure_stdio_mcp_server(
             _ => return,
         }
     };
-    if is_new_server {
+    server.insert(
+        "command".to_string(),
+        toml::Value::String(command.display().to_string()),
+    );
+    if args.is_empty() {
+        server.remove("args");
+    } else {
         server.insert(
-            "command".to_string(),
-            toml::Value::String(command.display().to_string()),
+            "args".to_string(),
+            toml::Value::Array(
+                args.iter()
+                    .map(|arg| toml::Value::String(arg.clone()))
+                    .collect(),
+            ),
         );
-        if args.is_empty() {
-            server.remove("args");
-        } else {
-            server.insert(
-                "args".to_string(),
-                toml::Value::Array(
-                    args.iter()
-                        .map(|arg| toml::Value::String((*arg).to_string()))
-                        .collect(),
-                ),
-            );
-        }
     }
     if !env_vars.is_empty() {
-        let env_table = ensure_child_table(server, "env");
+        let mut env_table = toml::Table::new();
         for (key, value) in env_vars {
             env_table.insert((*key).to_string(), toml::Value::String(value.clone()));
         }
+        server.insert("env".to_string(), toml::Value::Table(env_table));
+    } else {
+        server.remove("env");
     }
 }
 
@@ -654,13 +658,30 @@ fn find_prodex_builtin_command() -> Option<PathBuf> {
     env::current_exe().ok().filter(|path| executable_file(path))
 }
 
+fn mcp_jsonl_bridge_command_args(command: &Path, args: &[&str]) -> Option<(PathBuf, Vec<String>)> {
+    let bridge = find_prodex_builtin_command()?;
+    let mut bridge_args = vec![
+        "__mcp-jsonl-bridge".to_string(),
+        command.display().to_string(),
+    ];
+    bridge_args.extend(args.iter().map(|arg| (*arg).to_string()));
+    Some((bridge, bridge_args))
+}
+
 fn optimizer_command_ready(command: &str, path: &Path) -> bool {
     executable_file(path)
         && match command {
-            "sqz-mcp" => command_probe_success(path, &["--transport", "stdio", "--help"]),
+            "sqz-mcp" => {
+                command_probe_success(path, &["--transport", "stdio", "--help"])
+                    && mcp_tools_list_non_empty_jsonl(path, &["--transport", "stdio"])
+            }
             "token-savior" => token_savior_command_ready(path),
             _ => true,
         }
+}
+
+pub fn super_optimizer_command_ready(command: &str, path: &Path) -> bool {
+    optimizer_command_ready(command, path)
 }
 
 fn command_probe_success(path: &Path, args: &[&str]) -> bool {
@@ -674,9 +695,79 @@ fn command_probe_success(path: &Path, args: &[&str]) -> bool {
 
 fn token_savior_command_ready(path: &Path) -> bool {
     let Some(venv_root) = python_venv_root_for_command(path) else {
-        return true;
+        return mcp_tools_list_non_empty_jsonl(path, &[]);
     };
-    python_venv_has_module(venv_root, "mcp")
+    python_venv_has_module(venv_root, "mcp") && mcp_tools_list_non_empty_jsonl(path, &[])
+}
+
+fn mcp_tools_list_non_empty_jsonl(path: &Path, args: &[&str]) -> bool {
+    let mut child = match Command::new(path)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        return false;
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        return false;
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let messages = [
+        serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"prodex-probe","version":"0"}}}),
+        serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+        serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+    ];
+    for message in messages {
+        let Ok(line) = serde_json::to_string(&message) else {
+            let _ = child.kill();
+            return false;
+        };
+        if writeln!(stdin, "{line}").is_err() {
+            let _ = child.kill();
+            return false;
+        }
+    }
+    drop(stdin);
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let mut ready = false;
+    while std::time::Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let Ok(line) = receiver.recv_timeout(remaining.min(Duration::from_millis(200))) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if value.get("id").and_then(serde_json::Value::as_i64) != Some(2) {
+            continue;
+        }
+        ready = value
+            .get("result")
+            .and_then(|result| result.get("tools"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|tools| !tools.is_empty());
+        break;
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    ready
 }
 
 fn python_venv_root_for_command(path: &Path) -> Option<&Path> {

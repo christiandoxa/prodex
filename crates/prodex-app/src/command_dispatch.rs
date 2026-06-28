@@ -49,6 +49,7 @@ impl CommandDispatchExt for Commands {
                 | Commands::GeminiCompatRefresh(_)
                 | Commands::MemoryMcp(_)
                 | Commands::InspectMcp(_)
+                | Commands::McpJsonlBridge(_)
         )
     }
 }
@@ -266,6 +267,12 @@ impl CommandExecute for InspectMcpArgs {
     }
 }
 
+impl CommandExecute for McpJsonlBridgeArgs {
+    fn execute(self) -> Result<()> {
+        handle_mcp_jsonl_bridge(self)
+    }
+}
+
 impl CommandExecute for SetupArgs {
     fn execute(self) -> Result<()> {
         handle_setup(self)
@@ -338,6 +345,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::GeminiCompatRefresh(command) => RoutedCommand::new(command),
         Commands::MemoryMcp(command) => RoutedCommand::new(command),
         Commands::InspectMcp(command) => RoutedCommand::new(command),
+        Commands::McpJsonlBridge(command) => RoutedCommand::new(command),
     }
 }
 
