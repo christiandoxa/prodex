@@ -19,6 +19,7 @@ mod ponytail;
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
 const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
 const CLAW_COMPACTOR_STATE_DIR_NAME: &str = "claw-compactor";
+const CODEBASE_MEMORY_STATE_DIR_NAME: &str = "codebase-memory";
 const SQZ_STATE_DIR_NAME: &str = "sqz";
 const TOKEN_SAVIOR_STATE_DIR_NAME: &str = "token-savior";
 const PRODEX_MEMORY_BACKEND_ENV: &str = "PRODEX_MEMORY_BACKEND";
@@ -82,12 +83,15 @@ pub fn configure_super_optimizer_codex_home_with_options(
     let path_dirs = discovery::path_dirs_from_env();
     let optimizer_roots = discovery::managed_optimizer_roots();
     let sqz_mcp_command = find_optimizer_command("sqz-mcp", &path_dirs, &optimizer_roots);
+    let codebase_memory_command =
+        find_optimizer_command("codebase-memory-mcp", &path_dirs, &optimizer_roots);
     let ponytail_checkout = ponytail::find_ponytail_checkout(&optimizer_roots);
     let optimizers_path = codex_home.join(SUPER_OPTIMIZERS_MD);
     let awareness = render_super_optimizer_awareness(
         &path_dirs,
         &optimizer_roots,
         sqz_mcp_command.as_deref(),
+        codebase_memory_command.as_deref(),
         ponytail_checkout.as_deref(),
         presidio_enabled,
         memory_config,
@@ -101,6 +105,7 @@ pub fn configure_super_optimizer_codex_home_with_options(
         &path_dirs,
         &optimizer_roots,
         sqz_mcp_command.as_deref(),
+        codebase_memory_command.as_deref(),
         memory_config,
     )?;
     configure_super_optimizer_command_wrappers(
@@ -119,6 +124,7 @@ fn render_super_optimizer_awareness(
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
     sqz_mcp_command: Option<&Path>,
+    codebase_memory_command: Option<&Path>,
     ponytail_checkout: Option<&Path>,
     presidio_enabled: bool,
     memory_config: SuperOptimizerMemoryConfig<'_>,
@@ -138,6 +144,10 @@ fn render_super_optimizer_awareness(
         availability_label(
             find_optimizer_command("token-savior", path_dirs, optimizer_roots).as_deref()
         )
+    ));
+    awareness.push_str(&format!(
+        "- codebase-memory-mcp: {}\n",
+        availability_label(codebase_memory_command)
     ));
     awareness.push_str(&format!(
         "- prodex-claw-compactor: {}\n",
@@ -208,6 +218,7 @@ fn configure_super_optimizer_mcp_servers_with_sources(
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
     sqz_mcp_command: Option<&Path>,
+    codebase_memory_command: Option<&Path>,
     memory_config: SuperOptimizerMemoryConfig<'_>,
 ) -> Result<()> {
     let config_path = codex_home.join("config.toml");
@@ -252,6 +263,20 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             bridge,
             &bridge_args,
             &token_savior_env,
+        );
+    }
+
+    if let Some(command) = codebase_memory_command {
+        let env = codebase_memory_mcp_env();
+        let Some((bridge, bridge_args)) = mcp_jsonl_bridge_command_args(command, &[]) else {
+            return Ok(());
+        };
+        configure_stdio_mcp_server(
+            &mut table,
+            "codebase-memory-mcp",
+            bridge,
+            &bridge_args,
+            &env,
         );
     }
     if memory_config.enabled
@@ -445,6 +470,13 @@ fn token_savior_state_dirs_from_env() -> Option<TokenSaviorStateDirs> {
     Some(token_savior_state_dirs_from_prodex_home(&prodex_home))
 }
 
+fn codebase_memory_mcp_env() -> Vec<(&'static str, String)> {
+    let Some(state_dirs) = optimizer_state_dirs_from_env(CODEBASE_MEMORY_STATE_DIR_NAME) else {
+        return Vec::new();
+    };
+    vec![("CBM_CACHE_DIR", state_dirs.cache_dir.display().to_string())]
+}
+
 pub(super) fn claw_compactor_state_env_from_env() -> Vec<(&'static str, String)> {
     optimizer_state_env(optimizer_state_dirs_from_env(CLAW_COMPACTOR_STATE_DIR_NAME).as_ref())
 }
@@ -618,7 +650,7 @@ fn find_optimizer_command(
 fn prefer_managed_optimizer(command: &str) -> bool {
     matches!(
         command,
-        "sqz" | "sqz-mcp" | "token-savior" | "claw-compactor"
+        "sqz" | "sqz-mcp" | "token-savior" | "claw-compactor" | "codebase-memory-mcp"
     )
 }
 
@@ -676,6 +708,7 @@ fn optimizer_command_ready(command: &str, path: &Path) -> bool {
                     && mcp_tools_list_non_empty_jsonl(path, &["--transport", "stdio"])
             }
             "token-savior" => token_savior_command_ready(path),
+            "codebase-memory-mcp" => mcp_tools_list_non_empty_jsonl(path, &[]),
             _ => true,
         }
 }
@@ -805,6 +838,9 @@ fn executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
+#[cfg(test)]
+#[path = "super_optimizers_codebase_memory_tests.rs"]
+mod super_optimizers_codebase_memory_tests;
 #[cfg(test)]
 #[path = "super_optimizers_tests.rs"]
 mod super_optimizers_tests;

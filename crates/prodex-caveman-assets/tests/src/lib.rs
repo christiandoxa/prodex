@@ -279,6 +279,7 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
     assert!(hook_script.contains("rtk <cmd>"));
     assert!(hook_script.contains("prodex-sqz"));
     assert!(hook_script.contains("prodex-token-savior"));
+    assert!(hook_script.contains("codebase-memory-mcp"));
     assert!(hook_script.contains("prodex-claw-compactor"));
     assert!(hook_script.contains("Presidio is opt-in only"));
     assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
@@ -465,6 +466,7 @@ fn caveman_session_start_script_outputs_once_per_launch_home() {
     assert!(first_stdout.contains("Ponytail applies smallest-correct-implementation pressure"));
     assert!(first_stdout.contains("prodex-sqz"));
     assert!(first_stdout.contains("prodex-token-savior"));
+    assert!(first_stdout.contains("codebase-memory-mcp"));
     assert!(first_stdout.contains("prodex-claw-compactor"));
     assert!(first_stdout.contains("Presidio is opt-in only"));
 

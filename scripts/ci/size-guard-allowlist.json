@@ -21,8 +21,8 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/capability.rs",
-    "maxLines": 914,
-    "reason": "Capability report rendering, dry-run command probing, and provider capability summaries remain capped while command execution probes are split from presentation."
+    "maxLines": 929,
+    "reason": "Capability report rendering, dry-run command probing, provider capability summaries, and optional Codebase Memory probe status remain capped while command execution probes are split from presentation."
   },
   {
     "file": "crates/prodex-app/src/app_commands/log.rs",

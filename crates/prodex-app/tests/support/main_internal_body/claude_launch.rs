@@ -177,6 +177,7 @@ fn prepare_prodex_overlay_home_localizes_config_and_installs_plugin() {
     assert!(hook_script.contains("rtk <cmd>"));
     assert!(hook_script.contains("prodex-sqz"));
     assert!(hook_script.contains("prodex-token-savior"));
+    assert!(hook_script.contains("codebase-memory-mcp"));
     assert!(hook_script.contains("prodex-claw-compactor"));
     assert!(hook_script.contains("Presidio is opt-in only"));
     assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));

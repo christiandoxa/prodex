@@ -144,7 +144,7 @@ If you install from source, make sure the `codex` binary in your `PATH` is alrea
 
 ## Optional tools
 
-`prodex` can run without RTK, SQZ, token-savior, claw-compactor, Ponytail, Presidio, or prodex-memory. `prodex-inspect` is a built-in read-only MCP server for profile/runtime diagnostics and is auto-registered in Prodex overlay sessions. `prodex-memory` is built in and opt-in through the `mem` prefix or managed Mem0 Super prompt.
+`prodex` can run without RTK, SQZ, token-savior, codebase-memory-mcp, claw-compactor, Ponytail, Presidio, or prodex-memory. `prodex-inspect` is a built-in read-only MCP server for profile/runtime diagnostics and is auto-registered in Prodex overlay sessions. `prodex-memory` is built in and opt-in through the `mem` prefix or managed Mem0 Super prompt.
 
 Install them only if you want to use commands such as:
 
@@ -429,6 +429,40 @@ which token-savior
 ```
 
 Prodex handles MCP registration for its own overlay session when it can find the binary, so you do not need to manually edit `.mcp.json` just for `prodex super`.
+
+</details>
+
+<details>
+<summary>Install Codebase Memory MCP</summary>
+
+Codebase Memory MCP is used by Super mode when the `codebase-memory-mcp` binary is available on `PATH` or under a managed optimizer checkout. Prodex auto-registers it as `codebase-memory-mcp` for `prodex s` / `prodex super` overlay sessions and routes its cache under `PRODEX_HOME`.
+
+Install the upstream binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash -s -- --skip-config
+```
+
+Or use a managed checkout:
+
+```bash
+git clone https://github.com/DeusData/codebase-memory-mcp.git ~/.local/share/prodex-optimizers/codebase-memory-mcp
+cd ~/.local/share/prodex-optimizers/codebase-memory-mcp
+scripts/build.sh
+```
+
+Verify:
+
+```bash
+codebase-memory-mcp --help
+prodex s doctor
+```
+
+Enable its own startup indexing if you want Codebase Memory to index automatically when the MCP server starts:
+
+```bash
+CBM_CACHE_DIR="${PRODEX_HOME:-$HOME/.prodex}/optimizer-state/codebase-memory/cache" codebase-memory-mcp config set auto_index true
+```
 
 </details>
 
@@ -762,7 +796,7 @@ Use `prodex s expose` when you need to reach the live Super terminal from a brow
 <details>
 <summary>Super optimizer internals (advanced)</summary>
 
-Super's built-in optimization stack is deliberately local and deterministic. It preloads Caveman, exposes a Prodex overlay `rtk` PATH wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers built-in `prodex-inspect` plus discovered `sqz-mcp` and `token-savior` MCP servers, exposes `sqz` and `claw-compactor` wrapper commands when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction and prodex-memory are added only when you opt in. Prodex routes optional-tool state under `PRODEX_HOME` (default `~/.prodex`), including SQZ XDG state, token-savior cache/stats, claw-compactor HOME/XDG state, RTK analytics paths, and local memory, so compatible optimizer metadata stays out of worktrees.
+Super's built-in optimization stack is deliberately local and deterministic. It preloads Caveman, exposes a Prodex overlay `rtk` PATH wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers built-in `prodex-inspect` plus discovered `sqz-mcp`, `token-savior`, and `codebase-memory-mcp` MCP servers, exposes `sqz` and `claw-compactor` wrapper commands when those commands/checkouts are discoverable, invokes a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe when Claw-Compactor is available, falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it. Presidio redaction and prodex-memory are added only when you opt in. Prodex routes optional-tool state under `PRODEX_HOME` (default `~/.prodex`), including SQZ XDG state, token-savior cache/stats, Codebase Memory cache/config, claw-compactor HOME/XDG state, RTK analytics paths, and local memory, so compatible optimizer metadata stays out of worktrees.
 
 Smart Context treats protocol and continuation metadata as exact control-plane data while allowing independent context payload segments to remain eligible for deterministic lossless or artifact-backed rewriting. Explicit exact mode still makes the complete request pass through. Missing artifact references are handled as segment-local rehydration failures: the dependent reference is preserved and recorded, budgets tighten, and unrelated payload segments may still be optimized when validation proves continuation identifiers, tool-call structure, critical signals, and JSON integrity are intact.
 
@@ -779,6 +813,7 @@ Super instructs Codex to use the available local optimizer stack where it fits t
 - RTK works upstream/input-side. Use visible `rtk <cmd>` for noisy terminal commands before their output enters the model context, such as `git diff`, `cargo test`, `npm test`, build logs, and package-manager output. Prodex also auto-wraps common noisy commands as a fallback when RTK is installed, but that fallback does not make the TUI show an `rtk` prefix.
 - SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server when `sqz-mcp` is available. Use it for repeated workspace reads, large text blobs, long command outputs that need reuse, and long-session context compression instead of emitting the same full content again.
 - token-savior handles symbol lookup, caller/context navigation, duplicate/dead-code checks, and API-impact searches before broad source reads when token-savior is available.
+- codebase-memory-mcp handles structural codebase graph queries such as architecture, call chains, impact analysis, dead-code lookup, and cross-service links when the binary is available.
 - prodex-inspect provides read-only MCP diagnostics for Prodex status, profiles, and latest runtime log tail.
 - claw-compactor handles workspace-level summary or benchmark requests through `prodex-claw-compactor` / `prodex-claw-compactor-auto` when available; treat its output as overview context and reread exact source before edits.
 - Ponytail loads the local `DietrichGebert/ponytail` Codex plugin into the temporary overlay when the checkout exists under a managed optimizer root, adding smallest-correct-implementation pressure without changing the base Codex profile.
@@ -1100,7 +1135,7 @@ Note that the default Microsoft Presidio Docker images typically only support En
 
 It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
 
-The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp` and `token-savior` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, loads Ponytail from a managed checkout when available, exposes `sqz` and `claw-compactor` wrappers when discoverable, routes compatible optimizer cache/state under `PRODEX_HOME` instead of the workspace, and uses a dedicated runtime proxy for local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
+The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp`, `token-savior`, and `codebase-memory-mcp` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, loads Ponytail from a managed checkout when available, exposes `sqz` and `claw-compactor` wrappers when discoverable, routes compatible optimizer cache/state under `PRODEX_HOME` instead of the workspace, and uses a dedicated runtime proxy for local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
 
 RTK handles upstream/input command output before it enters the context window, using visible `rtk <cmd>` commands and overlay auto-wrappers when available. Auto-wrappers are only a backstop; write `rtk <cmd>` explicitly when you want the TUI/transcript to show RTK usage. SQZ handles downstream/context reuse after content is already in the session, using `prodex-sqz` when the MCP server is available.
 

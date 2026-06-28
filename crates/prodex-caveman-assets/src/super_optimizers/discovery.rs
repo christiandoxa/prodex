@@ -46,6 +46,15 @@ pub(super) fn managed_optimizer_command_candidates(root: &Path, command: &str) -
         "claw-compactor" => {
             push_python_tool_candidates(&mut candidates, root, "claw-compactor", command);
         }
+        "codebase-memory-mcp" => {
+            let checkout = root.join("codebase-memory-mcp");
+            push_command_candidate(&mut candidates, checkout.join(command));
+            push_command_candidate(
+                &mut candidates,
+                checkout.join("build").join("c").join(command),
+            );
+            push_command_candidate(&mut candidates, checkout.join("bin").join(command));
+        }
         _ => {}
     }
     candidates

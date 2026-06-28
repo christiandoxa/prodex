@@ -77,37 +77,17 @@ fn handle_capability_list(args: CapabilityListArgs) -> Result<()> {
 
 pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, String)> {
     let mut rows = vec![
-        (
-            "Codex CLI".to_string(),
-            command_version_status(codex_bin(), "--version"),
-        ),
+        version_check_row("Codex CLI", codex_bin(), "--version"),
         (
             "Codex auth".to_string(),
             command_status(codex_bin(), &["login", "status"]),
         ),
-        (
-            "Claude Code".to_string(),
-            command_version_status(claude_bin(), "--version"),
-        ),
-        (
-            "RTK".to_string(),
-            command_version_status("rtk", "--version"),
-        ),
-        (
-            "SQZ MCP".to_string(),
-            command_version_status("sqz-mcp", "--version"),
-        ),
-        (
-            "token-savior".to_string(),
-            command_version_status("token-savior", "--version"),
-        ),
-        (
-            "claw-compactor".to_string(),
-            command_probe_status(
-                "claw-compactor",
-                command_capability_probe_args("claw-compactor"),
-            ),
-        ),
+        version_check_row("Claude Code", claude_bin(), "--version"),
+        version_check_row("RTK", "rtk", "--version"),
+        version_check_row("SQZ MCP", "sqz-mcp", "--version"),
+        version_check_row("token-savior", "token-savior", "--version"),
+        probe_check_row("codebase-memory-mcp"),
+        probe_check_row("claw-compactor"),
     ];
     let memory_store = default_memory_store_path(paths);
     rows.push((
@@ -194,6 +174,11 @@ pub(crate) fn collect_super_tool_statuses_with_memory_mode(
             "token-savior",
             "token-savior MCP tools/list",
             "token-savior",
+        ),
+        optimizer_tool_status(
+            "codebase-memory-mcp",
+            "codebase-memory-mcp MCP tools/list",
+            "codebase-memory-mcp",
         ),
         optimizer_tool_status("claw-compactor", "claw-compactor --help", "claw-compactor"),
         ponytail_tool_status(paths),
@@ -442,7 +427,7 @@ fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
         ),
         (
             "Optional tools".to_string(),
-            "probe codex, claude, rtk, sqz-mcp, token-savior, claw-compactor, ponytail, prodex-inspect, prodex-memory"
+            "probe codex, claude, rtk, sqz-mcp, token-savior, codebase-memory-mcp, claw-compactor, ponytail, prodex-inspect, prodex-memory"
                 .to_string(),
         ),
     ]
@@ -475,6 +460,12 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             "optimizer",
             Some("token-savior"),
             "symbol navigation MCP",
+        ),
+        capability(
+            "codebase-memory-mcp",
+            "optimizer",
+            Some("codebase-memory-mcp"),
+            "structural codebase graph MCP",
         ),
         capability(
             "claw-compactor",
@@ -554,7 +545,7 @@ fn command_available_status(command: &str) -> &'static str {
 
 fn command_capability_probe_args(command: &str) -> &'static [&'static str] {
     match command {
-        "claw-compactor" => &["--help"],
+        "claw-compactor" | "codebase-memory-mcp" => &["--help"],
         _ => &["--version"],
     }
 }
@@ -584,6 +575,24 @@ fn command_probe_status(command: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> 
         Ok(output) => format!("warn (exit {})", output.status),
         Err(err) => format!("missing ({})", err.kind()),
     }
+}
+
+fn version_check_row(
+    name: &str,
+    command: impl AsRef<std::ffi::OsStr>,
+    version_arg: &str,
+) -> (String, String) {
+    (
+        name.to_string(),
+        command_version_status(command, version_arg),
+    )
+}
+
+fn probe_check_row(command: &'static str) -> (String, String) {
+    (
+        command.to_string(),
+        command_probe_status(command, command_capability_probe_args(command)),
+    )
 }
 
 fn memory_tool_status(paths: &AppPaths, memory_mode: SuperMemoryStatusMode) -> SuperToolStatus {
@@ -824,6 +833,12 @@ fn managed_optimizer_command_candidates_for_super_status(
             candidates.push(checkout.join("venv").join("bin").join(command));
             candidates.push(checkout.join("bin").join(command));
             candidates.push(checkout.join(command));
+        }
+        "codebase-memory-mcp" => {
+            let checkout = root.join("codebase-memory-mcp");
+            candidates.push(checkout.join(command));
+            candidates.push(checkout.join("build").join("c").join(command));
+            candidates.push(checkout.join("bin").join(command));
         }
         _ => {}
     }
