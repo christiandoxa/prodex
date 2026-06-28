@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.229.0 - 2026-06-28
+
+### Misc
+
+- Preserve pasted attachments across resume (`ef31ad6`)
+
 ## 0.228.0 - 2026-06-28
 
 ### CLI
@@ -73,10 +79,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Fall back from unsupported models (`6962024`)
-
-## 0.217.0 - 2026-06-25
-
-### Misc
-
-- Remove redundant closure in catalog sanitization (`6190f38`)
-- Add GNOME keyring token discovery and OAuth fallback (`b6bef0d`)
