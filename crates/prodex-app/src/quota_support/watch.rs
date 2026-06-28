@@ -1228,7 +1228,7 @@ fn render_all_quota_watch_tui_table(
 }
 
 fn quota_watch_overview_height(field_count: usize, max_height: u16) -> u16 {
-    u16::try_from(field_count)
+    u16::try_from(field_count.saturating_add(1))
         .unwrap_or(max_height)
         .min(max_height)
 }

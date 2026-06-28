@@ -113,7 +113,7 @@
 
     #[test]
     fn quota_watch_overview_height_has_no_extra_spacer_line() {
-        assert_eq!(quota_watch_overview_height(5, 20), 5);
+        assert_eq!(quota_watch_overview_height(5, 20), 6);
         assert_eq!(quota_watch_overview_height(5, 4), 4);
     }
 
