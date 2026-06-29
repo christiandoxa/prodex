@@ -5,7 +5,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use redaction::{redaction_key_looks_sensitive, redaction_redacted_body_snippet};
-use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{
+    text_width, tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style,
+};
 
 #[derive(Debug, Clone)]
 struct DoctorPanel {
@@ -389,14 +391,17 @@ fn doctor_tui_text(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Text<
         let label_width = panel
             .fields
             .iter()
-            .map(|(label, _)| label.chars().count())
+            .map(|(label, _)| text_width(label))
             .max()
             .unwrap_or(0)
             .min(24);
         for (label, value) in &panel.fields {
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("{label:<label_width$} "),
+                    format!(
+                        "{label}{} ",
+                        " ".repeat(label_width.saturating_sub(text_width(label)))
+                    ),
                     tui_secondary_style().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(

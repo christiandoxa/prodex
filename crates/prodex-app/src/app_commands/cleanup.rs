@@ -10,7 +10,7 @@ use crate::{
     ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS, ProdexCleanupOptions,
     perform_prodex_cleanup_with_options, print_panel, runtime_proxy_log_dir,
 };
-use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{text_width, tui_border_style, tui_secondary_style, tui_title_style};
 
 pub(crate) fn handle_cleanup(args: CleanupArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
@@ -130,7 +130,7 @@ fn cleanup_tui_height(fields: &[(String, String)]) -> u16 {
 fn cleanup_tui_text(fields: &[(String, String)]) -> Text<'static> {
     let label_width = fields
         .iter()
-        .map(|(label, _)| label.chars().count())
+        .map(|(label, _)| text_width(label))
         .max()
         .unwrap_or(0)
         .min(24);
@@ -140,7 +140,10 @@ fn cleanup_tui_text(fields: &[(String, String)]) -> Text<'static> {
             .map(|(label, value)| {
                 Line::from(vec![
                     Span::styled(
-                        format!("{label:<label_width$} "),
+                        format!(
+                            "{label}{} ",
+                            " ".repeat(label_width.saturating_sub(text_width(label)))
+                        ),
                         tui_secondary_style().add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(

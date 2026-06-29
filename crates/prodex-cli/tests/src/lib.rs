@@ -340,6 +340,52 @@ fn super_mem0_flag_selects_managed_memory_backend() {
     assert!(caveman.codex_args.contains(&OsString::from("mem")));
 }
 #[test]
+fn super_mem_prefix_selects_sqlite_memory_backend() {
+    let args = parse_super_as_caveman(&["prodex", "s", "mem", "exec", "hello"]);
+    assert_eq!(args.memory_backend, SuperMemoryBackend::Sqlite);
+    assert_eq!(
+        args.codex_args,
+        os_args(&[
+            "rtk",
+            "sqz",
+            "tokensavior",
+            "clawcompactor",
+            "ponytail",
+            "mem",
+            "--dangerously-bypass-hook-trust",
+            "exec",
+            "hello",
+        ])
+    );
+}
+#[test]
+fn super_leading_optional_prefixes_are_consumed_before_passthrough() {
+    let args = parse_super_as_caveman(&[
+        "prodex",
+        "s",
+        "sqz",
+        "token-savior",
+        "claw-compactor",
+        "presidio",
+        "exec",
+        "hello",
+    ]);
+    assert_eq!(
+        args.codex_args,
+        os_args(&[
+            "rtk",
+            "sqz",
+            "tokensavior",
+            "clawcompactor",
+            "ponytail",
+            "presidio",
+            "--dangerously-bypass-hook-trust",
+            "exec",
+            "hello",
+        ])
+    );
+}
+#[test]
 fn super_no_mem0_flag_selects_sqlite_memory_backend() {
     let command = parse_cli_command_from(["prodex", "super", "--no-mem0", "exec", "hello"])
         .expect("super command should parse");

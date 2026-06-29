@@ -371,6 +371,20 @@ mod tests {
     }
 
     #[test]
+    fn super_alias_mem_prefix_enables_sqlite_memory() {
+        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
+            "prodex", "s", "mem", "exec", "hi",
+        ]));
+
+        assert!(strategy.memory_enabled);
+        assert_eq!(strategy.args.memory_backend, SuperMemoryBackend::Sqlite);
+        assert!(
+            !strategy.codex_args.contains(&OsString::from("mem")),
+            "mem should be consumed before Codex launch"
+        );
+    }
+
+    #[test]
     fn super_alias_keeps_optional_stack_for_default_openai_provider() {
         let strategy =
             CavemanLaunchStrategy::new(super_as_caveman_args(&["prodex", "s", "exec", "hi"]));

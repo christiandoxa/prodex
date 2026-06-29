@@ -13,7 +13,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use terminal_ui::{
-    print_panel, print_stdout_line, tui_border_style, tui_secondary_style, tui_title_style,
+    print_panel, print_stdout_line, text_width, tui_border_style, tui_secondary_style,
+    tui_title_style,
 };
 
 #[derive(Debug, Clone)]
@@ -376,14 +377,17 @@ fn capability_tui_text(panels: &[CapabilityPanel]) -> Text<'static> {
         let label_width = panel
             .fields
             .iter()
-            .map(|(label, _)| label.chars().count())
+            .map(|(label, _)| text_width(label))
             .max()
             .unwrap_or(0)
             .min(24);
         for (label, value) in &panel.fields {
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("{label:<label_width$} "),
+                    format!(
+                        "{label}{} ",
+                        " ".repeat(label_width.saturating_sub(text_width(label)))
+                    ),
                     tui_secondary_style().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(

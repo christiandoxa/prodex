@@ -272,9 +272,34 @@ fn login_menu_maps_crossterm_keys() {
     );
     assert_eq!(
         login_menu_key_from_event(KeyEvent::new(
+            KeyCode::Char('c'),
+            crossterm::event::KeyModifiers::CONTROL
+        )),
+        LoginMenuKey::Cancel
+    );
+    assert_eq!(
+        login_menu_key_from_event(KeyEvent::new(
             KeyCode::Esc,
             crossterm::event::KeyModifiers::NONE
         )),
         LoginMenuKey::Cancel
     );
+}
+
+#[test]
+fn login_menu_detail_title_is_generic() {
+    let entries = login_menu_entries();
+    let detail = format!(
+        "{:?}",
+        login_menu_detail_text(
+            &entries[0],
+            LoginMenuLayout {
+                visible_items: 3,
+                compact: false,
+            },
+        )
+    );
+
+    assert!(detail.contains("Select login method"));
+    assert!(!detail.contains("Provide your own API key"));
 }

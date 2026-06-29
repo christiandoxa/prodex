@@ -1,6 +1,6 @@
 use crate::print::{print_stdout_line, print_wrapped_stderr};
 use crate::terminal::current_cli_width;
-use crate::text::{text_width, wrap_text};
+use crate::text::{fit_cell, text_width, wrap_text};
 use crate::{CLI_LABEL_WIDTH, CLI_MAX_LABEL_WIDTH, CLI_MIN_LABEL_WIDTH};
 use ratatui::Terminal;
 use ratatui::backend::{Backend, CrosstermBackend};
@@ -68,7 +68,7 @@ pub fn section_header_with_width(title: &str, total_width: usize) -> String {
     let prefix = format!("[ {title} ] ");
     let width = text_width(&prefix);
     if width >= total_width {
-        return prefix;
+        return fit_cell(&prefix, total_width);
     }
 
     format!("{prefix}{}", "=".repeat(total_width - width))
@@ -139,11 +139,10 @@ pub fn panel_label_width(fields: &[(String, String)], total_width: usize) -> usi
         .map(|(label, _)| text_width(label) + 1)
         .max()
         .unwrap_or(CLI_LABEL_WIDTH);
-    let max_by_width = total_width
-        .saturating_sub(20)
-        .clamp(CLI_MIN_LABEL_WIDTH, CLI_MAX_LABEL_WIDTH);
-    let preferred_cap = (total_width / 4).clamp(CLI_MIN_LABEL_WIDTH, CLI_MAX_LABEL_WIDTH);
-    longest.clamp(CLI_MIN_LABEL_WIDTH, max_by_width.min(preferred_cap))
+    let max_by_width = total_width.saturating_sub(20).clamp(1, CLI_MAX_LABEL_WIDTH);
+    let preferred_cap = (total_width / 4).clamp(1, CLI_MAX_LABEL_WIDTH);
+    let cap = max_by_width.min(preferred_cap);
+    longest.clamp(CLI_MIN_LABEL_WIDTH.min(cap), cap)
 }
 
 pub fn format_field_lines_with_layout(
@@ -159,10 +158,8 @@ pub fn format_field_lines_with_layout(
 
     for (index, line) in wrapped.into_iter().enumerate() {
         let field_label = if index == 0 { label.as_str() } else { "" };
-        lines.push(format!(
-            "{field_label:<label_w$} {line}",
-            label_w = label_width
-        ));
+        let padding = " ".repeat(label_width.saturating_sub(text_width(field_label)));
+        lines.push(format!("{field_label}{padding} {line}"));
     }
 
     lines

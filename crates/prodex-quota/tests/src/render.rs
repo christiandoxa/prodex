@@ -715,6 +715,21 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
 }
 
 #[test]
+fn quota_reports_do_not_force_sixty_column_width() {
+    let output = render_quota_reports_with_layout(
+        &[openai_report(
+            "表🙂profile",
+            usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800),
+        )],
+        false,
+        None,
+        40,
+    );
+
+    assert!(output.lines().take(4).all(|line| text_width(line) <= 40));
+}
+
+#[test]
 fn quota_reset_at_from_message_parses_ordinal_date() {
     let parsed = quota_reset_at_from_message(
         "You've hit your usage limit. Try again at Mar 24th, 2026 2:04 AM.",

@@ -1,6 +1,6 @@
 use super::*;
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -268,6 +268,11 @@ fn prompt_super_opt_in_tui(title: &str, question: &str, detail: &str) -> Result<
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Enter | KeyCode::Esc => {
+                    return Ok(false);
+                }
+                KeyCode::Char('c') | KeyCode::Char('z')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
                     return Ok(false);
                 }
                 _ => {}

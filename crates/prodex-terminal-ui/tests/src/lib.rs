@@ -6,10 +6,26 @@ fn section_headers_expand_to_requested_width() {
 }
 
 #[test]
+fn section_headers_fit_tiny_width() {
+    assert_eq!(text_width(&section_header_with_width("Doctor", 8)), 8);
+}
+
+#[test]
 fn wrapping_respects_requested_width() {
     let lines = wrap_text("alpha beta-gamma-delta epsilon", 10);
     assert!(lines.iter().all(|line| text_width(line) <= 10));
     assert!(!lines.is_empty());
+}
+
+#[test]
+fn wrapping_counts_terminal_display_width() {
+    assert_eq!(text_width("表🙂"), 4);
+    assert!(
+        wrap_text("alpha 表🙂 beta", 8)
+            .iter()
+            .all(|line| text_width(line) <= 8)
+    );
+    assert!(text_width(&fit_cell("表🙂abcdef", 6)) <= 6);
 }
 
 #[test]
@@ -18,6 +34,14 @@ fn field_layout_respects_requested_width() {
         format_field_lines_with_layout("Long Label", "some longer value that must wrap", 24, 10);
     assert!(lines.iter().all(|line| text_width(line) <= 24));
     assert!(lines.len() > 1);
+}
+
+#[test]
+fn panel_label_width_allows_tiny_terminals() {
+    assert_eq!(
+        panel_label_width(&[("Long Label".to_string(), "value".to_string())], 8),
+        1
+    );
 }
 
 #[test]
@@ -156,6 +180,23 @@ fn session_report_renderer_prints_full_id_when_id_column_is_truncated() {
     );
 
     assert!(rendered.contains(&format!("  id: {long_id}")));
+}
+
+#[test]
+fn session_report_renderer_respects_narrow_width() {
+    let rendered = render_session_reports_with_width(
+        &[SessionReportDisplay {
+            id: "sess-wide-name",
+            updated_at: Some("2026-04-29T12:30:00Z"),
+            thread_name: Some("表🙂 thread"),
+            cwd: Some("/repo"),
+            profile: None,
+            path: "/tmp/sessions/session-a.jsonl",
+        }],
+        40,
+    );
+
+    assert!(rendered.lines().take(3).all(|line| text_width(line) <= 40));
 }
 
 #[test]

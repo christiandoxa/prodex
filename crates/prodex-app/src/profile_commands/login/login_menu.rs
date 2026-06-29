@@ -1,7 +1,7 @@
 use super::LoginMethod;
 use anyhow::{Context, Result, bail};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -267,6 +267,11 @@ fn login_menu_key_from_event(key: KeyEvent) -> LoginMenuKey {
         KeyCode::End | KeyCode::Char('G') => LoginMenuKey::End,
         KeyCode::Enter => LoginMenuKey::Enter,
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => LoginMenuKey::Cancel,
+        KeyCode::Char('c') | KeyCode::Char('z')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            LoginMenuKey::Cancel
+        }
         KeyCode::Char(ch) if ('1'..='9').contains(&ch) => {
             LoginMenuKey::Digit(ch.to_digit(10).unwrap_or(0) as usize)
         }
@@ -484,10 +489,7 @@ fn login_menu_detail_text(entry: &LoginMenuEntry, layout: LoginMenuLayout) -> Te
     if layout.compact {
         return Text::from(vec![
             Line::from(vec![
-                Span::styled(
-                    "Select login method - Provide your own API key  ",
-                    tui_secondary_style(),
-                ),
+                Span::styled("Select login method  ", tui_secondary_style()),
                 Span::styled("Provider ", tui_secondary_style()),
                 Span::styled(entry.provider, tui_success_style()),
                 Span::raw(" | "),
@@ -506,10 +508,7 @@ fn login_menu_detail_text(entry: &LoginMenuEntry, layout: LoginMenuLayout) -> Te
 
     Text::from(vec![
         Line::from(vec![
-            Span::styled(
-                "Select login method - Provide your own API key  ",
-                tui_secondary_style(),
-            ),
+            Span::styled("Select login method  ", tui_secondary_style()),
             Span::styled("Provider ", tui_secondary_style()),
             Span::styled(entry.provider, tui_success_style()),
         ]),

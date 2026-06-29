@@ -6,7 +6,7 @@ use super::log_upstream::stream_upstream_payload_events;
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -252,6 +252,11 @@ fn stream_token_usage_events_tui() -> Result<()> {
             match event::read().context("failed to read log stream TUI input")? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('c') | KeyCode::Char('z')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        return Ok(());
+                    }
                     _ => {}
                 },
                 _ => {}

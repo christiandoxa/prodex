@@ -12,8 +12,8 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::io::IsTerminal;
 use terminal_ui::{
-    tui_border_style, tui_detail_style, tui_error_style, tui_muted_style, tui_success_style,
-    tui_title_style,
+    pad_cell, tui_border_style, tui_detail_style, tui_error_style, tui_muted_style,
+    tui_success_style, tui_title_style,
 };
 
 #[derive(Debug, Clone)]
@@ -1272,15 +1272,7 @@ fn quota_watch_table_main_line(row: &AllQuotaWatchTuiRow) -> Line<'static> {
 }
 
 fn quota_watch_table_cell_text(value: &str, width: usize) -> String {
-    let mut value = value.trim().to_string();
-    if value.chars().count() > width {
-        value = value
-            .chars()
-            .take(width.saturating_sub(1))
-            .collect::<String>();
-        value.push('~');
-    }
-    format!("{value:<width$}")
+    pad_cell(value.trim(), width)
 }
 
 fn quota_watch_status_style(status: &str) -> Style {

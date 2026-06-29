@@ -4,7 +4,7 @@ use super::{
 };
 use anyhow::{Context, Result, bail};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -608,7 +608,9 @@ fn prompt_gemini_validation_tui(validation: &GeminiCodeAssistValidation) -> Resu
 
         if let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
-            && matches!(key.code, KeyCode::Enter | KeyCode::Esc)
+            && (matches!(key.code, KeyCode::Enter | KeyCode::Esc)
+                || (key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z'))))
         {
             return Ok(());
         }

@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 
 mod session_meta;
 
+const SESSIONS_DIR: &str = "sessions";
+const ARCHIVED_SESSIONS_DIR: &str = "archived_sessions";
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SessionReportFilter<'a> {
     pub current_dir: Option<&'a Path>,
@@ -81,9 +84,12 @@ pub fn collect_session_reports_with_filter(
     filter: SessionReportFilter<'_>,
     state: &AppState,
 ) -> Result<Vec<SessionReport>> {
-    let sessions_root = shared_codex_root.join("sessions");
     let mut session_paths = Vec::new();
-    collect_session_paths(&sessions_root, &mut session_paths)?;
+    collect_session_paths(&shared_codex_root.join(SESSIONS_DIR), &mut session_paths)?;
+    collect_session_paths(
+        &shared_codex_root.join(ARCHIVED_SESSIONS_DIR),
+        &mut session_paths,
+    )?;
     session_paths.sort();
 
     let mut reports = Vec::new();
@@ -316,7 +322,8 @@ fn collect_resume_repair_candidate_paths(
 ) -> Result<Vec<SessionRepairCandidate>> {
     let mut paths = Vec::new();
     let mut session_paths = Vec::new();
-    collect_session_paths(&root.join("sessions"), &mut session_paths)?;
+    collect_session_paths(&root.join(SESSIONS_DIR), &mut session_paths)?;
+    collect_session_paths(&root.join(ARCHIVED_SESSIONS_DIR), &mut session_paths)?;
     paths.extend(
         session_paths
             .into_iter()

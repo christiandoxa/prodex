@@ -1,7 +1,7 @@
 use crate::CLI_TABLE_GAP;
 use crate::panel::section_header_with_width;
 use crate::terminal::current_cli_width;
-use crate::text::{fit_cell, text_width};
+use crate::text::{pad_cell, text_width};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionReportDisplay<'a> {
@@ -59,13 +59,13 @@ struct SessionReportColumnWidths {
 
 fn session_report_column_widths(total_width: usize) -> SessionReportColumnWidths {
     let gap_width = text_width(CLI_TABLE_GAP) * 4;
-    let available = total_width.saturating_sub(gap_width).max(60);
-    let id = (available / 5).clamp(12, 26);
-    let updated = (available / 5).clamp(12, 22);
-    let thread = (available / 5).clamp(12, 24);
+    let available = total_width.saturating_sub(gap_width).max(5);
+    let id = (available / 5).clamp(1, 26);
+    let updated = (available / 5).clamp(1, 22);
+    let thread = (available / 5).clamp(1, 24);
     let remaining = available.saturating_sub(id + updated + thread);
-    let cwd = (remaining / 2).max(12);
-    let path = remaining.saturating_sub(cwd).max(12);
+    let cwd = remaining / 2;
+    let path = remaining.saturating_sub(cwd);
     SessionReportColumnWidths {
         id,
         updated,
@@ -84,17 +84,12 @@ fn format_session_report_row(
     widths: SessionReportColumnWidths,
 ) -> String {
     format!(
-        "{:<id_w$}{gap}{:<updated_w$}{gap}{:<thread_w$}{gap}{:<cwd_w$}{gap}{:<path_w$}",
-        fit_cell(id, widths.id),
-        fit_cell(updated, widths.updated),
-        fit_cell(thread_name, widths.thread),
-        fit_cell(cwd, widths.cwd),
-        fit_cell(path, widths.path),
+        "{}{gap}{}{gap}{}{gap}{}{gap}{}",
+        pad_cell(id, widths.id),
+        pad_cell(updated, widths.updated),
+        pad_cell(thread_name, widths.thread),
+        pad_cell(cwd, widths.cwd),
+        pad_cell(path, widths.path),
         gap = CLI_TABLE_GAP,
-        id_w = widths.id,
-        updated_w = widths.updated,
-        thread_w = widths.thread,
-        cwd_w = widths.cwd,
-        path_w = widths.path,
     )
 }

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local};
 
 pub(super) fn current_log_width() -> usize {
-    terminal_ui::current_cli_width().max(60)
+    terminal_ui::current_cli_width()
 }
 
 pub(super) fn local_log_timestamp(timestamp: &str) -> String {

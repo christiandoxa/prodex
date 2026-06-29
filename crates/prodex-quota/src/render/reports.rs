@@ -106,9 +106,30 @@ fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
     const EXTRA_WEIGHTS: [usize; 7] = [12, 1, 3, 13, 4, 8, 18];
     const DISTRIBUTION_ORDER: [usize; 7] = [6, 3, 0, 5, 4, 2, 1];
 
-    let gap_width = text_width(CLI_TABLE_GAP) * 6;
     let min_total = MIN_WIDTHS.iter().sum::<usize>();
-    let available = total_width.saturating_sub(gap_width).max(min_total);
+    let available = total_width
+        .saturating_sub(text_width(CLI_TABLE_GAP) * 6)
+        .max(MIN_WIDTHS.len());
+
+    if available < min_total {
+        let mut widths = [1; 7];
+        for index in DISTRIBUTION_ORDER
+            .into_iter()
+            .cycle()
+            .take(available.saturating_sub(widths.len()))
+        {
+            widths[index] += 1;
+        }
+        return QuotaReportColumnWidths {
+            profile: widths[0],
+            current: widths[1],
+            auth: widths[2],
+            account: widths[3],
+            plan: widths[4],
+            status: widths[5],
+            remaining: widths[6],
+        };
+    }
 
     let mut widths = MIN_WIDTHS;
     let mut remaining_extra = available.saturating_sub(min_total);
@@ -337,27 +358,20 @@ fn render_quota_report_row(
 ) -> String {
     let active = if report.active { "*" } else { "" };
     format!(
-        "{:<name_w$}{}{:<act_w$}{}{:<auth_w$}{}{:<email_w$}{}{:<plan_w$}{}{:<status_w$}{}{:<main_w$}",
-        fit_cell(&report.name, column_widths.profile),
+        "{}{}{}{}{}{}{}{}{}{}{}{}{}",
+        pad_cell(&report.name, column_widths.profile),
         CLI_TABLE_GAP,
-        fit_cell(active, column_widths.current),
+        pad_cell(active, column_widths.current),
         CLI_TABLE_GAP,
-        fit_cell(&report.auth.label, column_widths.auth),
+        pad_cell(&report.auth.label, column_widths.auth),
         CLI_TABLE_GAP,
-        fit_cell(&view.email, column_widths.account),
+        pad_cell(&view.email, column_widths.account),
         CLI_TABLE_GAP,
-        fit_cell(&view.plan, column_widths.plan),
+        pad_cell(&view.plan, column_widths.plan),
         CLI_TABLE_GAP,
-        fit_cell(&view.status, column_widths.status),
+        pad_cell(&view.status, column_widths.status),
         CLI_TABLE_GAP,
-        fit_cell(&view.main, column_widths.remaining),
-        name_w = column_widths.profile,
-        act_w = column_widths.current,
-        auth_w = column_widths.auth,
-        email_w = column_widths.account,
-        plan_w = column_widths.plan,
-        status_w = column_widths.status,
-        main_w = column_widths.remaining,
+        pad_cell(&view.main, column_widths.remaining),
     )
 }
 

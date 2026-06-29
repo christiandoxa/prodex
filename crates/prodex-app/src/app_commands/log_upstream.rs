@@ -6,7 +6,7 @@ use super::log_upstream_payload::{
 use crate::{prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -145,7 +145,9 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
         if event::poll(LOG_STREAM_POLL_INTERVAL)?
             && let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
-            && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+            && (matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+                || (key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z'))))
         {
             break;
         }

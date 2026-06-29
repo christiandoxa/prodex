@@ -1,5 +1,7 @@
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 pub fn text_width(value: &str) -> usize {
-    value.chars().count()
+    UnicodeWidthStr::width(value)
 }
 
 pub fn fit_cell(value: &str, width: usize) -> String {
@@ -15,12 +17,15 @@ pub fn fit_cell(value: &str, width: usize) -> String {
         return ".".repeat(width);
     }
 
-    let mut output = String::new();
-    for ch in value.chars().take(width - 3) {
-        output.push(ch);
-    }
+    let mut output = take_display_width(value, width - 3);
     output.push_str("...");
     output
+}
+
+pub fn pad_cell(value: &str, width: usize) -> String {
+    let value = fit_cell(value, width);
+    let padding = width.saturating_sub(text_width(&value));
+    format!("{value}{}", " ".repeat(padding))
 }
 
 pub fn chunk_token(token: &str, width: usize) -> Vec<String> {
@@ -33,10 +38,18 @@ pub fn chunk_token(token: &str, width: usize) -> Vec<String> {
 
     let mut chunks = Vec::new();
     let mut current = String::new();
+    let mut current_width = 0;
     for ch in token.chars() {
-        current.push(ch);
-        if text_width(&current) >= width {
+        let ch_width = ch.width().unwrap_or(0);
+        if current_width > 0 && current_width + ch_width > width {
             chunks.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += ch_width;
+        if current_width >= width {
+            chunks.push(std::mem::take(&mut current));
+            current_width = 0;
         }
     }
 
@@ -45,6 +58,20 @@ pub fn chunk_token(token: &str, width: usize) -> Vec<String> {
     }
 
     chunks
+}
+
+fn take_display_width(value: &str, width: usize) -> String {
+    let mut output = String::new();
+    let mut used = 0;
+    for ch in value.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if used + ch_width > width {
+            break;
+        }
+        output.push(ch);
+        used += ch_width;
+    }
+    output
 }
 
 pub fn wrap_text(input: &str, width: usize) -> Vec<String> {

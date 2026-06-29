@@ -304,6 +304,11 @@ fn prompt_export_password_mode_tui() -> Result<bool> {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => return Ok(true),
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => return Ok(false),
+                KeyCode::Char('c') | KeyCode::Char('z')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    return Ok(false);
+                }
                 _ => {}
             }
         }

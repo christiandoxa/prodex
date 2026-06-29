@@ -52,7 +52,6 @@ fn session_reports_parse_codex_jsonl_metadata() {
 
     let reports =
         collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
-
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].id, "sess-a");
     assert_eq!(reports[0].thread_name.as_deref(), Some("Issue triage"));
@@ -64,6 +63,27 @@ fn session_reports_parse_codex_jsonl_metadata() {
         reports[0].updated_at.as_deref(),
         Some("2026-04-29T12:30:00Z")
     );
+    assert_eq!(reports[0].model_provider.as_deref(), Some("prodex-gemini"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn session_reports_include_archived_sessions() {
+    let root = test_temp_dir("session-archived-jsonl");
+    let sessions = root.join("archived_sessions/2026/04/29");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    fs::write(
+        sessions.join("archived.jsonl"),
+        "{\"timestamp\":\"2026-04-29T12:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"archived-session\",\"cwd\":\"/tmp/workspace\",\"model_provider\":\"prodex-gemini\"}}\n",
+    )
+    .expect("archived session should be written");
+
+    let reports =
+        collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].id, "archived-session");
     assert_eq!(reports[0].model_provider.as_deref(), Some("prodex-gemini"));
 
     let _ = fs::remove_dir_all(root);
@@ -188,6 +208,37 @@ fn repair_resume_session_metadata_prefix_synthesizes_missing_rollout_metadata() 
         collect_session_reports(&root, None, &AppState::default()).expect("sessions collect");
     assert_eq!(reports.len(), 1);
     assert_eq!(reports[0].id, "019ebd01-c881-74c0-b01d-7fdf5bd4dd32");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_resume_session_metadata_prefix_synthesizes_archived_metadata() {
+    let root = test_temp_dir("session-synthetic-archived-rollout");
+    let sessions = root.join("archived_sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_id = "019ebd01-c881-74c0-b01d-7fdf5bd4dd32";
+    let session_path = sessions.join(format!("rollout-2026-06-13T02-04-31-{session_id}.jsonl"));
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"archived partial\"}}\n",
+    )
+    .expect("archived session should be written");
+
+    repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+    let unrepairable =
+        find_unrepairable_resume_session(&root, session_id).expect("unrepairable check");
+
+    assert_eq!(unrepairable, None);
+    assert_codex_session_meta_line(
+        fs::read_to_string(&session_path)
+            .expect("session should read")
+            .lines()
+            .next()
+            .expect("session should have first line"),
+        session_id,
+        Some("2026-06-13T02:04:31Z"),
+    );
 
     let _ = fs::remove_dir_all(root);
 }

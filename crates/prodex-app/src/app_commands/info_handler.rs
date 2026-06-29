@@ -5,7 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use terminal_ui::{tui_border_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{text_width, tui_border_style, tui_secondary_style, tui_title_style};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, collect_active_runtime_log_paths,
@@ -206,7 +206,7 @@ fn info_panel_tui_height(fields: &[(String, String)]) -> u16 {
 fn info_panel_tui_text(fields: &[(String, String)]) -> Text<'static> {
     let label_width = fields
         .iter()
-        .map(|(label, _)| label.chars().count())
+        .map(|(label, _)| text_width(label))
         .max()
         .unwrap_or(0)
         .min(24);
@@ -215,7 +215,10 @@ fn info_panel_tui_text(fields: &[(String, String)]) -> Text<'static> {
         let color = info_panel_value_color(label, value);
         lines.push(Line::from(vec![
             Span::styled(
-                format!("{label:<label_width$} "),
+                format!(
+                    "{label}{} ",
+                    " ".repeat(label_width.saturating_sub(text_width(label)))
+                ),
                 tui_secondary_style().add_modifier(Modifier::BOLD),
             ),
             Span::styled(value.clone(), Style::default().fg(color)),

@@ -133,7 +133,7 @@ fn interactive_login_prompts_before_starting_chatgpt_browser_flow() {
         output.tty_output
     );
     assert!(output.tty_output.contains("Sign in with ChatGPT"));
-    assert!(output.tty_output.contains("Provide your own API key"));
+    assert!(output.tty_output.contains("Select login method"));
     let codex_args =
         fs::read_to_string(&fixture.codex_args_log).expect("failed to read codex args log");
     assert_eq!(

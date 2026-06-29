@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -471,6 +471,11 @@ fn print_profile_panels_scrollable(panels: &[ProfilePanel]) -> Result<()> {
         {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => return Ok(()),
+                KeyCode::Char('c') | KeyCode::Char('z')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    return Ok(());
+                }
                 KeyCode::Char('j') | KeyCode::Down => {
                     scroll_offset = scroll_offset.saturating_add(1).min(max_scroll);
                 }
@@ -613,14 +618,17 @@ fn profile_tui_lines(panels: &[ProfilePanel]) -> Vec<Line<'static>> {
         let label_width = panel
             .fields
             .iter()
-            .map(|(label, _)| label.chars().count())
+            .map(|(label, _)| terminal_ui::text_width(label))
             .max()
             .unwrap_or(0)
             .min(22);
         for (label, value) in &panel.fields {
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("{label:<label_width$} "),
+                    format!(
+                        "{label}{} ",
+                        " ".repeat(label_width.saturating_sub(terminal_ui::text_width(label)))
+                    ),
                     tui_secondary_style().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(

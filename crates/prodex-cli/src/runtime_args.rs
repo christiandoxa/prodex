@@ -396,6 +396,9 @@ impl SuperArgs {
     }
 
     pub fn into_caveman_args_with_choices(self, presidio: bool, mem0: bool) -> CavemanArgs {
+        let (prefixed_presidio, prefixed_memory, passthrough_codex_args) =
+            extract_super_leading_launch_prefixes(self.codex_args);
+        let presidio = presidio || prefixed_presidio;
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
         let external_upstream_base_url = self.provider.map(|provider| {
             self.base_url
@@ -434,7 +437,7 @@ impl SuperArgs {
         let mut codex_args = Vec::new();
         codex_args.push(OsString::from("rtk"));
         codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
-        if mem0 {
+        if mem0 || prefixed_memory {
             codex_args.push(OsString::from("mem"));
         }
         if presidio {
@@ -444,7 +447,7 @@ impl SuperArgs {
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
         codex_args.extend(feature_overrides);
-        codex_args.extend(self.codex_args);
+        codex_args.extend(passthrough_codex_args);
         CavemanArgs {
             profile: self.profile,
             auto_rotate: self.auto_rotate,
@@ -470,6 +473,26 @@ impl SuperArgs {
             codex_args,
         }
     }
+}
+
+fn extract_super_leading_launch_prefixes(args: Vec<OsString>) -> (bool, bool, Vec<OsString>) {
+    let mut presidio = false;
+    let mut memory = false;
+    let mut consumed = 0;
+    for arg in &args {
+        let Some(prefix) = arg.to_str() else {
+            break;
+        };
+        match prefix {
+            "rtk" | "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor"
+            | "ponytail" => {}
+            "mem" | "memory" => memory = true,
+            "presidio" => presidio = true,
+            _ => break,
+        }
+        consumed += 1;
+    }
+    (presidio, memory, args.into_iter().skip(consumed).collect())
 }
 
 impl RunArgs {

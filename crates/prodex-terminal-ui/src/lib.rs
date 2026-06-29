@@ -42,7 +42,7 @@ pub use terminal::{
     current_cli_width, terminal_dimensions_from_tty, terminal_height_lines,
     terminal_size_override_usize, terminal_width_chars,
 };
-pub use text::{chunk_token, fit_cell, text_width, wrap_text};
+pub use text::{chunk_token, fit_cell, pad_cell, text_width, wrap_text};
 
 pub const CLI_WIDTH: usize = 110;
 pub const CLI_MIN_WIDTH: usize = 60;

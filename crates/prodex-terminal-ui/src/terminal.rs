@@ -2,12 +2,10 @@ use std::env;
 use std::fs;
 use std::process::Command;
 
-use crate::{CLI_MIN_WIDTH, CLI_WIDTH};
+use crate::CLI_WIDTH;
 
 pub fn current_cli_width() -> usize {
-    terminal_width_chars()
-        .unwrap_or(CLI_WIDTH)
-        .max(CLI_MIN_WIDTH)
+    terminal_width_chars().unwrap_or(CLI_WIDTH).max(1)
 }
 
 pub fn terminal_size_override_usize(env_key: &str) -> Option<usize> {
