@@ -380,6 +380,88 @@ fn prepare_managed_codex_home_rescans_v2_cache_for_attachment_image_paths() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_managed_codex_home_rewrites_goal_objective_attachment_paths() {
+    let temp_dir = PrepareTestDir::new("goal-objective-attachments");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let attachment_id = "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb";
+    let old_root = temp_dir.path.join("deleted-overlay");
+    let old_paste = old_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("pasted-text-1.txt");
+    let old_image = old_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("image-1.png");
+    let old_goal_file = old_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("goal-objective.md");
+    let shared_dir = paths
+        .shared_codex_root
+        .join("attachments")
+        .join(attachment_id);
+    fs::create_dir_all(&shared_dir).expect("shared attachment dir should create");
+    fs::write(shared_dir.join("pasted-text-1.txt"), b"stable paste")
+        .expect("stable paste should write");
+    fs::write(shared_dir.join("image-1.png"), b"stable image").expect("stable image should write");
+    fs::write(shared_dir.join("goal-objective.md"), b"stable objective")
+        .expect("stable goal file should write");
+
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should create");
+    let db_path = paths.shared_codex_root.join("goals_1.sqlite");
+    let conn = rusqlite::Connection::open(&db_path).expect("goals db should open");
+    conn.execute_batch(
+        r#"
+        CREATE TABLE thread_goals (
+            thread_id TEXT PRIMARY KEY NOT NULL,
+            goal_id TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            token_budget INTEGER,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            time_used_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+        "#,
+    )
+    .expect("goals schema should create");
+    let objective = format!(
+        "use pasted text file: {} and image file: {}. Read the Codex goal objective file at {} before continuing.",
+        old_paste.display(),
+        old_image.display(),
+        old_goal_file.display()
+    );
+    conn.execute(
+        "INSERT INTO thread_goals (thread_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES (?1, 'goal-1', ?2, 'paused', 1, 1)",
+        rusqlite::params!["thread-1", objective],
+    )
+    .expect("goal row should insert");
+    drop(conn);
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should prepare");
+
+    let conn = rusqlite::Connection::open(&db_path).expect("goals db should reopen");
+    let rewritten: String = conn
+        .query_row(
+            "SELECT objective FROM thread_goals WHERE thread_id = 'thread-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("goal objective should read");
+    assert!(rewritten.contains(&shared_dir.join("pasted-text-1.txt").display().to_string()));
+    assert!(rewritten.contains(&shared_dir.join("image-1.png").display().to_string()));
+    assert!(rewritten.contains(&shared_dir.join("goal-objective.md").display().to_string()));
+    assert!(
+        !rewritten.contains(&old_root.display().to_string()),
+        "goal objective should not retain deleted overlay path: {rewritten}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn prepare_managed_codex_home_ignores_cache_write_failure() {
     let temp_dir = PrepareTestDir::new("cache-write-failure");
     let paths = temp_dir.app_paths();

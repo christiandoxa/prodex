@@ -1,10 +1,13 @@
 use super::*;
 use crate::image_attachments::{
     codex_session_image_attachments_are_stable, persist_codex_session_file_image_attachments,
+    rewrite_codex_persisted_attachment_paths,
 };
 use chrono::{DateTime, Utc};
 use filetime::FileTime;
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::time::UNIX_EPOCH;
 
 const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
@@ -61,6 +64,7 @@ pub fn maintain_managed_codex_sessions(paths: &AppPaths) -> Result<()> {
         &previous,
         &mut next,
     )?;
+    persist_codex_goal_attachment_paths(&paths.shared_codex_root)?;
 
     if next != previous {
         // The cache only avoids repeat work. A read-only or contended cache must never prevent
@@ -122,6 +126,85 @@ fn maintain_codex_sessions_in_dir(
     }
 
     Ok(())
+}
+
+fn persist_codex_goal_attachment_paths(codex_home: &Path) -> Result<()> {
+    if !codex_home.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(codex_home)
+        .with_context(|| format!("failed to read {}", codex_home.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", codex_home.display()))?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if file_name.starts_with("goals_") && file_name.ends_with(".sqlite") {
+            persist_codex_goal_attachment_paths_in_db(codex_home, &entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn persist_codex_goal_attachment_paths_in_db(codex_home: &Path, db_path: &Path) -> Result<()> {
+    if !path_looks_like_sqlite_db(db_path) {
+        return Ok(());
+    }
+    let Ok(conn) = Connection::open(db_path) else {
+        return Ok(());
+    };
+    let has_thread_goals = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_goals'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .is_some();
+    if !has_thread_goals {
+        return Ok(());
+    }
+
+    let mut stmt = match conn.prepare("SELECT thread_id, objective FROM thread_goals") {
+        Ok(stmt) => stmt,
+        Err(_) => return Ok(()),
+    };
+    let rows = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return Ok(()),
+    };
+    let mut updates = Vec::new();
+    for row in rows {
+        let Ok((thread_id, objective)) = row else {
+            continue;
+        };
+        let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &objective)?;
+        if rewritten != objective {
+            updates.push((thread_id, rewritten));
+        }
+    }
+    drop(stmt);
+
+    for (thread_id, objective) in updates {
+        conn.execute(
+            "UPDATE thread_goals SET objective = ? WHERE thread_id = ?",
+            params![objective, thread_id],
+        )
+        .with_context(|| format!("failed to update goal attachments in {}", db_path.display()))?;
+    }
+    Ok(())
+}
+
+fn path_looks_like_sqlite_db(path: &Path) -> bool {
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut header = [0; 16];
+    file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0"
 }
 
 fn session_file_fingerprint(path: &Path) -> Result<SessionFileFingerprint> {

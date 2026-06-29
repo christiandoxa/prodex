@@ -2425,6 +2425,7 @@ dependencies = [
  "chrono",
  "filetime",
  "prodex-core",
+ "rusqlite",
  "serde",
  "serde_json",
 ]

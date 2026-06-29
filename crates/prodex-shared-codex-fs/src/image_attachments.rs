@@ -5,6 +5,7 @@ const SESSION_ATTACHMENT_DIR: &str = "attachments";
 const CODEX_ATTACHMENT_PATH_MARKER: &str = "/attachments/";
 const CODEX_PASTED_TEXT_PREFIX: &str = "pasted-text-";
 const CODEX_ATTACHMENT_IMAGE_PREFIX: &str = "image-";
+const CODEX_GOAL_OBJECTIVE_FILE: &str = "goal-objective.md";
 const CODEX_IMAGE_TAG_PREFIX: &str = "<image ";
 const CODEX_IMAGE_PATH_PREFIX: &str = r#"path=""#;
 const CODEX_IMAGE_PATH_ESCAPED_PREFIX: &str = r#"path=\""#;
@@ -57,7 +58,7 @@ pub(crate) fn persist_codex_session_file_image_attachments(
 ) -> Result<String> {
     let contents = fs::read_to_string(session_file)
         .with_context(|| format!("failed to read {}", session_file.display()))?;
-    let rewritten = rewrite_codex_session_attachment_paths(codex_home, &contents)?;
+    let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &contents)?;
     if rewritten != contents {
         fs::write(session_file, &rewritten)
             .with_context(|| format!("failed to write {}", session_file.display()))?;
@@ -116,7 +117,10 @@ pub(crate) fn codex_session_image_attachments_are_stable(
     true
 }
 
-fn rewrite_codex_session_attachment_paths(codex_home: &Path, contents: &str) -> Result<String> {
+pub(crate) fn rewrite_codex_persisted_attachment_paths(
+    codex_home: &Path,
+    contents: &str,
+) -> Result<String> {
     let image_rewritten = rewrite_codex_session_image_paths(codex_home, contents)?;
     rewrite_codex_session_inline_attachment_paths(codex_home, &image_rewritten)
 }
@@ -225,6 +229,9 @@ fn next_codex_session_attachment_path(contents: &str, cursor: usize) -> Option<(
     while path_end < bytes.len() && is_codex_session_path_byte(bytes[path_end]) {
         path_end += 1;
     }
+    while path_end > marker_start && bytes[path_end - 1] == b'.' {
+        path_end -= 1;
+    }
 
     (path_start < marker_start && path_end > marker_start + CODEX_ATTACHMENT_PATH_MARKER.len())
         .then_some((path_start, path_end))
@@ -305,6 +312,7 @@ fn codex_attachment_path_suffix(path: &Path) -> Option<PathBuf> {
 fn codex_attachment_file_name_is_persistable(file_name: &str) -> bool {
     file_name.starts_with(CODEX_PASTED_TEXT_PREFIX)
         || file_name.starts_with(CODEX_ATTACHMENT_IMAGE_PREFIX)
+        || file_name == CODEX_GOAL_OBJECTIVE_FILE
 }
 
 #[cfg(test)]

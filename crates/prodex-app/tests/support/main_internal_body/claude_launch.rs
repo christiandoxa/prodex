@@ -304,6 +304,37 @@ fn prepare_prodex_overlay_home_preserves_pasted_attachments_across_profile_resum
         ),
     )
     .expect("session should write through overlay symlink");
+    let goals_db = paths.shared_codex_root.join("goals_1.sqlite");
+    let conn = rusqlite::Connection::open(&goals_db).expect("goals db should open");
+    conn.execute_batch(
+        r#"
+        CREATE TABLE thread_goals (
+            thread_id TEXT PRIMARY KEY NOT NULL,
+            goal_id TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            token_budget INTEGER,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            time_used_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+        "#,
+    )
+    .expect("goals schema should create");
+    conn.execute(
+        "INSERT INTO thread_goals (thread_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES (?1, 'goal-1', ?2, 'paused', 1, 1)",
+        rusqlite::params![
+            "thread-1",
+            format!(
+                "pasted text file: {}. image file: {}",
+                overlay_pasted_text.display(),
+                overlay_pasted_image.display()
+            )
+        ],
+    )
+    .expect("goal row should insert");
+    drop(conn);
 
     prodex_shared_codex_fs::maintain_managed_codex_sessions(&paths)
         .expect("post-exit maintenance should stabilize attachment paths");
@@ -362,6 +393,27 @@ fn prepare_prodex_overlay_home_preserves_pasted_attachments_across_profile_resum
     assert!(
         !rewritten.contains(&first_overlay.display().to_string()),
         "resume history must not retain first overlay path: {rewritten}"
+    );
+
+    let conn = rusqlite::Connection::open(&goals_db).expect("goals db should reopen");
+    let goal_objective: String = conn
+        .query_row(
+            "SELECT objective FROM thread_goals WHERE thread_id = 'thread-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("goal objective should read");
+    assert!(
+        goal_objective.contains(&shared_pasted_text.display().to_string()),
+        "goal objective should point at shared pasted text: {goal_objective}"
+    );
+    assert!(
+        goal_objective.contains(&shared_pasted_image.display().to_string()),
+        "goal objective should point at shared pasted image: {goal_objective}"
+    );
+    assert!(
+        !goal_objective.contains(&first_overlay.display().to_string()),
+        "goal objective must not retain first overlay path: {goal_objective}"
     );
 }
 
