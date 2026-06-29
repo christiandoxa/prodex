@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.232.0 - 2026-06-29
+
+### Runtime
+
+- Improve codex compatibility (`967305e`)
+
+### Misc
+
+- Expand compatibility for 0.232.0 (`b3867f2`)
+
 ## 0.231.0 - 2026-06-29
 
 ### CLI
@@ -73,9 +83,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Fall back when super prompt tui cannot initialize (`ede5412`)
 - Rewrite all prodex-owned CLI output to ratatui TUI (`d4c60d5`)
-
-## 0.220.0 - 2026-06-26
-
-### Misc
-
-- Stabilize copilot provider capabilities (`818a0b3`)
