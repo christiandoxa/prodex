@@ -255,7 +255,7 @@ fn deepseek_catalog_model(
         "effective_context_window_percent": 95,
         "experimental_supported_tools": [],
         "input_modalities": ["text"],
-        "supports_search_tool": true
+        "supports_search_tool": false
     })
 }
 
@@ -299,7 +299,7 @@ mod tests {
                 .any(|arg| { arg.to_string_lossy().contains("model_catalog_json=") })
         );
         assert_eq!(catalog["models"][0]["slug"], "deepseek-v4-pro");
-        assert_eq!(catalog["models"][0]["supports_search_tool"], true);
+        assert_eq!(catalog["models"][0]["supports_search_tool"], false);
         assert!(
             catalog["models"]
                 .as_array()

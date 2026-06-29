@@ -1,4 +1,7 @@
-use super::super::deepseek_rewrite::runtime_chat_compatible_request_body;
+use super::super::deepseek_rewrite::{
+    RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
+    runtime_chat_compatible_request_body,
+};
 use super::super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
@@ -68,9 +71,16 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
                 RuntimeProviderBridgeKind::Gemini,
                 GEMINI_DEFAULT_MODEL,
                 true,
+                RuntimeDeepSeekRewriteOptions::default(),
             )?;
             if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                pending.insert(request_id, translated.messages);
+                pending.insert(
+                    request_id,
+                    RuntimeDeepSeekPendingRequest {
+                        messages: translated.messages,
+                        response_metadata: translated.response_metadata,
+                    },
+                );
             }
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(

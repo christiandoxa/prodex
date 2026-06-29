@@ -1,4 +1,7 @@
-use super::deepseek_rewrite::runtime_deepseek_chat_request_body;
+use super::deepseek_rewrite::{
+    RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
+    runtime_deepseek_chat_request_body_with_options,
+};
 use super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
@@ -77,18 +80,48 @@ fn send_runtime_deepseek_responses_request(
         RuntimeProviderBridgeKind::DeepSeek,
         &model_selection.model,
     );
+    let (strict_tools, beta_base_url, web_search_mode) = match &shared.provider {
+        super::local_rewrite_options::RuntimeLocalRewriteProviderOptions::DeepSeek {
+            strict_tools,
+            beta_base_url,
+            web_search_mode,
+            ..
+        } => (*strict_tools, beta_base_url.as_str(), *web_search_mode),
+        _ => (
+            false,
+            shared.upstream_base_url.as_str(),
+            super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode::Auto,
+        ),
+    };
+    let upstream_base_url = if strict_tools {
+        beta_base_url
+    } else {
+        &shared.upstream_base_url
+    };
     let upstream_url = runtime_deepseek_upstream_url(
-        &shared.upstream_base_url,
+        upstream_base_url,
         &shared.mount_path,
         &request.path_and_query,
     );
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
-            let translated =
-                runtime_deepseek_chat_request_body(&model_body, &shared.deepseek_conversations)?;
+            let translated = runtime_deepseek_chat_request_body_with_options(
+                &model_body,
+                &shared.deepseek_conversations,
+                RuntimeDeepSeekRewriteOptions {
+                    strict_tools,
+                    web_search_mode,
+                },
+            )?;
             if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                pending.insert(request_id, translated.messages);
+                pending.insert(
+                    request_id,
+                    RuntimeDeepSeekPendingRequest {
+                        messages: translated.messages,
+                        response_metadata: translated.response_metadata,
+                    },
+                );
             }
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(

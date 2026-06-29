@@ -1,6 +1,6 @@
 use super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, runtime_chat_compatible_request_body,
-    runtime_deepseek_responses_value_from_chat_value,
+    RuntimeDeepSeekConversationStore, RuntimeDeepSeekRewriteOptions,
+    runtime_chat_compatible_request_body, runtime_deepseek_responses_value_from_chat_value,
 };
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use std::collections::BTreeMap;
@@ -25,6 +25,7 @@ fn gemini_openai_chat_request_preserves_documented_reasoning_effort() {
         RuntimeProviderBridgeKind::Gemini,
         "gemini-3.5-flash",
         true,
+        RuntimeDeepSeekRewriteOptions::default(),
     )
     .expect("Gemini OpenAI-compatible request should translate");
     let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
@@ -57,6 +58,7 @@ fn gemini_openai_chat_request_maps_thought_signature_to_extra_content() {
         RuntimeProviderBridgeKind::Gemini,
         "gemini-3.5-flash",
         true,
+        RuntimeDeepSeekRewriteOptions::default(),
     )
     .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();

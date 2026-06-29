@@ -6,17 +6,17 @@ use super::{
 use crate::{
     AppState, CodexModelProviderSetting, ProfileProvider, RuntimeAnthropicOAuthProfileAuth,
     RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth,
-    RuntimeGeminiModelResolution, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
-    RuntimeLocalRewriteProviderOptions, SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID,
-    SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID,
-    ensure_gemini_code_assist_project_if_missing, gemini_oauth_project_from_env,
-    refresh_claude_oauth_secret_if_needed, resolve_copilot_runtime_api_auth, resolve_profile_name,
-    write_copilot_runtime_model_catalog,
+    RuntimeDeepSeekWebSearchMode, RuntimeGeminiModelResolution, RuntimeGeminiOAuthProfileAuth,
+    RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions, SUPER_ANTHROPIC_PROVIDER_ID,
+    SUPER_COPILOT_PROVIDER_ID, SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID,
+    SUPER_LOCAL_PROVIDER_ID, codex_config_value, ensure_gemini_code_assist_project_if_missing,
+    gemini_oauth_project_from_env, refresh_claude_oauth_secret_if_needed,
+    resolve_copilot_runtime_api_auth, resolve_profile_name, write_copilot_runtime_model_catalog,
 };
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeSet;
-use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 pub(super) fn runtime_launch_should_use_profileless_gemini(
     state: &AppState,
@@ -280,7 +280,12 @@ pub(super) fn runtime_local_rewrite_provider_options(
             .context(
                 "DeepSeek provider requires --api-key or DEEPSEEK_API_KEY(S) in the environment",
             )?;
-            Ok(RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys })
+            Ok(RuntimeLocalRewriteProviderOptions::DeepSeek {
+                api_keys,
+                strict_tools: runtime_deepseek_strict_tools_enabled(&selection.codex_home),
+                beta_base_url: runtime_deepseek_beta_base_url(&selection.codex_home),
+                web_search_mode: runtime_deepseek_web_search_mode(&selection.codex_home),
+            })
         }
         Some(provider)
             if provider.eq_ignore_ascii_case("gemini")
@@ -665,6 +670,65 @@ pub(super) fn runtime_deepseek_api_keys_from_request_or_env(
         })
 }
 
+pub(super) fn runtime_deepseek_strict_tools_enabled(codex_home: &Path) -> bool {
+    runtime_deepseek_toml_config_value(codex_home, "deepseek.strict_tools")
+        .and_then(|value| match value {
+            toml::Value::Boolean(enabled) => Some(enabled),
+            toml::Value::String(value) => Some(runtime_deepseek_config_bool(&value)),
+            _ => None,
+        })
+        .or_else(|| {
+            env::var("PRODEX_DEEPSEEK_STRICT_TOOLS")
+                .ok()
+                .map(|value| runtime_deepseek_config_bool(&value))
+        })
+        .unwrap_or(false)
+}
+
+pub(super) fn runtime_deepseek_beta_base_url(codex_home: &Path) -> String {
+    codex_config_value(codex_home, "deepseek.beta_base_url")
+        .or_else(|| env::var("PRODEX_DEEPSEEK_BETA_BASE_URL").ok())
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://api.deepseek.com/beta".to_string())
+}
+
+pub(super) fn runtime_deepseek_web_search_mode(codex_home: &Path) -> RuntimeDeepSeekWebSearchMode {
+    codex_config_value(codex_home, "deepseek.web_search_mode")
+        .or_else(|| env::var("PRODEX_DEEPSEEK_WEB_SEARCH_MODE").ok())
+        .and_then(|value| runtime_deepseek_parse_web_search_mode(&value))
+        .unwrap_or_default()
+}
+
+fn runtime_deepseek_parse_web_search_mode(value: &str) -> Option<RuntimeDeepSeekWebSearchMode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" => None,
+        "auto" => Some(RuntimeDeepSeekWebSearchMode::Auto),
+        "off" | "disabled" | "disable" => Some(RuntimeDeepSeekWebSearchMode::Off),
+        "openai_chat" | "openai-chat" | "chat" => Some(RuntimeDeepSeekWebSearchMode::OpenAiChat),
+        "anthropic" => Some(RuntimeDeepSeekWebSearchMode::Anthropic),
+        "function_proxy" | "function-proxy" => Some(RuntimeDeepSeekWebSearchMode::FunctionProxy),
+        _ => None,
+    }
+}
+
+fn runtime_deepseek_config_bool(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn runtime_deepseek_toml_config_value(codex_home: &Path, key: &str) -> Option<toml::Value> {
+    let contents = fs::read_to_string(codex_home.join("config.toml")).ok()?;
+    let value = toml::from_str::<toml::Value>(&contents).ok()?;
+    let mut current = &value;
+    for part in key.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current.clone())
+}
+
 pub(super) fn runtime_anthropic_api_keys_from_request_or_env(
     value: Option<&str>,
 ) -> Option<Vec<String>> {
@@ -792,6 +856,46 @@ mod tests {
         let keys = runtime_gemini_api_keys_from_request_or_env(None).unwrap();
 
         assert_eq!(keys, vec!["one", "two"]);
+    }
+
+    #[test]
+    fn deepseek_strict_tools_reads_env_fallback() {
+        let _strict = TestEnvVarGuard::set("PRODEX_DEEPSEEK_STRICT_TOOLS", "true");
+        let _beta = TestEnvVarGuard::set(
+            "PRODEX_DEEPSEEK_BETA_BASE_URL",
+            "https://example.test/beta/",
+        );
+        let _search = TestEnvVarGuard::set("PRODEX_DEEPSEEK_WEB_SEARCH_MODE", "off");
+
+        assert!(runtime_deepseek_strict_tools_enabled(Path::new("")));
+        assert_eq!(
+            runtime_deepseek_beta_base_url(Path::new("")),
+            "https://example.test/beta"
+        );
+        assert_eq!(
+            runtime_deepseek_web_search_mode(Path::new("")),
+            RuntimeDeepSeekWebSearchMode::Off
+        );
+    }
+
+    #[test]
+    fn deepseek_strict_tools_reads_profile_config_bool() {
+        let root = env::temp_dir().join(format!("prodex-deepseek-config-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("config.toml"),
+            "[deepseek]\nstrict_tools = true\nweb_search_mode = \"function_proxy\"\n",
+        )
+        .unwrap();
+
+        assert!(runtime_deepseek_strict_tools_enabled(&root));
+        assert_eq!(
+            runtime_deepseek_web_search_mode(&root),
+            RuntimeDeepSeekWebSearchMode::FunctionProxy
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -87,6 +87,7 @@ fn copilot_custom_instructions_merge_into_chat_body() {
             serde_json::json!({"role": "system", "content": "Existing system."}),
             serde_json::json!({"role": "user", "content": "Hi"}),
         ],
+        response_metadata: None,
     };
 
     runtime_copilot_apply_custom_instructions(&mut translated, "Prefer Rust tests.").unwrap();
@@ -176,6 +177,7 @@ fn copilot_bridge_stream_records_response_id_and_restores_mcp_namespace() {
         Cursor::new(chat_stream),
         11,
         Vec::new(),
+        None,
         conversation_store(),
     );
     let mut reader = RuntimeCopilotResponsesSseBindingReader::new(chat_reader, Some(recorder));

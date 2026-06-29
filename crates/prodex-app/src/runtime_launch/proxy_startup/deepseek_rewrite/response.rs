@@ -1,7 +1,7 @@
 use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use super::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages,
-    runtime_deepseek_rtk_wrapped_tool_arguments,
+    RuntimeDeepSeekPendingRequest, runtime_deepseek_rtk_wrapped_tool_arguments,
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
@@ -14,6 +14,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
     mut response: reqwest::blocking::Response,
     request_id: u64,
     conversation_messages: Vec<serde_json::Value>,
+    response_metadata: Option<serde_json::Value>,
     conversations: &RuntimeDeepSeekConversationStore,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let mut body = Vec::new();
@@ -22,7 +23,8 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
         .context("failed to read DeepSeek chat response body")?;
     let value: serde_json::Value =
         serde_json::from_slice(&body).context("failed to parse DeepSeek chat response JSON")?;
-    let response = runtime_deepseek_responses_value_from_chat_value(&value, request_id);
+    let mut response = runtime_deepseek_responses_value_from_chat_value(&value, request_id);
+    runtime_deepseek_merge_response_metadata(&mut response, response_metadata);
     if let Some(response_id) = response.get("id").and_then(serde_json::Value::as_str) {
         runtime_deepseek_store_conversation(
             conversations,
@@ -45,7 +47,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_take_pending_messages(
     pending: &RuntimeDeepSeekPendingMessages,
     request_id: u64,
-) -> Vec<serde_json::Value> {
+) -> RuntimeDeepSeekPendingRequest {
     pending
         .lock()
         .ok()
@@ -69,6 +71,43 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_store_conversat
     );
     if let Ok(mut conversations) = conversations.lock() {
         conversations.insert(response_id.to_string(), messages);
+    }
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_merge_response_metadata(
+    response: &mut serde_json::Value,
+    metadata: Option<serde_json::Value>,
+) {
+    let Some(metadata) = metadata else {
+        return;
+    };
+    let Some(metadata_object) = metadata.as_object() else {
+        return;
+    };
+    let response_metadata = response
+        .as_object_mut()
+        .map(|object| {
+            object
+                .entry("metadata".to_string())
+                .or_insert_with(|| serde_json::json!({}))
+        })
+        .and_then(serde_json::Value::as_object_mut);
+    let Some(response_metadata) = response_metadata else {
+        return;
+    };
+    for (key, value) in metadata_object {
+        match (response_metadata.get_mut(key), value.as_object()) {
+            (Some(existing), Some(next)) => {
+                if let Some(existing) = existing.as_object_mut() {
+                    for (nested_key, nested_value) in next {
+                        existing.insert(nested_key.clone(), nested_value.clone());
+                    }
+                }
+            }
+            _ => {
+                response_metadata.insert(key.clone(), value.clone());
+            }
+        }
     }
 }
 
@@ -227,6 +266,31 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_value
     {
         response["usage"] = usage;
     }
+    let mut metadata = serde_json::Map::new();
+    if let Some(logprobs) = value
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("logprobs"))
+        .filter(|logprobs| !logprobs.is_null())
+    {
+        metadata.insert("logprobs".to_string(), logprobs.clone());
+    }
+    if let Some(finish_reason) = value
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(serde_json::Value::as_str)
+    {
+        metadata.insert(
+            "finish_reason".to_string(),
+            serde_json::Value::String(finish_reason.to_string()),
+        );
+    }
+    if !metadata.is_empty() {
+        response["metadata"] = serde_json::json!({ "deepseek": metadata });
+    }
     response
 }
 
@@ -300,11 +364,40 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_usage
         .get("total_tokens")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
-    Some(serde_json::json!({
+    let cache_hit_tokens = usage
+        .get("prompt_cache_hit_tokens")
+        .and_then(serde_json::Value::as_u64);
+    let cache_miss_tokens = usage
+        .get("prompt_cache_miss_tokens")
+        .and_then(serde_json::Value::as_u64);
+    let reasoning_tokens = usage
+        .get("completion_tokens_details")
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(serde_json::Value::as_u64);
+    let mut response_usage = serde_json::json!({
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
-    }))
+    });
+    if let Some(cache_hit_tokens) = cache_hit_tokens {
+        response_usage["input_tokens_details"] = serde_json::json!({
+            "cached_tokens": cache_hit_tokens,
+        });
+    }
+    if let Some(reasoning_tokens) = reasoning_tokens {
+        response_usage["output_tokens_details"] = serde_json::json!({
+            "reasoning_tokens": reasoning_tokens,
+        });
+    }
+    if cache_hit_tokens.is_some() || cache_miss_tokens.is_some() {
+        response_usage["metadata"] = serde_json::json!({
+            "deepseek": {
+                "prompt_cache_hit_tokens": cache_hit_tokens.unwrap_or(0),
+                "prompt_cache_miss_tokens": cache_miss_tokens.unwrap_or(0),
+            }
+        });
+    }
+    Some(response_usage)
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_created_at() -> u64 {

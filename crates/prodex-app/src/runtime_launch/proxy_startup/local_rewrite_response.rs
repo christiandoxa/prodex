@@ -435,8 +435,10 @@ fn respond_runtime_chat_compatible_rewrite(
             provider.label,
         )
     };
-    let conversation_messages =
+    let pending_request =
         runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
+    let conversation_messages = pending_request.messages;
+    let response_metadata = pending_request.response_metadata;
     if content_type.contains("text/event-stream") {
         let writer = request.into_writer();
         let mut headers = vec![(
@@ -449,6 +451,7 @@ fn respond_runtime_chat_compatible_rewrite(
             response,
             request_id,
             conversation_messages,
+            response_metadata,
             Arc::clone(&shared.deepseek_conversations),
         );
         let body: Box<dyn Read + Send> = if let Some(binding_recorder) = binding_recorder {
@@ -486,6 +489,7 @@ fn respond_runtime_chat_compatible_rewrite(
         response,
         request_id,
         conversation_messages,
+        response_metadata,
         &shared.deepseek_conversations,
     )
     .map(|mut parts| {

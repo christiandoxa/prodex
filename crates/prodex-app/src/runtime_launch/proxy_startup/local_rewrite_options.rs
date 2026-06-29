@@ -1,3 +1,4 @@
+use super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
 use super::local_rewrite_gateway_config::{
     RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
     RuntimeGatewayObservabilityConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
@@ -21,6 +22,9 @@ pub(crate) enum RuntimeLocalRewriteProviderOptions {
     },
     DeepSeek {
         api_keys: Vec<String>,
+        strict_tools: bool,
+        beta_base_url: String,
+        web_search_mode: RuntimeDeepSeekWebSearchMode,
     },
     Gemini {
         auth: RuntimeGeminiProviderAuth,

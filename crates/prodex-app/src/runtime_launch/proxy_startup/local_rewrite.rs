@@ -611,19 +611,9 @@ fn handle_runtime_local_rewrite_proxy_request(
             respond_runtime_gemini_compact_request(request_id, request, &captured, shared, auth);
             return;
         }
-        let provider_name = match &shared.provider {
-            RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
-            RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
-            RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. } => "OpenAI",
-            RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => {
-                "Prodex local embeddings"
-            }
-            RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
-            RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => "DeepSeek",
-        };
         let _ = request.respond(build_runtime_proxy_text_response(
             501,
-            &format!("{provider_name} provider does not support Codex remote compact yet"),
+            &runtime_local_rewrite_remote_compact_unsupported_message(&shared.provider),
         ));
         return;
     }
@@ -672,4 +662,18 @@ fn handle_runtime_local_rewrite_proxy_request(
     };
     respond_runtime_local_rewrite_proxy_request(request_id, request, response, &captured, shared);
     drop(route_load_guard);
+}
+
+pub(super) fn runtime_local_rewrite_remote_compact_unsupported_message(
+    provider: &RuntimeLocalRewriteProviderOptions,
+) -> String {
+    let provider_name = match provider {
+        RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
+        RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
+        RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. } => "OpenAI",
+        RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => "Prodex local embeddings",
+        RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
+        RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => "DeepSeek",
+    };
+    format!("{provider_name} provider does not support Codex remote compact yet")
 }

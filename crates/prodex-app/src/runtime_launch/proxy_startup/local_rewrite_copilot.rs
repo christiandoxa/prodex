@@ -4,8 +4,8 @@ use super::super::copilot_instructions::{
 };
 #[cfg(test)]
 use super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, RuntimeDeepSeekTranslatedRequest,
-    runtime_chat_compatible_request_body,
+    RuntimeDeepSeekConversationStore, RuntimeDeepSeekRewriteOptions,
+    RuntimeDeepSeekTranslatedRequest, runtime_chat_compatible_request_body,
 };
 use super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProviderOptions,
@@ -388,6 +388,7 @@ fn runtime_copilot_responses_chat_request_body(
         RuntimeProviderBridgeKind::Copilot,
         prodex_cli::SUPER_COPILOT_DEFAULT_MODEL,
         false,
+        RuntimeDeepSeekRewriteOptions::default(),
     )?;
     if let Some(instructions) = runtime_copilot_cached_workspace_custom_instructions() {
         runtime_copilot_apply_custom_instructions(&mut translated, instructions)?;

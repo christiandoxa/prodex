@@ -85,6 +85,7 @@ mod provider_tools;
 pub(crate) use anthropic_rewrite::{
     RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth,
 };
+pub(crate) use deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,

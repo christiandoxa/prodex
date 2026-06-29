@@ -1,19 +1,14 @@
-use std::collections::BTreeSet;
-
 pub(super) fn runtime_provider_chat_tools_from_responses_request(
     value: &serde_json::Value,
 ) -> Option<Vec<serde_json::Value>> {
     let tools = value.get("tools")?.as_array()?;
     let mut translated = Vec::new();
-    let mut seen_names = BTreeSet::new();
     for tool in tools {
         for translated_tool in runtime_provider_tools_from_responses_tool(tool) {
-            let Some(name) = runtime_provider_translated_tool_name(&translated_tool) else {
+            if runtime_provider_translated_tool_name(&translated_tool).is_none() {
                 continue;
-            };
-            if seen_names.insert(name) {
-                translated.push(translated_tool);
             }
+            translated.push(translated_tool);
         }
     }
     if translated.is_empty() {
@@ -34,7 +29,7 @@ pub(super) fn runtime_provider_chat_web_search_options_from_responses_request(
     let object = tool.as_object()?;
     let mut options = serde_json::Map::new();
     if let Some(search_context_size) =
-        runtime_provider_json_string(object, &["search_context_size"])
+        runtime_provider_json_string(object, &["search_context_size", "context_size"])
             .filter(|size| matches!(size.as_str(), "low" | "medium" | "high"))
     {
         options.insert(
@@ -42,9 +37,12 @@ pub(super) fn runtime_provider_chat_web_search_options_from_responses_request(
             serde_json::Value::String(search_context_size),
         );
     }
+    if let Some(allowed_domains) = object.get("allowed_domains") {
+        options.insert("allowed_domains".to_string(), allowed_domains.clone());
+    }
     if let Some(user_location) = object
         .get("user_location")
-        .filter(|value| value.is_object())
+        .or_else(|| object.get("location"))
     {
         options.insert("user_location".to_string(), user_location.clone());
     }
@@ -84,12 +82,37 @@ pub(super) fn runtime_provider_chat_tool_choice_from_responses_request(
     let name = runtime_provider_json_string(object, &["name"])
         .or_else(|| runtime_provider_json_string_at_path(object, &["function", "name"]))
         .filter(|name| !name.trim().is_empty())?;
+    let name = runtime_provider_tool_choice_function_name(object, choice_type, &name);
     Some(serde_json::json!({
         "type": "function",
         "function": {
             "name": name,
         },
     }))
+}
+
+fn runtime_provider_tool_choice_function_name(
+    object: &serde_json::Map<String, serde_json::Value>,
+    choice_type: &str,
+    name: &str,
+) -> String {
+    let Some(mut namespace) = runtime_provider_json_string(
+        object,
+        &[
+            "namespace",
+            "server_label",
+            "mcp_server_name",
+            "server_name",
+        ],
+    )
+    .or_else(|| runtime_provider_json_string_at_path(object, &["function", "namespace"]))
+    .filter(|namespace| !namespace.trim().is_empty()) else {
+        return name.to_string();
+    };
+    if choice_type.starts_with("mcp") && !namespace.starts_with("mcp__") {
+        namespace = format!("mcp__{namespace}");
+    }
+    runtime_provider_flatten_namespace_tool_name(&namespace, name)
 }
 
 fn runtime_provider_tools_from_responses_tool(tool: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -683,5 +706,37 @@ mod tests {
         assert_eq!(flat_name, "agents--spawn_agent");
         assert_eq!(namespace.as_deref(), Some("agents"));
         assert_eq!(name, "spawn_agent");
+    }
+
+    #[test]
+    fn provider_tools_flatten_namespace_tool_choice() {
+        let value = serde_json::json!({
+            "tool_choice": {
+                "type": "function",
+                "namespace": "agents",
+                "name": "spawn_agent"
+            }
+        });
+
+        let choice = runtime_provider_chat_tool_choice_from_responses_request(&value, false)
+            .expect("tool choice should translate");
+
+        assert_eq!(choice["function"]["name"], "agents--spawn_agent");
+    }
+
+    #[test]
+    fn provider_tools_flatten_mcp_tool_choice() {
+        let value = serde_json::json!({
+            "tool_choice": {
+                "type": "mcp",
+                "server_label": "prodex_sqz",
+                "name": "sqz_read_file"
+            }
+        });
+
+        let choice = runtime_provider_chat_tool_choice_from_responses_request(&value, false)
+            .expect("tool choice should translate");
+
+        assert_eq!(choice["function"]["name"], "mcp__prodex_sqz__sqz_read_file");
     }
 }

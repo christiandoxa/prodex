@@ -12,12 +12,18 @@ impl<R: Read> RuntimeDeepSeekChatSseReader<R> {
         reader: R,
         request_id: u64,
         conversation_messages: Vec<serde_json::Value>,
+        response_metadata: Option<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
     ) -> Self {
         Self {
             inner: RuntimeProviderSseJsonReader::new(
                 reader,
-                RuntimeDeepSeekSseState::new(request_id, conversation_messages, conversations),
+                RuntimeDeepSeekSseState::new(
+                    request_id,
+                    conversation_messages,
+                    response_metadata,
+                    conversations,
+                ),
             ),
         }
     }

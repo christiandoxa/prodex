@@ -1,4 +1,7 @@
-use super::deepseek_rewrite::runtime_chat_compatible_request_body;
+use super::deepseek_rewrite::{
+    RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
+    runtime_chat_compatible_request_body,
+};
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_copilot::{
     RuntimeCopilotRequestContext, send_runtime_copilot_upstream_request,
@@ -113,9 +116,16 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             RuntimeProviderBridgeKind::Anthropic,
                             prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
                             false,
+                            RuntimeDeepSeekRewriteOptions::default(),
                         )?;
                         if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                            pending.insert(request_id, translated.messages);
+                            pending.insert(
+                                request_id,
+                                RuntimeDeepSeekPendingRequest {
+                                    messages: translated.messages,
+                                    response_metadata: translated.response_metadata,
+                                },
+                            );
                         }
                         let send_result =
                             send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
@@ -324,7 +334,7 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 copilot_context: None,
             })
         }
-        RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys } => {
+        RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys, .. } => {
             send_runtime_deepseek_upstream_request(request_id, request, shared, body, api_keys)
         }
         RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } => {

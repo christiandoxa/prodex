@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.142.3 release",
+      "baseline_source": "openai/codex rust-v0.142.4 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -977,15 +977,15 @@
       ]
     },
     "latestRelease": {
-      "tag_name": "rust-v0.142.3",
-      "name": "0.142.3",
-      "published_at": "2026-06-26T21:29:20Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.3",
+      "tag_name": "rust-v0.142.4",
+      "name": "0.142.4",
+      "published_at": "2026-06-29T05:04:25Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.4",
       "body_head": [
         "## Chores",
-        "- Maintenance-only patch release with no user-facing changes since 0.142.2.",
+        "- No user-facing changes were identified for this release.",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.142.2...rust-v0.142.3"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.142.3...rust-v0.142.4"
       ]
     }
   },

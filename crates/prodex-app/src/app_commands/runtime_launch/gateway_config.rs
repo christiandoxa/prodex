@@ -1,5 +1,9 @@
 use super::*;
-use std::{collections::BTreeMap, env, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    env,
+    path::{Path, PathBuf},
+};
 
 pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) provider_name: Option<&'static str>,
@@ -701,7 +705,12 @@ fn gateway_provider_options(
         }
         Some(SuperExternalProvider::DeepSeek) => {
             runtime_deepseek_api_keys_from_request_or_env(api_key)
-                .map(|api_keys| RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys })
+                .map(|api_keys| RuntimeLocalRewriteProviderOptions::DeepSeek {
+                    api_keys,
+                    strict_tools: runtime_deepseek_strict_tools_enabled(Path::new("")),
+                    beta_base_url: runtime_deepseek_beta_base_url(Path::new("")),
+                    web_search_mode: runtime_deepseek_web_search_mode(Path::new("")),
+                })
                 .context("gateway deepseek provider requires --api-key or DEEPSEEK_API_KEY(S)")
         }
         Some(SuperExternalProvider::Gemini) => {

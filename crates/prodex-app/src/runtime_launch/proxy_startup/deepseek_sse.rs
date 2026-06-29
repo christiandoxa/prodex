@@ -1,7 +1,8 @@
 use super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_chat_tool_call_thought_signature,
-    runtime_deepseek_created_at, runtime_deepseek_responses_usage,
-    runtime_deepseek_rtk_wrapped_tool_arguments, runtime_deepseek_store_conversation,
+    runtime_deepseek_created_at, runtime_deepseek_merge_response_metadata,
+    runtime_deepseek_responses_usage, runtime_deepseek_rtk_wrapped_tool_arguments,
+    runtime_deepseek_store_conversation,
 };
 use super::provider_sse_events::{
     runtime_provider_sse_failed_event, runtime_provider_sse_output_text_item_added_event,
@@ -26,6 +27,9 @@ pub(super) struct RuntimeDeepSeekSseState {
     reasoning_content: String,
     tool_calls: BTreeMap<usize, RuntimeDeepSeekToolCall>,
     usage: Option<serde_json::Value>,
+    logprobs: Option<serde_json::Value>,
+    finish_reason: Option<String>,
+    response_metadata: Option<serde_json::Value>,
     conversation_messages: Vec<serde_json::Value>,
     conversations: RuntimeDeepSeekConversationStore,
 }
@@ -44,6 +48,7 @@ impl RuntimeDeepSeekSseState {
     pub(super) fn new(
         request_id: u64,
         conversation_messages: Vec<serde_json::Value>,
+        response_metadata: Option<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
     ) -> Self {
         Self {
@@ -61,6 +66,9 @@ impl RuntimeDeepSeekSseState {
             reasoning_content: String::new(),
             tool_calls: BTreeMap::new(),
             usage: None,
+            logprobs: None,
+            finish_reason: None,
+            response_metadata,
             conversation_messages,
             conversations,
         }
@@ -108,6 +116,12 @@ impl RuntimeDeepSeekSseState {
         else {
             return events;
         };
+        if let Some(logprobs) = choice
+            .get("logprobs")
+            .filter(|logprobs| !logprobs.is_null())
+        {
+            self.logprobs = Some(logprobs.clone());
+        }
         if let Some(delta) = choice.get("delta") {
             if let Some(reasoning_content) = delta
                 .get("reasoning_content")
@@ -146,11 +160,11 @@ impl RuntimeDeepSeekSseState {
                 }
             }
         }
-        if choice
+        if let Some(finish_reason) = choice
             .get("finish_reason")
             .and_then(serde_json::Value::as_str)
-            .is_some()
         {
+            self.finish_reason = Some(finish_reason.to_string());
             events.extend(self.complete_tool_call_events());
             if !self.tool_calls.is_empty() {
                 self.store_conversation_snapshot();
@@ -328,6 +342,20 @@ impl RuntimeDeepSeekSseState {
         if let Some(usage) = self.usage.clone() {
             response["usage"] = usage;
         }
+        let mut metadata = serde_json::Map::new();
+        if let Some(logprobs) = self.logprobs.clone() {
+            metadata.insert("logprobs".to_string(), logprobs);
+        }
+        if let Some(finish_reason) = self.finish_reason.clone() {
+            metadata.insert(
+                "finish_reason".to_string(),
+                serde_json::Value::String(finish_reason),
+            );
+        }
+        if !metadata.is_empty() {
+            response["metadata"] = serde_json::json!({ "deepseek": metadata });
+        }
+        runtime_deepseek_merge_response_metadata(&mut response, self.response_metadata.clone());
         let sequence_number = self.next_sequence_number();
         events.push(self.event(
             "response.completed",

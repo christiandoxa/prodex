@@ -28,11 +28,11 @@ pub(super) use proxy_startup::start_runtime_rotation_proxy_with_listen_addr;
 pub(super) use proxy_startup::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeAnthropicOAuthProfileAuth,
     RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth,
-    RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
-    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig,
-    RuntimeGatewayStateStore, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
-    start_runtime_local_rewrite_proxy,
+    RuntimeDeepSeekWebSearchMode, RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
+    RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
+    RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
+    RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions,
+    RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,
 };
 pub(super) use proxy_startup::{
     RuntimeRotationProxyStartOptions, start_runtime_rotation_proxy_with_options,

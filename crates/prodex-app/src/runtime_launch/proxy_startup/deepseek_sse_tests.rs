@@ -26,6 +26,7 @@ fn deepseek_sse_reader_stores_reasoning_content_for_tool_call_replay() {
             "role": "user",
             "content": "read package metadata"
         })],
+        None,
         Arc::clone(&conversations),
     );
     let mut output = String::new();
@@ -49,6 +50,7 @@ fn deepseek_sse_state_stores_tool_call_snapshot_before_done_event() {
             "role": "user",
             "content": "read recent commits"
         })],
+        None,
         Arc::clone(&conversations),
     );
 
@@ -103,6 +105,7 @@ fn deepseek_sse_reader_wraps_text_delta_in_message_item() {
         std::io::Cursor::new(stream.as_bytes()),
         7,
         Vec::new(),
+        None,
         conversations,
     );
     let mut output = String::new();
@@ -143,6 +146,7 @@ fn deepseek_sse_reader_wraps_noisy_shell_call_with_rtk() {
             "role": "user",
             "content": "run focused tests"
         })],
+        None,
         Arc::clone(&conversations),
     );
     let mut output = String::new();
@@ -171,6 +175,7 @@ fn deepseek_sse_reader_maps_flat_mcp_call_to_namespace_function_call() {
         std::io::Cursor::new(stream.as_bytes()),
         7,
         Vec::new(),
+        None,
         conversations.clone(),
     );
     let mut output = String::new();
@@ -200,6 +205,7 @@ fn deepseek_sse_reader_maps_tool_search_function_to_tool_search_call() {
         std::io::Cursor::new(stream.as_bytes()),
         7,
         Vec::new(),
+        None,
         conversation_store(),
     );
     let mut output = String::new();
@@ -223,6 +229,7 @@ fn deepseek_sse_reader_accumulates_multiline_json_data() {
         std::io::Cursor::new(stream.as_bytes()),
         7,
         Vec::new(),
+        None,
         conversation_store(),
     );
     let mut output = String::new();
@@ -233,12 +240,87 @@ fn deepseek_sse_reader_accumulates_multiline_json_data() {
 }
 
 #[test]
+fn deepseek_sse_reader_preserves_final_usage_cache_details() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_usage\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n",
+        "data: {\"id\":\"chatcmpl_usage\",\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":5,\"total_tokens\":25,\"completion_tokens_details\":{\"reasoning_tokens\":3},\"prompt_cache_hit_tokens\":12,\"prompt_cache_miss_tokens\":8}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"input_tokens_details\":{\"cached_tokens\":12}"));
+    assert!(output.contains("\"output_tokens_details\":{\"reasoning_tokens\":3}"));
+    assert!(output.contains("\"prompt_cache_miss_tokens\":8"));
+    assert!(output.contains("event: response.completed"));
+}
+
+#[test]
+fn deepseek_sse_reader_preserves_logprobs_metadata() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_logprobs\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"done\"},\"logprobs\":{\"content\":[{\"token\":\"done\",\"logprob\":-0.2,\"bytes\":[100,111,110,101],\"top_logprobs\":[]}]}}]}\n\n",
+        "data: {\"id\":\"chatcmpl_logprobs\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"deepseek\""));
+    assert!(output.contains("\"logprobs\":{\"content\""));
+    assert!(output.contains("\"token\":\"done\""));
+    assert!(output.contains("\"finish_reason\":\"stop\""));
+}
+
+#[test]
+fn deepseek_sse_reader_merges_request_degradation_metadata() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_json\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"{\\\"answer\\\":\\\"ok\\\"}\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        57,
+        Vec::new(),
+        Some(serde_json::json!({
+            "deepseek": {
+                "degraded_response_format": {
+                    "from": "json_schema",
+                    "to": "json_object"
+                }
+            }
+        })),
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"degraded_response_format\""));
+    assert!(output.contains("\"from\":\"json_schema\""));
+    assert!(output.contains("\"finish_reason\":\"stop\""));
+}
+
+#[test]
 fn deepseek_sse_reader_maps_embedded_error_to_failed_event() {
     let stream = "data: {\"error\":{\"type\":\"rate_limit_error\",\"message\":\"busy\"}}\n\n";
     let mut reader = RuntimeDeepSeekChatSseReader::new(
         std::io::Cursor::new(stream.as_bytes()),
         7,
         Vec::new(),
+        None,
         conversation_store(),
     );
     let mut output = String::new();
@@ -283,6 +365,7 @@ fn deepseek_sse_reader_maps_upstream_decode_error_to_failed_event() {
         },
         7,
         Vec::new(),
+        None,
         conversation_store(),
     );
     let mut output = String::new();

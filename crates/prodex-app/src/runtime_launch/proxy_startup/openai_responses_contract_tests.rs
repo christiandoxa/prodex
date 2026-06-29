@@ -97,6 +97,7 @@ fn chat_compatible_adapters_stream_openai_responses_events() {
         std::io::Cursor::new(stream.as_bytes()),
         31,
         Vec::new(),
+        None,
         conversation_store(),
     );
     let mut output = String::new();
@@ -141,6 +142,7 @@ fn copilot_adapter_streams_openai_responses_events_and_records_bindings() {
         std::io::Cursor::new(chat_stream.as_bytes()),
         33,
         Vec::new(),
+        None,
         conversation_store(),
     );
     let mut reader = RuntimeCopilotResponsesSseBindingReader::new(chat_reader, Some(recorder));
