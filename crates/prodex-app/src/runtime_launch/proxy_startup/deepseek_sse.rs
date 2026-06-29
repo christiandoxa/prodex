@@ -4,6 +4,7 @@ use super::deepseek_rewrite::{
     runtime_deepseek_responses_usage, runtime_deepseek_rtk_wrapped_tool_arguments,
     runtime_deepseek_store_conversation,
 };
+use super::gemini_rewrite::runtime_gemini_custom_tool_input_from_arguments;
 use super::provider_sse_events::{
     runtime_provider_sse_failed_event, runtime_provider_sse_output_text_item_added_event,
     runtime_provider_sse_output_text_item_done_event,
@@ -25,10 +26,13 @@ pub(super) struct RuntimeDeepSeekSseState {
     model: Option<String>,
     output_text: String,
     reasoning_content: String,
+    refusal: String,
     tool_calls: BTreeMap<usize, RuntimeDeepSeekToolCall>,
     usage: Option<serde_json::Value>,
     logprobs: Option<serde_json::Value>,
+    annotations: Vec<serde_json::Value>,
     finish_reason: Option<String>,
+    system_fingerprint: Option<String>,
     response_metadata: Option<serde_json::Value>,
     conversation_messages: Vec<serde_json::Value>,
     conversations: RuntimeDeepSeekConversationStore,
@@ -64,10 +68,13 @@ impl RuntimeDeepSeekSseState {
             model: None,
             output_text: String::new(),
             reasoning_content: String::new(),
+            refusal: String::new(),
             tool_calls: BTreeMap::new(),
             usage: None,
             logprobs: None,
+            annotations: Vec::new(),
             finish_reason: None,
+            system_fingerprint: None,
             response_metadata,
             conversation_messages,
             conversations,
@@ -88,6 +95,16 @@ impl RuntimeDeepSeekSseState {
         }
         if let Some(model) = value.get("model").and_then(serde_json::Value::as_str) {
             self.model = Some(model.to_string());
+        }
+        if let Some(created) = value.get("created").and_then(serde_json::Value::as_u64) {
+            self.created_at = created;
+        }
+        if let Some(system_fingerprint) = value
+            .get("system_fingerprint")
+            .and_then(serde_json::Value::as_str)
+            .filter(|system_fingerprint| !system_fingerprint.is_empty())
+        {
+            self.system_fingerprint = Some(system_fingerprint.to_string());
         }
         if let Some(usage) = value
             .get("usage")
@@ -130,6 +147,19 @@ impl RuntimeDeepSeekSseState {
             {
                 self.reasoning_content.push_str(reasoning_content);
             }
+            if let Some(refusal) = delta
+                .get("refusal")
+                .and_then(serde_json::Value::as_str)
+                .filter(|text| !text.is_empty())
+            {
+                self.refusal.push_str(refusal);
+            }
+            if let Some(annotations) = delta
+                .get("annotations")
+                .and_then(serde_json::Value::as_array)
+            {
+                self.annotations.extend(annotations.iter().cloned());
+            }
             if let Some(text) = delta
                 .get("content")
                 .and_then(serde_json::Value::as_str)
@@ -165,6 +195,12 @@ impl RuntimeDeepSeekSseState {
             .and_then(serde_json::Value::as_str)
         {
             self.finish_reason = Some(finish_reason.to_string());
+            if let Err(message) = self.validate_tool_call_arguments() {
+                if let Some(event) = self.failed_event("invalid_tool_call_arguments", &message) {
+                    events.push(event);
+                }
+                return events;
+            }
             events.extend(self.complete_tool_call_events());
             if !self.tool_calls.is_empty() {
                 self.store_conversation_snapshot();
@@ -180,6 +216,20 @@ impl RuntimeDeepSeekSseState {
             .and_then(|index| usize::try_from(index).ok())
             .unwrap_or(0);
         let mut events = Vec::new();
+        if value
+            .get("function")
+            .and_then(serde_json::Value::as_object)
+            .is_none()
+            && !self.tool_calls.contains_key(&index)
+        {
+            if let Some(event) = self.failed_event(
+                "invalid_tool_call_arguments",
+                "DeepSeek streamed a tool call without a function object",
+            ) {
+                events.push(event);
+            }
+            return events;
+        }
         let argument_delta = value
             .get("function")
             .and_then(|function| function.get("arguments"))
@@ -217,6 +267,23 @@ impl RuntimeDeepSeekSseState {
             (call_id, name, should_add)
         };
         if should_add && name != "tool_search" {
+            if name == "apply_patch" {
+                let sequence_number = self.next_sequence_number();
+                events.push(self.event(
+                    "response.output_item.added",
+                    serde_json::json!({
+                        "type": "response.output_item.added",
+                        "sequence_number": sequence_number,
+                        "item": {
+                            "type": "custom_tool_call",
+                            "call_id": call_id,
+                            "name": name,
+                            "input": "",
+                        },
+                    }),
+                ));
+                return events;
+            }
             let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&name);
             let mut item = serde_json::json!({
                 "type": "function_call",
@@ -288,6 +355,23 @@ impl RuntimeDeepSeekSseState {
                 ));
                 continue;
             }
+            if name == "apply_patch" {
+                let sequence_number = self.next_sequence_number();
+                events.push(self.event(
+                    "response.output_item.done",
+                    serde_json::json!({
+                        "type": "response.output_item.done",
+                        "sequence_number": sequence_number,
+                        "item": {
+                            "type": "custom_tool_call",
+                            "call_id": call_id,
+                            "name": name,
+                            "input": runtime_gemini_custom_tool_input_from_arguments(&arguments),
+                        },
+                    }),
+                ));
+                continue;
+            }
             if !arguments.is_empty() {
                 let sequence_number = self.next_sequence_number();
                 events.push(self.event(
@@ -330,6 +414,9 @@ impl RuntimeDeepSeekSseState {
         if self.completed {
             return None;
         }
+        if let Err(message) = self.validate_tool_call_arguments() {
+            return self.failed_event("invalid_tool_call_arguments", &message);
+        }
         let mut events = self.complete_tool_call_events();
         events.extend(self.complete_output_text_item_events());
         let mut response = serde_json::json!({
@@ -346,10 +433,34 @@ impl RuntimeDeepSeekSseState {
         if let Some(logprobs) = self.logprobs.clone() {
             metadata.insert("logprobs".to_string(), logprobs);
         }
+        if !self.reasoning_content.is_empty() {
+            metadata.insert(
+                "reasoning_content".to_string(),
+                serde_json::Value::String(self.reasoning_content.clone()),
+            );
+        }
+        if !self.refusal.is_empty() {
+            metadata.insert(
+                "refusal".to_string(),
+                serde_json::Value::String(self.refusal.clone()),
+            );
+        }
+        if !self.annotations.is_empty() {
+            metadata.insert(
+                "annotations".to_string(),
+                serde_json::Value::Array(self.annotations.clone()),
+            );
+        }
         if let Some(finish_reason) = self.finish_reason.clone() {
             metadata.insert(
                 "finish_reason".to_string(),
                 serde_json::Value::String(finish_reason),
+            );
+        }
+        if let Some(system_fingerprint) = self.system_fingerprint.clone() {
+            metadata.insert(
+                "system_fingerprint".to_string(),
+                serde_json::Value::String(system_fingerprint),
             );
         }
         if !metadata.is_empty() {
@@ -374,6 +485,29 @@ impl RuntimeDeepSeekSseState {
         );
         self.completed = true;
         Some(events.join(""))
+    }
+
+    fn validate_tool_call_arguments(&self) -> Result<(), String> {
+        for (index, tool_call) in &self.tool_calls {
+            let Some(name) = tool_call
+                .name
+                .as_deref()
+                .filter(|name| !name.trim().is_empty())
+            else {
+                return Err(format!(
+                    "DeepSeek streamed a tool call without a function name at index {index}"
+                ));
+            };
+            if tool_call.arguments.trim().is_empty() {
+                continue;
+            }
+            if let Err(error) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments) {
+                return Err(format!(
+                    "DeepSeek streamed malformed JSON arguments for tool call `{name}` at index {index}: {error}"
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn failed_event(&mut self, code: &str, message: &str) -> Option<String> {
@@ -522,6 +656,15 @@ impl RuntimeDeepSeekSseState {
                     "call_id": call_id,
                     "execution": "client",
                     "arguments": arguments,
+                }));
+                continue;
+            }
+            if flat_name == "apply_patch" {
+                output.push(serde_json::json!({
+                    "type": "custom_tool_call",
+                    "call_id": call_id,
+                    "name": flat_name,
+                    "input": runtime_gemini_custom_tool_input_from_arguments(&tool_call.arguments),
                 }));
                 continue;
             }

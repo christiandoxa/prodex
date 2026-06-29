@@ -16,8 +16,23 @@
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1725,
+    "maxLines": 1798,
     "reason": "Live quota ratatui rendering, status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
+  },
+  {
+    "file": "crates/prodex-app/src/app_commands/runtime_launch/providers.rs",
+    "maxLines": 910,
+    "reason": "Runtime provider launch config parsing, gateway defaults, and provider-specific environment projection remain capped while provider ownership is split from command routing."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs",
+    "maxLines": 1943,
+    "reason": "DeepSeek Responses-to-chat request validation, field mapping, reasoning, web-search gating, and conversation replay remain capped while the adapter is split by request domain."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs",
+    "maxLines": 2365,
+    "reason": "DeepSeek request rewrite regression coverage remains capped while compatibility cases are split by feature family."
   },
   {
     "file": "crates/prodex-app/src/app_commands/capability.rs",

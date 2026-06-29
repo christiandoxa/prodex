@@ -2,7 +2,7 @@ use super::*;
 use crate::{AdditionalRateLimit, AuthSummary, RateLimitResetCreditsSummary};
 use std::collections::BTreeMap;
 
-fn usage_with_main_windows(
+fn main_windows(
     five_hour_remaining: i64,
     five_hour_reset_at: i64,
     weekly_remaining: i64,
@@ -41,6 +41,34 @@ fn openai_report(name: &str, usage: UsageResponse) -> QuotaReport {
         workspace_name: None,
         result: Ok(ProviderQuotaSnapshot::OpenAi(usage)),
         fetched_at: 1_700_000_000,
+    }
+}
+
+fn copilot_report(reset_date: Option<&str>) -> QuotaReport {
+    QuotaReport {
+        name: "copilot-main".to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: "copilot".to_string(),
+            quota_compatible: false,
+        },
+        workspace_id: None,
+        workspace_name: None,
+        result: Ok(ProviderQuotaSnapshot::Copilot(CopilotQuotaInfo {
+            login: Some("copilot-user".to_string()),
+            access_type_sku: Some("free_limited_copilot".to_string()),
+            copilot_plan: Some("individual".to_string()),
+            limited_user_quotas: BTreeMap::from([
+                ("chat".to_string(), 450),
+                ("completions".to_string(), 4_000),
+            ]),
+            monthly_quotas: BTreeMap::from([
+                ("chat".to_string(), 500),
+                ("completions".to_string(), 4_000),
+            ]),
+            limited_user_reset_date: reset_date.map(str::to_string),
+        })),
+        fetched_at: 1_700_000_101,
     }
 }
 
@@ -84,24 +112,18 @@ fn blocks_missing_required_main_window() {
 
 #[test]
 fn openai_quota_status_uses_short_blocked_labels() {
-    assert_eq!(
-        format_openai_quota_status(&usage_with_main_windows(
-            0,
-            1_700_001_800,
-            80,
-            1_700_259_200
-        )),
-        "Blocked 5h"
-    );
-    assert_eq!(
-        format_openai_quota_status(&usage_with_main_windows(
-            80,
-            1_700_001_800,
-            0,
-            1_700_259_200
-        )),
-        "Blocked weekly"
-    );
+    for (usage, expected) in [
+        (
+            main_windows(0, 1_700_001_800, 80, 1_700_259_200),
+            "Blocked 5h",
+        ),
+        (
+            main_windows(80, 1_700_001_800, 0, 1_700_259_200),
+            "Blocked weekly",
+        ),
+    ] {
+        assert_eq!(format_openai_quota_status(&usage), expected);
+    }
     assert_eq!(
         format_quota_error_status("HTTP 401"),
         "Blocked unauthorized"
@@ -148,7 +170,7 @@ fn compact_window_format_uses_scale_of_100() {
 
 #[test]
 fn openai_quota_renders_rate_limit_reset_credits() {
-    let mut usage = usage_with_main_windows(0, 1_700_001_800, 80, 1_700_259_200);
+    let mut usage = main_windows(0, 1_700_001_800, 80, 1_700_259_200);
     usage.rate_limit_reset_credits = Some(RateLimitResetCreditsSummary { available_count: 2 });
 
     let panel =
@@ -163,7 +185,7 @@ fn openai_quota_renders_rate_limit_reset_credits() {
 
 #[test]
 fn quota_reports_put_status_in_column_and_resets_on_left_detail_line() {
-    let usage = usage_with_main_windows(20, 1_700_001_800, 10, 1_700_259_200);
+    let usage = main_windows(20, 1_700_001_800, 10, 1_700_259_200);
 
     let output = render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 100);
     let mut lines = output.lines();
@@ -245,14 +267,8 @@ fn quota_summary_marks_exhausted_window() {
 #[test]
 fn quota_pool_available_count_excludes_blocked_profiles() {
     let reports = vec![
-        openai_report(
-            "ready",
-            usage_with_main_windows(80, 1_700_001_800, 95, 1_700_259_200),
-        ),
-        openai_report(
-            "blocked",
-            usage_with_main_windows(0, 1_700_003_600, 80, 1_700_086_400),
-        ),
+        openai_report("ready", main_windows(80, 1_700_001_800, 95, 1_700_259_200)),
+        openai_report("blocked", main_windows(0, 1_700_003_600, 80, 1_700_086_400)),
     ];
 
     let output = render_quota_reports_with_layout(&reports, true, None, 90);
@@ -282,7 +298,7 @@ fn profile_quota_render_contains_core_fields() {
 
 #[test]
 fn profile_quota_render_shows_monthly_workspace_limits() {
-    let mut usage = usage_with_main_windows(82, 1_700_001_800, 91, 1_700_259_200);
+    let mut usage = main_windows(82, 1_700_001_800, 91, 1_700_259_200);
     usage.additional_rate_limits.push(AdditionalRateLimit {
         limit_name: Some("Workspace credits".to_string()),
         metered_feature: Some("codex".to_string()),
@@ -304,10 +320,10 @@ fn profile_quota_render_shows_monthly_workspace_limits() {
 
 #[test]
 fn quota_report_sort_modes_order_by_selected_columns() {
-    let mut beta_usage = usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800);
+    let mut beta_usage = main_windows(90, 1_700_007_200, 95, 1_700_172_800);
     beta_usage.email = Some("alpha@example.com".to_string());
     beta_usage.plan_type = Some("basic".to_string());
-    let mut alpha_usage = usage_with_main_windows(90, 1_700_001_800, 95, 1_700_259_200);
+    let mut alpha_usage = main_windows(90, 1_700_001_800, 95, 1_700_259_200);
     alpha_usage.email = Some("zeta@example.com".to_string());
     alpha_usage.plan_type = Some("plus".to_string());
     let mut reports = vec![
@@ -345,15 +361,32 @@ fn quota_report_sort_modes_order_by_selected_columns() {
 }
 
 #[test]
-fn quota_reports_respect_line_budget_while_preserving_sort_order() {
+fn current_sort_places_blocked_weekly_below_blocked_five_hour() {
     let reports = vec![
+        openai_report("ready", main_windows(80, 1_700_000_300, 70, 1_700_000_400)),
         openai_report(
-            "blocked",
-            usage_with_main_windows(0, 1_700_003_600, 80, 1_700_086_400),
+            "weekly-blocked",
+            main_windows(67, 1_700_000_100, 0, 1_700_000_050),
         ),
         openai_report(
+            "five-hour-blocked",
+            main_windows(0, 1_700_000_200, 84, 1_700_000_300),
+        ),
+    ];
+
+    assert_eq!(
+        sorted_names_by(&reports, QuotaReportSort::Current),
+        vec!["ready", "five-hour-blocked", "weekly-blocked"]
+    );
+}
+
+#[test]
+fn quota_reports_respect_line_budget_while_preserving_sort_order() {
+    let reports = vec![
+        openai_report("blocked", main_windows(0, 1_700_003_600, 80, 1_700_086_400)),
+        openai_report(
             "ready-late",
-            usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800),
+            main_windows(90, 1_700_007_200, 95, 1_700_172_800),
         ),
         QuotaReport {
             name: "error".to_string(),
@@ -369,7 +402,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         },
         openai_report(
             "ready-early",
-            usage_with_main_windows(90, 1_700_001_800, 95, 1_700_259_200),
+            main_windows(90, 1_700_001_800, 95, 1_700_259_200),
         ),
     ];
 
@@ -385,13 +418,10 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
 #[test]
 fn quota_reports_window_supports_scroll_offset_and_hint() {
     let reports = vec![
-        openai_report(
-            "blocked",
-            usage_with_main_windows(0, 1_700_003_600, 80, 1_700_086_400),
-        ),
+        openai_report("blocked", main_windows(0, 1_700_003_600, 80, 1_700_086_400)),
         openai_report(
             "ready-late",
-            usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800),
+            main_windows(90, 1_700_007_200, 95, 1_700_172_800),
         ),
         QuotaReport {
             name: "error".to_string(),
@@ -407,7 +437,7 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
         },
         openai_report(
             "ready-early",
-            usage_with_main_windows(90, 1_700_001_800, 95, 1_700_259_200),
+            main_windows(90, 1_700_001_800, 95, 1_700_259_200),
         ),
     ];
 
@@ -431,17 +461,15 @@ fn quota_reports_window_supports_scroll_offset_and_hint() {
 
 #[test]
 fn quota_reports_detail_shows_workspace_for_all_openai_profiles() {
-    let mut first_usage = usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800);
+    let mut first_usage = main_windows(90, 1_700_007_200, 95, 1_700_172_800);
     first_usage.email = Some("same@example.com".to_string());
-    let mut second_usage = usage_with_main_windows(80, 1_700_003_600, 88, 1_700_086_400);
+    let mut second_usage = main_windows(80, 1_700_003_600, 88, 1_700_086_400);
     second_usage.email = Some("same@example.com".to_string());
-    let mut same_workspace_first_usage =
-        usage_with_main_windows(75, 1_700_003_600, 86, 1_700_086_400);
+    let mut same_workspace_first_usage = main_windows(75, 1_700_003_600, 86, 1_700_086_400);
     same_workspace_first_usage.email = Some("same-workspace@example.com".to_string());
-    let mut same_workspace_second_usage =
-        usage_with_main_windows(74, 1_700_003_600, 85, 1_700_086_400);
+    let mut same_workspace_second_usage = main_windows(74, 1_700_003_600, 85, 1_700_086_400);
     same_workspace_second_usage.email = Some("same-workspace@example.com".to_string());
-    let mut solo_usage = usage_with_main_windows(70, 1_700_001_800, 78, 1_700_259_200);
+    let mut solo_usage = main_windows(70, 1_700_001_800, 78, 1_700_259_200);
     solo_usage.email = Some("solo@example.com".to_string());
     let mut reports = vec![
         openai_report("workspace-one", first_usage),
@@ -469,35 +497,8 @@ fn quota_reports_detail_shows_workspace_for_all_openai_profiles() {
 #[test]
 fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
     let reports = vec![
-        openai_report(
-            "main",
-            usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800),
-        ),
-        QuotaReport {
-            name: "copilot-main".to_string(),
-            active: false,
-            auth: AuthSummary {
-                label: "copilot".to_string(),
-                quota_compatible: false,
-            },
-            workspace_id: None,
-            workspace_name: None,
-            result: Ok(ProviderQuotaSnapshot::Copilot(CopilotQuotaInfo {
-                login: Some("copilot-user".to_string()),
-                access_type_sku: Some("free_limited_copilot".to_string()),
-                copilot_plan: Some("individual".to_string()),
-                limited_user_quotas: BTreeMap::from([
-                    ("chat".to_string(), 450),
-                    ("completions".to_string(), 4_000),
-                ]),
-                monthly_quotas: BTreeMap::from([
-                    ("chat".to_string(), 500),
-                    ("completions".to_string(), 4_000),
-                ]),
-                limited_user_reset_date: Some("2026-05-09".to_string()),
-            })),
-            fetched_at: 1_700_000_101,
-        },
+        openai_report("main", main_windows(90, 1_700_007_200, 95, 1_700_172_800)),
+        copilot_report(Some("2026-05-09")),
     ];
 
     let output = render_quota_reports_with_layout(&reports, true, None, 160);
@@ -517,31 +518,7 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
 
 #[test]
 fn quota_reports_aggregate_copilot_remaining_pool() {
-    let reports = vec![QuotaReport {
-        name: "copilot-main".to_string(),
-        active: false,
-        auth: AuthSummary {
-            label: "copilot".to_string(),
-            quota_compatible: false,
-        },
-        workspace_id: None,
-        workspace_name: None,
-        result: Ok(ProviderQuotaSnapshot::Copilot(CopilotQuotaInfo {
-            login: Some("copilot-user".to_string()),
-            access_type_sku: Some("free_limited_copilot".to_string()),
-            copilot_plan: Some("individual".to_string()),
-            limited_user_quotas: BTreeMap::from([
-                ("chat".to_string(), 450),
-                ("completions".to_string(), 4_000),
-            ]),
-            monthly_quotas: BTreeMap::from([
-                ("chat".to_string(), 500),
-                ("completions".to_string(), 4_000),
-            ]),
-            limited_user_reset_date: None,
-        })),
-        fetched_at: 1_700_000_101,
-    }];
+    let reports = vec![copilot_report(None)];
 
     let output = render_quota_reports_with_layout(&reports, true, None, 160);
 
@@ -701,12 +678,9 @@ fn quota_reports_fit_requested_width_in_narrow_layout() {
     let reports = vec![
         openai_report(
             "ready-early",
-            usage_with_main_windows(90, 1_700_001_800, 95, 1_700_259_200),
+            main_windows(90, 1_700_001_800, 95, 1_700_259_200),
         ),
-        openai_report(
-            "blocked",
-            usage_with_main_windows(0, 1_700_003_600, 80, 1_700_086_400),
-        ),
+        openai_report("blocked", main_windows(0, 1_700_003_600, 80, 1_700_086_400)),
     ];
 
     let output = render_quota_reports_with_layout(&reports, false, None, 72);
@@ -719,7 +693,7 @@ fn quota_reports_do_not_force_sixty_column_width() {
     let output = render_quota_reports_with_layout(
         &[openai_report(
             "表🙂profile",
-            usage_with_main_windows(90, 1_700_007_200, 95, 1_700_172_800),
+            main_windows(90, 1_700_007_200, 95, 1_700_172_800),
         )],
         false,
         None,

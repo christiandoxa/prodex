@@ -260,6 +260,8 @@ pub(crate) fn collect_quota_reports_with_filters(
 
 const QUOTA_RUNTIME_LOG_TAIL_BYTES: usize = 1024 * 1024;
 const QUOTA_RUNTIME_PROFILE_EVENTS: &[&str] = &["token_usage", "profile_commit"];
+const QUOTA_RUNTIME_AUTH_BACKOFF_EVENTS: &[&str] =
+    &["profile_auth_backoff", "profile_auth_backoff_cleared"];
 
 fn quota_current_profile_name(state: &AppState) -> Option<String> {
     quota_current_runtime_profile_name(state).or_else(|| quota_state_current_profile_name(state))
@@ -289,6 +291,87 @@ fn quota_current_runtime_profile_name(state: &AppState) -> Option<String> {
         state,
         prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()),
     )
+}
+
+pub(crate) fn quota_runtime_auth_backoff_profiles() -> std::collections::BTreeSet<String> {
+    if let Ok(path) = fs::read_to_string(runtime_proxy_latest_log_pointer_path()) {
+        let path = PathBuf::from(path.trim());
+        if path.exists() {
+            return quota_runtime_auth_backoff_profiles_from_paths([path]);
+        }
+    }
+    quota_runtime_auth_backoff_profiles_from_paths(prodex_runtime_log_paths_in_dir(
+        &runtime_proxy_log_dir(),
+    ))
+}
+
+fn quota_runtime_auth_backoff_profiles_from_paths<I>(paths: I) -> std::collections::BTreeSet<String>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let mut paths: Vec<PathBuf> = paths.into_iter().collect();
+    paths.sort_by(|left, right| {
+        let left_modified = left
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        let right_modified = right
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        left_modified
+            .cmp(&right_modified)
+            .then_with(|| left.cmp(right))
+    });
+
+    let mut backoff = std::collections::BTreeSet::new();
+    for path in paths {
+        let Ok(tail) = read_runtime_log_tail(&path, QUOTA_RUNTIME_LOG_TAIL_BYTES) else {
+            continue;
+        };
+        let tail = String::from_utf8_lossy(&tail);
+        for line in tail.lines() {
+            match quota_runtime_auth_backoff_from_line(line) {
+                Some((profile_name, true)) => {
+                    backoff.insert(profile_name);
+                }
+                Some((profile_name, false)) => {
+                    backoff.remove(&profile_name);
+                }
+                None => {}
+            }
+        }
+    }
+    backoff
+}
+
+fn quota_runtime_auth_backoff_from_line(line: &str) -> Option<(String, bool)> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+        let event = value.get("event").and_then(serde_json::Value::as_str)?;
+        if !QUOTA_RUNTIME_AUTH_BACKOFF_EVENTS.contains(&event) {
+            return None;
+        }
+        let profile = value
+            .get("fields")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|fields| fields.get("profile"))
+            .and_then(serde_json::Value::as_str)?
+            .to_string();
+        return Some((profile, event == "profile_auth_backoff"));
+    }
+
+    let message = line
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once("] ").map(|(_, message)| message))
+        .unwrap_or(line);
+    let event = runtime_proxy_crate::runtime_proxy_log_event(message)?;
+    if !QUOTA_RUNTIME_AUTH_BACKOFF_EVENTS.contains(&event) {
+        return None;
+    }
+    runtime_proxy_crate::runtime_proxy_log_fields(message)
+        .get("profile")
+        .cloned()
+        .map(|profile| (profile, event == "profile_auth_backoff"))
 }
 
 fn quota_current_runtime_profile_name_from_paths<I>(state: &AppState, paths: I) -> Option<String>
@@ -643,5 +726,31 @@ mod tests {
             quota_current_runtime_profile_name_from_paths(&state, vec![log_path]),
             None
         );
+    }
+
+    #[test]
+    fn quota_runtime_auth_backoff_profiles_follow_runtime_log_clear() {
+        let log_path = test_runtime_log_path("prodex-runtime-auth-test.log");
+        let mut log = fs::File::create(&log_path).unwrap();
+        writeln!(
+            log,
+            "[2026-06-22 16:00:00.000 +07:00] profile_auth_backoff profile=main route=responses status=401 score=100 seconds=300"
+        )
+        .unwrap();
+        writeln!(
+            log,
+            "[2026-06-22 16:00:01.000 +07:00] profile_auth_backoff profile=second route=responses status=401 score=100 seconds=300"
+        )
+        .unwrap();
+        writeln!(
+            log,
+            "[2026-06-22 16:00:02.000 +07:00] profile_auth_backoff_cleared profile=main reason=auth_changed"
+        )
+        .unwrap();
+
+        let profiles = quota_runtime_auth_backoff_profiles_from_paths(vec![log_path]);
+
+        assert!(!profiles.contains("main"));
+        assert!(profiles.contains("second"));
     }
 }

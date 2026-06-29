@@ -299,8 +299,9 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                 {
                     continue;
                 }
-                if matches!(status, 401 | 403)
-                    && (status == 401 || extract_runtime_proxy_quota_message(&body).is_none())
+                if (matches!(status, 401 | 403)
+                    && (status == 401 || extract_runtime_proxy_quota_message(&body).is_none()))
+                    || runtime_proxy_body_indicates_token_invalidated(&body)
                 {
                     note_runtime_profile_auth_failure(
                         shared,

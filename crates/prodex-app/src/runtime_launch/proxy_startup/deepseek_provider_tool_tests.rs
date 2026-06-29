@@ -68,7 +68,198 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_request_translation_maps_web_search_options_without_tool_stub() {
+    fn deepseek_response_translation_fails_malformed_tool_call_arguments() {
+        let response = serde_json::json!({
+            "id": "chatcmpl_bad_args",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_shell_1",
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": "{\"cmd\":"
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let translated = runtime_deepseek_responses_value_from_chat_value(&response, 48);
+
+        assert_eq!(translated["status"], "failed");
+        assert_eq!(translated["error"]["code"], "invalid_tool_call_arguments");
+        assert!(
+            translated["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("malformed JSON arguments")
+        );
+        assert!(translated["output"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn deepseek_response_translation_fails_tool_call_without_function_object() {
+        let response = serde_json::json!({
+            "id": "chatcmpl_bad_tool",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_missing_function",
+                        "type": "function"
+                    }]
+                }
+            }]
+        });
+
+        let translated = runtime_deepseek_responses_value_from_chat_value(&response, 48);
+
+        assert_eq!(translated["status"], "failed");
+        assert_eq!(translated["error"]["code"], "invalid_tool_call_arguments");
+        assert!(
+            translated["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("without a function object")
+        );
+        assert!(translated["output"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn deepseek_response_translation_fails_tool_call_without_function_name() {
+        let response = serde_json::json!({
+            "id": "chatcmpl_bad_name",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_missing_name",
+                        "type": "function",
+                        "function": {
+                            "arguments": "{}"
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let translated = runtime_deepseek_responses_value_from_chat_value(&response, 48);
+
+        assert_eq!(translated["status"], "failed");
+        assert_eq!(translated["error"]["code"], "invalid_tool_call_arguments");
+        assert!(
+            translated["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("without a function name")
+        );
+        assert!(translated["output"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn deepseek_response_translation_preserves_reasoning_content_metadata() {
+        let response = serde_json::json!({
+            "id": "chatcmpl_reasoning",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": "Need to inspect the tool output.",
+                    "content": "Done."
+                },
+                "finish_reason": "stop"
+            }]
+        });
+
+        let translated = runtime_deepseek_responses_value_from_chat_value(&response, 48);
+
+        assert_eq!(
+            translated["metadata"]["deepseek"]["reasoning_content"],
+            "Need to inspect the tool output."
+        );
+        assert_eq!(translated["metadata"]["deepseek"]["finish_reason"], "stop");
+        assert_eq!(translated["output"][0]["content"][0]["text"], "Done.");
+    }
+
+    #[test]
+    fn deepseek_request_translation_maps_custom_apply_patch_tool() {
+        let conversations = conversation_store();
+        let request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "edit the file",
+            "tools": [{
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Use apply_patch to edit files.",
+                "format": {
+                    "type": "grammar",
+                    "syntax": "lark",
+                    "definition": "start: begin_patch hunk+ end_patch"
+                }
+            }],
+            "tool_choice": {
+                "type": "function",
+                "name": "apply_patch"
+            }
+        });
+
+        let translated = runtime_deepseek_chat_request_body(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversations,
+        )
+        .expect("request should translate");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+        assert_eq!(body["tools"][0]["function"]["name"], "apply_patch");
+        assert!(
+            body["tools"][0]["function"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("exact Codex apply_patch grammar")
+        );
+        assert_eq!(
+            body["tools"][0]["function"]["parameters"]["properties"]["input"]["type"],
+            "string"
+        );
+        assert_eq!(body["tool_choice"]["function"]["name"], "apply_patch");
+    }
+
+    #[test]
+    fn deepseek_response_translation_maps_apply_patch_to_custom_tool_call() {
+        let patch = "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch";
+        let response = serde_json::json!({
+            "id": "chatcmpl_patch",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_patch_1",
+                        "type": "function",
+                        "function": {
+                            "name": "apply_patch",
+                            "arguments": serde_json::json!({"input": patch}).to_string()
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let translated = runtime_deepseek_responses_value_from_chat_value(&response, 49);
+
+        assert_eq!(translated["output"][0]["type"], "custom_tool_call");
+        assert_eq!(translated["output"][0]["name"], "apply_patch");
+        assert_eq!(translated["output"][0]["call_id"], "call_patch_1");
+        assert_eq!(translated["output"][0]["input"], patch);
+    }
+
+    #[test]
+    fn deepseek_request_translation_auto_web_search_rejects_without_documented_route() {
         let request = serde_json::json!({
             "model": "deepseek-v4-pro",
             "stream": true,
@@ -97,21 +288,17 @@ mod tests {
             ]
         });
 
-        let translated = runtime_deepseek_chat_request_body(
+        let error = runtime_deepseek_chat_request_body(
             &serde_json::to_vec(&request).unwrap(),
             &conversation_store(),
         )
-        .expect("request should translate");
-        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        .expect_err("auto web search should reject until a documented route exists");
 
-        assert_eq!(body["web_search_options"]["search_context_size"], "high");
-        assert_eq!(
-            body["web_search_options"]["allowed_domains"][0],
-            "example.com"
+        assert!(
+            error
+                .to_string()
+                .contains("no documented native OpenAI Chat route")
         );
-        assert_eq!(body["web_search_options"]["user_location"]["country"], "US");
-        assert_eq!(body["tools"].as_array().unwrap().len(), 1);
-        assert_eq!(body["tools"][0]["function"]["name"], "shell");
     }
 
     #[test]
@@ -193,6 +380,53 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_request_translation_auto_rejects_top_level_web_search_options() {
+        let request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "search",
+            "web_search_options": {
+                "search_context_size": "medium"
+            }
+        });
+
+        let error = runtime_deepseek_chat_request_body(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversation_store(),
+        )
+        .expect_err("auto mode should reject top-level web search options");
+
+        assert!(
+            error
+                .to_string()
+                .contains("no documented native OpenAI Chat route")
+        );
+    }
+
+    #[test]
+    fn deepseek_request_translation_openai_chat_preserves_top_level_web_search_options() {
+        let request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "search",
+            "web_search_options": {
+                "search_context_size": "medium"
+            }
+        });
+
+        let translated = runtime_deepseek_chat_request_body_with_options(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversation_store(),
+            RuntimeDeepSeekRewriteOptions {
+                strict_tools: false,
+                web_search_mode: RuntimeDeepSeekWebSearchMode::OpenAiChat,
+            },
+        )
+        .expect("openai_chat mode should preserve top-level web search options");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+        assert_eq!(body["web_search_options"]["search_context_size"], "medium");
+    }
+
+    #[test]
     fn deepseek_request_translation_rejects_invalid_web_search_options() {
         let request = serde_json::json!({
             "model": "deepseek-v4-pro",
@@ -204,9 +438,13 @@ mod tests {
             }]
         });
 
-        let error = runtime_deepseek_chat_request_body(
+        let error = runtime_deepseek_chat_request_body_with_options(
             &serde_json::to_vec(&request).unwrap(),
             &conversation_store(),
+            RuntimeDeepSeekRewriteOptions {
+                strict_tools: false,
+                web_search_mode: RuntimeDeepSeekWebSearchMode::OpenAiChat,
+            },
         )
         .expect_err("invalid web search options should fail");
 
@@ -214,6 +452,86 @@ mod tests {
             error
                 .to_string()
                 .contains("allowed_domains entries must be non-empty strings")
+        );
+    }
+
+    #[test]
+    fn deepseek_request_translation_rejects_non_object_web_search_options() {
+        let request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "search",
+            "web_search_options": "enabled"
+        });
+
+        let error = runtime_deepseek_chat_request_body_with_options(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversation_store(),
+            RuntimeDeepSeekRewriteOptions {
+                strict_tools: false,
+                web_search_mode: RuntimeDeepSeekWebSearchMode::OpenAiChat,
+            },
+        )
+        .expect_err("non-object web_search_options should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("web_search_options must be an object")
+        );
+    }
+
+    #[test]
+    fn deepseek_request_translation_rejects_invalid_web_search_context_size() {
+        let request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "search",
+            "tools": [{
+                "type": "web_search_preview",
+                "context_size": "huge"
+            }]
+        });
+
+        let error = runtime_deepseek_chat_request_body_with_options(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversation_store(),
+            RuntimeDeepSeekRewriteOptions {
+                strict_tools: false,
+                web_search_mode: RuntimeDeepSeekWebSearchMode::OpenAiChat,
+            },
+        )
+        .expect_err("invalid web search context size should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("web_search context_size must be low, medium, or high")
+        );
+    }
+
+    #[test]
+    fn deepseek_request_translation_rejects_invalid_top_level_web_search_context_size() {
+        let request = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "search",
+            "web_search_options": {
+                "search_context_size": "huge"
+            }
+        });
+
+        let error = runtime_deepseek_chat_request_body_with_options(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversation_store(),
+            RuntimeDeepSeekRewriteOptions {
+                strict_tools: false,
+                web_search_mode: RuntimeDeepSeekWebSearchMode::OpenAiChat,
+            },
+        )
+        .expect_err("invalid top-level web search context size should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("web_search search_context_size must be low, medium, or high")
         );
     }
 
@@ -228,9 +546,13 @@ mod tests {
             }]
         });
 
-        let error = runtime_deepseek_chat_request_body(
+        let error = runtime_deepseek_chat_request_body_with_options(
             &serde_json::to_vec(&request).unwrap(),
             &conversation_store(),
+            RuntimeDeepSeekRewriteOptions {
+                strict_tools: false,
+                web_search_mode: RuntimeDeepSeekWebSearchMode::OpenAiChat,
+            },
         )
         .expect_err("invalid web search location should fail");
 
@@ -287,10 +609,17 @@ mod tests {
         let response = serde_json::json!({
             "id": "chatcmpl_logprobs",
             "model": "deepseek-v4-pro",
+            "created": 1782740700u64,
+            "system_fingerprint": "fp_deepseek_test",
             "choices": [{
                 "message": {
                     "role": "assistant",
-                    "content": "done"
+                    "content": "done",
+                    "refusal": "I cannot help with that.",
+                    "annotations": [{
+                        "type": "url_citation",
+                        "url": "https://example.com/ref"
+                    }]
                 },
                 "finish_reason": "stop",
                 "logprobs": {
@@ -311,6 +640,19 @@ mod tests {
             "done"
         );
         assert_eq!(translated["metadata"]["deepseek"]["finish_reason"], "stop");
+        assert_eq!(
+            translated["metadata"]["deepseek"]["refusal"],
+            "I cannot help with that."
+        );
+        assert_eq!(
+            translated["metadata"]["deepseek"]["annotations"][0]["url"],
+            "https://example.com/ref"
+        );
+        assert_eq!(translated["created_at"], 1782740700u64);
+        assert_eq!(
+            translated["metadata"]["deepseek"]["system_fingerprint"],
+            "fp_deepseek_test"
+        );
     }
 
     #[test]

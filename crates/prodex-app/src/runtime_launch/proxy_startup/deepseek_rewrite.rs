@@ -110,6 +110,7 @@ pub(super) fn runtime_chat_compatible_request_body(
     let value: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
     runtime_deepseek_reject_beta_completion_fields(&value)?;
+    runtime_deepseek_validate_top_level_request_shape(&value)?;
     let mut request = serde_json::Map::new();
     let model = value
         .get("model")
@@ -143,8 +144,13 @@ pub(super) fn runtime_chat_compatible_request_body(
     if thinking_enabled {
         runtime_deepseek_normalize_thinking_tool_call_messages(&mut messages);
     }
-    let response_format = runtime_deepseek_response_format_from_responses_request(&value);
-    let response_metadata = runtime_deepseek_response_metadata_from_responses_request(&value);
+    let response_format = runtime_deepseek_response_format_from_responses_request(&value)?;
+    let mut response_metadata = runtime_deepseek_response_metadata_from_responses_request(&value)?;
+    runtime_deepseek_note_thinking_tool_choice_omission(
+        &value,
+        thinking_enabled,
+        &mut response_metadata,
+    );
     if response_format.is_some() {
         runtime_deepseek_ensure_json_prompt_instruction(&mut messages);
     }
@@ -157,9 +163,10 @@ pub(super) fn runtime_chat_compatible_request_body(
             &value,
             &mut request,
             provider_kind,
-        );
+        )?;
     }
     let mut tool_names = BTreeSet::new();
+    runtime_deepseek_validate_tools_shape(&value)?;
     if let Some(tools) = runtime_deepseek_tools_from_responses_request(&value) {
         let tools = runtime_deepseek_dedup_and_validate_function_tools(tools, options)?;
         if tools.len() > 128 {
@@ -169,10 +176,11 @@ pub(super) fn runtime_chat_compatible_request_body(
         request.insert("tools".to_string(), serde_json::Value::Array(tools));
     }
     if let Some(web_search_options) =
-        runtime_deepseek_web_search_options_from_responses_request(&value)
+        runtime_deepseek_web_search_options_from_responses_request(&value)?
     {
         runtime_deepseek_apply_web_search_mode(&mut request, web_search_options, options)?;
     }
+    runtime_deepseek_validate_tool_choice_shape(&value, thinking_enabled)?;
     if let Some(tool_choice) =
         runtime_deepseek_tool_choice_from_responses_request(&value, thinking_enabled)
     {
@@ -180,17 +188,7 @@ pub(super) fn runtime_chat_compatible_request_body(
         runtime_deepseek_validate_tool_choice_target(&tool_choice, &tool_names)?;
         request.insert("tool_choice".to_string(), tool_choice);
     }
-    for (from, to) in [
-        ("temperature", "temperature"),
-        ("top_p", "top_p"),
-        ("max_output_tokens", "max_tokens"),
-        ("max_tokens", "max_tokens"),
-        ("logprobs", "logprobs"),
-    ] {
-        if let Some(next) = value.get(from) {
-            request.insert(to.to_string(), next.clone());
-        }
-    }
+    runtime_deepseek_insert_primitive_request_fields(&value, &mut request)?;
     runtime_deepseek_reject_unsupported_request_fields(&value)?;
     if let Some(stop) = runtime_deepseek_stop_from_responses_request(&value)? {
         request.insert("stop".to_string(), stop);
@@ -217,6 +215,36 @@ pub(super) fn runtime_chat_compatible_request_body(
         messages,
         response_metadata,
     })
+}
+
+fn runtime_deepseek_validate_top_level_request_shape(value: &serde_json::Value) -> Result<()> {
+    if !value.is_object() {
+        anyhow::bail!("DeepSeek request body must be a JSON object");
+    }
+    if let Some(model) = value.get("model") {
+        let Some(model) = model.as_str() else {
+            anyhow::bail!("DeepSeek model must be a string");
+        };
+        if model.trim().is_empty() {
+            anyhow::bail!("DeepSeek model must not be empty");
+        }
+    }
+    if let Some(stream) = value.get("stream")
+        && !stream.is_boolean()
+    {
+        anyhow::bail!("DeepSeek stream must be a boolean");
+    }
+    if let Some(instructions) = value.get("instructions")
+        && !instructions.is_string()
+    {
+        anyhow::bail!("DeepSeek instructions must be a string");
+    }
+    if let Some(previous_response_id) = value.get("previous_response_id")
+        && !previous_response_id.is_string()
+    {
+        anyhow::bail!("DeepSeek previous_response_id must be a string");
+    }
+    Ok(())
 }
 
 fn runtime_gemini_openai_preserve_tool_call_signatures(messages: &mut [serde_json::Value]) {
@@ -305,7 +333,8 @@ fn runtime_deepseek_messages_from_responses_request(
                 );
             }
         }
-        _ => {}
+        Some(_) => anyhow::bail!("DeepSeek input must be a string or array of input items"),
+        None => {}
     }
     if messages.is_empty() {
         Ok(None)
@@ -316,13 +345,116 @@ fn runtime_deepseek_messages_from_responses_request(
 
 fn runtime_deepseek_validate_supported_input_item(item: &serde_json::Value) -> Result<()> {
     let Some(object) = item.as_object() else {
-        return Ok(());
+        anyhow::bail!("DeepSeek input items must be objects");
     };
     runtime_deepseek_reject_chat_prefix_marker(object)?;
-    if object.get("type").and_then(serde_json::Value::as_str) != Some("message") {
+    match object.get("type").and_then(serde_json::Value::as_str) {
+        Some("message") => {
+            runtime_deepseek_validate_input_message_role(object)?;
+            runtime_deepseek_validate_supported_message_content(object.get("content"))
+        }
+        Some("function_call" | "custom_tool_call" | "mcp_call") => {
+            runtime_deepseek_validate_input_tool_call_item(object)
+        }
+        Some("local_shell_call") => runtime_deepseek_validate_input_local_shell_call_item(object),
+        Some(
+            "function_call_output"
+            | "custom_tool_call_output"
+            | "mcp_tool_result"
+            | "mcp_call_output",
+        ) => runtime_deepseek_validate_input_tool_output_item(object),
+        Some(other) => {
+            anyhow::bail!(
+                "DeepSeek input item type `{other}` is not supported by this Responses adapter"
+            )
+        }
+        None => Ok(()),
+    }
+}
+
+fn runtime_deepseek_validate_input_message_role(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    let Some(role) = object.get("role") else {
+        return Ok(());
+    };
+    let Some(role) = role.as_str() else {
+        anyhow::bail!("DeepSeek message role must be a string");
+    };
+    if matches!(role, "user" | "assistant" | "system" | "developer") {
         return Ok(());
     }
-    runtime_deepseek_validate_supported_message_content(object.get("content"))
+    anyhow::bail!("DeepSeek message role `{role}` is not supported by this Responses adapter")
+}
+
+fn runtime_deepseek_validate_input_tool_call_item(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    runtime_deepseek_require_input_item_call_id(object)?;
+    if runtime_deepseek_input_item_tool_name(object).is_none() {
+        anyhow::bail!("DeepSeek input tool call items require a function name");
+    }
+    Ok(())
+}
+
+fn runtime_deepseek_validate_input_tool_output_item(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    runtime_deepseek_require_input_item_call_id(object)?;
+    if ["output", "content", "result", "error"]
+        .iter()
+        .any(|key| object.contains_key(*key))
+    {
+        return Ok(());
+    }
+    anyhow::bail!("DeepSeek input tool output items require output content")
+}
+
+fn runtime_deepseek_validate_input_local_shell_call_item(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    runtime_deepseek_require_input_item_call_id(object)?;
+    if let Some(parts) = object
+        .get("action")
+        .and_then(|action| action.get("command"))
+        .and_then(serde_json::Value::as_array)
+    {
+        if !parts.is_empty()
+            && parts
+                .iter()
+                .all(|part| part.as_str().is_some_and(|part| !part.trim().is_empty()))
+        {
+            return Ok(());
+        }
+        anyhow::bail!("DeepSeek local_shell_call action.command must be an array of strings");
+    }
+    if runtime_deepseek_json_string(object, &["command"])
+        .filter(|command| !command.trim().is_empty())
+        .is_some()
+    {
+        return Ok(());
+    }
+    anyhow::bail!("DeepSeek local_shell_call requires a command");
+}
+
+fn runtime_deepseek_require_input_item_call_id(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    if runtime_deepseek_json_string(object, &["call_id", "tool_call_id", "id"])
+        .filter(|call_id| !call_id.trim().is_empty())
+        .is_some()
+    {
+        return Ok(());
+    }
+    anyhow::bail!("DeepSeek input tool items require a call_id")
+}
+
+fn runtime_deepseek_input_item_tool_name(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    runtime_deepseek_json_string(object, &["name", "tool_name"])
+        .or_else(|| runtime_deepseek_json_string_at_path(object, &["function", "name"]))
+        .filter(|name| !name.trim().is_empty())
 }
 
 fn runtime_deepseek_validate_supported_message_content(
@@ -337,7 +469,8 @@ fn runtime_deepseek_validate_supported_message_content(
         Some(content @ serde_json::Value::Object(_)) => {
             runtime_deepseek_validate_supported_content_part(content)?;
         }
-        _ => {}
+        Some(serde_json::Value::String(_)) | None => {}
+        Some(_) => anyhow::bail!("DeepSeek message content must be a string, object, or array"),
     }
     Ok(())
 }
@@ -347,20 +480,27 @@ fn runtime_deepseek_validate_supported_content_part(part: &serde_json::Value) ->
         return Ok(());
     };
     runtime_deepseek_reject_chat_prefix_marker(object)?;
-    if object
+    if object.get("cache_control").is_some() {
+        anyhow::bail!(
+            "DeepSeek per-message cache_control is not supported by this Responses adapter because DeepSeek context caching is automatic"
+        );
+    }
+    let has_text = object
         .get("text")
         .or_else(|| object.get("input_text"))
         .or_else(|| object.get("output_text"))
         .and_then(serde_json::Value::as_str)
-        .is_some()
-    {
+        .is_some();
+    if has_text {
         return Ok(());
     }
     let Some(part_type) = object.get("type").and_then(serde_json::Value::as_str) else {
-        return Ok(());
+        anyhow::bail!(
+            "DeepSeek text-only adapter does not support object message content parts without text or type"
+        );
     };
     if matches!(part_type, "input_text" | "output_text" | "text") {
-        return Ok(());
+        anyhow::bail!("DeepSeek {part_type} content parts require a text field");
     }
     anyhow::bail!(
         "DeepSeek text-only adapter does not support message content part type `{part_type}`"
@@ -588,17 +728,7 @@ fn runtime_deepseek_push_message_from_responses_item(
                 "content": runtime_deepseek_tool_output_text(object),
             }));
         }
-        Some(other) => {
-            let text = runtime_deepseek_responses_content_text(object.get("content"))
-                .trim()
-                .to_string();
-            if !text.is_empty() {
-                messages.push(serde_json::json!({
-                    "role": "user",
-                    "content": format!("{other}: {text}"),
-                }));
-            }
-        }
+        Some(_) => {}
         None => {}
     }
 }
@@ -827,7 +957,7 @@ fn runtime_deepseek_stop_from_responses_request(
         return Ok(Some(stop.clone()));
     }
     let Some(stops) = stop.as_array() else {
-        return Ok(Some(stop.clone()));
+        anyhow::bail!("DeepSeek stop must be a string or array of strings");
     };
     if stops.len() > 16 {
         anyhow::bail!("DeepSeek supports at most 16 stop sequences");
@@ -838,15 +968,45 @@ fn runtime_deepseek_stop_from_responses_request(
     Ok(Some(stop.clone()))
 }
 
+fn runtime_deepseek_insert_primitive_request_fields(
+    value: &serde_json::Value,
+    request: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    for field in ["temperature", "top_p"] {
+        if let Some(next) = value.get(field) {
+            if !next.is_number() {
+                anyhow::bail!("DeepSeek {field} must be a number");
+            }
+            request.insert(field.to_string(), next.clone());
+        }
+    }
+    for field in ["max_output_tokens", "max_tokens", "max_completion_tokens"] {
+        if let Some(next) = value.get(field) {
+            if next.as_u64().is_none_or(|count| count == 0) {
+                anyhow::bail!("DeepSeek {field} must be a positive integer");
+            }
+            request.insert("max_tokens".to_string(), next.clone());
+        }
+    }
+    if let Some(logprobs) = value.get("logprobs") {
+        if !logprobs.is_boolean() {
+            anyhow::bail!("DeepSeek logprobs must be a boolean");
+        }
+        request.insert("logprobs".to_string(), logprobs.clone());
+    }
+    Ok(())
+}
+
 fn runtime_deepseek_top_logprobs_from_responses_request(
     value: &serde_json::Value,
 ) -> Result<Option<serde_json::Value>> {
     let Some(top_logprobs) = value.get("top_logprobs") else {
         return Ok(None);
     };
-    if let Some(count) = top_logprobs.as_u64()
-        && count > 20
-    {
+    let Some(count) = top_logprobs.as_u64() else {
+        anyhow::bail!("DeepSeek top_logprobs must be an integer");
+    };
+    if count > 20 {
         anyhow::bail!("DeepSeek top_logprobs must be <= 20");
     }
     if value.get("logprobs").and_then(serde_json::Value::as_bool) != Some(true) {
@@ -861,14 +1021,364 @@ fn runtime_deepseek_reject_unsupported_request_fields(value: &serde_json::Value)
             anyhow::bail!("DeepSeek {field} is deprecated and is not forwarded by Prodex");
         }
     }
-    if value
-        .get("parallel_tool_calls")
-        .and_then(serde_json::Value::as_bool)
-        == Some(false)
-    {
-        anyhow::bail!("DeepSeek does not expose a compatible parallel_tool_calls=false control");
+    for field in [
+        "n",
+        "seed",
+        "service_tier",
+        "prediction",
+        "logit_bias",
+        "functions",
+        "function_call",
+    ] {
+        if value.get(field).is_some() {
+            anyhow::bail!("DeepSeek {field} is not supported by this Responses adapter");
+        }
+    }
+    if let Some(include) = value.get("include") {
+        let Some(include) = include.as_array() else {
+            anyhow::bail!("DeepSeek include must be an array");
+        };
+        if !include.is_empty() {
+            anyhow::bail!(
+                "DeepSeek include response expansions are not supported by this Responses adapter"
+            );
+        }
+    }
+    if let Some(store) = value.get("store") {
+        match store.as_bool() {
+            Some(true) => {}
+            Some(false) => anyhow::bail!(
+                "DeepSeek store=false is not supported because this adapter uses local conversation snapshots for previous_response_id replay"
+            ),
+            None => anyhow::bail!("DeepSeek store must be a boolean"),
+        }
+    }
+    if let Some(background) = value.get("background") {
+        match background.as_bool() {
+            Some(false) => {}
+            Some(true) => anyhow::bail!(
+                "DeepSeek background responses are not supported by this Responses adapter"
+            ),
+            None => anyhow::bail!("DeepSeek background must be a boolean"),
+        }
+    }
+    if let Some(truncation) = value.get("truncation") {
+        match truncation.as_str() {
+            Some("disabled") => {}
+            Some("auto") => {
+                anyhow::bail!("DeepSeek truncation=auto is not supported by this Responses adapter")
+            }
+            Some(other) => anyhow::bail!("DeepSeek truncation `{other}` is not supported"),
+            None => anyhow::bail!("DeepSeek truncation must be a string"),
+        }
+    }
+    if value.get("max_tool_calls").is_some() {
+        anyhow::bail!("DeepSeek max_tool_calls is not supported by this Responses adapter");
+    }
+    if let Some(text) = value.get("text") {
+        let Some(text) = text.as_object() else {
+            anyhow::bail!("DeepSeek text must be an object");
+        };
+        for key in text.keys() {
+            if key != "format" {
+                anyhow::bail!("DeepSeek text.{key} is not supported by this Responses adapter");
+            }
+        }
+    }
+    if let Some(parallel_tool_calls) = value.get("parallel_tool_calls") {
+        match parallel_tool_calls.as_bool() {
+            Some(true) => {}
+            Some(false) => {
+                anyhow::bail!(
+                    "DeepSeek does not expose a compatible parallel_tool_calls=false control"
+                );
+            }
+            None => anyhow::bail!("DeepSeek parallel_tool_calls must be a boolean"),
+        }
+    }
+    if let Some(stream_options) = value.get("stream_options") {
+        let Some(stream_options) = stream_options.as_object() else {
+            anyhow::bail!("DeepSeek stream_options must be an object");
+        };
+        if value.get("stream").and_then(serde_json::Value::as_bool) != Some(true) {
+            anyhow::bail!("DeepSeek stream_options requires stream=true");
+        }
+        for key in stream_options.keys() {
+            if key != "include_usage" {
+                anyhow::bail!("DeepSeek stream_options.{key} is not supported");
+            }
+        }
+        if let Some(include_usage) = stream_options.get("include_usage") {
+            match include_usage.as_bool() {
+                Some(true) => {}
+                Some(false) => {
+                    anyhow::bail!(
+                        "DeepSeek streaming adapter requires stream_options.include_usage=true"
+                    )
+                }
+                None => anyhow::bail!("DeepSeek stream_options.include_usage must be a boolean"),
+            }
+        }
+    }
+    if let Some(modalities) = value.get("modalities") {
+        let Some(modalities) = modalities.as_array() else {
+            anyhow::bail!("DeepSeek modalities must be an array");
+        };
+        if modalities
+            .iter()
+            .any(|modality| modality.as_str() != Some("text"))
+        {
+            anyhow::bail!(
+                "DeepSeek Responses adapter only supports text modality; audio/image/video modalities are not supported"
+            );
+        }
+    }
+    if value.get("audio").is_some() {
+        anyhow::bail!("DeepSeek Responses adapter does not support audio output");
     }
     Ok(())
+}
+
+fn runtime_deepseek_validate_tools_shape(value: &serde_json::Value) -> Result<()> {
+    let Some(tools) = value.get("tools") else {
+        return Ok(());
+    };
+    let Some(tools) = tools.as_array() else {
+        anyhow::bail!("DeepSeek tools must be an array");
+    };
+    if tools.iter().any(|tool| !tool.is_object()) {
+        anyhow::bail!("DeepSeek tools entries must be objects");
+    }
+    for tool in tools {
+        let Some(object) = tool.as_object() else {
+            continue;
+        };
+        let Some(tool_type) = object.get("type").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if tool_type == "function"
+            || tool_type == "custom"
+            || tool_type == "namespace"
+            || tool_type == "tool_search"
+            || tool_type == "mcp"
+            || tool_type == "mcp_toolset"
+            || tool_type.starts_with("mcp")
+            || tool_type == "web_search"
+            || tool_type == "web_search_preview"
+            || tool_type.starts_with("web_search_preview_")
+        {
+            runtime_deepseek_validate_optional_string(object, "description", "tool description")?;
+            if let Some(function) = object
+                .get("function")
+                .and_then(serde_json::Value::as_object)
+            {
+                runtime_deepseek_validate_optional_string(
+                    function,
+                    "description",
+                    "function description",
+                )?;
+                runtime_deepseek_validate_optional_bool(function, "strict", "function strict")?;
+            }
+            runtime_deepseek_validate_optional_bool(object, "strict", "tool strict")?;
+            if matches!(tool_type, "function" | "custom")
+                && runtime_deepseek_tool_name_from_tool_object(object).is_none()
+            {
+                anyhow::bail!("DeepSeek {tool_type} tools require a name");
+            }
+            if tool_type == "custom"
+                && object.get("strict").and_then(serde_json::Value::as_bool) == Some(true)
+            {
+                anyhow::bail!(
+                    "DeepSeek custom tools cannot preserve strict=true through the function wrapper"
+                );
+            }
+            if tool_type == "custom" {
+                runtime_deepseek_validate_custom_tool_format_shape(object)?;
+            }
+            if tool_type == "namespace" {
+                runtime_deepseek_validate_namespace_tool_shape(object)?;
+            }
+            if matches!(tool_type, "mcp" | "mcp_toolset") {
+                runtime_deepseek_validate_mcp_toolset_shape(object)?;
+            }
+            if tool_type.starts_with("mcp") && !matches!(tool_type, "mcp" | "mcp_toolset") {
+                runtime_deepseek_validate_mcp_function_tool_shape(object)?;
+            }
+            continue;
+        }
+        anyhow::bail!("DeepSeek tool type `{tool_type}` is not supported");
+    }
+    Ok(())
+}
+
+fn runtime_deepseek_validate_optional_string(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<()> {
+    if let Some(value) = object.get(key)
+        && !value.is_string()
+    {
+        anyhow::bail!("DeepSeek {label} must be a string");
+    }
+    Ok(())
+}
+
+fn runtime_deepseek_validate_optional_bool(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Result<()> {
+    if let Some(value) = object.get(key)
+        && !value.is_boolean()
+    {
+        anyhow::bail!("DeepSeek {label} must be a boolean");
+    }
+    Ok(())
+}
+
+fn runtime_deepseek_validate_custom_tool_format_shape(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    let Some(format) = object.get("format") else {
+        return Ok(());
+    };
+    let Some(format) = format.as_object() else {
+        anyhow::bail!("DeepSeek custom tool format must be an object");
+    };
+    if let Some(format_type) = format.get("type")
+        && !format_type.is_string()
+    {
+        anyhow::bail!("DeepSeek custom tool format.type must be a string");
+    }
+    Ok(())
+}
+
+fn runtime_deepseek_validate_namespace_tool_shape(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    let Some(namespace) =
+        runtime_deepseek_json_string(object, &["name"]).filter(|name| !name.trim().is_empty())
+    else {
+        anyhow::bail!("DeepSeek namespace tools require a name");
+    };
+    let Some(tools) = object.get("tools").and_then(serde_json::Value::as_array) else {
+        anyhow::bail!("DeepSeek namespace tool `{namespace}` requires a tools array");
+    };
+    if tools.is_empty() {
+        anyhow::bail!("DeepSeek namespace tool `{namespace}` requires at least one tool");
+    }
+    for tool in tools {
+        let Some(tool) = tool.as_object() else {
+            anyhow::bail!("DeepSeek namespace tool `{namespace}` entries must be objects");
+        };
+        runtime_deepseek_validate_optional_string(
+            tool,
+            "description",
+            "namespace function description",
+        )?;
+        runtime_deepseek_validate_optional_bool(tool, "strict", "namespace function strict")?;
+        if tool.get("type").and_then(serde_json::Value::as_str) != Some("function") {
+            anyhow::bail!("DeepSeek namespace tool `{namespace}` entries must be function tools");
+        }
+        if runtime_deepseek_json_string(tool, &["name"])
+            .filter(|name| !name.trim().is_empty())
+            .is_none()
+        {
+            anyhow::bail!("DeepSeek namespace tool `{namespace}` function entries require a name");
+        }
+    }
+    Ok(())
+}
+
+fn runtime_deepseek_validate_mcp_function_tool_shape(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    let Some(name) =
+        runtime_deepseek_json_string(object, &["name"]).filter(|name| !name.trim().is_empty())
+    else {
+        anyhow::bail!("DeepSeek MCP function tools require a name");
+    };
+    let has_schema = [
+        "parameters",
+        "parametersJsonSchema",
+        "input_schema",
+        "schema",
+    ]
+    .iter()
+    .any(|key| object.get(*key).is_some());
+    if !has_schema {
+        anyhow::bail!("DeepSeek MCP function tool `{name}` requires a schema");
+    }
+    Ok(())
+}
+
+fn runtime_deepseek_validate_mcp_toolset_shape(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<()> {
+    let declares_tools = object.contains_key("allowed_tools") || object.contains_key("configs");
+    if !declares_tools {
+        return Ok(());
+    }
+    let Some(server_name) = runtime_deepseek_json_string(
+        object,
+        &["mcp_server_name", "server_label", "server_name", "name"],
+    )
+    .filter(|server_name| !server_name.trim().is_empty()) else {
+        anyhow::bail!("DeepSeek MCP toolsets require a server name");
+    };
+    let allowed_count = object
+        .get("allowed_tools")
+        .and_then(serde_json::Value::as_array)
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .count()
+        })
+        .unwrap_or(0);
+    let config_count = object
+        .get("configs")
+        .and_then(serde_json::Value::as_object)
+        .map(|configs| {
+            let default_enabled = object
+                .get("default_config")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|config| config.get("enabled"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            configs
+                .iter()
+                .filter(|(_, config)| {
+                    config
+                        .as_object()
+                        .and_then(|config| config.get("enabled"))
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(default_enabled)
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    if allowed_count == 0 && config_count == 0 {
+        anyhow::bail!(
+            "DeepSeek MCP toolset `{server_name}` requires allowed_tools or enabled configs"
+        );
+    }
+    Ok(())
+}
+
+fn runtime_deepseek_tool_name_from_tool_object(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    runtime_deepseek_json_string(object, &["name"])
+        .or_else(|| {
+            object
+                .get("function")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|function| runtime_deepseek_json_string(function, &["name"]))
+        })
+        .filter(|name| !name.trim().is_empty())
 }
 
 fn runtime_deepseek_reject_beta_completion_fields(value: &serde_json::Value) -> Result<()> {
@@ -904,6 +1414,18 @@ fn runtime_deepseek_dedup_and_validate_function_tools(
             .map(str::to_string)
         {
             runtime_deepseek_validate_function_name(&name)?;
+            runtime_deepseek_validate_function_parameters(&tool, &name)?;
+            if !options.strict_tools
+                && tool
+                    .get("function")
+                    .and_then(|function| function.get("strict"))
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+            {
+                anyhow::bail!(
+                    "DeepSeek strict function tool `{name}` requires deepseek.strict_tools=true"
+                );
+            }
             if options.strict_tools {
                 runtime_deepseek_apply_strict_function_schema(&mut tool)?;
             }
@@ -934,6 +1456,20 @@ fn runtime_deepseek_dedup_and_validate_function_tools(
         deduped.push(tool);
     }
     Ok(deduped)
+}
+
+fn runtime_deepseek_validate_function_parameters(
+    tool: &serde_json::Value,
+    name: &str,
+) -> Result<()> {
+    if let Some(parameters) = tool
+        .get("function")
+        .and_then(|function| function.get("parameters"))
+        && !parameters.is_object()
+    {
+        anyhow::bail!("DeepSeek function tool `{name}` parameters must be an object");
+    }
+    Ok(())
 }
 
 fn runtime_deepseek_apply_strict_function_schema(tool: &mut serde_json::Value) -> Result<()> {
@@ -1080,6 +1616,47 @@ fn runtime_deepseek_validate_tool_choice_name(tool_choice: &serde_json::Value) -
     Ok(())
 }
 
+fn runtime_deepseek_validate_tool_choice_shape(
+    value: &serde_json::Value,
+    thinking_enabled: bool,
+) -> Result<()> {
+    if thinking_enabled {
+        return Ok(());
+    }
+    let Some(choice) = value.get("tool_choice") else {
+        return Ok(());
+    };
+    if let Some(choice) = choice.as_str() {
+        if matches!(choice, "auto" | "none" | "required") {
+            return Ok(());
+        }
+        anyhow::bail!("DeepSeek tool_choice string `{choice}` is not supported");
+    }
+    let Some(object) = choice.as_object() else {
+        anyhow::bail!("DeepSeek tool_choice must be a string or object");
+    };
+    let choice_type = object
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if choice_type == "function" || choice_type.starts_with("mcp") {
+        if runtime_deepseek_json_string(object, &["name"])
+            .or_else(|| {
+                object
+                    .get("function")
+                    .and_then(serde_json::Value::as_object)
+                    .and_then(|function| runtime_deepseek_json_string(function, &["name"]))
+            })
+            .filter(|name| !name.trim().is_empty())
+            .is_none()
+        {
+            anyhow::bail!("DeepSeek named tool_choice requires a function name");
+        }
+        return Ok(());
+    }
+    anyhow::bail!("DeepSeek tool_choice type `{choice_type}` is not supported");
+}
+
 fn runtime_deepseek_validate_tool_choice_target(
     tool_choice: &serde_json::Value,
     tool_names: &BTreeSet<String>,
@@ -1111,8 +1688,16 @@ fn runtime_deepseek_validate_function_name(name: &str) -> Result<()> {
 
 fn runtime_deepseek_validate_web_search_options(options: &serde_json::Value) -> Result<()> {
     let Some(object) = options.as_object() else {
-        return Ok(());
+        anyhow::bail!("DeepSeek web_search_options must be an object");
     };
+    if let Some(size) = object.get("search_context_size") {
+        let Some(size) = size.as_str() else {
+            anyhow::bail!("DeepSeek web_search search_context_size must be low, medium, or high");
+        };
+        if !matches!(size, "low" | "medium" | "high") {
+            anyhow::bail!("DeepSeek web_search search_context_size must be low, medium, or high");
+        }
+    }
     if let Some(allowed_domains) = object.get("allowed_domains") {
         let Some(domains) = allowed_domains.as_array() else {
             anyhow::bail!("DeepSeek web_search allowed_domains must be an array of strings");
@@ -1140,7 +1725,12 @@ fn runtime_deepseek_apply_web_search_mode(
     options: RuntimeDeepSeekRewriteOptions,
 ) -> Result<()> {
     match options.web_search_mode {
-        RuntimeDeepSeekWebSearchMode::Auto | RuntimeDeepSeekWebSearchMode::OpenAiChat => {
+        RuntimeDeepSeekWebSearchMode::Auto => {
+            anyhow::bail!(
+                "DeepSeek web search auto mode has no documented native OpenAI Chat route yet; set deepseek.web_search_mode=\"openai_chat\" for explicit best-effort forwarding, \"anthropic\" when the Anthropic adapter exists, or \"function_proxy\" when a local search backend exists"
+            )
+        }
+        RuntimeDeepSeekWebSearchMode::OpenAiChat => {
             runtime_deepseek_validate_web_search_options(&web_search_options)?;
             request.insert("web_search_options".to_string(), web_search_options);
             Ok(())
@@ -1165,42 +1755,133 @@ fn runtime_deepseek_apply_web_search_mode(
 
 fn runtime_deepseek_response_format_from_responses_request(
     value: &serde_json::Value,
-) -> Option<serde_json::Value> {
+) -> Result<Option<serde_json::Value>> {
     let response_format = value
         .get("response_format")
-        .or_else(|| value.get("text").and_then(|text| text.get("format")))?;
+        .or_else(|| value.get("text").and_then(|text| text.get("format")));
+    let Some(response_format) = response_format else {
+        return Ok(None);
+    };
     let format_type = response_format
         .get("type")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    matches!(
-        format_type,
-        "json_object" | "json_schema" | "json" | "structured_output"
-    )
-    .then(|| serde_json::json!({"type": "json_object"}))
+    match format_type {
+        "json_object" | "json_schema" | "json" | "structured_output" => {
+            Ok(Some(serde_json::json!({"type": "json_object"})))
+        }
+        "text" => Ok(None),
+        "" => anyhow::bail!("DeepSeek response_format must include a type"),
+        other => anyhow::bail!("DeepSeek response_format type `{other}` is not supported"),
+    }
 }
 
 fn runtime_deepseek_response_metadata_from_responses_request(
     value: &serde_json::Value,
-) -> Option<serde_json::Value> {
+) -> Result<Option<serde_json::Value>> {
+    let mut metadata = match value.get("metadata") {
+        Some(metadata) => metadata
+            .as_object()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("DeepSeek request metadata must be an object"))?,
+        None => serde_json::Map::new(),
+    };
+    if metadata
+        .get("deepseek")
+        .is_some_and(|deepseek| !deepseek.is_object())
+    {
+        anyhow::bail!("DeepSeek request metadata.deepseek must be an object");
+    }
+    if let Some(client_metadata) = value.get("client_metadata") {
+        let client_metadata = client_metadata
+            .as_object()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("DeepSeek client_metadata must be an object"))?;
+        metadata.insert(
+            "client_metadata".to_string(),
+            serde_json::Value::Object(client_metadata),
+        );
+    }
+    if let Some(prompt_cache_key) = value.get("prompt_cache_key") {
+        let prompt_cache_key = prompt_cache_key
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("DeepSeek prompt_cache_key must be a string"))?;
+        if !prompt_cache_key.trim().is_empty() {
+            metadata.insert(
+                "prompt_cache_key".to_string(),
+                serde_json::Value::String(prompt_cache_key.to_string()),
+            );
+        }
+    }
+    if let Some(prompt_cache_retention) = value.get("prompt_cache_retention") {
+        if !prompt_cache_retention.is_string() {
+            anyhow::bail!("DeepSeek prompt_cache_retention must be a string");
+        }
+        metadata.insert(
+            "prompt_cache_retention".to_string(),
+            prompt_cache_retention.clone(),
+        );
+    }
     let response_format = value
         .get("response_format")
-        .or_else(|| value.get("text").and_then(|text| text.get("format")))?;
-    let format_type = response_format
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    matches!(format_type, "json_schema" | "structured_output").then(|| {
-        serde_json::json!({
-            "deepseek": {
-                "degraded_response_format": {
+        .or_else(|| value.get("text").and_then(|text| text.get("format")));
+    if let Some(response_format) = response_format {
+        let format_type = response_format
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if matches!(format_type, "json_schema" | "structured_output") {
+            let deepseek = metadata
+                .entry("deepseek".to_string())
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("DeepSeek request metadata.deepseek must be an object")
+                })?;
+            deepseek.insert(
+                "degraded_response_format".to_string(),
+                serde_json::json!({
                     "from": format_type,
                     "to": "json_object",
                     "reason": "DeepSeek OpenAI Chat response_format supports json_object but not native JSON Schema enforcement"
-                }
-            }
-        })
-    })
+                }),
+            );
+        }
+    }
+    Ok((!metadata.is_empty()).then_some(serde_json::Value::Object(metadata)))
+}
+
+fn runtime_deepseek_note_thinking_tool_choice_omission(
+    value: &serde_json::Value,
+    thinking_enabled: bool,
+    response_metadata: &mut Option<serde_json::Value>,
+) {
+    if !thinking_enabled {
+        return;
+    }
+    let Some(tool_choice) = value.get("tool_choice") else {
+        return;
+    };
+    let metadata = response_metadata
+        .get_or_insert_with(|| serde_json::json!({}))
+        .as_object_mut();
+    let Some(metadata) = metadata else {
+        return;
+    };
+    let deepseek = metadata
+        .entry("deepseek".to_string())
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut();
+    let Some(deepseek) = deepseek else {
+        return;
+    };
+    deepseek.insert(
+        "omitted_tool_choice".to_string(),
+        serde_json::json!({
+            "from": tool_choice,
+            "reason": "DeepSeek thinking mode currently rejects explicit tool_choice on the OpenAI Chat route, so Prodex omits it while preserving translated function tools"
+        }),
+    );
 }
 
 fn runtime_deepseek_ensure_json_prompt_instruction(messages: &mut Vec<serde_json::Value>) {
@@ -1238,12 +1919,17 @@ fn runtime_deepseek_user_id_from_responses_request(
     let Some(user_id) = value
         .get("user_id")
         .or_else(|| value.get("user"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|user| !user.is_empty())
+        .or_else(|| value.get("safety_identifier"))
     else {
         return Ok(None);
     };
+    let Some(user_id) = user_id.as_str() else {
+        anyhow::bail!("DeepSeek user_id must be a string");
+    };
+    let user_id = user_id.trim();
+    if user_id.is_empty() {
+        return Ok(None);
+    }
     if user_id.len() > 512
         || !user_id
             .bytes()

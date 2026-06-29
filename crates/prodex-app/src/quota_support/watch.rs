@@ -54,6 +54,7 @@ const ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS: u64 = 90;
 const ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS: u64 = 2;
 const ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS: i64 = 2 * 60;
 const ALL_QUOTA_WATCH_NEAR_RESET_SECONDS: i64 = 15 * 60;
+const ALL_QUOTA_WATCH_AUTH_BACKOFF_POLL_SECONDS: u64 = 1;
 enum QuotaWatchCommand {
     Up,
     Down,
@@ -491,8 +492,20 @@ fn watch_all_quotas_plain(
     );
     let mut redraw_needed = true;
     let mut next_refresh_at = None;
+    let mut auth_backoff_profiles = std::collections::BTreeSet::new();
+    let mut next_auth_backoff_poll_at = Instant::now();
 
     loop {
+        if Instant::now() >= next_auth_backoff_poll_at {
+            let next_auth_backoff_profiles = quota_runtime_auth_backoff_profiles();
+            if next_auth_backoff_profiles != auth_backoff_profiles {
+                auth_backoff_profiles = next_auth_backoff_profiles;
+                redraw_needed = true;
+            }
+            next_auth_backoff_poll_at =
+                Instant::now() + Duration::from_secs(ALL_QUOTA_WATCH_AUTH_BACKOFF_POLL_SECONDS);
+        }
+
         if let Some(next_snapshot) = refresh.take_latest() {
             snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
             redraw_needed = true;
@@ -500,14 +513,16 @@ fn watch_all_quotas_plain(
         }
 
         if redraw_needed {
+            let render_snapshot =
+                quota_watch_snapshot_with_auth_backoff(&snapshot, &auth_backoff_profiles);
             scroll_offset = scroll_offset.min(quota_watch_max_scroll_offset(
-                &snapshot,
+                &render_snapshot,
                 detail,
                 provider_filter,
                 sort,
             ));
             let output = render_all_quota_watch_snapshot(
-                &snapshot,
+                &render_snapshot,
                 detail,
                 scroll_offset,
                 sort,
@@ -565,8 +580,20 @@ fn watch_all_quotas_tui(
     );
     let mut redraw_needed = true;
     let mut next_refresh_at = None;
+    let mut auth_backoff_profiles = std::collections::BTreeSet::new();
+    let mut next_auth_backoff_poll_at = Instant::now();
 
     loop {
+        if Instant::now() >= next_auth_backoff_poll_at {
+            let next_auth_backoff_profiles = quota_runtime_auth_backoff_profiles();
+            if next_auth_backoff_profiles != auth_backoff_profiles {
+                auth_backoff_profiles = next_auth_backoff_profiles;
+                redraw_needed = true;
+            }
+            next_auth_backoff_poll_at =
+                Instant::now() + Duration::from_secs(ALL_QUOTA_WATCH_AUTH_BACKOFF_POLL_SECONDS);
+        }
+
         if let Some(next_snapshot) = refresh.take_latest() {
             snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
             redraw_needed = true;
@@ -578,10 +605,12 @@ fn watch_all_quotas_tui(
                 .terminal
                 .size()
                 .context("failed to read quota TUI terminal size")?;
+            let render_snapshot =
+                quota_watch_snapshot_with_auth_backoff(&snapshot, &auth_backoff_profiles);
             let max_lines = quota_watch_tui_report_lines(size.height);
             scroll_offset =
                 scroll_offset.min(quota_watch_max_scroll_offset_for_snapshot_with_layout(
-                    &snapshot,
+                    &render_snapshot,
                     detail,
                     provider_filter,
                     sort,
@@ -589,7 +618,7 @@ fn watch_all_quotas_tui(
                     usize::from(size.width).saturating_sub(4),
                 ));
             let frame = build_all_quota_watch_tui_frame(
-                &snapshot,
+                &render_snapshot,
                 AllQuotaWatchLayout {
                     detail,
                     scroll_offset,
@@ -1680,12 +1709,46 @@ fn merge_all_quota_watch_snapshot(
     }
 }
 
+fn quota_watch_snapshot_with_auth_backoff(
+    snapshot: &AllQuotaWatchSnapshot,
+    auth_backoff_profiles: &std::collections::BTreeSet<String>,
+) -> AllQuotaWatchSnapshot {
+    if auth_backoff_profiles.is_empty() {
+        return snapshot.clone();
+    }
+    let AllQuotaWatchSnapshot::Reports {
+        updated,
+        profile_count,
+        reports,
+    } = snapshot
+    else {
+        return snapshot.clone();
+    };
+    let mut reports = reports.clone();
+    for report in &mut reports {
+        if auth_backoff_profiles.contains(&report.name) {
+            report.result = Err(format!(
+                "unauthorized: runtime saw token invalidated for {}; run `prodex login {}` again",
+                report.name, report.name
+            ));
+        }
+    }
+    AllQuotaWatchSnapshot::Reports {
+        updated: updated.clone(),
+        profile_count: *profile_count,
+        reports,
+    }
+}
+
 fn preserve_previous_successful_quota_reports(
     previous_reports: &[QuotaReport],
     reports: &mut [QuotaReport],
 ) {
     for report in reports {
         if report.result.is_ok() {
+            continue;
+        }
+        if quota_watch_error_is_auth_failure(&report.result) {
             continue;
         }
         let Some(previous) = previous_reports.iter().find(|previous| {
@@ -1697,6 +1760,16 @@ fn preserve_previous_successful_quota_reports(
         };
         *report = previous.clone();
     }
+}
+
+fn quota_watch_error_is_auth_failure(
+    result: &std::result::Result<ProviderQuotaSnapshot, String>,
+) -> bool {
+    let Err(error) = result else {
+        return false;
+    };
+    let lower = error.to_ascii_lowercase();
+    lower.contains("401") || lower.contains("unauthorized") || lower.contains("token invalidated")
 }
 
 fn apply_quota_watch_command(

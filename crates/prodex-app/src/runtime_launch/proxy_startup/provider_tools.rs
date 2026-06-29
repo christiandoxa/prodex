@@ -173,6 +173,12 @@ fn runtime_provider_tool_from_responses_tool(
     {
         function.insert("parameters".to_string(), parameters.clone());
     }
+    if let Some(strict) = function_object
+        .get("strict")
+        .and_then(serde_json::Value::as_bool)
+    {
+        function.insert("strict".to_string(), serde_json::Value::Bool(strict));
+    }
 
     Some(serde_json::json!({
         "type": "function",
@@ -201,11 +207,16 @@ fn runtime_provider_custom_tool_from_responses_tool(
     } else {
         "Exact raw input for the custom/freeform tool."
     };
+    let format_hint = object
+        .get("format")
+        .and_then(|format| serde_json::to_string(format).ok())
+        .map(|format| format!("\n\nOriginal custom tool format JSON: {format}"))
+        .unwrap_or_default();
     Some(serde_json::json!({
         "type": "function",
         "function": {
             "name": name,
-            "description": format!("{description}\n\n{input_hint}"),
+            "description": format!("{description}\n\n{input_hint}{format_hint}"),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -267,6 +278,9 @@ fn runtime_provider_namespace_function_tools(tool: &serde_json::Value) -> Vec<se
                 .or_else(|| tool.get("schema"))
             {
                 function.insert("parameters".to_string(), parameters.clone());
+            }
+            if let Some(strict) = tool.get("strict").and_then(serde_json::Value::as_bool) {
+                function.insert("strict".to_string(), serde_json::Value::Bool(strict));
             }
             Some(serde_json::json!({
                 "type": "function",
@@ -660,6 +674,7 @@ mod tests {
             "web_search_options": {
                 "search_context_size": "medium"
             },
+            "metadata": {"ticket": "DS-123"},
             "tools": [{
                 "type": "function",
                 "function": {"name": "shell"}
@@ -672,6 +687,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
 
         assert!(value.get("web_search_options").is_none());
+        assert_eq!(value["metadata"]["ticket"], "DS-123");
         assert_eq!(value["tools"][0]["function"]["name"], "shell");
     }
 

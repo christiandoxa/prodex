@@ -115,6 +115,7 @@ pub(crate) fn attempt_runtime_responses_request(
             }
             let retryable_quota = matches!(status, 403 | 429)
                 && extract_runtime_proxy_quota_message(&parts.body).is_some();
+            let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
             let retryable_previous = status == 400
                 && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
             let response = RuntimeResponsesReply::Buffered(parts);
@@ -144,7 +145,7 @@ pub(crate) fn attempt_runtime_responses_request(
                     turn_state: response_turn_state,
                 });
             }
-            if matches!(status, 401 | 403) {
+            if matches!(status, 401 | 403) || token_invalidated {
                 note_runtime_profile_auth_failure(
                     shared,
                     profile_name,

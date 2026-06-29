@@ -68,7 +68,6 @@
     fn test_openai_quota_report(usage: UsageResponse) -> QuotaReport {
         test_quota_report("main", Ok(ProviderQuotaSnapshot::OpenAi(usage)))
     }
-
     fn assert_refresh_interval_near(actual: Duration, expected_seconds: u64) {
         let actual_seconds = actual.as_secs();
         let jitter = (expected_seconds / 10).max(1);
@@ -475,7 +474,35 @@
     }
 
     #[test]
-    fn all_quota_watch_merge_preserves_previous_successful_report_on_refresh_error() {
+    fn all_quota_watch_merge_preserves_previous_successful_report_on_transient_refresh_error() {
+        let previous = AllQuotaWatchSnapshot::Reports {
+            updated: "before".to_string(),
+            profile_count: 1,
+            reports: vec![test_quota_report(
+                "main",
+                Ok(test_usage("main@example.com")),
+            )],
+        };
+        let next = AllQuotaWatchSnapshot::Reports {
+            updated: "after".to_string(),
+            profile_count: 1,
+            reports: vec![test_quota_report("main", Err("HTTP 503".to_string()))],
+        };
+
+        let merged = merge_all_quota_watch_snapshot(&previous, next);
+
+        let AllQuotaWatchSnapshot::Reports {
+            updated, reports, ..
+        } = merged
+        else {
+            panic!("expected report snapshot");
+        };
+        assert_eq!(updated, "after");
+        assert!(reports[0].result.is_ok());
+    }
+
+    #[test]
+    fn all_quota_watch_merge_does_not_preserve_previous_success_on_auth_error() {
         let previous = AllQuotaWatchSnapshot::Reports {
             updated: "before".to_string(),
             profile_count: 1,
@@ -492,14 +519,36 @@
 
         let merged = merge_all_quota_watch_snapshot(&previous, next);
 
-        let AllQuotaWatchSnapshot::Reports {
-            updated, reports, ..
-        } = merged
-        else {
+        let AllQuotaWatchSnapshot::Reports { reports, .. } = merged else {
             panic!("expected report snapshot");
         };
-        assert_eq!(updated, "after");
-        assert!(reports[0].result.is_ok());
+        assert!(reports[0].result.as_ref().unwrap_err().contains("401"));
+    }
+
+    #[test]
+    fn quota_watch_auth_backoff_overlay_replaces_stale_success() {
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: 1,
+            reports: vec![test_quota_report("main", Ok(test_usage("main@example.com")))],
+        };
+
+        let overlay = quota_watch_snapshot_with_auth_backoff(
+            &snapshot,
+            &std::collections::BTreeSet::from(["main".to_string()]),
+        );
+
+        let AllQuotaWatchSnapshot::Reports { reports, .. } = overlay else {
+            panic!("expected reports snapshot");
+        };
+        assert!(reports[0].result.as_ref().unwrap_err().contains("unauthorized"));
+        assert!(
+            reports[0]
+                .result
+                .as_ref()
+                .unwrap_err()
+                .contains("prodex login main")
+        );
     }
 
     #[test]

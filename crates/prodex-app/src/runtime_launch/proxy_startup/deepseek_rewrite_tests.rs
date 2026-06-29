@@ -610,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_thinking_mode_drops_tool_choice() {
+    fn deepseek_thinking_mode_omits_tool_choice_with_metadata() {
         let conversations = conversation_store();
         let request = serde_json::json!({
             "model": "deepseek-v4-pro",
@@ -636,5 +636,18 @@ mod tests {
 
         assert_eq!(body["thinking"]["type"], "enabled");
         assert!(body.get("tool_choice").is_none());
+        let metadata = translated
+            .response_metadata
+            .expect("tool_choice omission should be recorded");
+        assert_eq!(
+            metadata["deepseek"]["omitted_tool_choice"]["from"]["name"],
+            "shell"
+        );
+        assert!(
+            metadata["deepseek"]["omitted_tool_choice"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("thinking mode")
+        );
     }
 }

@@ -38,6 +38,12 @@ pub(crate) fn runtime_proxy_redacted_body_snippet(body: &[u8], max_chars: usize)
     redaction_redacted_body_snippet(body, max_chars)
 }
 
+pub(crate) fn runtime_proxy_body_indicates_token_invalidated(body: &[u8]) -> bool {
+    String::from_utf8_lossy(body)
+        .to_ascii_lowercase()
+        .contains("token invalidated")
+}
+
 pub(crate) fn runtime_proxy_redacted_headers_debug(headers: &[(String, String)]) -> String {
     redaction_redacted_headers_debug(headers)
 }
@@ -138,4 +144,19 @@ pub(crate) fn log_runtime_token_usage(input: RuntimeTokenUsageLog<'_>) {
             ],
         ),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_invalidated_classifier_matches_backend_body_text() {
+        assert!(runtime_proxy_body_indicates_token_invalidated(
+            br#"{"error":{"message":"Token invalidated. Please login again."}}"#
+        ));
+        assert!(!runtime_proxy_body_indicates_token_invalidated(
+            b"temporary server unavailable"
+        ));
+    }
 }

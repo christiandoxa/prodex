@@ -504,6 +504,10 @@ fn compare_quota_reports_for_sort(
         QuotaReportSort::Current => quota_report_current_sort_key(left)
             .cmp(&quota_report_current_sort_key(right))
             .then_with(|| {
+                quota_report_current_blocked_sort_key(left)
+                    .cmp(&quota_report_current_blocked_sort_key(right))
+            })
+            .then_with(|| {
                 quota_report_remaining_sort_key(left).cmp(&quota_report_remaining_sort_key(right))
             }),
         QuotaReportSort::Remaining => {
@@ -539,6 +543,33 @@ fn quota_report_remaining_sort_key(report: &QuotaReport) -> (usize, i64) {
 
 fn quota_report_current_sort_key(report: &QuotaReport) -> usize {
     usize::from(!report.active)
+}
+
+fn quota_report_current_blocked_sort_key(report: &QuotaReport) -> usize {
+    match report.result.as_ref().ok() {
+        Some(ProviderQuotaSnapshot::OpenAi(usage)) => {
+            let blocked = collect_blocked_limits(usage, false);
+            if blocked.is_empty() {
+                return 0;
+            }
+            if blocked
+                .iter()
+                .any(|limit| limit.message.to_ascii_lowercase().contains("5h"))
+            {
+                1
+            } else if blocked
+                .iter()
+                .any(|limit| limit.message.to_ascii_lowercase().contains("weekly"))
+            {
+                2
+            } else {
+                3
+            }
+        }
+        Some(_) if quota_report_status_rank(report) == 0 => 0,
+        Some(_) => 3,
+        None => 4,
+    }
 }
 
 fn quota_report_account_sort_value(report: &QuotaReport) -> String {

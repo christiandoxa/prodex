@@ -35,8 +35,7 @@ fn deepseek_request_translation_maps_responses_input_and_tools() {
                 "name": "shell",
                 "description": "Run shell",
                 "parameters": {"type": "object"}
-            },
-            {"type": "web_search_preview"}
+            }
         ],
         "tool_choice": {
             "type": "function",
@@ -51,6 +50,10 @@ fn deepseek_request_translation_maps_responses_input_and_tools() {
     let translated =
         runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
             .expect("request should translate");
+    let metadata = translated
+        .response_metadata
+        .clone()
+        .expect("tool_choice omission should be recorded");
     let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
 
     assert_eq!(translated["model"], "deepseek-v4-pro");
@@ -64,6 +67,10 @@ fn deepseek_request_translation_maps_responses_input_and_tools() {
     assert!(translated.get("tool_choice").is_none());
     assert_eq!(translated["thinking"]["type"], "enabled");
     assert_eq!(translated["reasoning_effort"], "max");
+    assert_eq!(
+        metadata["deepseek"]["omitted_tool_choice"]["from"]["name"],
+        "shell"
+    );
 }
 
 #[test]
@@ -105,6 +112,45 @@ fn deepseek_request_translation_preserves_local_shell_call_fields() {
 }
 
 #[test]
+fn deepseek_request_translation_replays_custom_apply_patch_call_and_output() {
+    let conversations = deepseek_conversation_store();
+    let patch = "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch";
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": [{
+            "type": "custom_tool_call",
+            "call_id": "call_patch_1",
+            "name": "apply_patch",
+            "input": patch
+        }, {
+            "type": "custom_tool_call_output",
+            "call_id": "call_patch_1",
+            "output": "ok"
+        }]
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("request should translate");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let messages = translated["messages"].as_array().unwrap();
+    let arguments = messages[0]["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .expect("apply_patch arguments should be a JSON string");
+    let arguments: serde_json::Value = serde_json::from_str(arguments).unwrap();
+
+    assert_eq!(messages[0]["role"], "assistant");
+    assert_eq!(
+        messages[0]["tool_calls"][0]["function"]["name"],
+        "apply_patch"
+    );
+    assert_eq!(arguments["input"], patch);
+    assert_eq!(messages[1]["role"], "tool");
+    assert_eq!(messages[1]["tool_call_id"], "call_patch_1");
+    assert_eq!(messages[1]["content"], "ok");
+}
+
+#[test]
 fn deepseek_strict_tools_sets_strict_and_sanitizes_schema() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({
@@ -140,6 +186,153 @@ fn deepseek_strict_tools_sets_strict_and_sanitizes_schema() {
     assert_eq!(function["parameters"]["required"][0], "limit");
     assert_eq!(function["parameters"]["required"][1], "query");
     assert_eq!(function["parameters"]["additionalProperties"], false);
+}
+
+#[test]
+fn deepseek_request_translation_preserves_strict_false_function_tool() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "call the tool",
+        "tools": [{
+            "type": "function",
+            "name": "lookup",
+            "strict": false,
+            "parameters": {"type": "object"}
+        }]
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("strict false should translate");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(translated["tools"][0]["function"]["strict"], false);
+}
+
+#[test]
+fn deepseek_request_translation_rejects_strict_true_without_strict_mode() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "call the tool",
+        "tools": [{
+            "type": "function",
+            "name": "lookup",
+            "strict": true,
+            "parameters": {"type": "object"}
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("strict true should require strict mode");
+
+    assert!(
+        error
+            .to_string()
+            .contains("requires deepseek.strict_tools=true")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_non_bool_function_strict() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "call the tool",
+        "tools": [{
+            "type": "function",
+            "name": "lookup",
+            "strict": "true",
+            "parameters": {"type": "object"}
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("non-bool strict should fail");
+
+    assert!(error.to_string().contains("tool strict must be a boolean"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_strict_true_custom_tool() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "edit",
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "strict": true
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("strict custom tool should fail clearly");
+
+    assert!(
+        error
+            .to_string()
+            .contains("custom tools cannot preserve strict=true")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_preserves_custom_tool_format_in_wrapper() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "emit a selector",
+        "tools": [{
+            "type": "custom",
+            "name": "css_selector",
+            "description": "Emit a CSS selector.",
+            "format": {
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": "start: /[a-z]+/"
+            }
+        }]
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("custom format should translate through wrapper description");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let description = translated["tools"][0]["function"]["description"]
+        .as_str()
+        .unwrap();
+
+    assert!(description.contains("Original custom tool format JSON"));
+    assert!(description.contains("\"type\":\"grammar\""));
+    assert!(description.contains("\"syntax\":\"lark\""));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_malformed_custom_tool_format() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "emit a selector",
+        "tools": [{
+            "type": "custom",
+            "name": "css_selector",
+            "format": "grammar"
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("malformed custom format should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("custom tool format must be an object")
+    );
 }
 
 #[test]
@@ -186,7 +379,7 @@ fn deepseek_request_translation_maps_chat_completion_parameters() {
         "stop": ["DONE"],
         "logprobs": true,
         "top_logprobs": 3,
-        "user_id": "user-safe-123",
+        "safety_identifier": "user-safe-123",
         "response_format": {"type": "json_object"}
     });
 
@@ -204,6 +397,189 @@ fn deepseek_request_translation_maps_chat_completion_parameters() {
     assert_eq!(translated["user_id"], "user-safe-123");
     assert_eq!(translated["response_format"]["type"], "json_object");
     assert_eq!(translated["stream_options"]["include_usage"], true);
+}
+
+#[test]
+fn deepseek_request_translation_maps_max_completion_tokens() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "max_completion_tokens": 77
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("max_completion_tokens should translate");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(translated["max_tokens"], 77);
+}
+
+#[test]
+fn deepseek_request_translation_rejects_invalid_top_level_shapes() {
+    for (body, expected) in [
+        (
+            serde_json::json!(["hello"]),
+            "request body must be a JSON object",
+        ),
+        (
+            serde_json::json!({
+                "model": 7,
+                "input": "hello"
+            }),
+            "model must be a string",
+        ),
+        (
+            serde_json::json!({
+                "model": "",
+                "input": "hello"
+            }),
+            "model must not be empty",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "stream": "true",
+                "input": "hello"
+            }),
+            "stream must be a boolean",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "instructions": ["be concise"],
+                "input": "hello"
+            }),
+            "instructions must be a string",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "previous_response_id": 7,
+                "input": "hello"
+            }),
+            "previous_response_id must be a string",
+        ),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("invalid top-level shape should fail clearly");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected `{expected}`, got `{error}`"
+        );
+    }
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unknown_reasoning_effort() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "reasoning": {"effort": "extreme"}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("unknown reasoning effort should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("reasoning effort is not supported")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_invalid_reasoning_shape() {
+    for (body, expected) in [
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "reasoning": "high"
+            }),
+            "reasoning must be an object",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "reasoning": {"effort": 7}
+            }),
+            "reasoning.effort must be a string",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "reasoning": {"effort": "high", "summary": "auto"}
+            }),
+            "reasoning.summary is not supported",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "reasoning_effort": 7
+            }),
+            "reasoning_effort must be a string",
+        ),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("invalid reasoning shape should fail");
+
+        assert!(error.to_string().contains(expected));
+    }
+}
+
+#[test]
+fn deepseek_request_translation_rejects_invalid_chat_parameter_shapes() {
+    for (field, value, message) in [
+        (
+            "temperature",
+            serde_json::json!("0.2"),
+            "temperature must be a number",
+        ),
+        ("top_p", serde_json::json!("0.9"), "top_p must be a number"),
+        (
+            "max_output_tokens",
+            serde_json::json!(0),
+            "max_output_tokens must be a positive integer",
+        ),
+        (
+            "max_tokens",
+            serde_json::json!("321"),
+            "max_tokens must be a positive integer",
+        ),
+        (
+            "logprobs",
+            serde_json::json!("true"),
+            "logprobs must be a boolean",
+        ),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let mut body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "hello"
+        });
+        body[field] = value;
+
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("request should reject invalid chat parameter shape");
+
+        assert!(
+            error.to_string().contains(message),
+            "{field} error should contain `{message}`, got `{error}`"
+        );
+    }
 }
 
 #[test]
@@ -359,6 +735,246 @@ fn deepseek_request_translation_rejects_document_message_content() {
 }
 
 #[test]
+fn deepseek_request_translation_rejects_message_cache_control() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "hello",
+                "cache_control": {"type": "ephemeral"}
+            }]
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("per-message cache_control should fail clearly");
+
+    assert!(error.to_string().contains("cache_control is not supported"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_text_part_without_text() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text"}]
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("text content without text should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("input_text content parts require a text field")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unknown_object_content_part() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"unknown": "value"}]
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("unknown object content should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("object message content parts without text or type")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unknown_input_item_type() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": [{
+            "type": "file_search_call",
+            "query": "README"
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("unsupported input item type should fail clearly");
+
+    assert!(
+        error
+            .to_string()
+            .contains("input item type `file_search_call` is not supported")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_invalid_input_item_shapes() {
+    for (input, expected) in [
+        (
+            serde_json::json!("loose text"),
+            "input items must be objects",
+        ),
+        (
+            serde_json::json!({
+                "type": "message",
+                "role": "critic",
+                "content": "hello"
+            }),
+            "message role `critic` is not supported",
+        ),
+        (
+            serde_json::json!({
+                "type": "message",
+                "role": 7,
+                "content": "hello"
+            }),
+            "message role must be a string",
+        ),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": [input]
+        });
+
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("invalid input item shape should fail clearly");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected `{expected}`, got `{error}`"
+        );
+    }
+}
+
+#[test]
+fn deepseek_request_translation_rejects_invalid_input_and_content_shapes() {
+    for (body, expected) in [
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": {"text": "hello"}
+            }),
+            "input must be a string or array of input items",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": 7
+                }]
+            }),
+            "message content must be a string, object, or array",
+        ),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("invalid input/content shape should fail clearly");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected `{expected}`, got `{error}`"
+        );
+    }
+}
+
+#[test]
+fn deepseek_request_translation_rejects_malformed_input_tool_items() {
+    for (input, expected) in [
+        (
+            serde_json::json!({
+                "type": "function_call",
+                "call_id": "call_1",
+                "arguments": "{}"
+            }),
+            "input tool call items require a function name",
+        ),
+        (
+            serde_json::json!({
+                "type": "function_call",
+                "name": "shell",
+                "arguments": "{}"
+            }),
+            "input tool items require a call_id",
+        ),
+        (
+            serde_json::json!({
+                "type": "function_call_output",
+                "output": "ok"
+            }),
+            "input tool items require a call_id",
+        ),
+        (
+            serde_json::json!({
+                "type": "function_call_output",
+                "call_id": "call_1"
+            }),
+            "input tool output items require output content",
+        ),
+        (
+            serde_json::json!({
+                "type": "local_shell_call",
+                "call_id": "call_shell_1",
+                "action": {"command": ["cargo", 7]}
+            }),
+            "local_shell_call action.command must be an array of strings",
+        ),
+        (
+            serde_json::json!({
+                "type": "local_shell_call",
+                "call_id": "call_shell_1",
+                "action": {"command": []}
+            }),
+            "local_shell_call action.command must be an array of strings",
+        ),
+        (
+            serde_json::json!({
+                "type": "local_shell_call",
+                "call_id": "call_shell_1"
+            }),
+            "local_shell_call requires a command",
+        ),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": [input]
+        });
+
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("malformed input tool item should fail clearly");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected `{expected}`, got `{error}`"
+        );
+    }
+}
+
+#[test]
 fn deepseek_request_translation_degrades_json_schema_to_json_object() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({
@@ -396,6 +1012,94 @@ fn deepseek_request_translation_degrades_json_schema_to_json_object() {
         metadata["deepseek"]["degraded_response_format"]["to"],
         "json_object"
     );
+}
+
+#[test]
+fn deepseek_request_translation_preserves_request_metadata() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "metadata": {
+            "ticket": "DS-123",
+            "deepseek": {
+                "caller": "codex"
+            }
+        },
+        "client_metadata": {
+            "session_id": "sess-123",
+            "turn_id": "turn-456"
+        },
+        "prompt_cache_key": "cache-stable-123",
+        "prompt_cache_retention": "24h"
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("request metadata should translate");
+    let metadata = translated
+        .response_metadata
+        .expect("request metadata should be preserved");
+
+    assert_eq!(metadata["ticket"], "DS-123");
+    assert_eq!(metadata["deepseek"]["caller"], "codex");
+    assert_eq!(metadata["client_metadata"]["session_id"], "sess-123");
+    assert_eq!(metadata["client_metadata"]["turn_id"], "turn-456");
+    assert_eq!(metadata["prompt_cache_key"], "cache-stable-123");
+    assert_eq!(metadata["prompt_cache_retention"], "24h");
+}
+
+#[test]
+fn deepseek_request_translation_rejects_invalid_metadata_shape() {
+    for (body, expected) in [
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "metadata": "ticket"
+            }),
+            "request metadata must be an object",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "metadata": {"deepseek": "caller"}
+            }),
+            "request metadata.deepseek must be an object",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "client_metadata": "session"
+            }),
+            "client_metadata must be an object",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "prompt_cache_key": 7
+            }),
+            "prompt_cache_key must be a string",
+        ),
+        (
+            serde_json::json!({
+                "model": "deepseek-v4-pro",
+                "input": "hello",
+                "prompt_cache_retention": 7
+            }),
+            "prompt_cache_retention must be a string",
+        ),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("invalid metadata should fail");
+
+        assert!(error.to_string().contains(expected));
+    }
 }
 
 #[test]
@@ -445,6 +1149,71 @@ fn deepseek_request_translation_does_not_duplicate_json_prompt_guard() {
 }
 
 #[test]
+fn deepseek_request_translation_allows_text_response_format_default() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "response_format": {"type": "text"}
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("text response format should translate as default");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert!(translated.get("response_format").is_none());
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unsupported_text_options() {
+    for (text, expected) in [
+        (
+            serde_json::json!({"format": {"type": "text"}, "verbosity": "low"}),
+            "text.verbosity is not supported",
+        ),
+        (
+            serde_json::json!({"extra": true}),
+            "text.extra is not supported",
+        ),
+        (serde_json::json!("json"), "text must be an object"),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "hello",
+            "text": text
+        });
+
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("unsupported text option should fail clearly");
+
+        assert!(error.to_string().contains(expected));
+    }
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unknown_response_format() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "response_format": {"type": "xml"}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("unknown response format should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("response_format type `xml` is not supported")
+    );
+}
+
+#[test]
 fn deepseek_request_translation_rejects_too_many_stop_sequences() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({
@@ -477,6 +1246,22 @@ fn deepseek_request_translation_rejects_non_string_stop_sequences() {
 }
 
 #[test]
+fn deepseek_request_translation_rejects_invalid_stop_shape() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "stop": {"sequence": "DONE"}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject invalid stop shape");
+
+    assert!(error.to_string().contains("stop must be a string or array"));
+}
+
+#[test]
 fn deepseek_request_translation_rejects_too_many_top_logprobs() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({
@@ -491,6 +1276,27 @@ fn deepseek_request_translation_rejects_too_many_top_logprobs() {
             .expect_err("request should reject unsupported top_logprobs count");
 
     assert!(error.to_string().contains("top_logprobs must be <= 20"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_invalid_top_logprobs_shape() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "logprobs": true,
+        "top_logprobs": "3"
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject invalid top_logprobs shape");
+
+    assert!(
+        error
+            .to_string()
+            .contains("top_logprobs must be an integer")
+    );
 }
 
 #[test]
@@ -533,6 +1339,117 @@ fn deepseek_request_translation_rejects_deprecated_penalties() {
 }
 
 #[test]
+fn deepseek_request_translation_rejects_unsupported_generation_knobs() {
+    for (field, value) in [
+        ("n", serde_json::json!(2)),
+        ("seed", serde_json::json!(7)),
+        ("service_tier", serde_json::json!("flex")),
+        (
+            "prediction",
+            serde_json::json!({"type": "content", "content": "hello"}),
+        ),
+        ("logit_bias", serde_json::json!({"42": 10})),
+        (
+            "functions",
+            serde_json::json!([{"name": "legacy", "parameters": {"type": "object"}}]),
+        ),
+        ("function_call", serde_json::json!("auto")),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "hello",
+            field: value
+        });
+
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("request should reject unsupported generation knobs");
+
+        assert!(error.to_string().contains("not supported"));
+        assert!(error.to_string().contains(field));
+    }
+}
+
+#[test]
+fn deepseek_request_translation_tolerates_empty_include() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "include": []
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("empty include should be a no-op");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert!(translated.get("include").is_none());
+}
+
+#[test]
+fn deepseek_request_translation_rejects_include_expansions() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "include": ["message.output_text.logprobs"]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("non-empty include should fail clearly");
+
+    assert!(error.to_string().contains("include response expansions"));
+}
+
+#[test]
+fn deepseek_request_translation_tolerates_default_response_controls() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "store": true,
+        "background": false,
+        "truncation": "disabled"
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("default response controls should be no-ops");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert!(translated.get("background").is_none());
+    assert!(translated.get("store").is_none());
+    assert!(translated.get("truncation").is_none());
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unsupported_response_controls() {
+    for (field, value) in [
+        ("store", serde_json::json!(false)),
+        ("background", serde_json::json!(true)),
+        ("truncation", serde_json::json!("auto")),
+        ("max_tool_calls", serde_json::json!(1)),
+    ] {
+        let conversations = deepseek_conversation_store();
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "hello",
+            field: value
+        });
+
+        let error =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect_err("unsupported response control should fail clearly");
+
+        assert!(error.to_string().contains(field));
+        assert!(error.to_string().contains("not supported"));
+    }
+}
+
+#[test]
 fn deepseek_request_translation_tolerates_parallel_tool_calls_true() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({
@@ -566,6 +1483,152 @@ fn deepseek_request_translation_rejects_parallel_tool_calls_false() {
 }
 
 #[test]
+fn deepseek_request_translation_rejects_invalid_parallel_tool_calls_shape() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "parallel_tool_calls": "true"
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject invalid parallel tool call control");
+
+    assert!(
+        error
+            .to_string()
+            .contains("parallel_tool_calls must be a boolean")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_accepts_include_usage_stream_options() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "stream": true,
+        "stream_options": {"include_usage": true}
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("supported stream_options should translate");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(translated["stream_options"]["include_usage"], true);
+}
+
+#[test]
+fn deepseek_request_translation_rejects_include_usage_false() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "stream": true,
+        "stream_options": {"include_usage": false}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("include_usage=false should fail clearly");
+
+    assert!(error.to_string().contains("include_usage=true"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_invalid_include_usage_shape() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "stream": true,
+        "stream_options": {"include_usage": "true"}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("non-boolean include_usage should fail clearly");
+
+    assert!(
+        error
+            .to_string()
+            .contains("stream_options.include_usage must be a boolean")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unknown_stream_options() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "stream": true,
+        "stream_options": {"include_usage": true, "extra": true}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("unknown stream_options should fail clearly");
+
+    assert!(
+        error
+            .to_string()
+            .contains("stream_options.extra is not supported")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_allows_text_only_modalities() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "modalities": ["text"]
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("text-only modalities should translate");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert!(translated.get("modalities").is_none());
+}
+
+#[test]
+fn deepseek_request_translation_rejects_audio_modality() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "modalities": ["text", "audio"]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("audio modality should fail");
+
+    assert!(error.to_string().contains("only supports text modality"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_audio_output_options() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "audio": {"voice": "alloy", "format": "mp3"}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("audio options should fail");
+
+    assert!(error.to_string().contains("does not support audio output"));
+}
+
+#[test]
 fn deepseek_request_translation_rejects_invalid_user_id() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({
@@ -579,6 +1642,26 @@ fn deepseek_request_translation_rejects_invalid_user_id() {
             .expect_err("request should reject invalid DeepSeek user_id");
 
     assert!(error.to_string().contains("DeepSeek user_id must use only"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_non_string_user_id() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "user_id": 123
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject non-string DeepSeek user_id");
+
+    assert!(
+        error
+            .to_string()
+            .contains("DeepSeek user_id must be a string")
+    );
 }
 
 #[test]
@@ -604,6 +1687,337 @@ fn deepseek_request_translation_rejects_more_than_128_function_tools() {
             .expect_err("request should reject unsupported tool count");
 
     assert!(error.to_string().contains("at most 128 function tools"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_non_array_tools() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": {"type": "function", "name": "shell"}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject non-array tools");
+
+    assert!(error.to_string().contains("tools must be an array"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_non_object_tool_entries() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": ["shell"]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject non-object tool entries");
+
+    assert!(error.to_string().contains("tools entries must be objects"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unknown_tool_type() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{"type": "computer_use", "name": "computer"}]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject unknown tool type");
+
+    assert!(
+        error
+            .to_string()
+            .contains("tool type `computer_use` is not supported")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_function_tool_without_name() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{"type": "function", "parameters": {"type": "object"}}]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject unnamed function tool");
+
+    assert!(error.to_string().contains("function tools require a name"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_custom_tool_without_name() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{"type": "custom"}]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject unnamed custom tool");
+
+    assert!(error.to_string().contains("custom tools require a name"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_function_tool_with_non_object_parameters() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "function",
+            "name": "shell",
+            "parameters": "not a schema object"
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject malformed function parameters");
+
+    assert!(
+        error
+            .to_string()
+            .contains("function tool `shell` parameters must be an object")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_non_string_tool_description() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "function",
+            "name": "shell",
+            "description": {"text": "run a command"},
+            "parameters": {"type": "object"}
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject non-string tool description");
+
+    assert!(
+        error
+            .to_string()
+            .contains("tool description must be a string")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_namespace_tool_without_name() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "namespace",
+            "tools": [{
+                "type": "function",
+                "name": "spawn_agent",
+                "parameters": {"type": "object"}
+            }]
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject unnamed namespace tool");
+
+    assert!(error.to_string().contains("namespace tools require a name"));
+}
+
+#[test]
+fn deepseek_request_translation_rejects_namespace_tool_without_tool_array() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "namespace",
+            "name": "agents"
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject namespace tool without tools array");
+
+    assert!(
+        error
+            .to_string()
+            .contains("namespace tool `agents` requires a tools array")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_namespace_tool_without_function_name() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "namespace",
+            "name": "agents",
+            "tools": [{
+                "type": "function",
+                "parameters": {"type": "object"}
+            }]
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject unnamed namespace function tool");
+
+    assert!(
+        error
+            .to_string()
+            .contains("namespace tool `agents` function entries require a name")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_non_string_namespace_function_description() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "namespace",
+            "name": "agents",
+            "tools": [{
+                "type": "function",
+                "name": "spawn_agent",
+                "description": ["spawn"],
+                "parameters": {"type": "object"}
+            }]
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject non-string namespace function description");
+
+    assert!(
+        error
+            .to_string()
+            .contains("namespace function description must be a string")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_mcp_toolset_without_server_name() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "mcp",
+            "allowed_tools": ["status"]
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject MCP toolset without server name");
+
+    assert!(
+        error
+            .to_string()
+            .contains("MCP toolsets require a server name")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_mcp_toolset_without_enabled_tools() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "mcp",
+            "server_label": "git tools",
+            "allowed_tools": [],
+            "configs": {
+                "status": {"enabled": false}
+            }
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject MCP toolset without enabled tools");
+
+    assert!(
+        error
+            .to_string()
+            .contains("MCP toolset `git tools` requires allowed_tools or enabled configs")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_mcp_function_tool_without_name() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "mcp_tool",
+            "input_schema": {"type": "object"}
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject unnamed MCP function tool");
+
+    assert!(
+        error
+            .to_string()
+            .contains("MCP function tools require a name")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_mcp_function_tool_without_schema() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tools": [{
+            "type": "mcp_tool",
+            "name": "mcp__prodex_sqz__compress"
+        }]
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject MCP function tool without schema");
+
+    assert!(
+        error
+            .to_string()
+            .contains("MCP function tool `mcp__prodex_sqz__compress` requires a schema")
+    );
 }
 
 #[test]
@@ -722,6 +2136,28 @@ fn deepseek_request_translation_rejects_invalid_named_tool_choice() {
 }
 
 #[test]
+fn deepseek_request_translation_rejects_named_tool_choice_without_name() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tool_choice": {
+            "type": "function"
+        }
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("request should reject named tool_choice without a name");
+
+    assert!(
+        error
+            .to_string()
+            .contains("named tool_choice requires a function name")
+    );
+}
+
+#[test]
 fn deepseek_request_translation_rejects_named_tool_choice_without_tools() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({
@@ -769,6 +2205,70 @@ fn deepseek_request_translation_rejects_named_tool_choice_missing_target() {
         error
             .to_string()
             .contains("named tool_choice `missing` does not match")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_maps_string_tool_choice_modes() {
+    for mode in ["none", "auto", "required"] {
+        let conversations = deepseek_conversation_store();
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "input": "hello",
+            "tools": [{
+                "type": "function",
+                "name": "shell",
+                "parameters": {"type": "object"}
+            }],
+            "tool_choice": mode
+        });
+
+        let translated =
+            runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+                .expect("request should translate");
+        let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+        assert_eq!(translated["tool_choice"], mode);
+    }
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unknown_string_tool_choice() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tool_choice": "always"
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("unknown tool_choice string should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("tool_choice string `always` is not supported")
+    );
+}
+
+#[test]
+fn deepseek_request_translation_rejects_unknown_object_tool_choice() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "tool_choice": {"type": "web_search"}
+    });
+
+    let error =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect_err("unknown tool_choice object should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("tool_choice type `web_search` is not supported")
     );
 }
 

@@ -1,5 +1,18 @@
 [
   {
+    "id": "deepseek-compatibility-0.232.0",
+    "requiredSubjects": [
+      "feat(deepseek): expand compatibility for 0.232.0"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 25,
+      "maxLines": 4100,
+      "maxFileLines": 1750
+    },
+    "reason": "Reviewed cross-cutting DeepSeek compatibility expansion, quota/auth reporting updates, and 0.232.0 release metadata with local full test suite, format, clippy, lockfile refresh, and diff checks."
+  },
+  {
     "id": "quota-native-ratatui-and-release-0.225.0",
     "requiredSubjects": [
       "feat(quota): render quota views with native ratatui"

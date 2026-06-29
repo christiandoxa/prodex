@@ -237,7 +237,7 @@ fn deepseek_catalog_model(
         "availability_nux": null,
         "upgrade": null,
         "base_instructions": DEEPSEEK_BASE_INSTRUCTIONS,
-        "supports_reasoning_summaries": true,
+        "supports_reasoning_summaries": false,
         "default_reasoning_summary": "none",
         "support_verbosity": false,
         "default_verbosity": null,
@@ -300,6 +300,16 @@ mod tests {
         );
         assert_eq!(catalog["models"][0]["slug"], "deepseek-v4-pro");
         assert_eq!(catalog["models"][0]["supports_search_tool"], false);
+        assert_eq!(catalog["models"][0]["supports_reasoning_summaries"], false);
+        assert_eq!(
+            catalog["models"][0]["experimental_supported_tools"],
+            json!([])
+        );
+        assert_eq!(catalog["models"][0]["input_modalities"], json!(["text"]));
+        assert_eq!(
+            catalog["models"][0]["supports_image_detail_original"],
+            false
+        );
         assert!(
             catalog["models"]
                 .as_array()
@@ -313,6 +323,20 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|model| model["slug"] == "auto")
+        );
+        assert!(
+            catalog["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|model| model["slug"] == "deepseek-chat")
+        );
+        assert!(
+            catalog["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|model| model["slug"] == "deepseek-reasoner")
         );
         let efforts = catalog["models"][0]["supported_reasoning_levels"]
             .as_array()

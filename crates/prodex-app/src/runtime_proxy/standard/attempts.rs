@@ -154,7 +154,9 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
                 request_session_id.as_deref(),
                 RuntimeRouteKind::Standard,
             )?;
-            if matches!(status, 401 | 403) {
+            if matches!(status, 401 | 403)
+                || runtime_proxy_body_indicates_token_invalidated(&parts.body)
+            {
                 note_runtime_profile_auth_failure(
                     shared,
                     profile_name,
@@ -222,6 +224,7 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
         }
         let retryable_quota = matches!(status, 403 | 429)
             && extract_runtime_proxy_quota_message(&parts.body).is_some();
+        let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
         if matches!(status, 403 | 429) && !retryable_quota {
             runtime_proxy_log(
                 shared,
@@ -273,7 +276,7 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
             });
         }
 
-        if matches!(status, 401 | 403) {
+        if matches!(status, 401 | 403) || token_invalidated {
             note_runtime_profile_auth_failure(
                 shared,
                 profile_name,
@@ -514,6 +517,7 @@ pub(super) fn attempt_runtime_standard_request(
         }
         let retryable_quota = matches!(status, 403 | 429)
             && extract_runtime_proxy_quota_message(&parts.body).is_some();
+        let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
         let retryable_overload =
             extract_runtime_proxy_overload_message(status, &parts.body).is_some();
         if matches!(status, 403 | 429) && !retryable_quota {
@@ -572,7 +576,7 @@ pub(super) fn attempt_runtime_standard_request(
             });
         }
 
-        if matches!(status, 401 | 403) {
+        if matches!(status, 401 | 403) || token_invalidated {
             note_runtime_profile_auth_failure(
                 shared,
                 profile_name,

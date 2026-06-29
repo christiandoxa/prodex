@@ -32,7 +32,8 @@ fn deepseek_sse_reader_stores_reasoning_content_for_tool_call_replay() {
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();
 
-    assert!(!output.contains("reasoning_content"));
+    assert!(output.contains("\"reasoning_content\":\"Need package metadata.\""));
+    assert!(output.contains("event: response.completed"));
     let stored = conversations.lock().unwrap();
     let messages = stored
         .get("chatcmpl_1")
@@ -218,6 +219,95 @@ fn deepseek_sse_reader_maps_tool_search_function_to_tool_search_call() {
 }
 
 #[test]
+fn deepseek_sse_reader_fails_malformed_tool_call_arguments() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_bad_args\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_shell\",\"function\":{\"name\":\"shell\",\"arguments\":\"{\\\"cmd\\\":\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("invalid_tool_call_arguments"));
+    assert!(output.contains("malformed JSON arguments"));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn deepseek_sse_reader_fails_tool_call_without_function_object() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_bad_tool\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_missing_function\"}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("invalid_tool_call_arguments"));
+    assert!(output.contains("without a function object"));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn deepseek_sse_reader_fails_tool_call_without_function_name() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_bad_name\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_missing_name\",\"function\":{\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("event: response.failed"));
+    assert!(output.contains("invalid_tool_call_arguments"));
+    assert!(output.contains("without a function name"));
+    assert!(!output.contains("event: response.completed"));
+}
+
+#[test]
+fn deepseek_sse_reader_maps_apply_patch_to_custom_tool_call() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_patch\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_patch\",\"function\":{\"name\":\"apply_patch\",\"arguments\":\"{\\\"input\\\":\\\"*** Begin Patch\\\\n*** Add File: note.txt\\\\n\"}}]}}]}\n\n",
+        "data: {\"id\":\"chatcmpl_patch\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"+hello\\\\n*** End Patch\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"type\":\"custom_tool_call\""));
+    assert!(output.contains("\"name\":\"apply_patch\""));
+    assert!(output.contains("*** Begin Patch\\n*** Add File: note.txt\\n+hello\\n*** End Patch"));
+    assert!(!output.contains("\"type\":\"function_call\""));
+}
+
+#[test]
 fn deepseek_sse_reader_accumulates_multiline_json_data() {
     let stream = concat!(
         "data: {\"id\":\"chatcmpl_4\",\"choices\":[{\"delta\":{\n",
@@ -265,7 +355,8 @@ fn deepseek_sse_reader_preserves_final_usage_cache_details() {
 #[test]
 fn deepseek_sse_reader_preserves_logprobs_metadata() {
     let stream = concat!(
-        "data: {\"id\":\"chatcmpl_logprobs\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"done\"},\"logprobs\":{\"content\":[{\"token\":\"done\",\"logprob\":-0.2,\"bytes\":[100,111,110,101],\"top_logprobs\":[]}]}}]}\n\n",
+        "data: {\"id\":\"chatcmpl_logprobs\",\"model\":\"deepseek-v4-pro\",\"created\":1782740700,\"system_fingerprint\":\"fp_deepseek_stream\",\"choices\":[{\"delta\":{\"content\":\"done\",\"refusal\":\"I cannot\",\"annotations\":[{\"type\":\"url_citation\",\"url\":\"https://example.com/ref\"}]},\"logprobs\":{\"content\":[{\"token\":\"done\",\"logprob\":-0.2,\"bytes\":[100,111,110,101],\"top_logprobs\":[]}]}}]}\n\n",
+        "data: {\"id\":\"chatcmpl_logprobs\",\"choices\":[{\"delta\":{\"refusal\":\" help with that.\"}}]}\n\n",
         "data: {\"id\":\"chatcmpl_logprobs\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
         "data: [DONE]\n\n",
     );
@@ -283,6 +374,11 @@ fn deepseek_sse_reader_preserves_logprobs_metadata() {
     assert!(output.contains("\"logprobs\":{\"content\""));
     assert!(output.contains("\"token\":\"done\""));
     assert!(output.contains("\"finish_reason\":\"stop\""));
+    assert!(output.contains("\"refusal\":\"I cannot help with that.\""));
+    assert!(output.contains("\"annotations\":[{\"type\":\"url_citation\""));
+    assert!(output.contains("\"url\":\"https://example.com/ref\""));
+    assert!(output.contains("\"created_at\":1782740700"));
+    assert!(output.contains("\"system_fingerprint\":\"fp_deepseek_stream\""));
 }
 
 #[test]
