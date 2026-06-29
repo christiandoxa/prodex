@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.230.0 - 2026-06-29
+
+### Runtime
+
+- Polish terminal flows and runtime helpers (`47a6994`)
+
 ## 0.229.0 - 2026-06-28
 
 ### Misc
@@ -73,9 +79,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Use native responses flow (`7fffe96`)
-
-## 0.218.0 - 2026-06-25
-
-### Misc
-
-- Fall back from unsupported models (`6962024`)
