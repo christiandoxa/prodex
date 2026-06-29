@@ -1,6 +1,6 @@
 [package]
 name = "prodex"
-version = "0.230.0"
+version = "0.231.0"
 edition = "2024"
 description = "Multi-provider Codex wrapper with OpenAI quota-aware routing and Claude Code support"
 license = "Apache-2.0"
@@ -58,7 +58,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.230.0"
+version = "0.231.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/christiandoxa/prodex"
@@ -69,7 +69,7 @@ anyhow = "1.0.102"
 base64 = "0.22.1"
 chrono = { version = "0.4.44", features = ["clock"] }
 clap = { version = "4.6.1", features = ["derive"] }
-codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config", version = "0.230.0" }
+codex_config = { package = "prodex-codex-config", path = "crates/prodex-codex-config", version = "0.231.0" }
 dirs = "6.0.0"
 fs2 = "0.4.3"
 filetime = "0.2.26"
@@ -78,61 +78,61 @@ pbkdf2 = "0.13.0"
 portable-pty = "0.9.0"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 unicode-width = "0.2.2"
-prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-log", version = "0.230.0" }
-prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.230.0" }
-prodex_app_reports = { package = "prodex-app-reports", path = "crates/prodex-app-reports", version = "0.230.0" }
-prodex_bench_support = { package = "prodex-bench-support", path = "crates/prodex-bench-support", version = "0.230.0" }
-prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prodex-caveman-assets", version = "0.230.0" }
-prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli", version = "0.230.0" }
-prodex_context = { package = "prodex-context", path = "crates/prodex-context", version = "0.230.0" }
-prodex_core = { package = "prodex-core", path = "crates/prodex-core", version = "0.230.0" }
-prodex_housekeeping = { package = "prodex-housekeeping", path = "crates/prodex-housekeeping", version = "0.230.0" }
-prodex_mcp_stdio = { package = "prodex-mcp-stdio", path = "crates/prodex-mcp-stdio", version = "0.230.0" }
-prodex_memory = { package = "prodex-memory", path = "crates/prodex-memory", version = "0.230.0" }
-prodex_presidio = { package = "prodex-presidio", path = "crates/prodex-presidio", version = "0.230.0" }
-prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export", version = "0.230.0" }
-prodex_profile_identity = { package = "prodex-profile-identity", path = "crates/prodex-profile-identity", version = "0.230.0" }
-prodex_provider_core = { package = "prodex-provider-core", path = "crates/prodex-provider-core", version = "0.230.0" }
-prodex_proxy_config = { package = "prodex-proxy-config", path = "crates/prodex-proxy-config", version = "0.230.0" }
-prodex_quota = { package = "prodex-quota", path = "crates/prodex-quota", version = "0.230.0" }
-prodex_runtime_broker = { package = "prodex-runtime-broker", path = "crates/prodex-runtime-broker", version = "0.230.0" }
-prodex_runtime_broker_log = { package = "prodex-runtime-broker-log", path = "crates/prodex-runtime-broker-log", version = "0.230.0" }
-prodex_runtime_capabilities = { package = "prodex-runtime-capabilities", path = "crates/prodex-runtime-capabilities", version = "0.230.0" }
-prodex_runtime_claude = { package = "prodex-runtime-claude", path = "crates/prodex-runtime-claude", version = "0.230.0" }
-prodex_runtime_cookies = { package = "prodex-runtime-cookies", path = "crates/prodex-runtime-cookies", version = "0.230.0" }
-prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor", version = "0.230.0" }
-prodex_runtime_gemini = { package = "prodex-runtime-gemini", path = "crates/prodex-runtime-gemini", version = "0.230.0" }
-prodex_runtime_gemini_cli_compat = { package = "prodex-runtime-gemini-cli-compat", path = "crates/prodex-runtime-gemini-cli-compat", version = "0.230.0" }
-prodex_runtime_launch = { package = "prodex-runtime-launch", path = "crates/prodex-runtime-launch", version = "0.230.0" }
-prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy", version = "0.230.0" }
-prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.230.0" }
-prodex_runtime_quota = { package = "prodex-runtime-quota", path = "crates/prodex-runtime-quota", version = "0.230.0" }
-prodex_runtime_state = { package = "prodex-runtime-state", path = "crates/prodex-runtime-state", version = "0.230.0" }
-prodex_runtime_store = { package = "prodex-runtime-store", path = "crates/prodex-runtime-store", version = "0.230.0" }
-prodex_runtime_tuning = { package = "prodex-runtime-tuning", path = "crates/prodex-runtime-tuning", version = "0.230.0" }
-prodex_session_store = { package = "prodex-session-store", path = "crates/prodex-session-store", version = "0.230.0" }
-prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "crates/prodex-shared-codex-fs", version = "0.230.0" }
-prodex_shared_types = { package = "prodex-shared-types", path = "crates/prodex-shared-types", version = "0.230.0" }
-prodex_state = { package = "prodex-state", path = "crates/prodex-state", version = "0.230.0" }
-prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice", version = "0.230.0" }
-redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.230.0" }
+prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-log", version = "0.231.0" }
+prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.231.0" }
+prodex_app_reports = { package = "prodex-app-reports", path = "crates/prodex-app-reports", version = "0.231.0" }
+prodex_bench_support = { package = "prodex-bench-support", path = "crates/prodex-bench-support", version = "0.231.0" }
+prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prodex-caveman-assets", version = "0.231.0" }
+prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli", version = "0.231.0" }
+prodex_context = { package = "prodex-context", path = "crates/prodex-context", version = "0.231.0" }
+prodex_core = { package = "prodex-core", path = "crates/prodex-core", version = "0.231.0" }
+prodex_housekeeping = { package = "prodex-housekeeping", path = "crates/prodex-housekeeping", version = "0.231.0" }
+prodex_mcp_stdio = { package = "prodex-mcp-stdio", path = "crates/prodex-mcp-stdio", version = "0.231.0" }
+prodex_memory = { package = "prodex-memory", path = "crates/prodex-memory", version = "0.231.0" }
+prodex_presidio = { package = "prodex-presidio", path = "crates/prodex-presidio", version = "0.231.0" }
+prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export", version = "0.231.0" }
+prodex_profile_identity = { package = "prodex-profile-identity", path = "crates/prodex-profile-identity", version = "0.231.0" }
+prodex_provider_core = { package = "prodex-provider-core", path = "crates/prodex-provider-core", version = "0.231.0" }
+prodex_proxy_config = { package = "prodex-proxy-config", path = "crates/prodex-proxy-config", version = "0.231.0" }
+prodex_quota = { package = "prodex-quota", path = "crates/prodex-quota", version = "0.231.0" }
+prodex_runtime_broker = { package = "prodex-runtime-broker", path = "crates/prodex-runtime-broker", version = "0.231.0" }
+prodex_runtime_broker_log = { package = "prodex-runtime-broker-log", path = "crates/prodex-runtime-broker-log", version = "0.231.0" }
+prodex_runtime_capabilities = { package = "prodex-runtime-capabilities", path = "crates/prodex-runtime-capabilities", version = "0.231.0" }
+prodex_runtime_claude = { package = "prodex-runtime-claude", path = "crates/prodex-runtime-claude", version = "0.231.0" }
+prodex_runtime_cookies = { package = "prodex-runtime-cookies", path = "crates/prodex-runtime-cookies", version = "0.231.0" }
+prodex_runtime_doctor = { package = "prodex-runtime-doctor", path = "crates/prodex-runtime-doctor", version = "0.231.0" }
+prodex_runtime_gemini = { package = "prodex-runtime-gemini", path = "crates/prodex-runtime-gemini", version = "0.231.0" }
+prodex_runtime_gemini_cli_compat = { package = "prodex-runtime-gemini-cli-compat", path = "crates/prodex-runtime-gemini-cli-compat", version = "0.231.0" }
+prodex_runtime_launch = { package = "prodex-runtime-launch", path = "crates/prodex-runtime-launch", version = "0.231.0" }
+prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy", version = "0.231.0" }
+prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.231.0" }
+prodex_runtime_quota = { package = "prodex-runtime-quota", path = "crates/prodex-runtime-quota", version = "0.231.0" }
+prodex_runtime_state = { package = "prodex-runtime-state", path = "crates/prodex-runtime-state", version = "0.231.0" }
+prodex_runtime_store = { package = "prodex-runtime-store", path = "crates/prodex-runtime-store", version = "0.231.0" }
+prodex_runtime_tuning = { package = "prodex-runtime-tuning", path = "crates/prodex-runtime-tuning", version = "0.231.0" }
+prodex_session_store = { package = "prodex-session-store", path = "crates/prodex-session-store", version = "0.231.0" }
+prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "crates/prodex-shared-codex-fs", version = "0.231.0" }
+prodex_shared_types = { package = "prodex-shared-types", path = "crates/prodex-shared-types", version = "0.231.0" }
+prodex_state = { package = "prodex-state", path = "crates/prodex-state", version = "0.231.0" }
+prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice", version = "0.231.0" }
+redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.231.0" }
 reqwest = { version = "0.13.2", default-features = false }
 rpassword = "7.5.4"
 crossterm = "0.29.0"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 postgres = "0.19.12"
 redis = { version = "1.2.4", default-features = false }
-runtime_anthropic = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.230.0" }
-runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.230.0" }
-runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.230.0" }
-runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics", version = "0.230.0" }
-runtime_proxy = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.230.0" }
-runtime_proxy_crate = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.230.0" }
-secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store", version = "0.230.0" }
+runtime_anthropic = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.231.0" }
+runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.231.0" }
+runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.231.0" }
+runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics", version = "0.231.0" }
+runtime_proxy = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.231.0" }
+runtime_proxy_crate = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.231.0" }
+secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store", version = "0.231.0" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.11.0"
-terminal_ui = { package = "prodex-terminal-ui", path = "crates/prodex-terminal-ui", version = "0.230.0" }
+terminal_ui = { package = "prodex-terminal-ui", path = "crates/prodex-terminal-ui", version = "0.231.0" }
 tiny_http = "0.12.0"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "time"] }
 toml = "1.1.2"

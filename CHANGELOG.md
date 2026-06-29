@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.231.0 - 2026-06-29
+
+### CLI
+
+- Preserve pasted goal attachments across profile resume (`bc6e374`)
+
 ## 0.230.0 - 2026-06-29
 
 ### Runtime
@@ -73,9 +79,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Stabilize copilot provider capabilities (`818a0b3`)
-
-## 0.219.0 - 2026-06-25
-
-### Misc
-
-- Use native responses flow (`7fffe96`)
