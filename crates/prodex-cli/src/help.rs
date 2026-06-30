@@ -198,7 +198,7 @@ Examples:
   prodex session list --json
   prodex session list --id-only
   prodex session list --resume-command
-  prodex session list --include-subagents
+  prodex session list --parent-only
   prodex session list --profile main --query triage
   prodex session current
   prodex session current --resume-command

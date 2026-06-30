@@ -139,7 +139,7 @@ For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits
 
 `prodex dashboard` starts a localhost browser dashboard, defaulting to `http://127.0.0.1:8765`. It shows configured profiles, active account controls, and live quota usage using the same quota collectors as `prodex quota`. Use `prodex dashboard --port 0` to bind a free port, or `--base-url` to point quota checks at a custom Codex-compatible backend. The dashboard has no password auth, so keep it bound to localhost unless the network is trusted.
 
-Use `prodex session list` to inspect shared Codex parent sessions, or `prodex session current` to show parent sessions started from the current directory. Add `--include-subagents` only when you explicitly need spawned agent sessions for diagnostics.
+Use `prodex session list` to inspect shared Codex sessions, or `prodex session current` to show sessions started from the current directory. Add `--parent-only` when you only want resumable parent sessions.
 
 `prodex info` includes provider route/quota-shape summaries, the runtime proxy contract, and the effective runtime worker, admission, websocket, lane, and inflight tuning values after environment, policy, and default resolution.
 For the full policy key reference, see [docs/runtime-policy.md](./docs/runtime-policy.md).

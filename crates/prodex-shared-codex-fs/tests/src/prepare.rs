@@ -90,6 +90,36 @@ fn shared_codex_manifest_includes_attachment_dirs() {
 }
 
 #[test]
+fn shared_codex_manifest_includes_primary_goals_db_files() {
+    let entries = shared_codex_manifest_entries();
+    for name in ["goals_1.sqlite", "goals_1.sqlite-shm", "goals_1.sqlite-wal"] {
+        assert!(
+            entries.contains(&SharedCodexEntry::file(name)),
+            "shared Codex manifest should include {name}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_links_primary_goals_db_before_it_exists() {
+    let temp_dir = PrepareTestDir::new("missing-goals-db-link");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should prepare");
+
+    for name in ["goals_1.sqlite", "goals_1.sqlite-shm", "goals_1.sqlite-wal"] {
+        let local_path = codex_home.join(name);
+        let shared_path = paths.shared_codex_root.join(name);
+        assert_eq!(
+            fs::read_link(&local_path).expect("local goals db path should be a symlink"),
+            shared_path
+        );
+    }
+}
+
+#[test]
 fn shared_codex_manifest_keeps_cloud_config_bundle_cache_profile_local() {
     assert!(
         !shared_codex_manifest_entries()

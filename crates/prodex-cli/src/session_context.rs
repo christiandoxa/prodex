@@ -5,9 +5,9 @@ use super::RUNTIME_PROXY_DOCTOR_TAIL_BYTES;
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommands {
-    /// List shared Codex parent sessions.
+    /// List shared Codex sessions.
     List(SessionListArgs),
-    /// List shared Codex parent sessions started from the current directory.
+    /// List shared Codex sessions started from the current directory.
     Current(SessionCurrentArgs),
     /// Resume a shared Codex session by unique partial or full id.
     Resume(SessionResumeArgs),
@@ -33,9 +33,12 @@ pub struct SessionListArgs {
     /// Limit the number of sessions shown after sorting newest first.
     #[arg(long, value_name = "N")]
     pub limit: Option<usize>,
-    /// Include spawned subagent sessions. Default output shows only resumable parent sessions.
-    #[arg(long)]
+    /// Include spawned subagent sessions. This is the default; kept for compatibility.
+    #[arg(long, conflicts_with = "parent_only")]
     pub include_subagents: bool,
+    /// Show only resumable parent sessions.
+    #[arg(long)]
+    pub parent_only: bool,
 }
 
 #[derive(Args, Debug)]
@@ -61,9 +64,12 @@ pub struct SessionCurrentArgs {
     /// Directory used for matching sessions. Defaults to the current working directory.
     #[arg(long, value_name = "PATH", hide = true)]
     pub cwd: Option<PathBuf>,
-    /// Include spawned subagent sessions. Default output shows only resumable parent sessions.
-    #[arg(long)]
+    /// Include spawned subagent sessions. This is the default; kept for compatibility.
+    #[arg(long, conflicts_with = "parent_only")]
     pub include_subagents: bool,
+    /// Show only resumable parent sessions.
+    #[arg(long)]
+    pub parent_only: bool,
 }
 
 #[derive(Args, Debug)]

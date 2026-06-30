@@ -34,7 +34,7 @@ pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
                 args.limit,
                 args.profile.as_deref(),
                 args.query.as_deref(),
-                args.include_subagents,
+                !args.parent_only,
             )?;
             print_session_reports(&reports, output_mode, "No sessions found")
         }
@@ -49,7 +49,7 @@ pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
                 args.limit,
                 args.profile.as_deref(),
                 args.query.as_deref(),
-                args.include_subagents,
+                !args.parent_only,
             )?;
             print_session_reports(
                 &reports,

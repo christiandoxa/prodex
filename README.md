@@ -903,7 +903,7 @@ For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits
 ```bash
 prodex session list
 prodex session current
-prodex session current --include-subagents
+prodex session current --parent-only
 ```
 
 </details>

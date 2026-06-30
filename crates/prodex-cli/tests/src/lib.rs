@@ -703,7 +703,7 @@ fn session_list_parses_line_modes_and_filters() {
         "triage",
         "--limit",
         "5",
-        "--include-subagents",
+        "--parent-only",
     ])
     .expect("session list should parse");
     let Commands::Session(SessionCommands::List(args)) = command else {
@@ -714,7 +714,8 @@ fn session_list_parses_line_modes_and_filters() {
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert_eq!(args.query.as_deref(), Some("triage"));
     assert_eq!(args.limit, Some(5));
-    assert!(args.include_subagents);
+    assert!(!args.include_subagents);
+    assert!(args.parent_only);
 }
 #[test]
 fn session_current_parses_resume_command_filters_and_cwd() {
@@ -741,6 +742,7 @@ fn session_current_parses_resume_command_filters_and_cwd() {
     assert_eq!(args.cwd.as_deref(), Some(std::path::Path::new("/tmp/work")));
     assert!(!args.include_subagents);
 }
+
 #[test]
 fn session_line_modes_conflict_with_json_and_each_other() {
     assert!(parse_cli_command_from(["prodex", "session", "list", "--json", "--id-only"]).is_err());
