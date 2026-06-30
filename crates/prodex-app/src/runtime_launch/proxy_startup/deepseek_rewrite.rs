@@ -1035,22 +1035,13 @@ fn runtime_deepseek_reject_unsupported_request_fields(value: &serde_json::Value)
         }
     }
     if let Some(include) = value.get("include") {
-        let Some(include) = include.as_array() else {
+        if !include.is_array() {
             anyhow::bail!("DeepSeek include must be an array");
-        };
-        if !include.is_empty() {
-            anyhow::bail!(
-                "DeepSeek include response expansions are not supported by this Responses adapter"
-            );
         }
     }
     if let Some(store) = value.get("store") {
-        match store.as_bool() {
-            Some(true) => {}
-            Some(false) => anyhow::bail!(
-                "DeepSeek store=false is not supported because this adapter uses local conversation snapshots for previous_response_id replay"
-            ),
-            None => anyhow::bail!("DeepSeek store must be a boolean"),
+        if !store.is_boolean() {
+            anyhow::bail!("DeepSeek store must be a boolean");
         }
     }
     if let Some(background) = value.get("background") {

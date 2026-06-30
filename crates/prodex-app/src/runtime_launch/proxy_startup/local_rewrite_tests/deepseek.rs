@@ -1389,7 +1389,7 @@ fn deepseek_request_translation_tolerates_empty_include() {
 }
 
 #[test]
-fn deepseek_request_translation_rejects_include_expansions() {
+fn deepseek_request_translation_ignores_include_expansions() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({
         "model": "deepseek-v4-pro",
@@ -1397,11 +1397,12 @@ fn deepseek_request_translation_rejects_include_expansions() {
         "include": ["message.output_text.logprobs"]
     });
 
-    let error =
+    let translated =
         runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
-            .expect_err("non-empty include should fail clearly");
+            .expect("include expansions should be a no-op");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
 
-    assert!(error.to_string().contains("include response expansions"));
+    assert!(translated.get("include").is_none());
 }
 
 #[test]
@@ -1410,7 +1411,7 @@ fn deepseek_request_translation_tolerates_default_response_controls() {
     let body = serde_json::json!({
         "model": "deepseek-v4-pro",
         "input": "hello",
-        "store": true,
+        "store": false,
         "background": false,
         "truncation": "disabled"
     });
@@ -1428,7 +1429,6 @@ fn deepseek_request_translation_tolerates_default_response_controls() {
 #[test]
 fn deepseek_request_translation_rejects_unsupported_response_controls() {
     for (field, value) in [
-        ("store", serde_json::json!(false)),
         ("background", serde_json::json!(true)),
         ("truncation", serde_json::json!("auto")),
         ("max_tool_calls", serde_json::json!(1)),

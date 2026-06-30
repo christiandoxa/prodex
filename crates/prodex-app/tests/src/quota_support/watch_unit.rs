@@ -170,6 +170,41 @@
     }
 
     #[test]
+    fn all_quota_watch_tui_detail_uses_table_height_for_visible_rows() {
+        let reports = (0..9)
+            .map(|index| {
+                let mut report = test_openai_quota_report(test_openai_usage_with_windows(
+                    20,
+                    10,
+                    1_700_001_800,
+                ));
+                report.name = format!("profile-{index}");
+                report
+            })
+            .collect::<Vec<_>>();
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: reports.len(),
+            reports,
+        };
+
+        let frame = build_all_quota_watch_tui_frame(
+            &snapshot,
+            AllQuotaWatchLayout {
+                detail: true,
+                scroll_offset: 0,
+                sort: QuotaReportSort::Current,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 100,
+                max_lines: quota_watch_tui_table_lines(30, 5),
+            },
+        );
+
+        assert_eq!(frame.table.as_ref().expect("table").rows.len(), 8);
+    }
+
+    #[test]
     fn quota_human_tui_spans_use_readable_detail_color() {
         let spans = quota_human_tui_spans(
             "  resets: 5h 2026-06-28 01:44:03 | weekly 2026-07-04 10:12:48",

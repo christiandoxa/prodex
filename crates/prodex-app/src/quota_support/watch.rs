@@ -607,16 +607,17 @@ fn watch_all_quotas_tui(
                 .context("failed to read quota TUI terminal size")?;
             let render_snapshot =
                 quota_watch_snapshot_with_auth_backoff(&snapshot, &auth_backoff_profiles);
-            let max_lines = quota_watch_tui_report_lines(size.height);
-            scroll_offset =
-                scroll_offset.min(quota_watch_max_scroll_offset_for_snapshot_with_layout(
-                    &render_snapshot,
-                    detail,
-                    provider_filter,
-                    sort,
-                    max_lines,
-                    usize::from(size.width).saturating_sub(4),
-                ));
+            let max_lines = quota_watch_tui_table_lines(
+                size.height,
+                quota_watch_snapshot_overview_field_count(&render_snapshot, provider_filter),
+            );
+            scroll_offset = scroll_offset.min(quota_watch_tui_max_scroll_offset_for_snapshot(
+                &render_snapshot,
+                detail,
+                provider_filter,
+                sort,
+                max_lines,
+            ));
             let frame = build_all_quota_watch_tui_frame(
                 &render_snapshot,
                 AllQuotaWatchLayout {
@@ -668,18 +669,18 @@ fn watch_all_quotas_tui(
                     match apply_quota_watch_command(
                         command,
                         scroll_offset,
-                        quota_watch_max_scroll_offset_for_snapshot_with_layout(
+                        quota_watch_tui_max_scroll_offset_for_snapshot(
                             &snapshot,
                             detail,
                             provider_filter,
                             sort,
-                            quota_watch_tui_report_lines(
+                            quota_watch_tui_table_lines(
                                 tui.terminal.size().map(|size| size.height).unwrap_or(24),
+                                quota_watch_snapshot_overview_field_count(
+                                    &snapshot,
+                                    provider_filter,
+                                ),
                             ),
-                            tui.terminal
-                                .size()
-                                .map(|size| usize::from(size.width).saturating_sub(4))
-                                .unwrap_or_else(|_| current_cli_width()),
                         ),
                     ) {
                         QuotaWatchCommandOutcome::Continue(next_offset) => {
@@ -760,14 +761,14 @@ fn build_all_quota_watch_tui_frame(
         AllQuotaWatchSnapshot::Reports { reports, .. } => {
             let filtered_reports =
                 filter_quota_reports_by_provider(reports, layout.provider_filter);
-            let window = render_quota_reports_window_with_sort(
+            let sorted_indexes =
+                sorted_quota_report_indexes_by_sort(&filtered_reports, layout.sort);
+            let shown_profiles = quota_watch_visible_profile_count(
                 &filtered_reports,
+                &sorted_indexes,
                 layout.detail,
                 layout.max_lines,
-                layout.total_width,
                 layout.scroll_offset,
-                true,
-                layout.sort,
             );
             (
                 "Quota Overview".to_string(),
@@ -775,8 +776,8 @@ fn build_all_quota_watch_tui_frame(
                 Some(build_all_quota_watch_tui_table(
                     &filtered_reports,
                     layout,
-                    window.start_profile,
-                    window.shown_profiles,
+                    &sorted_indexes,
+                    shown_profiles,
                 )),
             )
         }
@@ -825,12 +826,13 @@ fn quota_watch_status_fields(message: &str, updated: &str) -> Vec<(String, Strin
 fn build_all_quota_watch_tui_table(
     reports: &[QuotaReport],
     layout: AllQuotaWatchLayout,
-    start_profile: usize,
+    sorted_indexes: &[usize],
     shown_profiles: usize,
 ) -> AllQuotaWatchTuiTable {
-    let rows = sorted_quota_report_indexes_by_sort(reports, layout.sort)
-        .into_iter()
-        .skip(start_profile)
+    let rows = sorted_indexes
+        .iter()
+        .copied()
+        .skip(layout.scroll_offset)
         .take(shown_profiles)
         .map(|index| build_all_quota_watch_tui_row(&reports[index], layout.detail))
         .collect::<Vec<_>>();
@@ -1230,7 +1232,10 @@ pub(crate) fn render_all_quota_reports_once_tui(
             provider_filter: QuotaProviderFilter::All,
             provider_filter_locked: false,
             total_width: usize::from(area.width).saturating_sub(4),
-            max_lines: quota_watch_tui_report_lines(area.height),
+            max_lines: quota_watch_tui_table_lines(
+                area.height,
+                quota_watch_snapshot_overview_field_count(&snapshot, QuotaProviderFilter::All),
+            ),
         },
     );
     render_all_quota_watch_tui(frame, &data);
@@ -1414,8 +1419,92 @@ fn quota_watch_footer_style() -> Style {
     tui_title_style()
 }
 
-fn quota_watch_tui_report_lines(terminal_height: u16) -> Option<usize> {
-    Some(usize::from(terminal_height).saturating_sub(5).max(1))
+fn quota_watch_snapshot_overview_field_count(
+    snapshot: &AllQuotaWatchSnapshot,
+    provider_filter: QuotaProviderFilter,
+) -> usize {
+    match snapshot {
+        AllQuotaWatchSnapshot::Reports { reports, .. } => quota_pool_summary_fields_for_reports(
+            &filter_quota_reports_by_provider(reports, provider_filter),
+        )
+        .len(),
+        AllQuotaWatchSnapshot::Loading { .. }
+        | AllQuotaWatchSnapshot::Empty { .. }
+        | AllQuotaWatchSnapshot::Error { .. } => 2,
+    }
+}
+
+fn quota_watch_tui_table_lines(terminal_height: u16, overview_field_count: usize) -> Option<usize> {
+    let body_inner = usize::from(terminal_height)
+        .saturating_sub(3)
+        .saturating_sub(2);
+    let overview_height = overview_field_count.saturating_add(1).min(body_inner);
+    Some(
+        body_inner
+            .saturating_sub(overview_height)
+            .saturating_sub(1)
+            .max(1),
+    )
+}
+
+fn quota_watch_visible_profile_count(
+    reports: &[QuotaReport],
+    sorted_indexes: &[usize],
+    detail: bool,
+    max_lines: Option<usize>,
+    start_profile: usize,
+) -> usize {
+    let Some(max_lines) = max_lines else {
+        return sorted_indexes.len().saturating_sub(start_profile);
+    };
+    let mut shown_profiles = 0_usize;
+    let mut remaining = max_lines.saturating_sub(1);
+    for index in sorted_indexes.iter().copied().skip(start_profile) {
+        let row_lines = quota_watch_tui_row_line_count(&reports[index], detail);
+        if row_lines > remaining {
+            break;
+        }
+        remaining = remaining.saturating_sub(row_lines);
+        shown_profiles += 1;
+    }
+    shown_profiles
+}
+
+fn quota_watch_tui_row_line_count(report: &QuotaReport, detail: bool) -> usize {
+    build_all_quota_watch_tui_row(report, detail)
+        .detail
+        .len()
+        .saturating_add(1)
+}
+
+fn quota_watch_tui_max_scroll_offset_for_snapshot(
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    provider_filter: QuotaProviderFilter,
+    sort: QuotaReportSort,
+    max_lines: Option<usize>,
+) -> usize {
+    let AllQuotaWatchSnapshot::Reports { reports, .. } = snapshot else {
+        return 0;
+    };
+    let filtered_reports = filter_quota_reports_by_provider(reports, provider_filter);
+    if filtered_reports.is_empty() {
+        return 0;
+    }
+    let sorted_indexes = sorted_quota_report_indexes_by_sort(&filtered_reports, sort);
+    for scroll_offset in 0..filtered_reports.len() {
+        let shown_profiles = quota_watch_visible_profile_count(
+            &filtered_reports,
+            &sorted_indexes,
+            detail,
+            max_lines,
+            scroll_offset,
+        );
+        if scroll_offset.saturating_add(shown_profiles) >= filtered_reports.len() {
+            return scroll_offset;
+        }
+    }
+    filtered_reports.len().saturating_sub(1)
 }
 
 fn start_all_quota_watch_refresh(
@@ -1606,29 +1695,6 @@ fn quota_watch_max_scroll_offset(
     match snapshot {
         AllQuotaWatchSnapshot::Reports { reports, .. } => {
             quota_watch_max_scroll_offset_for_reports(reports, detail, provider_filter, sort)
-        }
-        _ => 0,
-    }
-}
-
-fn quota_watch_max_scroll_offset_for_snapshot_with_layout(
-    snapshot: &AllQuotaWatchSnapshot,
-    detail: bool,
-    provider_filter: QuotaProviderFilter,
-    sort: QuotaReportSort,
-    max_lines: Option<usize>,
-    total_width: usize,
-) -> usize {
-    match snapshot {
-        AllQuotaWatchSnapshot::Reports { reports, .. } => {
-            quota_watch_max_scroll_offset_for_reports_with_layout(
-                reports,
-                detail,
-                provider_filter,
-                sort,
-                max_lines,
-                total_width,
-            )
         }
         _ => 0,
     }
