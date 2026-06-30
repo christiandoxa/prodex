@@ -2,6 +2,24 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.234.0 - 2026-06-30
+
+### CLI
+
+- Improve DeepSeek bridge and quota detail view (`e148a9d`)
+
+## 0.233.0 - 2026-06-30
+
+### CLI
+
+- Prioritize blocked type over active status in current sort (`f65d480`)
+
+### Misc
+
+- Add scrollable TUI when session list exceeds terminal height (`951b66d`)
+- Auto web_search_mode forwards like 0.231.0 instead of 502 (`d29ca44`)
+- Gateway inspect, provider capabilities, app-server broker skeleton, and usage idempotency (`95430bf`)
+
 ## 0.232.0 - 2026-06-29
 
 ### Runtime
@@ -70,16 +88,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.223.0 - 2026-06-27
 
 - No grouped changes.
-
-## 0.222.0 - 2026-06-26
-
-### Misc
-
-- Migrate legacy output to ratatui (`ce19af2`)
-
-## 0.221.0 - 2026-06-26
-
-### Misc
-
-- Fall back when super prompt tui cannot initialize (`ede5412`)
-- Rewrite all prodex-owned CLI output to ratatui TUI (`d4c60d5`)
