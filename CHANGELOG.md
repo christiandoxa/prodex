@@ -2,11 +2,21 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.235.0 - 2026-06-30
+
+### CLI
+
+- Add OpenAI ping command (`18819d9`)
+
 ## 0.234.0 - 2026-06-30
 
 ### CLI
 
 - Improve DeepSeek bridge and quota detail view (`e148a9d`)
+
+### Misc
+
+- Satisfy DeepSeek bridge clippy gate (`f448018`)
 
 ## 0.233.0 - 2026-06-30
 
@@ -84,7 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add ponytail optimizer and reset credit expiry (`c6d3497`)
-
-## 0.223.0 - 2026-06-27
-
-- No grouped changes.
