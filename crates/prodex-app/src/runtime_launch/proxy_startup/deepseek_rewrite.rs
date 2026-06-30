@@ -1034,15 +1034,15 @@ fn runtime_deepseek_reject_unsupported_request_fields(value: &serde_json::Value)
             anyhow::bail!("DeepSeek {field} is not supported by this Responses adapter");
         }
     }
-    if let Some(include) = value.get("include") {
-        if !include.is_array() {
-            anyhow::bail!("DeepSeek include must be an array");
-        }
+    if let Some(include) = value.get("include")
+        && !include.is_array()
+    {
+        anyhow::bail!("DeepSeek include must be an array");
     }
-    if let Some(store) = value.get("store") {
-        if !store.is_boolean() {
-            anyhow::bail!("DeepSeek store must be a boolean");
-        }
+    if let Some(store) = value.get("store")
+        && !store.is_boolean()
+    {
+        anyhow::bail!("DeepSeek store must be a boolean");
     }
     if let Some(background) = value.get("background") {
         match background.as_bool() {
