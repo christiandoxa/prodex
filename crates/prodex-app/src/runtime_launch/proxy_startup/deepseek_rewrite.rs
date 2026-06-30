@@ -1726,9 +1726,10 @@ fn runtime_deepseek_apply_web_search_mode(
 ) -> Result<()> {
     match options.web_search_mode {
         RuntimeDeepSeekWebSearchMode::Auto => {
-            anyhow::bail!(
-                "DeepSeek web search auto mode has no documented native OpenAI Chat route yet; set deepseek.web_search_mode=\"openai_chat\" for explicit best-effort forwarding, \"anthropic\" when the Anthropic adapter exists, or \"function_proxy\" when a local search backend exists"
-            )
+            // ponytail: auto = forward like 0.231.0; same path as openai_chat
+            runtime_deepseek_validate_web_search_options(&web_search_options)?;
+            request.insert("web_search_options".to_string(), web_search_options);
+            Ok(())
         }
         RuntimeDeepSeekWebSearchMode::OpenAiChat => {
             runtime_deepseek_validate_web_search_options(&web_search_options)?;
