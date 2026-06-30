@@ -66,6 +66,8 @@ pub struct RuntimePolicyGatewaySettings {
     pub base_url: Option<String>,
     pub require_auth: Option<bool>,
     #[serde(default)]
+    pub adaptive_routing: RuntimePolicyAdaptiveRoutingSettings,
+    #[serde(default)]
     pub state: RuntimePolicyGatewayStateSettings,
     #[serde(default)]
     pub admin_tokens: Vec<RuntimePolicyGatewayAdminToken>,
@@ -79,6 +81,16 @@ pub struct RuntimePolicyGatewaySettings {
     pub observability: RuntimePolicyGatewayObservabilitySettings,
     #[serde(default)]
     pub guardrails: RuntimePolicyGatewayGuardrailsSettings,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyAdaptiveRoutingSettings {
+    pub enabled: Option<bool>,
+    pub shadow_mode: Option<bool>,
+    pub window_size: Option<usize>,
+    pub min_samples: Option<u64>,
+    pub exploration_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

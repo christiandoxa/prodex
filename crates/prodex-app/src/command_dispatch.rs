@@ -79,6 +79,12 @@ impl CommandExecute for AuditArgs {
     }
 }
 
+impl CommandExecute for AppServerBrokerArgs {
+    fn execute(self) -> Result<()> {
+        handle_app_server_broker(self)
+    }
+}
+
 impl CommandExecute for CavemanArgs {
     fn execute(self) -> Result<()> {
         if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
@@ -308,6 +314,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Setup(command) => RoutedCommand::new(command),
         Commands::Capability(command) => RoutedCommand::new(command),
         Commands::Audit(command) => RoutedCommand::new(command),
+        Commands::AppServerBroker(command) => RoutedCommand::new(command),
         Commands::Context(command) => RoutedCommand::new(command),
         Commands::Cleanup(command) => RoutedCommand::new(command),
         Commands::Presidio(command) => RoutedCommand::new(command),

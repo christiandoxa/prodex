@@ -24,6 +24,8 @@ fn codex_sandbox_removed_env_strips_inherited_codex_sandbox_vars() {
 fn codex_child_plan_applies_codex_sandbox_removed_env() {
     let _env_guard = TestEnvVarGuard::lock();
     let _custom_guard = TestEnvVarGuard::set("CODEX_SANDBOX_PROFILE", "danger-full-access");
+    let _ld_preload_guard = TestEnvVarGuard::set("LD_PRELOAD", "/tmp/inject.so");
+    let _dyld_guard = TestEnvVarGuard::set("DYLD_INSERT_LIBRARIES", "/tmp/inject.dylib");
     let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", "example.com");
     let _lower_no_proxy_guard = TestEnvVarGuard::set("no_proxy", "internal.local");
     let binary = OsString::from("codex");
@@ -51,6 +53,12 @@ fn codex_child_plan_applies_codex_sandbox_removed_env() {
             .iter()
             .any(|key| key == "CODEX_SANDBOX_PROFILE")
     );
+    assert!(plan.removed_env.iter().any(|key| key == "LD_PRELOAD"));
+    assert!(
+        plan.removed_env
+            .iter()
+            .any(|key| key == "DYLD_INSERT_LIBRARIES")
+    );
     assert_eq!(
         plan.extra_env
             .iter()
@@ -65,6 +73,29 @@ fn codex_child_plan_applies_codex_sandbox_removed_env() {
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("example.com,internal.local,127.0.0.1,localhost,::1".to_string())
     );
+}
+
+#[test]
+fn child_process_hardening_strips_dynamic_loader_env_unless_allowed() {
+    let _env_guard = TestEnvVarGuard::lock();
+    let _ld_preload_guard = TestEnvVarGuard::set("LD_PRELOAD", "/tmp/inject.so");
+    let _dyld_custom_guard = TestEnvVarGuard::set("DYLD_CUSTOM_TEST", "1");
+    let _allow_guard = TestEnvVarGuard::unset("PRODEX_ALLOW_UNSAFE_CHILD_ENV");
+
+    let removed = child_process_hardening_removed_env();
+
+    assert!(removed.iter().any(|key| key == "LD_PRELOAD"));
+    assert!(removed.iter().any(|key| key == "LD_LIBRARY_PATH"));
+    assert!(removed.iter().any(|key| key == "DYLD_CUSTOM_TEST"));
+}
+
+#[test]
+fn child_process_hardening_can_be_explicitly_disabled() {
+    let _env_guard = TestEnvVarGuard::lock();
+    let _ld_preload_guard = TestEnvVarGuard::set("LD_PRELOAD", "/tmp/inject.so");
+    let _allow_guard = TestEnvVarGuard::set("PRODEX_ALLOW_UNSAFE_CHILD_ENV", "1");
+
+    assert!(child_process_hardening_removed_env().is_empty());
 }
 
 #[test]

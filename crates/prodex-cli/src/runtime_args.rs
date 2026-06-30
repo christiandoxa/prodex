@@ -1,5 +1,5 @@
 use crate::CodexRuntimeFeatureArgs;
-use clap::{ArgGroup, Args};
+use clap::{ArgGroup, Args, Subcommand};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -276,7 +276,19 @@ pub struct ExposeArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct AppServerBrokerArgs {
+    /// Print the broker capability contract as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Reserved opt-in for future stdio brokering. Currently reports unsupported.
+    #[arg(long)]
+    pub experimental_stdio: bool,
+}
+
+#[derive(Args, Debug)]
 pub struct GatewayArgs {
+    #[command(subcommand)]
+    pub command: Option<GatewayCommands>,
     /// Address to bind the OpenAI-compatible gateway to.
     #[arg(long, value_name = "ADDR")]
     pub listen: Option<String>,
@@ -301,6 +313,30 @@ pub struct GatewayArgs {
     /// Disable policy-enabled Presidio redaction for this gateway process.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GatewayCommands {
+    #[command(about = "Print provider adapter contracts.")]
+    Providers(GatewayProvidersArgs),
+    #[command(about = "Print provider endpoint capabilities.")]
+    Capabilities(GatewayProviderFilterArgs),
+    #[command(about = "Print provider model catalog.")]
+    Models(GatewayProviderFilterArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct GatewayProvidersArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct GatewayProviderFilterArgs {
+    #[arg(long, value_name = "PROVIDER")]
+    pub provider: String,
+    #[arg(long)]
+    pub json: bool,
 }
 
 impl SuperArgs {

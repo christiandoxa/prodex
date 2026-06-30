@@ -826,6 +826,8 @@ pub fn provider_model_json(provider: ProviderId, model: &str) -> Option<serde_js
             "context_window": model.context_window_tokens,
             "input_cost_per_million_microusd": model.input_cost_per_million_microusd,
             "output_cost_per_million_microusd": model.output_cost_per_million_microusd,
+            "endpoints": model.endpoints.iter().map(|endpoint| endpoint.label()).collect::<Vec<_>>(),
+            "aliases": model.aliases,
         })
     })
 }
@@ -843,6 +845,8 @@ pub fn provider_model_catalog_json(provider: ProviderId) -> Vec<serde_json::Valu
                 "context_window": model.context_window_tokens,
                 "input_cost_per_million_microusd": model.input_cost_per_million_microusd,
                 "output_cost_per_million_microusd": model.output_cost_per_million_microusd,
+                "endpoints": model.endpoints.iter().map(|endpoint| endpoint.label()).collect::<Vec<_>>(),
+                "aliases": model.aliases,
             })
         })
         .collect()

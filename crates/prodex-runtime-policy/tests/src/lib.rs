@@ -115,6 +115,13 @@ provider = "gemini"
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 require_auth = true
 
+[gateway.adaptive_routing]
+enabled = true
+shadow_mode = true
+window_size = 64
+min_samples = 12
+exploration_rate = 0.05
+
 [gateway.state]
 backend = "sqlite"
 sqlite_path = "gateway-state.sqlite"
@@ -215,6 +222,11 @@ webhook_fail_closed = true
         Some("127.0.0.1:4100")
     );
     assert_eq!(loaded.gateway.provider.as_deref(), Some("gemini"));
+    assert_eq!(loaded.gateway.adaptive_routing.enabled, Some(true));
+    assert_eq!(loaded.gateway.adaptive_routing.shadow_mode, Some(true));
+    assert_eq!(loaded.gateway.adaptive_routing.window_size, Some(64));
+    assert_eq!(loaded.gateway.adaptive_routing.min_samples, Some(12));
+    assert_eq!(loaded.gateway.adaptive_routing.exploration_rate, Some(0.05));
     assert_eq!(loaded.gateway.state.backend.as_deref(), Some("sqlite"));
     assert_eq!(
         loaded.gateway.state.sqlite_path.as_deref(),

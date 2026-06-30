@@ -382,6 +382,107 @@
             "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
             "prune_schema_compositions"
           ]
+        },
+        {
+          "path": "codex-rs/app-server/README.md",
+          "reason": "Owns public app-server JSON-RPC lifecycle docs and generated-schema command surface.",
+          "required_contains": [
+            "codex app-server generate-json-schema",
+            "--experimental",
+            "thread/start",
+            "thread/resume",
+            "thread/fork",
+            "turn/start",
+            "thread/started",
+            "turn/started",
+            "turn/completed",
+            "JSON-RPC"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/export.rs",
+          "reason": "Owns app-server JSON schema generation used to compare schema-level protocol drift.",
+          "required_contains": [
+            "generate_internal_json_schema",
+            "JsonSchemaEmitter",
+            "schema_for",
+            "GeneratedSchema"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/jsonrpc_lite.rs",
+          "reason": "Owns JSON-RPC envelope schema types for app-server requests, responses, notifications, and errors.",
+          "required_contains": [
+            "JsonRpcMessage",
+            "Request",
+            "Response",
+            "Notification",
+            "Error",
+            "JsonSchema",
+            "jsonrpc"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+          "reason": "Owns stable app-server method names and notification names for thread and turn lifecycle.",
+          "required_contains": [
+            "ThreadStart => \"thread/start\"",
+            "ThreadResume => \"thread/resume\"",
+            "ThreadFork => \"thread/fork\"",
+            "TurnStart => \"turn/start\"",
+            "ThreadStarted => \"thread/started\"",
+            "TurnStarted => \"turn/started\"",
+            "JsonSchema",
+            "ClientRequest",
+            "ServerNotification"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/initialize_processor.rs",
+          "reason": "Owns initialize/initialized handshake state and startup notifications.",
+          "required_contains": [
+            "InitializeRequestProcessor",
+            "initialize",
+            "Already initialized",
+            "send_initialize_notifications_to_connection",
+            "track_initialized_request"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+          "reason": "Owns thread start/resume/fork request processing and thread-scoped request IDs.",
+          "required_contains": [
+            "ThreadRequestProcessor",
+            "ThreadStartParams",
+            "ThreadResumeParams",
+            "ThreadForkParams",
+            "ThreadCompactStartParams",
+            "ConnectionRequestId"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/turn_processor.rs",
+          "reason": "Owns turn/start request processing and the initial in-progress turn response.",
+          "required_contains": [
+            "TurnRequestProcessor",
+            "TurnStartParams",
+            "TurnStartResponse",
+            "turn/start",
+            "TurnStatus::InProgress",
+            "ThreadSettingsBuildParams"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_serialization.rs",
+          "reason": "Owns app-server request serialization scopes, including thread and thread-path queues.",
+          "required_contains": [
+            "ClientRequestSerializationScope",
+            "RequestSerializationQueueKey",
+            "Thread",
+            "ThreadPath",
+            "RequestSerializationAccess",
+            "QueuedInitializedRequest"
+          ]
         }
       ],
       "expected_headers": [
@@ -973,8 +1074,109 @@
             "resolve_interface_asset_path",
             "PluginManifestInterface"
           ]
+        },
+        {
+          "id": "app-server.schema-generation",
+          "kind": "schema_generation",
+          "file": "codex-rs/app-server/README.md",
+          "reason": "Generated schema support must stay exposed so Prodex can move from token checks to schema-aware compatibility.",
+          "file_contains_all": [
+            "codex app-server generate-json-schema",
+            "--experimental"
+          ]
+        },
+        {
+          "id": "app-server.jsonrpc-envelope",
+          "kind": "jsonrpc_schema",
+          "file": "codex-rs/app-server-protocol/src/jsonrpc_lite.rs",
+          "reason": "Broker mode must preserve JSON-RPC 2.0 request/response/notification envelope semantics.",
+          "file_contains_all": [
+            "JsonRpcMessage",
+            "Request",
+            "Response",
+            "Notification",
+            "Error",
+            "jsonrpc"
+          ]
+        },
+        {
+          "id": "app-server.lifecycle-methods",
+          "kind": "jsonrpc_methods",
+          "file": "codex-rs/app-server-protocol/src/protocol/common.rs",
+          "reason": "Thread and turn lifecycle method names are the semantic routing contract for a future Prodex app-server broker.",
+          "file_contains_all": [
+            "ThreadStart => \"thread/start\"",
+            "ThreadResume => \"thread/resume\"",
+            "ThreadFork => \"thread/fork\"",
+            "TurnStart => \"turn/start\"",
+            "ThreadStarted => \"thread/started\"",
+            "TurnStarted => \"turn/started\""
+          ]
+        },
+        {
+          "id": "app-server.initialize-handshake",
+          "kind": "jsonrpc_handshake",
+          "file": "codex-rs/app-server/src/request_processors/initialize_processor.rs",
+          "reason": "Broker mode must preserve initialize/initialized ordering and duplicate initialize rejection.",
+          "file_contains_all": [
+            "InitializeRequestProcessor",
+            "Already initialized",
+            "send_initialize_notifications_to_connection"
+          ]
+        },
+        {
+          "id": "app-server.thread-lifecycle-processors",
+          "kind": "thread_lifecycle",
+          "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+          "reason": "Thread start/resume/fork are the owner-attribution points for profile/session affinity.",
+          "file_contains_all": [
+            "ThreadStartParams",
+            "ThreadResumeParams",
+            "ThreadForkParams",
+            "ConnectionRequestId"
+          ]
+        },
+        {
+          "id": "app-server.turn-start-processor",
+          "kind": "turn_lifecycle",
+          "file": "codex-rs/app-server/src/request_processors/turn_processor.rs",
+          "reason": "turn/start is the safe pre-commit rotation boundary for app-server broker mode.",
+          "file_contains_all": [
+            "TurnStartParams",
+            "TurnStartResponse",
+            "turn/start",
+            "TurnStatus::InProgress"
+          ]
+        },
+        {
+          "id": "app-server.thread-serialization-scope",
+          "kind": "serialization_scope",
+          "file": "codex-rs/app-server/src/request_serialization.rs",
+          "reason": "Broker mode must respect upstream app-server thread serialization scopes.",
+          "file_contains_all": [
+            "ClientRequestSerializationScope",
+            "RequestSerializationQueueKey",
+            "Thread",
+            "ThreadPath",
+            "RequestSerializationAccess"
+          ]
         }
-      ]
+      ],
+      "tested_codex_release": "rust-v0.142.4",
+      "app_server_protocol": {
+        "schema_command": "codex app-server generate-json-schema --out DIR",
+        "schema_hash": null,
+        "schema_hash_note": "Generated schema artifacts are version-specific and not vendored in Prodex yet.",
+        "required_methods": [
+          "initialize",
+          "initialized",
+          "thread/start",
+          "thread/resume",
+          "thread/fork",
+          "turn/start",
+          "turn/cancel"
+        ]
+      }
     },
     "latestRelease": {
       "tag_name": "rust-v0.142.4",

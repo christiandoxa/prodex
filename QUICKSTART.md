@@ -173,7 +173,7 @@ printf 'context from stdin' | prodex run exec "summarize this"
 
 Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation. Prodex does not auto-redeem reset credits by default; add `--auto-redeem` when you want guarded automatic single reset-credit redemption only after the OpenAI/Codex weekly window is exhausted for every profile and the weekly reset is not already imminent. Manual `prodex redeem <profile>` is an explicit one-profile consume request; the upstream backend decides whether it applies or reports nothing-to-reset/no-credit.
 
-Recent Codex runtime feature switches are available on `prodex run`, `prodex caveman`, and `prodex super` as Codex config overrides: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens <tokens>`, `--current-time-reminder`, and `--respect-system-proxy` / `--no-respect-system-proxy`. Multi-agent `multiAgentMode` remains an upstream app-server/thread setting; use `prodex app-server` or `prodex run app-server` and pass `none`, `explicitRequestOnly`, or `proactive` through the Codex app-server API. Codex plugin catalog commands such as `prodex plugin list` are managed passthrough launches by default.
+Recent Codex runtime feature switches are available on `prodex run`, `prodex caveman`, and `prodex super` as Codex config overrides: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens <tokens>`, `--current-time-reminder`, and `--respect-system-proxy` / `--no-respect-system-proxy`. Multi-agent `multiAgentMode` remains an upstream app-server/thread setting; use `prodex app-server` or `prodex run app-server` and pass `none`, `explicitRequestOnly`, or `proactive` through the Codex app-server API. `mcp-server`, `app-server`, and `exec-server` are direct Codex command-server passthroughs by default: Prodex selects profile `CODEX_HOME`, but does not wrap stdio, inject the runtime proxy, rotate accounts inside the protocol, or apply gateway guardrails. `prodex app-server-broker --json` reports the disabled-by-default JSON-RPC broker skeleton; stdio brokering is not enabled yet. Codex plugin catalog commands such as `prodex plugin list` are managed passthrough launches by default.
 
 New Codex top-level subcommands stay on this managed path by default. For example, `prodex remote-control` is treated as `prodex run remote-control` unless Prodex explicitly adds its own command with that name. Codex-owned TUI commands such as `/usage`, `/goal`, `/import`, and `/delete` remain upstream behavior; `prodex delete <session>` passes through to Codex and prunes matching Prodex session affinity metadata after a successful delete.
 
@@ -407,6 +407,12 @@ listen_addr = "127.0.0.1:4000"
 provider = "gemini"
 require_auth = true
 
+[gateway.adaptive_routing]
+enabled = true
+shadow_mode = true
+window_size = 128
+min_samples = 8
+
 [gateway.state]
 backend = "sqlite"
 sqlite_path = "gateway-state.sqlite"
@@ -447,6 +453,8 @@ webhook_phases = ["pre", "post"]
 Environment variables still override `policy.toml`.
 Use `prodex info` to inspect the resulting effective runtime tuning values.
 See [docs/runtime-policy.md](./docs/runtime-policy.md) for all `runtime`, `gateway`, and `runtime_proxy` keys, env overrides, defaults, and meanings.
+Gateway adaptive routing is a shadow-mode foundation: it can score owner-attributed feedback and report recommendations, but deterministic routing and continuation affinity still decide live traffic.
+Prodex's own keyring secret backend is not implemented yet. Selecting `PRODEX_SECRET_BACKEND=keyring` or `[secrets].backend = "keyring"` makes doctor/info report an invalid backend instead of silently claiming OS keyring storage is active.
 
 ## Admin And Observability Notes
 
@@ -461,6 +469,7 @@ Current local hardening includes:
 - `prodex doctor --bundle PATH --redacted` for shareable local diagnostics without stored auth tokens
 - local structured audit logging for profile, rotation, and admin events, separate from runtime session output and discoverable through `prodex info` or `prodex doctor --runtime --json`
 - `prodex audit` for browsing the local append-only audit log without touching runtime proxy behavior
+- Codex child-process env sanitization for dynamic-loader injection variables such as `LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`, and `DYLD_*`; set `PRODEX_ALLOW_UNSAFE_CHILD_ENV=1` only for deliberate local debugging
 
 Known gaps today:
 

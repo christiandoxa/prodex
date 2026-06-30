@@ -194,6 +194,11 @@ pub enum Commands {
     #[command(about = "Expose a protected browser terminal through a Cloudflare quick tunnel.")]
     Expose(ExposeArgs),
     #[command(
+        name = "app-server-broker",
+        about = "Inspect the experimental JSON-RPC app-server broker contract."
+    )]
+    AppServerBroker(AppServerBrokerArgs),
+    #[command(
         about = "Run a standalone OpenAI-compatible gateway backed by Prodex provider routing."
     )]
     Gateway(GatewayArgs),
@@ -347,6 +352,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "memory"
             | "super"
             | "s"
+            | "app-server-broker"
             | "expose"
             | "gateway"
             | "claude"

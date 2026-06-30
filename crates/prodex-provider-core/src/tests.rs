@@ -52,6 +52,7 @@ fn provider_adapter_contract_matches_fixture() {
             spec.supports_model_fallback,
             contract["supports_model_fallback"].as_bool().unwrap()
         );
+        assert_eq!(spec.transform_status, contract["transform_status"]);
         for required in contract["required_endpoints"].as_array().unwrap() {
             assert!(
                 spec.supported_endpoints
@@ -88,6 +89,9 @@ fn provider_contract_matrix_is_stable_and_complete() {
         assert_eq!(contract.canonical_client_endpoint, "/v1/responses");
         assert_eq!(contract.model_list_endpoint, "/v1/models");
         assert!(contract.supports_streaming);
+        assert!(
+            contract.transform_status == "passthrough" || contract.transform_status == "translated"
+        );
         assert!(contract.supported_endpoints.contains(&"responses"));
         assert!(contract.supported_endpoints.contains(&"models"));
         assert!(contract.model_count > 0);

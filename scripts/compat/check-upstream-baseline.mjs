@@ -28,6 +28,14 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/plugin/src/manifest.rs",
   "codex-rs/ext/web-search/src/tool.rs",
   "codex-rs/tools/src/json_schema.rs",
+  "codex-rs/app-server/README.md",
+  "codex-rs/app-server-protocol/src/export.rs",
+  "codex-rs/app-server-protocol/src/jsonrpc_lite.rs",
+  "codex-rs/app-server-protocol/src/protocol/common.rs",
+  "codex-rs/app-server/src/request_processors/initialize_processor.rs",
+  "codex-rs/app-server/src/request_processors/thread_processor.rs",
+  "codex-rs/app-server/src/request_processors/turn_processor.rs",
+  "codex-rs/app-server/src/request_serialization.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -320,6 +328,75 @@ const REQUIRED_FILE_CONTAINS = {
     "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
     "prune_schema_compositions",
   ],
+  "codex-rs/app-server/README.md": [
+    "codex app-server generate-json-schema",
+    "--experimental",
+    "thread/start",
+    "thread/resume",
+    "thread/fork",
+    "turn/start",
+    "thread/started",
+    "turn/started",
+    "turn/completed",
+    "JSON-RPC",
+  ],
+  "codex-rs/app-server-protocol/src/export.rs": [
+    "generate_internal_json_schema",
+    "JsonSchemaEmitter",
+    "schema_for",
+    "GeneratedSchema",
+  ],
+  "codex-rs/app-server-protocol/src/jsonrpc_lite.rs": [
+    "JsonRpcMessage",
+    "Request",
+    "Response",
+    "Notification",
+    "Error",
+    "JsonSchema",
+    "jsonrpc",
+  ],
+  "codex-rs/app-server-protocol/src/protocol/common.rs": [
+    "ThreadStart => \"thread/start\"",
+    "ThreadResume => \"thread/resume\"",
+    "ThreadFork => \"thread/fork\"",
+    "TurnStart => \"turn/start\"",
+    "ThreadStarted => \"thread/started\"",
+    "TurnStarted => \"turn/started\"",
+    "JsonSchema",
+    "ClientRequest",
+    "ServerNotification",
+  ],
+  "codex-rs/app-server/src/request_processors/initialize_processor.rs": [
+    "InitializeRequestProcessor",
+    "initialize",
+    "Already initialized",
+    "send_initialize_notifications_to_connection",
+    "track_initialized_request",
+  ],
+  "codex-rs/app-server/src/request_processors/thread_processor.rs": [
+    "ThreadRequestProcessor",
+    "ThreadStartParams",
+    "ThreadResumeParams",
+    "ThreadForkParams",
+    "ThreadCompactStartParams",
+    "ConnectionRequestId",
+  ],
+  "codex-rs/app-server/src/request_processors/turn_processor.rs": [
+    "TurnRequestProcessor",
+    "TurnStartParams",
+    "TurnStartResponse",
+    "turn/start",
+    "TurnStatus::InProgress",
+    "ThreadSettingsBuildParams",
+  ],
+  "codex-rs/app-server/src/request_serialization.rs": [
+    "ClientRequestSerializationScope",
+    "RequestSerializationQueueKey",
+    "Thread",
+    "ThreadPath",
+    "RequestSerializationAccess",
+    "QueuedInitializedRequest",
+  ],
 };
 
 const REQUIRED_EXPECTED_HEADERS = [
@@ -370,6 +447,16 @@ const REQUIRED_EXPECTED_ROUTES = [
   "/realtime/calls",
   "/memories/trace_summarize",
   "websocket_url_for_path(\"responses\")",
+];
+
+const REQUIRED_APP_SERVER_METHODS = [
+  "initialize",
+  "initialized",
+  "thread/start",
+  "thread/resume",
+  "thread/fork",
+  "turn/start",
+  "turn/cancel",
 ];
 
 const REQUIRED_STREAM_EVENTS = [
@@ -816,6 +903,61 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "PluginManifestInterface",
     ],
   },
+  {
+    id: "app-server.schema-generation",
+    kind: "schema_generation",
+    file: "codex-rs/app-server/README.md",
+    file_contains_all: ["codex app-server generate-json-schema", "--experimental"],
+  },
+  {
+    id: "app-server.jsonrpc-envelope",
+    kind: "jsonrpc_schema",
+    file: "codex-rs/app-server-protocol/src/jsonrpc_lite.rs",
+    file_contains_all: ["JsonRpcMessage", "Request", "Response", "Notification", "Error", "jsonrpc"],
+  },
+  {
+    id: "app-server.lifecycle-methods",
+    kind: "jsonrpc_methods",
+    file: "codex-rs/app-server-protocol/src/protocol/common.rs",
+    file_contains_all: [
+      "ThreadStart => \"thread/start\"",
+      "ThreadResume => \"thread/resume\"",
+      "ThreadFork => \"thread/fork\"",
+      "TurnStart => \"turn/start\"",
+      "ThreadStarted => \"thread/started\"",
+      "TurnStarted => \"turn/started\"",
+    ],
+  },
+  {
+    id: "app-server.initialize-handshake",
+    kind: "jsonrpc_handshake",
+    file: "codex-rs/app-server/src/request_processors/initialize_processor.rs",
+    file_contains_all: ["InitializeRequestProcessor", "Already initialized", "send_initialize_notifications_to_connection"],
+  },
+  {
+    id: "app-server.thread-lifecycle-processors",
+    kind: "thread_lifecycle",
+    file: "codex-rs/app-server/src/request_processors/thread_processor.rs",
+    file_contains_all: ["ThreadStartParams", "ThreadResumeParams", "ThreadForkParams", "ConnectionRequestId"],
+  },
+  {
+    id: "app-server.turn-start-processor",
+    kind: "turn_lifecycle",
+    file: "codex-rs/app-server/src/request_processors/turn_processor.rs",
+    file_contains_all: ["TurnStartParams", "TurnStartResponse", "turn/start", "TurnStatus::InProgress"],
+  },
+  {
+    id: "app-server.thread-serialization-scope",
+    kind: "serialization_scope",
+    file: "codex-rs/app-server/src/request_serialization.rs",
+    file_contains_all: [
+      "ClientRequestSerializationScope",
+      "RequestSerializationQueueKey",
+      "Thread",
+      "ThreadPath",
+      "RequestSerializationAccess",
+    ],
+  },
 ];
 
 const SEMANTIC_LIST_FIELDS = [
@@ -1180,6 +1322,35 @@ function validateBaseline(baseline) {
     warnings.push("codex.compatibility.guard_command should document the offline guard command");
   }
 
+  if (typeof compat.tested_codex_release !== "string" || compat.tested_codex_release.length === 0) {
+    errors.push("codex.compatibility.tested_codex_release must identify the tested Codex release");
+  }
+
+  const appServerProtocol = compat.app_server_protocol;
+  if (!appServerProtocol || typeof appServerProtocol !== "object" || Array.isArray(appServerProtocol)) {
+    errors.push("codex.compatibility.app_server_protocol is missing");
+  } else {
+    if (
+      typeof appServerProtocol.schema_command !== "string" ||
+      !appServerProtocol.schema_command.includes("generate-json-schema")
+    ) {
+      errors.push("codex.compatibility.app_server_protocol.schema_command must document generate-json-schema");
+    }
+    if (appServerProtocol.schema_hash !== null && typeof appServerProtocol.schema_hash !== "string") {
+      errors.push("codex.compatibility.app_server_protocol.schema_hash must be a string or null");
+    }
+    if (!Array.isArray(appServerProtocol.required_methods)) {
+      errors.push("codex.compatibility.app_server_protocol.required_methods must be an array");
+    } else {
+      for (const method of missingValues(
+        REQUIRED_APP_SERVER_METHODS,
+        stringArray(appServerProtocol.required_methods),
+      )) {
+        errors.push(`codex.compatibility.app_server_protocol.required_methods missing ${method}`);
+      }
+    }
+  }
+
   validateSemanticChecks({ compat, files, errors, warnings });
 
   return { errors, warnings };
@@ -1223,6 +1394,12 @@ function buildSelfTestBaseline() {
         upstream_repository: "self-test",
         guard_command: "node scripts/compat/check-upstream-baseline.mjs --self-test",
         format_version: COMPAT_FORMAT_VERSION_WITH_SEMANTIC_CHECKS,
+        tested_codex_release: "self-test",
+        app_server_protocol: {
+          schema_command: "codex app-server generate-json-schema --out DIR",
+          schema_hash: null,
+          required_methods: REQUIRED_APP_SERVER_METHODS,
+        },
         critical_files: REQUIRED_CRITICAL_FILES.map((filePath) => ({
           path: filePath,
           reason: "self-test critical file",
@@ -1325,6 +1502,16 @@ function runSelfTest() {
       compat.proxy_skipped_headers = compat.proxy_skipped_headers.filter((header) => header !== "sec-websocket-*");
     },
     expectedMessage: "codex.compatibility.proxy_skipped_headers missing sec-websocket-*",
+  });
+
+  assertSelfTestError({
+    name: "missing app-server lifecycle method",
+    mutate: (compat) => {
+      compat.app_server_protocol.required_methods = compat.app_server_protocol.required_methods.filter(
+        (method) => method !== "turn/start",
+      );
+    },
+    expectedMessage: "codex.compatibility.app_server_protocol.required_methods missing turn/start",
   });
 }
 

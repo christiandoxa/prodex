@@ -224,6 +224,46 @@ fn prepare_managed_codex_home_retries_attachment_that_appears_later() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_managed_codex_home_persists_local_images_array_for_resume() {
+    let temp_dir = PrepareTestDir::new("local-images-array-resume");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/30/rollout-session.jsonl");
+    let source = temp_dir.path.join("codex-clipboard-resume.png");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(&source, b"resume image").expect("source image should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"timestamp":"2026-06-30T08:00:00Z","type":"event_msg","payload":{{"type":"user_message","message":"[Image #1]","local_images":["{}"]}}}}"#,
+            source.display()
+        ),
+    )
+    .expect("session should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should prepare");
+
+    let stable = paths
+        .shared_codex_root
+        .join("image_attachments/codex-clipboard-resume.png");
+    assert_eq!(
+        fs::read(&stable).expect("stable image should exist"),
+        b"resume image"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should read");
+    assert!(rewritten.contains(&stable.display().to_string()));
+    assert!(!rewritten.contains(&source.display().to_string()));
+    assert_eq!(
+        fs::read_link(codex_home.join("image_attachments"))
+            .expect("image attachments should be symlinked"),
+        paths.shared_codex_root.join("image_attachments")
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn prepare_managed_codex_home_shares_pasted_attachment_dirs() {
     let temp_dir = PrepareTestDir::new("shared-pasted-attachments");
     let paths = temp_dir.app_paths();

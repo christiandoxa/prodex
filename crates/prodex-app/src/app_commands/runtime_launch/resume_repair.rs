@@ -101,6 +101,13 @@ fn repair_resume_session_in_profile_root_dirs(
         if !path.is_dir() {
             continue;
         }
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with('.'))
+        {
+            continue;
+        }
         repair_resume_session_in_profile_home(primary_home, &path, session_id, repaired_homes);
     }
 }

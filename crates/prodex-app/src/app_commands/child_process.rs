@@ -24,7 +24,7 @@ use crate::{
     runtime_launch_cli_model_context_window_tokens,
 };
 pub(crate) use prodex_runtime_launch::{
-    RuntimeLaunchDryRunChild, codex_sandbox_removed_env, extract_prodex_dry_run_flag,
+    RuntimeLaunchDryRunChild, default_child_removed_env, extract_prodex_dry_run_flag,
     prepare_codex_launch_args, prodex_dry_run_requested, remove_upstream_proxy_env,
 };
 
@@ -160,7 +160,7 @@ pub(crate) fn run_codex_direct_passthrough(args: Vec<OsString>) -> Result<ExitSt
     let binary = codex_bin();
     let mut command = Command::new(&binary);
     command.args(args);
-    for key in codex_sandbox_removed_env() {
+    for key in default_child_removed_env() {
         command.env_remove(key);
     }
     let mut child = command

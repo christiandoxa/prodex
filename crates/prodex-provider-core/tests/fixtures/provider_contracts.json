@@ -8,6 +8,7 @@
     "model_list_endpoint": "/v1/models",
     "supports_streaming": true,
     "supports_model_fallback": false,
+    "transform_status": "passthrough",
     "required_endpoints": ["responses", "chat-completions", "messages", "models", "embeddings", "images", "audio", "batches", "rerank", "a2a"]
   },
   {
@@ -19,6 +20,7 @@
     "model_list_endpoint": "/v1/models",
     "supports_streaming": true,
     "supports_model_fallback": true,
+    "transform_status": "translated",
     "required_endpoints": ["responses", "chat-completions", "messages", "models"]
   },
   {
@@ -30,6 +32,7 @@
     "model_list_endpoint": "/v1/models",
     "supports_streaming": true,
     "supports_model_fallback": true,
+    "transform_status": "translated",
     "required_endpoints": ["responses", "chat-completions", "messages", "models"]
   },
   {
@@ -41,6 +44,7 @@
     "model_list_endpoint": "/v1/models",
     "supports_streaming": true,
     "supports_model_fallback": true,
+    "transform_status": "translated",
     "required_endpoints": ["responses", "chat-completions", "messages", "models"]
   },
   {
@@ -52,6 +56,7 @@
     "model_list_endpoint": "/v1/models",
     "supports_streaming": true,
     "supports_model_fallback": true,
+    "transform_status": "translated",
     "required_endpoints": ["responses", "chat-completions", "messages", "models", "embeddings"]
   },
   {
@@ -63,6 +68,7 @@
     "model_list_endpoint": "/v1/models",
     "supports_streaming": true,
     "supports_model_fallback": false,
+    "transform_status": "passthrough",
     "required_endpoints": ["responses", "chat-completions", "messages", "models", "embeddings", "images", "audio", "batches", "rerank", "a2a"]
   }
 ]

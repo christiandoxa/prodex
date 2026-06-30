@@ -46,6 +46,19 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
         }],
     )
     .expect("second delta batch should merge");
+    runtime_gateway_virtual_key_usage_apply_deltas(
+        &state_store,
+        &[RuntimeGatewayVirtualKeyUsageDelta {
+            request_id: 2,
+            key_name: "team-a".to_string(),
+            model: "gpt-5.4".to_string(),
+            minute_epoch: 100,
+            input_tokens: 13,
+            estimated_cost_microusd: Some(17),
+            created_at_epoch: 1_700_000_001,
+        }],
+    )
+    .expect("duplicate delta should be idempotent");
 
     let usage = wait_for_json_file(&path);
     assert_eq!(usage["team-a"]["requests_total"], 2);
@@ -56,6 +69,36 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
     assert_eq!(ledger.lines().count(), 2);
     assert!(ledger.contains("\"call_id\":\"prodex-1\""));
     assert!(ledger.contains("\"estimated_cost_microusd\":17"));
+}
+
+#[test]
+fn gateway_sqlite_usage_deltas_are_idempotent_by_request_id() {
+    let root = temp_root("gateway-sqlite-usage-idempotent");
+    let db_path = root.join("gateway-state.sqlite");
+    let state_store = RuntimeGatewayStateStore::sqlite(db_path.clone());
+    let delta = RuntimeGatewayVirtualKeyUsageDelta {
+        request_id: 7,
+        key_name: "team-a".to_string(),
+        model: "gpt-5.4".to_string(),
+        minute_epoch: 100,
+        input_tokens: 13,
+        estimated_cost_microusd: Some(17),
+        created_at_epoch: 1_700_000_001,
+    };
+
+    runtime_gateway_virtual_key_usage_apply_deltas(&state_store, &[delta.clone(), delta])
+        .expect("duplicate sqlite deltas should save idempotently");
+
+    wait_for_sqlite_usage_total(&db_path, "team-a", 1);
+    let conn = rusqlite::Connection::open(&db_path).expect("sqlite database should open");
+    let rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM prodex_gateway_billing_ledger WHERE request_id = 7",
+            [],
+            |row| row.get(0),
+        )
+        .expect("ledger count should load");
+    assert_eq!(rows, 1);
 }
 
 #[test]

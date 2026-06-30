@@ -2,7 +2,9 @@ use super::local_rewrite::{
     RUNTIME_GATEWAY_REDIS_LEDGER_KEY, RUNTIME_GATEWAY_REDIS_LEDGER_LOCK, RuntimeGatewayStateStore,
     RuntimeLocalRewriteProxyShared, runtime_gateway_generate_virtual_key_token,
 };
-use super::local_rewrite_gateway_file_ledger::runtime_gateway_file_ledger_append_deltas;
+use super::local_rewrite_gateway_file_ledger::{
+    runtime_gateway_file_ledger_append_deltas, runtime_gateway_file_ledger_load,
+};
 use super::local_rewrite_gateway_usage_backend::{
     RuntimeGatewayVirtualKeyUsageDelta, runtime_gateway_postgres_usage_apply_deltas,
     runtime_gateway_postgres_usage_load, runtime_gateway_redis_usage_apply_deltas,
@@ -228,8 +230,21 @@ pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(
         .truncate(false)
         .open(lock_path)?;
     lock_file.lock_exclusive()?;
+    let ledger_path = state_store.ledger_path();
+    let mut seen_requests = runtime_gateway_file_ledger_load(ledger_path, usize::MAX)?
+        .into_iter()
+        .filter(|entry| entry.phase == "request")
+        .map(|entry| (entry.request, entry.key_name.to_ascii_lowercase()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let unique_deltas = deltas
+        .iter()
+        .filter(|&delta| {
+            seen_requests.insert((delta.request_id, delta.key_name.to_ascii_lowercase()))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     let mut usage = runtime_gateway_virtual_key_usage_load_strict(path)?;
-    for delta in deltas {
+    for delta in &unique_deltas {
         let entry = usage.entry(delta.key_name.clone()).or_default();
         let admission = runtime_proxy_crate::RuntimeGatewayVirtualKeyAdmission {
             key_name: delta.key_name.clone(),
@@ -247,7 +262,7 @@ pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, payload)?;
     std::fs::rename(tmp_path, path)?;
-    runtime_gateway_file_ledger_append_deltas(state_store.ledger_path(), deltas)?;
+    runtime_gateway_file_ledger_append_deltas(ledger_path, &unique_deltas)?;
     let _ = lock_file.unlock();
     Ok(())
 }

@@ -49,6 +49,18 @@ fn codex_app_server_account_usage_rpc_is_run_passthrough() {
 }
 
 #[test]
+fn app_server_broker_is_explicit_prodex_command_not_default_passthrough() {
+    let command = parse_cli_command_from(["prodex", "app-server-broker", "--json"])
+        .expect("app-server-broker should parse");
+    let Commands::AppServerBroker(args) = command else {
+        panic!("expected app-server-broker command");
+    };
+
+    assert!(args.json);
+    assert!(!args.experimental_stdio);
+}
+
+#[test]
 fn codex_app_server_release_0141_rpcs_remain_exact_run_passthrough() {
     for passthrough in [
         vec![

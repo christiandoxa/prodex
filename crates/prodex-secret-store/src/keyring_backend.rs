@@ -21,6 +21,14 @@ impl KeyringSecretBackend {
     pub fn service(&self) -> &str {
         &self.service
     }
+
+    pub fn is_supported(&self) -> bool {
+        false
+    }
+
+    pub fn unsupported_reason(&self) -> &'static str {
+        "keyring secret backend is not implemented in this build; use backend=file"
+    }
 }
 
 impl SecretBackend for KeyringSecretBackend {

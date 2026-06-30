@@ -15,6 +15,16 @@ const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
     "PROXY",
     "proxy",
 ];
+const CHILD_HARDENING_ALLOW_ENV: &str = "PRODEX_ALLOW_UNSAFE_CHILD_ENV";
+const DANGEROUS_CHILD_ENV_KEYS: [&str; 7] = [
+    "LD_PRELOAD",
+    "LD_AUDIT",
+    "LD_LIBRARY_PATH",
+    "LD_ORIGIN_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH",
+];
 
 #[derive(Debug, Clone)]
 pub struct ChildProcessPlan {
@@ -74,7 +84,7 @@ pub fn codex_child_plan(
     ChildProcessPlan::new(binary, codex_home)
         .with_args(args)
         .with_extra_env(local_proxy_bypass_env_for_hosts(&local_provider_hosts))
-        .with_removed_env(codex_sandbox_removed_env())
+        .with_removed_env(default_child_removed_env())
 }
 
 pub fn local_proxy_bypass_env() -> Vec<(&'static str, OsString)> {
@@ -167,6 +177,25 @@ pub fn codex_sandbox_removed_env() -> Vec<OsString> {
             .is_some_and(|value| value.starts_with("CODEX_SANDBOX"))
             .then_some(key)
     }));
+    removed.into_iter().collect()
+}
+
+pub fn child_process_hardening_removed_env() -> Vec<OsString> {
+    if env::var_os(CHILD_HARDENING_ALLOW_ENV).is_some() {
+        return Vec::new();
+    }
+    let mut removed = BTreeSet::from_iter(DANGEROUS_CHILD_ENV_KEYS.into_iter().map(OsString::from));
+    removed.extend(env::vars_os().filter_map(|(key, _)| {
+        key.to_str()
+            .is_some_and(|value| value.starts_with("DYLD_"))
+            .then_some(key)
+    }));
+    removed.into_iter().collect()
+}
+
+pub fn default_child_removed_env() -> Vec<OsString> {
+    let mut removed = BTreeSet::<OsString>::from_iter(codex_sandbox_removed_env());
+    removed.extend(child_process_hardening_removed_env());
     removed.into_iter().collect()
 }
 

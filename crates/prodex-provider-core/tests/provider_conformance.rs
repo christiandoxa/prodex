@@ -1,8 +1,8 @@
 use prodex_provider_core::{
-    PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContract, ProviderEndpoint, ProviderId,
-    ProviderTransformPhase, ProviderWireFormat, extract_usage_tokens, provider_adapter,
-    provider_adapter_contract_matrix, provider_model_catalog, provider_model_fallback_chain,
-    provider_replay_cases,
+    PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContract, ProviderCapabilityStatus,
+    ProviderEndpoint, ProviderId, ProviderTransformPhase, ProviderWireFormat, extract_usage_tokens,
+    provider_adapter, provider_adapter_contract_matrix, provider_model_catalog,
+    provider_model_catalog_json, provider_model_fallback_chain, provider_replay_cases,
 };
 
 #[test]
@@ -15,6 +15,10 @@ fn adapters_publish_required_contract_surface() {
             ProviderWireFormat::OpenAiResponses
         );
         assert!(adapter.supports_streaming());
+        assert!(matches!(
+            adapter.transform_status(),
+            ProviderCapabilityStatus::Passthrough | ProviderCapabilityStatus::Translated
+        ));
         assert_eq!(adapter.canonical_client_endpoint(), "/v1/responses");
         assert_eq!(adapter.model_list_endpoint(), "/v1/models");
         assert!(
@@ -76,6 +80,14 @@ fn adapter_transform_contract_preserves_body_and_declares_formats() {
         assert_eq!(response.to_format, adapter.response_format());
         assert_eq!(response.body, body);
         assert!(!response.lossy);
+
+        let stream_event = adapter.transform_stream_event(b"data: {}\n\n");
+        assert_eq!(
+            stream_event.phase,
+            ProviderTransformPhase::UpstreamStreamEventToClient
+        );
+        assert_eq!(stream_event.provider, *provider);
+        assert_eq!(stream_event.body, b"data: {}\n\n");
     }
 }
 
@@ -139,6 +151,27 @@ fn public_contract_matrix_is_machine_readable() {
             .iter()
             .any(|endpoint| endpoint == "responses")
     );
+    assert!(json[0]["transform_status"].is_string());
+    assert!(json[0]["endpoint_status"].as_array().unwrap().iter().any(
+        |endpoint| endpoint["endpoint"] == "responses"
+            && endpoint["status"].is_string()
+            && endpoint["tested"].as_bool().unwrap()
+    ));
+}
+
+#[test]
+fn model_catalog_json_includes_machine_readable_contract_fields() {
+    let models = provider_model_catalog_json(ProviderId::Gemini);
+    assert!(!models.is_empty());
+    assert!(models[0]["aliases"].is_array());
+    assert!(models[0]["endpoints"].is_array());
+    assert!(models.iter().all(|model| {
+        model["endpoints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|endpoint| endpoint == "responses")
+    }));
 }
 
 #[test]

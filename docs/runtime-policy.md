@@ -33,6 +33,11 @@ Provider bridges translate `/v1/responses` where supported and pass native-compa
 | `gateway.provider` | CLI `--provider` | OpenAI-compatible upstream | Provider preset: `anthropic`, `copilot`, `deepseek`, or `gemini`. |
 | `gateway.base_url` | CLI `--base-url`; `OPENAI_BASE_URL` for OpenAI-compatible mode | Provider default, or `https://api.openai.com/v1` | Upstream base URL. OpenAI-compatible mode appends `/v1` when the URL has no path. |
 | `gateway.require_auth` | none | `false` | Require gateway bearer auth even on loopback. Token value comes from `--auth-token`, `PRODEX_GATEWAY_TOKEN`, or configured virtual key env vars. |
+| `gateway.adaptive_routing.enabled` | none | `false` | Enable adaptive routing telemetry and shadow recommendations. Live route selection remains deterministic until an explicit non-shadow policy is implemented. |
+| `gateway.adaptive_routing.shadow_mode` | none | `true` | Keep adaptive routing recommendations observational only. Continuation affinity and quota/safety constraints still win. |
+| `gateway.adaptive_routing.window_size` | none | `128` | Bounded owner-attributed feedback window size used by adaptive quality scoring. |
+| `gateway.adaptive_routing.min_samples` | none | `8` | Minimum samples before a model can be recommended by the adaptive shadow scorer. |
+| `gateway.adaptive_routing.exploration_rate` | none | `0.0` | Reserved exploration rate in the range `0.0..=1.0`; currently parsed and validated but not applied to live routing. |
 | `gateway.state.backend` | none | `file` | Gateway admin/usage state backend. Valid values: `file`, `sqlite`, `postgres`, `redis`. `postgres` stores admin-managed virtual keys, usage counters, and billing ledger rows in a shared Postgres database. `redis` stores the same data in Redis using locked JSON snapshots and a Redis list for the ledger. |
 | `gateway.state.sqlite_path` | none | `gateway-state.sqlite` under the Prodex root when `backend=sqlite` | SQLite database path for admin-managed virtual keys, usage counters, and schema migrations. Relative paths are resolved under the Prodex root. |
 | `gateway.state.postgres_url_env` | none | empty | Environment variable containing a Postgres connection URL. Required when `backend="postgres"`. |

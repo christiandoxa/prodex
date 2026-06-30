@@ -80,6 +80,24 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     if matches!(policy.gateway.base_url.as_deref().map(str::trim), Some("")) {
         bail!("gateway.base_url in {} cannot be empty", path.display());
     }
+    validate_optional_usize(
+        policy.gateway.adaptive_routing.window_size,
+        path,
+        "gateway.adaptive_routing.window_size",
+    )?;
+    validate_optional_u64(
+        policy.gateway.adaptive_routing.min_samples,
+        path,
+        "gateway.adaptive_routing.min_samples",
+    )?;
+    if let Some(rate) = policy.gateway.adaptive_routing.exploration_rate
+        && !(0.0..=1.0).contains(&rate)
+    {
+        bail!(
+            "gateway.adaptive_routing.exploration_rate in {} must be between 0.0 and 1.0",
+            path.display()
+        );
+    }
     if let Some(backend) = policy.gateway.state.backend.as_deref() {
         validate_gateway_state_backend(backend)
             .with_context(|| format!("gateway.state.backend in {} is invalid", path.display()))?;

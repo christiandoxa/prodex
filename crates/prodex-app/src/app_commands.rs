@@ -16,6 +16,7 @@ use terminal_ui::{
     tui_title_style,
 };
 
+mod app_server_broker;
 mod audit;
 mod broker;
 mod capability;
@@ -43,6 +44,7 @@ mod selection;
 mod session;
 mod shared;
 
+pub(crate) use self::app_server_broker::*;
 pub(crate) use self::audit::*;
 pub(crate) use self::broker::*;
 pub(crate) use self::capability::*;

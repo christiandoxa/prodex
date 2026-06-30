@@ -10,7 +10,9 @@ use super::local_rewrite_gateway_backend_connection::{
     runtime_gateway_redis_with_lock, runtime_gateway_sqlite_open,
 };
 use super::local_rewrite_gateway_ledger_types::runtime_gateway_billing_ledger_entry_from_delta;
-use super::local_rewrite_gateway_redis_ledger::runtime_gateway_redis_append_ledger_deltas;
+use super::local_rewrite_gateway_redis_ledger::{
+    runtime_gateway_redis_append_ledger_deltas, runtime_gateway_redis_ledger_load,
+};
 use super::local_rewrite_gateway_sqlite_utils::runtime_gateway_sqlite_i64_to_u64;
 use super::local_rewrite_gateway_sqlite_utils::{
     runtime_gateway_sqlite_optional_u64_to_i64, runtime_gateway_sqlite_u64_to_i64,
@@ -101,6 +103,30 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
     let mut conn = runtime_gateway_sqlite_open(path)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     for delta in deltas {
+        let ledger = runtime_gateway_billing_ledger_entry_from_delta(delta);
+        let inserted = tx.execute(
+            r#"
+            INSERT OR IGNORE INTO prodex_gateway_billing_ledger (
+                phase, request_id, call_id, key_name, model, minute_epoch,
+                input_tokens, estimated_cost_microusd, created_at_epoch
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+            params![
+                ledger.phase,
+                runtime_gateway_sqlite_u64_to_i64(ledger.request),
+                ledger.call_id,
+                ledger.key_name,
+                ledger.model,
+                runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
+                runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
+                runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
+                runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
+            ],
+        )?;
+        if inserted == 0 {
+            continue;
+        }
         let mut usage = tx
             .query_row(
                 r#"
@@ -148,27 +174,6 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
                 runtime_gateway_sqlite_u64_to_i64(usage.spend_microusd),
             ],
         )?;
-        let ledger = runtime_gateway_billing_ledger_entry_from_delta(delta);
-        tx.execute(
-            r#"
-            INSERT OR IGNORE INTO prodex_gateway_billing_ledger (
-                phase, request_id, call_id, key_name, model, minute_epoch,
-                input_tokens, estimated_cost_microusd, created_at_epoch
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-            "#,
-            params![
-                ledger.phase,
-                runtime_gateway_sqlite_u64_to_i64(ledger.request),
-                ledger.call_id,
-                ledger.key_name,
-                ledger.model,
-                runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
-                runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
-                runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
-                runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
-            ],
-        )?;
     }
     tx.commit()?;
     Ok(())
@@ -181,6 +186,31 @@ pub(super) fn runtime_gateway_postgres_usage_apply_deltas(
     let mut client = runtime_gateway_postgres_open(url)?;
     let mut tx = client.transaction()?;
     for delta in deltas {
+        let ledger = runtime_gateway_billing_ledger_entry_from_delta(delta);
+        let inserted = tx.execute(
+            r#"
+            INSERT INTO prodex_gateway_billing_ledger (
+                phase, request_id, call_id, key_name, model, minute_epoch,
+                input_tokens, estimated_cost_microusd, created_at_epoch
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT(request_id, key_name, phase) DO NOTHING
+            "#,
+            &[
+                &ledger.phase,
+                &runtime_gateway_sqlite_u64_to_i64(ledger.request),
+                &ledger.call_id,
+                &ledger.key_name,
+                &ledger.model,
+                &runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
+                &runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
+                &runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
+                &runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
+            ],
+        )?;
+        if inserted == 0 {
+            continue;
+        }
         let mut usage = tx
             .query_opt(
                 r#"
@@ -228,28 +258,6 @@ pub(super) fn runtime_gateway_postgres_usage_apply_deltas(
                 &runtime_gateway_sqlite_u64_to_i64(usage.spend_microusd),
             ],
         )?;
-        let ledger = runtime_gateway_billing_ledger_entry_from_delta(delta);
-        tx.execute(
-            r#"
-            INSERT INTO prodex_gateway_billing_ledger (
-                phase, request_id, call_id, key_name, model, minute_epoch,
-                input_tokens, estimated_cost_microusd, created_at_epoch
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT(request_id, key_name, phase) DO NOTHING
-            "#,
-            &[
-                &ledger.phase,
-                &runtime_gateway_sqlite_u64_to_i64(ledger.request),
-                &ledger.call_id,
-                &ledger.key_name,
-                &ledger.model,
-                &runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
-                &runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
-                &runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
-                &runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
-            ],
-        )?;
     }
     tx.commit()?;
     Ok(())
@@ -267,6 +275,18 @@ pub(super) fn runtime_gateway_redis_usage_apply_deltas<G>(
 where
     G: Fn() -> Result<String> + Copy,
 {
+    let mut seen_requests = runtime_gateway_redis_ledger_load(url, ledger_key, usize::MAX)?
+        .into_iter()
+        .filter(|entry| entry.phase == "request")
+        .map(|entry| (entry.request, entry.key_name.to_ascii_lowercase()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let unique_deltas = deltas
+        .iter()
+        .filter(|&delta| {
+            seen_requests.insert((delta.request_id, delta.key_name.to_ascii_lowercase()))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     runtime_gateway_redis_with_lock(url, usage_lock_key, token_generator, |conn| {
         let payload: Option<String> = conn.get(usage_key)?;
         let mut usage = match payload {
@@ -276,7 +296,7 @@ where
             .context("failed to parse gateway redis virtual key usage")?,
             None => BTreeMap::new(),
         };
-        for delta in deltas {
+        for delta in &unique_deltas {
             let entry = usage.entry(delta.key_name.clone()).or_default();
             let admission = runtime_proxy_crate::RuntimeGatewayVirtualKeyAdmission {
                 key_name: delta.key_name.clone(),
@@ -299,7 +319,7 @@ where
         ledger_key,
         ledger_lock_key,
         token_generator,
-        deltas,
+        &unique_deltas,
     )?;
     Ok(())
 }

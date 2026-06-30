@@ -182,6 +182,39 @@ fn gateway_provider_args_parse_as_top_level_command() {
 }
 
 #[test]
+fn gateway_provider_catalog_commands_parse() {
+    let command = parse_cli_command_from(["prodex", "gateway", "providers", "--json"])
+        .expect("gateway providers should parse");
+    let Commands::Gateway(args) = command else {
+        panic!("expected gateway command");
+    };
+    assert!(matches!(
+        args.command,
+        Some(GatewayCommands::Providers(GatewayProvidersArgs {
+            json: true
+        }))
+    ));
+
+    let command = parse_cli_command_from([
+        "prodex",
+        "gateway",
+        "models",
+        "--provider",
+        "gemini",
+        "--json",
+    ])
+    .expect("gateway models should parse");
+    let Commands::Gateway(args) = command else {
+        panic!("expected gateway command");
+    };
+    assert!(matches!(
+        args.command,
+        Some(GatewayCommands::Models(GatewayProviderFilterArgs { provider, json: true }))
+            if provider == "gemini"
+    ));
+}
+
+#[test]
 fn super_gemini_provider_enables_native_image_generation_only_for_gemini() {
     for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
         let args = parse_super_as_caveman(&[

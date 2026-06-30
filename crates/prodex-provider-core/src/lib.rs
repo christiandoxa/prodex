@@ -103,6 +103,32 @@ pub enum ProviderEndpoint {
     A2a,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderCapabilityStatus {
+    Native,
+    Translated,
+    Passthrough,
+    Emulated,
+    Partial,
+    Unsupported,
+    Untested,
+}
+
+impl ProviderCapabilityStatus {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Translated => "translated",
+            Self::Passthrough => "passthrough",
+            Self::Emulated => "emulated",
+            Self::Partial => "partial",
+            Self::Unsupported => "unsupported",
+            Self::Untested => "untested",
+        }
+    }
+}
+
 impl ProviderEndpoint {
     pub const fn label(self) -> &'static str {
         match self {
@@ -176,6 +202,17 @@ pub trait ProviderAdapterContract {
     fn supports_model_fallback(&self) -> bool;
     fn supported_endpoints(&self) -> &'static [ProviderEndpoint];
     fn model_catalog(&self) -> &'static [ProviderModelSpec];
+    fn capability_status(&self, endpoint: ProviderEndpoint) -> ProviderCapabilityStatus;
+
+    fn transform_status(&self) -> ProviderCapabilityStatus {
+        if self.client_request_format() == self.upstream_request_format()
+            && self.upstream_request_format() == self.response_format()
+        {
+            ProviderCapabilityStatus::Passthrough
+        } else {
+            ProviderCapabilityStatus::Translated
+        }
+    }
 
     fn fallback_chain(&self, model: &str) -> Vec<String> {
         provider_model_fallback_chain(self.provider(), model)
@@ -215,6 +252,17 @@ pub trait ProviderAdapterContract {
             lossy: false,
         }
     }
+
+    fn transform_stream_event(&self, event: &[u8]) -> ProviderBodyTransform {
+        ProviderBodyTransform {
+            phase: ProviderTransformPhase::UpstreamStreamEventToClient,
+            provider: self.provider(),
+            from_format: self.upstream_request_format(),
+            to_format: self.response_format(),
+            body: event.to_vec(),
+            lossy: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -227,9 +275,19 @@ pub struct ProviderAdapterContractSpec {
     pub model_list_endpoint: &'static str,
     pub supports_streaming: bool,
     pub supports_model_fallback: bool,
+    pub transform_status: &'static str,
     pub supported_endpoints: Vec<&'static str>,
+    pub endpoint_status: Vec<ProviderEndpointContractSpec>,
     pub model_count: usize,
     pub replay_case_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ProviderEndpointContractSpec {
+    pub endpoint: &'static str,
+    pub status: &'static str,
+    pub streaming: bool,
+    pub tested: bool,
 }
 
 pub const PROVIDER_CONTRACT_PROVIDERS: &[ProviderId] = &[
@@ -252,10 +310,28 @@ pub fn provider_adapter_contract_spec(provider: ProviderId) -> ProviderAdapterCo
         model_list_endpoint: adapter.model_list_endpoint(),
         supports_streaming: adapter.supports_streaming(),
         supports_model_fallback: adapter.supports_model_fallback(),
+        transform_status: adapter.transform_status().label(),
         supported_endpoints: adapter
             .supported_endpoints()
             .iter()
             .map(|endpoint| endpoint.label())
+            .collect(),
+        endpoint_status: ALL_PROVIDER_ENDPOINTS
+            .iter()
+            .copied()
+            .map(|endpoint| ProviderEndpointContractSpec {
+                endpoint: endpoint.label(),
+                status: adapter.capability_status(endpoint).label(),
+                streaming: adapter.supports_streaming()
+                    && matches!(
+                        endpoint,
+                        ProviderEndpoint::Responses
+                            | ProviderEndpoint::ChatCompletions
+                            | ProviderEndpoint::Messages
+                    ),
+                tested: adapter.supported_endpoints().contains(&endpoint)
+                    && provider_replay_case_count(provider) > 0,
+            })
             .collect(),
         model_count: adapter.model_catalog().len(),
         replay_case_count: provider_replay_case_count(provider),
@@ -275,6 +351,7 @@ pub fn provider_adapter_contract_matrix() -> Vec<ProviderAdapterContractSpec> {
 pub enum ProviderTransformPhase {
     ClientRequestToUpstream,
     UpstreamResponseToClient,
+    UpstreamStreamEventToClient,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -313,6 +390,19 @@ const GEMINI_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Messages,
     ProviderEndpoint::Models,
     ProviderEndpoint::Embeddings,
+];
+
+pub const ALL_PROVIDER_ENDPOINTS: &[ProviderEndpoint] = &[
+    ProviderEndpoint::Responses,
+    ProviderEndpoint::ChatCompletions,
+    ProviderEndpoint::Messages,
+    ProviderEndpoint::Models,
+    ProviderEndpoint::Embeddings,
+    ProviderEndpoint::Images,
+    ProviderEndpoint::Audio,
+    ProviderEndpoint::Batches,
+    ProviderEndpoint::Rerank,
+    ProviderEndpoint::A2a,
 ];
 
 pub fn provider_supported_endpoints(provider: ProviderId) -> &'static [ProviderEndpoint] {

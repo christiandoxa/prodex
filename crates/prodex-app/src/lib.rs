@@ -41,6 +41,7 @@ use tungstenite::{
 };
 
 mod app_commands;
+mod app_server_broker;
 mod app_state;
 mod audit_log;
 mod cli_args;

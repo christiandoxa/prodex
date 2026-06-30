@@ -315,8 +315,14 @@ pub(crate) fn configured_secret_backend_selection() -> Result<secret_store::Secr
                 .as_ref()
                 .and_then(|policy| policy.keyring_service.clone())
         });
-    secret_store::SecretBackendSelection::from_kind(backend, keyring_service)
-        .map_err(anyhow::Error::new)
+    let selection = secret_store::SecretBackendSelection::from_kind(backend, keyring_service)
+        .map_err(anyhow::Error::new)?;
+    if let secret_store::SecretBackendSelection::Keyring(backend) = &selection
+        && !backend.is_supported()
+    {
+        anyhow::bail!("{}", backend.unsupported_reason());
+    }
+    Ok(selection)
 }
 
 pub(crate) fn format_secret_backend_summary() -> String {

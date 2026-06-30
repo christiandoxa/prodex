@@ -1,6 +1,6 @@
 use crate::{
-    ProviderAdapterContract, ProviderEndpoint, ProviderId, ProviderModelSpec, ProviderWireFormat,
-    provider_model_catalog, provider_supported_endpoints,
+    ProviderAdapterContract, ProviderCapabilityStatus, ProviderEndpoint, ProviderId,
+    ProviderModelSpec, ProviderWireFormat, provider_model_catalog, provider_supported_endpoints,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +71,20 @@ impl ProviderAdapterContract for StaticProviderAdapter {
 
     fn model_catalog(&self) -> &'static [ProviderModelSpec] {
         provider_model_catalog(self.provider)
+    }
+
+    fn capability_status(&self, endpoint: ProviderEndpoint) -> ProviderCapabilityStatus {
+        if !self.supported_endpoints().contains(&endpoint) {
+            return ProviderCapabilityStatus::Unsupported;
+        }
+        match self.provider {
+            ProviderId::OpenAi => ProviderCapabilityStatus::Native,
+            ProviderId::Local => ProviderCapabilityStatus::Passthrough,
+            ProviderId::Anthropic
+            | ProviderId::Copilot
+            | ProviderId::DeepSeek
+            | ProviderId::Gemini => ProviderCapabilityStatus::Translated,
+        }
     }
 }
 

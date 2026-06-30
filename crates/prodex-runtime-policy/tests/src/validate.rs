@@ -83,6 +83,45 @@ allowed_models = ["prodex-fast", ""]
 }
 
 #[test]
+fn validate_runtime_policy_rejects_invalid_adaptive_routing_values() {
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[gateway.adaptive_routing]
+window_size = 0
+min_samples = 1
+exploration_rate = 0.25
+"#,
+    );
+
+    let err = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("zero adaptive window should be rejected");
+    assert!(
+        err.to_string()
+            .contains("gateway.adaptive_routing.window_size")
+    );
+
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[gateway.adaptive_routing]
+window_size = 64
+min_samples = 1
+exploration_rate = 1.5
+"#,
+    );
+
+    let err = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("adaptive exploration rate should be bounded");
+    assert!(
+        err.to_string()
+            .contains("gateway.adaptive_routing.exploration_rate")
+    );
+}
+
+#[test]
 fn validate_runtime_policy_rejects_unknown_gateway_route_strategy() {
     let policy = parse_policy(
         r#"

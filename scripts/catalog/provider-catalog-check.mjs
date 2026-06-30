@@ -4,8 +4,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const sourcePath = resolve(root, "crates/prodex-provider-core/src/lib.rs");
-const source = readFileSync(sourcePath, "utf8");
+const sourceArg = process.argv.find((arg) => arg.startsWith("--source="));
+const sourcePaths = sourceArg
+  ? [resolve(root, sourceArg.slice("--source=".length))]
+  : [
+      resolve(root, "crates/prodex-provider-core/src/lib.rs"),
+      resolve(root, "crates/prodex-provider-core/src/models.rs"),
+    ];
+const sources = sourcePaths.map((path) => ({ path, text: readFileSync(path, "utf8") }));
+const source = sources.map((entry) => entry.text).join("\n");
 const json = process.argv.includes("--json");
 const stringConstants = new Map(
   [...source.matchAll(/pub const ([A-Z0-9_]+): &str = "([^"]+)";/g)].map((match) => [
@@ -14,6 +21,7 @@ const stringConstants = new Map(
   ]),
 );
 const validEndpointSets = new Set(["OPENAI_ENDPOINTS", "CORE_TEXT_ENDPOINTS", "GEMINI_ENDPOINTS"]);
+const requiredProviders = ["OpenAi", "Anthropic", "Copilot", "DeepSeek", "Gemini", "Local"];
 
 function collectModelCalls(text) {
   const calls = [];
@@ -144,8 +152,14 @@ const issues = [];
 const seenIds = new Map();
 const seenNames = new Map();
 const providerCounts = new Map();
+if (models.length === 0) {
+  issues.push("model_count is 0");
+}
 for (const model of models) {
   providerCounts.set(model.provider, (providerCounts.get(model.provider) ?? 0) + 1);
+  if (!model.provider || model.provider === "undefined") {
+    issues.push(`missing provider metadata for ${model.id || `model ${models.indexOf(model) + 1}`}`);
+  }
   if (!model.id || model.id.includes(" ")) {
     issues.push(`invalid id for ${model.provider}: ${model.id}`);
   }
@@ -171,10 +185,21 @@ for (const model of models) {
     seenNames.set(aliasKey, model);
   }
 }
+if (providerCounts.size === 0) {
+  issues.push("provider_count is 0");
+}
+for (const provider of requiredProviders) {
+  if (!providerCounts.has(provider)) {
+    issues.push(`required provider missing: ${provider}`);
+  }
+}
 
 const summary = {
-  source: sourcePath,
+  source: sourcePaths.join(", "),
+  sources: sourcePaths,
   models: models.length,
+  model_count: models.length,
+  provider_count: providerCounts.size,
   providers: Object.fromEntries([...providerCounts.entries()].sort()),
   issues,
 };
@@ -183,8 +208,11 @@ if (json) {
   console.log(JSON.stringify(summary, null, 2));
 } else {
   console.log(
-    `provider catalog: ${summary.models} models across ${Object.keys(summary.providers).length} providers`,
+    `provider catalog: ${summary.model_count} models across ${summary.provider_count} providers`,
   );
+  for (const sourcePath of summary.sources) {
+    console.log(`  source: ${sourcePath}`);
+  }
   for (const [provider, count] of Object.entries(summary.providers)) {
     console.log(`  ${provider}: ${count}`);
   }

@@ -103,6 +103,15 @@ pub(crate) fn codex_session_image_attachments_are_stable(
     }
 
     let mut cursor = 0;
+    while let Some((path_start, path_end)) = next_codex_session_clipboard_path(contents, cursor) {
+        let path = Path::new(&contents[path_start..path_end]);
+        if path.is_absolute() && !path.starts_with(&stable_image_dir) {
+            return false;
+        }
+        cursor = path_end;
+    }
+
+    let mut cursor = 0;
     while let Some((path_start, path_end)) = next_codex_session_attachment_path(contents, cursor) {
         let path = Path::new(&contents[path_start..path_end]);
         if path.is_absolute()
@@ -122,7 +131,9 @@ pub(crate) fn rewrite_codex_persisted_attachment_paths(
     contents: &str,
 ) -> Result<String> {
     let image_rewritten = rewrite_codex_session_image_paths(codex_home, contents)?;
-    rewrite_codex_session_inline_attachment_paths(codex_home, &image_rewritten)
+    let clipboard_rewritten =
+        rewrite_codex_session_inline_clipboard_paths(codex_home, &image_rewritten)?;
+    rewrite_codex_session_inline_attachment_paths(codex_home, &clipboard_rewritten)
 }
 
 fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Result<String> {
@@ -214,6 +225,46 @@ fn rewrite_codex_session_inline_attachment_paths(
 
     output.push_str(&contents[cursor..]);
     Ok(output)
+}
+
+fn rewrite_codex_session_inline_clipboard_paths(
+    codex_home: &Path,
+    contents: &str,
+) -> Result<String> {
+    let mut output = String::with_capacity(contents.len());
+    let mut cursor = 0;
+
+    while let Some((path_start, path_end)) = next_codex_session_clipboard_path(contents, cursor) {
+        let raw_path = &contents[path_start..path_end];
+        let replacement = stable_codex_session_image_path(codex_home, raw_path)?;
+        output.push_str(&contents[cursor..path_start]);
+        output.push_str(replacement.as_deref().unwrap_or(raw_path));
+        cursor = path_end;
+    }
+
+    output.push_str(&contents[cursor..]);
+    Ok(output)
+}
+
+fn next_codex_session_clipboard_path(contents: &str, cursor: usize) -> Option<(usize, usize)> {
+    let marker_start = cursor + contents[cursor..].find(CODEX_CLIPBOARD_PREFIX)?;
+    let bytes = contents.as_bytes();
+
+    let mut path_start = marker_start;
+    while path_start > 0 && is_codex_session_path_byte(bytes[path_start - 1]) {
+        path_start -= 1;
+    }
+
+    let mut path_end = marker_start + CODEX_CLIPBOARD_PREFIX.len();
+    while path_end < bytes.len() && is_codex_session_path_byte(bytes[path_end]) {
+        path_end += 1;
+    }
+    while path_end > marker_start && bytes[path_end - 1] == b'.' {
+        path_end -= 1;
+    }
+
+    (path_start < marker_start && path_end > marker_start + CODEX_CLIPBOARD_PREFIX.len())
+        .then_some((path_start, path_end))
 }
 
 fn next_codex_session_attachment_path(contents: &str, cursor: usize) -> Option<(usize, usize)> {
