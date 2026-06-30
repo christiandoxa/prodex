@@ -5,6 +5,7 @@ const CODEX_COMMAND_SERVER_SUBCOMMANDS: [&str; 3] = ["mcp-server", "app-server",
 
 mod cleanup;
 mod help;
+mod ping;
 mod profile;
 mod runtime_args;
 mod runtime_features;
@@ -13,6 +14,7 @@ mod session_context;
 pub use cleanup::*;
 pub use help::RUNTIME_PROXY_DOCTOR_TAIL_BYTES;
 use help::*;
+pub use ping::*;
 pub use presidio::*;
 pub use profile::*;
 pub use runtime_args::*;
@@ -125,6 +127,11 @@ pub enum Commands {
         after_help = CLI_REDEEM_AFTER_HELP
     )]
     Redeem(RedeemArgs),
+    #[command(
+        subcommand,
+        about = "Send lightweight prompt checks through ready profiles."
+    )]
+    Ping(PingCommands),
     #[command(
         about = "Serve a local browser dashboard for profiles, active account, and quota usage."
     )]
@@ -338,6 +345,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "update"
             | "quota"
             | "redeem"
+            | "ping"
             | "dashboard"
             | "run"
             | "caveman"

@@ -201,7 +201,53 @@
             },
         );
 
-        assert_eq!(frame.table.as_ref().expect("table").rows.len(), 8);
+        assert_eq!(frame.table.as_ref().expect("table").rows.len(), 6);
+    }
+
+    #[test]
+    fn all_quota_watch_tui_detail_scroll_reaches_last_profiles() {
+        let reports = (0..4)
+            .map(|index| {
+                let mut report = test_openai_quota_report(test_openai_usage_with_windows(
+                    20,
+                    10,
+                    1_700_001_800,
+                ));
+                report.name = format!("profile-{index}");
+                report
+            })
+            .collect::<Vec<_>>();
+        let snapshot = AllQuotaWatchSnapshot::Reports {
+            updated: "2026-06-26 10:00:00 UTC".to_string(),
+            profile_count: reports.len(),
+            reports,
+        };
+
+        let max_scroll = quota_watch_tui_max_scroll_offset_for_snapshot(
+            &snapshot,
+            true,
+            QuotaProviderFilter::All,
+            QuotaReportSort::Profile,
+            Some(7),
+        );
+        let frame = build_all_quota_watch_tui_frame(
+            &snapshot,
+            AllQuotaWatchLayout {
+                detail: true,
+                scroll_offset: max_scroll,
+                sort: QuotaReportSort::Profile,
+                provider_filter: QuotaProviderFilter::All,
+                provider_filter_locked: false,
+                total_width: 100,
+                max_lines: Some(7),
+            },
+        );
+
+        let rows = &frame.table.as_ref().expect("table").rows;
+        assert_eq!(max_scroll, 2);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].profile, vec!["profile-2".to_string()]);
+        assert_eq!(rows[1].profile, vec!["profile-3".to_string()]);
     }
 
     #[test]

@@ -207,6 +207,12 @@ impl CommandExecute for PresidioCommands {
     }
 }
 
+impl CommandExecute for PingCommands {
+    fn execute(self) -> Result<()> {
+        handle_ping(self)
+    }
+}
+
 impl CommandExecute for ListProfilesCommand {
     fn execute(self) -> Result<()> {
         handle_list_profiles()
@@ -323,6 +329,7 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Update(command) => RoutedCommand::new(command),
         Commands::Quota(command) => RoutedCommand::new(command),
         Commands::Redeem(command) => RoutedCommand::new(command),
+        Commands::Ping(command) => RoutedCommand::new(command),
         Commands::Dashboard(command) => RoutedCommand::new(command),
         Commands::Run(command) => RoutedCommand::new(command),
         Commands::Caveman(command) => RoutedCommand::new(command),

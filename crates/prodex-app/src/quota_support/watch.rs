@@ -1275,12 +1275,14 @@ fn quota_watch_table_text(table: &AllQuotaWatchTuiTable) -> Text<'static> {
         ),
         quota_watch_title_style(),
     )];
-    for row in &table.rows {
+    for (index, row) in table.rows.iter().enumerate() {
+        if index > 0 {
+            lines.push(Line::raw(""));
+        }
         lines.push(quota_watch_table_main_line(row));
         for detail in &row.detail {
             lines.push(Line::styled(detail.clone(), quota_watch_detail_style()));
         }
-        lines.push(Line::raw(""));
     }
     Text::from(lines)
 }
@@ -1460,7 +1462,8 @@ fn quota_watch_visible_profile_count(
     let mut shown_profiles = 0_usize;
     let mut remaining = max_lines.saturating_sub(1);
     for index in sorted_indexes.iter().copied().skip(start_profile) {
-        let row_lines = quota_watch_tui_row_line_count(&reports[index], detail);
+        let row_lines = usize::from(shown_profiles > 0)
+            + quota_watch_tui_row_line_count(&reports[index], detail);
         if row_lines > remaining {
             break;
         }

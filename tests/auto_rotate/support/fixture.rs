@@ -76,8 +76,13 @@ pub(crate) fn setup_fixture() -> Fixture {
         &codex_bin,
         r#"#!/bin/sh
 printf '%s\n' "$CODEX_HOME" > "$TEST_CODEX_LOG"
+if [ -n "$TEST_CODEX_LOG_APPEND" ]; then
+  printf '%s\n' "$CODEX_HOME" >> "$TEST_CODEX_LOG_APPEND"
+fi
 if [ -n "$TEST_CODEX_ARGS_LOG" ]; then
-  : > "$TEST_CODEX_ARGS_LOG"
+  if [ -z "$TEST_CODEX_ARGS_LOG_APPEND" ]; then
+    : > "$TEST_CODEX_ARGS_LOG"
+  fi
   for arg in "$@"; do
     printf '%s\n' "$arg" >> "$TEST_CODEX_ARGS_LOG"
   done

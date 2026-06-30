@@ -17,6 +17,7 @@ fn quota_watch_table_starts_rows_without_header_padding() {
     assert!(format!("{:?}", text.lines[0]).contains("PROFILE"));
     assert!(!format!("{:?}", text.lines[0]).contains("|"));
     assert!(format!("{:?}", text.lines[1]).contains("main"));
+    assert_eq!(text.lines.len(), 2);
     assert!(text.lines[1]
         .spans
         .iter()
