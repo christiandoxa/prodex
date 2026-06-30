@@ -7,6 +7,10 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, IsTerminal};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::widgets::Wrap;
 use std::path::Path;
 use terminal_ui::{
     tui_border_style, tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style,
@@ -151,6 +155,18 @@ fn print_session_reports(
 }
 
 fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) -> Result<()> {
+    // Try scrollable TUI first (like profile list)
+    let total_lines = session_tui_item_count(reports) * 2;
+    let term_h = usize::from(terminal::size().map(|(_, h)| h).unwrap_or(24));
+    let needs_scroll = total_lines.saturating_add(6) > term_h
+        && env::var_os("CODEX_CI").is_none()
+        && !env::var("CI").map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes")).unwrap_or(false);
+
+    if needs_scroll {
+        return render_session_reports_tui_scrollable(reports, empty_message);
+    }
+
+    // Inline (short list) — identical to before
     let height = session_report_tui_height(reports);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         let output = render_session_reports_output(reports, false, empty_message)
@@ -220,6 +236,125 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
         .context("failed to draw session report TUI")?;
     let _ = terminal.show_cursor();
     Ok(())
+}
+
+fn session_tui_item_count(reports: &[SessionReport]) -> usize {
+    reports.len().saturating_mul(4)
+}
+
+fn render_session_reports_tui_scrollable(reports: &[SessionReport], empty_message: &str) -> Result<()> {
+    crossterm::terminal::enable_raw_mode().context("failed to enable raw mode")?;
+    let mut stdout = io::stdout();
+    if let Err(err) = crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen, crossterm::cursor::Hide) {
+        let _ = crossterm::terminal::disable_raw_mode();
+        return Err(err).context("failed to enter alternate screen");
+    }
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).context("failed to init terminal")?;
+
+    let mut scroll_offset = 0usize;
+    let result = (|| -> Result<()> {
+        loop {
+            let lines: Vec<Line<'_>> = session_scroll_lines(reports);
+            let total = lines.len();
+            let size = terminal.size()?;
+            let visible = usize::from(size.height).saturating_sub(6).max(1);
+            let max_scroll = total.saturating_sub(visible);
+            scroll_offset = scroll_offset.min(max_scroll);
+
+            terminal.draw(|frame| {
+                let chunks = Layout::default().direction(Direction::Vertical)
+                    .constraints([Constraint::Length(3), Constraint::Min(1), Constraint::Length(3)])
+                    .split(frame.area());
+
+                let header = Paragraph::new(Line::from(vec![
+                    Span::styled("Prodex Sessions", tui_title_style()),
+                    Span::raw("  "),
+                    Span::styled(format!("{} session(s)", reports.len()), tui_secondary_style()),
+                ])).block(Block::default().borders(Borders::ALL).border_style(tui_border_style()));
+                frame.render_widget(header, chunks[0]);
+
+                if reports.is_empty() {
+                    let empty = Paragraph::new(Line::styled(empty_message.to_string(), tui_secondary_style()))
+                        .block(Block::default().borders(Borders::LEFT | Borders::RIGHT).border_style(tui_border_style()));
+                    frame.render_widget(empty, chunks[1]);
+                } else {
+                    let slice: Vec<Line<'_>> = lines.iter().skip(scroll_offset).take(visible).cloned().collect();
+                    let body = Paragraph::new(Text::from(slice))
+                        .block(Block::default().borders(Borders::LEFT | Borders::RIGHT).border_style(tui_border_style()))
+                        .wrap(Wrap { trim: false });
+                    frame.render_widget(body, chunks[1]);
+                }
+
+                let footer_text = if max_scroll == 0 {
+                    format!("{} session(s) — q / Esc / Enter to exit", reports.len())
+                } else {
+                    format!(
+                        "lines {}-{} of {} — j/k/Up/Down/PgUp/PgDn/Home/End to scroll, q/Esc/Enter to exit",
+                        scroll_offset.saturating_add(1),
+                        (scroll_offset + visible).min(total),
+                        total,
+                    )
+                };
+                let footer = Paragraph::new(Line::styled(footer_text, tui_hint_style().add_modifier(Modifier::BOLD)))
+                    .block(Block::default().borders(Borders::ALL).border_style(tui_border_style()));
+                frame.render_widget(footer, chunks[2]);
+            }).context("failed to draw session scroll TUI")?;
+
+            if let Event::Key(key) = crossterm::event::read().context("failed to read input")?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => break,
+                    KeyCode::Char('c') | KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                    KeyCode::Char('j') | KeyCode::Down => scroll_offset = scroll_offset.saturating_add(1).min(max_scroll),
+                    KeyCode::Char('k') | KeyCode::Up => scroll_offset = scroll_offset.saturating_sub(1),
+                    KeyCode::PageDown => scroll_offset = scroll_offset.saturating_add(visible).min(max_scroll),
+                    KeyCode::PageUp => scroll_offset = scroll_offset.saturating_sub(visible),
+                    KeyCode::Home => scroll_offset = 0,
+                    KeyCode::End => scroll_offset = max_scroll,
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    })();
+
+    let _ = crossterm::terminal::disable_raw_mode();
+    let _ = crossterm::execute!(terminal.backend_mut(), crossterm::cursor::Show, crossterm::terminal::LeaveAlternateScreen);
+    let _ = terminal.show_cursor();
+    result
+}
+
+fn session_scroll_lines(reports: &[SessionReport]) -> Vec<Line<'_>> {
+    let mut lines = Vec::new();
+    for report in reports {
+        let title = report.thread_name.as_deref().filter(|v| !v.trim().is_empty()).unwrap_or("Untitled session");
+        let updated = report.updated_at.as_deref().unwrap_or("-");
+        let profile = report.profile.as_deref().unwrap_or("-");
+        let provider = report.model_provider.as_deref().unwrap_or("-");
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}", report.id), tui_hint_style().add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled(title, tui_primary_style()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("updated ", tui_secondary_style()),
+            Span::raw(updated),
+            Span::styled("  profile ", tui_secondary_style()),
+            Span::raw(profile),
+            Span::styled("  provider ", tui_secondary_style()),
+            Span::raw(provider),
+        ]));
+        if let Some(cwd) = &report.cwd {
+            lines.push(Line::from(vec![
+                Span::styled("cwd ", tui_secondary_style()),
+                Span::raw(cwd.as_str()),
+            ]));
+        }
+        lines.push(Line::raw(""));
+    }
+    lines
 }
 
 fn session_report_tui_height(reports: &[SessionReport]) -> u16 {
