@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.236.0 - 2026-06-30
+
+### Misc
+
+- Preserve shared session attachments (`3ddbc77`)
+
 ## 0.235.0 - 2026-06-30
 
 ### CLI
@@ -88,9 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Render quota views with native ratatui (`a6a766d`)
-
-## 0.224.0 - 2026-06-27
-
-### Misc
-
-- Add ponytail optimizer and reset credit expiry (`c6d3497`)
