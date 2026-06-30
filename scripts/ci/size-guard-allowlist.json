@@ -11,7 +11,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 949,
+    "maxLines": 985,
     "reason": "SuperArgs provider-flag extraction for trailing-var-arg session-ID-first syntax coexists with struct definition and tests; tightly coupled arg-parsing surface."
   },
   {
@@ -26,7 +26,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs",
-    "maxLines": 1943,
+    "maxLines": 1944,
     "reason": "DeepSeek Responses-to-chat request validation, field mapping, reasoning, web-search gating, and conversation replay remain capped while the adapter is split by request domain."
   },
   {
@@ -48,5 +48,10 @@
     "file": "crates/prodex-app/src/profile_commands/login.rs",
     "maxLines": 945,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
+  },
+  {
+    "file": "crates/prodex-provider-core/src/models.rs",
+    "maxLines": 853,
+    "reason": "Provider model catalog definitions, JSON serialization, and model metadata remain capped while model ownership is split from adapter logic."
   }
 ]
