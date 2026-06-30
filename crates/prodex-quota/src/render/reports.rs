@@ -504,8 +504,7 @@ fn compare_quota_reports_for_sort(
         QuotaReportSort::Current => quota_report_current_blocked_sort_key(left)
             .cmp(&quota_report_current_blocked_sort_key(right))
             .then_with(|| {
-                quota_report_current_sort_key(left)
-                    .cmp(&quota_report_current_sort_key(right))
+                quota_report_current_sort_key(left).cmp(&quota_report_current_sort_key(right))
             })
             .then_with(|| {
                 quota_report_remaining_sort_key(left).cmp(&quota_report_remaining_sort_key(right))

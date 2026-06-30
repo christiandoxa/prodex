@@ -1,16 +1,16 @@
 use anyhow::{Context, Result};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::Wrap;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, IsTerminal};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
-use ratatui::widgets::Wrap;
 use std::path::Path;
 use terminal_ui::{
     tui_border_style, tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style,
@@ -160,7 +160,9 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
     let term_h = usize::from(terminal::size().map(|(_, h)| h).unwrap_or(24));
     let needs_scroll = total_lines.saturating_add(6) > term_h
         && env::var_os("CODEX_CI").is_none()
-        && !env::var("CI").map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes")).unwrap_or(false);
+        && !env::var("CI")
+            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
 
     if needs_scroll {
         return render_session_reports_tui_scrollable(reports, empty_message);
@@ -242,10 +244,17 @@ fn session_tui_item_count(reports: &[SessionReport]) -> usize {
     reports.len().saturating_mul(4)
 }
 
-fn render_session_reports_tui_scrollable(reports: &[SessionReport], empty_message: &str) -> Result<()> {
+fn render_session_reports_tui_scrollable(
+    reports: &[SessionReport],
+    empty_message: &str,
+) -> Result<()> {
     crossterm::terminal::enable_raw_mode().context("failed to enable raw mode")?;
     let mut stdout = io::stdout();
-    if let Err(err) = crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen, crossterm::cursor::Hide) {
+    if let Err(err) = crossterm::execute!(
+        stdout,
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::cursor::Hide
+    ) {
         let _ = crossterm::terminal::disable_raw_mode();
         return Err(err).context("failed to enter alternate screen");
     }
@@ -306,10 +315,20 @@ fn render_session_reports_tui_scrollable(reports: &[SessionReport], empty_messag
             {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => break,
-                    KeyCode::Char('c') | KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                    KeyCode::Char('j') | KeyCode::Down => scroll_offset = scroll_offset.saturating_add(1).min(max_scroll),
-                    KeyCode::Char('k') | KeyCode::Up => scroll_offset = scroll_offset.saturating_sub(1),
-                    KeyCode::PageDown => scroll_offset = scroll_offset.saturating_add(visible).min(max_scroll),
+                    KeyCode::Char('c') | KeyCode::Char('z')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        break;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        scroll_offset = scroll_offset.saturating_add(1).min(max_scroll)
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        scroll_offset = scroll_offset.saturating_sub(1)
+                    }
+                    KeyCode::PageDown => {
+                        scroll_offset = scroll_offset.saturating_add(visible).min(max_scroll)
+                    }
                     KeyCode::PageUp => scroll_offset = scroll_offset.saturating_sub(visible),
                     KeyCode::Home => scroll_offset = 0,
                     KeyCode::End => scroll_offset = max_scroll,
@@ -321,7 +340,11 @@ fn render_session_reports_tui_scrollable(reports: &[SessionReport], empty_messag
     })();
 
     let _ = crossterm::terminal::disable_raw_mode();
-    let _ = crossterm::execute!(terminal.backend_mut(), crossterm::cursor::Show, crossterm::terminal::LeaveAlternateScreen);
+    let _ = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::cursor::Show,
+        crossterm::terminal::LeaveAlternateScreen
+    );
     let _ = terminal.show_cursor();
     result
 }
@@ -329,12 +352,19 @@ fn render_session_reports_tui_scrollable(reports: &[SessionReport], empty_messag
 fn session_scroll_lines(reports: &[SessionReport]) -> Vec<Line<'_>> {
     let mut lines = Vec::new();
     for report in reports {
-        let title = report.thread_name.as_deref().filter(|v| !v.trim().is_empty()).unwrap_or("Untitled session");
+        let title = report
+            .thread_name
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or("Untitled session");
         let updated = report.updated_at.as_deref().unwrap_or("-");
         let profile = report.profile.as_deref().unwrap_or("-");
         let provider = report.model_provider.as_deref().unwrap_or("-");
         lines.push(Line::from(vec![
-            Span::styled(format!("{}", report.id), tui_hint_style().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                report.id.as_str(),
+                tui_hint_style().add_modifier(Modifier::BOLD),
+            ),
             Span::raw("  "),
             Span::styled(title, tui_primary_style()),
         ]));
