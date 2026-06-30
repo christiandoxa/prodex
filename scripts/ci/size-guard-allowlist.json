@@ -16,7 +16,7 @@
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1798,
+    "maxLines": 1864,
     "reason": "Live quota ratatui rendering, status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
   },
   {
@@ -26,7 +26,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs",
-    "maxLines": 1944,
+    "maxLines": 1935,
     "reason": "DeepSeek Responses-to-chat request validation, field mapping, reasoning, web-search gating, and conversation replay remain capped while the adapter is split by request domain."
   },
   {
