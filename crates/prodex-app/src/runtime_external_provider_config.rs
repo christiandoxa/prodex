@@ -174,16 +174,32 @@ fn external_catalog_models(
     let dynamic_models = external_dynamic_catalog_models(codex_home, provider);
     let mut models = Vec::with_capacity(provider.models().len() + dynamic_models.len() + 1);
     let mut seen = BTreeSet::new();
-    for slug in std::iter::once(launch_model)
-        .chain(dynamic_models.iter().map(|model| model.slug.as_str()))
-        .chain(provider.models().iter().map(|model| model.0))
+    let launch_model_compact_limit = dynamic_models
+        .iter()
+        .find(|model| model.slug.eq_ignore_ascii_case(launch_model))
+        .and_then(|model| model.context_window)
+        .map(|cw| cw.saturating_mul(95).saturating_div(100));
+    let default_compact_limit = auto_compact_token_limit;
+    for slug in std::iter::once((launch_model, launch_model_compact_limit))
+        .chain(dynamic_models.iter().map(|model| {
+            let limit = model
+                .context_window
+                .map(|cw| cw.saturating_mul(95).saturating_div(100))
+                .unwrap_or(auto_compact_token_limit);
+            (model.slug.as_str(), Some(limit))
+        }))
+        .chain(provider.models().iter().map(|model| (model.0, None::<u64>)))
     {
+        let (slug, per_model_compact_limit) = slug;
         let slug = slug.trim();
         if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
             continue;
         }
         let priority = models.len() + 1;
         let (display_name, description) = provider.model_metadata(slug);
+        let model_compact_limit = per_model_compact_limit
+            .unwrap_or(default_compact_limit)
+            .min(context_window.saturating_sub(1));
         models.push(external_catalog_model(
             provider,
             slug,
@@ -191,7 +207,7 @@ fn external_catalog_models(
             description,
             priority,
             context_window,
-            auto_compact_token_limit,
+            model_compact_limit,
         ));
     }
     models
@@ -200,6 +216,7 @@ fn external_catalog_models(
 #[derive(Clone, Debug)]
 struct ExternalDynamicCatalogModel {
     slug: String,
+    context_window: Option<u64>,
 }
 
 fn external_dynamic_catalog_models(
@@ -229,6 +246,10 @@ fn external_dynamic_catalog_models(
                 .or_else(|| model.get("model"))
                 .and_then(serde_json::Value::as_str)?
                 .trim();
+            let context_window = model
+                .get("context_window")
+                .and_then(serde_json::Value::as_u64)
+                .filter(|cw| *cw > 1);
             if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
                 return None;
             }
@@ -239,6 +260,7 @@ fn external_dynamic_catalog_models(
             }
             Some(ExternalDynamicCatalogModel {
                 slug: slug.to_string(),
+                context_window,
             })
         })
         .collect()

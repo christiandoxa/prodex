@@ -58,10 +58,34 @@ pub(super) fn read_copilot_libsecret_token(account_key: &str) -> Result<Option<S
     {
         Ok(output) if output.status.success() => {
             let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            Ok((!token.is_empty()).then_some(token))
+            if !token.is_empty() {
+                return Ok(Some(token));
+            }
         }
-        _ => Ok(None),
+        _ => {}
     }
+
+    // Copilot CLI ≤1.0.31 stored tokens with the `account` attribute
+    // (keytar getPassword(service, account)).  Later versions use
+    // `username` (rust-keyring).  Try both so old entries are not missed.
+    match Command::new("secret-tool")
+        .arg("lookup")
+        .arg("service")
+        .arg(COPILOT_KEYCHAIN_SERVICE)
+        .arg("account")
+        .arg(account_key)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !token.is_empty() {
+                return Ok(Some(token));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(None)
 }
 
 fn discover_copilot_keytar_path() -> Result<PathBuf> {
