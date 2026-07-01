@@ -16,14 +16,42 @@ use super::local_rewrite_gateway_billing_summary::{
 use super::local_rewrite_gateway_ledger_types::RuntimeGatewayBillingLedgerEntry;
 use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 use super::*;
+use prodex_gateway_http::{
+    GatewayHttpPaginationQueryErrorStatus, page_request_from_query,
+    plan_gateway_http_pagination_query_error_response,
+};
 
 const RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT: usize = 100_000;
+const RUNTIME_GATEWAY_ADMIN_LEDGER_DEFAULT_LIMIT: usize = 1000;
 
 pub(super) fn runtime_gateway_admin_ledger_response(
+    path_and_query: &str,
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    match runtime_gateway_billing_ledger_load(&shared.gateway_state_store, 1000) {
+    let query = path_and_query
+        .split_once('?')
+        .map(|(_, query)| query)
+        .unwrap_or_default();
+    let page_request = match page_request_from_query(query) {
+        Ok(page_request) => page_request,
+        Err(error) => {
+            let response = plan_gateway_http_pagination_query_error_response(&error);
+            return build_runtime_proxy_json_error_response(
+                match response.status {
+                    GatewayHttpPaginationQueryErrorStatus::BadRequest => 400,
+                },
+                response.code,
+                response.message,
+            );
+        }
+    };
+    let limit = if query.is_empty() {
+        RUNTIME_GATEWAY_ADMIN_LEDGER_DEFAULT_LIMIT
+    } else {
+        usize::from(page_request.limit)
+    };
+    match runtime_gateway_billing_ledger_load(&shared.gateway_state_store, limit) {
         Ok(records) => {
             let records = runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth);
             runtime_gateway_admin_json_response(
@@ -32,7 +60,7 @@ pub(super) fn runtime_gateway_admin_ledger_response(
                     "object": "gateway.billing_ledger",
                     "state_backend": shared.gateway_state_store.label(),
                     "ledger_path": shared.gateway_state_store.ledger_path().display().to_string(),
-                    "limit": 1000,
+                    "limit": limit,
                     "records": records,
                 }),
             )

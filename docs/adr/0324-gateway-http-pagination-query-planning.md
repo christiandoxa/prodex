@@ -28,6 +28,8 @@ request-controlled value.
 
 - HTTP adapters can normalize pagination requests before calling control-plane
   application code.
+- Legacy mounted gateway admin ledger reads now use the same query planner for
+  `limit` validation instead of hand-written adapter-local parsing.
 - Cursor length and encoding details remain hidden from client-visible
   responses.
 - Pagination semantics remain domain-owned while gateway HTTP handles only

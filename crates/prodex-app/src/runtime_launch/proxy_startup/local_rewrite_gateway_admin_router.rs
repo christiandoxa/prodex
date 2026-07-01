@@ -250,7 +250,11 @@ pub(super) fn runtime_gateway_admin_response(
                 "gateway ledger endpoint requires GET",
             ));
         }
-        return Some(runtime_gateway_admin_ledger_response(shared, &admin_auth));
+        return Some(runtime_gateway_admin_ledger_response(
+            &captured.path_and_query,
+            shared,
+            &admin_auth,
+        ));
     }
 
     if path == ledger_csv_path {

@@ -12,11 +12,11 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
-
 mod deepseek;
 mod gateway_admin_auth;
 mod gateway_admin_crud;
 mod gateway_admin_governance_headers;
+mod gateway_admin_ledger_query;
 mod gateway_admin_scope;
 mod gateway_admin_tenant_scope;
 mod gateway_health;

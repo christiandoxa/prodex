@@ -157,7 +157,9 @@ while moving legacy adapter code behind enterprise boundaries.
   multi-tenant production mode. The dedicated `prodex-control-plane` binary can
   now exercise control-plane HTTP route and idempotency planning for those
   paths through the shared application and gateway-http boundaries instead of
-  duplicating that logic in ad hoc scripts.
+  duplicating that logic in ad hoc scripts. Legacy mounted gateway admin ledger
+  reads now also delegate pagination query validation to the shared
+  `prodex-gateway-http` boundary, shrinking one more adapter-local branch.
 
 ### 2. Root Token Must Not Bypass Data-Plane Authorization
 
