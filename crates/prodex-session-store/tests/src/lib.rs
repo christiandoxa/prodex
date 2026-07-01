@@ -448,7 +448,7 @@ fn repair_resume_session_metadata_prefix_skips_unreadable_unrelated_files_for_ex
     let mut perms = fs::metadata(&unrelated)
         .expect("unrelated metadata should read")
         .permissions();
-    perms.set_mode(0);
+    perms.set_mode(0o0);
     fs::set_permissions(&unrelated, perms).expect("unrelated permissions should update");
 
     let repaired =
@@ -499,7 +499,7 @@ fn resolve_session_report_by_id_in_store_skips_unreadable_unrelated_files_for_ex
     let mut perms = fs::metadata(&unrelated)
         .expect("unrelated metadata should read")
         .permissions();
-    perms.set_mode(0);
+    perms.set_mode(0o0);
     fs::set_permissions(&unrelated, perms).expect("unrelated permissions should update");
 
     let report = resolve_session_report_by_id_in_store(&root, &AppState::default(), session_id)

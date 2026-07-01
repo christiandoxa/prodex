@@ -181,7 +181,7 @@ fn run_strategy_exact_resume_provider_detection_skips_unreadable_unrelated_files
     )
     .unwrap();
     let mut perms = fs::metadata(&unrelated).unwrap().permissions();
-    perms.set_mode(0);
+    perms.set_mode(0o0);
     fs::set_permissions(&unrelated, perms).unwrap();
 
     let strategy = RunCommandStrategy::new(RunArgs {
