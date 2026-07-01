@@ -135,6 +135,10 @@ use runtime_launch_shared::*;
 use runtime_local_provider_config::*;
 use runtime_persistence::*;
 use runtime_policy::*;
+pub use runtime_policy::{
+    RuntimePolicyPublicationDeliveryPlan, clear_runtime_policy_cache,
+    deliver_config_publication_event_to_gateway_runtime,
+};
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;

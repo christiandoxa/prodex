@@ -1,28 +1,21 @@
-#[cfg(test)]
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
 use anyhow::{Result, anyhow, bail};
-#[cfg(test)]
 use prodex_config::{ConfigPublicationEventPlan, ConfigPublicationEventTarget};
-#[cfg(test)]
 use prodex_observability::{
     ConfigPublicationDeliveryMetricPlan, ConfigPublicationDeliveryResult,
     ConfigPublicationDeliveryTarget, plan_config_publication_delivery_metric,
 };
 
-#[cfg(test)]
 use prodex_runtime_policy::RuntimePolicyCacheInvalidationPlan;
-#[cfg(test)]
-pub(super) use prodex_runtime_policy::clear_runtime_policy_cache;
+pub use prodex_runtime_policy::clear_runtime_policy_cache;
 pub(super) use prodex_runtime_policy::{
     RuntimeLogFormat, RuntimePolicySummary, ensure_runtime_policy_valid, runtime_policy_proxy,
     runtime_policy_runtime, runtime_policy_secrets, runtime_policy_summary,
 };
 
-#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct RuntimePolicyPublicationDeliveryPlan {
+pub struct RuntimePolicyPublicationDeliveryPlan {
     pub root: PathBuf,
     pub gateway_cache_refreshed: bool,
     pub runtime_policy_invalidation: RuntimePolicyCacheInvalidationPlan,
@@ -30,8 +23,7 @@ pub(super) struct RuntimePolicyPublicationDeliveryPlan {
     pub delivery_metrics: [ConfigPublicationDeliveryMetricPlan; 2],
 }
 
-#[cfg(test)]
-pub(super) fn deliver_config_publication_event_to_gateway_runtime(
+pub fn deliver_config_publication_event_to_gateway_runtime(
     event: &ConfigPublicationEventPlan,
     root: &Path,
 ) -> Result<RuntimePolicyPublicationDeliveryPlan> {

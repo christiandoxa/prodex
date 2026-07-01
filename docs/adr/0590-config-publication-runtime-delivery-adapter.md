@@ -14,8 +14,8 @@ process.
 
 ## Decision
 
-Add a small `prodex-app` runtime-policy delivery adapter for config publication
-events. The adapter validates that both required event targets are present,
+Add a small production-exported `prodex-app` runtime-policy delivery adapter
+for config publication events. The adapter validates that both required event targets are present,
 marks the gateway cache refresh target as delivered for the local process,
 invalidates the runtime policy cache for the resolved root, and immediately
 reloads the runtime policy from disk. It also returns the existing
