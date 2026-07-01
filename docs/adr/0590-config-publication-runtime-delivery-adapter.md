@@ -31,5 +31,7 @@ cache refresh and runtime policy reload targets.
   in metric labels.
 - Publication delivery remains in the composition root instead of adding a
   runtime-policy dependency to the side-effect-free application boundary.
+- The dedicated `prodex-control-plane` binary can now invoke this adapter as a
+  one-shot publication-delivery command for operational fan-out and testing.
 - A future multi-process control-plane deployment still needs an external event
   transport to call this adapter in every gateway replica.

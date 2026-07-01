@@ -2168,6 +2168,8 @@ dependencies = [
  "libc",
  "postgres",
  "prodex-app",
+ "prodex-config",
+ "prodex-domain",
  "prodex-storage-postgres",
  "prodex-storage-sqlite",
  "rusqlite",

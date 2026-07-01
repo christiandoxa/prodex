@@ -1005,8 +1005,9 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0618-config-secret-ref-shape-guard.md`, and
   `docs/adr/0633-policy-metadata-character-guard.md`, and
   `docs/adr/0634-policy-issued-at-zero-guard.md`.
-- **Remaining gap:** Externalize publication delivery transport so a separated
-  control plane can fan out the same event to every gateway replica.
+- **Remaining gap:** Replace the current one-shot control-plane publication
+  delivery command with a replicated event transport so a separated control
+  plane can fan out the same event to every gateway replica automatically.
 
 ## Cross-Cutting Release Gates
 
