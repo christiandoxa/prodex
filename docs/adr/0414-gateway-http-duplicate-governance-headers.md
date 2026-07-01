@@ -21,3 +21,6 @@ redacted invalid idempotency-key and entity-tag response envelopes.
 
 - Ambiguous replay/precondition headers fail closed before application planning.
 - Header values remain out of client-visible error messages.
+- Legacy gateway admin composition now delegates `Idempotency-Key` and
+  `If-Match` parsing to the same shared helpers instead of choosing one
+  duplicate header ad hoc.

@@ -103,7 +103,10 @@ while moving legacy adapter code behind enterprise boundaries.
   `runtime.log_dir`, are also preserved as exact filesystem paths. Domain
   security debug output redacts principal and tenant identifiers while
   preserving authorization shape. Role-mapper debug output redacts configured
-  identity-provider claim mappings.
+  identity-provider claim mappings. Legacy gateway admin composition now also
+  delegates `Idempotency-Key` and `If-Match` parsing to the shared
+  `prodex-gateway-http` boundary, so duplicate governance headers fail closed
+  instead of the adapter selecting one value ad hoc.
 - **ADRs:** `docs/adr/0002-gateway-admin-auth-boundary.md`,
   `docs/adr/0081-authn-boundary-crate.md`,
   `docs/adr/0082-auth-boundary-guard.md`,

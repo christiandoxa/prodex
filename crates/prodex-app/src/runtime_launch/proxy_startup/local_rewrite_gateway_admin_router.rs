@@ -33,8 +33,9 @@ use super::local_rewrite_gateway_metrics::runtime_gateway_prometheus_response;
 use super::*;
 use prodex_gateway_http::{
     GatewayControlPlaneRouteErrorStatus, GatewayHttpHeader, GatewayHttpMethod,
-    GatewayHttpRequestMeta, plan_control_plane_route,
-    plan_gateway_control_plane_route_error_response,
+    GatewayHttpRequestMeta, entity_tag_from_if_match_headers, idempotency_key_from_headers,
+    plan_control_plane_route, plan_gateway_control_plane_route_error_response,
+    plan_gateway_http_entity_tag_error_response, plan_gateway_http_idempotency_key_error_response,
 };
 
 pub(super) fn runtime_gateway_request_path_is_admin(
@@ -480,11 +481,29 @@ fn runtime_gateway_admin_idempotency_response(
     method: &str,
     path: &str,
 ) -> Option<tiny_http::ResponseBox> {
-    let idempotency_key = captured.headers.iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("Idempotency-Key")
-            .then_some(value)
-    })?;
-    if !runtime_gateway_admin_idempotency_key_is_valid(idempotency_key) {
+    let idempotency_key =
+        match idempotency_key_from_headers(&runtime_gateway_http_headers(captured)) {
+            Ok(Some(key)) => key,
+            Ok(None) => return None,
+            Err(error) => {
+                let response = plan_gateway_http_idempotency_key_error_response(&error);
+                runtime_gateway_audit_admin_request_denied_event(
+                    shared,
+                    &admin_auth.name,
+                    admin_auth.role.as_str(),
+                    "invalid_idempotency_key",
+                    method,
+                    path,
+                );
+                return Some(build_runtime_proxy_json_error_response(
+                    400,
+                    response.code,
+                    response.message,
+                ));
+            }
+        };
+    let idempotency_key = idempotency_key.as_str();
+    if idempotency_key.is_empty() {
         runtime_gateway_audit_admin_request_denied_event(
             shared,
             &admin_auth.name,
@@ -526,10 +545,6 @@ fn runtime_gateway_admin_idempotency_response(
     None
 }
 
-fn runtime_gateway_admin_idempotency_key_is_valid(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 200 && value.bytes().all(|byte| byte.is_ascii_graphic())
-}
-
 fn runtime_gateway_admin_idempotency_scope_key(admin_auth: &RuntimeGatewayAdminAuth) -> String {
     [
         admin_auth.name.as_str(),
@@ -552,11 +567,28 @@ fn runtime_gateway_admin_if_match_response(
     method: &str,
     path: &str,
 ) -> Option<tiny_http::ResponseBox> {
-    let expected_match = captured.headers.iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("If-Match")
-            .then_some(value.as_str())
-    })?;
-    if runtime_gateway_admin_if_match_matches(expected_match, "*") {
+    let expected_match =
+        match entity_tag_from_if_match_headers(&runtime_gateway_http_headers(captured)) {
+            Ok(Some(tag)) => tag,
+            Ok(None) => return None,
+            Err(error) => {
+                let response = plan_gateway_http_entity_tag_error_response(&error);
+                runtime_gateway_audit_admin_request_denied_event(
+                    shared,
+                    &admin_auth.name,
+                    admin_auth.role.as_str(),
+                    response.code,
+                    method,
+                    path,
+                );
+                return Some(build_runtime_proxy_json_error_response(
+                    400,
+                    response.code,
+                    response.message,
+                ));
+            }
+        };
+    if expected_match.as_str() == "*" {
         return None;
     }
     let key_name = key_name?;
@@ -568,8 +600,10 @@ fn runtime_gateway_admin_if_match_response(
     let entry = entries
         .iter()
         .find(|entry| entry.key.name.eq_ignore_ascii_case(key_name))?;
-    let current = runtime_gateway_admin_key_etag(entry.updated_at_epoch);
-    if !runtime_gateway_admin_if_match_matches(expected_match, &current) {
+    let current =
+        prodex_domain::EntityTag::new(runtime_gateway_admin_key_etag(entry.updated_at_epoch))
+            .expect("generated gateway key etag should be valid");
+    if expected_match != current {
         runtime_gateway_audit_admin_request_denied_event(
             shared,
             &admin_auth.name,
@@ -587,8 +621,12 @@ fn runtime_gateway_admin_if_match_response(
     None
 }
 
-fn runtime_gateway_admin_if_match_matches(expected: &str, current: &str) -> bool {
-    expected == "*" || expected == current
+fn runtime_gateway_http_headers(captured: &RuntimeProxyRequest) -> Vec<GatewayHttpHeader> {
+    captured
+        .headers
+        .iter()
+        .map(|(name, value)| GatewayHttpHeader::new(name, value))
+        .collect()
 }
 
 #[cfg(test)]
@@ -596,32 +634,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn admin_idempotency_key_rejects_whitespace_instead_of_trimming() {
-        assert!(runtime_gateway_admin_idempotency_key_is_valid("idem-1"));
-        assert!(!runtime_gateway_admin_idempotency_key_is_valid(""));
-        assert!(!runtime_gateway_admin_idempotency_key_is_valid(" idem-1 "));
-        assert!(!runtime_gateway_admin_idempotency_key_is_valid("idem 1"));
-        assert!(!runtime_gateway_admin_idempotency_key_is_valid("idem\n1"));
-        assert!(!runtime_gateway_admin_idempotency_key_is_valid("idéem"));
-    }
+    fn runtime_gateway_http_headers_preserve_exact_header_order_and_values() {
+        let request = RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/v1/prodex/gateway/keys".to_string(),
+            headers: vec![
+                ("Idempotency-Key".to_string(), "idem-1".to_string()),
+                ("If-Match".to_string(), "\"gateway-key-1\"".to_string()),
+            ],
+            body: Vec::new(),
+        };
 
-    #[test]
-    fn admin_if_match_compares_exact_values_without_trimming() {
-        assert!(runtime_gateway_admin_if_match_matches(
-            "\"gateway-key-1\"",
-            "\"gateway-key-1\""
-        ));
-        assert!(runtime_gateway_admin_if_match_matches(
-            "*",
-            "\"gateway-key-1\""
-        ));
-        assert!(!runtime_gateway_admin_if_match_matches(
-            " \"gateway-key-1\" ",
-            "\"gateway-key-1\""
-        ));
-        assert!(!runtime_gateway_admin_if_match_matches(
-            " * ",
-            "\"gateway-key-1\""
-        ));
+        let headers = runtime_gateway_http_headers(&request);
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[0].name, "Idempotency-Key");
+        assert_eq!(headers[0].value, "idem-1");
+        assert_eq!(headers[1].name, "If-Match");
+        assert_eq!(headers[1].value, "\"gateway-key-1\"");
     }
 }
