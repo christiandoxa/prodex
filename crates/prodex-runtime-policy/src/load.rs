@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-use crate::cache::{cached_policy_for, store_cached_policy};
+use crate::cache::{cached_policy_for, invalidate_runtime_policy_cache_for, store_cached_policy};
 use crate::paths::{resolve_runtime_policy_path, runtime_policy_path};
 use crate::types::{
     RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyRuntimeSettings,
@@ -17,6 +17,11 @@ pub fn load_runtime_policy_cached(root: &Path) -> Result<Option<RuntimePolicyCon
     let loaded = load_runtime_policy_from_root(root)?;
     store_cached_policy(root, loaded.clone());
     Ok(loaded)
+}
+
+pub fn reload_runtime_policy_cached(root: &Path) -> Result<Option<RuntimePolicyConfig>> {
+    invalidate_runtime_policy_cache_for(root);
+    load_runtime_policy_cached(root)
 }
 
 pub fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicyConfig>> {
@@ -51,7 +56,6 @@ pub fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicy
             .secrets
             .keyring_service
             .as_deref()
-            .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string),
     };

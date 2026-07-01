@@ -2,6 +2,7 @@ use super::*;
 use crate::command_dispatch::command_exit_error;
 use chrono::Local;
 use prodex_quota::{BlockedLimit, UsageWindow, WindowPair};
+use redaction::redaction_redact_secret_like_text;
 use std::collections::BTreeMap;
 
 pub(super) fn select_runtime_launch_profile(
@@ -231,8 +232,9 @@ fn run_selected_runtime_launch_preflight(
                 "Quota Preflight",
                 vec![
                     format!(
-                        "Warning: quota preflight failed for '{}': {err:#}",
-                        selection.initial_profile_name
+                        "Warning: quota preflight failed for '{}': {}",
+                        selection.initial_profile_name,
+                        runtime_launch_preflight_error_message(&err)
                     ),
                     "Continuing without quota gate.".to_string(),
                 ],
@@ -241,6 +243,10 @@ fn run_selected_runtime_launch_preflight(
     }
 
     Ok(())
+}
+
+pub(super) fn runtime_launch_preflight_error_message(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&format!("{err:#}"))
 }
 
 fn try_runtime_launch_snapshot_preflight(

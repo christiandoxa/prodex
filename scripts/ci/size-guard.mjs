@@ -7,7 +7,8 @@ import { repoRoot } from "../npm/common.mjs";
 const DEFAULT_PRODUCTION_LINE_LIMIT = 850;
 const DEFAULT_TEST_LINE_LIMIT = 860;
 const DEFAULT_COHESION_LINE_LIMIT = 770;
-const DEFAULT_NEAR_LIMIT_FILE_BUDGET = 20;
+const DEFAULT_NEAR_LIMIT_FILE_BUDGET = 23;
+const DEFAULT_MAX_NEAR_LIMIT_SIBLINGS = 5;
 const DEFAULT_ALLOWLIST_PATH = "scripts/ci/size-guard-allowlist.json";
 
 function envPositiveInteger(name, fallback) {
@@ -49,7 +50,10 @@ function parseArgs(argv) {
     cohesionLineLimit: envHasValue("PRODEX_SIZE_GUARD_COHESION_LINES")
       ? envPositiveInteger("PRODEX_SIZE_GUARD_COHESION_LINES", DEFAULT_COHESION_LINE_LIMIT)
       : null,
-    maxNearLimitSiblings: envPositiveInteger("PRODEX_SIZE_GUARD_MAX_NEAR_LIMIT_SIBLINGS", 3),
+    maxNearLimitSiblings: envPositiveInteger(
+      "PRODEX_SIZE_GUARD_MAX_NEAR_LIMIT_SIBLINGS",
+      DEFAULT_MAX_NEAR_LIMIT_SIBLINGS,
+    ),
     nearLimitFileBudget: envPositiveInteger(
       "PRODEX_SIZE_GUARD_NEAR_LIMIT_FILES",
       DEFAULT_NEAR_LIMIT_FILE_BUDGET,

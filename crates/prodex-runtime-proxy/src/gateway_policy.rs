@@ -40,7 +40,10 @@ impl RuntimeGatewayRouteStrategy {
     ];
 
     pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
+        if value != value.trim() {
+            return None;
+        }
+        match value.to_ascii_lowercase().as_str() {
             "" | "fallback" | "ordered-fallback" | "ordered_fallback" => Some(Self::Fallback),
             "round-robin" | "round_robin" | "rr" => Some(Self::RoundRobin),
             "first" | "first-available" | "first_available" | "ordered" => Some(Self::First),
@@ -432,6 +435,15 @@ fn runtime_gateway_estimated_tokens(body: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn route_strategy_parse_rejects_padded_values() {
+        assert_eq!(
+            RuntimeGatewayRouteStrategy::parse("lowest-cost"),
+            Some(RuntimeGatewayRouteStrategy::LowestCost)
+        );
+        assert_eq!(RuntimeGatewayRouteStrategy::parse(" lowest-cost "), None);
+    }
 
     #[test]
     fn rewrites_model_alias_to_combo_chain() {

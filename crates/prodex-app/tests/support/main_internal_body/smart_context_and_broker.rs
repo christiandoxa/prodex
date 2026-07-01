@@ -372,3 +372,118 @@ fn runtime_broker_and_update_commands_skip_prodex_update_notice() {
     assert!(!update.should_show_update_notice());
     assert!(run.should_show_update_notice());
 }
+
+#[test]
+fn runtime_proxy_presidio_redaction_failure_uses_generic_response_and_logs_no_endpoint() {
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let temp_dir = TestDir::new();
+    let home = temp_dir.path.join("homes/primary");
+    write_auth_json(&home.join("auth.json"), "primary-account");
+    let paths = AppPaths {
+        state_file: temp_dir.path.join("state.json"),
+        managed_profiles_root: temp_dir.path.join("homes"),
+        shared_codex_root: temp_dir.path.join("shared-codex"),
+        legacy_shared_codex_root: temp_dir.path.join("shared"),
+        root: temp_dir.path.clone(),
+    };
+    let state = AppState::default();
+    let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
+        paths: &paths,
+        state: &state,
+        current_profile: "primary",
+        upstream_base_url: backend.base_url(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        auto_redeem: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: None,
+    })
+    .expect("runtime proxy should start");
+    register_runtime_presidio_redaction_proxy_state(
+        &proxy.log_path,
+        Some(RuntimePresidioRedactionConfig {
+            analyzer_url: "http://127.0.0.1:9/analyze?secret=standard-presidio-secret".to_string(),
+            anonymizer_url: "http://127.0.0.1:9/anonymize?secret=standard-presidio-secret"
+                .to_string(),
+            languages: vec!["en".to_string()],
+            language_mode: PresidioLanguageMode::Fixed,
+            fail_closed: true,
+        }),
+    );
+
+    let gateway_token = "standard-presidio-gateway-token";
+    let sensitive_input = "standard-user@example.com";
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .json(&serde_json::json!({"model":"gpt-5","input":sensitive_input}))
+        .send()
+        .expect("proxy request should be sent");
+    assert_eq!(response.status().as_u16(), 502);
+    assert_eq!(
+        response.text().expect("response body should be text"),
+        "gateway PII redaction failed"
+    );
+
+    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("presidio_redaction_error"));
+    assert!(runtime_log.contains("reason=presidio_redaction_failed"));
+    assert!(runtime_log.contains("presidio_redaction_failed"));
+    assert!(!runtime_log.contains(gateway_token));
+    assert!(!runtime_log.contains(sensitive_input));
+    assert!(!runtime_log.contains("standard-presidio-secret"));
+    assert!(!runtime_log.contains("127.0.0.1:9"));
+}
+
+#[test]
+fn runtime_proxy_oversized_request_body_uses_generic_response_and_redacted_log() {
+    let _limit = TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES", "64");
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let temp_dir = TestDir::new();
+    let home = temp_dir.path.join("homes/primary");
+    write_auth_json(&home.join("auth.json"), "primary-account");
+    let paths = AppPaths {
+        state_file: temp_dir.path.join("state.json"),
+        managed_profiles_root: temp_dir.path.join("homes"),
+        shared_codex_root: temp_dir.path.join("shared-codex"),
+        legacy_shared_codex_root: temp_dir.path.join("shared"),
+        root: temp_dir.path.clone(),
+    };
+    let state = AppState::default();
+    let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
+        paths: &paths,
+        state: &state,
+        current_profile: "primary",
+        upstream_base_url: backend.base_url(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        auto_redeem: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: None,
+    })
+    .expect("runtime proxy should start");
+
+    let bearer_token = "standard-body-limit-token";
+    let oversized_input = "standard-sensitive-body-marker".repeat(16);
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(bearer_token)
+        .json(&serde_json::json!({"model":"gpt-5","input":oversized_input}))
+        .send()
+        .expect("oversized proxy request should be sent");
+    assert_eq!(response.status().as_u16(), 413);
+    assert_eq!(
+        response.text().expect("response body should be text"),
+        "proxied request body is too large"
+    );
+
+    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("request_body_too_large"));
+    assert!(!runtime_log.contains(bearer_token));
+    assert!(!runtime_log.contains(&oversized_input));
+    assert!(!runtime_log.contains("bytes exceeds"));
+}

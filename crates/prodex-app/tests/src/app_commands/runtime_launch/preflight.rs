@@ -92,6 +92,18 @@ fn no_ready_runtime_profiles_continues_when_probe_failed() {
 }
 
 #[test]
+fn runtime_launch_preflight_error_message_redacts_secret_like_chain() {
+    let err = anyhow::anyhow!("failed: Authorization: Bearer preflight-token")
+        .context("quota preflight failed");
+
+    let message = runtime_launch_preflight_error_message(&err);
+
+    assert!(message.contains("quota preflight failed"));
+    assert!(message.contains("Authorization: Bearer <redacted>"));
+    assert!(!message.contains("preflight-token"));
+}
+
+#[test]
 fn prepare_runtime_launch_uses_persisted_exhausted_quota_snapshot_before_network_preflight() {
     let root = temp_dir("launch-preflight-persisted-exhausted-snapshot");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());

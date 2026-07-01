@@ -5,6 +5,7 @@ use super::{
     runtime_proxy_prefetch_backpressure_timeout_ms, runtime_proxy_prefetch_max_buffered_bytes,
     runtime_reqwest_error_kind,
 };
+use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io;
 use std::path::PathBuf;
@@ -25,6 +26,10 @@ fn runtime_prefetch_set_terminal_error(
     if terminal_error.is_none() {
         *terminal_error = Some((kind, message.into()));
     }
+}
+
+fn runtime_prefetch_error_log_value(error: &str) -> String {
+    redaction_redact_secret_like_text(error).replace('\n', " ")
 }
 
 pub(crate) fn runtime_prefetch_terminal_error(
@@ -220,7 +225,8 @@ pub(crate) async fn runtime_prefetch_response_chunks(
             }
             Err(err) => {
                 let kind = runtime_reqwest_error_kind(&err);
-                runtime_prefetch_set_terminal_error(&shared, kind, err.to_string());
+                let error = runtime_prefetch_error_log_value(&err.to_string());
+                runtime_prefetch_set_terminal_error(&shared, kind, error.clone());
                 runtime_proxy_log_to_path(
                     &log_path,
                     &runtime_proxy_structured_log_message(
@@ -229,13 +235,31 @@ pub(crate) async fn runtime_prefetch_response_chunks(
                             runtime_proxy_log_field("request", request_id.to_string()),
                             runtime_proxy_log_field("transport", "http"),
                             runtime_proxy_log_field("kind", format!("{kind:?}")),
-                            runtime_proxy_log_field("error", err.to_string()),
+                            runtime_proxy_log_field("error", error.as_str()),
                         ],
                     ),
                 );
-                let _ = sender.try_send(RuntimePrefetchChunk::Error(kind, err.to_string()));
+                let _ = sender.try_send(RuntimePrefetchChunk::Error(kind, error));
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefetch_error_log_value_redacts_secret_like_material() {
+        let message = runtime_prefetch_error_log_value(
+            "prefetch failed\nAuthorization: Bearer prefetch-token\napi_key=prefetch-key",
+        );
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("prefetch-token"));
+        assert!(!message.contains("prefetch-key"));
     }
 }

@@ -7,6 +7,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use redaction::redaction_redact_secret_like_text;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,6 +31,14 @@ struct ProdexCapability {
     status: String,
     command: Option<&'static str>,
     description: String,
+}
+
+fn capability_redacted_detail(value: &str) -> String {
+    redaction_redact_secret_like_text(value)
+}
+
+fn capability_failed_status(err: &anyhow::Error) -> String {
+    format!("fail ({})", capability_redacted_detail(&format!("{err:#}")))
 }
 
 pub(crate) fn handle_capability(command: CapabilityCommands) -> Result<()> {
@@ -96,7 +105,7 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
         "prodex-memory".to_string(),
         match memory_store_ready(&memory_store) {
             Ok(()) => format!("ok (local sqlite {})", memory_store.display()),
-            Err(err) => format!("fail ({err:#})"),
+            Err(err) => capability_failed_status(&err),
         },
     ));
     rows.push((
@@ -110,7 +119,7 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
                 "ok (codex files={}, claude files={}, skills={})",
                 report.codex_plugin_files, report.claude_plugin_files, report.skill_files
             ),
-            Err(err) => format!("fail ({err:#})"),
+            Err(err) => capability_failed_status(&err),
         },
     ));
     rows.push(("Prodex home".to_string(), paths.root.display().to_string()));
@@ -164,7 +173,7 @@ pub(crate) fn collect_super_tool_statuses_with_memory_mode(
                     "ok (codex files={}, claude files={}, skills={})",
                     report.codex_plugin_files, report.claude_plugin_files, report.skill_files
                 ),
-                Err(err) => format!("fail ({err:#})"),
+                Err(err) => capability_failed_status(&err),
             },
             detail: "Caveman/Super embedded assets are required for the Prodex overlay home"
                 .to_string(),
@@ -280,7 +289,10 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
                     "claude_plugin_files": report.claude_plugin_files,
                     "skill_files": report.skill_files,
                 }),
-                Err(err) => serde_json::json!({ "status": "fail", "error": format!("{err:#}") }),
+                Err(err) => serde_json::json!({
+                    "status": "fail",
+                    "error": capability_redacted_detail(&format!("{err:#}")),
+                }),
             },
         });
         print_stdout_line(
@@ -639,7 +651,7 @@ fn memory_tool_status(paths: &AppPaths, memory_mode: SuperMemoryStatusMode) -> S
             check: "local SQLite memory store",
             ready: false,
             status: "fail".to_string(),
-            detail: format!("{err:#}"),
+            detail: capability_redacted_detail(&format!("{err:#}")),
         },
     }
 }
@@ -869,7 +881,7 @@ fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {
                 check: "Presidio Analyzer/Anonymizer health",
                 ready: false,
                 status: "fail (config)".to_string(),
-                detail: format!("{err:#}"),
+                detail: capability_redacted_detail(&format!("{err:#}")),
             };
         }
     };
@@ -885,7 +897,7 @@ fn presidio_tool_status(paths: &AppPaths) -> SuperToolStatus {
                 check: "Presidio Analyzer/Anonymizer health",
                 ready: false,
                 status: "fail (http client)".to_string(),
-                detail: err.to_string(),
+                detail: capability_redacted_detail(&err.to_string()),
             };
         }
     };
@@ -917,7 +929,7 @@ fn presidio_health(client: &reqwest::blocking::Client, base_url: &str) -> (bool,
     match client.get(url).send() {
         Ok(response) if response.status().is_success() => (true, "ok".to_string()),
         Ok(response) => (false, format!("status {}", response.status())),
-        Err(err) => (false, err.to_string()),
+        Err(err) => (false, capability_redacted_detail(&err.to_string())),
     }
 }
 

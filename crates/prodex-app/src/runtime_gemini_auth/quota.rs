@@ -9,6 +9,7 @@ use super::{
 };
 use anyhow::{Context, Result, bail};
 use prodex_quota::GeminiQuotaInfo;
+use redaction::redaction_redact_secret_like_text;
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -183,11 +184,16 @@ fn retrieve_gemini_user_quota(
             handle_gemini_validation(&validation, mode)?;
             continue;
         }
+        let body = gemini_quota_redacted_error_body(&body);
         bail!(
             "Gemini quota request failed (HTTP {}): {body}",
             status.as_u16()
         );
     }
+}
+
+fn gemini_quota_redacted_error_body(body: &str) -> String {
+    redaction_redact_secret_like_text(body)
 }
 
 fn gemini_error_is_http_401(err: &anyhow::Error) -> bool {
@@ -310,6 +316,42 @@ mod tests {
         assert!(message.contains("Verify your account"));
         assert!(message.contains("https://accounts.google.com/verify"));
         assert!(message.contains("https://support.google.com/accounts?p=al_alert"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fetch_gemini_quota_redacts_secret_like_error_body_material() {
+        let server = TinyServer::http("127.0.0.1:0").expect("quota test server should bind");
+        let listen_addr = server.server_addr().to_ip().unwrap();
+        let endpoint = format!("http://{listen_addr}/v1internal");
+        let _endpoint_guard =
+            crate::TestEnvVarGuard::set("PRODEX_GEMINI_CODE_ASSIST_ENDPOINT", endpoint.as_str());
+        let root = temp_codex_home("quota-redacted-error");
+        let secret = test_gemini_secret(Some("gemini-project"));
+        write_gemini_oauth_secret(&root, &secret).expect("Gemini OAuth secret should write");
+
+        let handle = thread::spawn(move || {
+            let request = server.recv().expect("quota request should arrive");
+            assert_eq!(request.method().as_str(), "POST");
+            assert_eq!(request.url(), "/v1internal:retrieveUserQuota");
+            request
+                .respond(
+                    TinyResponse::from_string(
+                        r#"{"error":"Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"}"#,
+                    )
+                    .with_status_code(500),
+                )
+                .expect("error response should send");
+        });
+
+        let err = fetch_gemini_quota(&root, None).expect_err("quota should fail");
+        handle.join().expect("quota test server should finish");
+        let message = format!("{err:#}");
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("fixture-token-123"));
+        assert!(!message.contains("sk-fixture-123"));
 
         let _ = std::fs::remove_dir_all(root);
     }

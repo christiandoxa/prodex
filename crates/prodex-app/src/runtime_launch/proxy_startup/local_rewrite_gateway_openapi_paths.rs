@@ -18,7 +18,90 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
     let openapi_path = format!("{mount_path}/prodex/gateway/openapi.json");
     let admin_path = format!("{mount_path}/prodex/gateway/admin");
 
+    let idempotency_key_header = serde_json::json!({
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+        "schema": {"type": "string", "maxLength": 200}
+    });
+    let if_match_header = serde_json::json!({
+        "name": "If-Match",
+        "in": "header",
+        "required": false,
+        "description": "Optional optimistic-concurrency guard. Use the current ETag from GET, or * to bypass the guard.",
+        "schema": {"type": "string"}
+    });
+
     let mut paths = serde_json::Map::new();
+    for (path, operation_id, summary) in [
+        (
+            "/livez",
+            "getGatewayLivez",
+            "Check that the local gateway process is alive",
+        ),
+        (
+            "/readyz",
+            "getGatewayReadyz",
+            "Check that the gateway is ready to admit local traffic",
+        ),
+        (
+            "/startupz",
+            "getGatewayStartupz",
+            "Check that the gateway startup path completed",
+        ),
+    ] {
+        paths.insert(
+            path.to_string(),
+            serde_json::json!({
+                "get": {
+                    "operationId": operation_id,
+                    "summary": summary,
+                    "security": [],
+                    "responses": {
+                        "200": {
+                            "description": "Gateway operational health snapshot",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/GatewayHealth"}
+                                }
+                            }
+                        },
+                        "503": {
+                            "description": "Gateway is alive but not locally ready",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/GatewayHealth"}
+                                }
+                            }
+                        },
+                        "405": {
+                            "description": "Health probe method is not allowed",
+                            "headers": {
+                                "Allow": {
+                                    "schema": {"type": "string"}
+                                }
+                            },
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/GatewayHealth"}
+                                }
+                            }
+                        }
+                    }
+                },
+                "head": {
+                    "operationId": operation_id.replace("get", "head"),
+                    "summary": summary,
+                    "security": [],
+                    "responses": {
+                        "200": {"description": "Gateway operational health snapshot without a body"},
+                        "503": {"description": "Gateway is alive but not locally ready"}
+                    }
+                }
+            }),
+        );
+    }
     paths.insert(
         responses_path,
         serde_json::json!({
@@ -65,6 +148,7 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
             },
             "post": {
                 "operationId": "createGatewayVirtualKey",
+                "parameters": [idempotency_key_header.clone()],
                 "summary": "Create an admin-managed gateway virtual key",
                 "security": [{"GatewayBearerAuth": []}],
                 "requestBody": {
@@ -110,6 +194,12 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
                 "responses": {
                     "200": {
                         "description": "Gateway virtual key",
+                        "headers": {
+                            "ETag": {
+                                "description": "Opaque virtual-key version token for If-Match concurrency guards.",
+                                "schema": {"type": "string"}
+                            }
+                        },
                         "content": {
                             "application/json": {
                                 "schema": {"$ref": "#/components/schemas/GatewayKeyResponse"}
@@ -122,6 +212,7 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
             },
             "patch": {
                 "operationId": "updateGatewayVirtualKey",
+                "parameters": [idempotency_key_header.clone(), if_match_header.clone()],
                 "summary": "Update, disable, or rotate an admin-managed gateway virtual key",
                 "security": [{"GatewayBearerAuth": []}],
                 "requestBody": {
@@ -144,11 +235,13 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
                     "400": {"$ref": "#/components/responses/GatewayError"},
                     "401": {"$ref": "#/components/responses/GatewayError"},
                     "403": {"$ref": "#/components/responses/GatewayError"},
-                    "404": {"$ref": "#/components/responses/GatewayError"}
+                    "404": {"$ref": "#/components/responses/GatewayError"},
+                    "412": {"$ref": "#/components/responses/GatewayError"}
                 }
             },
             "delete": {
                 "operationId": "deleteGatewayVirtualKey",
+                "parameters": [idempotency_key_header.clone(), if_match_header.clone()],
                 "summary": "Delete an admin-managed gateway virtual key",
                 "security": [{"GatewayBearerAuth": []}],
                 "responses": {
@@ -162,7 +255,8 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
                     },
                     "401": {"$ref": "#/components/responses/GatewayError"},
                     "403": {"$ref": "#/components/responses/GatewayError"},
-                    "404": {"$ref": "#/components/responses/GatewayError"}
+                    "404": {"$ref": "#/components/responses/GatewayError"},
+                    "412": {"$ref": "#/components/responses/GatewayError"}
                 }
             }
         }),
@@ -188,6 +282,7 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
             },
             "post": {
                 "operationId": "createGatewayScimUser",
+                "parameters": [idempotency_key_header.clone()],
                 "summary": "Provision a gateway admin user for trusted-proxy SSO",
                 "security": [{"GatewayBearerAuth": []}],
                 "requestBody": {
@@ -245,6 +340,7 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
             },
             "patch": {
                 "operationId": "patchGatewayScimUser",
+                "parameters": [idempotency_key_header.clone()],
                 "summary": "Patch one gateway SCIM user",
                 "security": [{"GatewayBearerAuth": []}],
                 "requestBody": {
@@ -273,6 +369,7 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
             },
             "delete": {
                 "operationId": "deleteGatewayScimUser",
+                "parameters": [idempotency_key_header.clone()],
                 "summary": "Delete one gateway SCIM user",
                 "security": [{"GatewayBearerAuth": []}],
                 "responses": {
@@ -499,16 +596,18 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
         serde_json::json!({
             "get": {
                 "operationId": "getProdexGatewayAdminDashboard",
-                "summary": "Get the built-in Prodex gateway admin dashboard shell",
+                "summary": "Get the authenticated built-in Prodex gateway admin dashboard shell",
+                "security": [{"GatewayBearerAuth": []}],
                 "responses": {
                     "200": {
-                        "description": "HTML dashboard shell. Data requests still require a gateway admin bearer token.",
+                        "description": "Authenticated HTML dashboard shell for gateway administration.",
                         "content": {
                             "text/html": {
                                 "schema": {"type": "string"}
                             }
                         }
-                    }
+                    },
+                    "401": {"$ref": "#/components/responses/GatewayError"}
                 }
             }
         }),

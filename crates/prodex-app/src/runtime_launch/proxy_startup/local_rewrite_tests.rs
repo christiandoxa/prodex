@@ -18,6 +18,7 @@ mod gateway_admin_auth;
 mod gateway_admin_crud;
 mod gateway_admin_scope;
 mod gateway_admin_tenant_scope;
+mod gateway_health;
 mod gateway_state;
 mod gateway_usage;
 mod model_memory;
@@ -2500,6 +2501,12 @@ fn copilot_transport_uses_copilot_api_headers_for_chat_completions() {
     let response = reqwest::blocking::Client::new()
         .post(format!("http://{}/v1/chat/completions", proxy.listen_addr))
         .header(reqwest::header::USER_AGENT, "codex-cli/0.1-test")
+        .header(
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        )
+        .header("tracestate", "prodex=test")
+        .header("baggage", "tenant_tier=premium")
         .json(&serde_json::json!({
             "model": "codex",
             "stream": false,
@@ -2538,6 +2545,91 @@ fn copilot_transport_uses_copilot_api_headers_for_chat_completions() {
     assert_eq!(header("x-github-api-version"), Some("2025-04-01"));
     assert_eq!(header("x-vscode-user-agent-library-version"), None);
     assert_eq!(header("x-initiator"), Some("agent"));
+    let request_id = header("x-request-id")
+        .and_then(|id| id.strip_prefix("prodex-"))
+        .expect("Copilot request ID should keep prodex prefix");
+    assert_eq!(
+        request_id
+            .parse::<prodex_domain::RequestId>()
+            .unwrap()
+            .as_uuid()
+            .get_version_num(),
+        7
+    );
+    assert_eq!(
+        header("traceparent"),
+        Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+    );
+    assert_eq!(header("tracestate"), Some("prodex=test"));
+    assert_eq!(header("baggage"), Some("tenant_tier=premium"));
+}
+
+#[test]
+fn openai_compatible_transport_preserves_trace_context_for_chat_completions() {
+    let root = temp_root("openai-compatible-trace-context");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start();
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("OpenAI-compatible local rewrite proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/chat/completions", proxy.listen_addr))
+        .header(reqwest::header::USER_AGENT, "codex-cli/0.1-test")
+        .header("authorization", "Bearer caller-token")
+        .header(
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        )
+        .header("tracestate", "prodex=test")
+        .header("baggage", "tenant_tier=premium")
+        .json(&serde_json::json!({
+            "model": "gpt-5.4",
+            "stream": false,
+            "messages": [{"role": "user", "content": "trace me"}]
+        }))
+        .send()
+        .expect("OpenAI-compatible chat request should be sent");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let headers = upstream
+        .headers_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("upstream should receive OpenAI-compatible headers");
+    let header = |name: &str| {
+        headers
+            .iter()
+            .find_map(|(key, value)| key.eq_ignore_ascii_case(name).then_some(value.as_str()))
+    };
+    assert_eq!(header("authorization"), Some("Bearer upstream-key"));
+    assert_eq!(header("user-agent"), Some("codex-cli/0.1-test"));
+    assert_eq!(
+        header("traceparent"),
+        Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+    );
+    assert_eq!(header("tracestate"), Some("prodex=test"));
+    assert_eq!(header("baggage"), Some("tenant_tier=premium"));
 }
 
 #[test]
@@ -2959,6 +3051,14 @@ fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
     .expect("gateway proxy should start");
     let client = reqwest::blocking::Client::new();
 
+    let admin_data_plane = client
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"model": "gpt-5.4", "input": "admin token"}))
+        .send()
+        .expect("admin token data-plane request should be sent");
+    assert_eq!(admin_data_plane.status().as_u16(), 401);
+
     let viewed = client
         .get(format!(
             "http://{}/v1/prodex/gateway/keys",
@@ -3150,4 +3250,549 @@ fn local_embeddings_only_serves_embeddings_and_rejects_generation() {
     assert_eq!(generation.status().as_u16(), 503);
     let generation: serde_json::Value = generation.json().expect("error response is JSON");
     assert_eq!(generation["error"]["code"], "local_embeddings_only");
+}
+
+#[test]
+fn gateway_request_guardrail_blocked_keywords_are_audited_without_token_leakage() {
+    let root = temp_root("gateway-request-guardrail-audit");
+    let audit_dir = root.join("audit");
+    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
+    let _audit_env = crate::TestEnvVarGuard::set(
+        "PRODEX_AUDIT_LOG_DIR",
+        audit_dir.to_str().expect("audit dir should be utf8"),
+    );
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let gateway_token = "guardrail-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
+            blocked_keywords: vec!["do-not-send".to_string()],
+            blocked_output_keywords: Vec::new(),
+            allowed_models: Vec::new(),
+            prompt_injection_detection: false,
+            pii_redaction: false,
+        },
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let client = reqwest::blocking::Client::new();
+    let denied = client
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .json(&serde_json::json!({"model":"gpt-5","input":"please do-not-send this"}))
+        .send()
+        .expect("guardrail-denied request should be sent");
+    assert_eq!(denied.status().as_u16(), 403);
+    let denied: serde_json::Value = denied.json().expect("denied response should be json");
+    assert_eq!(denied["error"]["code"], "blocked_keyword");
+
+    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("guardrail denial should be audited");
+    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
+    assert!(audit_log.contains(r#""action":"guardrail_blocked""#));
+    assert!(audit_log.contains(r#""reason":"blocked_keyword""#));
+    assert!(audit_log.contains(r#""path":"/v1/responses""#));
+    assert!(!audit_log.contains(gateway_token));
+    assert!(!audit_log.contains("do-not-send"));
+
+    let runtime_log =
+        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_guardrail_blocked"));
+    assert!(runtime_log.contains("matched_value_redacted"));
+    assert!(!runtime_log.contains(gateway_token));
+    assert!(!runtime_log.contains("do-not-send"));
+}
+
+#[test]
+fn gateway_response_guardrail_blocked_output_is_audited_without_token_or_value_leakage() {
+    let root = temp_root("gateway-response-guardrail-audit");
+    let audit_dir = root.join("audit");
+    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
+    let _audit_env = crate::TestEnvVarGuard::set(
+        "PRODEX_AUDIT_LOG_DIR",
+        audit_dir.to_str().expect("audit dir should be utf8"),
+    );
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_with_response_body(
+        r#"{"id":"resp_test","output":[{"content":"do-not-emit-sensitive-marker"}],"usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#,
+    );
+    let gateway_token = "response-guardrail-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
+            blocked_keywords: Vec::new(),
+            blocked_output_keywords: vec!["do-not-emit-sensitive-marker".to_string()],
+            allowed_models: Vec::new(),
+            prompt_injection_detection: false,
+            pii_redaction: false,
+        },
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let denied = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .json(&serde_json::json!({"model":"gpt-5","input":"hello"}))
+        .send()
+        .expect("response-guardrail request should be sent");
+    assert_eq!(denied.status().as_u16(), 403);
+    let denied: serde_json::Value = denied.json().expect("denied response should be json");
+    assert_eq!(denied["error"]["code"], "policy_violation");
+
+    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("response guardrail denial should be audited");
+    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
+    assert!(audit_log.contains(r#""action":"response_guardrail_blocked""#));
+    assert!(audit_log.contains(r#""reason":"blocked_output_keyword""#));
+    assert!(!audit_log.contains(gateway_token));
+    assert!(!audit_log.contains("do-not-emit-sensitive-marker"));
+
+    let runtime_log =
+        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_guardrail_response_blocked"));
+    assert!(runtime_log.contains("matched_value_redacted"));
+    assert!(!runtime_log.contains(gateway_token));
+    assert!(!runtime_log.contains("do-not-emit-sensitive-marker"));
+}
+
+#[test]
+fn gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_leakage() {
+    let root = temp_root("gateway-stream-response-guardrail-audit");
+    let audit_dir = root.join("audit");
+    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
+    let _audit_env = crate::TestEnvVarGuard::set(
+        "PRODEX_AUDIT_LOG_DIR",
+        audit_dir.to_str().expect("audit dir should be utf8"),
+    );
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_with_response(
+        "text/event-stream; charset=utf-8",
+        concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"safe chunk\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"do-not-stream-sensitive-marker\"}\n\n",
+            "data: [DONE]\n\n",
+        ),
+    );
+    let gateway_token = "stream-guardrail-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
+        gateway_admin_tokens: Vec::new(),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
+            blocked_keywords: Vec::new(),
+            blocked_output_keywords: vec!["do-not-stream-sensitive-marker".to_string()],
+            allowed_models: Vec::new(),
+            prompt_injection_detection: false,
+            pii_redaction: false,
+        },
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+    })
+    .expect("proxy should start");
+
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .json(&serde_json::json!({
+            "model": "gpt-5",
+            "input": "hello",
+            "stream": true,
+        }))
+        .send()
+        .expect("streaming request should be sent");
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("stream body should be readable");
+    assert!(!body.contains("do-not-stream-sensitive-marker"));
+
+    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("stream guardrail denial should be audited");
+    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
+    assert!(audit_log.contains(r#""action":"response_guardrail_blocked""#));
+    assert!(audit_log.contains(r#""reason":"blocked_output_keyword""#));
+    assert!(!audit_log.contains(gateway_token));
+    assert!(!audit_log.contains("do-not-stream-sensitive-marker"));
+
+    let runtime_log =
+        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_guardrail_stream_blocked"));
+    assert!(runtime_log.contains("matched_value_redacted"));
+    assert!(!runtime_log.contains(gateway_token));
+    assert!(!runtime_log.contains("do-not-stream-sensitive-marker"));
+}
+
+#[test]
+fn gateway_pre_guardrail_webhook_denial_is_audited_without_secret_leakage() {
+    let root = temp_root("gateway-pre-webhook-guardrail-audit");
+    let audit_dir = root.join("audit");
+    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
+    let _audit_env = crate::TestEnvVarGuard::set(
+        "PRODEX_AUDIT_LOG_DIR",
+        audit_dir.to_str().expect("audit dir should be utf8"),
+    );
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let webhook = TestGuardrailWebhook::start_deny("tenant_policy_denied");
+    let gateway_token = "pre-webhook-gateway-token";
+    let webhook_token = "webhook-secret-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
+        gateway_admin_tokens: Vec::new(),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
+            url: Some(format!("http://{}", webhook.addr)),
+            phases: vec!["pre".to_string()],
+            bearer_token: Some(webhook_token.to_string()),
+            fail_closed: true,
+        },
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+    })
+    .expect("gateway proxy should start");
+
+    let denied = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .json(&serde_json::json!({"model":"gpt-5","input":"hello"}))
+        .send()
+        .expect("webhook-denied request should be sent");
+    assert_eq!(denied.status().as_u16(), 403);
+    let denied: serde_json::Value = denied.json().expect("denied response should be json");
+    assert_eq!(denied["error"]["code"], "policy_violation");
+
+    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("webhook denial should be audited");
+    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
+    assert!(audit_log.contains(r#""action":"guardrail_webhook_blocked""#));
+    assert!(audit_log.contains(r#""phase":"pre""#));
+    assert!(audit_log.contains(r#""reason":"tenant_policy_denied""#));
+    assert!(audit_log.contains(r#""path":"/v1/responses""#));
+    assert!(!audit_log.contains(gateway_token));
+    assert!(!audit_log.contains(webhook_token));
+    assert!(!audit_log.contains("do-not-log-webhook-message"));
+
+    let runtime_log =
+        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_guardrail_webhook_blocked"));
+    assert!(runtime_log.contains("matched_value_redacted"));
+    assert!(!runtime_log.contains(gateway_token));
+    assert!(!runtime_log.contains(webhook_token));
+    assert!(!runtime_log.contains("do-not-log-webhook-message"));
+}
+
+#[test]
+fn gateway_post_guardrail_webhook_denial_is_audited_without_secret_leakage() {
+    let root = temp_root("gateway-post-webhook-guardrail-audit");
+    let audit_dir = root.join("audit");
+    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
+    let _audit_env = crate::TestEnvVarGuard::set(
+        "PRODEX_AUDIT_LOG_DIR",
+        audit_dir.to_str().expect("audit dir should be utf8"),
+    );
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(1);
+    let webhook = TestGuardrailWebhook::start_deny("output_policy_denied");
+    let gateway_token = "post-webhook-gateway-token";
+    let webhook_token = "post-webhook-secret-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
+        gateway_admin_tokens: Vec::new(),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
+            url: Some(format!("http://{}", webhook.addr)),
+            phases: vec!["post".to_string()],
+            bearer_token: Some(webhook_token.to_string()),
+            fail_closed: true,
+        },
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+    })
+    .expect("gateway proxy should start");
+
+    let denied = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .json(&serde_json::json!({"model":"gpt-5","input":"hello"}))
+        .send()
+        .expect("webhook-denied request should be sent");
+    assert_eq!(denied.status().as_u16(), 403);
+    let denied: serde_json::Value = denied.json().expect("denied response should be json");
+    assert_eq!(denied["error"]["code"], "policy_violation");
+
+    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("webhook response denial should be audited");
+    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
+    assert!(audit_log.contains(r#""action":"response_guardrail_webhook_blocked""#));
+    assert!(audit_log.contains(r#""phase":"post""#));
+    assert!(audit_log.contains(r#""reason":"output_policy_denied""#));
+    assert!(!audit_log.contains(gateway_token));
+    assert!(!audit_log.contains(webhook_token));
+    assert!(!audit_log.contains("do-not-log-webhook-message"));
+
+    let runtime_log =
+        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_guardrail_webhook_blocked"));
+    assert!(runtime_log.contains("matched_value_redacted"));
+    assert!(!runtime_log.contains(gateway_token));
+    assert!(!runtime_log.contains(webhook_token));
+    assert!(!runtime_log.contains("do-not-log-webhook-message"));
+}
+
+#[test]
+fn gateway_pre_guardrail_webhook_failure_redacts_url_and_is_audited() {
+    let root = temp_root("gateway-pre-webhook-failure-audit");
+    let audit_dir = root.join("audit");
+    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
+    let _audit_env = crate::TestEnvVarGuard::set(
+        "PRODEX_AUDIT_LOG_DIR",
+        audit_dir.to_str().expect("audit dir should be utf8"),
+    );
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let gateway_token = "pre-webhook-failure-gateway-token";
+    let webhook_url_secret = "webhook-url-query-secret";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
+        gateway_admin_tokens: Vec::new(),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
+            url: Some(format!(
+                "http://127.0.0.1:9/deny?token={webhook_url_secret}"
+            )),
+            phases: vec!["pre".to_string()],
+            bearer_token: Some("failure-webhook-bearer-secret".to_string()),
+            fail_closed: true,
+        },
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+    })
+    .expect("gateway proxy should start");
+
+    let denied = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .json(&serde_json::json!({"model":"gpt-5","input":"hello"}))
+        .send()
+        .expect("webhook-failure request should be sent");
+    assert_eq!(denied.status().as_u16(), 403);
+    let denied: serde_json::Value = denied.json().expect("denied response should be json");
+    assert_eq!(denied["error"]["code"], "policy_violation");
+
+    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("webhook failure should be audited");
+    assert!(audit_log.contains(r#""action":"guardrail_webhook_blocked""#));
+    assert!(audit_log.contains(r#""phase":"pre""#));
+    assert!(audit_log.contains(r#""reason":"webhook_error""#));
+    assert!(!audit_log.contains(gateway_token));
+    assert!(!audit_log.contains(webhook_url_secret));
+    assert!(!audit_log.contains("failure-webhook-bearer-secret"));
+
+    let runtime_log =
+        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_guardrail_webhook_failed"));
+    assert!(runtime_log.contains("endpoint=redacted"));
+    assert!(runtime_log.contains("error_kind="));
+    assert!(!runtime_log.contains(gateway_token));
+    assert!(!runtime_log.contains(webhook_url_secret));
+    assert!(!runtime_log.contains("failure-webhook-bearer-secret"));
+    assert!(!runtime_log.contains("127.0.0.1:9/deny"));
+}
+
+#[test]
+fn gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_leakage() {
+    let root = temp_root("gateway-presidio-redaction-failure-audit");
+    let audit_dir = root.join("audit");
+    std::fs::create_dir_all(&audit_dir).expect("audit dir should be created");
+    let _audit_env = crate::TestEnvVarGuard::set(
+        "PRODEX_AUDIT_LOG_DIR",
+        audit_dir.to_str().expect("audit dir should be utf8"),
+    );
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let gateway_token = "presidio-failure-gateway-token";
+    let sensitive_input = "alice@example.com";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
+        gateway_admin_tokens: Vec::new(),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+    })
+    .expect("gateway proxy should start");
+    crate::register_runtime_presidio_redaction_proxy_state(
+        &proxy.log_path,
+        Some(crate::RuntimePresidioRedactionConfig {
+            analyzer_url: "http://127.0.0.1:9/analyze?secret=presidio-endpoint-secret".to_string(),
+            anonymizer_url: "http://127.0.0.1:9/anonymize?secret=presidio-endpoint-secret"
+                .to_string(),
+            languages: vec!["en".to_string()],
+            language_mode: crate::PresidioLanguageMode::Fixed,
+            fail_closed: true,
+        }),
+    );
+
+    let rejected = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .json(&serde_json::json!({"model":"gpt-5","input":sensitive_input}))
+        .send()
+        .expect("presidio failure request should be sent");
+    assert_eq!(rejected.status().as_u16(), 502);
+    let body = rejected.text().expect("rejection should be text");
+    assert_eq!(body, "gateway PII redaction failed");
+    assert!(
+        upstream
+            .body_rx
+            .recv_timeout(Duration::from_millis(200))
+            .is_err()
+    );
+
+    let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("presidio failure should be audited");
+    assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
+    assert!(audit_log.contains(r#""action":"presidio_redaction_failed""#));
+    assert!(audit_log.contains(r#""reason":"presidio_redaction_failed""#));
+    assert!(audit_log.contains(r#""path":"/v1/responses""#));
+    assert!(!audit_log.contains(gateway_token));
+    assert!(!audit_log.contains(sensitive_input));
+    assert!(!audit_log.contains("presidio-endpoint-secret"));
+    assert!(!audit_log.contains("127.0.0.1:9"));
+
+    let runtime_log =
+        std::fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("local_rewrite_presidio_redaction_failed"));
+    assert!(runtime_log.contains("reason=presidio_redaction_failed"));
+    assert!(!runtime_log.contains(gateway_token));
+    assert!(!runtime_log.contains(sensitive_input));
+    assert!(!runtime_log.contains("presidio-endpoint-secret"));
+    assert!(!runtime_log.contains("127.0.0.1:9"));
 }

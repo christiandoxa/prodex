@@ -4,6 +4,7 @@ use super::local_rewrite_copilot::{
     RuntimeCopilotOAuthPool, runtime_copilot_model_catalog_from_provider,
     runtime_copilot_oauth_pool_from_provider,
 };
+use super::local_rewrite_gateway_admin_auth::runtime_gateway_prefetch_oidc_cache;
 use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_admin_response, runtime_gateway_request_path_is_admin,
 };
@@ -64,10 +65,13 @@ use super::provider_bridge::{
     runtime_provider_request_ledger_message,
 };
 use super::*;
+use redaction::redaction_redact_secret_like_text;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
 pub(super) const RUNTIME_LOCAL_REWRITE_PROFILE: &str = "local";
+const RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE: &str = "upstream request failed";
 pub(super) const RUNTIME_GATEWAY_REDIS_KEY_STORE_KEY: &str = "prodex:gateway:virtual_keys";
 pub(super) const RUNTIME_GATEWAY_REDIS_KEY_STORE_LOCK: &str = "prodex:gateway:virtual_keys:lock";
 pub(super) const RUNTIME_GATEWAY_REDIS_LEDGER_KEY: &str = "prodex:gateway:billing_ledger";
@@ -76,6 +80,14 @@ pub(super) const RUNTIME_GATEWAY_SCIM_USER_SCHEMA: &str =
     "urn:ietf:params:scim:schemas:core:2.0:User";
 pub(super) const RUNTIME_GATEWAY_SCIM_PRODEX_SCHEMA: &str =
     "urn:prodex:params:scim:schemas:gateway:2.0:User";
+
+fn runtime_local_rewrite_upstream_request_failed_response() -> tiny_http::ResponseBox {
+    build_runtime_proxy_text_response(502, RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE)
+}
+
+fn runtime_local_rewrite_error_log_value(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&format!("{err:#}")).replace('\n', " ")
+}
 
 #[derive(Clone)]
 pub(super) struct RuntimeLocalRewriteProxyShared {
@@ -91,10 +103,13 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) model_memory: RuntimeLocalRewriteModelMemory,
     pub(super) api_key_cursor: Arc<AtomicUsize>,
     pub(super) client: reqwest::blocking::Client,
+    pub(super) gateway_oidc_http_cache: Arc<Mutex<BTreeMap<String, (std::time::Instant, String)>>>,
+    pub(super) gateway_admin_idempotency_keys: Arc<Mutex<BTreeSet<String>>>,
     pub(super) gateway_auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(super) gateway_admin_tokens: Vec<RuntimeGatewayAdminToken>,
     pub(super) gateway_sso: RuntimeGatewaySsoConfig,
     pub(super) gateway_state_store: RuntimeGatewayStateStore,
+    pub(super) gateway_policy_version: Option<u32>,
     pub(super) gateway_virtual_keys: Arc<Mutex<Vec<RuntimeGatewayVirtualKeyEntry>>>,
     pub(super) gateway_virtual_key_store_path: PathBuf,
     pub(super) gateway_usage: RuntimeGatewayVirtualKeyUsageState,
@@ -119,6 +134,8 @@ pub(super) struct RuntimeGatewayVirtualKeyUsageState {
     pub(super) save_dirty: Arc<AtomicBool>,
     pub(super) pending_deltas: Arc<Mutex<Vec<RuntimeGatewayVirtualKeyUsageDelta>>>,
     pub(super) request_ids: Arc<Mutex<BTreeSet<u64>>>,
+    pub(super) typed_request_ids: Arc<Mutex<BTreeMap<u64, String>>>,
+    pub(super) call_ids: Arc<Mutex<BTreeMap<u64, String>>>,
 }
 
 pub(crate) fn start_runtime_local_rewrite_proxy(
@@ -176,7 +193,9 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         async_client: build_runtime_upstream_async_http_client(true)?,
         async_runtime,
         log_path: log_path.clone(),
-        request_sequence: Arc::new(AtomicU64::new(1)),
+        request_sequence: Arc::new(AtomicU64::new(runtime_proxy_request_sequence_seed(
+            &log_path,
+        ))),
         state_save_revision: Arc::new(AtomicU64::new(0)),
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),
@@ -275,10 +294,16 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         model_memory: Arc::new(Mutex::new(RuntimeLocalRewriteModelMemoryState::default())),
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client()?,
+        gateway_oidc_http_cache: Arc::new(Mutex::new(BTreeMap::new())),
+        gateway_admin_idempotency_keys: Arc::new(Mutex::new(BTreeSet::new())),
         gateway_auth_token_hash,
         gateway_admin_tokens,
         gateway_sso,
         gateway_state_store,
+        gateway_policy_version: prodex_runtime_policy::runtime_policy_summary()
+            .ok()
+            .flatten()
+            .map(|summary| summary.version),
         gateway_virtual_keys: Arc::new(Mutex::new(gateway_virtual_key_entries)),
         gateway_virtual_key_store_path,
         gateway_usage: RuntimeGatewayVirtualKeyUsageState {
@@ -288,6 +313,8 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
             save_dirty: Arc::new(AtomicBool::new(false)),
             pending_deltas: Arc::new(Mutex::new(Vec::new())),
             request_ids: Arc::new(Mutex::new(BTreeSet::new())),
+            typed_request_ids: Arc::new(Mutex::new(BTreeMap::new())),
+            call_ids: Arc::new(Mutex::new(BTreeMap::new())),
         },
         gateway_route_aliases,
         gateway_route_load: Arc::new(Mutex::new(BTreeMap::new())),
@@ -296,6 +323,20 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         gateway_call_id_header,
         gateway_observability,
     };
+    if shared.gateway_sso.oidc.is_some()
+        && let Err(_err) = runtime_gateway_prefetch_oidc_cache(&shared)
+    {
+        runtime_proxy_log_to_path(
+            &shared.runtime_shared.log_path,
+            &runtime_proxy_structured_log_message(
+                "gateway_oidc_prefetch_failed",
+                [runtime_proxy_log_field(
+                    "error_kind",
+                    "gateway_oidc_prefetch_failed",
+                )],
+            ),
+        );
+    }
     if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
         pool.spawn_quota_refresh(shared.runtime_shared.log_path.clone());
     }
@@ -372,6 +413,198 @@ fn build_runtime_local_rewrite_http_client() -> Result<reqwest::blocking::Client
         .context("failed to build runtime local rewrite HTTP client")
 }
 
+fn runtime_gateway_audit_data_plane_auth_failed(
+    shared: &RuntimeLocalRewriteProxyShared,
+    path_value: &str,
+) {
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "reason": "missing_or_invalid_gateway_bearer_token",
+            "path": path_value,
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        "auth_failed",
+        "failure",
+        payload,
+    );
+}
+
+fn runtime_gateway_audit_data_plane_request_capture_failed(
+    shared: &RuntimeLocalRewriteProxyShared,
+    path_value: &str,
+) {
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "path": path_value,
+            "reason": "request_capture_failed",
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        "request_capture_failed",
+        "failure",
+        payload,
+    );
+}
+
+fn runtime_gateway_audit_data_plane_presidio_redaction_failed(
+    shared: &RuntimeLocalRewriteProxyShared,
+    path_value: &str,
+) {
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "path": path_value,
+            "reason": "presidio_redaction_failed",
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        "presidio_redaction_failed",
+        "failure",
+        payload,
+    );
+}
+
+fn runtime_gateway_audit_data_plane_request_body_too_large(
+    shared: &RuntimeLocalRewriteProxyShared,
+    path_value: &str,
+) {
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "path": path_value,
+            "reason": "request_body_too_large",
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        "request_body_too_large",
+        "failure",
+        payload,
+    );
+}
+
+fn runtime_gateway_audit_data_plane_virtual_key_rejected(
+    shared: &RuntimeLocalRewriteProxyShared,
+    path_value: &str,
+    reason: &str,
+) {
+    let action = if reason == "invalid_gateway_key" {
+        "auth_failed"
+    } else {
+        "authorization_denied"
+    };
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "reason": reason,
+            "path": path_value,
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        action,
+        "failure",
+        payload,
+    );
+}
+
+fn runtime_gateway_audit_data_plane_guardrail_blocked(
+    shared: &RuntimeLocalRewriteProxyShared,
+    path_value: &str,
+    reason: &str,
+) {
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "reason": reason,
+            "path": path_value,
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        "guardrail_blocked",
+        "failure",
+        payload,
+    );
+}
+
+fn runtime_gateway_audit_data_plane_guardrail_webhook_blocked(
+    shared: &RuntimeLocalRewriteProxyShared,
+    path_value: &str,
+    phase: &str,
+    reason: &str,
+) {
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "path": path_value,
+            "phase": phase,
+            "reason": reason,
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        "guardrail_webhook_blocked",
+        "failure",
+        payload,
+    );
+}
+
 fn handle_runtime_local_rewrite_proxy_request(
     request: tiny_http::Request,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -379,27 +612,42 @@ fn handle_runtime_local_rewrite_proxy_request(
     let request_path = request.url().to_string();
     let runtime_shared = &shared.runtime_shared;
     let request_id = runtime_proxy_next_request_id(runtime_shared);
-    if runtime_gateway_virtual_key_entries_is_empty(shared)
-        && let Some(auth_token_hash) = shared.gateway_auth_token_hash.as_ref()
-        && !runtime_gateway_request_path_is_admin(&request_path, shared)
-        && !runtime_local_rewrite_request_is_authorized(&request, auth_token_hash)
+    if let Some(response) =
+        runtime_gateway_operational_probe_response(request.method().as_str(), &request_path, shared)
     {
-        runtime_proxy_log(
-            runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_auth_rejected",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("path", request_path.as_str()),
-                ],
-            ),
-        );
-        let _ = request.respond(build_runtime_proxy_text_response(
-            401,
-            "missing or invalid gateway bearer token",
-        ));
+        let _ = request.respond(response);
         return;
+    }
+    if runtime_gateway_virtual_key_entries_is_empty(shared)
+        && !runtime_gateway_request_path_is_admin(&request_path, shared)
+    {
+        let authorized = shared
+            .gateway_auth_token_hash
+            .as_ref()
+            .is_some_and(|auth_token_hash| {
+                runtime_local_rewrite_request_is_authorized(&request, auth_token_hash)
+            });
+        if !authorized
+            && (shared.gateway_auth_token_hash.is_some() || !shared.gateway_admin_tokens.is_empty())
+        {
+            runtime_gateway_audit_data_plane_auth_failed(shared, &request_path);
+            runtime_proxy_log(
+                runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "gateway_auth_rejected",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("path", request_path.as_str()),
+                    ],
+                ),
+            );
+            let _ = request.respond(build_runtime_proxy_text_response(
+                401,
+                "missing or invalid gateway bearer token",
+            ));
+            return;
+        }
     }
     let websocket = is_tiny_http_websocket_upgrade(&request);
     let request_transport = if websocket { "websocket" } else { "http" };
@@ -456,6 +704,30 @@ fn handle_runtime_local_rewrite_proxy_request(
     let mut captured = match capture_runtime_proxy_request(&mut request) {
         Ok(captured) => captured,
         Err(err) => {
+            if runtime_proxy_error_is_body_too_large(&err) {
+                runtime_gateway_audit_data_plane_request_body_too_large(
+                    shared,
+                    request_path.as_str(),
+                );
+                runtime_proxy_log(
+                    runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "local_rewrite_request_body_too_large",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "http"),
+                            runtime_proxy_log_field("reason", "request_body_too_large"),
+                            runtime_proxy_log_field("path", request_path.as_str()),
+                        ],
+                    ),
+                );
+                let _ = request.respond(build_runtime_proxy_text_response(
+                    413,
+                    "proxied request body is too large",
+                ));
+                return;
+            }
+            runtime_gateway_audit_data_plane_request_capture_failed(shared, request_path.as_str());
             runtime_proxy_log(
                 runtime_shared,
                 runtime_proxy_structured_log_message(
@@ -463,17 +735,25 @@ fn handle_runtime_local_rewrite_proxy_request(
                     [
                         runtime_proxy_log_field("request", request_id.to_string()),
                         runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
+                        runtime_proxy_log_field("reason", "request_capture_failed"),
+                        runtime_proxy_log_field("path", request_path.as_str()),
                     ],
                 ),
             );
-            let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+            let _ = request.respond(build_runtime_proxy_text_response(
+                502,
+                "gateway request capture failed",
+            ));
             return;
         }
     };
-    if let Err(err) =
+    if let Err(_err) =
         apply_runtime_presidio_redaction_to_request(request_id, &mut captured, runtime_shared)
     {
+        runtime_gateway_audit_data_plane_presidio_redaction_failed(
+            shared,
+            captured.path_and_query.as_str(),
+        );
         runtime_proxy_log(
             runtime_shared,
             runtime_proxy_structured_log_message(
@@ -481,15 +761,49 @@ fn handle_runtime_local_rewrite_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("error", format!("{err:#}")),
+                    runtime_proxy_log_field("reason", "presidio_redaction_failed"),
+                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
                 ],
             ),
         );
-        let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+        let _ = request.respond(build_runtime_proxy_text_response(
+            502,
+            "gateway PII redaction failed",
+        ));
         return;
     }
     if let Some(response) = runtime_gateway_admin_response(request_id, &captured, shared) {
         let _ = request.respond(response);
+        return;
+    }
+    if let Some(block) = runtime_proxy_crate::runtime_gateway_guardrail_block(
+        &captured.body,
+        &shared.gateway_guardrails,
+    ) {
+        let reason = block.kind.as_str();
+        runtime_gateway_audit_data_plane_guardrail_blocked(
+            shared,
+            captured.path_and_query.as_str(),
+            reason,
+        );
+        runtime_proxy_log(
+            runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_guardrail_blocked",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("matched_value_redacted", "true"),
+                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                ],
+            ),
+        );
+        let _ = request.respond(build_runtime_proxy_json_error_response(
+            403,
+            reason,
+            "gateway guardrail blocked this request",
+        ));
         return;
     }
     if let Some(redacted_body) = runtime_proxy_crate::runtime_gateway_redact_request_body(
@@ -510,6 +824,11 @@ fn handle_runtime_local_rewrite_proxy_request(
         captured.body = redacted_body;
     }
     if let Some(rejection) = runtime_gateway_virtual_key_rejection(request_id, &captured, shared) {
+        runtime_gateway_audit_data_plane_virtual_key_rejected(
+            shared,
+            captured.path_and_query.as_str(),
+            rejection.code(),
+        );
         runtime_proxy_log(
             runtime_shared,
             runtime_proxy_structured_log_message(
@@ -532,6 +851,12 @@ fn handle_runtime_local_rewrite_proxy_request(
     if let Some(block) =
         runtime_gateway_guardrail_webhook_block("pre", request_id, &captured.body, shared)
     {
+        runtime_gateway_audit_data_plane_guardrail_webhook_blocked(
+            shared,
+            captured.path_and_query.as_str(),
+            "pre",
+            block.reason.as_str(),
+        );
         runtime_proxy_log(
             runtime_shared,
             runtime_proxy_structured_log_message(
@@ -541,7 +866,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("transport", "http"),
                     runtime_proxy_log_field("phase", "pre"),
                     runtime_proxy_log_field("reason", block.reason.as_str()),
-                    runtime_proxy_log_field("value", block.value.as_str()),
+                    runtime_proxy_log_field("matched_value_redacted", "true"),
                     runtime_proxy_log_field("path", captured.path_and_query.as_str()),
                 ],
             ),
@@ -565,7 +890,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
                     runtime_proxy_log_field("reason", block.kind.as_str()),
-                    runtime_proxy_log_field("value", block.value.as_str()),
+                    runtime_proxy_log_field("matched_value_redacted", "true"),
                     runtime_proxy_log_field("path", captured.path_and_query.as_str()),
                 ],
             ),
@@ -692,11 +1017,14 @@ fn handle_runtime_local_rewrite_proxy_request(
                     [
                         runtime_proxy_log_field("request", request_id.to_string()),
                         runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
+                        runtime_proxy_log_field(
+                            "error",
+                            runtime_local_rewrite_error_log_value(&err),
+                        ),
                     ],
                 ),
             );
-            let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+            let _ = request.respond(runtime_local_rewrite_upstream_request_failed_response());
             return;
         }
     };
@@ -717,4 +1045,87 @@ pub(super) fn runtime_local_rewrite_remote_compact_unsupported_message(
         RuntimeLocalRewriteProviderOptions::Kiro { .. } => "Kiro",
     };
     format!("{provider_name} provider does not support Codex remote compact yet")
+}
+
+fn runtime_gateway_operational_probe_response(
+    method: &str,
+    request_path: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Option<tiny_http::ResponseBox> {
+    let probe = request_path.split('?').next().unwrap_or(request_path);
+    let probe = match probe {
+        "/livez" => "livez",
+        "/readyz" => "readyz",
+        "/startupz" => "startupz",
+        _ => return None,
+    };
+
+    if method != "GET" && method != "HEAD" {
+        return Some(build_runtime_proxy_response_from_parts(
+            RuntimeHeapTrimmedBufferedResponseParts {
+                status: 405,
+                headers: vec![
+                    ("content-type".to_string(), b"application/json".to_vec()),
+                    ("allow".to_string(), b"GET, HEAD".to_vec()),
+                ],
+                body: serde_json::json!({
+                    "object": "gateway.health",
+                    "probe": probe,
+                    "status": "method_not_allowed"
+                })
+                .to_string()
+                .into_bytes()
+                .into(),
+            },
+        ));
+    }
+
+    let overloaded = runtime_proxy_local_overload_pressure_active(&shared.runtime_shared);
+    let ready = probe != "readyz" || !overloaded;
+    let status = if ready { 200 } else { 503 };
+    let state = if ready { "ok" } else { "overloaded" };
+    let body = serde_json::json!({
+        "object": "gateway.health",
+        "probe": probe,
+        "status": state,
+        "ready": ready,
+        "local_overload": overloaded,
+        "policy_version": shared.gateway_policy_version,
+        "active_requests": shared.runtime_shared.active_request_count.load(Ordering::SeqCst),
+        "active_request_limit": shared.runtime_shared.active_request_limit,
+    })
+    .to_string();
+
+    Some(build_runtime_proxy_response_from_parts(
+        RuntimeHeapTrimmedBufferedResponseParts {
+            status,
+            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+            body: if method == "HEAD" {
+                Vec::new().into()
+            } else {
+                body.into_bytes().into()
+            },
+        },
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_rewrite_error_log_value_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!(
+            "upstream failed\nAuthorization: Bearer local-rewrite-token\napi_key=local-rewrite-key"
+        )
+        .context("local rewrite upstream failed");
+        let message = runtime_local_rewrite_error_log_value(&err);
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("local rewrite upstream failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("local-rewrite-token"));
+        assert!(!message.contains("local-rewrite-key"));
+    }
 }

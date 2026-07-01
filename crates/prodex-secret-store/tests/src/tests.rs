@@ -1,8 +1,10 @@
 use crate::{
     FileSecretBackend, KeyringSecretBackend, RefreshLeaseBypassReason, RefreshLeaseCoordinator,
-    RefreshLeaseDecision, RefreshLeaseRole, SecretBackendKind, SecretBackendSelection, SecretError,
-    SecretLocation, SecretManager, SecretRevision, SecretValue, auth_json_location,
+    RefreshLeaseDecision, RefreshLeaseError, RefreshLeaseErrorStatus, RefreshLeaseRole,
+    SecretBackend, SecretBackendKind, SecretBackendSelection, SecretError, SecretLocation,
+    SecretManager, SecretRevision, SecretStoreErrorStatus, SecretValue, auth_json_location,
     auth_json_location_for_backend, auth_json_path, describe_secret_location,
+    plan_refresh_lease_error_response, plan_secret_error_response,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -102,6 +104,16 @@ fn file_backend_rejects_keyring_locations() {
 }
 
 #[test]
+fn file_backend_rejects_empty_file_path() {
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(PathBuf::new());
+
+    let err = store.read(&location).unwrap_err();
+
+    assert!(matches!(err, SecretError::InvalidLocation { .. }));
+}
+
+#[test]
 fn keyring_backend_validates_service_name() {
     let backend = KeyringSecretBackend::new("prodex").unwrap();
     assert_eq!(backend.service(), "prodex");
@@ -109,6 +121,19 @@ fn keyring_backend_validates_service_name() {
     assert!(backend.unsupported_reason().contains("not implemented"));
 
     let err = KeyringSecretBackend::new("   ").unwrap_err();
+    assert!(matches!(err, SecretError::InvalidLocation { .. }));
+
+    let err = KeyringSecretBackend::new(" prodex ").unwrap_err();
+    assert!(matches!(err, SecretError::InvalidLocation { .. }));
+}
+
+#[test]
+fn keyring_backend_rejects_empty_location_account() {
+    let backend = KeyringSecretBackend::new("prodex").unwrap();
+    let location = SecretLocation::keyring("prodex", "");
+
+    let err = backend.read(&location).unwrap_err();
+
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
 }
 
@@ -149,6 +174,69 @@ fn selectable_backend_from_kind_requires_keyring_service() {
 
     let err = SecretBackendSelection::from_kind(SecretBackendKind::Keyring, None).unwrap_err();
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
+}
+
+#[test]
+fn secret_backend_kind_rejects_padded_values() {
+    let err = " keyring ".parse::<SecretBackendKind>().unwrap_err();
+    assert!(matches!(err, SecretError::InvalidLocation { .. }));
+}
+
+#[test]
+fn secret_error_response_is_stable_and_redacted() {
+    let error = SecretError::Io {
+        path: PathBuf::from("/tmp/prodex/auth.json"),
+        reason: "permission denied".to_string(),
+    };
+    assert!(!error.to_string().contains("/tmp"));
+    assert!(!error.to_string().contains("auth.json"));
+    assert!(!error.to_string().contains("permission"));
+
+    let unsupported = SecretError::UnsupportedLocation {
+        location: "keyring://prodex/auth-json:/tmp/codex-home".to_string(),
+    };
+    assert!(!unsupported.to_string().contains("keyring://"));
+    assert!(!unsupported.to_string().contains("/tmp/codex-home"));
+
+    let invalid = SecretError::InvalidLocation {
+        reason: "unknown secret backend 'raw-prod-token'".to_string(),
+    };
+    assert!(!invalid.to_string().contains("raw-prod-token"));
+
+    let response = plan_secret_error_response(&error);
+
+    assert_eq!(response.status, SecretStoreErrorStatus::ServiceUnavailable);
+    assert_eq!(response.code, "secret_store_unavailable");
+    assert_eq!(
+        response.message,
+        "secret storage is temporarily unavailable"
+    );
+    assert!(!response.message.contains("/tmp"));
+    assert!(!response.message.contains("auth.json"));
+    assert!(!response.message.contains("permission"));
+}
+
+#[test]
+fn refresh_lease_error_response_is_stable_and_redacted() {
+    let error = RefreshLeaseError::Io {
+        path: PathBuf::from("/tmp/prodex/refresh-token-secret.lock"),
+        reason: "permission denied".to_string(),
+    };
+    assert!(!error.to_string().contains("/tmp"));
+    assert!(!error.to_string().contains("refresh-token-secret"));
+    assert!(!error.to_string().contains("permission"));
+
+    let response = plan_refresh_lease_error_response(&error);
+
+    assert_eq!(response.status, RefreshLeaseErrorStatus::ServiceUnavailable);
+    assert_eq!(response.code, "refresh_lease_unavailable");
+    assert_eq!(
+        response.message,
+        "refresh lease coordination is temporarily unavailable"
+    );
+    assert!(!response.message.contains("/tmp"));
+    assert!(!response.message.contains("refresh-token-secret"));
+    assert!(!response.message.contains("permission"));
 }
 
 #[test]

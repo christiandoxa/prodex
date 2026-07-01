@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Local;
+use redaction::redaction_redact_secret_like_text;
 use std::collections::BTreeMap;
 use std::thread;
 
@@ -56,7 +57,7 @@ pub(crate) fn collect_run_profile_reports(
         let auth = job.provider.auth_summary(&job.codex_home);
         let result = if auth.quota_compatible {
             fetch_usage_with_proxy_policy(&job.codex_home, base_url.as_deref(), upstream_no_proxy)
-                .map_err(|err| err.to_string())
+                .map_err(|err| selection_probe_error(&err))
         } else {
             Err("auth mode is not quota-compatible".to_string())
         };
@@ -84,7 +85,7 @@ pub(crate) fn probe_run_profile(
     let auth = profile.provider.auth_summary(&profile.codex_home);
     let result = if auth.quota_compatible {
         fetch_usage_with_proxy_policy(&profile.codex_home, base_url, upstream_no_proxy)
-            .map_err(|err| err.to_string())
+            .map_err(|err| selection_probe_error(&err))
     } else {
         Err("auth mode is not quota-compatible".to_string())
     };
@@ -113,6 +114,10 @@ pub(crate) fn run_preflight_reports_with_current_first(
             upstream_no_proxy,
         ),
     )
+}
+
+fn selection_probe_error(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&err.to_string())
 }
 
 pub(crate) fn ready_profile_candidates(
@@ -232,4 +237,23 @@ pub(crate) fn find_ready_profiles(
 
 pub(crate) fn profile_rotation_order(state: &AppState, current_profile: &str) -> Vec<String> {
     profile_rotation_order_with_view(app_state_profile_selection_view(state), current_profile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selection_probe_error_redacts_secret_like_material() {
+        let err = anyhow::anyhow!(
+            "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"
+        );
+
+        let message = selection_probe_error(&err);
+
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("fixture-token-123"));
+        assert!(!message.contains("sk-fixture-123"));
+    }
 }

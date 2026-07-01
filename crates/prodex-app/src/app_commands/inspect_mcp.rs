@@ -10,6 +10,8 @@ use std::path::PathBuf;
 
 const RUNTIME_LATEST_POINTER: &str = "prodex-runtime-latest.path";
 const RUNTIME_LOG_TAIL_BYTES: usize = 32 * 1024;
+const INSPECT_MCP_INVALID_PARAMS_MESSAGE: &str = "invalid inspect tool parameters";
+const INSPECT_MCP_METHOD_NOT_FOUND_MESSAGE: &str = "method not found";
 
 pub(crate) fn handle_inspect_mcp(_args: InspectMcpArgs) -> Result<()> {
     run_inspect_mcp_stdio()
@@ -51,11 +53,11 @@ fn handle_mcp_request(request: Value) -> Result<Option<Value>> {
             let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
             match handle_tool_call(params) {
                 Ok(result) => result,
-                Err(err) => {
+                Err(_err) => {
                     return Ok(Some(json!({
                         "jsonrpc": "2.0",
                         "id": id,
-                        "error": { "code": -32602, "message": format!("{err:#}") }
+                        "error": { "code": -32602, "message": INSPECT_MCP_INVALID_PARAMS_MESSAGE }
                     })));
                 }
             }
@@ -64,7 +66,7 @@ fn handle_mcp_request(request: Value) -> Result<Option<Value>> {
             return Ok(Some(json!({
                 "jsonrpc": "2.0",
                 "id": id,
-                "error": { "code": -32601, "message": format!("unknown method: {method}") }
+                "error": { "code": -32601, "message": INSPECT_MCP_METHOD_NOT_FOUND_MESSAGE }
             })));
         }
     };
@@ -273,5 +275,42 @@ mod tests {
         )
         .unwrap();
         assert!(content_length.starts_with(b"Content-Length:"));
+    }
+
+    #[test]
+    fn inspect_mcp_invalid_params_error_is_stable_and_redacted() {
+        let response = handle_mcp_request(json!({
+            "jsonrpc":"2.0",
+            "id":1,
+            "method":"tools/call",
+            "params": { "name": "secret-token-123", "arguments": {} }
+        }))
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(response["error"]["code"], -32602);
+        assert_eq!(
+            response["error"]["message"],
+            INSPECT_MCP_INVALID_PARAMS_MESSAGE
+        );
+        assert!(!response.to_string().contains("secret-token-123"));
+    }
+
+    #[test]
+    fn inspect_mcp_unknown_method_error_is_stable_and_redacted() {
+        let response = handle_mcp_request(json!({
+            "jsonrpc":"2.0",
+            "id":1,
+            "method":"secret-token-123"
+        }))
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(response["error"]["code"], -32601);
+        assert_eq!(
+            response["error"]["message"],
+            INSPECT_MCP_METHOD_NOT_FOUND_MESSAGE
+        );
+        assert!(!response.to_string().contains("secret-token-123"));
     }
 }

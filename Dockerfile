@@ -20,6 +20,8 @@ RUN useradd --create-home --uid 10001 prodex \
     && chown -R prodex:prodex /var/lib/prodex /var/log/prodex
 
 COPY --from=builder /workspace/target/release/prodex /usr/local/bin/prodex
+COPY --from=builder /workspace/target/release/prodex-gateway /usr/local/bin/prodex-gateway
+COPY --from=builder /workspace/target/release/prodex-control-plane /usr/local/bin/prodex-control-plane
 
 ENV PRODEX_HOME=/var/lib/prodex
 ENV PRODEX_RUNTIME_LOG_DIR=/var/log/prodex

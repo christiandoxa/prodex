@@ -18,6 +18,24 @@ import {
 import { workspacePackageNameForCrateDir } from "./workspace-metadata.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
+const ENTERPRISE_ID_BOUNDARY_CRATES = new Set([
+  "prodex-application",
+  "prodex-authn",
+  "prodex-authz",
+  "prodex-config",
+  "prodex-control-plane",
+  "prodex-domain",
+  "prodex-gateway-core",
+  "prodex-gateway-http",
+  "prodex-observability",
+  "prodex-provider-core",
+  "prodex-provider-spi",
+  "prodex-storage",
+  "prodex-storage-postgres",
+  "prodex-storage-redis",
+  "prodex-storage-sqlite",
+]);
+
 function parseArgs(argv) {
   const args = {
     dryRun: false,
@@ -246,6 +264,42 @@ function isSizeGuardRelevantPath(filePath) {
   return pathMatchesGroup(filePath, PATH_GROUP_NAMES.sizeGuardRelevant);
 }
 
+function isEnterpriseIdBoundaryRelevantPath(filePath) {
+  if (
+    filePath === "package.json" ||
+    filePath === "scripts/ci/changed-tests.mjs" ||
+    filePath === "scripts/ci/enterprise-id-boundary-guard.mjs" ||
+    filePath === "scripts/ci/preflight.mjs" ||
+    filePath === "scripts/ci/test-impact-manifest.json" ||
+    filePath === "docs/adr/0222-enterprise-id-boundary-guard.md" ||
+    filePath === "docs/enterprise-readiness-audit.md"
+  ) {
+    return true;
+  }
+
+  const parts = filePath.split("/");
+  return (
+    parts[0] === "crates" &&
+    ENTERPRISE_ID_BOUNDARY_CRATES.has(parts[1]) &&
+    parts[2] === "src" &&
+    filePath.endsWith(".rs")
+  );
+}
+
+function isEnterpriseDocsGuardRelevantPath(filePath) {
+  return (
+    filePath === "package.json" ||
+    filePath === ".github/workflows/ci.yml" ||
+    filePath === "scripts/ci/changed-tests.mjs" ||
+    filePath === "scripts/ci/enterprise-docs-guard.mjs" ||
+    filePath === "scripts/ci/test-impact-manifest.json" ||
+    filePath === "docs/enterprise-readiness-audit.md" ||
+    filePath === "docs/threat-model.md" ||
+    filePath === "docs/migration-guide.md" ||
+    filePath.startsWith("docs/adr/03")
+  );
+}
+
 function isReleaseGuardFixturesRelevantPath(filePath) {
   return pathMatchesGroup(filePath, PATH_GROUP_NAMES.releaseGuardRelevant);
 }
@@ -256,6 +310,16 @@ function isUpstreamCompatRelevantPath(filePath) {
 
 function isChurnHygieneRelevantPath(filePath) {
   return pathMatchesGroup(filePath, PATH_GROUP_NAMES.churnHygieneRelevant);
+}
+
+function isGatewaySecurityRelevantPath(filePath) {
+  return (
+    filePath === "package.json" ||
+    filePath === "scripts/ci/changed-tests.mjs" ||
+    filePath === "scripts/ci/test-impact-manifest.json" ||
+    filePath.startsWith("crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_") ||
+    filePath.startsWith("crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_")
+  );
 }
 
 function isReleaseRunRelevantPath(filePath) {
@@ -372,6 +436,30 @@ export async function buildSteps(paths) {
       });
     }
 
+    if (isEnterpriseIdBoundaryRelevantPath(filePath)) {
+      addStep(steps, "enterprise-id-boundary-guard", {
+        label: "enterprise-id-boundary-guard",
+        command: "node",
+        args: ["scripts/ci/enterprise-id-boundary-guard.mjs"],
+      });
+    }
+
+    if (isEnterpriseDocsGuardRelevantPath(filePath)) {
+      addStep(steps, "enterprise-docs-guard", {
+        label: "enterprise-docs-guard",
+        command: "node",
+        args: ["scripts/ci/enterprise-docs-guard.mjs"],
+      });
+    }
+
+    if (isGatewaySecurityRelevantPath(filePath)) {
+      addStep(steps, "gateway-security-smoke", {
+        label: "gateway-security-smoke",
+        command: "npm",
+        args: ["run", "ci:gateway-security-smoke"],
+      });
+    }
+
     if (isReleaseGuardFixturesRelevantPath(filePath)) {
       addStep(steps, "release-guard-fixtures", {
         label: "release-guard-fixtures",
@@ -462,6 +550,11 @@ export async function buildSteps(paths) {
     }
 
     if (pathMatchesGroup(filePath, PATH_GROUP_NAMES.runtimePolicyDocsRelevant)) {
+      addStep(steps, "docs-runtime-policy-self-test", {
+        label: "docs-runtime-policy-self-test",
+        command: "node",
+        args: ["scripts/docs/runtime-policy.mjs", "--self-test"],
+      });
       addStep(steps, "docs-runtime-policy-check", {
         label: "docs-runtime-policy-check",
         command: "node",

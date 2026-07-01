@@ -189,7 +189,7 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     let body = response.text().expect("prometheus body should decode");
     assert!(body.contains("prodex_runtime_broker_info"));
     assert!(body.contains("broker_key=\""));
-    assert!(body.contains("current_profile=\"main\""));
+    assert!(!body.contains("current_profile="));
     assert!(body.contains("prodex_version=\""));
     assert!(body.contains("executable_sha256=\""));
     assert!(body.contains("prodex_runtime_broker_lane_admissions_total"));

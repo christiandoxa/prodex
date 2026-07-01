@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use redaction::redaction_redact_secret_like_text;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::net::SocketAddr;
@@ -50,7 +51,10 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
     };
     for request in server.incoming_requests() {
         if let Err(err) = dashboard.handle(request) {
-            eprintln!("dashboard request failed: {err:#}");
+            eprintln!(
+                "dashboard request failed: {}",
+                dashboard_request_error_message(&err)
+            );
         }
     }
     Ok(())
@@ -398,9 +402,17 @@ fn respond_error(request: Request, status: StatusCode, err: anyhow::Error) -> Re
         request,
         status,
         "application/json",
-        serde_json::to_vec(&json!({ "error": err.to_string() }))
+        serde_json::to_vec(&json!({ "error": dashboard_error_message(&err) }))
             .context("failed to serialize dashboard error")?,
     )
+}
+
+fn dashboard_error_message(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&err.to_string())
+}
+
+fn dashboard_request_error_message(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&format!("{err:#}"))
 }
 
 fn respond_html(request: Request, html: &str) -> Result<()> {
@@ -472,5 +484,31 @@ mod tests {
             "Warning".to_string(),
             "dashboard has no password auth".to_string()
         )));
+    }
+
+    #[test]
+    fn dashboard_error_message_redacts_secret_like_material() {
+        let err = anyhow!(
+            "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"
+        );
+
+        let message = dashboard_error_message(&err);
+
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("fixture-token-123"));
+        assert!(!message.contains("sk-fixture-123"));
+    }
+
+    #[test]
+    fn dashboard_request_error_message_redacts_secret_like_chain() {
+        let err = anyhow!("failed: Authorization: Bearer dashboard-token")
+            .context("outer dashboard failure");
+
+        let message = dashboard_request_error_message(&err);
+
+        assert!(message.contains("outer dashboard failure"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(!message.contains("dashboard-token"));
     }
 }

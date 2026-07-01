@@ -22,6 +22,10 @@ import { workspacePackagesFromCargoMetadata } from "./workspace-metadata.mjs";
 
 const execFileAsync = promisify(execFile);
 const SCRIPT_PATH = new URL("./ci-impact.mjs", import.meta.url).pathname;
+const RUNTIME_HOTPATH_GUARD_SCRIPT_PATH = new URL(
+  "./runtime-hotpath-guard.mjs",
+  import.meta.url,
+).pathname;
 
 test("normalizes changed paths", () => {
   assert.equal(normalizeChangedPath("./docs\\runtime-policy.md"), "docs/runtime-policy.md");
@@ -150,6 +154,70 @@ test("changed-tests keeps uncategorized node scripts conservative", async () => 
 
   const labels = (await buildSteps([filePath])).map((step) => step.label);
   assert.deepEqual(labels, ["node-check:scripts/ci/benchmark-calibration.mjs"]);
+});
+
+test("changed-tests runs enterprise ID guard for boundary identity paths", async () => {
+  const labels = (await buildSteps([
+    "crates/prodex-domain/src/ids.rs",
+    "crates/prodex-provider-core/src/lib.rs",
+    "scripts/ci/enterprise-id-boundary-guard.mjs",
+  ])).map((step) => step.label);
+
+  assert.ok(labels.includes("enterprise-id-boundary-guard"));
+});
+
+test("changed-tests runs enterprise docs guard for workflow and package drift", async () => {
+  const labels = (await buildSteps([
+    ".github/workflows/ci.yml",
+    "package.json",
+    "scripts/ci/enterprise-docs-guard.mjs",
+  ])).map((step) => step.label);
+
+  assert.ok(labels.includes("enterprise-docs-guard"));
+});
+
+test("changed-tests package alias check covers enterprise guard scripts", async () => {
+  const steps = await buildSteps(["package.json"]);
+  const packageAliasStep = steps.find((step) => step.label === "package:changed-aliases");
+  assert.ok(packageAliasStep);
+  const expectedAliases = JSON.parse(packageAliasStep.args[2]);
+
+  assert.equal(
+    expectedAliases["ci:deployment-security-guard"],
+    "node scripts/ci/deployment-security-guard.mjs",
+  );
+  assert.equal(
+    expectedAliases["ci:gateway-http-boundary-guard"],
+    "node scripts/ci/gateway-http-boundary-guard.mjs",
+  );
+});
+
+test("changed-tests runs runtime policy docs self-test and check together", async () => {
+  const labels = (await buildSteps([
+    "docs/runtime-policy.md",
+    "scripts/docs/runtime-policy.mjs",
+  ])).map((step) => step.label);
+
+  assert.ok(labels.includes("docs-runtime-policy-self-test"));
+  assert.ok(labels.includes("docs-runtime-policy-check"));
+});
+
+test("runtime hotpath guard default scan excludes split test fixtures", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    RUNTIME_HOTPATH_GUARD_SCRIPT_PATH,
+    "--json",
+  ]);
+  const result = JSON.parse(stdout);
+
+  assert.equal(result.violations.length, 0);
+  assert.equal(
+    result.files.some(
+      (filePath) =>
+        filePath.endsWith("/local_rewrite_tests.rs") ||
+        filePath.includes("/local_rewrite_tests/"),
+    ),
+    false,
+  );
 });
 
 test("workspace metadata helper derives package ownership from cargo metadata", () => {

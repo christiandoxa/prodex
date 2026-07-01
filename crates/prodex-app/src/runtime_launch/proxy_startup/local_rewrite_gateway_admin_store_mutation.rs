@@ -6,8 +6,9 @@ use super::local_rewrite_gateway_backend_connection::{
 };
 use super::local_rewrite_gateway_key_store_backend::{
     runtime_gateway_postgres_load_key_store_from_client,
-    runtime_gateway_postgres_save_key_store_in_tx, runtime_gateway_redis_save_key_store,
-    runtime_gateway_sqlite_load_key_store_from_conn, runtime_gateway_sqlite_save_key_store_in_tx,
+    runtime_gateway_postgres_save_key_store_in_tx, runtime_gateway_redis_load_key_store_from_conn,
+    runtime_gateway_redis_save_key_store, runtime_gateway_sqlite_load_key_store_from_conn,
+    runtime_gateway_sqlite_save_key_store_in_tx,
 };
 use super::local_rewrite_gateway_store_file::{
     RuntimeGatewayStoreFileLoadError, runtime_gateway_virtual_key_store_file_load,
@@ -19,7 +20,6 @@ use super::local_rewrite_gateway_store_types::{
 };
 use super::*;
 use fs2::FileExt;
-use redis::Commands;
 use rusqlite::TransactionBehavior;
 use std::fs::OpenOptions;
 
@@ -56,12 +56,12 @@ where
 {
     let lock_path = path.with_extension("json.lock");
     if let Some(parent) = lock_path.parent()
-        && let Err(err) = std::fs::create_dir_all(parent)
+        && let Err(_err) = std::fs::create_dir_all(parent)
     {
         return Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_lock_failed",
-            &err.to_string(),
+            "gateway key store lock could not be acquired",
         ));
     }
     let lock_file = match OpenOptions::new()
@@ -72,19 +72,19 @@ where
         .open(&lock_path)
     {
         Ok(file) => file,
-        Err(err) => {
+        Err(_err) => {
             return Err(build_runtime_proxy_json_error_response(
                 500,
                 "gateway_key_store_lock_failed",
-                &err.to_string(),
+                "gateway key store lock could not be acquired",
             ));
         }
     };
-    if let Err(err) = lock_file.lock_exclusive() {
+    if let Err(_err) = lock_file.lock_exclusive() {
         return Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_lock_failed",
-            &err.to_string(),
+            "gateway key store lock could not be acquired",
         ));
     }
     let mut store = match runtime_gateway_virtual_key_store_load_strict_file(path) {
@@ -100,12 +100,12 @@ where
         return Err(err.into_response());
     }
     store.sort_for_rendering();
-    if let Err(err) = runtime_gateway_virtual_key_store_file_save(path, &store) {
+    if let Err(_err) = runtime_gateway_virtual_key_store_file_save(path, &store) {
         let _ = lock_file.unlock();
         return Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_save_failed",
-            &err.to_string(),
+            "gateway key store could not be saved",
         ));
     }
     runtime_gateway_apply_admin_virtual_key_store(shared, &store);
@@ -123,31 +123,31 @@ where
 {
     let mut conn = match runtime_gateway_sqlite_open(path) {
         Ok(conn) => conn,
-        Err(err) => {
+        Err(_err) => {
             return Err(build_runtime_proxy_json_error_response(
                 500,
                 "gateway_key_store_load_failed",
-                &err.to_string(),
+                "gateway key store could not be loaded",
             ));
         }
     };
     let tx = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
         Ok(tx) => tx,
-        Err(err) => {
+        Err(_err) => {
             return Err(build_runtime_proxy_json_error_response(
                 500,
                 "gateway_key_store_lock_failed",
-                &err.to_string(),
+                "gateway key store lock could not be acquired",
             ));
         }
     };
     let mut store = match runtime_gateway_sqlite_load_key_store_from_conn(&tx) {
         Ok(store) => store,
-        Err(err) => {
+        Err(_err) => {
             return Err(build_runtime_proxy_json_error_response(
                 500,
                 "gateway_key_store_load_failed",
-                &err.to_string(),
+                "gateway key store could not be loaded",
             ));
         }
     };
@@ -156,18 +156,18 @@ where
         return Err(err.into_response());
     }
     store.sort_keys();
-    if let Err(err) = runtime_gateway_sqlite_save_key_store_in_tx(&tx, &store) {
+    if let Err(_err) = runtime_gateway_sqlite_save_key_store_in_tx(&tx, &store) {
         return Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_save_failed",
-            &err.to_string(),
+            "gateway key store could not be saved",
         ));
     }
-    if let Err(err) = tx.commit() {
+    if let Err(_err) = tx.commit() {
         return Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_save_failed",
-            &err.to_string(),
+            "gateway key store could not be saved",
         ));
     }
     runtime_gateway_apply_admin_virtual_key_store(shared, &store);
@@ -184,40 +184,40 @@ where
 {
     let mut client = match runtime_gateway_postgres_open(url) {
         Ok(client) => client,
-        Err(err) => {
+        Err(_err) => {
             return Err(build_runtime_proxy_json_error_response(
                 500,
                 "gateway_key_store_load_failed",
-                &err.to_string(),
+                "gateway key store could not be loaded",
             ));
         }
     };
     let mut tx = match client.transaction() {
         Ok(tx) => tx,
-        Err(err) => {
+        Err(_err) => {
             return Err(build_runtime_proxy_json_error_response(
                 500,
                 "gateway_key_store_lock_failed",
-                &err.to_string(),
+                "gateway key store lock could not be acquired",
             ));
         }
     };
-    if let Err(err) = tx.batch_execute(
+    if let Err(_err) = tx.batch_execute(
         "LOCK TABLE prodex_gateway_virtual_keys, prodex_gateway_scim_users IN EXCLUSIVE MODE",
     ) {
         return Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_lock_failed",
-            &err.to_string(),
+            "gateway key store lock could not be acquired",
         ));
     }
     let mut store = match runtime_gateway_postgres_load_key_store_from_client(&mut tx) {
         Ok(store) => store,
-        Err(err) => {
+        Err(_err) => {
             return Err(build_runtime_proxy_json_error_response(
                 500,
                 "gateway_key_store_load_failed",
-                &err.to_string(),
+                "gateway key store could not be loaded",
             ));
         }
     };
@@ -226,18 +226,18 @@ where
         return Err(err.into_response());
     }
     store.sort_for_rendering();
-    if let Err(err) = runtime_gateway_postgres_save_key_store_in_tx(&mut tx, &store) {
+    if let Err(_err) = runtime_gateway_postgres_save_key_store_in_tx(&mut tx, &store) {
         return Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_save_failed",
-            &err.to_string(),
+            "gateway key store could not be saved",
         ));
     }
-    if let Err(err) = tx.commit() {
+    if let Err(_err) = tx.commit() {
         return Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_save_failed",
-            &err.to_string(),
+            "gateway key store could not be saved",
         ));
     }
     runtime_gateway_apply_admin_virtual_key_store(shared, &store);
@@ -257,15 +257,10 @@ where
         super::local_rewrite::RUNTIME_GATEWAY_REDIS_KEY_STORE_LOCK,
         super::local_rewrite::runtime_gateway_generate_virtual_key_token,
         |conn| -> Result<Result<RuntimeGatewayVirtualKeyStoreFile, RuntimeGatewayAdminError>> {
-            let payload: Option<String> =
-                conn.get(super::local_rewrite::RUNTIME_GATEWAY_REDIS_KEY_STORE_KEY)?;
-            let mut store = match payload {
-                Some(payload) => {
-                    serde_json::from_str::<RuntimeGatewayVirtualKeyStoreFile>(&payload)
-                        .context("failed to parse gateway redis virtual key store")?
-                }
-                None => RuntimeGatewayVirtualKeyStoreFile::default(),
-            };
+            let mut store = runtime_gateway_redis_load_key_store_from_conn(
+                conn,
+                super::local_rewrite::RUNTIME_GATEWAY_REDIS_KEY_STORE_KEY,
+            )?;
             store.version = runtime_gateway_virtual_key_store_version();
             if let Err(err) = mutation(&mut store) {
                 return Ok(Err(err));
@@ -285,10 +280,10 @@ where
             Ok(())
         }
         Ok(Err(err)) => Err(err.into_response()),
-        Err(err) => Err(build_runtime_proxy_json_error_response(
+        Err(_err) => Err(build_runtime_proxy_json_error_response(
             500,
             "gateway_key_store_save_failed",
-            &err.to_string(),
+            "gateway key store could not be saved",
         )),
     }
 }
@@ -328,11 +323,15 @@ fn runtime_gateway_virtual_key_store_load_strict_file(
     path: &Path,
 ) -> Result<RuntimeGatewayVirtualKeyStoreFile, RuntimeGatewayAdminError> {
     runtime_gateway_virtual_key_store_file_load(path).map_err(|err| match err {
-        RuntimeGatewayStoreFileLoadError::Invalid(message) => {
-            RuntimeGatewayAdminError::new(500, "gateway_key_store_invalid", message)
-        }
-        RuntimeGatewayStoreFileLoadError::Io(message) => {
-            RuntimeGatewayAdminError::new(500, "gateway_key_store_load_failed", message)
-        }
+        RuntimeGatewayStoreFileLoadError::Invalid(_message) => RuntimeGatewayAdminError::new(
+            500,
+            "gateway_key_store_invalid",
+            "gateway key store is invalid",
+        ),
+        RuntimeGatewayStoreFileLoadError::Io(_message) => RuntimeGatewayAdminError::new(
+            500,
+            "gateway_key_store_load_failed",
+            "gateway key store could not be loaded",
+        ),
     })
 }

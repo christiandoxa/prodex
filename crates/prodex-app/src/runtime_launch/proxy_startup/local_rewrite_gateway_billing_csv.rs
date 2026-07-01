@@ -6,7 +6,13 @@ pub(super) fn runtime_gateway_billing_ledger_csv<T: Serialize>(records: &[T]) ->
         &mut csv,
         [
             "call_id",
+            "request_id",
             "key_name",
+            "tenant_id",
+            "team_id",
+            "project_id",
+            "user_id",
+            "budget_id",
             "model",
             "phase",
             "request",
@@ -29,7 +35,13 @@ pub(super) fn runtime_gateway_billing_ledger_csv<T: Serialize>(records: &[T]) ->
             &mut csv,
             &[
                 runtime_gateway_json_csv_string(&record, "call_id"),
+                runtime_gateway_json_csv_string(&record, "request_id"),
                 runtime_gateway_json_csv_string(&record, "key_name"),
+                runtime_gateway_json_csv_string(&record, "tenant_id"),
+                runtime_gateway_json_csv_string(&record, "team_id"),
+                runtime_gateway_json_csv_string(&record, "project_id"),
+                runtime_gateway_json_csv_string(&record, "user_id"),
+                runtime_gateway_json_csv_string(&record, "budget_id"),
                 runtime_gateway_json_csv_string(&record, "model"),
                 runtime_gateway_json_csv_string(&record, "phase"),
                 runtime_gateway_json_csv_u64(&record, "request"),
@@ -58,6 +70,7 @@ pub(super) fn runtime_gateway_billing_summary_csv(summary: &serde_json::Value) -
             "group",
             "key_name",
             "model",
+            "tenant_id",
             "team_id",
             "project_id",
             "user_id",
@@ -85,6 +98,7 @@ pub(super) fn runtime_gateway_billing_summary_csv(summary: &serde_json::Value) -
         "by_key",
         "by_model",
         "by_key_model",
+        "by_tenant",
         "by_team",
         "by_project",
         "by_user",
@@ -106,6 +120,7 @@ fn runtime_gateway_billing_summary_csv_row(csv: &mut String, group: &str, row: &
             group.to_string(),
             runtime_gateway_json_csv_string(row, "key_name"),
             runtime_gateway_json_csv_string(row, "model"),
+            runtime_gateway_json_csv_string(row, "tenant_id"),
             runtime_gateway_json_csv_string(row, "team_id"),
             runtime_gateway_json_csv_string(row, "project_id"),
             runtime_gateway_json_csv_string(row, "user_id"),
@@ -191,7 +206,13 @@ mod tests {
     #[derive(Serialize)]
     struct LedgerRecord {
         call_id: String,
+        request_id: String,
         key_name: String,
+        tenant_id: String,
+        team_id: String,
+        project_id: String,
+        user_id: String,
+        budget_id: String,
         model: String,
         phase: String,
         request: u64,
@@ -206,7 +227,13 @@ mod tests {
     fn ledger_csv_quotes_cells_that_need_escaping() {
         let csv = runtime_gateway_billing_ledger_csv(&[LedgerRecord {
             call_id: "prodex-1".to_string(),
+            request_id: "prodex-request-1".to_string(),
             key_name: "team,\"a\"".to_string(),
+            tenant_id: "tenant-a".to_string(),
+            team_id: "platform".to_string(),
+            project_id: String::new(),
+            user_id: String::new(),
+            budget_id: "budget-a".to_string(),
             model: "gpt-5.4".to_string(),
             phase: "request".to_string(),
             request: 1,
@@ -216,18 +243,24 @@ mod tests {
             output_tokens: Some(5),
             response_status: Some(200),
         }]);
-        assert!(csv.contains("prodex-1,\"team,\"\"a\"\"\",gpt-5.4"));
-        assert!(csv.starts_with("call_id,key_name,model"));
+        assert!(csv.contains(
+            "prodex-1,prodex-request-1,\"team,\"\"a\"\"\",tenant-a,platform,,,budget-a,gpt-5.4"
+        ));
+        assert!(csv.starts_with("call_id,request_id,key_name,tenant_id"));
     }
 
     #[test]
     fn summary_csv_includes_governance_dimensions() {
         let summary = serde_json::json!({
             "totals": {"requests": 1},
+            "by_tenant": [{"tenant_id": "tenant-a", "requests": 1}],
             "by_team": [{"team_id": "platform", "requests": 1}]
         });
         let csv = runtime_gateway_billing_summary_csv(&summary);
-        assert!(csv.contains("group,key_name,model,team_id,project_id,user_id,budget_id"));
-        assert!(csv.contains("by_team,,,platform,,,"));
+        assert!(
+            csv.contains("group,key_name,model,tenant_id,team_id,project_id,user_id,budget_id")
+        );
+        assert!(csv.contains("by_tenant,,,tenant-a,,,,"));
+        assert!(csv.contains("by_team,,,,platform,,,"));
     }
 }

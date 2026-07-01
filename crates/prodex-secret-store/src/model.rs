@@ -99,16 +99,34 @@ impl SecretError {
 impl fmt::Display for SecretError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedLocation { location } => {
-                write!(f, "unsupported secret location: {location}")
-            }
-            Self::InvalidLocation { reason } => write!(f, "invalid secret location: {reason}"),
-            Self::Io { path, reason } => write!(f, "I/O error for {}: {reason}", path.display()),
+            Self::UnsupportedLocation { .. } => write!(f, "unsupported secret location"),
+            Self::InvalidLocation { .. } => write!(f, "invalid secret location"),
+            Self::Io { .. } => write!(f, "secret storage I/O error"),
         }
     }
 }
 
 impl StdError for SecretError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretStoreErrorStatus {
+    ServiceUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretStoreErrorResponsePlan {
+    pub status: SecretStoreErrorStatus,
+    pub code: &'static str,
+    pub message: &'static str,
+}
+
+pub fn plan_secret_error_response(_error: &SecretError) -> SecretStoreErrorResponsePlan {
+    SecretStoreErrorResponsePlan {
+        status: SecretStoreErrorStatus::ServiceUnavailable,
+        code: "secret_store_unavailable",
+        message: "secret storage is temporarily unavailable",
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretBackendKind {
@@ -143,7 +161,12 @@ impl std::str::FromStr for SecretBackendKind {
     type Err = SecretError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
+        if value != value.trim() {
+            return Err(SecretError::invalid_location(format!(
+                "unknown secret backend '{value}'"
+            )));
+        }
+        match value.to_ascii_lowercase().as_str() {
             "file" => Ok(Self::File),
             "keyring" => Ok(Self::Keyring),
             _ => Err(SecretError::invalid_location(format!(

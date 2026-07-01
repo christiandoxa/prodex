@@ -6,6 +6,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use prodex_domain::RequestId;
 use prodex_quota::{UsageResponse, UsageWindow, format_precise_reset_time};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -359,11 +360,7 @@ fn parse_manual_redeem_confirmation(input: &str) -> Option<bool> {
 }
 
 fn manual_redeem_request_id() -> String {
-    let now_nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    format!("prodex-manual-redeem-{}-{now_nanos}", std::process::id())
+    format!("prodex-manual-redeem-{}", RequestId::new())
 }
 
 fn manual_redeem_outcome_label(outcome: RateLimitResetCreditConsumeOutcome) -> &'static str {
@@ -381,7 +378,18 @@ mod tests {
 
     #[test]
     fn manual_redeem_request_id_is_prodex_scoped() {
-        assert!(manual_redeem_request_id().starts_with("prodex-manual-redeem-"));
+        let id = manual_redeem_request_id();
+        let uuid = id
+            .strip_prefix("prodex-manual-redeem-")
+            .expect("manual redeem id should be prodex scoped");
+
+        assert_eq!(
+            uuid.parse::<RequestId>()
+                .unwrap()
+                .as_uuid()
+                .get_version_num(),
+            7
+        );
     }
 
     #[test]

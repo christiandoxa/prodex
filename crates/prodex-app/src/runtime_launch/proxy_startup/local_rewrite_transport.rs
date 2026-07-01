@@ -7,16 +7,19 @@ use super::local_rewrite_transport_copilot::{
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderGatewaySpendEvent, RuntimeProviderWireFormat,
-    runtime_provider_gateway_cost_for_request, runtime_provider_gateway_spend_event,
-    runtime_provider_label, runtime_provider_model_from_body, runtime_provider_openai_contract,
-    runtime_provider_request_ledger_message,
+    runtime_provider_gateway_cost_for_request, runtime_provider_gateway_spend_apply_admission_ids,
+    runtime_provider_gateway_spend_event, runtime_provider_label, runtime_provider_model_from_body,
+    runtime_provider_openai_contract, runtime_provider_request_ledger_message,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
+use prodex_domain::RequestId;
+use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
@@ -107,7 +110,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                 .header("copilot-integration-id", "copilot-developer-cli")
                 .header("openai-intent", "conversation-panel")
                 .header("x-github-api-version", "2025-04-01")
-                .header("x-request-id", format!("prodex-{request_id}"))
+                .header("x-request-id", format!("prodex-{}", RequestId::new()))
                 .header("X-Initiator", runtime_copilot_initiator_header(request))
                 .header(
                     reqwest::header::USER_AGENT,
@@ -173,6 +176,9 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                 upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
             }
         }
+    }
+    if !matches!(provider_kind, RuntimeProviderBridgeKind::OpenAiResponses) {
+        upstream_request = runtime_local_rewrite_trace_context_headers(upstream_request, request);
     }
     runtime_proxy_log(
         &shared.runtime_shared,
@@ -250,38 +256,52 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
 
 pub(super) fn emit_runtime_gateway_spend_event(
     shared: &RuntimeLocalRewriteProxyShared,
-    event: RuntimeProviderGatewaySpendEvent,
+    mut event: RuntimeProviderGatewaySpendEvent,
 ) {
+    let typed_request_id = shared
+        .gateway_usage
+        .typed_request_ids
+        .lock()
+        .ok()
+        .and_then(|typed_request_ids| typed_request_ids.get(&event.request).cloned());
+    let call_id = shared
+        .gateway_usage
+        .call_ids
+        .lock()
+        .ok()
+        .and_then(|call_ids| call_ids.get(&event.request).cloned());
+    runtime_provider_gateway_spend_apply_admission_ids(
+        &mut event,
+        typed_request_id.as_deref(),
+        call_id.as_deref(),
+    );
     runtime_proxy_log(&shared.runtime_shared, event.log_message());
     schedule_runtime_gateway_billing_ledger_reconcile(shared, event.clone());
     if shared.gateway_observability.sink_enabled("jsonl")
         && let Some(path) = shared.gateway_observability.jsonl_path.as_ref()
     {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        {
-            Ok(mut file) => {
-                if let Ok(payload) = serde_json::to_string(&event) {
-                    let _ = writeln!(file, "{payload}");
-                }
+        let path = path.clone();
+        let runtime_shared = shared.runtime_shared.clone();
+        let event_for_jsonl = event.clone();
+        shared.runtime_shared.async_runtime.spawn_blocking(move || {
+            if let Err(err) = runtime_gateway_observability_write_jsonl(&path, &event_for_jsonl) {
+                let redacted_path =
+                    runtime_gateway_observability_redacted_log_text(&path.display().to_string());
+                let redacted_error =
+                    runtime_gateway_observability_redacted_log_text(&err.to_string());
+                runtime_proxy_log(
+                    &runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "gateway_observability_jsonl_failed",
+                        [
+                            runtime_proxy_log_field("request", event_for_jsonl.request.to_string()),
+                            runtime_proxy_log_field("path", redacted_path),
+                            runtime_proxy_log_field("error", redacted_error),
+                        ],
+                    ),
+                );
             }
-            Err(err) => runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_observability_jsonl_failed",
-                    [
-                        runtime_proxy_log_field("request", event.request.to_string()),
-                        runtime_proxy_log_field("path", path.display().to_string()),
-                        runtime_proxy_log_field("error", err.to_string()),
-                    ],
-                ),
-            ),
-        }
+        });
     }
     if shared.gateway_observability.sink_enabled("http")
         && let Some(endpoint) = shared.gateway_observability.http_endpoint.as_deref()
@@ -290,24 +310,53 @@ pub(super) fn emit_runtime_gateway_spend_event(
             &event,
             shared.gateway_observability.http_schema.as_str(),
         );
-        let mut request = shared.client.post(endpoint).json(&payload);
-        if let Some(token) = shared.gateway_observability.http_bearer_token.as_deref() {
-            request = request.bearer_auth(token);
-        }
-        if let Err(err) = request.send() {
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_observability_http_failed",
-                    [
-                        runtime_proxy_log_field("request", event.request.to_string()),
-                        runtime_proxy_log_field("endpoint", endpoint),
-                        runtime_proxy_log_field("error", err.to_string()),
-                    ],
-                ),
-            );
-        }
+        let client = shared.client.clone();
+        let endpoint = endpoint.to_string();
+        let token = shared.gateway_observability.http_bearer_token.clone();
+        let runtime_shared = shared.runtime_shared.clone();
+        let request_id = event.request;
+        shared.runtime_shared.async_runtime.spawn_blocking(move || {
+            let mut request = client.post(&endpoint).json(&payload);
+            if let Some(token) = token.as_deref() {
+                request = request.bearer_auth(token);
+            }
+            if let Err(err) = request.send() {
+                let redacted_endpoint = runtime_gateway_observability_redacted_log_text(&endpoint);
+                let redacted_error =
+                    runtime_gateway_observability_redacted_log_text(&err.to_string());
+                runtime_proxy_log(
+                    &runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "gateway_observability_http_failed",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("endpoint", redacted_endpoint),
+                            runtime_proxy_log_field("error", redacted_error),
+                        ],
+                    ),
+                );
+            }
+        });
     }
+}
+
+fn runtime_gateway_observability_redacted_log_text(value: &str) -> String {
+    redaction_redact_secret_like_text(value)
+}
+
+fn runtime_gateway_observability_write_jsonl(
+    path: &Path,
+    event: &RuntimeProviderGatewaySpendEvent,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let payload = serde_json::to_string(event).map_err(std::io::Error::other)?;
+    writeln!(file, "{payload}")
 }
 
 fn runtime_gateway_observability_http_payload(
@@ -356,6 +405,7 @@ fn runtime_gateway_otel_attributes(
     event: &RuntimeProviderGatewaySpendEvent,
 ) -> Vec<serde_json::Value> {
     vec![
+        serde_json::json!({"key": "prodex.request_id", "value": {"stringValue": event.request_id}}),
         serde_json::json!({"key": "prodex.call_id", "value": {"stringValue": event.call_id}}),
         serde_json::json!({"key": "prodex.phase", "value": {"stringValue": event.phase}}),
         serde_json::json!({"key": "prodex.provider", "value": {"stringValue": event.provider}}),
@@ -521,6 +571,18 @@ fn runtime_local_rewrite_header<'a>(
         .map(|(_, value)| value.as_str())
 }
 
+fn runtime_local_rewrite_trace_context_headers(
+    mut upstream_request: reqwest::blocking::RequestBuilder,
+    request: &RuntimeProxyRequest,
+) -> reqwest::blocking::RequestBuilder {
+    for header_name in ["traceparent", "tracestate", "baggage"] {
+        if let Some(header_value) = runtime_local_rewrite_header(request, header_name) {
+            upstream_request = upstream_request.header(header_name, header_value);
+        }
+    }
+    upstream_request
+}
+
 fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(
@@ -542,6 +604,7 @@ fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn openai_standard_provider_upstream_url_uses_contract_formats() {
@@ -654,7 +717,12 @@ mod tests {
 
         let generic = runtime_gateway_observability_http_payload(&event, "generic");
         assert_eq!(generic["event"], "gateway_spend");
-        assert_eq!(generic["call_id"], "prodex-7");
+        let call_id = generic["call_id"].as_str().expect("call_id is a string");
+        let uuid = call_id
+            .strip_prefix("prodex-")
+            .and_then(|value| prodex_domain::CallId::from_str(value).ok())
+            .expect("call_id uses a prodex-scoped uuidv7");
+        assert_eq!(uuid.as_uuid().get_version_num(), 7);
 
         let otel = runtime_gateway_observability_http_payload(&event, "otel");
         assert_eq!(
@@ -667,5 +735,54 @@ mod tests {
 
         let langfuse = runtime_gateway_observability_http_payload(&event, "langfuse");
         assert_eq!(langfuse["batch"][0]["type"], "trace-create");
+    }
+
+    #[test]
+    fn gateway_observability_jsonl_write_preserves_event_payload() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gateway-jsonl-{}",
+            prodex_domain::RequestId::new()
+        ));
+        let path = root.join("spend.jsonl");
+        let event = runtime_provider_gateway_spend_event(
+            7,
+            RuntimeProviderBridgeKind::OpenAiResponses,
+            "/v1/responses",
+            Some("gpt-5-mini"),
+            200,
+            42,
+            128,
+            br#"{"model":"gpt-5-mini","input":"hello from prodex"}"#,
+            prodex_provider_core::ProviderModelCost::default(),
+        );
+
+        runtime_gateway_observability_write_jsonl(&path, &event).unwrap();
+
+        let line = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(json["event"], "gateway_spend");
+        assert_eq!(json["legacy_request_sequence"], 7);
+        assert!(json.get("request").is_none());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gateway_observability_failure_log_text_redacts_endpoint_secrets() {
+        let endpoint =
+            "https://telemetry.example.test/ingest?api_key=sk-live-fixture-notreal-123456";
+        let error = "failed to send Authorization: Bearer fixture_http_notreal_12345";
+        let path = "/tmp/prodex/sk-live-fixture-notreal-path/spend.jsonl";
+
+        let redacted_endpoint = runtime_gateway_observability_redacted_log_text(endpoint);
+        let redacted_error = runtime_gateway_observability_redacted_log_text(error);
+        let redacted_path = runtime_gateway_observability_redacted_log_text(path);
+
+        assert!(redacted_endpoint.contains("api_key=<redacted>"));
+        assert!(!redacted_endpoint.contains("sk-live-fixture-notreal-123456"));
+        assert!(redacted_error.contains("Authorization: Bearer <redacted>"));
+        assert!(!redacted_error.contains("fixture_http_notreal_12345"));
+        assert!(redacted_path.contains("sk-live-<redacted>"));
+        assert!(!redacted_path.contains("sk-live-fixture-notreal-path"));
     }
 }

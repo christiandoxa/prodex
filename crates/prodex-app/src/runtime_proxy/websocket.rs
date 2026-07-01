@@ -1,4 +1,5 @@
 use super::*;
+use redaction::redaction_redact_secret_like_text;
 mod connect;
 mod response_tracking;
 pub(crate) use connect::*;
@@ -29,6 +30,10 @@ use runtime_proxy_crate::{
     runtime_websocket_proxy_url_candidate, runtime_websocket_read_http_connect_response,
     runtime_websocket_target_from_parts,
 };
+
+fn runtime_websocket_error_log_value(error: &str) -> String {
+    redaction_redact_secret_like_text(error).replace('\n', " ")
+}
 
 pub(super) fn run_runtime_proxy_websocket_session(
     session_id: u64,
@@ -366,7 +371,10 @@ fn runtime_websocket_connect_transport_error(
                     runtime_proxy_log_field("transport", "websocket"),
                     runtime_proxy_log_field("profile", profile_name),
                     runtime_proxy_log_field("class", local_pressure_kind.as_str()),
-                    runtime_proxy_log_field("error", err.to_string()),
+                    runtime_proxy_log_field(
+                        "error",
+                        runtime_websocket_error_log_value(&err.to_string()),
+                    ),
                 ],
             ),
         );
@@ -443,4 +451,22 @@ pub(super) fn runtime_configure_upstream_tcp_stream(
     stream.set_read_timeout(Some(io_timeout))?;
     stream.set_write_timeout(Some(io_timeout))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_error_log_value_redacts_secret_like_material() {
+        let message = runtime_websocket_error_log_value(
+            "connect failed\nAuthorization: Bearer websocket-token\napi_key=websocket-key",
+        );
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("websocket-token"));
+        assert!(!message.contains("websocket-key"));
+    }
 }

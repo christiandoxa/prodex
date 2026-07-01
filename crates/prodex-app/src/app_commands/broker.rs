@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::Local;
+use redaction::redaction_redact_secret_like_text;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -192,7 +193,32 @@ fn runtime_broker_try_promote_persistence_owner(
         Ok(None) => {}
         Err(err) => runtime_proxy_log_to_path(
             &proxy.log_path,
-            &format!("runtime_broker_persistence_promotion_error error={err:#}"),
+            &runtime_broker_persistence_promotion_error_log(&err),
         ),
+    }
+}
+
+fn runtime_broker_persistence_promotion_error_log(err: &anyhow::Error) -> String {
+    format!(
+        "runtime_broker_persistence_promotion_error error={}",
+        redaction_redact_secret_like_text(&format!("{err:#}"))
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn broker_persistence_promotion_error_log_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!("failed: Authorization: Bearer broker-owner-token")
+            .context("owner promotion failed");
+
+        let message = runtime_broker_persistence_promotion_error_log(&err);
+
+        assert!(message.contains("runtime_broker_persistence_promotion_error"));
+        assert!(message.contains("owner promotion failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(!message.contains("broker-owner-token"));
     }
 }

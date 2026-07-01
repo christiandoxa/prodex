@@ -69,6 +69,21 @@ fn persist_codex_session_image_attachments_rewrites_escaped_session_path() {
 }
 
 #[test]
+fn persist_codex_session_file_image_attachment_error_redacts_session_path() {
+    let temp_dir = ImageAttachmentTestDir::new("session-path-error-redaction");
+    let codex_home = temp_dir.path.join("codex-home");
+    let session_file = temp_dir.path.join("sessions/secret-profile/rollout.jsonl");
+
+    let error = persist_codex_session_file_image_attachments(&codex_home, &session_file)
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(error, "failed to read codex session file");
+    assert!(!error.contains("secret-profile"));
+    assert!(!error.contains(session_file.to_string_lossy().as_ref()));
+}
+
+#[test]
 fn persist_codex_session_image_attachments_rewrites_to_existing_stable_copy_when_source_is_gone() {
     let temp_dir = ImageAttachmentTestDir::new("clipboard-image-source-gone");
     let codex_home = temp_dir.path.join("codex-home");

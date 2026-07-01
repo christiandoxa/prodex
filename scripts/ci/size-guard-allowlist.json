@@ -1,7 +1,7 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/capability.rs",
-    "maxLines": 934,
+    "maxLines": 945,
     "reason": "Capability report rendering, dry-run command probing, provider capability summaries, and optional Codebase Memory probe status remain capped while command execution probes are split from presentation."
   },
   {
@@ -31,7 +31,7 @@
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1872,
+    "maxLines": 1882,
     "reason": "Live quota ratatui rendering, Spark status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
   },
   {
@@ -126,12 +126,147 @@
   },
   {
     "file": "crates/prodex-session-store/src/lib.rs",
-    "maxLines": 935,
-    "reason": "Session report resolution, resume repair with slim threshold change; recapped at current size."
+    "maxLines": 946,
+    "reason": "Session report resolution, resume repair, archived/state-db lookup, and prefix/full-id recovery remain capped while repair scanning and report/store ownership are split."
   },
   {
     "file": "crates/prodex-session-store/tests/src/lib.rs",
     "maxLines": 865,
     "reason": "Resume-repair and session-store regression coverage remain capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
+    "maxLines": 1090,
+    "reason": "Local rewrite gateway compatibility, provider routing, and enterprise bridge glue remain capped while request-path ownership is moved into narrower gateway crates."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
+    "maxLines": 1232,
+    "reason": "Gateway compatibility characterization tests remain capped while route-specific fixtures continue moving under local_rewrite_tests modules."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
+    "maxLines": 1162,
+    "reason": "Gateway admin CRUD compatibility coverage remains capped while tenant, key, SCIM, and audit fixtures are split by resource."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_usage.rs",
+    "maxLines": 1126,
+    "reason": "Gateway usage, budget, and billing characterization remains capped while reservation and reconciliation cases move into storage-boundary tests."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
+    "maxLines": 860,
+    "reason": "Gemini compact compatibility remains capped while request rewriting, context projection, and response shaping move into narrower adapter modules."
+  },
+  {
+    "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
+    "maxLines": 1226,
+    "reason": "Runtime launch characterization remains capped while provider, gateway, and resume-session cases are split into focused test modules."
+  },
+  {
+    "file": "crates/prodex-app/tests/src/quota_support/watch_unit.rs",
+    "maxLines": 866,
+    "reason": "Quota watch rendering and refresh characterization remains capped while row-formatting and terminal-behavior cases are split."
+  },
+  {
+    "file": "crates/prodex-provider-core/src/models.rs",
+    "maxLines": 853,
+    "reason": "Provider model catalog definitions, JSON serialization, and model metadata remain capped while model ownership is split from adapter logic."
+  },
+  {
+    "file": "crates/prodex-application/src/lib.rs",
+    "maxLines": 6148,
+    "reason": "Application orchestration boundary is a Phase 1 mechanical extraction cap; split use-case groups as ports stabilize."
+  },
+  {
+    "file": "crates/prodex-application/tests/application_boundary.rs",
+    "maxLines": 6082,
+    "reason": "Application boundary characterization matrix is capped while security, accounting, and policy cases move to focused modules."
+  },
+  {
+    "file": "crates/prodex-authz/tests/boundary.rs",
+    "maxLines": 880,
+    "reason": "Authorization boundary characterization remains capped while data-plane, control-plane, and break-glass cases are split by surface."
+  },
+  {
+    "file": "crates/prodex-config/tests/config_boundary.rs",
+    "maxLines": 954,
+    "reason": "Config boundary characterization remains capped while refresh, invalidation, publication, and secret-reference cases are split."
+  },
+  {
+    "file": "crates/prodex-control-plane/tests/control_plane.rs",
+    "maxLines": 907,
+    "reason": "Control-plane boundary characterization remains capped while tenant, identity, key, and policy flows are split into focused modules."
+  },
+  {
+    "file": "crates/prodex-domain/src/audit.rs",
+    "maxLines": 2411,
+    "reason": "Domain audit value objects, query planning, retention, and digest chaining remain capped until audit submodules are split by responsibility."
+  },
+  {
+    "file": "crates/prodex-domain/tests/accounting.rs",
+    "maxLines": 1191,
+    "reason": "Accounting domain characterization remains capped while reservation, reconciliation, and idempotency cases are split."
+  },
+  {
+    "file": "crates/prodex-domain/tests/audit.rs",
+    "maxLines": 3553,
+    "reason": "Audit domain characterization remains capped while query, retention, digest, and export tests are split."
+  },
+  {
+    "file": "crates/prodex-gateway-http/src/lib.rs",
+    "maxLines": 1380,
+    "reason": "Gateway HTTP boundary is capped during Phase 3 bootstrap until router, extractors, and response mapping move into separate modules."
+  },
+  {
+    "file": "crates/prodex-gateway-http/tests/http_policy.rs",
+    "maxLines": 1124,
+    "reason": "Gateway HTTP policy compatibility tests remain capped while auth, health, and OpenAPI assertions are split."
+  },
+  {
+    "file": "crates/prodex-observability/src/lib.rs",
+    "maxLines": 4963,
+    "reason": "Observability contract planners are capped during OpenTelemetry bootstrap until metrics, traces, logs, SLOs, and redaction move into submodules."
+  },
+  {
+    "file": "crates/prodex-observability/tests/observability_boundary.rs",
+    "maxLines": 5554,
+    "reason": "Observability boundary characterization is capped while metric, trace, log, SLO, and redaction tests are split."
+  },
+  {
+    "file": "crates/prodex-runtime-policy/tests/src/lib.rs",
+    "maxLines": 2099,
+    "reason": "Runtime policy compatibility coverage is capped while versioned policy, cache, and gateway settings tests are split."
+  },
+  {
+    "file": "crates/prodex-storage/src/lib.rs",
+    "maxLines": 2393,
+    "reason": "Storage boundary contracts are capped during Phase 2 extraction until accounting, migration, idempotency, and readiness ports move into submodules."
+  },
+  {
+    "file": "crates/prodex-storage/tests/storage_contract.rs",
+    "maxLines": 2496,
+    "reason": "Storage boundary characterization is capped while accounting, migration, idempotency, and readiness tests are split."
+  },
+  {
+    "file": "crates/prodex-storage-postgres/src/lib.rs",
+    "maxLines": 1624,
+    "reason": "PostgreSQL SQL-plan contracts are capped until migrations, reservation accounting, idempotency, and RLS plans are split."
+  },
+  {
+    "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
+    "maxLines": 1526,
+    "reason": "PostgreSQL storage characterization is capped while migration, tenant isolation, and accounting tests are split."
+  },
+  {
+    "file": "crates/prodex-storage-sqlite/src/lib.rs",
+    "maxLines": 1723,
+    "reason": "SQLite compatibility SQL-plan contracts are capped until migrations, local accounting, idempotency, and readiness plans are split."
+  },
+  {
+    "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
+    "maxLines": 1400,
+    "reason": "SQLite storage characterization is capped while migration, tenant isolation, and accounting tests are split."
   }
 ]

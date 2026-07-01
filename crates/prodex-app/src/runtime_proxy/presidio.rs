@@ -5,7 +5,7 @@ use crate::runtime_core_shared::{runtime_proxy_log_field, runtime_proxy_structur
 use crate::runtime_proxy_log;
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -88,7 +88,7 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request(
             }
             Ok(())
         }
-        Err(err) => {
+        Err(_err) => {
             let fail_closed = config.fail_closed;
             runtime_proxy_log(
                 shared,
@@ -101,12 +101,12 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request(
                             "fail_mode",
                             if fail_closed { "closed" } else { "open" },
                         ),
-                        runtime_proxy_log_field("error", err.to_string()),
+                        runtime_proxy_log_field("reason", "presidio_redaction_failed"),
                     ],
                 ),
             );
             if fail_closed {
-                Err(err.context("Presidio request redaction failed"))
+                Err(anyhow!("presidio_redaction_failed"))
             } else {
                 Ok(())
             }
@@ -149,7 +149,7 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
                 Ok(Cow::Borrowed(text))
             }
         }
-        Err(err) => {
+        Err(_err) => {
             runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
@@ -161,12 +161,12 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
                             "fail_mode",
                             if config.fail_closed { "closed" } else { "open" },
                         ),
-                        runtime_proxy_log_field("error", err.to_string()),
+                        runtime_proxy_log_field("reason", "presidio_redaction_failed"),
                     ],
                 ),
             );
             if config.fail_closed {
-                Err(err.context("Presidio websocket redaction failed"))
+                Err(anyhow!("presidio_redaction_failed"))
             } else {
                 Ok(Cow::Borrowed(text))
             }

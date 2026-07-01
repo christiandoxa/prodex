@@ -21,6 +21,9 @@ use super::provider_bridge::RuntimeProviderGatewaySpendEvent;
 use super::*;
 use std::sync::Arc;
 
+const RUNTIME_GATEWAY_LEDGER_PERSISTENCE_FAILED_ERROR_KIND: &str =
+    "gateway_ledger_persistence_failed";
+
 pub(super) fn runtime_gateway_billing_ledger_load(
     state_store: &RuntimeGatewayStateStore,
     limit: usize,
@@ -61,6 +64,8 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
     let state_store = shared.gateway_state_store.clone();
     let runtime_shared = shared.runtime_shared.clone();
     let request_ids = Arc::clone(&shared.gateway_usage.request_ids);
+    let typed_request_ids = Arc::clone(&shared.gateway_usage.typed_request_ids);
+    let call_ids = Arc::clone(&shared.gateway_usage.call_ids);
     shared.runtime_shared.async_runtime.spawn_blocking(move || {
         let mut last_error = None;
         for attempt in 0..25 {
@@ -68,6 +73,12 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
                 Ok(true) => {
                     if let Ok(mut request_ids) = request_ids.lock() {
                         request_ids.remove(&event.request);
+                    }
+                    if let Ok(mut typed_request_ids) = typed_request_ids.lock() {
+                        typed_request_ids.remove(&event.request);
+                    }
+                    if let Ok(mut call_ids) = call_ids.lock() {
+                        call_ids.remove(&event.request);
                     }
                     return;
                 }
@@ -78,14 +89,22 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
                 }
                 Err(err) => {
                     last_error = Some(err);
-                    break;
+                    if attempt < 24 {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
                 }
             }
         }
         if let Ok(mut request_ids) = request_ids.lock() {
             request_ids.remove(&event.request);
         }
-        if let Some(err) = last_error {
+        if let Ok(mut typed_request_ids) = typed_request_ids.lock() {
+            typed_request_ids.remove(&event.request);
+        }
+        if let Ok(mut call_ids) = call_ids.lock() {
+            call_ids.remove(&event.request);
+        }
+        if let Some(_err) = last_error {
             crate::runtime_proxy_log(
                 &runtime_shared,
                 runtime_proxy_structured_log_message(
@@ -93,7 +112,10 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
                     [
                         runtime_proxy_log_field("request", event.request.to_string()),
                         runtime_proxy_log_field("backend", state_store.label()),
-                        runtime_proxy_log_field("error", err.to_string()),
+                        runtime_proxy_log_field(
+                            "error_kind",
+                            RUNTIME_GATEWAY_LEDGER_PERSISTENCE_FAILED_ERROR_KIND,
+                        ),
                     ],
                 ),
             );
@@ -140,5 +162,32 @@ fn runtime_gateway_billing_ledger_reconcile_response(
             )
             .map_err(std::io::Error::other)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ledger_persistence_failure_log_uses_stable_redacted_error_kind() {
+        let message = runtime_proxy_structured_log_message(
+            "gateway_billing_ledger_reconcile_failed",
+            [
+                runtime_proxy_log_field("request", "123"),
+                runtime_proxy_log_field("backend", "file"),
+                runtime_proxy_log_field(
+                    "error_kind",
+                    RUNTIME_GATEWAY_LEDGER_PERSISTENCE_FAILED_ERROR_KIND,
+                ),
+            ],
+        );
+        assert!(message.contains("gateway_billing_ledger_reconcile_failed"));
+        assert!(message.contains("backend=file"));
+        assert!(message.contains("error_kind=gateway_ledger_persistence_failed"));
+        assert!(!message.contains("gateway-billing-ledger.jsonl"));
+        assert!(!message.contains("/tmp/"));
+        assert!(!message.contains("Is a directory"));
+        assert!(!message.contains("permission denied"));
     }
 }

@@ -14,11 +14,11 @@ use super::provider_sse_events::{
     runtime_provider_sse_output_text_item_done_event,
 };
 use super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
+use prodex_domain::{CallId, RequestId};
 use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub(super) struct RuntimeDeepSeekSseState {
-    request_id: u64,
     response_id: String,
     created_at: u64,
     sequence_number: u64,
@@ -27,6 +27,7 @@ pub(super) struct RuntimeDeepSeekSseState {
     pub(super) eof: bool,
     output_text_item_added: bool,
     output_text_item_done: bool,
+    output_text_item_id: String,
     model: Option<String>,
     output_text: String,
     reasoning_content: String,
@@ -54,14 +55,13 @@ struct RuntimeDeepSeekToolCall {
 
 impl RuntimeDeepSeekSseState {
     pub(super) fn new(
-        request_id: u64,
+        _request_id: u64,
         conversation_messages: Vec<serde_json::Value>,
         response_metadata: Option<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
     ) -> Self {
         Self {
-            request_id,
-            response_id: format!("resp_deepseek_{request_id}"),
+            response_id: format!("resp_deepseek_{}", RequestId::new()),
             created_at: runtime_deepseek_created_at(),
             sequence_number: 0,
             created: false,
@@ -69,6 +69,7 @@ impl RuntimeDeepSeekSseState {
             eof: false,
             output_text_item_added: false,
             output_text_item_done: false,
+            output_text_item_id: format!("msg_deepseek_{}", RequestId::new()),
             model: None,
             output_text: String::new(),
             reasoning_content: String::new(),
@@ -262,6 +263,9 @@ impl RuntimeDeepSeekSseState {
             if let Some(id) = value.get("id").and_then(serde_json::Value::as_str) {
                 tool_call.call_id = Some(id.to_string());
             }
+            if tool_call.call_id.is_none() {
+                tool_call.call_id = Some(format!("call_deepseek_{}", CallId::new()));
+            }
             if let Some(signature) = runtime_deepseek_chat_tool_call_thought_signature(value) {
                 tool_call.thought_signature = Some(signature);
             }
@@ -276,7 +280,7 @@ impl RuntimeDeepSeekSseState {
             let call_id = tool_call
                 .call_id
                 .clone()
-                .unwrap_or_else(|| format!("call_deepseek_{}_{}", self.request_id, index));
+                .unwrap_or_else(|| format!("call_deepseek_{}", CallId::new()));
             let name = tool_call
                 .name
                 .clone()
@@ -332,7 +336,7 @@ impl RuntimeDeepSeekSseState {
         let pending = self
             .tool_calls
             .iter_mut()
-            .filter_map(|(index, tool_call)| {
+            .filter_map(|(_index, tool_call)| {
                 if tool_call.done {
                     return None;
                 }
@@ -340,7 +344,7 @@ impl RuntimeDeepSeekSseState {
                 let call_id = tool_call
                     .call_id
                     .clone()
-                    .unwrap_or_else(|| format!("call_deepseek_{}_{}", self.request_id, index));
+                    .unwrap_or_else(|| format!("call_deepseek_{}", CallId::new()));
                 let name = tool_call
                     .name
                     .clone()
@@ -568,8 +572,8 @@ impl RuntimeDeepSeekSseState {
         ))
     }
 
-    fn output_text_item_id(&self) -> String {
-        format!("msg_deepseek_{}", self.request_id)
+    fn output_text_item_id(&self) -> &str {
+        &self.output_text_item_id
     }
 
     fn output_text_item_added_event(&mut self) -> Option<String> {
@@ -581,7 +585,7 @@ impl RuntimeDeepSeekSseState {
         Some(runtime_provider_sse_output_text_item_added_event(
             sequence_number,
             &self.response_id,
-            &self.output_text_item_id(),
+            self.output_text_item_id(),
         ))
     }
 
@@ -598,7 +602,7 @@ impl RuntimeDeepSeekSseState {
         events.push(runtime_provider_sse_output_text_item_done_event(
             sequence_number,
             &self.response_id,
-            &self.output_text_item_id(),
+            self.output_text_item_id(),
             &self.output_text,
         ));
         events
@@ -639,13 +643,13 @@ impl RuntimeDeepSeekSseState {
         if !self.tool_calls.is_empty() {
             assistant["tool_calls"] = serde_json::Value::Array(
                 self.tool_calls
-                    .iter()
-                    .map(|(index, tool_call)| {
+                    .values()
+                    .map(|tool_call| {
                         let mut tool_call_value = serde_json::json!({
                             "id": tool_call
                                 .call_id
                                 .clone()
-                                .unwrap_or_else(|| format!("call_deepseek_{}_{}", self.request_id, index)),
+                                .unwrap_or_else(|| format!("call_deepseek_{}", CallId::new())),
                             "type": "function",
                             "function": {
                                 "name": tool_call
@@ -682,11 +686,11 @@ impl RuntimeDeepSeekSseState {
                 }],
             }));
         }
-        for (index, tool_call) in &self.tool_calls {
+        for tool_call in self.tool_calls.values() {
             let call_id = tool_call
                 .call_id
                 .clone()
-                .unwrap_or_else(|| format!("call_deepseek_{}_{}", self.request_id, index));
+                .unwrap_or_else(|| format!("call_deepseek_{}", CallId::new()));
             let flat_name = tool_call
                 .name
                 .clone()

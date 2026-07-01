@@ -8,7 +8,7 @@ services:
     environment:
       PRODEX_HOME: /var/lib/prodex
       PRODEX_RUNTIME_LOG_DIR: /var/log/prodex
-      PRODEX_GATEWAY_TOKEN: ${PRODEX_GATEWAY_TOKEN:-change-me}
+      PRODEX_GATEWAY_TOKEN: ${PRODEX_GATEWAY_TOKEN:?set PRODEX_GATEWAY_TOKEN}
       PRODEX_GATEWAY_SSO_PROXY_TOKEN: ${PRODEX_GATEWAY_SSO_PROXY_TOKEN:-}
       PRODEX_GATEWAY_POSTGRES_URL: ${PRODEX_GATEWAY_POSTGRES_URL:-}
       PRODEX_GATEWAY_REDIS_URL: ${PRODEX_GATEWAY_REDIS_URL:-}
@@ -24,11 +24,18 @@ services:
     volumes:
       - prodex-data:/var/lib/prodex
       - prodex-runtime-logs:/var/log/prodex
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "curl -fsS -H \"Authorization: Bearer $$PRODEX_GATEWAY_TOKEN\" http://127.0.0.1:4000/v1/prodex/gateway/openapi.json >/dev/null",
+          "curl -fsS http://127.0.0.1:4000/readyz >/dev/null",
         ]
       interval: 30s
       timeout: 5s
@@ -42,7 +49,7 @@ services:
     environment:
       POSTGRES_DB: ${PRODEX_POSTGRES_DB:-prodex}
       POSTGRES_USER: ${PRODEX_POSTGRES_USER:-prodex}
-      POSTGRES_PASSWORD: ${PRODEX_POSTGRES_PASSWORD:-prodex}
+      POSTGRES_PASSWORD: ${PRODEX_POSTGRES_PASSWORD:?set PRODEX_POSTGRES_PASSWORD}
     volumes:
       - prodex-postgres:/var/lib/postgresql/data
     healthcheck:

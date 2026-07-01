@@ -105,6 +105,17 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
         .expect("tenant-a cross-tenant create request should be sent");
     assert_eq!(tenant_a_cross_tenant_create.status().as_u16(), 403);
 
+    let tenant_a_clear_tenant_patch = client
+        .patch(format!(
+            "http://{}/v1/prodex/gateway/keys/shared-main",
+            proxy.listen_addr
+        ))
+        .bearer_auth(tenant_a_token)
+        .json(&serde_json::json!({"tenant_id": null}))
+        .send()
+        .expect("tenant-a scope-clearing patch request should be sent");
+    assert_eq!(tenant_a_clear_tenant_patch.status().as_u16(), 403);
+
     for (token, input) in [
         (&tenant_a_virtual_token, "tenant-a traffic"),
         (&tenant_b_virtual_token, "tenant-b traffic"),
@@ -221,6 +232,12 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
         .expect("tenant-a metrics request should be sent");
     assert_eq!(tenant_a_metrics.status().as_u16(), 200);
     let tenant_a_metrics = tenant_a_metrics.text().expect("tenant-a metrics text");
-    assert!(tenant_a_metrics.contains("key=\"shared-main\""));
-    assert!(!tenant_a_metrics.contains("key=\"other-main\""));
+    assert_eq!(
+        tenant_a_metrics
+            .matches("prodex_gateway_virtual_key_requests_total{")
+            .count(),
+        1
+    );
+    assert!(!tenant_a_metrics.contains("shared-main"));
+    assert!(!tenant_a_metrics.contains("other-main"));
 }

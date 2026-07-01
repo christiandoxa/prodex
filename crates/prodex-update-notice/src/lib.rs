@@ -182,10 +182,8 @@ fn load_update_check_cache(paths: &AppPaths) -> Result<Option<UpdateCheckCache>>
     if !path.exists() {
         return Ok(None);
     }
-    let content =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let cache = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let content = fs::read_to_string(&path).context("failed to read update check cache")?;
+    let cache = serde_json::from_str(&content).context("failed to parse update check cache")?;
     Ok(Some(cache))
 }
 
@@ -214,16 +212,13 @@ fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {
 }
 
 fn save_update_check_cache(paths: &AppPaths, cache: &UpdateCheckCache) -> Result<()> {
-    fs::create_dir_all(&paths.root)
-        .with_context(|| format!("failed to create {}", paths.root.display()))?;
+    fs::create_dir_all(&paths.root).context("failed to create prodex state directory")?;
     let path = update_check_cache_file_path(paths);
     let temp_file = unique_state_temp_file_path(&path);
     let json =
         serde_json::to_string_pretty(cache).context("failed to serialize update check cache")?;
-    fs::write(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-    fs::rename(&temp_file, &path)
-        .with_context(|| format!("failed to replace update cache file {}", path.display()))?;
+    fs::write(&temp_file, json).context("failed to write update check cache")?;
+    fs::rename(&temp_file, &path).context("failed to replace update check cache")?;
     Ok(())
 }
 
@@ -266,4 +261,42 @@ fn parse_release_version(version: &str) -> Vec<u64> {
         .split('.')
         .map(|part| part.parse::<u64>().unwrap_or(0))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_paths(name: &str) -> AppPaths {
+        let root = env::temp_dir().join(format!(
+            "prodex-update-notice-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        AppPaths {
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared-codex"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+            root,
+        }
+    }
+
+    #[test]
+    fn update_check_cache_parse_error_redacts_cache_path() {
+        let paths = test_paths("parse-redaction");
+        fs::create_dir_all(&paths.root).expect("prodex root should be created");
+        fs::write(update_check_cache_file_path(&paths), "{not-json")
+            .expect("cache should be written");
+
+        let error = load_update_check_cache(&paths).unwrap_err().to_string();
+
+        assert_eq!(error, "failed to parse update check cache");
+        assert!(!error.contains(paths.root.to_string_lossy().as_ref()));
+
+        let _ = fs::remove_dir_all(paths.root);
+    }
 }

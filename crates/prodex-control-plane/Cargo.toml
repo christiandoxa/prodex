@@ -1,0 +1,15 @@
+[package]
+name = "prodex-control-plane"
+version.workspace = true
+edition.workspace = true
+description = "HTTP-neutral control-plane authorization and audit planning for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_control_plane"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_config = { workspace = true }
+prodex_domain = { workspace = true }

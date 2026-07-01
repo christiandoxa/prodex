@@ -6,6 +6,11 @@ use serde::Serialize;
 pub(super) struct RuntimeGatewayBillingSummaryRecord {
     pub(super) phase: String,
     pub(super) key_name: String,
+    pub(super) tenant_id: Option<String>,
+    pub(super) team_id: Option<String>,
+    pub(super) project_id: Option<String>,
+    pub(super) user_id: Option<String>,
+    pub(super) budget_id: Option<String>,
     pub(super) model: String,
     pub(super) input_tokens: u64,
     pub(super) estimated_cost_microusd: Option<u64>,
@@ -19,16 +24,28 @@ pub(super) struct RuntimeGatewayBillingSummaryRecord {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct RuntimeGatewayBillingSummaryKeyDimensions {
+    pub(super) tenant_id: Option<String>,
     pub(super) team_id: Option<String>,
     pub(super) project_id: Option<String>,
     pub(super) user_id: Option<String>,
     pub(super) budget_id: Option<String>,
 }
 
+impl RuntimeGatewayBillingSummaryKeyDimensions {
+    fn has_any(&self) -> bool {
+        self.tenant_id.is_some()
+            || self.team_id.is_some()
+            || self.project_id.is_some()
+            || self.user_id.is_some()
+            || self.budget_id.is_some()
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 struct RuntimeGatewayBillingSummaryBucket {
     key_name: Option<String>,
     model: Option<String>,
+    tenant_id: Option<String>,
     team_id: Option<String>,
     project_id: Option<String>,
     user_id: Option<String>,
@@ -61,6 +78,7 @@ impl RuntimeGatewayBillingSummaryBucket {
     fn with_dimension(field: &str, value: String) -> Self {
         let mut bucket = Self::default();
         match field {
+            "tenant_id" => bucket.tenant_id = Some(value),
             "team_id" => bucket.team_id = Some(value),
             "project_id" => bucket.project_id = Some(value),
             "user_id" => bucket.user_id = Some(value),
@@ -129,6 +147,7 @@ pub(super) fn runtime_gateway_billing_summary_payload(
     let mut by_model: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
     let mut by_key_model: BTreeMap<(String, String), RuntimeGatewayBillingSummaryBucket> =
         BTreeMap::new();
+    let mut by_tenant: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
     let mut by_team: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
     let mut by_project: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
     let mut by_user: BTreeMap<String, RuntimeGatewayBillingSummaryBucket> = BTreeMap::new();
@@ -159,28 +178,39 @@ pub(super) fn runtime_gateway_billing_summary_payload(
                 )
             })
             .record(record);
-        if let Some(dimensions) = key_dimensions.get(&record.key_name.to_ascii_lowercase()) {
-            for (value, field, buckets) in [
-                (dimensions.team_id.as_deref(), "team_id", &mut by_team),
-                (
-                    dimensions.project_id.as_deref(),
-                    "project_id",
-                    &mut by_project,
-                ),
-                (dimensions.user_id.as_deref(), "user_id", &mut by_user),
-                (dimensions.budget_id.as_deref(), "budget_id", &mut by_budget),
-            ] {
-                if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-                    buckets
-                        .entry(value.to_string())
-                        .or_insert_with(|| {
-                            RuntimeGatewayBillingSummaryBucket::with_dimension(
-                                field,
-                                value.to_string(),
-                            )
-                        })
-                        .record(record);
-                }
+        let ledger_dimensions = RuntimeGatewayBillingSummaryKeyDimensions {
+            tenant_id: record.tenant_id.clone(),
+            team_id: record.team_id.clone(),
+            project_id: record.project_id.clone(),
+            user_id: record.user_id.clone(),
+            budget_id: record.budget_id.clone(),
+        };
+        let dimensions = if ledger_dimensions.has_any() {
+            Some(&ledger_dimensions)
+        } else {
+            key_dimensions.get(&record.key_name.to_ascii_lowercase())
+        };
+        let Some(dimensions) = dimensions else {
+            continue;
+        };
+        for (value, field, buckets) in [
+            (dimensions.tenant_id.as_deref(), "tenant_id", &mut by_tenant),
+            (dimensions.team_id.as_deref(), "team_id", &mut by_team),
+            (
+                dimensions.project_id.as_deref(),
+                "project_id",
+                &mut by_project,
+            ),
+            (dimensions.user_id.as_deref(), "user_id", &mut by_user),
+            (dimensions.budget_id.as_deref(), "budget_id", &mut by_budget),
+        ] {
+            if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+                buckets
+                    .entry(value.to_string())
+                    .or_insert_with(|| {
+                        RuntimeGatewayBillingSummaryBucket::with_dimension(field, value.to_string())
+                    })
+                    .record(record);
             }
         }
     }
@@ -193,6 +223,7 @@ pub(super) fn runtime_gateway_billing_summary_payload(
         "by_key": by_key.into_values().collect::<Vec<_>>(),
         "by_model": by_model.into_values().collect::<Vec<_>>(),
         "by_key_model": by_key_model.into_values().collect::<Vec<_>>(),
+        "by_tenant": by_tenant.into_values().collect::<Vec<_>>(),
         "by_team": by_team.into_values().collect::<Vec<_>>(),
         "by_project": by_project.into_values().collect::<Vec<_>>(),
         "by_user": by_user.into_values().collect::<Vec<_>>(),
@@ -213,6 +244,11 @@ mod tests {
         let records = vec![RuntimeGatewayBillingSummaryRecord {
             phase: "request".to_string(),
             key_name: "alpha".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
             model: "gpt-5.4".to_string(),
             input_tokens: 100,
             estimated_cost_microusd: Some(250_000),
@@ -245,5 +281,47 @@ mod tests {
         assert_eq!(summary["by_model"][0]["model"], "gpt-5.4");
         assert_eq!(summary["by_team"][0]["team_id"], "platform");
         assert_eq!(summary["by_budget"][0]["budget_id"], "budget-a");
+    }
+
+    #[test]
+    fn summary_prefers_ledger_dimension_snapshot_over_current_key_store() {
+        let records = vec![RuntimeGatewayBillingSummaryRecord {
+            phase: "request".to_string(),
+            key_name: "alpha".to_string(),
+            tenant_id: Some("tenant-ledger".to_string()),
+            team_id: Some("historical".to_string()),
+            project_id: None,
+            user_id: None,
+            budget_id: Some("budget-ledger".to_string()),
+            model: "gpt-5.4".to_string(),
+            input_tokens: 100,
+            estimated_cost_microusd: Some(250_000),
+            created_at_epoch: 10,
+            response_status: Some(200),
+            response_bytes: None,
+            output_tokens: None,
+            final_cost_microusd: None,
+            reconciled_at_epoch: None,
+        }];
+        let mut dimensions = BTreeMap::new();
+        dimensions.insert(
+            "alpha".to_ascii_lowercase(),
+            RuntimeGatewayBillingSummaryKeyDimensions {
+                tenant_id: Some("tenant-current".to_string()),
+                team_id: Some("current".to_string()),
+                budget_id: Some("budget-current".to_string()),
+                ..Default::default()
+            },
+        );
+        let summary = runtime_gateway_billing_summary_payload(
+            "file",
+            "/tmp/ledger.jsonl".to_string(),
+            &records,
+            &dimensions,
+        );
+
+        assert_eq!(summary["by_tenant"][0]["tenant_id"], "tenant-ledger");
+        assert_eq!(summary["by_team"][0]["team_id"], "historical");
+        assert_eq!(summary["by_budget"][0]["budget_id"], "budget-ledger");
     }
 }

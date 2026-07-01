@@ -58,6 +58,23 @@ npm run ci:super-wildcard-guard
 npm run ci:release-cut-fixtures
 npm run ci:runtime-hotpath-guard
 npm run ci:crate-boundary
+npm run ci:enterprise-docs-guard
+npm run ci:enterprise-id-boundary-guard
+npm run ci:enterprise-binaries-guard
+npm run ci:application-boundary-guard
+npm run ci:auth-boundary-guard
+npm run ci:gateway-security-smoke
+npm run ci:config-boundary-guard
+npm run ci:control-plane-boundary-guard
+npm run ci:observability-boundary-guard
+npm run ci:provider-spi-boundary-guard
+npm run ci:storage-boundary-guard
+npm run ci:storage-postgres-boundary-guard
+npm run ci:storage-redis-boundary-guard
+npm run ci:storage-sqlite-boundary-guard
+npm run ci:gateway-core-boundary-guard
+npm run ci:gateway-http-boundary-guard
+npm run ci:deployment-security-guard
 npm run ci:churn-hygiene
 npm run release:run -- --version 0.x.y --dry-run
 npm run release:prepare
@@ -148,7 +165,7 @@ Use `npm run ci:release-hygiene` for the full release gate. By default it checks
 
 Use `npm run ci:release-metadata-guard` for the focused metadata-only check. By default it checks `HEAD`; use `-- --range main..HEAD` for a branch range, or `-- --staged --assume-release` before committing a release bump. The guard fails only when a release-like commit changes both version metadata such as `Cargo.toml`, `Cargo.lock`, npm package manifests, or versioned install snippets in `README.md`/`QUICKSTART.md`, and non-metadata files.
 
-Use `npm run ci:runtime-hotpath-guard` after proxy hot-path work. It strips `#[cfg(test)]` Rust items, scans runtime proxy hot-path targets for blocking `std::fs`/`fs::` disk operations, file opens, `spawn_blocking`, and OS `thread::spawn`, then permits only narrow allowlisted existing cases with rationale.
+Use `npm run ci:runtime-hotpath-guard` after proxy hot-path work. It strips `#[cfg(test)]` Rust items, scans runtime proxy hot-path targets for blocking `std::fs`/`fs::` disk operations, file opens, `spawn_blocking`, and OS `thread::spawn`, skips local rewrite test-fixture modules during the default production scan, then permits only narrow allowlisted existing cases with rationale.
 
 Use `npm run ci:crate-boundary` after adding workspace dependencies. It parses Cargo manifests and fails on direct dependency edges from focused/helper crates into app orchestration, terminal rendering, or runtime-proxy-incompatible layers.
 
@@ -198,3 +215,9 @@ The compat capture scrubber redacts auth headers, API keys, cookies, token-like 
 `npm run test:fast` prebuilds cargo test binaries with `cargo test --no-run` before starting parallel cargo test shards when `CI` is not set. This local warmup reduces misleading cargo build lock waits from many child processes trying to compile the same test binaries at once. CI defaults are preserved: when `CI=true`, prebuild is off unless explicitly enabled with `npm run test:fast -- --prebuild`.
 
 Use `npm run test:fast -- --no-prebuild` when measuring cold parallel behavior or debugging cargo scheduling itself. Seeing Cargo print `Blocking waiting for file lock` during local parallel shards usually means another cargo process is compiling or writing the shared target/cache directory, not that a test has deadlocked.
+
+## Domain Boundary Guard
+
+Run `npm run ci:domain-boundary-guard` after changing `crates/prodex-domain/Cargo.toml` or moving security/accounting identifiers between crates. The guard keeps `prodex-domain` pure by rejecting HTTP, CLI, database, async-runtime, transport, filesystem/process/network, and provider/runtime dependencies and source imports; use `node scripts/ci/domain-boundary-guard.mjs --self-test` after changing the guard itself.
+
+Use `npm run ci:gateway-security-smoke` after touching gateway admin authentication, OIDC/JWKS admin auth, data-plane auth separation, or gateway usage/budget enforcement. It runs the focused `gateway_admin_auth` and `gateway_usage` `prodex-app` suites that cover missing/unknown role fallback, stale JWKS request-path behavior, admin-token rejection on inference routes, and gateway usage/accounting auth invariants.

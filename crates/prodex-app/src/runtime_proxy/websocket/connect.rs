@@ -122,7 +122,10 @@ pub(crate) fn connect_runtime_proxy_upstream_tcp_stream_via_http_proxy(
                         runtime_proxy_log_field("transport", "websocket"),
                         runtime_proxy_log_field("proxy", proxy.log_label()),
                         runtime_proxy_log_field("target", target.authority.as_str()),
-                        runtime_proxy_log_field("error", err.to_string()),
+                        runtime_proxy_log_field(
+                            "error",
+                            runtime_websocket_error_log_value(&err.to_string()),
+                        ),
                     ],
                 ),
             );

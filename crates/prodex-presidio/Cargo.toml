@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 prodex_cli = { workspace = true }
+redaction = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

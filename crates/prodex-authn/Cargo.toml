@@ -1,0 +1,14 @@
+[package]
+name = "prodex-authn"
+version.workspace = true
+edition.workspace = true
+description = "Network-free authentication boundary primitives for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_authn"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }

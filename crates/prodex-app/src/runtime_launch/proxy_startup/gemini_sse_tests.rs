@@ -1,7 +1,7 @@
 use super::{
     RuntimeDeepSeekConversationStore, RuntimeGeminiBindingRecorder, RuntimeGeminiGenerateSseReader,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 
@@ -33,6 +33,61 @@ fn gemini_sse_reader_maps_text_and_function_call_to_responses_events() {
     assert!(output.contains("\"type\":\"response.function_call_arguments.delta\""));
     assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\""));
     assert!(output.contains("event: response.completed"));
+    let item_ids = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|event| event["item"]["id"].as_str().map(str::to_string))
+        .filter(|id| id.starts_with("msg_gemini_"))
+        .collect::<BTreeSet<_>>();
+    let item_id = item_ids
+        .iter()
+        .next()
+        .expect("message item id should be present");
+    let uuid = item_id
+        .strip_prefix("msg_gemini_")
+        .expect("message item id should be prodex scoped")
+        .parse::<prodex_domain::RequestId>()
+        .unwrap();
+    assert_eq!(item_ids.len(), 1);
+    assert_eq!(uuid.as_uuid().get_version_num(), 7);
+    assert!(!output.contains("\"id\":\"msg_gemini_9\""));
+}
+
+#[test]
+fn gemini_sse_missing_response_id_fallback_uses_request_id_uuidv7() {
+    let stream = concat!(
+        "data: {\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeGeminiGenerateSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        9,
+        Vec::new(),
+        conversation_store(),
+        None,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    let created = output
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .and_then(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("created event should be valid JSON");
+    let id = created["response"]["id"]
+        .as_str()
+        .and_then(|id| id.strip_prefix("resp_gemini_"))
+        .expect("fallback Gemini SSE response id should be prodex scoped");
+
+    assert_eq!(
+        id.parse::<prodex_domain::RequestId>()
+            .unwrap()
+            .as_uuid()
+            .get_version_num(),
+        7
+    );
+    assert_ne!(created["response"]["id"].as_str(), Some("resp_gemini_9"));
 }
 
 #[test]
@@ -337,7 +392,27 @@ fn gemini_sse_reader_merges_repeated_function_call_without_id() {
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();
 
-    assert!(output.contains("\"call_id\":\"call_gemini_9_0\""));
+    let call_ids = output
+        .split("\"call_id\":\"")
+        .skip(1)
+        .filter_map(|part| part.split('"').next())
+        .filter(|id| id.starts_with("call_gemini_"))
+        .collect::<Vec<_>>();
+    assert!(!call_ids.is_empty());
+    for call_id in &call_ids {
+        let uuid = call_id
+            .strip_prefix("call_gemini_")
+            .expect("fallback Gemini SSE call id should be prodex scoped");
+        assert_eq!(
+            uuid.parse::<prodex_domain::CallId>()
+                .unwrap()
+                .as_uuid()
+                .get_version_num(),
+            7
+        );
+    }
+    assert!(call_ids.iter().all(|id| *id == call_ids[0]));
+    assert!(!output.contains("\"call_id\":\"call_gemini_9_0\""));
     assert!(!output.contains("\"call_id\":\"call_gemini_9_1\""));
     assert!(output.contains("\"arguments\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\""));
 }

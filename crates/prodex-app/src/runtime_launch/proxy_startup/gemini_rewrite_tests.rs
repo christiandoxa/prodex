@@ -61,6 +61,35 @@ fn gemini_request_translation_maps_tools_and_thinking() {
 }
 
 #[test]
+fn gemini_missing_response_id_fallback_uses_request_id_uuidv7() {
+    let response = serde_json::json!({
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "role": "model",
+                "parts": [{"text": "ok"}]
+            },
+            "finishReason": "STOP"
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+    let id = translated["id"]
+        .as_str()
+        .and_then(|id| id.strip_prefix("resp_gemini_"))
+        .expect("fallback Gemini response id should be prodex scoped");
+
+    assert_eq!(
+        id.parse::<prodex_domain::RequestId>()
+            .unwrap()
+            .as_uuid()
+            .get_version_num(),
+        7
+    );
+    assert_ne!(translated["id"].as_str(), Some("resp_gemini_44"));
+}
+
+#[test]
 fn gemini_request_translation_promotes_contextual_user_messages_to_system_instruction() {
     let body = serde_json::json!({
         "model": "gemini-2.5-pro",
@@ -642,6 +671,43 @@ fn gemini_response_translation_restores_namespace_tool_calls() {
     assert_eq!(translated["output"][0]["namespace"], "mcp__prodex_sqz");
     assert_eq!(translated["output"][0]["name"], "sqz_read_file");
     assert_eq!(translated["output"][0]["call_id"], "call_sqz_1");
+}
+
+#[test]
+fn gemini_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
+    let response = serde_json::json!({
+        "responseId": "resp_call_fallback",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {
+                "parts": [{
+                    "functionCall": {
+                        "name": "shell",
+                        "args": {"cmd": "pwd"}
+                    }
+                }]
+            }
+        }]
+    });
+
+    let translated = runtime_gemini_responses_value_from_generate_value(&response, 44);
+    let call_id = translated["output"][0]["call_id"]
+        .as_str()
+        .and_then(|id| id.strip_prefix("call_gemini_"))
+        .expect("fallback Gemini call id should be prodex scoped");
+
+    assert_eq!(
+        call_id
+            .parse::<prodex_domain::CallId>()
+            .unwrap()
+            .as_uuid()
+            .get_version_num(),
+        7
+    );
+    assert_ne!(
+        translated["output"][0]["call_id"].as_str(),
+        Some("call_gemini_44_0")
+    );
 }
 
 #[test]

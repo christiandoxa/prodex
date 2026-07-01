@@ -16,6 +16,7 @@ use crate::{
     write_copilot_runtime_model_catalog,
 };
 use anyhow::{Context, Result, bail};
+use redaction::redaction_redact_secret_like_text;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
@@ -547,7 +548,7 @@ fn runtime_anthropic_oauth_profiles_for_provider(
                 });
             }
             Err(err) => {
-                errors.push(format!("{profile_name}: {err:#}"));
+                errors.push(runtime_provider_profile_error(&profile_name, &err));
             }
         }
     }
@@ -609,7 +610,7 @@ fn runtime_copilot_profiles_for_provider(
                 api_url: api_url.clone(),
                 model_catalog: auth.model_catalog,
             }),
-            Err(err) => errors.push(format!("{profile_name}: {err:#}")),
+            Err(err) => errors.push(runtime_provider_profile_error(&profile_name, &err)),
         }
     }
 
@@ -678,7 +679,7 @@ fn runtime_gemini_oauth_profiles_for_provider(
                 });
             }
             Err(err) => {
-                errors.push(format!("{profile_name}: {err:#}"));
+                errors.push(runtime_provider_profile_error(&profile_name, &err));
             }
         }
     }
@@ -710,11 +711,10 @@ fn runtime_kiro_profile_auth(
             selected_profile.provider.display_name()
         );
     }
-    let model_catalog =
-        std::fs::read_to_string(selected_profile.codex_home.join(KIRO_MODEL_CATALOG_FILE))
-            .ok()
-            .and_then(|text| parse_kiro_model_catalog_text(&text).ok())
-            .unwrap_or_default();
+    let model_catalog = std::fs::read_to_string(selected_profile.codex_home.join(KIRO_MODEL_CATALOG_FILE))
+        .ok()
+        .and_then(|text| parse_kiro_model_catalog_text(&text).ok())
+        .unwrap_or_default();
     Ok(RuntimeKiroProfileAuth {
         profile_name: selected_profile_name.to_string(),
         codex_home: selected_profile.codex_home.clone(),
@@ -735,6 +735,14 @@ pub(super) fn runtime_kiro_gateway_profile_auth(
 ) -> Result<RuntimeKiroProfileAuth> {
     let profile_name = resolve_kiro_runtime_launch_profile_name(state, None)?;
     runtime_kiro_profile_auth(state, &profile_name)
+}
+
+fn runtime_provider_profile_error(profile_name: &str, err: &anyhow::Error) -> String {
+    format!(
+        "{}: {}",
+        profile_name,
+        redaction_redact_secret_like_text(&format!("{err:#}"))
+    )
 }
 
 pub(super) fn runtime_deepseek_api_keys_from_request_or_env(
@@ -910,6 +918,18 @@ mod tests {
             vec!["one", "two", "three", "four"]
         );
         assert!(runtime_provider_api_keys_from_list(" , ; \n ").is_none());
+    }
+
+    #[test]
+    fn runtime_provider_profile_error_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!("failed: Authorization: Bearer provider-profile-token")
+            .context("provider profile refresh failed");
+
+        let message = runtime_provider_profile_error("main", &err);
+
+        assert!(message.contains("main: provider profile refresh failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(!message.contains("provider-profile-token"));
     }
 
     #[test]

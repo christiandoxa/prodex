@@ -30,9 +30,16 @@ pub(crate) fn build_runtime_proxy_json_error_parts(
     code: &str,
     message: &str,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
-    RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
+    let mut parts = RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
         runtime_proxy_crate::build_runtime_proxy_json_error_parts(status, code, message),
-    )
+    );
+    parts
+        .headers
+        .push(("cache-control".to_string(), b"no-store".to_vec()));
+    parts
+        .headers
+        .push(("x-content-type-options".to_string(), b"nosniff".to_vec()));
+    parts
 }
 
 pub(crate) fn build_runtime_proxy_json_error_response(

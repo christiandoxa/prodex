@@ -21,6 +21,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
+use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -201,7 +202,12 @@ impl RuntimeGeminiOAuthPool {
                                             "profile",
                                             profile.profile_name.as_str(),
                                         ),
-                                        runtime_proxy_log_field("error", err.to_string()),
+                                        runtime_proxy_log_field(
+                                            "error",
+                                            runtime_gemini_oauth_pool_error_log_value(
+                                                &err.to_string(),
+                                            ),
+                                        ),
                                     ],
                                 ),
                             );
@@ -766,4 +772,26 @@ pub(super) fn runtime_gemini_now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
+}
+
+fn runtime_gemini_oauth_pool_error_log_value(error: &str) -> String {
+    redaction_redact_secret_like_text(error).replace('\n', " ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_oauth_pool_error_log_value_redacts_secret_like_material() {
+        let message = runtime_gemini_oauth_pool_error_log_value(
+            "quota probe failed\nAuthorization: Bearer gemini-pool-token\napi_key=gemini-pool-key",
+        );
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("gemini-pool-token"));
+        assert!(!message.contains("gemini-pool-key"));
+    }
 }

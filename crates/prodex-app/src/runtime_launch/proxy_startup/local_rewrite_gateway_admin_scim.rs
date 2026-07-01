@@ -1,7 +1,10 @@
 use super::local_rewrite::{
     RuntimeLocalRewriteProxyShared, runtime_gateway_virtual_key_store_load,
 };
-use super::local_rewrite_gateway_admin_audit::runtime_gateway_audit_admin_scim_user_event;
+use super::local_rewrite_gateway_admin_audit::{
+    runtime_gateway_audit_admin_authorization_denied_event,
+    runtime_gateway_audit_admin_scim_user_event,
+};
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
 use super::local_rewrite_gateway_admin_response::{
     RuntimeGatewayAdminError, runtime_gateway_admin_json_body, runtime_gateway_admin_json_response,
@@ -16,6 +19,16 @@ use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_seconds;
 use super::*;
 
 const RUNTIME_GATEWAY_SCIM_LIST_SCHEMA: &str = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
+const RUNTIME_GATEWAY_SCIM_USER_GENERATION_FAILED_MESSAGE: &str =
+    "gateway SCIM user id could not be generated";
+
+fn runtime_gateway_admin_scim_user_generation_failed_error() -> RuntimeGatewayAdminError {
+    RuntimeGatewayAdminError::new(
+        500,
+        "gateway_scim_user_generation_failed",
+        RUNTIME_GATEWAY_SCIM_USER_GENERATION_FAILED_MESSAGE,
+    )
+}
 
 pub(super) fn runtime_gateway_admin_scim_list_users_response(
     shared: &RuntimeLocalRewriteProxyShared,
@@ -55,12 +68,8 @@ pub(super) fn runtime_gateway_admin_scim_create_user_response(
     let now = runtime_gateway_unix_epoch_seconds();
     let id = match runtime_gateway_generate_scim_user_id() {
         Ok(id) => id,
-        Err(err) => {
-            return build_runtime_proxy_json_error_response(
-                500,
-                "gateway_scim_user_generation_failed",
-                &err.to_string(),
-            );
+        Err(_err) => {
+            return runtime_gateway_admin_scim_user_generation_failed_error().into_response();
         }
     };
     let mut user = RuntimeGatewayScimUser {
@@ -98,7 +107,12 @@ pub(super) fn runtime_gateway_admin_scim_create_user_response(
         user.budget_id = admin_auth.budget_id.clone();
     }
     if !admin_auth.can_access_scim_user(&user) {
-        return runtime_gateway_admin_scim_scope_forbidden_response();
+        return runtime_gateway_admin_scim_scope_forbidden_response(
+            shared,
+            admin_auth,
+            "create_scim_user",
+            &user.id,
+        );
     }
     let user_name = user.user_name.clone();
     match runtime_gateway_mutate_admin_key_store(shared, |store| {
@@ -146,7 +160,12 @@ pub(super) fn runtime_gateway_admin_scim_get_user_response(
         );
     };
     if !admin_auth.can_access_scim_user(user) {
-        return runtime_gateway_admin_scim_scope_forbidden_response();
+        return runtime_gateway_admin_scim_scope_forbidden_response(
+            shared,
+            admin_auth,
+            "get_scim_user",
+            &user.id,
+        );
     }
     runtime_gateway_admin_json_response(200, runtime_gateway_scim_user_json(user, shared))
 }
@@ -172,6 +191,14 @@ pub(super) fn runtime_gateway_admin_scim_update_user_response(
             ));
         };
         if !admin_auth.can_access_scim_user(&store.scim_users[index]) {
+            runtime_gateway_audit_admin_authorization_denied_event(
+                shared,
+                &admin_auth.name,
+                admin_auth.role.as_str(),
+                "scim_user",
+                "update_scim_user",
+                &store.scim_users[index].id,
+            );
             return Err(RuntimeGatewayAdminError::new(
                 403,
                 "gateway_admin_key_scope_forbidden",
@@ -181,6 +208,14 @@ pub(super) fn runtime_gateway_admin_scim_update_user_response(
         let previous_name = store.scim_users[index].user_name.clone();
         runtime_gateway_apply_scim_user_patch(&mut store.scim_users[index], &body, partial)?;
         if !admin_auth.can_access_scim_user(&store.scim_users[index]) {
+            runtime_gateway_audit_admin_authorization_denied_event(
+                shared,
+                &admin_auth.name,
+                admin_auth.role.as_str(),
+                "scim_user",
+                "update_scim_user",
+                &store.scim_users[index].id,
+            );
             return Err(RuntimeGatewayAdminError::new(
                 403,
                 "gateway_admin_key_scope_forbidden",
@@ -234,11 +269,13 @@ pub(super) fn runtime_gateway_admin_scim_delete_user_response(
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
     let mut deleted = None;
+    let mut forbidden = None;
     match runtime_gateway_mutate_admin_key_store(shared, |store| {
         let before = store.scim_users.len();
         store.scim_users.retain(|user| {
             if user.id == id {
                 if !admin_auth.can_access_scim_user(user) {
+                    forbidden = Some(user.id.clone());
                     return true;
                 }
                 deleted = Some(user.clone());
@@ -247,6 +284,21 @@ pub(super) fn runtime_gateway_admin_scim_delete_user_response(
                 true
             }
         });
+        if let Some(user_id) = forbidden.as_deref() {
+            runtime_gateway_audit_admin_authorization_denied_event(
+                shared,
+                &admin_auth.name,
+                admin_auth.role.as_str(),
+                "scim_user",
+                "delete_scim_user",
+                user_id,
+            );
+            return Err(RuntimeGatewayAdminError::new(
+                403,
+                "gateway_admin_key_scope_forbidden",
+                "gateway admin token is not allowed to access this tenant",
+            ));
+        }
         if store.scim_users.len() == before {
             return Err(RuntimeGatewayAdminError::new(
                 404,
@@ -278,10 +330,44 @@ pub(super) fn runtime_gateway_admin_scim_delete_user_response(
     }
 }
 
-fn runtime_gateway_admin_scim_scope_forbidden_response() -> tiny_http::ResponseBox {
+fn runtime_gateway_admin_scim_scope_forbidden_response(
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    action: &'static str,
+    user_id: &str,
+) -> tiny_http::ResponseBox {
+    runtime_gateway_audit_admin_authorization_denied_event(
+        shared,
+        &admin_auth.name,
+        admin_auth.role.as_str(),
+        "scim_user",
+        action,
+        user_id,
+    );
     build_runtime_proxy_json_error_response(
         403,
         "gateway_admin_key_scope_forbidden",
         "gateway admin token is not allowed to access this virtual key",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gateway_scim_user_generation_error_uses_stable_redacted_message() {
+        let err = runtime_gateway_admin_scim_user_generation_failed_error();
+        assert_eq!(err.test_status(), 500);
+        assert_eq!(err.test_code(), "gateway_scim_user_generation_failed");
+        assert_eq!(
+            err.test_message(),
+            "gateway SCIM user id could not be generated"
+        );
+        assert!(!err.test_message().contains("getrandom"));
+        assert!(
+            !err.test_message()
+                .contains("failed to generate gateway virtual key")
+        );
+    }
 }

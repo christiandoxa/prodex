@@ -15,6 +15,18 @@ import {
   writeJsonFile,
 } from "../npm/common.mjs";
 
+async function resolveDefaultBinaryDir(spec) {
+  const candidates = [path.join(repoRoot, "target", "release"), path.join(repoRoot, "target", "debug")];
+  for (const candidate of candidates) {
+    const binaryPath = path.join(candidate, spec.binaryFileName);
+    const exists = await fs.access(binaryPath).then(() => true).catch(() => false);
+    if (exists) {
+      return candidate;
+    }
+  }
+  return path.join(repoRoot, "target", "release");
+}
+
 function parseArgs(argv) {
   const args = { binaryDir: null };
   for (let index = 2; index < argv.length; index += 1) {
@@ -32,10 +44,6 @@ function parseArgs(argv) {
       continue;
     }
     throw new Error(`unknown argument: ${value}`);
-  }
-
-  if (!args.help && !args.binaryDir) {
-    throw new Error("--binary-dir is required");
   }
 
   return args;
@@ -79,9 +87,10 @@ async function main() {
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: node scripts/ci/npm-package-smoke.mjs --binary-dir <release-target-dir>",
+        "Usage: node scripts/ci/npm-package-smoke.mjs [--binary-dir <target-dir>]",
         "",
         "Stages a local npm package tree and runs prodex --version against it.",
+        "Defaults to target/release and falls back to target/debug when no --binary-dir is provided.",
       ].join("\n") + "\n",
     );
     return;
@@ -92,6 +101,7 @@ async function main() {
   if (!spec) {
     throw new Error(`unsupported runner platform for npm smoke: ${process.platform} ${process.arch}`);
   }
+  args.binaryDir ??= await resolveDefaultBinaryDir(spec);
 
   const smokeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-npm-smoke-"));
   const mainPackageDir = await stageMainPackage(version, smokeRoot);

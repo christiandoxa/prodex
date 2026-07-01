@@ -8,6 +8,17 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn profile_identity_error_redacts_secret_like_material() {
+    let err =
+        anyhow::anyhow!("stored auth failure for Authorization: Bearer profile-identity-secret");
+
+    let message = profile_identity_redacted_error(&err);
+
+    assert!(!message.contains("profile-identity-secret"));
+    assert!(message.contains("<redacted>"));
+}
+
+#[test]
 fn fetch_profile_email_uses_auth_email_for_non_openai_model_provider() {
     let root = temp_dir("non-openai-auth-email");
     fs::create_dir_all(&root).unwrap();

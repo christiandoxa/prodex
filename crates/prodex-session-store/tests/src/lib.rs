@@ -848,6 +848,44 @@ fn session_resolver_handles_unique_ambiguous_and_missing_ids() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn session_resolve_error_response_is_stable_and_redacted() {
+    let missing = SessionResolveError::Missing {
+        selector: "99999999-secret-selector".to_string(),
+    };
+    let missing_response = plan_session_resolve_error_response(&missing);
+    assert_eq!(missing_response.status, SessionResolveErrorStatus::NotFound);
+    assert_eq!(missing_response.code, "session_not_found");
+    assert_eq!(missing_response.message, "session could not be resolved");
+    assert!(!missing_response.message.contains("99999999"));
+    assert!(!missing_response.message.contains("secret"));
+    let missing_display = missing.to_string();
+    assert_eq!(missing_display, "session could not be resolved");
+    assert!(!missing_display.contains("99999999"));
+    assert!(!missing_display.contains("secret"));
+
+    let ambiguous = SessionResolveError::Ambiguous {
+        selector: "11111111".to_string(),
+        matches: vec![
+            "11111111-1111-1111-1111-111111111111".to_string(),
+            "11111111-1111-1111-1111-222222222222".to_string(),
+        ],
+    };
+    let ambiguous_response = plan_session_resolve_error_response(&ambiguous);
+    assert_eq!(
+        ambiguous_response.status,
+        SessionResolveErrorStatus::Conflict
+    );
+    assert_eq!(ambiguous_response.code, "session_selector_ambiguous");
+    assert_eq!(ambiguous_response.message, "session selector is ambiguous");
+    assert!(!ambiguous_response.message.contains("11111111"));
+    assert!(!ambiguous_response.message.contains("22222222"));
+    let ambiguous_display = ambiguous.to_string();
+    assert_eq!(ambiguous_display, "session selector is ambiguous");
+    assert!(!ambiguous_display.contains("11111111"));
+    assert!(!ambiguous_display.contains("22222222"));
+}
+
 fn test_temp_dir(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
         "prodex-session-store-{name}-{}-{}",

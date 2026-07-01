@@ -3,6 +3,7 @@ use super::{
     worker_spawn::spawn_runtime_background_worker_or_log,
 };
 use anyhow::{Context, Result};
+use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -132,13 +133,20 @@ fn runtime_smart_context_token_calibration_save_worker_loop(
                             queued_at.elapsed().as_millis().to_string(),
                         ),
                         runtime_proxy_log_field("stage", "write"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
+                        runtime_proxy_log_field(
+                            "error",
+                            runtime_token_calibration_save_error(&err),
+                        ),
                     ],
                 ),
             ),
         }
         runtime_allocator_trim_best_effort();
     }
+}
+
+fn runtime_token_calibration_save_error(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&format!("{err:#}"))
 }
 
 fn runtime_smart_context_next_token_calibration_save_job(
@@ -170,6 +178,23 @@ fn runtime_smart_context_next_token_calibration_save_job(
             .wait_timeout(pending, wait)
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         pending = next_pending;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_token_calibration_save_error_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!("failed: Authorization: Bearer token-calibration-token")
+            .context("token calibration save failed");
+
+        let message = runtime_token_calibration_save_error(&err);
+
+        assert!(message.contains("token calibration save failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(!message.contains("token-calibration-token"));
     }
 }
 

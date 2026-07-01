@@ -5,12 +5,17 @@ mod types;
 mod validate;
 mod validate_helpers;
 
-pub use self::cache::clear_runtime_policy_cache;
-pub use self::load::{load_runtime_policy_cached, load_runtime_policy_from_root};
+pub use self::cache::{
+    RuntimePolicyCacheInvalidationPlan, clear_runtime_policy_cache,
+    invalidate_runtime_policy_cache_for, plan_runtime_policy_cache_invalidation,
+};
+pub use self::load::{
+    load_runtime_policy_cached, load_runtime_policy_from_root, reload_runtime_policy_cached,
+};
 pub use self::paths::{resolve_runtime_policy_path, runtime_policy_path};
 pub use self::types::{
     PRODEX_POLICY_FILE_NAME, PRODEX_POLICY_VERSION, PRODEX_RUNTIME_PROXY_PRESET_ENV,
-    RuntimeLogFormat, RuntimePolicyConfig, RuntimePolicyFile,
+    RuntimeLogFormat, RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyGatewayAdminToken,
     RuntimePolicyGatewayGuardrailsSettings, RuntimePolicyGatewayObservabilitySettings,
     RuntimePolicyGatewayRouteAlias, RuntimePolicyGatewayRouteModelMetrics,
     RuntimePolicyGatewaySettings, RuntimePolicyGatewayVirtualKey, RuntimePolicyProxyPreset,

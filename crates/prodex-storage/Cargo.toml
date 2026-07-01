@@ -1,0 +1,14 @@
+[package]
+name = "prodex-storage"
+version.workspace = true
+edition.workspace = true
+description = "Storage boundary contracts for Prodex tenant-scoped atomic operations"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_storage"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }

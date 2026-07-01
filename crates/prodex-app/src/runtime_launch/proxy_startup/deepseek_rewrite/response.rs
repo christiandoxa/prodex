@@ -11,6 +11,7 @@ use super::{
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
+use prodex_domain::{CallId, RequestId};
 use prodex_provider_core::ProviderTransformLoss;
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -244,13 +245,13 @@ fn runtime_deepseek_rtk_wrapped_chat_tool_calls(
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_value_from_chat_value(
     value: &serde_json::Value,
-    request_id: u64,
+    _request_id: u64,
 ) -> serde_json::Value {
     let response_id = value
         .get("id")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
-        .unwrap_or_else(|| format!("resp_deepseek_{request_id}"));
+        .unwrap_or_else(|| format!("resp_deepseek_{}", RequestId::new()));
     let model = value
         .get("model")
         .and_then(serde_json::Value::as_str)
@@ -389,7 +390,8 @@ fn runtime_deepseek_responses_tool_call_item(
     let call_id = tool_call
         .get("id")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or("call_0");
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("call_deepseek_{}", CallId::new()));
     let Some(function) = tool_call
         .get("function")
         .and_then(serde_json::Value::as_object)

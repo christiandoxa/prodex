@@ -20,6 +20,7 @@ pub(crate) use prodex_quota::{
     UsageAuth,
 };
 use prodex_runtime_doctor::read_runtime_log_tail;
+use redaction::redaction_redact_secret_like_text;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProviderQuotaSnapshot {
@@ -233,7 +234,7 @@ pub(crate) fn collect_quota_reports_with_filters(
 
     let mut reports = map_parallel(jobs, |job| {
         let result = fetch_profile_quota(&job.provider, &job.codex_home, base_url.as_deref())
-            .map_err(|err| err.to_string());
+            .map_err(|err| quota_error_message(&err));
         let (workspace_id, workspace_name) = match &job.provider {
             ProfileProvider::Openai => {
                 read_profile_workspace_from_auth(&job.codex_home, base_url.as_deref())
@@ -479,7 +480,7 @@ pub(crate) fn collect_doctor_profile_reports(
         DoctorProfileReport {
             quota: include_quota.then(|| {
                 fetch_profile_quota(&summary.provider, &summary.codex_home, None)
-                    .map_err(|err| err.to_string())
+                    .map_err(|err| quota_error_message(&err))
             }),
             summary,
         }
@@ -620,6 +621,10 @@ pub(crate) fn format_response_body(body: &[u8]) -> String {
     prodex_quota::format_response_body(body)
 }
 
+pub(crate) fn quota_error_message(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,6 +639,20 @@ mod tests {
             email: None,
             provider: ProfileProvider::Openai,
         }
+    }
+
+    #[test]
+    fn quota_error_message_redacts_secret_like_material() {
+        let err = anyhow::anyhow!(
+            "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"
+        );
+
+        let message = quota_error_message(&err);
+
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("fixture-token-123"));
+        assert!(!message.contains("sk-fixture-123"));
     }
 
     fn test_runtime_log_path(name: &str) -> PathBuf {

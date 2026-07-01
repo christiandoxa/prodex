@@ -8,9 +8,21 @@ use super::provider_bridge::RuntimeProviderGatewaySpendEvent;
 pub(super) struct RuntimeGatewayBillingLedgerEntry {
     pub(super) object: String,
     pub(super) phase: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) request_id: Option<String>,
     pub(super) request: u64,
     pub(super) call_id: String,
     pub(super) key_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) tenant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) team_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) budget_id: Option<String>,
     pub(super) model: String,
     pub(super) minute_epoch: u64,
     pub(super) input_tokens: u64,
@@ -37,9 +49,15 @@ pub(super) fn runtime_gateway_billing_ledger_entry_from_delta(
     RuntimeGatewayBillingLedgerEntry {
         object: "gateway.billing_ledger_entry".to_string(),
         phase: "request".to_string(),
+        request_id: Some(delta.typed_request_id.clone()),
         request: delta.request_id,
-        call_id: format!("prodex-{}", delta.request_id),
+        call_id: delta.call_id.clone(),
         key_name: delta.key_name.clone(),
+        tenant_id: delta.tenant_id.clone(),
+        team_id: delta.team_id.clone(),
+        project_id: delta.project_id.clone(),
+        user_id: delta.user_id.clone(),
+        budget_id: delta.budget_id.clone(),
         model: delta.model.clone(),
         minute_epoch: delta.minute_epoch,
         input_tokens: delta.input_tokens,
@@ -82,10 +100,19 @@ mod tests {
 
     #[test]
     fn ledger_entry_from_delta_sets_request_phase_and_cost() {
+        let call_id = format!("prodex-{}", prodex_domain::CallId::new());
+        let typed_request_id = format!("prodex-{}", prodex_domain::RequestId::new());
         let entry =
             runtime_gateway_billing_ledger_entry_from_delta(&RuntimeGatewayVirtualKeyUsageDelta {
                 request_id: 42,
+                typed_request_id: typed_request_id.clone(),
+                call_id: call_id.clone(),
                 key_name: "alpha".to_string(),
+                tenant_id: Some("tenant-a".to_string()),
+                team_id: Some("platform".to_string()),
+                project_id: None,
+                user_id: None,
+                budget_id: Some("budget-a".to_string()),
                 model: "gpt-5".to_string(),
                 minute_epoch: 10,
                 input_tokens: 100,
@@ -95,7 +122,24 @@ mod tests {
 
         assert_eq!(entry.object, "gateway.billing_ledger_entry");
         assert_eq!(entry.phase, "request");
-        assert_eq!(entry.call_id, "prodex-42");
+        assert_eq!(entry.request_id.as_deref(), Some(typed_request_id.as_str()));
+        let request_id = entry
+            .request_id
+            .as_deref()
+            .and_then(|id| id.strip_prefix("prodex-"))
+            .expect("ledger request id should keep prodex prefix");
+        assert_eq!(
+            request_id
+                .parse::<prodex_domain::RequestId>()
+                .unwrap()
+                .as_uuid()
+                .get_version_num(),
+            7
+        );
+        assert_eq!(entry.call_id, call_id);
+        assert_eq!(entry.tenant_id.as_deref(), Some("tenant-a"));
+        assert_eq!(entry.team_id.as_deref(), Some("platform"));
+        assert_eq!(entry.budget_id.as_deref(), Some("budget-a"));
         assert_eq!(entry.estimated_cost_usd, Some(0.25));
     }
 

@@ -1,6 +1,39 @@
 use super::*;
 use base64::Engine;
 
+fn gemini_live_response_ids(events: &[serde_json::Value]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| event["response"]["id"].as_str().map(str::to_string))
+        .collect()
+}
+
+fn assert_gemini_live_response_id_is_uuidv7(response_id: &str) {
+    let uuid = response_id
+        .strip_prefix("resp_gemini_live_")
+        .expect("Gemini Live response id should be prodex scoped");
+    assert_eq!(
+        uuid.parse::<prodex_domain::RequestId>()
+            .unwrap()
+            .as_uuid()
+            .get_version_num(),
+        7
+    );
+}
+
+fn assert_gemini_live_call_id_is_uuidv7(call_id: &str) {
+    let uuid = call_id
+        .strip_prefix("call_gemini_live_")
+        .expect("Gemini Live call id should be prodex scoped");
+    assert_eq!(
+        uuid.parse::<prodex_domain::CallId>()
+            .unwrap()
+            .as_uuid()
+            .get_version_num(),
+        7
+    );
+}
+
 #[test]
 fn gemini_live_translates_codex_session_audio_and_text() {
     let mut state = RuntimeGeminiLiveState::new(7);
@@ -112,6 +145,32 @@ fn gemini_live_translates_server_audio_transcripts_tools_and_turn_completion() {
     assert!(serialized.contains("response.output_audio.delta"));
     assert!(serialized.contains("conversation.item.done"));
     assert!(serialized.contains("response.done"));
+}
+
+#[test]
+fn gemini_live_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
+    let mut state = RuntimeGeminiLiveState::new(19);
+    let translated = state
+        .translate_server_message(
+            &serde_json::json!({
+                "toolCall": {
+                    "functionCalls": [{
+                        "name": "background_agent",
+                        "args": {"prompt": "work"}
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let call_id = translated
+        .events
+        .iter()
+        .find_map(|event| event["item"]["call_id"].as_str())
+        .expect("tool call should include call id");
+
+    assert_gemini_live_call_id_is_uuidv7(call_id);
+    assert_ne!(call_id, "call_gemini_live");
 }
 
 #[test]
@@ -262,7 +321,12 @@ fn gemini_live_suppresses_late_server_output_after_client_cancel() {
         )
         .unwrap();
     let serialized = serde_json::to_string(&next.events).unwrap();
-    assert!(serialized.contains("resp_gemini_live_14_2"));
+    let ids = gemini_live_response_ids(&next.events);
+    assert!(ids.iter().any(|id| id.starts_with("resp_gemini_live_")));
+    for id in &ids {
+        assert_gemini_live_response_id_is_uuidv7(id);
+    }
+    assert!(!serialized.contains("resp_gemini_live_14_2"));
     assert!(serialized.contains("next"));
 }
 
@@ -299,7 +363,12 @@ fn gemini_live_server_interruption_cancels_current_turn_and_recovers() {
         )
         .unwrap();
     let next_serialized = serde_json::to_string(&next.events).unwrap();
-    assert!(next_serialized.contains("resp_gemini_live_15_2"));
+    let ids = gemini_live_response_ids(&next.events);
+    assert!(ids.iter().any(|id| id.starts_with("resp_gemini_live_")));
+    for id in &ids {
+        assert_gemini_live_response_id_is_uuidv7(id);
+    }
+    assert!(!next_serialized.contains("resp_gemini_live_15_2"));
     assert!(next_serialized.contains("recovered"));
 }
 
@@ -328,8 +397,15 @@ fn gemini_live_uses_distinct_response_ids_per_turn() {
             .to_string(),
         )
         .unwrap();
-    let first_serialized = serde_json::to_string(&first.events).unwrap();
-    let second_serialized = serde_json::to_string(&second.events).unwrap();
-    assert!(first_serialized.contains("resp_gemini_live_13"));
-    assert!(second_serialized.contains("resp_gemini_live_13_2"));
+    let first_id = gemini_live_response_ids(&first.events)
+        .into_iter()
+        .next()
+        .expect("first turn should include response id");
+    let second_id = gemini_live_response_ids(&second.events)
+        .into_iter()
+        .next()
+        .expect("second turn should include response id");
+    assert_gemini_live_response_id_is_uuidv7(&first_id);
+    assert_gemini_live_response_id_is_uuidv7(&second_id);
+    assert_ne!(first_id, second_id);
 }

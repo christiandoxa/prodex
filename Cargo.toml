@@ -12,20 +12,30 @@ members = [
     ".",
     "crates/prodex-app",
     "crates/prodex-app-reports",
+    "crates/prodex-application",
+    "crates/prodex-authn",
+    "crates/prodex-authz",
     "crates/prodex-caveman-assets",
     "crates/prodex-cli",
+    "crates/prodex-config",
+    "crates/prodex-control-plane",
     "crates/prodex-audit-log",
     "crates/prodex-bench-support",
+    "crates/prodex-gateway-core",
+    "crates/prodex-gateway-http",
     "crates/prodex-codex-config",
     "crates/prodex-context",
     "crates/prodex-core",
+    "crates/prodex-domain",
     "crates/prodex-housekeeping",
     "crates/prodex-mcp-stdio",
     "crates/prodex-memory",
+    "crates/prodex-observability",
     "crates/prodex-presidio",
     "crates/prodex-profile-export",
     "crates/prodex-profile-identity",
     "crates/prodex-provider-core",
+    "crates/prodex-provider-spi",
     "crates/prodex-proxy-config",
     "crates/prodex-quota",
     "crates/prodex-redaction",
@@ -51,6 +61,10 @@ members = [
     "crates/prodex-shared-codex-fs",
     "crates/prodex-shared-types",
     "crates/prodex-state",
+    "crates/prodex-storage",
+    "crates/prodex-storage-postgres",
+    "crates/prodex-storage-redis",
+    "crates/prodex-storage-sqlite",
     "crates/prodex-runtime-proxy",
     "crates/prodex-terminal-ui",
     "crates/prodex-update-notice",
@@ -80,20 +94,30 @@ portable-pty = "0.9.0"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 unicode-width = "0.2.2"
 prodex_audit_log = { package = "prodex-audit-log", path = "crates/prodex-audit-log", version = "0.258.0" }
+prodex_authn = { package = "prodex-authn", path = "crates/prodex-authn", version = "0.258.0" }
+prodex_authz = { package = "prodex-authz", path = "crates/prodex-authz", version = "0.258.0" }
 prodex_app = { package = "prodex-app", path = "crates/prodex-app", version = "0.258.0" }
 prodex_app_reports = { package = "prodex-app-reports", path = "crates/prodex-app-reports", version = "0.258.0" }
+prodex_application = { package = "prodex-application", path = "crates/prodex-application", version = "0.258.0" }
 prodex_bench_support = { package = "prodex-bench-support", path = "crates/prodex-bench-support", version = "0.258.0" }
 prodex_caveman_assets = { package = "prodex-caveman-assets", path = "crates/prodex-caveman-assets", version = "0.258.0" }
 prodex_cli = { package = "prodex-cli", path = "crates/prodex-cli", version = "0.258.0" }
+prodex_config = { package = "prodex-config", path = "crates/prodex-config", version = "0.258.0" }
+prodex_control_plane = { package = "prodex-control-plane", path = "crates/prodex-control-plane", version = "0.258.0" }
 prodex_context = { package = "prodex-context", path = "crates/prodex-context", version = "0.258.0" }
 prodex_core = { package = "prodex-core", path = "crates/prodex-core", version = "0.258.0" }
+prodex_domain = { package = "prodex-domain", path = "crates/prodex-domain", version = "0.258.0" }
+prodex_gateway_core = { package = "prodex-gateway-core", path = "crates/prodex-gateway-core", version = "0.258.0" }
+prodex_gateway_http = { package = "prodex-gateway-http", path = "crates/prodex-gateway-http", version = "0.258.0" }
 prodex_housekeeping = { package = "prodex-housekeeping", path = "crates/prodex-housekeeping", version = "0.258.0" }
 prodex_mcp_stdio = { package = "prodex-mcp-stdio", path = "crates/prodex-mcp-stdio", version = "0.258.0" }
 prodex_memory = { package = "prodex-memory", path = "crates/prodex-memory", version = "0.258.0" }
+prodex_observability = { package = "prodex-observability", path = "crates/prodex-observability", version = "0.258.0" }
 prodex_presidio = { package = "prodex-presidio", path = "crates/prodex-presidio", version = "0.258.0" }
 prodex_profile_export = { package = "prodex-profile-export", path = "crates/prodex-profile-export", version = "0.258.0" }
 prodex_profile_identity = { package = "prodex-profile-identity", path = "crates/prodex-profile-identity", version = "0.258.0" }
 prodex_provider_core = { package = "prodex-provider-core", path = "crates/prodex-provider-core", version = "0.258.0" }
+prodex_provider_spi = { package = "prodex-provider-spi", path = "crates/prodex-provider-spi", version = "0.258.0" }
 prodex_proxy_config = { package = "prodex-proxy-config", path = "crates/prodex-proxy-config", version = "0.258.0" }
 prodex_quota = { package = "prodex-quota", path = "crates/prodex-quota", version = "0.258.0" }
 prodex_runtime_broker = { package = "prodex-runtime-broker", path = "crates/prodex-runtime-broker", version = "0.258.0" }
@@ -115,6 +139,10 @@ prodex_session_store = { package = "prodex-session-store", path = "crates/prodex
 prodex_shared_codex_fs = { package = "prodex-shared-codex-fs", path = "crates/prodex-shared-codex-fs", version = "0.258.0" }
 prodex_shared_types = { package = "prodex-shared-types", path = "crates/prodex-shared-types", version = "0.258.0" }
 prodex_state = { package = "prodex-state", path = "crates/prodex-state", version = "0.258.0" }
+prodex_storage = { package = "prodex-storage", path = "crates/prodex-storage", version = "0.258.0" }
+prodex_storage_postgres = { package = "prodex-storage-postgres", path = "crates/prodex-storage-postgres", version = "0.258.0" }
+prodex_storage_redis = { package = "prodex-storage-redis", path = "crates/prodex-storage-redis", version = "0.258.0" }
+prodex_storage_sqlite = { package = "prodex-storage-sqlite", path = "crates/prodex-storage-sqlite", version = "0.258.0" }
 prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice", version = "0.258.0" }
 redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.258.0" }
 reqwest = { version = "0.13.2", default-features = false }
@@ -138,13 +166,18 @@ tiny_http = "0.12.0"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "time"] }
 toml = "1.1.2"
 tungstenite = { version = "0.29.0", default-features = false, features = ["handshake"] }
+uuid = { version = "1.18.1", features = ["serde", "v7"] }
 
 [features]
 default = []
 bench-support = ["prodex_app/bench-support"]
 
 [dependencies]
+postgres = { workspace = true }
 prodex_app = { workspace = true }
+prodex_storage_postgres = { workspace = true }
+prodex_storage_sqlite = { workspace = true }
+rusqlite = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }

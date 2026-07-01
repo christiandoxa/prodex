@@ -1,7 +1,8 @@
 use super::{
     RuntimeRotationProxyShared, RuntimeWebsocketAttempt, RuntimeWebsocketSessionState,
     note_runtime_profile_transport_failure, runtime_proxy_log,
-    runtime_proxy_websocket_precommit_progress_timeout_ms, runtime_websocket_timeout_error,
+    runtime_proxy_websocket_precommit_progress_timeout_ms, runtime_websocket_error_log_value,
+    runtime_websocket_timeout_error,
 };
 use anyhow::Result;
 use prodex_runtime_state::RuntimeRouteKind;
@@ -293,7 +294,10 @@ pub(super) fn handle_runtime_websocket_read_error(
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "websocket"),
                 runtime_proxy_log_field("profile", profile_name),
-                runtime_proxy_log_field("error", err.to_string()),
+                runtime_proxy_log_field(
+                    "error",
+                    runtime_websocket_error_log_value(&err.to_string()),
+                ),
             ],
         ),
     );

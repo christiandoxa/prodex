@@ -7,6 +7,7 @@ use super::RuntimeGeminiSseState;
 use super::runtime_gemini_blocked_tool_call_item;
 use super::runtime_gemini_blocked_tool_call_message;
 use super::runtime_provider_split_flat_namespace_tool_name;
+use prodex_domain::CallId;
 
 #[derive(Debug, Default)]
 pub(super) struct RuntimeGeminiToolCall {
@@ -48,7 +49,7 @@ impl RuntimeGeminiSseState {
             tool_call.call_id = explicit_call_id
                 .clone()
                 .or_else(|| tool_call.call_id.clone())
-                .or_else(|| Some(format!("call_gemini_{}_{}", self.request_id, index)));
+                .or_else(|| Some(format!("call_gemini_{}", CallId::new())));
             if let Some(explicit_call_id) = explicit_call_id {
                 self.tool_call_indices_by_id.insert(explicit_call_id, index);
                 tool_call.explicit_call_id = true;
@@ -182,7 +183,7 @@ impl RuntimeGeminiSseState {
                 let call_id = tool_call
                     .call_id
                     .clone()
-                    .unwrap_or_else(|| format!("call_gemini_{}_{}", self.request_id, index));
+                    .unwrap_or_else(|| format!("call_gemini_{}", CallId::new()));
                 let name = tool_call
                     .name
                     .clone()

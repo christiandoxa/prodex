@@ -121,6 +121,7 @@ pub struct RuntimePolicyGatewayAdminToken {
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGatewaySsoSettings {
     pub proxy_token_env: Option<String>,
+    pub require_tenant: Option<bool>,
     pub token_header: Option<String>,
     pub user_header: Option<String>,
     pub role_header: Option<String>,
@@ -229,7 +230,10 @@ impl RuntimePolicyProxyPreset {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
+        if value != value.trim() {
+            return None;
+        }
+        match value.to_ascii_lowercase().as_str() {
             "low" => Some(Self::Low),
             "default" => Some(Self::Default),
             "many-terminals" | "many_terminals" => Some(Self::ManyTerminals),
@@ -342,7 +346,7 @@ impl<'de> Deserialize<'de> for RuntimePolicyProxyPresetSelection {
         RuntimePolicyProxyPreset::parse(&value)
             .map(Self::selected)
             .ok_or_else(|| {
-                de::Error::unknown_variant(value.trim(), RuntimePolicyProxyPreset::VALID_VALUES)
+                de::Error::unknown_variant(value.as_str(), RuntimePolicyProxyPreset::VALID_VALUES)
             })
     }
 }

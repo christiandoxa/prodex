@@ -1,4 +1,5 @@
 use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_label};
+use prodex_domain::{CallId, RequestId};
 use prodex_provider_core::{
     ProviderModelCost, calculate_cost_microusd, estimate_request_input_tokens,
     estimate_text_tokens, extract_usage_tokens, microusd_to_usd,
@@ -31,7 +32,9 @@ pub(super) fn runtime_provider_gateway_spend_event(
         event: "gateway_spend",
         phase: "request",
         request: request_id,
-        call_id: format!("prodex-{request_id}"),
+        request_id: runtime_provider_gateway_spend_request_id(),
+        legacy_request_sequence: request_id,
+        call_id: runtime_provider_gateway_spend_call_id(),
         provider: runtime_provider_label(kind).to_string(),
         path: path_without_query(path_and_query).to_string(),
         model,
@@ -105,7 +108,9 @@ pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(
         event: "gateway_spend",
         phase: "response",
         request: request_id,
-        call_id: format!("prodex-{request_id}"),
+        request_id: runtime_provider_gateway_spend_request_id(),
+        legacy_request_sequence: request_id,
+        call_id: runtime_provider_gateway_spend_call_id(),
         provider: runtime_provider_label(kind).to_string(),
         path: path_without_query(path_and_query).to_string(),
         model,
@@ -124,7 +129,10 @@ pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(
 pub(super) struct RuntimeProviderGatewaySpendEvent {
     pub(super) event: &'static str,
     pub(super) phase: &'static str,
+    #[serde(skip)]
     pub(super) request: u64,
+    pub(super) request_id: String,
+    pub(super) legacy_request_sequence: u64,
     pub(super) call_id: String,
     pub(super) provider: String,
     pub(super) path: String,
@@ -146,6 +154,11 @@ impl RuntimeProviderGatewaySpendEvent {
             [
                 runtime_proxy_log_field("phase", self.phase),
                 runtime_proxy_log_field("request", self.request.to_string()),
+                runtime_proxy_log_field("request_id", self.request_id.as_str()),
+                runtime_proxy_log_field(
+                    "legacy_request_sequence",
+                    self.legacy_request_sequence.to_string(),
+                ),
                 runtime_proxy_log_field("call_id", self.call_id.as_str()),
                 runtime_proxy_log_field("provider", self.provider.as_str()),
                 runtime_proxy_log_field("path", self.path.as_str()),
@@ -163,6 +176,27 @@ impl RuntimeProviderGatewaySpendEvent {
                 runtime_proxy_log_field("sink", self.sink.as_str()),
             ],
         )
+    }
+}
+
+fn runtime_provider_gateway_spend_call_id() -> String {
+    format!("prodex-{}", CallId::new())
+}
+
+fn runtime_provider_gateway_spend_request_id() -> String {
+    format!("prodex-{}", RequestId::new())
+}
+
+pub(super) fn runtime_provider_gateway_spend_apply_admission_ids(
+    event: &mut RuntimeProviderGatewaySpendEvent,
+    typed_request_id: Option<&str>,
+    call_id: Option<&str>,
+) {
+    if let Some(typed_request_id) = typed_request_id {
+        event.request_id = typed_request_id.to_string();
+    }
+    if let Some(call_id) = call_id {
+        event.call_id = call_id.to_string();
     }
 }
 

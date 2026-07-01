@@ -16,6 +16,7 @@ use super::local_rewrite_gateway_store_types::{
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_seconds;
 use super::provider_bridge::runtime_provider_gateway_cost_for_request;
 use super::*;
+use prodex_domain::{CallId, RequestId};
 use prodex_provider_core::{calculate_cost_microusd, estimate_request_input_tokens};
 use std::path::Path;
 
@@ -76,13 +77,7 @@ pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
                 log_path,
                 &runtime_proxy_structured_log_message(
                     "gateway_virtual_key_store_duplicate_ignored",
-                    [
-                        runtime_proxy_log_field(
-                            "path",
-                            state_store.key_store_path().display().to_string(),
-                        ),
-                        runtime_proxy_log_field("key", key_name),
-                    ],
+                    [runtime_proxy_log_field("key", key_name)],
                 ),
             );
             continue;
@@ -92,13 +87,7 @@ pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
                 log_path,
                 &runtime_proxy_structured_log_message(
                     "gateway_virtual_key_store_invalid_hash",
-                    [
-                        runtime_proxy_log_field(
-                            "path",
-                            state_store.key_store_path().display().to_string(),
-                        ),
-                        runtime_proxy_log_field("key", key_name),
-                    ],
+                    [runtime_proxy_log_field("key", key_name)],
                 ),
             );
             continue;
@@ -121,15 +110,17 @@ pub(super) fn runtime_gateway_virtual_key_store_load(
                     store.sort_for_rendering();
                     store
                 }
-                Err(err) => {
+                Err(_err) => {
                     runtime_proxy_log_to_path(
                         log_path,
                         &runtime_proxy_structured_log_message(
                             "gateway_virtual_key_store_load_failed",
                             [
                                 runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
+                                runtime_proxy_log_field(
+                                    "error_kind",
+                                    "gateway_key_store_persistence_failed",
+                                ),
                             ],
                         ),
                     );
@@ -137,23 +128,23 @@ pub(super) fn runtime_gateway_virtual_key_store_load(
                 }
             };
         }
-        RuntimeGatewayStateStore::Postgres {
-            url, state_path, ..
-        } => {
+        RuntimeGatewayStateStore::Postgres { url, .. } => {
             return match runtime_gateway_postgres_load_key_store(url) {
                 Ok(mut store) => {
                     store.sort_for_rendering();
                     store
                 }
-                Err(err) => {
+                Err(_err) => {
                     runtime_proxy_log_to_path(
                         log_path,
                         &runtime_proxy_structured_log_message(
                             "gateway_virtual_key_store_load_failed",
                             [
                                 runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", state_path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
+                                runtime_proxy_log_field(
+                                    "error_kind",
+                                    "gateway_key_store_persistence_failed",
+                                ),
                             ],
                         ),
                     );
@@ -161,7 +152,7 @@ pub(super) fn runtime_gateway_virtual_key_store_load(
                 }
             };
         }
-        RuntimeGatewayStateStore::Redis { url, state_path } => {
+        RuntimeGatewayStateStore::Redis { url, .. } => {
             return match runtime_gateway_redis_load_key_store(
                 url,
                 RUNTIME_GATEWAY_REDIS_KEY_STORE_KEY,
@@ -170,15 +161,17 @@ pub(super) fn runtime_gateway_virtual_key_store_load(
                     store.sort_for_rendering();
                     store
                 }
-                Err(err) => {
+                Err(_err) => {
                     runtime_proxy_log_to_path(
                         log_path,
                         &runtime_proxy_structured_log_message(
                             "gateway_virtual_key_store_load_failed",
                             [
                                 runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", state_path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
+                                runtime_proxy_log_field(
+                                    "error_kind",
+                                    "gateway_key_store_persistence_failed",
+                                ),
                             ],
                         ),
                     );
@@ -193,15 +186,15 @@ pub(super) fn runtime_gateway_virtual_key_store_load(
             store.sort_for_rendering();
             store
         }
-        Err(err) => {
+        Err(_err) => {
             runtime_proxy_log_to_path(
                 log_path,
                 &runtime_proxy_structured_log_message(
                     "gateway_virtual_key_store_load_failed",
-                    [
-                        runtime_proxy_log_field("path", path.display().to_string()),
-                        runtime_proxy_log_field("error", err.to_string()),
-                    ],
+                    [runtime_proxy_log_field(
+                        "error_kind",
+                        "gateway_key_store_persistence_failed",
+                    )],
                 ),
             );
             RuntimeGatewayVirtualKeyStoreFile::default()
@@ -215,14 +208,6 @@ pub(super) fn runtime_gateway_virtual_key_rejection(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Option<runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection> {
     if path_without_query(&captured.path_and_query) == runtime_proxy_crate::LOCAL_BRIDGE_HEALTH_PATH
-    {
-        return None;
-    }
-    if let Some(auth_token_hash) = shared.gateway_auth_token_hash.as_ref()
-        && captured.headers.iter().any(|(name, value)| {
-            name.eq_ignore_ascii_case("authorization")
-                && auth_token_hash.verify_authorization_header(value)
-        })
     {
         return None;
     }
@@ -253,47 +238,60 @@ pub(super) fn runtime_gateway_virtual_key_rejection(
     );
     let estimated_cost_microusd = calculate_cost_microusd(Some(input_tokens), None, cost);
     let minute_epoch = runtime_proxy_crate::runtime_gateway_minute_epoch();
-    let usage_map = shared
-        .gateway_usage
-        .usage
-        .lock()
-        .map(|usage| usage.clone())
-        .unwrap_or_default();
-    if let Some(rejection) = runtime_gateway_budget_group_rejection(
-        key,
-        &active_keys,
-        &usage_map,
-        estimated_cost_microusd,
-    ) {
-        return Some(rejection);
-    }
-    let usage = usage_map.get(&key.name).cloned();
-    let admission = match runtime_proxy_crate::runtime_gateway_virtual_key_admission(
-        key,
-        usage.as_ref(),
-        &captured.body,
-        estimated_cost_microusd,
-        minute_epoch,
-    ) {
-        Ok(admission) => admission,
-        Err(rejection) => return Some(rejection),
-    };
-    if let Ok(mut usage) = shared.gateway_usage.usage.lock() {
+    let admission = {
+        let Ok(mut usage) = shared.gateway_usage.usage.lock() else {
+            return Some(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::BudgetExceeded);
+        };
+        if let Some(rejection) = runtime_gateway_budget_group_rejection(
+            key,
+            &active_keys,
+            &usage,
+            estimated_cost_microusd,
+        ) {
+            return Some(rejection);
+        }
+        let key_usage = usage.get(&key.name).cloned();
+        let admission = match runtime_proxy_crate::runtime_gateway_virtual_key_admission(
+            key,
+            key_usage.as_ref(),
+            &captured.body,
+            estimated_cost_microusd,
+            minute_epoch,
+        ) {
+            Ok(admission) => admission,
+            Err(rejection) => return Some(rejection),
+        };
         let entry = usage.entry(admission.key_name.clone()).or_default();
         runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(
             entry,
             &admission,
             minute_epoch,
         );
-    }
+        admission
+    };
     if let Ok(mut request_ids) = shared.gateway_usage.request_ids.lock() {
         request_ids.insert(request_id);
+    }
+    let typed_request_id = format!("prodex-{}", RequestId::new());
+    if let Ok(mut typed_request_ids) = shared.gateway_usage.typed_request_ids.lock() {
+        typed_request_ids.insert(request_id, typed_request_id.clone());
+    }
+    let call_id = format!("prodex-{}", CallId::new());
+    if let Ok(mut call_ids) = shared.gateway_usage.call_ids.lock() {
+        call_ids.insert(request_id, call_id.clone());
     }
     schedule_runtime_gateway_virtual_key_usage_save(
         shared,
         RuntimeGatewayVirtualKeyUsageDelta {
             request_id,
+            typed_request_id,
+            call_id,
             key_name: admission.key_name.clone(),
+            tenant_id: key.tenant_id.clone(),
+            team_id: key.team_id.clone(),
+            project_id: key.project_id.clone(),
+            user_id: key.user_id.clone(),
+            budget_id: key.budget_id.clone(),
             model: model.clone(),
             minute_epoch,
             input_tokens: admission.input_tokens,
@@ -337,4 +335,38 @@ pub(super) fn runtime_local_rewrite_request_is_authorized(
         header.field.equiv("Authorization")
             && auth_token_hash.verify_authorization_header(header.value.as_str())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_store_load_failure_log_uses_stable_error_without_path_details() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("prodex-key-store-load-log-redaction-{nonce}"));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("test root should be created");
+        let key_store_path = root.join("gateway-virtual-keys.json");
+        std::fs::create_dir_all(&key_store_path).expect("key store path directory should exist");
+        let log_path = root.join("runtime.log");
+        let state_store = RuntimeGatewayStateStore::File {
+            key_store_path: key_store_path.clone(),
+            usage_path: root.join("gateway-virtual-key-usage.json"),
+            ledger_path: root.join("gateway-billing-ledger.jsonl"),
+        };
+
+        let store = runtime_gateway_virtual_key_store_load(&state_store, &log_path);
+        assert!(store.keys.is_empty());
+        let runtime_log = std::fs::read_to_string(&log_path).expect("runtime log should exist");
+        assert!(runtime_log.contains("gateway_virtual_key_store_load_failed"));
+        assert!(runtime_log.contains("error_kind=gateway_key_store_persistence_failed"));
+        assert!(!runtime_log.contains("gateway-virtual-keys.json"));
+        assert!(!runtime_log.contains(&root.display().to_string()));
+        assert!(!runtime_log.contains("Is a directory"));
+    }
 }

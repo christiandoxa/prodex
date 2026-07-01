@@ -1,4 +1,5 @@
 use super::*;
+use redaction::redaction_redact_secret_like_text;
 
 #[cfg(test)]
 pub(crate) use prodex_app_reports::collect_info_runtime_load_summary_from_text;
@@ -333,7 +334,7 @@ pub(crate) fn format_secret_backend_summary() -> String {
             None,
         ),
         Err(err) => {
-            let error = err.to_string();
+            let error = secret_backend_redacted_error(&err);
             prodex_app_reports::format_secret_backend_summary_parts(None, None, Some(&error))
         }
     }
@@ -347,8 +348,31 @@ pub(crate) fn secret_backend_json_value() -> serde_json::Value {
             None,
         ),
         Err(err) => {
-            let error = err.to_string();
+            let error = secret_backend_redacted_error(&err);
             prodex_app_reports::secret_backend_json_value_parts(None, None, Some(&error))
         }
+    }
+}
+
+fn secret_backend_redacted_error(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_backend_error_redacts_secret_like_material() {
+        let err = anyhow::anyhow!(
+            "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"
+        );
+
+        let message = secret_backend_redacted_error(&err);
+
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("fixture-token-123"));
+        assert!(!message.contains("sk-fixture-123"));
     }
 }

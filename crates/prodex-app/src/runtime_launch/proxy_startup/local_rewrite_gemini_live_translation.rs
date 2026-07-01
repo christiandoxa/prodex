@@ -7,6 +7,7 @@ use super::local_rewrite_gemini_live_audio::{
 };
 use anyhow::{Context, Result};
 use base64::Engine;
+use prodex_domain::{CallId, RequestId};
 use std::collections::HashMap;
 
 pub(super) struct RuntimeGeminiLiveClientTranslation {
@@ -23,7 +24,6 @@ pub(super) struct RuntimeGeminiLiveServerTranslation {
 }
 
 pub(super) struct RuntimeGeminiLiveState {
-    request_id: u64,
     turn_sequence: u64,
     response_id: String,
     item_id: String,
@@ -39,12 +39,11 @@ pub(super) struct RuntimeGeminiLiveState {
 }
 
 impl RuntimeGeminiLiveState {
-    pub(super) fn new(request_id: u64) -> Self {
+    pub(super) fn new(_request_id: u64) -> Self {
         Self {
-            request_id,
             turn_sequence: 1,
-            response_id: format!("resp_gemini_live_{request_id}"),
-            item_id: format!("item_gemini_live_{request_id}"),
+            response_id: runtime_gemini_live_response_id(),
+            item_id: runtime_gemini_live_item_id(),
             response_created: false,
             input_audio_format: RuntimeGeminiLiveAudioFormat::Pcm16,
             input_audio_rate: GEMINI_LIVE_AUDIO_RATE,
@@ -245,13 +244,14 @@ impl RuntimeGeminiLiveState {
                     let call_id = function_call
                         .get("id")
                         .and_then(serde_json::Value::as_str)
-                        .unwrap_or("call_gemini_live");
+                        .map(str::to_string)
+                        .unwrap_or_else(runtime_gemini_live_call_id);
                     let name = function_call
                         .get("name")
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("tool_call");
                     self.tool_names_by_call_id
-                        .insert(call_id.to_string(), name.to_string());
+                        .insert(call_id.clone(), name.to_string());
                     let args = function_call
                         .get("args")
                         .cloned()
@@ -406,14 +406,8 @@ impl RuntimeGeminiLiveState {
 
     fn advance_turn(&mut self) {
         self.turn_sequence += 1;
-        self.response_id = format!(
-            "resp_gemini_live_{}_{}",
-            self.request_id, self.turn_sequence
-        );
-        self.item_id = format!(
-            "item_gemini_live_{}_{}",
-            self.request_id, self.turn_sequence
-        );
+        self.response_id = runtime_gemini_live_response_id();
+        self.item_id = runtime_gemini_live_item_id();
     }
 
     fn translate_input_audio(&self, audio: &str) -> Result<RuntimeGeminiLiveAudioPayload> {
@@ -446,6 +440,18 @@ impl RuntimeGeminiLiveState {
             }
         }
     }
+}
+
+fn runtime_gemini_live_response_id() -> String {
+    format!("resp_gemini_live_{}", RequestId::new())
+}
+
+fn runtime_gemini_live_item_id() -> String {
+    format!("item_gemini_live_{}", RequestId::new())
+}
+
+fn runtime_gemini_live_call_id() -> String {
+    format!("call_gemini_live_{}", CallId::new())
 }
 
 fn runtime_gemini_live_setup_message(

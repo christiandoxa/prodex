@@ -13,7 +13,8 @@ use crate::{
 use super::super::worker_spawn::spawn_runtime_background_worker_or_log;
 use super::{
     RUNTIME_SMART_CONTEXT_ARTIFACT_SAVE_DELAY_MS, RuntimeSmartContextArtifactSaveJob,
-    RuntimeSmartContextArtifactSaveQueue, runtime_smart_context_artifact_save_worker_loop,
+    RuntimeSmartContextArtifactSaveQueue, runtime_scheduled_save_error,
+    runtime_smart_context_artifact_save_worker_loop,
 };
 
 pub(crate) fn schedule_runtime_smart_context_artifact_save(
@@ -58,7 +59,7 @@ pub(crate) fn schedule_runtime_smart_context_artifact_save(
                         runtime_proxy_log_field("reason", reason),
                         runtime_proxy_log_field("lag_ms", "0"),
                         runtime_proxy_log_field("stage", "write"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
+                        runtime_proxy_log_field("error", runtime_scheduled_save_error(&err)),
                     ],
                 ),
             ),

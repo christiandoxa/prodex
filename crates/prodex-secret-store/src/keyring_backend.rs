@@ -10,9 +10,9 @@ pub struct KeyringSecretBackend {
 impl KeyringSecretBackend {
     pub fn new(service: impl Into<String>) -> Result<Self, SecretError> {
         let service = service.into();
-        if service.trim().is_empty() {
+        if service.is_empty() || service.chars().any(char::is_whitespace) {
             return Err(SecretError::invalid_location(
-                "keyring service name cannot be empty",
+                "keyring service name must be non-empty without whitespace",
             ));
         }
         Ok(Self { service })
@@ -63,12 +63,17 @@ fn validate_keyring_location(
     expected_service: &str,
 ) -> Result<(), SecretError> {
     match location {
-        SecretLocation::Keyring { service, .. } => {
+        SecretLocation::Keyring { service, account } => {
             if service != expected_service {
                 return Err(SecretError::invalid_location(format!(
                     "expected keyring service '{}' but got '{}'",
                     expected_service, service
                 )));
+            }
+            if account.is_empty() {
+                return Err(SecretError::invalid_location(
+                    "keyring account cannot be empty",
+                ));
             }
             Ok(())
         }

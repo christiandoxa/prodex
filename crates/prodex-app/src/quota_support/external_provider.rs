@@ -1,7 +1,8 @@
 use super::{
     ExternalQuotaDetail, ExternalQuotaInfo, ProfileProvider, SUPER_ANTHROPIC_PROVIDER_ID,
     SUPER_DEEPSEEK_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID, build_upstream_blocking_http_client,
-    first_line_of_error, format_response_body, refresh_claude_oauth_secret_if_needed,
+    first_line_of_error, format_response_body, quota_error_message,
+    refresh_claude_oauth_secret_if_needed,
 };
 use anyhow::{Context, Result, bail};
 use codex_config::codex_non_openai_model_provider;
@@ -212,9 +213,10 @@ pub(super) fn fetch_anthropic_quota_info(
                 });
             }
             Err(err) => {
+                let error = quota_error_message(&err);
                 details.push(ExternalQuotaDetail {
                     label: "Admin API".to_string(),
-                    value: format!("error: {}", first_line_of_error(&err.to_string())),
+                    value: format!("error: {}", first_line_of_error(&error)),
                 });
             }
         }

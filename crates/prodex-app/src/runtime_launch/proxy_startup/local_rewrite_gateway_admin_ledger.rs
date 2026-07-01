@@ -17,6 +17,8 @@ use super::local_rewrite_gateway_ledger_types::RuntimeGatewayBillingLedgerEntry;
 use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 use super::*;
 
+const RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT: usize = 100_000;
+
 pub(super) fn runtime_gateway_admin_ledger_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
@@ -35,10 +37,10 @@ pub(super) fn runtime_gateway_admin_ledger_response(
                 }),
             )
         }
-        Err(err) => build_runtime_proxy_json_error_response(
+        Err(_err) => build_runtime_proxy_json_error_response(
             500,
             "gateway_billing_ledger_load_failed",
-            &err.to_string(),
+            "gateway billing ledger could not be loaded",
         ),
     }
 }
@@ -47,15 +49,18 @@ pub(super) fn runtime_gateway_admin_ledger_csv_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    match runtime_gateway_billing_ledger_load(&shared.gateway_state_store, usize::MAX) {
+    match runtime_gateway_billing_ledger_load(
+        &shared.gateway_state_store,
+        RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT,
+    ) {
         Ok(records) => {
             let records = runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth);
             runtime_gateway_admin_csv_response(runtime_gateway_billing_ledger_csv(&records))
         }
-        Err(err) => build_runtime_proxy_json_error_response(
+        Err(_err) => build_runtime_proxy_json_error_response(
             500,
             "gateway_billing_ledger_load_failed",
-            &err.to_string(),
+            "gateway billing ledger could not be loaded",
         ),
     }
 }
@@ -64,7 +69,10 @@ pub(super) fn runtime_gateway_admin_ledger_summary_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    match runtime_gateway_billing_ledger_load(&shared.gateway_state_store, usize::MAX) {
+    match runtime_gateway_billing_ledger_load(
+        &shared.gateway_state_store,
+        RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT,
+    ) {
         Ok(records) => {
             let records = runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth);
             runtime_gateway_admin_json_response(
@@ -72,10 +80,10 @@ pub(super) fn runtime_gateway_admin_ledger_summary_response(
                 runtime_gateway_billing_summary_payload(shared, &records),
             )
         }
-        Err(err) => build_runtime_proxy_json_error_response(
+        Err(_err) => build_runtime_proxy_json_error_response(
             500,
             "gateway_billing_summary_load_failed",
-            &err.to_string(),
+            "gateway billing summary could not be loaded",
         ),
     }
 }
@@ -84,17 +92,20 @@ pub(super) fn runtime_gateway_admin_ledger_summary_csv_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    match runtime_gateway_billing_ledger_load(&shared.gateway_state_store, usize::MAX) {
+    match runtime_gateway_billing_ledger_load(
+        &shared.gateway_state_store,
+        RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT,
+    ) {
         Ok(records) => {
             let records = runtime_gateway_admin_filter_ledger_records(records, shared, admin_auth);
             runtime_gateway_admin_csv_response(runtime_gateway_billing_summary_csv(
                 &runtime_gateway_billing_summary_payload(shared, &records),
             ))
         }
-        Err(err) => build_runtime_proxy_json_error_response(
+        Err(_err) => build_runtime_proxy_json_error_response(
             500,
             "gateway_billing_summary_load_failed",
-            &err.to_string(),
+            "gateway billing summary could not be loaded",
         ),
     }
 }
@@ -126,6 +137,15 @@ fn runtime_gateway_admin_can_access_ledger_key(
     if runtime_gateway_admin_auth_is_unscoped(admin_auth) {
         return true;
     }
+    if runtime_gateway_ledger_record_has_scope_snapshot(record) {
+        return admin_auth.governance_scope().matches(
+            record.tenant_id.as_deref(),
+            record.team_id.as_deref(),
+            record.project_id.as_deref(),
+            record.user_id.as_deref(),
+            record.budget_id.as_deref(),
+        );
+    }
     entries
         .iter()
         .find(|entry| entry.key.name.eq_ignore_ascii_case(&record.key_name))
@@ -134,6 +154,16 @@ fn runtime_gateway_admin_can_access_ledger_key(
                 && admin_auth.can_access_key(&entry.key.name)
         })
         .unwrap_or(false)
+}
+
+fn runtime_gateway_ledger_record_has_scope_snapshot(
+    record: &RuntimeGatewayBillingLedgerEntry,
+) -> bool {
+    record.tenant_id.is_some()
+        || record.team_id.is_some()
+        || record.project_id.is_some()
+        || record.user_id.is_some()
+        || record.budget_id.is_some()
 }
 
 fn runtime_gateway_billing_summary_payload(
@@ -162,6 +192,11 @@ fn runtime_gateway_billing_summary_record(
     RuntimeGatewayBillingSummaryRecord {
         phase: record.phase.clone(),
         key_name: record.key_name.clone(),
+        tenant_id: record.tenant_id.clone(),
+        team_id: record.team_id.clone(),
+        project_id: record.project_id.clone(),
+        user_id: record.user_id.clone(),
+        budget_id: record.budget_id.clone(),
         model: record.model.clone(),
         input_tokens: record.input_tokens,
         estimated_cost_microusd: record.estimated_cost_microusd,
@@ -187,6 +222,7 @@ fn runtime_gateway_billing_summary_key_dimensions(
                     (
                         entry.key.name.to_ascii_lowercase(),
                         RuntimeGatewayBillingSummaryKeyDimensions {
+                            tenant_id: entry.key.tenant_id.clone(),
                             team_id: entry.key.team_id.clone(),
                             project_id: entry.key.project_id.clone(),
                             user_id: entry.key.user_id.clone(),
@@ -197,4 +233,79 @@ fn runtime_gateway_billing_summary_key_dimensions(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scoped_admin(tenant_id: &str) -> RuntimeGatewayAdminAuth {
+        RuntimeGatewayAdminAuth {
+            name: "tenant-admin".to_string(),
+            role: RuntimeGatewayAdminRole::Viewer,
+            tenant_id: Some(tenant_id.to_string()),
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }
+    }
+
+    fn ledger_record(tenant_id: Option<&str>) -> RuntimeGatewayBillingLedgerEntry {
+        RuntimeGatewayBillingLedgerEntry {
+            object: "gateway.billing_ledger_entry".to_string(),
+            phase: "request".to_string(),
+            request_id: None,
+            request: 1,
+            call_id: "prodex-call".to_string(),
+            key_name: "deleted-key".to_string(),
+            tenant_id: tenant_id.map(str::to_string),
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            model: "gpt-5".to_string(),
+            minute_epoch: 10,
+            input_tokens: 100,
+            estimated_cost_microusd: None,
+            estimated_cost_usd: None,
+            created_at_epoch: 20,
+            response_status: None,
+            response_bytes: None,
+            output_tokens: None,
+            final_cost_microusd: None,
+            final_cost_usd: None,
+            reconciled_at_epoch: None,
+        }
+    }
+
+    #[test]
+    fn scoped_ledger_filter_uses_record_scope_snapshot_when_key_is_absent() {
+        assert!(runtime_gateway_admin_can_access_ledger_key(
+            &ledger_record(Some("tenant-a")),
+            &[],
+            &scoped_admin("tenant-a"),
+        ));
+        assert!(!runtime_gateway_admin_can_access_ledger_key(
+            &ledger_record(Some("tenant-b")),
+            &[],
+            &scoped_admin("tenant-a"),
+        ));
+    }
+
+    #[test]
+    fn scoped_ledger_filter_keeps_legacy_records_without_snapshot_hidden_when_key_is_absent() {
+        assert!(!runtime_gateway_admin_can_access_ledger_key(
+            &ledger_record(None),
+            &[],
+            &scoped_admin("tenant-a"),
+        ));
+    }
+
+    #[test]
+    fn admin_ledger_exports_are_bounded() {
+        assert!(RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT >= 1000);
+        assert!(RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT < usize::MAX);
+    }
 }

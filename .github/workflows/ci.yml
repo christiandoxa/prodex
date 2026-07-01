@@ -216,6 +216,30 @@ jobs:
       - name: Enforce crate boundaries
         run: npm run ci:crate-boundary
 
+      - name: Enforce domain crate boundary
+        run: npm run ci:domain-boundary-guard
+
+      - name: Enforce enterprise boundary guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run ci:enterprise-docs-guard
+          npm run ci:enterprise-id-boundary-guard
+          npm run ci:enterprise-binaries-guard
+          npm run ci:application-boundary-guard
+          npm run ci:auth-boundary-guard
+          npm run ci:config-boundary-guard
+          npm run ci:control-plane-boundary-guard
+          npm run ci:observability-boundary-guard
+          npm run ci:provider-spi-boundary-guard
+          npm run ci:storage-boundary-guard
+          npm run ci:storage-postgres-boundary-guard
+          npm run ci:storage-redis-boundary-guard
+          npm run ci:storage-sqlite-boundary-guard
+          npm run ci:gateway-core-boundary-guard
+          npm run ci:gateway-http-boundary-guard
+          npm run ci:deployment-security-guard
+
       - name: Enforce dependency duplicate budget
         run: npm run ci:dependency-duplicates
 

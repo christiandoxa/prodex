@@ -234,18 +234,34 @@ impl RefreshLeaseError {
 impl fmt::Display for RefreshLeaseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { path, reason } => {
-                write!(
-                    f,
-                    "refresh lease I/O error for {}: {reason}",
-                    path.display()
-                )
-            }
+            Self::Io { .. } => write!(f, "refresh lease I/O error"),
         }
     }
 }
 
 impl StdError for RefreshLeaseError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshLeaseErrorStatus {
+    ServiceUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefreshLeaseErrorResponsePlan {
+    pub status: RefreshLeaseErrorStatus,
+    pub code: &'static str,
+    pub message: &'static str,
+}
+
+pub fn plan_refresh_lease_error_response(
+    _error: &RefreshLeaseError,
+) -> RefreshLeaseErrorResponsePlan {
+    RefreshLeaseErrorResponsePlan {
+        status: RefreshLeaseErrorStatus::ServiceUnavailable,
+        code: "refresh_lease_unavailable",
+        message: "refresh lease coordination is temporarily unavailable",
+    }
+}
 
 fn digest_key(namespace: &str, sensitive_key: &[u8]) -> String {
     let mut hasher = Sha256::new();

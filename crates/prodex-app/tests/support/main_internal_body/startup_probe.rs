@@ -16,6 +16,18 @@ fn main_entry_exit_code_defaults_to_one_for_generic_errors() {
 }
 
 #[test]
+fn main_entry_error_message_redacts_secret_like_chain() {
+    let err = anyhow::anyhow!("failed: Authorization: Bearer main-entry-token")
+        .context("command failed");
+
+    let message = main_entry_error_message(&err);
+
+    assert!(message.contains("command failed"));
+    assert!(message.contains("Authorization: Bearer <redacted>"));
+    assert!(!message.contains("main-entry-token"));
+}
+
+#[test]
 fn startup_probe_refresh_targets_current_then_stale_or_missing_profiles() {
     let temp_dir = TestDir::new();
     let now = Local::now().timestamp();

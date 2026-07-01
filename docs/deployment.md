@@ -4,7 +4,9 @@ This page describes the repository-provided container scaffold for running `prod
 
 ## Docker Compose
 
-Copy the example environment file, fill in real secrets, then start the gateway:
+Copy the example environment file, fill in real secrets, then start the gateway.
+The compose scaffold intentionally does not provide fallback production
+credentials; `PRODEX_GATEWAY_TOKEN` must be set explicitly.
 
 ```bash
 cp deploy/gateway.env.example deploy/gateway.env
@@ -40,6 +42,10 @@ curl http://127.0.0.1:4000/v1/prodex/gateway/openapi.json \
   -H "Authorization: Bearer $PRODEX_GATEWAY_TOKEN"
 ```
 
+Container health checks use the public `/readyz` probe instead of an admin
+endpoint so readiness can be evaluated without placing bearer tokens in process
+arguments.
+
 Recent billing ledger records are available at `/v1/prodex/gateway/ledger`, aggregated billing totals are available at `/v1/prodex/gateway/ledger/summary`, billing CSV exports are available at `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, Prometheus-compatible virtual-key usage metrics are available to the same admin token at `/v1/prodex/gateway/metrics`, SCIM-compatible SSO user provisioning is available at `/v1/prodex/gateway/scim/v2/Users`, and the built-in single-node gateway admin dashboard is available at `/v1/prodex/gateway/admin`.
 
 ## Operational Limits
@@ -70,14 +76,23 @@ user_header = "x-auth-request-email"
 role_header = "x-prodex-role"
 key_prefixes_header = "x-prodex-key-prefixes"
 tenant_header = "x-prodex-tenant"
+require_tenant = true
 default_role = "viewer"
 ```
 
 The proxy must strip these headers from client input, inject them after authentication, and send `x-prodex-sso-token` with the shared token value. Prodex only trusts SSO headers when that proxy token matches. Admins can also provision SCIM users through `/v1/prodex/gateway/scim/v2/Users`; when role, tenant, or key-prefix SSO headers are absent, an active SCIM user matching `userName` can supply those values, and an inactive match is rejected.
 
-Prodex can also verify admin OIDC/JWT bearer tokens directly when `[gateway.sso]` sets `oidc_issuer` and `oidc_audience`; `oidc_jwks_url` can be configured explicitly or discovered from the issuer's OpenID configuration. Role, tenant, and key-prefix claims can come from the JWT or from SCIM users when those claims are absent.
+Prodex can also verify admin OIDC/JWT bearer tokens directly when `[gateway.sso]` sets an HTTPS `oidc_issuer` and `oidc_audience`; `oidc_jwks_url` can be configured explicitly as an HTTPS URL or discovered from the issuer's OpenID configuration. Role, tenant, and key-prefix claims can come from the JWT or from SCIM users when those claims are absent.
 
 File and SQLite state are single-node deployment models. File locks make local JSON updates merge-safe; SQLite uses transactional updates for admin keys and usage counters. Do not scale multiple containers against the same `PRODEX_HOME` across hosts or network filesystems unless you have verified locking behavior and are prepared for single-writer operation.
+
+Keep `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=false` for local compose or
+single-node compatibility. Set it to `true` only for a topology that uses shared
+PostgreSQL as the durable source of truth, Redis as the rebuildable coordination
+backend, and at least two gateway replicas. In that mode
+`PRODEX_GATEWAY_REPLICA_COUNT` must match the intended gateway replica count so
+the application runtime can select the multi-replica accounting concurrency
+spec before adapters start.
 
 Use `gateway.state.backend = "postgres"` with `postgres_url_env` for shared database-backed admin keys, usage counters, and billing ledger rows:
 
@@ -90,6 +105,7 @@ postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"
 The Compose file includes an optional Postgres service under the `postgres` profile:
 
 ```bash
+openssl rand -base64 32 # use this output as PRODEX_POSTGRES_PASSWORD
 docker compose --profile postgres --env-file deploy/gateway.env up -d --build
 ```
 
@@ -108,3 +124,104 @@ docker compose --profile redis --env-file deploy/gateway.env up -d --build
 ```
 
 Tenant-scoped admin tokens, trusted-proxy SSO, OIDC/JWT claims, SCIM users, and shared Postgres or Redis state provide a single-node or self-hosted gateway admin boundary. Treat this compose stack as a production-shaped gateway baseline, not a hosted central SaaS control plane.
+
+## Kubernetes Baseline
+
+`deploy/kubernetes/prodex-gateway.yaml` provides a production-shaped manifest
+baseline with:
+
+- `Deployment`, `ServiceAccount`, `Service`, `ConfigMap`, `ExternalSecret`,
+  `PodDisruptionBudget`, `HorizontalPodAutoscaler`, `NetworkPolicy`,
+  `ServiceMonitor`, and migration `Job` objects.
+- non-root pod execution, read-only root filesystems, dropped Linux
+  capabilities, `RuntimeDefault` seccomp, no privilege escalation, resource
+  requests/limits, and `/livez`, `/readyz`, and `/startupz` probes.
+- gateway topology spread constraints across zones and nodes so multi-replica
+  deployments are not silently concentrated onto one failure domain.
+- a gateway termination grace period plus `preStop` delay so Kubernetes rolling
+  updates and evictions give readiness removal and connection draining time to
+  settle before SIGTERM.
+- explicit gateway, migration, and control-plane service accounts with
+  automounted service account tokens disabled, so workloads do not inherit the
+  default namespace identity or share operational RBAC accidentally.
+- Pod Security Admission labels on the `prodex` namespace with
+  `enforce`, `audit`, and `warn` set to `restricted`, so future pods must keep
+  the same restricted runtime posture as the checked-in workloads.
+- a namespace-wide `prodex-default-deny` NetworkPolicy, so new pods in the
+  `prodex` namespace start with no ingress or egress until a workload-specific
+  allow policy is added.
+- immutable image digest references that operators must replace with the
+  published 64-character `sha256` image digest for the release they deploy;
+  malformed and all-zero digest placeholders are rejected by the deployment
+  security guard.
+
+The gateway workload mounts `prodex-gateway-secrets`, which contains the
+gateway bearer token, provider API key references, PostgreSQL, and Redis
+connection references. It must not mount `prodex-control-plane-secrets`; that
+secret is reserved for the placeholder control-plane workload.
+
+The migration Job is currently a safe-failing placeholder. It documents that
+gateway request-serving pods must not run schema migration from startup. The Job
+is labeled separately, uses the dedicated `prodex-gateway-migration`
+ServiceAccount, reads only `prodex-gateway-migration-secrets` containing the
+PostgreSQL URL, and has a dedicated egress-only NetworkPolicy that permits DNS
+and PostgreSQL but not Redis, provider HTTPS, or ingress. Replace the
+placeholder only after the versioned migrator command lands.
+
+The same manifest also includes a `prodex-control-plane` `Deployment`, `Service`,
+and `NetworkPolicy` as an explicit enterprise control-plane surface. It is scaled
+to `replicas: 0` and annotated as a placeholder until the control-plane async
+adapter is wired to `prodex-application` and `prodex-control-plane`. Operators
+must not scale it above zero until the `prodex-control-plane serve` command is
+implemented and validated. The placeholder mounts only
+`prodex-control-plane-secrets`, which contains PostgreSQL and Redis connection
+references, so provider API keys and data-plane gateway tokens remain scoped to
+the gateway workload.
+
+The gateway ConfigMap sets `PRODEX_GATEWAY_REPLICA_COUNT=3` and
+`PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`, and the gateway
+`ExternalSecret` includes both PostgreSQL and Redis URLs. This makes the
+Kubernetes baseline production-shaped for the accounting concurrency gate:
+PostgreSQL remains the durable ledger/counter source of truth while Redis is
+only used for rate limiting, cache, and coordination primitives.
+
+The namespace default-deny policy has no allow rules. The gateway and
+placeholder control-plane NetworkPolicies intentionally avoid unbounded
+in-cluster ingress and egress rules. They accept application ingress only from
+namespaces labeled `prodex.dev/network-tier=ingress`, gateway metrics scraping
+only from namespaces labeled `prodex.dev/network-tier=monitoring`, allow DNS to
+`kube-dns`, and allow PostgreSQL (`5432`) and Redis (`6379`) only in namespaces
+labeled `prodex.dev/network-tier=data-store`. Gateway pods additionally allow
+outbound HTTPS (`443`) to public provider endpoints while excluding RFC1918
+private ranges from that broad HTTPS egress; the control-plane placeholder does
+not allow public provider egress. Label your ingress controller, monitoring,
+and database/Redis namespaces, or replace the selectors with your private
+endpoint policy before applying the manifest.
+
+The `ServiceMonitor` authenticates with `PRODEX_GATEWAY_METRICS_TOKEN` from
+`prodex-gateway-secrets`, not the gateway root token. The manifest also mounts
+`prodex-gateway-policy` at `/var/lib/prodex/policy.toml` so the same token is
+registered as a viewer admin token:
+
+```toml
+[gateway.state]
+backend = "postgres"
+postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"
+
+[[gateway.admin_tokens]]
+name = "prometheus"
+token_env = "PRODEX_GATEWAY_METRICS_TOKEN"
+role = "viewer"
+```
+
+The PostgreSQL state backend keeps admin keys, SCIM users, usage counters, and
+billing ledger rows shared across Kubernetes gateway replicas. Add `tenant_id`
+or `allowed_key_prefixes` when Prometheus should scrape only a tenant- or
+prefix-scoped view of gateway metrics.
+
+## Backup and Restore
+
+Use `docs/backup-restore.md` as the backend-specific runbook for file, SQLite,
+PostgreSQL, Redis, audit-log, and runtime-log backup and restore drills. Run a
+restore drill before promoting a new state backend, changing migration behavior,
+or scaling a gateway deployment across replicas.

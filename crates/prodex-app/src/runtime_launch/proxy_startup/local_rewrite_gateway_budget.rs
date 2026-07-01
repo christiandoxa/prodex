@@ -6,7 +6,7 @@ pub(super) fn runtime_gateway_budget_group_rejection(
     usage: &BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>,
     estimated_cost_microusd: Option<u64>,
 ) -> Option<runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection> {
-    let budget_id = key.budget_id.as_deref()?.trim();
+    let budget_id = key.budget_id.as_deref()?;
     if budget_id.is_empty() {
         return None;
     }
@@ -14,7 +14,8 @@ pub(super) fn runtime_gateway_budget_group_rejection(
     let mut spend_microusd = 0_u64;
     for entry in active_keys
         .iter()
-        .filter(|entry| entry.budget_id.as_deref().map(str::trim) == Some(budget_id))
+        .filter(|entry| entry.budget_id.as_deref() == Some(budget_id))
+        .filter(|entry| runtime_gateway_budget_group_scope_matches(key, entry))
     {
         if let Some(usage) = usage.get(&entry.name) {
             requests_total = requests_total.saturating_add(usage.requests_total);
@@ -34,6 +35,16 @@ pub(super) fn runtime_gateway_budget_group_rejection(
     None
 }
 
+fn runtime_gateway_budget_group_scope_matches(
+    key: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
+    entry: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
+) -> bool {
+    key.tenant_id == entry.tenant_id
+        && key.team_id == entry.team_id
+        && key.project_id == entry.project_id
+        && key.user_id == entry.user_id
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,12 +52,13 @@ mod tests {
     fn key(
         name: &str,
         budget_id: Option<&str>,
+        tenant_id: Option<&str>,
         request_budget: Option<u64>,
         budget_microusd: Option<u64>,
     ) -> runtime_proxy_crate::RuntimeGatewayVirtualKey {
         runtime_proxy_crate::RuntimeGatewayVirtualKey {
             name: name.to_string(),
-            tenant_id: None,
+            tenant_id: tenant_id.map(str::to_string),
             team_id: None,
             project_id: None,
             user_id: None,
@@ -63,9 +75,9 @@ mod tests {
     #[test]
     fn rejects_when_budget_group_request_limit_is_exhausted() {
         let active_keys = vec![
-            key("alpha", Some("shared"), Some(3), None),
-            key("beta", Some("shared"), Some(3), None),
-            key("gamma", Some("other"), Some(3), None),
+            key("alpha", Some("shared"), None, Some(3), None),
+            key("beta", Some("shared"), None, Some(3), None),
+            key("gamma", Some("other"), None, Some(3), None),
         ];
         let usage = BTreeMap::from([
             (
@@ -100,8 +112,8 @@ mod tests {
     #[test]
     fn rejects_when_budget_group_spend_would_exceed_limit() {
         let active_keys = vec![
-            key("alpha", Some("shared"), None, Some(1_000)),
-            key("beta", Some("shared"), None, Some(1_000)),
+            key("alpha", Some("shared"), None, None, Some(1_000)),
+            key("beta", Some("shared"), None, None, Some(1_000)),
         ];
         let usage = BTreeMap::from([(
             "beta".to_string(),
@@ -119,6 +131,46 @@ mod tests {
                 Some(250)
             ),
             Some(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::BudgetExceeded)
+        );
+    }
+
+    #[test]
+    fn budget_group_request_limit_is_scoped_by_tenant() {
+        let active_keys = vec![
+            key("alpha", Some("shared"), Some("tenant-a"), Some(1), None),
+            key("beta", Some("shared"), Some("tenant-b"), Some(1), None),
+        ];
+        let usage = BTreeMap::from([(
+            "alpha".to_string(),
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
+                requests_total: 1,
+                ..Default::default()
+            },
+        )]);
+
+        assert_eq!(
+            runtime_gateway_budget_group_rejection(&active_keys[1], &active_keys, &usage, None),
+            None
+        );
+    }
+
+    #[test]
+    fn budget_group_ids_match_exactly_without_trimming() {
+        let active_keys = vec![
+            key("alpha", Some("shared"), Some("tenant-a"), Some(1), None),
+            key("beta", Some(" shared "), Some("tenant-a"), Some(1), None),
+        ];
+        let usage = BTreeMap::from([(
+            "alpha".to_string(),
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
+                requests_total: 1,
+                ..Default::default()
+            },
+        )]);
+
+        assert_eq!(
+            runtime_gateway_budget_group_rejection(&active_keys[1], &active_keys, &usage, None),
+            None
         );
     }
 }

@@ -17,6 +17,18 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
             }
         },
             "schemas": {
+                "GatewayExactIdentifier": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^\\S+$",
+                    "description": "Exact non-empty identifier; whitespace is not normalized."
+                },
+                "GatewayNullableExactIdentifier": {
+                    "anyOf": [
+                        {"$ref": "#/components/schemas/GatewayExactIdentifier"},
+                        {"type": "null"}
+                    ]
+                },
                 "GatewayError": {
                     "type": "object",
                     "required": ["error"],
@@ -35,19 +47,19 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                     "type": "object",
                     "required": ["name"],
                     "properties": {
-                        "name": {"type": "string"},
+                        "name": {"$ref": "#/components/schemas/GatewayExactIdentifier"},
                         "token": {
                             "type": "string",
                             "description": "Optional caller-supplied bearer token. Omit to have Prodex generate one."
                         },
-                        "tenant_id": {"type": ["string", "null"]},
-                        "team_id": {"type": ["string", "null"]},
-                        "project_id": {"type": ["string", "null"]},
-                        "user_id": {"type": ["string", "null"]},
-                        "budget_id": {"type": ["string", "null"]},
+                        "tenant_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "team_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "project_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "user_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "budget_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
                         "allowed_models": {
                             "type": "array",
-                            "items": {"type": "string"}
+                            "items": {"$ref": "#/components/schemas/GatewayExactIdentifier"}
                         },
                         "budget_microusd": {"type": ["integer", "null"], "minimum": 0},
                         "budget_usd": {"type": ["number", "null"], "minimum": 0},
@@ -69,14 +81,14 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                             "type": "boolean",
                             "description": "Generate and return a new bearer token once."
                         },
-                        "tenant_id": {"type": ["string", "null"]},
-                        "team_id": {"type": ["string", "null"]},
-                        "project_id": {"type": ["string", "null"]},
-                        "user_id": {"type": ["string", "null"]},
-                        "budget_id": {"type": ["string", "null"]},
+                        "tenant_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "team_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "project_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "user_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "budget_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
                         "allowed_models": {
                             "type": "array",
-                            "items": {"type": "string"}
+                            "items": {"$ref": "#/components/schemas/GatewayExactIdentifier"}
                         },
                         "budget_microusd": {"type": ["integer", "null"], "minimum": 0},
                         "budget_usd": {"type": ["number", "null"], "minimum": 0},
@@ -97,6 +109,20 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                             "type": ["string", "null"],
                             "description": "Returned only when Prodex generated or rotated the token for this request."
                         }
+                    }
+                },
+                "GatewayHealth": {
+                    "type": "object",
+                    "required": ["object", "probe", "status", "ready", "local_overload", "policy_version", "active_requests", "active_request_limit"],
+                    "properties": {
+                        "object": {"type": "string", "const": "gateway.health"},
+                        "probe": {"type": "string", "enum": ["livez", "readyz", "startupz"]},
+                        "status": {"type": "string", "enum": ["ok", "overloaded", "method_not_allowed"]},
+                        "ready": {"type": "boolean"},
+                        "local_overload": {"type": "boolean"},
+                        "policy_version": {"type": ["integer", "null"], "minimum": 0},
+                        "active_requests": {"type": "integer", "minimum": 0},
+                        "active_request_limit": {"type": "integer", "minimum": 0}
                     }
                 },
                 "GatewayKeyResponse": {
@@ -147,19 +173,19 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                     "type": "object",
                     "required": ["userName"],
                     "properties": {
-                        "userName": {"type": "string"},
+                        "userName": {"$ref": "#/components/schemas/GatewayExactIdentifier"},
                         "externalId": {"type": ["string", "null"]},
                         "displayName": {"type": ["string", "null"]},
                         "active": {"type": "boolean"},
-                        "tenant_id": {"type": ["string", "null"]},
-                        "team_id": {"type": ["string", "null"]},
-                        "project_id": {"type": ["string", "null"]},
-                        "user_id": {"type": ["string", "null"]},
-                        "budget_id": {"type": ["string", "null"]},
+                        "tenant_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "team_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "project_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "user_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "budget_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
                         "role": {"type": ["string", "null"], "enum": ["admin", "viewer", null]},
                         "allowed_key_prefixes": {
                             "type": "array",
-                            "items": {"type": "string"}
+                            "items": {"$ref": "#/components/schemas/GatewayExactIdentifier"}
                         }
                     },
                     "additionalProperties": true
@@ -173,15 +199,15 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                             "items": {"type": "string"}
                         },
                         "id": {"type": "string"},
-                        "userName": {"type": "string"},
+                        "userName": {"$ref": "#/components/schemas/GatewayExactIdentifier"},
                         "externalId": {"type": ["string", "null"]},
                         "displayName": {"type": ["string", "null"]},
                         "active": {"type": "boolean"},
-                        "tenant_id": {"type": ["string", "null"]},
-                        "team_id": {"type": ["string", "null"]},
-                        "project_id": {"type": ["string", "null"]},
-                        "user_id": {"type": ["string", "null"]},
-                        "budget_id": {"type": ["string", "null"]},
+                        "tenant_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "team_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "project_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "user_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "budget_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
                         "meta": {"type": "object", "additionalProperties": true}
                     },
                     "additionalProperties": true
@@ -221,6 +247,10 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                             "type": "array",
                             "items": {"$ref": "#/components/schemas/GatewayBillingSummaryBucket"}
                         },
+                        "by_tenant": {
+                            "type": "array",
+                            "items": {"$ref": "#/components/schemas/GatewayBillingSummaryBucket"}
+                        },
                         "by_team": {
                             "type": "array",
                             "items": {"$ref": "#/components/schemas/GatewayBillingSummaryBucket"}
@@ -257,6 +287,7 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                     "properties": {
                         "key_name": {"type": ["string", "null"]},
                         "model": {"type": ["string", "null"]},
+                        "tenant_id": {"type": ["string", "null"]},
                         "team_id": {"type": ["string", "null"]},
                         "project_id": {"type": ["string", "null"]},
                         "user_id": {"type": ["string", "null"]},
@@ -293,9 +324,15 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                     "properties": {
                         "object": {"type": "string"},
                         "phase": {"type": "string", "enum": ["request"]},
+                        "request_id": {"type": ["string", "null"]},
                         "request": {"type": "integer"},
                         "call_id": {"type": "string"},
                         "key_name": {"type": "string"},
+                        "tenant_id": {"type": ["string", "null"]},
+                        "team_id": {"type": ["string", "null"]},
+                        "project_id": {"type": ["string", "null"]},
+                        "user_id": {"type": ["string", "null"]},
+                        "budget_id": {"type": ["string", "null"]},
                         "model": {"type": "string"},
                         "minute_epoch": {"type": "integer"},
                         "input_tokens": {"type": "integer"},
@@ -314,12 +351,12 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                     "type": "object",
                     "required": ["name", "source", "disabled", "editable", "usage"],
                     "properties": {
-                        "name": {"type": "string"},
-                        "tenant_id": {"type": ["string", "null"]},
-                        "team_id": {"type": ["string", "null"]},
-                        "project_id": {"type": ["string", "null"]},
-                        "user_id": {"type": ["string", "null"]},
-                        "budget_id": {"type": ["string", "null"]},
+                        "name": {"$ref": "#/components/schemas/GatewayExactIdentifier"},
+                        "tenant_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "team_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "project_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "user_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
+                        "budget_id": {"$ref": "#/components/schemas/GatewayNullableExactIdentifier"},
                         "source": {"type": "string", "enum": ["policy", "admin"]},
                         "disabled": {"type": "boolean"},
                         "editable": {"type": "boolean"},
@@ -327,7 +364,7 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                         "updated_at_epoch": {"type": ["integer", "null"]},
                         "allowed_models": {
                             "type": "array",
-                            "items": {"type": "string"}
+                            "items": {"$ref": "#/components/schemas/GatewayExactIdentifier"}
                         },
                         "budget_microusd": {"type": ["integer", "null"]},
                         "budget_usd": {"type": ["number", "null"]},

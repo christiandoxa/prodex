@@ -263,6 +263,7 @@ function parseArgs(argv) {
     write: false,
     check: false,
     print: false,
+    selfTest: false,
     help: false,
   };
 
@@ -273,6 +274,8 @@ function parseArgs(argv) {
       args.check = true;
     } else if (value === "--print") {
       args.print = true;
+    } else if (value === "--self-test") {
+      args.selfTest = true;
     } else if (value === "--help" || value === "-h") {
       args.help = true;
     } else {
@@ -280,7 +283,7 @@ function parseArgs(argv) {
     }
   }
 
-  if (!args.write && !args.check && !args.print) {
+  if (!args.write && !args.check && !args.print && !args.selfTest) {
     args.write = true;
   }
 
@@ -413,16 +416,77 @@ async function checkMetadataAgainstRust() {
 
 async function checkDocs(generatedTable) {
   const contents = await fs.readFile(docsPath, "utf8");
+  const errors = [];
   const nextContents = replaceGeneratedBlock(contents, generatedTable);
   if (contents !== nextContents) {
-    return [
+    errors.push(
       `${path.relative(
         repoRoot,
         docsPath,
       )} Runtime Proxy Keys table is stale; run npm run docs:runtime-policy`,
-    ];
+    );
   }
-  return [];
+  errors.push(
+    ...validatePrometheusMetricLabelDocs(
+      contents,
+      path.relative(repoRoot, docsPath),
+    ),
+  );
+  return errors;
+}
+
+function validatePrometheusMetricLabelDocs(contents, label = "runtime policy docs") {
+  const errors = [];
+  if (
+    contents.includes(
+      "Prometheus virtual-key metrics include `tenant_id`, `team_id`, `project_id`, `user_id`, and `budget_id` labels",
+    )
+  ) {
+    errors.push(
+      `${label} must not document raw tenant/team/project/user/budget Prometheus labels`,
+    );
+  }
+  for (const required of ["`key_hash`", "`tenant_scoped`", "`budget_scoped`"]) {
+    if (!contents.includes(required)) {
+      errors.push(
+        `${label} is missing Prometheus label contract phrase ${required}`,
+      );
+    }
+  }
+  return errors;
+}
+
+function assertSelfTest(condition, message) {
+  if (!condition) throw new Error(`self-test failed: ${message}`);
+}
+
+function runSelfTest() {
+  const validMetricsDoc =
+    "Prometheus virtual-key metrics expose a stable `key_hash` plus " +
+    "low-cardinality scope booleans such as `tenant_scoped` and `budget_scoped`.";
+  assertSelfTest(
+    validatePrometheusMetricLabelDocs(validMetricsDoc, "valid.md").length === 0,
+    "valid Prometheus label docs rejected",
+  );
+  assertSelfTest(
+    validatePrometheusMetricLabelDocs(
+      "Prometheus virtual-key metrics include `tenant_id`, `team_id`, `project_id`, `user_id`, and `budget_id` labels. `key_hash` `tenant_scoped` `budget_scoped`",
+      "raw-labels.md",
+    ).some((error) => error.includes("raw tenant/team/project/user/budget")),
+    "raw Prometheus governance labels accepted",
+  );
+  assertSelfTest(
+    validatePrometheusMetricLabelDocs("`key_hash` `budget_scoped`", "missing-scope.md").some(
+      (error) => error.includes("`tenant_scoped`"),
+    ),
+    "missing tenant scope label contract accepted",
+  );
+  assertSelfTest(
+    validatePrometheusMetricLabelDocs("`tenant_scoped` `budget_scoped`", "missing-hash.md").some(
+      (error) => error.includes("`key_hash`"),
+    ),
+    "missing key hash label contract accepted",
+  );
 }
 
 function printHelp() {
@@ -432,6 +496,7 @@ function printHelp() {
       "",
       "Generates or checks the Runtime Proxy Keys table in docs/runtime-policy.md.",
       "The metadata table is checked against RuntimePolicyProxySettings and Rust env names.",
+      "--self-test validates the docs guard negative cases.",
     ].join("\n") + "\n",
   );
 }
@@ -440,6 +505,10 @@ async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
     printHelp();
+    return;
+  }
+  if (args.selfTest) {
+    runSelfTest();
     return;
   }
 

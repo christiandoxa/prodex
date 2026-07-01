@@ -1,4 +1,5 @@
 use super::*;
+use redaction::redaction_redact_secret_like_text;
 
 const RUNTIME_SMART_CONTEXT_ARTIFACT_SAVE_DELAY_MS: u64 = if cfg!(test) { 0 } else { 25 };
 
@@ -121,7 +122,7 @@ pub(crate) fn schedule_runtime_state_save_request(
                         runtime_proxy_log_field("reason", reason),
                         runtime_proxy_log_field("lag_ms", "0"),
                         runtime_proxy_log_field("stage", "write"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
+                        runtime_proxy_log_field("error", runtime_scheduled_save_error(&err)),
                     ],
                 ),
             ),
@@ -389,4 +390,25 @@ fn runtime_continuation_journal_save_enqueue_plan(
         queued_at,
         Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS),
     )
+}
+
+fn runtime_scheduled_save_error(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&format!("{err:#}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_scheduled_save_error_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!("failed: Authorization: Bearer scheduled-save-token")
+            .context("state save failed");
+
+        let message = runtime_scheduled_save_error(&err);
+
+        assert!(message.contains("state save failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(!message.contains("scheduled-save-token"));
+    }
 }

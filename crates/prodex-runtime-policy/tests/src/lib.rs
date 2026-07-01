@@ -1,6 +1,8 @@
 use super::{
-    RuntimeLogFormat, clear_runtime_policy_cache, load_runtime_policy_from_root,
-    runtime_policy_path, runtime_policy_proxy,
+    RuntimeLogFormat, clear_runtime_policy_cache, invalidate_runtime_policy_cache_for,
+    load_runtime_policy_cached, load_runtime_policy_from_root,
+    plan_runtime_policy_cache_invalidation, reload_runtime_policy_cached,
+    resolve_runtime_policy_path, runtime_policy_path, runtime_policy_proxy,
 };
 use secret_store::SecretBackendKind;
 use std::ffi::OsString;
@@ -61,6 +63,40 @@ fn temp_root(name: &str) -> PathBuf {
 }
 
 #[test]
+fn resolve_runtime_policy_path_preserves_nonblank_path_value() {
+    let root = temp_root("resolve-path-exact");
+
+    let resolved = resolve_runtime_policy_path(&root, " runtime logs ").unwrap();
+
+    assert_eq!(resolved, root.join(" runtime logs "));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn resolve_runtime_policy_path_preserves_absolute_path_value() {
+    let root = temp_root("resolve-path-absolute-exact");
+    let absolute = root.join(" absolute logs ");
+
+    let resolved = resolve_runtime_policy_path(&root, absolute.to_str().unwrap()).unwrap();
+
+    assert_eq!(resolved, absolute);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn resolve_runtime_policy_path_rejects_blank_path_value() {
+    let root = temp_root("resolve-path-blank");
+
+    let err = resolve_runtime_policy_path(&root, "   ").unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("policy path values cannot be empty")
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn load_runtime_policy_from_root_reads_versioned_policy_and_resolves_relative_log_dir() {
     clear_runtime_policy_cache();
     let root = temp_root("loads");
@@ -95,6 +131,206 @@ profile_inflight_hard_limit = 9
     assert_eq!(loaded.runtime_proxy.active_request_limit, Some(96));
     assert_eq!(loaded.runtime_proxy.profile_inflight_soft_limit, Some(5));
     assert_eq!(loaded.runtime_proxy.profile_inflight_hard_limit, Some(9));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_preserves_runtime_log_dir_path_value() {
+    clear_runtime_policy_cache();
+    let root = temp_root("runtime-log-dir-exact");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime]
+log_dir = " runtime logs "
+"#,
+    )
+    .unwrap();
+
+    let loaded = load_runtime_policy_from_root(&root).unwrap().unwrap();
+    assert_eq!(loaded.runtime.log_dir, Some(root.join(" runtime logs ")));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_cached_preserves_runtime_log_dir_path_value() {
+    clear_runtime_policy_cache();
+    let root = temp_root("runtime-log-dir-cache-exact");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime]
+log_dir = " runtime logs "
+"#,
+    )
+    .unwrap();
+
+    let loaded = load_runtime_policy_cached(&root).unwrap().unwrap();
+    assert_eq!(loaded.runtime.log_dir, Some(root.join(" runtime logs ")));
+    let cached = load_runtime_policy_cached(&root).unwrap().unwrap();
+    assert_eq!(cached.runtime.log_dir, Some(root.join(" runtime logs ")));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_blank_runtime_log_dir_path_value() {
+    clear_runtime_policy_cache();
+    let root = temp_root("runtime-log-dir-blank");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime]
+log_dir = "   "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("runtime.log_dir"), "{err:#}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn reload_runtime_policy_cached_invalidates_root_entry_before_reading() {
+    clear_runtime_policy_cache();
+    let root = temp_root("reload");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 2
+"#,
+    )
+    .unwrap();
+
+    let cached = load_runtime_policy_cached(&root).unwrap().unwrap();
+    assert_eq!(cached.runtime_proxy.worker_count, Some(2));
+    let invalidated = invalidate_runtime_policy_cache_for(&root)
+        .expect("expected root cache entry to be invalidated")
+        .expect("expected cached policy value");
+    assert_eq!(invalidated.runtime_proxy.worker_count, Some(2));
+    assert!(invalidate_runtime_policy_cache_for(&root).is_none());
+
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 7
+"#,
+    )
+    .unwrap();
+
+    let reloaded = reload_runtime_policy_cached(&root).unwrap().unwrap();
+    assert_eq!(reloaded.runtime_proxy.worker_count, Some(7));
+    let cached_after_reload = load_runtime_policy_cached(&root).unwrap().unwrap();
+    assert_eq!(cached_after_reload.runtime_proxy.worker_count, Some(7));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn runtime_policy_cache_invalidation_plan_is_redacted_and_removes_root_entry() {
+    clear_runtime_policy_cache();
+    let root = temp_root("invalidation-plan");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 3
+"#,
+    )
+    .unwrap();
+
+    let cached = load_runtime_policy_cached(&root).unwrap().unwrap();
+    assert_eq!(cached.runtime_proxy.worker_count, Some(3));
+
+    let plan = plan_runtime_policy_cache_invalidation(&root);
+
+    assert_eq!(plan.root, root);
+    assert!(plan.had_cached_entry);
+    assert_eq!(plan.cached_policy_version, Some(1));
+
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 9
+"#,
+    )
+    .unwrap();
+    let reloaded = load_runtime_policy_cached(&root).unwrap().unwrap();
+    assert_eq!(reloaded.runtime_proxy.worker_count, Some(9));
+
+    let second_plan = plan_runtime_policy_cache_invalidation(&root);
+    assert!(second_plan.had_cached_entry);
+    assert_eq!(second_plan.cached_policy_version, Some(1));
+    let missing_plan = plan_runtime_policy_cache_invalidation(&root);
+    assert!(!missing_plan.had_cached_entry);
+    assert_eq!(missing_plan.cached_policy_version, None);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn runtime_policy_cache_invalidation_normalizes_root_aliases() {
+    clear_runtime_policy_cache();
+    let root = temp_root("invalidation-root-alias");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 3
+"#,
+    )
+    .unwrap();
+
+    let alias = root.join(".");
+    let cached = load_runtime_policy_cached(&alias).unwrap().unwrap();
+    assert_eq!(cached.runtime_proxy.worker_count, Some(3));
+
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime_proxy]
+worker_count = 9
+"#,
+    )
+    .unwrap();
+    let plan = plan_runtime_policy_cache_invalidation(&root);
+    assert_eq!(plan.root, root);
+    assert!(plan.had_cached_entry);
+    assert_eq!(plan.cached_policy_version, Some(1));
+
+    let reloaded = load_runtime_policy_cached(&alias).unwrap().unwrap();
+    assert_eq!(reloaded.runtime_proxy.worker_count, Some(9));
 
     let _ = fs::remove_dir_all(root);
 }
@@ -431,6 +667,281 @@ allowed_key_prefixes = [""]
 }
 
 #[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_admin_token_name() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-admin-padded-token-name");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.admin_tokens]]
+name = " scoped "
+token_env = "PRODEX_GATEWAY_SCOPED_TOKEN"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.admin_tokens[0].name"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_admin_token_env() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-admin-padded-token-env");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.admin_tokens]]
+name = "scoped"
+token_env = " PRODEX_GATEWAY_SCOPED_TOKEN "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.admin_tokens[0].token_env"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_admin_key_prefix() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-admin-padded-prefix");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.admin_tokens]]
+name = "scoped"
+token_env = "PRODEX_GATEWAY_SCOPED_TOKEN"
+allowed_key_prefixes = [" team-a- "]
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.admin_tokens[0].allowed_key_prefixes[0]"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_admin_role() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-admin-padded-role");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.admin_tokens]]
+name = "scoped"
+token_env = "PRODEX_GATEWAY_SCOPED_TOKEN"
+role = " admin "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.admin_tokens[0].role"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_sso_default_role() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-sso-padded-default-role");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+default_role = " admin "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.default_role"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_provider() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-padded-provider");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway]
+provider = " gemini "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("gateway.provider"), "{err:#}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_base_url() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-padded-base-url");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway]
+base_url = " https://api.example/v1 "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("gateway.base_url"), "{err:#}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_listen_addr() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-padded-listen-addr");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway]
+listen_addr = " 127.0.0.1:4000 "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("gateway.listen_addr"), "{err:#}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_sso_proxy_token_env() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-sso-padded-proxy-token-env");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+proxy_token_env = " PRODEX_GATEWAY_SSO_PROXY_TOKEN "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.proxy_token_env"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_sso_header_and_claim() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-sso-padded-header-claim");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+user_header = " x-auth-request-email "
+oidc_user_claim = " preferred_username "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.user_header"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_sso_oidc_claim() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-sso-padded-oidc-claim");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_user_claim = " preferred_username "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.oidc_user_claim"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn load_runtime_policy_from_root_rejects_empty_gateway_admin_governance_scope() {
     clear_runtime_policy_cache();
     let root = temp_root("gateway-admin-empty-governance-scope");
@@ -458,6 +969,515 @@ team_id = ""
 }
 
 #[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_admin_governance_scope() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-admin-padded-governance-scope");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.admin_tokens]]
+name = "scoped"
+token_env = "PRODEX_GATEWAY_SCOPED_TOKEN"
+tenant_id = " tenant-a "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.admin_tokens[0].tenant_id"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_virtual_key_name() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-key-padded-name");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.virtual_keys]]
+name = " team-a "
+token_env = "PRODEX_GATEWAY_TEAM_A_TOKEN"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.virtual_keys[0].name"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_virtual_key_token_env() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-key-padded-token-env");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.virtual_keys]]
+name = "team-a"
+token_env = " PRODEX_GATEWAY_TEAM_A_TOKEN "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.virtual_keys[0].token_env"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_virtual_key_governance_scope() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-key-padded-governance-scope");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.virtual_keys]]
+name = "team-a"
+token_env = "PRODEX_GATEWAY_TEAM_A_TOKEN"
+team_id = " team-a "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.virtual_keys[0].team_id"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_virtual_key_allowed_model() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-key-padded-allowed-model");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.virtual_keys]]
+name = "team-a"
+token_env = "PRODEX_GATEWAY_TEAM_A_TOKEN"
+allowed_models = [" gpt-5 "]
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.virtual_keys[0].allowed_models[0]"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_guardrail_allowed_model() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-guardrail-padded-allowed-model");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.guardrails]
+allowed_models = [" gpt-5 "]
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.guardrails.allowed_models[0]"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_guardrail_bearer_token_env() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-guardrail-padded-bearer-token-env");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.guardrails]
+webhook_bearer_token_env = " PRODEX_GATEWAY_GUARDRAIL_TOKEN "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.guardrails.webhook_bearer_token_env"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_guardrail_webhook_phase() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-guardrail-padded-webhook-phase");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.guardrails]
+webhook_phases = [" pre "]
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.guardrails.webhook_phases[0]"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_preserves_gateway_guardrail_keyword_values() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-guardrail-keyword-exact");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.guardrails]
+blocked_keywords = [" secret project "]
+blocked_output_keywords = [" do not reveal "]
+"#,
+    )
+    .unwrap();
+
+    let loaded = load_runtime_policy_from_root(&root).unwrap().unwrap();
+    assert_eq!(
+        loaded.gateway.guardrails.blocked_keywords,
+        vec![" secret project "]
+    );
+    assert_eq!(
+        loaded.gateway.guardrails.blocked_output_keywords,
+        vec![" do not reveal "]
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_observability_bearer_token_env() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-observability-padded-bearer-token-env");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.observability]
+http_bearer_token_env = " PRODEX_GATEWAY_OBSERVABILITY_TOKEN "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.observability.http_bearer_token_env"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_observability_http_schema() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-observability-padded-http-schema");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.observability]
+http_schema = " otel "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.observability.http_schema"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_observability_http_endpoint() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-observability-padded-http-endpoint");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.observability]
+http_endpoint = " https://otel-collector.example/v1/events "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.observability.http_endpoint"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_guardrail_webhook_url() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-guardrail-padded-webhook-url");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.guardrails]
+webhook_url = " https://guardrails.example/check "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.guardrails.webhook_url"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_observability_sink() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-observability-padded-sink");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.observability]
+sinks = [" jsonl "]
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.observability.sinks[0]"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_observability_call_id_header() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-observability-padded-call-id-header");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.observability]
+call_id_header = " x-prodex-call-id "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.observability.call_id_header"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_route_alias_model() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-route-alias-padded-model");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.route_aliases]]
+alias = "fast"
+models = [" gpt-5 "]
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.route_aliases[0].models[0]"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_route_alias_name() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-route-alias-padded-name");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.route_aliases]]
+alias = " fast "
+models = ["gpt-5"]
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.route_aliases[0].alias"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_route_alias_strategy() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-route-alias-padded-strategy");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.route_aliases]]
+alias = "fast"
+models = ["gpt-5"]
+strategy = " lowest-cost "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.route_aliases[0].strategy"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_route_metric_model() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-route-metric-padded-model");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[[gateway.route_aliases]]
+alias = "fast"
+models = ["gpt-5"]
+
+[[gateway.route_aliases.model_metrics]]
+model = " gpt-5 "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("gateway.route_aliases[0].model_metrics[0].model"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn load_runtime_policy_from_root_rejects_incomplete_gateway_oidc_sso() {
     clear_runtime_policy_cache();
     let root = temp_root("gateway-oidc-incomplete");
@@ -477,6 +1497,132 @@ oidc_issuer = "https://idp.example"
     assert!(
         err.to_string()
             .contains("requires oidc_issuer and oidc_audience"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_plaintext_oidc_jwks_url() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-oidc-http-jwks");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_issuer = "https://idp.example"
+oidc_audience = "prodex-gateway"
+oidc_jwks_url = "http://idp.example/.well-known/jwks.json"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("must be an https URL"), "{err:#}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_oidc_jwks_url() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-oidc-padded-jwks");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_issuer = "https://idp.example"
+oidc_audience = "prodex-gateway"
+oidc_jwks_url = " https://idp.example/.well-known/jwks.json "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.oidc_jwks_url"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_plaintext_oidc_issuer() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-oidc-http-issuer");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_issuer = "http://idp.example"
+oidc_audience = "prodex-gateway"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("must be an https URL"), "{err:#}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_oidc_issuer() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-oidc-padded-issuer");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_issuer = " https://idp.example "
+oidc_audience = "prodex-gateway"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.oidc_issuer"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_oidc_audience() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-oidc-padded-audience");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_issuer = "https://idp.example"
+oidc_audience = " prodex-gateway "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.oidc_audience"),
         "{err:#}"
     );
 
@@ -511,6 +1657,56 @@ redis_url_env = "PRODEX_GATEWAY_REDIS_URL"
         loaded.gateway.state.redis_url_env.as_deref(),
         Some("PRODEX_GATEWAY_REDIS_URL")
     );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_state_url_env_refs() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-shared-state-env-exact");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.state]
+backend = "postgres"
+postgres_url_env = " PRODEX_GATEWAY_POSTGRES_URL "
+redis_url_env = " PRODEX_GATEWAY_REDIS_URL "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.state.postgres_url_env"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_gateway_state_backend() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-shared-state-backend-exact");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.state]
+backend = " redis "
+redis_url_env = "PRODEX_GATEWAY_REDIS_URL"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("gateway.state.backend"), "{err:#}");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -561,6 +1757,29 @@ preset = "many-terminals"
         loaded.runtime_proxy.preset().map(|preset| preset.as_str()),
         Some("many-terminals")
     );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_runtime_proxy_preset() {
+    clear_runtime_policy_cache();
+    let root = temp_root("preset-exact");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[runtime_proxy]
+preset = " many-terminals "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    let detail = format!("{err:#}");
+    assert!(detail.contains("unknown variant"), "{detail}");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -781,6 +2000,52 @@ keyring_service = "prodex"
     let loaded = load_runtime_policy_from_root(&root).unwrap().unwrap();
     assert_eq!(loaded.secrets.backend, Some(SecretBackendKind::Keyring));
     assert_eq!(loaded.secrets.keyring_service.as_deref(), Some("prodex"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_keyring_service() {
+    clear_runtime_policy_cache();
+    let root = temp_root("secrets-keyring-service-exact");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[secrets]
+backend = "keyring"
+keyring_service = " prodex "
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("secrets.keyring_service"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_padded_secret_backend_kind() {
+    clear_runtime_policy_cache();
+    let root = temp_root("secrets-backend-kind-exact");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[secrets]
+backend = " keyring "
+keyring_service = "prodex"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("invalid secrets.backend"));
 
     let _ = fs::remove_dir_all(root);
 }

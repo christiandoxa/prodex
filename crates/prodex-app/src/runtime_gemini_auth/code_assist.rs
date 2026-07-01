@@ -13,6 +13,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use redaction::redaction_redact_secret_like_text;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -282,6 +283,7 @@ fn parse_gemini_code_assist_response(
         if let Some(validation) = gemini_validation_from_body(&body) {
             bail!("{}", gemini_validation_error_message(&validation));
         }
+        let body = gemini_code_assist_redacted_error_body(&body);
         bail!(
             "Gemini Code Assist {method} failed (HTTP {}): {body}",
             status.as_u16()
@@ -289,6 +291,10 @@ fn parse_gemini_code_assist_response(
     }
     serde_json::from_str(&body)
         .with_context(|| format!("failed to parse Gemini Code Assist {method} response"))
+}
+
+fn gemini_code_assist_redacted_error_body(body: &str) -> String {
+    redaction_redact_secret_like_text(body)
 }
 
 fn gemini_code_assist_onboard_tier(
@@ -714,6 +720,48 @@ mod tests {
         handle.join().expect("setup test server should finish");
 
         assert_eq!(project_id.as_deref(), Some("created-project"));
+    }
+
+    #[test]
+    fn code_assist_error_body_redacts_secret_like_material() {
+        let server = TinyServer::http("127.0.0.1:0").expect("setup test server should bind");
+        let listen_addr = server.server_addr().to_ip().unwrap();
+        let endpoint = format!("http://{listen_addr}/v1internal");
+        let secret = test_gemini_secret(None);
+
+        let handle = thread::spawn(move || {
+            let request = server.recv().expect("Code Assist request should arrive");
+            assert_eq!(request.method().as_str(), "POST");
+            assert_eq!(request.url(), "/v1internal:loadCodeAssist");
+            request
+                .respond(
+                    TinyResponse::from_string(
+                        r#"{"error":"Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"}"#,
+                    )
+                    .with_status_code(500),
+                )
+                .expect("error response should send");
+        });
+
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("client should build");
+        let err = request_gemini_code_assist_post(
+            &client,
+            &secret,
+            &endpoint,
+            "loadCodeAssist",
+            &json!({}),
+        )
+        .expect_err("Code Assist request should fail");
+        handle.join().expect("setup test server should finish");
+        let message = format!("{err:#}");
+
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("fixture-token-123"));
+        assert!(!message.contains("sk-fixture-123"));
     }
 
     fn test_gemini_secret(project_id: Option<&str>) -> GeminiOAuthSecret {

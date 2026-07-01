@@ -350,7 +350,9 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         async_client: build_runtime_upstream_async_http_client(upstream_no_proxy)?,
         async_runtime,
         log_path: log_path.clone(),
-        request_sequence: Arc::new(AtomicU64::new(1)),
+        request_sequence: Arc::new(AtomicU64::new(runtime_proxy_request_sequence_seed(
+            &log_path,
+        ))),
         state_save_revision: Arc::new(AtomicU64::new(0)),
         local_overload_backoff_until: Arc::new(AtomicU64::new(0)),
         active_request_count: Arc::new(AtomicUsize::new(0)),

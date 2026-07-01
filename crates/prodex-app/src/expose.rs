@@ -2,6 +2,7 @@ use crate::ExposeArgs;
 use anyhow::{Context, Result};
 use base64::Engine;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use redaction::redaction_redact_secret_like_text;
 use std::collections::VecDeque;
 use std::env;
 use std::io::{self, BufRead, Read, Write};
@@ -76,8 +77,7 @@ pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
                 Some(tunnel)
             }
             Err(err) => {
-                tunnel_status =
-                    format!("unavailable: {err:#}; install cloudflared or rerun with --no-tunnel");
+                tunnel_status = expose_tunnel_unavailable_status(&err);
                 None
             }
         }
@@ -133,6 +133,13 @@ fn expose_status_fields(
         fields.push(("Tunnel URL".to_string(), url.to_string()));
     }
     fields
+}
+
+fn expose_tunnel_unavailable_status(err: &anyhow::Error) -> String {
+    format!(
+        "unavailable: {}; install cloudflared or rerun with --no-tunnel",
+        redaction_redact_secret_like_text(&format!("{err:#}"))
+    )
 }
 
 struct ExposeShared {
@@ -513,5 +520,16 @@ mod tests {
         assert!(fields.iter().any(|(label, value)| {
             label == "Tunnel URL" && value.contains("demo.trycloudflare.com")
         }));
+    }
+
+    #[test]
+    fn expose_tunnel_status_redacts_secret_like_error() {
+        let err = anyhow::anyhow!("failed: Authorization: Bearer expose-tunnel-token");
+
+        let status = expose_tunnel_unavailable_status(&err);
+
+        assert!(status.contains("unavailable:"));
+        assert!(status.contains("Authorization: Bearer <redacted>"));
+        assert!(!status.contains("expose-tunnel-token"));
     }
 }

@@ -134,7 +134,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
                         runtime_proxy_log_field("reason", reason),
                         runtime_proxy_log_field("lag_ms", "0"),
                         runtime_proxy_log_field("stage", "write"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
+                        runtime_proxy_log_field("error", runtime_scheduled_save_error(&err)),
                     ],
                 ),
             ),

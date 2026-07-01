@@ -1,0 +1,14 @@
+[package]
+name = "prodex-authz"
+version.workspace = true
+edition.workspace = true
+description = "Application authorization boundary policies for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_authz"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }

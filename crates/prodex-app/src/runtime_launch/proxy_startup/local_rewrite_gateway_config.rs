@@ -17,13 +17,13 @@ pub(crate) struct RuntimeGatewayAdminToken {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RuntimeGatewaySsoConfig {
     pub(crate) proxy_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
+    pub(crate) require_tenant: bool,
     pub(crate) token_header: String,
     pub(crate) user_header: String,
     pub(crate) role_header: String,
     pub(crate) tenant_header: String,
     pub(crate) key_prefixes_header: String,
     pub(crate) oidc: Option<RuntimeGatewayOidcConfig>,
-    pub(crate) default_role: RuntimeGatewayAdminRole,
 }
 
 #[derive(Clone, Debug)]
@@ -39,14 +39,17 @@ pub(crate) struct RuntimeGatewayOidcConfig {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum RuntimeGatewayAdminRole {
-    #[default]
     Admin,
+    #[default]
     Viewer,
 }
 
 impl RuntimeGatewayAdminRole {
     pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
+        if value.is_empty() || value.chars().any(char::is_whitespace) {
+            return None;
+        }
+        match value.to_ascii_lowercase().as_str() {
             "admin" | "write" | "writer" => Some(Self::Admin),
             "viewer" | "read" | "readonly" | "read-only" => Some(Self::Viewer),
             _ => None,

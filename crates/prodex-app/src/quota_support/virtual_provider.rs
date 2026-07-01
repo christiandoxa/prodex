@@ -2,6 +2,7 @@ use super::external_provider::fetch_agy_quota_info;
 use super::{
     AuthSummary, ExternalQuotaDetail, ExternalQuotaInfo, ProviderQuotaSnapshot,
     QuotaProviderFilter, QuotaReport, build_upstream_blocking_http_client, format_response_body,
+    quota_error_message,
 };
 use anyhow::{Context, Result, bail};
 use chrono::Local;
@@ -42,7 +43,8 @@ fn collect_deepseek_quota_reports(base_url: Option<&str>) -> Vec<QuotaReport> {
             } else {
                 format!("deepseek-{}", index + 1)
             };
-            let result = fetch_deepseek_quota_info(&key, base_url).map_err(|err| err.to_string());
+            let result =
+                fetch_deepseek_quota_info(&key, base_url).map_err(|err| quota_error_message(&err));
             virtual_quota_report(
                 &name,
                 "deepseek-key",
@@ -61,7 +63,7 @@ fn collect_local_quota_report(base_url: Option<&str>) -> QuotaReport {
             ))
         })
         .map(ProviderQuotaSnapshot::External)
-        .map_err(|err| err.to_string());
+        .map_err(|err| quota_error_message(&err));
     virtual_quota_report("local", "local", result)
 }
 
@@ -80,7 +82,7 @@ fn collect_agy_quota_reports() -> Vec<QuotaReport> {
         Err(err) => vec![virtual_quota_report_with_provider(
             "agy",
             "agy",
-            Err(err.to_string()),
+            Err(quota_error_message(&err)),
             ProfileProvider::Agy { account: None },
         )],
     }

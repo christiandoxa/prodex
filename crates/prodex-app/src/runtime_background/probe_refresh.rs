@@ -11,6 +11,7 @@ pub(crate) use apply::apply_runtime_profile_probe_result;
 #[cfg(test)]
 pub(crate) use attempt::{
     execute_runtime_probe_attempt_inline_for_test, execute_runtime_probe_attempt_queued_for_test,
+    runtime_probe_refresh_error_text, runtime_probe_refresh_state_update_error,
 };
 #[allow(unused_imports)]
 pub(crate) use queue::note_runtime_probe_refresh_progress;

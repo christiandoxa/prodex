@@ -1,5 +1,6 @@
 use super::{GeminiOAuthSecret, gemini_oauth_expiry_date_ms};
 use anyhow::{Context, Result, bail};
+use redaction::redaction_redact_secret_like_text;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::env;
@@ -181,6 +182,7 @@ fn parse_google_token_response(
         .text()
         .with_context(|| format!("failed to read {context_label} response"))?;
     if !status.is_success() {
+        let body = gemini_oauth_redacted_error_body(&body);
         bail!("{context_label} failed (HTTP {}): {body}", status.as_u16());
     }
     serde_json::from_str(&body).with_context(|| format!("failed to parse {context_label} response"))
@@ -219,6 +221,7 @@ pub(super) fn fetch_google_user_email(client: &Client, access_token: &str) -> Re
         .text()
         .context("failed to read Google user info response")?;
     if !status.is_success() {
+        let body = gemini_oauth_redacted_error_body(&body);
         bail!(
             "Google user info request failed (HTTP {}): {body}",
             status.as_u16()
@@ -230,6 +233,10 @@ pub(super) fn fetch_google_user_email(client: &Client, access_token: &str) -> Re
         bail!("Google user info response did not include an email");
     }
     Ok(user.email)
+}
+
+fn gemini_oauth_redacted_error_body(body: &str) -> String {
+    redaction_redact_secret_like_text(body)
 }
 
 pub(super) fn gemini_oauth_secret_from_token(
@@ -305,6 +312,18 @@ mod tests {
         assert!(url.contains("state=state-test"));
         assert!(url.contains("access_type=offline"));
         assert!(url.contains("cloud-platform"));
+    }
+
+    #[test]
+    fn gemini_oauth_error_body_redacts_secret_like_material() {
+        let body = gemini_oauth_redacted_error_body(
+            "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123",
+        );
+
+        assert!(body.contains("Authorization: Bearer <redacted>"));
+        assert!(body.contains("api_key=<redacted>"));
+        assert!(!body.contains("fixture-token-123"));
+        assert!(!body.contains("sk-fixture-123"));
     }
 
     #[cfg(target_os = "linux")]

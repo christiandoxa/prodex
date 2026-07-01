@@ -1,0 +1,15 @@
+[package]
+name = "prodex-storage-sqlite"
+version.workspace = true
+edition.workspace = true
+description = "SQLite migration and local compatibility SQL plans for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_storage_sqlite"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }
+prodex_storage = { workspace = true }

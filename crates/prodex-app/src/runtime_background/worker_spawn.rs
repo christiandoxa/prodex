@@ -1,4 +1,5 @@
 use crate::runtime_panic::{catch_runtime_unwind_silently, runtime_panic_payload_label};
+use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::fs;
 use std::io;
@@ -53,7 +54,10 @@ fn log_runtime_background_worker_spawn_error(
             "runtime_background_worker_spawn_error",
             [
                 runtime_proxy_log_field("worker", worker_name),
-                runtime_proxy_log_field("error", err.to_string()),
+                runtime_proxy_log_field(
+                    "error",
+                    runtime_background_worker_error_log_value(&err.to_string()),
+                ),
             ],
         ),
     );
@@ -70,10 +74,17 @@ fn log_runtime_background_worker_panic(
             "runtime_background_worker_panic",
             [
                 runtime_proxy_log_field("worker", worker_name),
-                runtime_proxy_log_field("error", panic_message),
+                runtime_proxy_log_field(
+                    "error",
+                    runtime_background_worker_error_log_value(panic_message),
+                ),
             ],
         ),
     );
+}
+
+fn runtime_background_worker_error_log_value(error: &str) -> String {
+    redaction_redact_secret_like_text(error).replace('\n', " ")
 }
 
 fn log_runtime_background_worker_event(log_path: Option<&Path>, message: String) {
@@ -140,5 +151,18 @@ mod tests {
         assert!(log.contains("worker=prodex-panic-worker"));
         assert!(log.contains("error=\"simulated background panic\""));
         let _ = fs::remove_file(log_path);
+    }
+
+    #[test]
+    fn runtime_background_worker_error_log_value_redacts_secret_like_material() {
+        let message = runtime_background_worker_error_log_value(
+            "spawn failed\nAuthorization: Bearer worker-token\napi_key=worker-key",
+        );
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("worker-token"));
+        assert!(!message.contains("worker-key"));
     }
 }

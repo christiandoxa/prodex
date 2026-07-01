@@ -34,11 +34,20 @@ use crate::{
     build_runtime_proxy_text_response, write_runtime_streaming_response,
 };
 use anyhow::{Context, Result};
+use prodex_domain::CallId;
 use runtime_proxy_crate::path_without_query;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io::Read;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
+
+const RUNTIME_LOCAL_REWRITE_RESPONSE_TRANSFORM_FAILED_MESSAGE: &str =
+    "provider response could not be transformed";
+
+fn runtime_local_rewrite_response_transform_failed_response() -> tiny_http::ResponseBox {
+    build_runtime_proxy_text_response(502, RUNTIME_LOCAL_REWRITE_RESPONSE_TRANSFORM_FAILED_MESSAGE)
+}
 
 #[derive(Clone, Copy)]
 struct RuntimeChatCompatibleProvider {
@@ -78,6 +87,57 @@ pub(super) fn runtime_local_rewrite_buffered_response_from_response(
     runtime_local_rewrite_buffered_response_parts(status, headers, response)
 }
 
+fn runtime_gateway_audit_data_plane_response_guardrail_blocked(
+    shared: &RuntimeLocalRewriteProxyShared,
+    reason: &str,
+) {
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "reason": reason,
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        "response_guardrail_blocked",
+        "failure",
+        payload,
+    );
+}
+
+fn runtime_gateway_audit_data_plane_response_guardrail_webhook_blocked(
+    shared: &RuntimeLocalRewriteProxyShared,
+    reason: &str,
+) {
+    let payload = serde_json::json!({
+        "state_backend": shared.gateway_state_store.label(),
+        "details": {
+            "phase": "post",
+            "reason": reason,
+        },
+    });
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    let _ = prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_data_plane",
+        "response_guardrail_webhook_blocked",
+        "failure",
+        payload,
+    );
+}
+
 pub(super) fn runtime_local_rewrite_response_with_call_id(
     mut parts: RuntimeHeapTrimmedBufferedResponseParts,
     request_id: u64,
@@ -89,6 +149,7 @@ pub(super) fn runtime_local_rewrite_response_with_call_id(
             &shared.gateway_guardrails,
         )
     {
+        runtime_gateway_audit_data_plane_response_guardrail_blocked(shared, block.kind.as_str());
         crate::runtime_proxy_log(
             &shared.runtime_shared,
             runtime_proxy_structured_log_message(
@@ -97,7 +158,7 @@ pub(super) fn runtime_local_rewrite_response_with_call_id(
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
                     runtime_proxy_log_field("reason", block.kind.as_str()),
-                    runtime_proxy_log_field("value", block.value.as_str()),
+                    runtime_proxy_log_field("matched_value_redacted", "true"),
                 ],
             ),
         );
@@ -111,6 +172,10 @@ pub(super) fn runtime_local_rewrite_response_with_call_id(
         && let Some(block) =
             runtime_gateway_guardrail_webhook_block("post", request_id, &parts.body, shared)
     {
+        runtime_gateway_audit_data_plane_response_guardrail_webhook_blocked(
+            shared,
+            block.reason.as_str(),
+        );
         crate::runtime_proxy_log(
             &shared.runtime_shared,
             runtime_proxy_structured_log_message(
@@ -120,7 +185,7 @@ pub(super) fn runtime_local_rewrite_response_with_call_id(
                     runtime_proxy_log_field("transport", "http"),
                     runtime_proxy_log_field("phase", "post"),
                     runtime_proxy_log_field("reason", block.reason.as_str()),
-                    runtime_proxy_log_field("value", block.value.as_str()),
+                    runtime_proxy_log_field("matched_value_redacted", "true"),
                 ],
             ),
         );
@@ -133,7 +198,7 @@ pub(super) fn runtime_local_rewrite_response_with_call_id(
     if let Some(header_name) = shared.gateway_call_id_header.as_deref() {
         parts.headers.push((
             header_name.to_string(),
-            runtime_local_rewrite_call_id(request_id).into_bytes(),
+            runtime_local_rewrite_call_id(request_id, shared).into_bytes(),
         ));
     }
     build_runtime_proxy_response_from_parts(parts)
@@ -375,7 +440,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                 );
                 runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
             })
-            .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
+            .unwrap_or_else(|_err| runtime_local_rewrite_response_transform_failed_response());
         let _ = request.respond(response);
         return;
     }
@@ -418,12 +483,21 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             );
             runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
         })
-        .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
+        .unwrap_or_else(|_err| runtime_local_rewrite_response_transform_failed_response());
     let _ = request.respond(response);
 }
 
-fn runtime_local_rewrite_call_id(request_id: u64) -> String {
-    format!("prodex-{request_id}")
+fn runtime_local_rewrite_call_id(
+    request_id: u64,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> String {
+    shared
+        .gateway_usage
+        .call_ids
+        .lock()
+        .ok()
+        .and_then(|call_ids| call_ids.get(&request_id).cloned())
+        .unwrap_or_else(|| format!("prodex-{}", CallId::new()))
 }
 
 fn runtime_local_rewrite_append_call_id_header(
@@ -434,7 +508,7 @@ fn runtime_local_rewrite_append_call_id_header(
     if let Some(header_name) = shared.gateway_call_id_header.as_deref() {
         headers.push((
             header_name.to_string(),
-            runtime_local_rewrite_call_id(request_id),
+            runtime_local_rewrite_call_id(request_id, shared),
         ));
     }
 }
@@ -555,7 +629,7 @@ fn respond_runtime_chat_compatible_rewrite(
         );
         runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
     })
-    .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
+    .unwrap_or_else(|_err| runtime_local_rewrite_response_transform_failed_response());
     let _ = request.respond(response);
 }
 
@@ -676,7 +750,7 @@ fn respond_runtime_gemini_rewrite(
         );
         runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
     })
-    .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
+    .unwrap_or_else(|_err| runtime_local_rewrite_response_transform_failed_response());
     let _ = request.respond(response);
 }
 
@@ -694,4 +768,20 @@ fn runtime_local_rewrite_buffered_response_parts(
         headers,
         body: body.into(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_transform_failure_message_is_stable_and_redacted() {
+        let message = RUNTIME_LOCAL_REWRITE_RESPONSE_TRANSFORM_FAILED_MESSAGE;
+        assert_eq!(message, "provider response could not be transformed");
+        assert!(!message.contains("serde"));
+        assert!(!message.contains("json"));
+        assert!(!message.contains("Gemini"));
+        assert!(!message.contains("DeepSeek"));
+        assert!(!message.contains("Copilot"));
+    }
 }

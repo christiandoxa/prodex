@@ -2,7 +2,8 @@ use crate::AppPaths;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use std::fs;
 use std::net::SocketAddr;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
@@ -20,7 +21,30 @@ impl TestUpstream {
         Self::start_n(1)
     }
 
+    pub(super) fn start_with_response_body(response_body: &'static str) -> Self {
+        Self::start_n_with_response(1, "application/json", response_body)
+    }
+
+    pub(super) fn start_with_response(
+        content_type: &'static str,
+        response_body: &'static str,
+    ) -> Self {
+        Self::start_n_with_response(1, content_type, response_body)
+    }
+
     pub(super) fn start_n(request_count: usize) -> Self {
+        Self::start_n_with_response(
+            request_count,
+            "application/json",
+            r#"{"id":"resp_test","usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#,
+        )
+    }
+
+    fn start_n_with_response(
+        request_count: usize,
+        content_type: &'static str,
+        response_body: &'static str,
+    ) -> Self {
         let server = TinyServer::http("127.0.0.1:0").expect("test upstream should bind");
         let addr = server
             .server_addr()
@@ -51,13 +75,8 @@ impl TestUpstream {
                 let _ = path_tx.send(path);
                 let _ = headers_tx.send(headers);
                 let _ = body_tx.send(body);
-                let mut response = TinyResponse::from_string(
-                    r#"{"id":"resp_test","usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#,
-                )
-                .with_status_code(200);
-                response.add_header(
-                    TinyHeader::from_bytes("content-type", "application/json").unwrap(),
-                );
+                let mut response = TinyResponse::from_string(response_body).with_status_code(200);
+                response.add_header(TinyHeader::from_bytes("content-type", content_type).unwrap());
                 let _ = request.respond(response);
             }
         });
@@ -73,23 +92,34 @@ impl TestUpstream {
 
 pub(super) struct TestJwksServer {
     pub(super) addr: SocketAddr,
+    request_count: Arc<AtomicUsize>,
     _thread: thread::JoinHandle<()>,
 }
 
 impl TestJwksServer {
     pub(super) fn start() -> Self {
+        Self::start_with_success_count(16)
+    }
+
+    pub(super) fn start_with_success_count(success_count: usize) -> Self {
         let server = TinyServer::http("127.0.0.1:0").expect("test JWKS server should bind");
         let addr = server
             .server_addr()
             .to_ip()
             .expect("test JWKS server should expose TCP addr");
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let request_count_for_thread = Arc::clone(&request_count);
         let thread = thread::spawn(move || {
             for _ in 0..16 {
                 let Ok(request) = server.recv() else {
                     break;
                 };
-                let mut response =
-                    TinyResponse::from_string(gateway_oidc_test_jwks()).with_status_code(200);
+                let current = request_count_for_thread.fetch_add(1, Ordering::Relaxed);
+                let mut response = if current < success_count {
+                    TinyResponse::from_string(gateway_oidc_test_jwks()).with_status_code(200)
+                } else {
+                    TinyResponse::from_string("temporary JWKS failure").with_status_code(503)
+                };
                 response.add_header(
                     TinyHeader::from_bytes("content-type", "application/json").unwrap(),
                 );
@@ -98,13 +128,19 @@ impl TestJwksServer {
         });
         Self {
             addr,
+            request_count,
             _thread: thread,
         }
+    }
+
+    pub(super) fn request_count(&self) -> usize {
+        self.request_count.load(Ordering::Relaxed)
     }
 }
 
 pub(super) struct TestOidcDiscoveryServer {
     pub(super) addr: SocketAddr,
+    request_count: Arc<AtomicUsize>,
     _thread: thread::JoinHandle<()>,
 }
 
@@ -115,11 +151,14 @@ impl TestOidcDiscoveryServer {
             .server_addr()
             .to_ip()
             .expect("test OIDC server should expose TCP addr");
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let request_count_for_thread = Arc::clone(&request_count);
         let thread = thread::spawn(move || {
             for _ in 0..16 {
                 let Ok(request) = server.recv() else {
                     break;
                 };
+                request_count_for_thread.fetch_add(1, Ordering::Relaxed);
                 let path = request.url().to_string();
                 let body = if path == "/.well-known/openid-configuration" {
                     format!(r#"{{"jwks_uri":"http://{addr}/jwks.json"}}"#)
@@ -135,8 +174,13 @@ impl TestOidcDiscoveryServer {
         });
         Self {
             addr,
+            request_count,
             _thread: thread,
         }
+    }
+
+    pub(super) fn request_count(&self) -> usize {
+        self.request_count.load(Ordering::Relaxed)
     }
 }
 
@@ -156,6 +200,29 @@ pub(super) fn gateway_oidc_test_token(
         .unwrap()
         .as_secs()
         + 3600;
+    gateway_oidc_test_token_with_exp(issuer, audience, email, role, prefixes, exp)
+}
+
+pub(super) fn gateway_oidc_test_token_with_exp(
+    issuer: &str,
+    audience: &str,
+    email: &str,
+    role: &str,
+    prefixes: &[&str],
+    exp: u64,
+) -> String {
+    gateway_oidc_test_token_with_exp_and_kid(issuer, audience, email, role, prefixes, exp, "rsa01")
+}
+
+pub(super) fn gateway_oidc_test_token_with_exp_and_kid(
+    issuer: &str,
+    audience: &str,
+    email: &str,
+    role: &str,
+    prefixes: &[&str],
+    exp: u64,
+    kid: &str,
+) -> String {
     let claims = serde_json::json!({
         "iss": issuer,
         "aud": audience,
@@ -166,7 +233,7 @@ pub(super) fn gateway_oidc_test_token(
         "exp": exp,
     });
     let mut header = Header::new(Algorithm::RS256);
-    header.kid = Some("rsa01".to_string());
+    header.kid = Some(kid.to_string());
     encode(
         &header,
         &claims,
@@ -174,6 +241,28 @@ pub(super) fn gateway_oidc_test_token(
             .expect("test RSA key should parse"),
     )
     .expect("test OIDC token should sign")
+}
+
+pub(super) fn gateway_oidc_test_hs256_token(issuer: &str, audience: &str) -> String {
+    let exp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    let claims = serde_json::json!({
+        "iss": issuer,
+        "aud": audience,
+        "sub": "alice@example.com",
+        "email": "alice@example.com",
+        "prodex_role": "admin",
+        "exp": exp,
+    });
+    encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(b"not-an-oidc-asymmetric-key"),
+    )
+    .expect("test HS256 token should sign")
 }
 
 const GATEWAY_OIDC_TEST_PRIVATE_KEY: &str = concat!(
@@ -258,30 +347,6 @@ pub(super) fn wait_for_sqlite_usage_total(path: &std::path::Path, key_name: &str
     );
 }
 
-pub(super) fn wait_for_ledger_file_response_status(
-    path: &std::path::Path,
-    request: u64,
-    expected: u16,
-) {
-    for _ in 0..50 {
-        if let Ok(bytes) = fs::read(path) {
-            for line in String::from_utf8_lossy(&bytes).lines() {
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
-                    && value["request"] == request
-                    && value["response_status"] == expected
-                {
-                    return;
-                }
-            }
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    panic!(
-        "ledger response status for request {request} did not reach {expected} at {}",
-        path.display()
-    );
-}
-
 pub(super) fn wait_for_ledger_file_key_response_status(
     path: &std::path::Path,
     key_name: &str,
@@ -306,17 +371,17 @@ pub(super) fn wait_for_ledger_file_key_response_status(
     );
 }
 
-pub(super) fn wait_for_sqlite_ledger_response_status(
+pub(super) fn wait_for_sqlite_ledger_key_response_status(
     path: &std::path::Path,
-    request: u64,
+    key_name: &str,
     expected: u16,
 ) {
     for _ in 0..50 {
         if let Ok(conn) = rusqlite::Connection::open(path) {
             let status = conn
                 .query_row(
-                    "SELECT response_status FROM prodex_gateway_billing_ledger WHERE request_id = ?1",
-                    [i64::try_from(request).unwrap_or(i64::MAX)],
+                    "SELECT response_status FROM prodex_gateway_billing_ledger WHERE key_name = ?1",
+                    [key_name],
                     |row| row.get::<_, Option<i64>>(0),
                 )
                 .ok()
@@ -329,7 +394,7 @@ pub(super) fn wait_for_sqlite_ledger_response_status(
         thread::sleep(Duration::from_millis(20));
     }
     panic!(
-        "sqlite ledger response status for request {request} did not reach {expected} at {}",
+        "sqlite ledger response status for key {key_name} did not reach {expected} at {}",
         path.display()
     );
 }
@@ -344,4 +409,40 @@ pub(super) fn wait_for_json_file(path: &std::path::Path) -> serde_json::Value {
         thread::sleep(Duration::from_millis(20));
     }
     panic!("usage file was not written at {}", path.display());
+}
+
+pub(super) struct TestGuardrailWebhook {
+    pub(super) addr: SocketAddr,
+    _thread: thread::JoinHandle<()>,
+}
+
+impl TestGuardrailWebhook {
+    pub(super) fn start_deny(reason: &'static str) -> Self {
+        let server = TinyServer::http("127.0.0.1:0").expect("test webhook should bind");
+        let addr = server
+            .server_addr()
+            .to_ip()
+            .expect("test webhook should expose TCP addr");
+        let thread = thread::spawn(move || {
+            for _ in 0..16 {
+                let Ok(mut request) = server.recv() else {
+                    break;
+                };
+                let mut body = Vec::new();
+                let _ = request.as_reader().read_to_end(&mut body);
+                let mut response = TinyResponse::from_string(format!(
+                    r#"{{"allow":false,"reason":"{reason}","message":"do-not-log-webhook-message"}}"#
+                ))
+                .with_status_code(200);
+                response.add_header(
+                    TinyHeader::from_bytes("content-type", "application/json").unwrap(),
+                );
+                let _ = request.respond(response);
+            }
+        });
+        Self {
+            addr,
+            _thread: thread,
+        }
+    }
 }

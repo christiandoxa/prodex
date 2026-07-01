@@ -44,7 +44,6 @@ pub fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> 
             .secrets
             .keyring_service
             .as_deref()
-            .map(str::trim)
             .is_none_or(|value| value.is_empty())
     {
         bail!(
@@ -53,10 +52,10 @@ pub fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> 
         );
     }
     if let Some(service) = policy.secrets.keyring_service.as_deref()
-        && service.trim().is_empty()
+        && (service.is_empty() || service.chars().any(char::is_whitespace))
     {
         bail!(
-            "secrets.keyring_service in {} cannot be empty",
+            "secrets.keyring_service in {} must be non-empty without whitespace",
             path.display()
         );
     }
@@ -68,17 +67,22 @@ pub fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> 
 }
 
 pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    if matches!(
-        policy.gateway.listen_addr.as_deref().map(str::trim),
-        Some("")
-    ) {
-        bail!("gateway.listen_addr in {} cannot be empty", path.display());
+    if let Some(listen_addr) = policy.gateway.listen_addr.as_deref() {
+        validate_gateway_exact_identifier(listen_addr, path, "gateway.listen_addr")?;
     }
-    if matches!(policy.gateway.provider.as_deref().map(str::trim), Some("")) {
-        bail!("gateway.provider in {} cannot be empty", path.display());
+    if let Some(provider) = policy.gateway.provider.as_deref() {
+        validate_gateway_exact_identifier(provider, path, "gateway.provider")?;
     }
-    if matches!(policy.gateway.base_url.as_deref().map(str::trim), Some("")) {
-        bail!("gateway.base_url in {} cannot be empty", path.display());
+    if let Some(base_url) = policy.gateway.base_url.as_deref() {
+        if base_url.is_empty() {
+            bail!("gateway.base_url in {} cannot be empty", path.display());
+        }
+        if base_url.chars().any(char::is_whitespace) {
+            bail!(
+                "gateway.base_url in {} must not contain whitespace",
+                path.display()
+            );
+        }
     }
     validate_optional_usize(
         policy.gateway.adaptive_routing.window_size,
@@ -111,28 +115,11 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             path.display()
         );
     }
-    if matches!(
-        policy
-            .gateway
-            .state
-            .postgres_url_env
-            .as_deref()
-            .map(str::trim),
-        Some("")
-    ) {
-        bail!(
-            "gateway.state.postgres_url_env in {} cannot be empty",
-            path.display()
-        );
+    if let Some(value) = policy.gateway.state.postgres_url_env.as_deref() {
+        validate_gateway_exact_identifier(value, path, "gateway.state.postgres_url_env")?;
     }
-    if matches!(
-        policy.gateway.state.redis_url_env.as_deref().map(str::trim),
-        Some("")
-    ) {
-        bail!(
-            "gateway.state.redis_url_env in {} cannot be empty",
-            path.display()
-        );
+    if let Some(value) = policy.gateway.state.redis_url_env.as_deref() {
+        validate_gateway_exact_identifier(value, path, "gateway.state.redis_url_env")?;
     }
     match policy
         .gateway
@@ -159,33 +146,25 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     }
     for (index, token) in policy.gateway.admin_tokens.iter().enumerate() {
         let field = format!("gateway.admin_tokens[{index}]");
-        if token.name.trim().is_empty() {
-            bail!("{field}.name in {} cannot be empty", path.display());
-        }
-        if token.token_env.trim().is_empty() {
-            bail!("{field}.token_env in {} cannot be empty", path.display());
-        }
+        validate_gateway_exact_identifier(&token.name, path, &format!("{field}.name"))?;
+        validate_gateway_exact_identifier(&token.token_env, path, &format!("{field}.token_env"))?;
         if let Some(role) = token.role.as_deref() {
             validate_gateway_admin_role(role)
                 .with_context(|| format!("{field}.role in {} is invalid", path.display()))?;
         }
-        if matches!(token.tenant_id.as_deref().map(str::trim), Some("")) {
-            bail!("{field}.tenant_id in {} cannot be empty", path.display());
-        }
+        validate_gateway_optional_scope(token.tenant_id.as_deref(), path, &field, "tenant_id")?;
         for (name, value) in [
             ("team_id", token.team_id.as_deref()),
             ("project_id", token.project_id.as_deref()),
             ("user_id", token.user_id.as_deref()),
             ("budget_id", token.budget_id.as_deref()),
         ] {
-            if matches!(value.map(str::trim), Some("")) {
-                bail!("{field}.{name} in {} cannot be empty", path.display());
-            }
+            validate_gateway_optional_scope(value, path, &field, name)?;
         }
         for (prefix_index, prefix) in token.allowed_key_prefixes.iter().enumerate() {
-            if prefix.trim().is_empty() {
+            if prefix.is_empty() || prefix.chars().any(char::is_whitespace) {
                 bail!(
-                    "{field}.allowed_key_prefixes[{prefix_index}] in {} cannot be empty",
+                    "{field}.allowed_key_prefixes[{prefix_index}] in {} must be non-empty without whitespace",
                     path.display()
                 );
             }
@@ -194,17 +173,16 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     validate_gateway_sso_policy(policy, path)?;
     for (index, alias) in policy.gateway.route_aliases.iter().enumerate() {
         let field = format!("gateway.route_aliases[{index}]");
-        if alias.alias.trim().is_empty() {
-            bail!("{field}.alias in {} cannot be empty", path.display());
-        }
+        validate_gateway_exact_identifier(&alias.alias, path, &format!("{field}.alias"))?;
         if alias.models.is_empty() {
             bail!("{field}.models in {} cannot be empty", path.display());
         }
-        if alias.models.iter().any(|model| model.trim().is_empty()) {
-            bail!(
-                "{field}.models in {} cannot contain empty values",
-                path.display()
-            );
+        for (model_index, model) in alias.models.iter().enumerate() {
+            validate_gateway_exact_identifier(
+                model,
+                path,
+                &format!("{field}.models[{model_index}]"),
+            )?;
         }
         if let Some(strategy) = alias.strategy.as_deref() {
             validate_gateway_route_strategy(strategy)
@@ -212,14 +190,12 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
         }
         for (metric_index, metric) in alias.model_metrics.iter().enumerate() {
             let metric_field = format!("{field}.model_metrics[{metric_index}]");
-            if metric.model.trim().is_empty() {
-                bail!("{metric_field}.model in {} cannot be empty", path.display());
-            }
-            if !alias
-                .models
-                .iter()
-                .any(|model| model.trim() == metric.model.trim())
-            {
+            validate_gateway_exact_identifier(
+                &metric.model,
+                path,
+                &format!("{metric_field}.model"),
+            )?;
+            if !alias.models.iter().any(|model| model == &metric.model) {
                 bail!(
                     "{metric_field}.model in {} must match one of {field}.models",
                     path.display()
@@ -246,32 +222,23 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     }
     for (index, key) in policy.gateway.virtual_keys.iter().enumerate() {
         let field = format!("gateway.virtual_keys[{index}]");
-        if key.name.trim().is_empty() {
-            bail!("{field}.name in {} cannot be empty", path.display());
-        }
-        if key.token_env.trim().is_empty() {
-            bail!("{field}.token_env in {} cannot be empty", path.display());
-        }
-        if matches!(key.tenant_id.as_deref().map(str::trim), Some("")) {
-            bail!("{field}.tenant_id in {} cannot be empty", path.display());
-        }
+        validate_gateway_exact_identifier(&key.name, path, &format!("{field}.name"))?;
+        validate_gateway_exact_identifier(&key.token_env, path, &format!("{field}.token_env"))?;
+        validate_gateway_optional_scope(key.tenant_id.as_deref(), path, &field, "tenant_id")?;
         for (name, value) in [
             ("team_id", key.team_id.as_deref()),
             ("project_id", key.project_id.as_deref()),
             ("user_id", key.user_id.as_deref()),
             ("budget_id", key.budget_id.as_deref()),
         ] {
-            if matches!(value.map(str::trim), Some("")) {
-                bail!("{field}.{name} in {} cannot be empty", path.display());
-            }
+            validate_gateway_optional_scope(value, path, &field, name)?;
         }
         for (model_index, model) in key.allowed_models.iter().enumerate() {
-            if model.trim().is_empty() {
-                bail!(
-                    "{field}.allowed_models[{model_index}] in {} cannot be empty",
-                    path.display()
-                );
-            }
+            validate_gateway_exact_identifier(
+                model,
+                path,
+                &format!("{field}.allowed_models[{model_index}]"),
+            )?;
         }
         if let Some(budget_usd) = key.budget_usd
             && (!budget_usd.is_finite() || budget_usd <= 0.0)
@@ -286,26 +253,15 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
         validate_optional_u64(key.tpm_limit, path, &format!("{field}.tpm_limit"))?;
     }
     for (index, sink) in policy.gateway.observability.sinks.iter().enumerate() {
-        if sink.trim().is_empty() {
+        if sink.is_empty() || sink.chars().any(char::is_whitespace) {
             bail!(
-                "gateway.observability.sinks[{index}] in {} cannot be empty",
+                "gateway.observability.sinks[{index}] in {} must be non-empty without whitespace",
                 path.display()
             );
         }
     }
-    if matches!(
-        policy
-            .gateway
-            .observability
-            .call_id_header
-            .as_deref()
-            .map(str::trim),
-        Some("")
-    ) {
-        bail!(
-            "gateway.observability.call_id_header in {} cannot be empty",
-            path.display()
-        );
+    if let Some(value) = policy.gateway.observability.call_id_header.as_deref() {
+        validate_gateway_exact_identifier(value, path, "gateway.observability.call_id_header")?;
     }
     if matches!(
         policy
@@ -322,10 +278,15 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
         );
     }
     if let Some(endpoint) = policy.gateway.observability.http_endpoint.as_deref() {
-        let endpoint = endpoint.trim();
         if endpoint.is_empty() {
             bail!(
                 "gateway.observability.http_endpoint in {} cannot be empty",
+                path.display()
+            );
+        }
+        if endpoint.chars().any(char::is_whitespace) {
+            bail!(
+                "gateway.observability.http_endpoint in {} must not contain whitespace",
                 path.display()
             );
         }
@@ -336,19 +297,17 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             );
         }
     }
-    if matches!(
-        policy
-            .gateway
-            .observability
-            .http_bearer_token_env
-            .as_deref()
-            .map(str::trim),
-        Some("")
-    ) {
-        bail!(
-            "gateway.observability.http_bearer_token_env in {} cannot be empty",
-            path.display()
-        );
+    if let Some(value) = policy
+        .gateway
+        .observability
+        .http_bearer_token_env
+        .as_deref()
+    {
+        validate_gateway_exact_identifier(
+            value,
+            path,
+            "gateway.observability.http_bearer_token_env",
+        )?;
     }
     if let Some(schema) = policy.gateway.observability.http_schema.as_deref() {
         validate_gateway_observability_http_schema(schema).with_context(|| {
@@ -387,18 +346,22 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
         }
     }
     for (index, model) in policy.gateway.guardrails.allowed_models.iter().enumerate() {
-        if model.trim().is_empty() {
-            bail!(
-                "gateway.guardrails.allowed_models[{index}] in {} cannot be empty",
-                path.display()
-            );
-        }
+        validate_gateway_exact_identifier(
+            model,
+            path,
+            &format!("gateway.guardrails.allowed_models[{index}]"),
+        )?;
     }
     if let Some(url) = policy.gateway.guardrails.webhook_url.as_deref() {
-        let url = url.trim();
         if url.is_empty() {
             bail!(
                 "gateway.guardrails.webhook_url in {} cannot be empty",
+                path.display()
+            );
+        }
+        if url.chars().any(char::is_whitespace) {
+            bail!(
+                "gateway.guardrails.webhook_url in {} must not contain whitespace",
                 path.display()
             );
         }
@@ -417,17 +380,43 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             )
         })?;
     }
-    if matches!(
-        policy
-            .gateway
-            .guardrails
-            .webhook_bearer_token_env
-            .as_deref()
-            .map(str::trim),
-        Some("")
-    ) {
+    if let Some(value) = policy
+        .gateway
+        .guardrails
+        .webhook_bearer_token_env
+        .as_deref()
+    {
+        validate_gateway_exact_identifier(
+            value,
+            path,
+            "gateway.guardrails.webhook_bearer_token_env",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_gateway_optional_scope(
+    value: Option<&str>,
+    path: &Path,
+    field: &str,
+    name: &str,
+) -> Result<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if value.is_empty() || value.chars().any(char::is_whitespace) {
         bail!(
-            "gateway.guardrails.webhook_bearer_token_env in {} cannot be empty",
+            "{field}.{name} in {} must be non-empty without whitespace",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn validate_gateway_exact_identifier(value: &str, path: &Path, field: &str) -> Result<()> {
+    if value.is_empty() || value.chars().any(char::is_whitespace) {
+        bail!(
+            "{field} in {} must be non-empty without whitespace",
             path.display()
         );
     }
@@ -436,11 +425,8 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
 
 fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let sso = &policy.gateway.sso;
-    if matches!(sso.proxy_token_env.as_deref().map(str::trim), Some("")) {
-        bail!(
-            "gateway.sso.proxy_token_env in {} cannot be empty",
-            path.display()
-        );
+    if let Some(value) = sso.proxy_token_env.as_deref() {
+        validate_gateway_exact_identifier(value, path, "gateway.sso.proxy_token_env")?;
     }
     for (field, value) in [
         ("gateway.sso.token_header", sso.token_header.as_deref()),
@@ -451,9 +437,7 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             "gateway.sso.key_prefixes_header",
             sso.key_prefixes_header.as_deref(),
         ),
-        ("gateway.sso.oidc_issuer", sso.oidc_issuer.as_deref()),
         ("gateway.sso.oidc_audience", sso.oidc_audience.as_deref()),
-        ("gateway.sso.oidc_jwks_url", sso.oidc_jwks_url.as_deref()),
         (
             "gateway.sso.oidc_user_claim",
             sso.oidc_user_claim.as_deref(),
@@ -471,6 +455,14 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             sso.oidc_key_prefixes_claim.as_deref(),
         ),
     ] {
+        if let Some(value) = value {
+            validate_gateway_exact_identifier(value, path, field)?;
+        }
+    }
+    for (field, value) in [
+        ("gateway.sso.oidc_issuer", sso.oidc_issuer.as_deref()),
+        ("gateway.sso.oidc_jwks_url", sso.oidc_jwks_url.as_deref()),
+    ] {
         if matches!(value.map(str::trim), Some("")) {
             bail!("{field} in {} cannot be empty", path.display());
         }
@@ -484,13 +476,33 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
                 path.display()
             );
         }
-        if let Some(jwks_url) = sso.oidc_jwks_url.as_deref().map(str::trim)
-            && !(jwks_url.starts_with("https://") || jwks_url.starts_with("http://"))
-        {
-            bail!(
-                "gateway.sso.oidc_jwks_url in {} must be an http or https URL",
-                path.display()
-            );
+        if let Some(issuer) = sso.oidc_issuer.as_deref() {
+            if issuer.chars().any(char::is_whitespace) {
+                bail!(
+                    "gateway.sso.oidc_issuer in {} must not contain whitespace",
+                    path.display()
+                );
+            }
+            if !issuer.starts_with("https://") {
+                bail!(
+                    "gateway.sso.oidc_issuer in {} must be an https URL",
+                    path.display()
+                );
+            }
+        }
+        if let Some(jwks_url) = sso.oidc_jwks_url.as_deref() {
+            if jwks_url.chars().any(char::is_whitespace) {
+                bail!(
+                    "gateway.sso.oidc_jwks_url in {} must not contain whitespace",
+                    path.display()
+                );
+            }
+            if !jwks_url.starts_with("https://") {
+                bail!(
+                    "gateway.sso.oidc_jwks_url in {} must be an https URL",
+                    path.display()
+                );
+            }
         }
     }
     if let Some(role) = sso.default_role.as_deref() {

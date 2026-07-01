@@ -14,6 +14,7 @@ const LOW_LEVEL_CRATES = Object.freeze([
   "prodex-core",
   "prodex-profile-export",
   "prodex-profile-identity",
+  "prodex-provider-core",
   "prodex-proxy-config",
   "prodex-redaction",
   "prodex-runtime-anthropic",
@@ -473,10 +474,18 @@ function runSelfTest() {
   const violations = findViolations({
     packages: [
       { name: "prodex-app" },
+      { name: "prodex-provider-core" },
       { name: "prodex-terminal-ui" },
       { name: "prodex-runtime-proxy" },
     ],
     edges: [
+      {
+        from: "prodex-provider-core",
+        to: "prodex-app",
+        alias: "prodex_app",
+        section: "dependencies",
+        manifestPath: "crates/prodex-provider-core/Cargo.toml",
+      },
       {
         from: "prodex-terminal-ui",
         to: "prodex-app",
@@ -495,7 +504,11 @@ function runSelfTest() {
   });
   assertEqual(
     violations.map((violation) => violation.rule.id),
-    ["terminal-ui-stays-generic", "runtime-proxy-stays-hot-path-helper"],
+    [
+      "low-level-crates-stay-below-orchestration",
+      "terminal-ui-stays-generic",
+      "runtime-proxy-stays-hot-path-helper",
+    ],
     "violations",
   );
 

@@ -31,15 +31,17 @@ pub(super) fn runtime_gateway_virtual_key_usage_load(
         RuntimeGatewayStateStore::Sqlite { path } => {
             return match runtime_gateway_sqlite_usage_load(path) {
                 Ok(usage) => usage,
-                Err(err) => {
+                Err(_err) => {
                     runtime_proxy_log_to_path(
                         log_path,
                         &runtime_proxy_structured_log_message(
                             "gateway_virtual_key_usage_load_failed",
                             [
                                 runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
+                                runtime_proxy_log_field(
+                                    "error_kind",
+                                    "gateway_usage_persistence_failed",
+                                ),
                             ],
                         ),
                     );
@@ -47,20 +49,20 @@ pub(super) fn runtime_gateway_virtual_key_usage_load(
                 }
             };
         }
-        RuntimeGatewayStateStore::Postgres {
-            url, state_path, ..
-        } => {
+        RuntimeGatewayStateStore::Postgres { url, .. } => {
             return match runtime_gateway_postgres_usage_load(url) {
                 Ok(usage) => usage,
-                Err(err) => {
+                Err(_err) => {
                     runtime_proxy_log_to_path(
                         log_path,
                         &runtime_proxy_structured_log_message(
                             "gateway_virtual_key_usage_load_failed",
                             [
                                 runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", state_path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
+                                runtime_proxy_log_field(
+                                    "error_kind",
+                                    "gateway_usage_persistence_failed",
+                                ),
                             ],
                         ),
                     );
@@ -68,18 +70,20 @@ pub(super) fn runtime_gateway_virtual_key_usage_load(
                 }
             };
         }
-        RuntimeGatewayStateStore::Redis { url, state_path } => {
+        RuntimeGatewayStateStore::Redis { url, .. } => {
             return match runtime_gateway_redis_usage_load(url, RUNTIME_GATEWAY_REDIS_USAGE_KEY) {
                 Ok(usage) => usage,
-                Err(err) => {
+                Err(_err) => {
                     runtime_proxy_log_to_path(
                         log_path,
                         &runtime_proxy_structured_log_message(
                             "gateway_virtual_key_usage_load_failed",
                             [
                                 runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", state_path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
+                                runtime_proxy_log_field(
+                                    "error_kind",
+                                    "gateway_usage_persistence_failed",
+                                ),
                             ],
                         ),
                     );
@@ -96,15 +100,15 @@ pub(super) fn runtime_gateway_virtual_key_usage_load(
             >(&bytes)
             {
                 Ok(usage) => usage,
-                Err(err) => {
+                Err(_err) => {
                     runtime_proxy_log_to_path(
                         log_path,
                         &runtime_proxy_structured_log_message(
                             "gateway_virtual_key_usage_load_failed",
-                            [
-                                runtime_proxy_log_field("path", path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
-                            ],
+                            [runtime_proxy_log_field(
+                                "error_kind",
+                                "gateway_usage_persistence_failed",
+                            )],
                         ),
                     );
                     BTreeMap::new()
@@ -112,15 +116,15 @@ pub(super) fn runtime_gateway_virtual_key_usage_load(
             }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-        Err(err) => {
+        Err(_err) => {
             runtime_proxy_log_to_path(
                 log_path,
                 &runtime_proxy_structured_log_message(
                     "gateway_virtual_key_usage_load_failed",
-                    [
-                        runtime_proxy_log_field("path", path.display().to_string()),
-                        runtime_proxy_log_field("error", err.to_string()),
-                    ],
+                    [runtime_proxy_log_field(
+                        "error_kind",
+                        "gateway_usage_persistence_failed",
+                    )],
                 ),
             );
             BTreeMap::new()
@@ -162,7 +166,7 @@ pub(super) fn schedule_runtime_gateway_virtual_key_usage_save(
                 .map(|mut pending| pending.drain(..).collect::<Vec<_>>())
                 .unwrap_or_default();
             if !deltas.is_empty()
-                && let Err(err) =
+                && let Err(_err) =
                     runtime_gateway_virtual_key_usage_apply_deltas(&state_store, &deltas)
             {
                 runtime_proxy_log_to_path(
@@ -172,10 +176,9 @@ pub(super) fn schedule_runtime_gateway_virtual_key_usage_save(
                         [
                             runtime_proxy_log_field("backend", state_store.label()),
                             runtime_proxy_log_field(
-                                "path",
-                                state_store.usage_path().display().to_string(),
+                                "error_kind",
+                                "gateway_usage_persistence_failed",
                             ),
-                            runtime_proxy_log_field("error", err.to_string()),
                         ],
                     ),
                 );

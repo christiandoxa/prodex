@@ -115,21 +115,21 @@ fn runtime_gateway_apply_scim_operation(
             user.role = runtime_gateway_scim_optional_role_value(value)?;
         }
         "tenant_id" | "tenantid" | "urn:prodex:params:scim:schemas:gateway:2.0:user.tenant_id" => {
-            user.tenant_id = runtime_gateway_scim_optional_string_value(value, "tenant_id")?;
+            user.tenant_id = runtime_gateway_scim_optional_scope_value(value, "tenant_id")?;
         }
         "team_id" | "teamid" | "urn:prodex:params:scim:schemas:gateway:2.0:user.team_id" => {
-            user.team_id = runtime_gateway_scim_optional_string_value(value, "team_id")?;
+            user.team_id = runtime_gateway_scim_optional_scope_value(value, "team_id")?;
         }
         "project_id"
         | "projectid"
         | "urn:prodex:params:scim:schemas:gateway:2.0:user.project_id" => {
-            user.project_id = runtime_gateway_scim_optional_string_value(value, "project_id")?;
+            user.project_id = runtime_gateway_scim_optional_scope_value(value, "project_id")?;
         }
         "user_id" | "userid" | "urn:prodex:params:scim:schemas:gateway:2.0:user.user_id" => {
-            user.user_id = runtime_gateway_scim_optional_string_value(value, "user_id")?;
+            user.user_id = runtime_gateway_scim_optional_scope_value(value, "user_id")?;
         }
         "budget_id" | "budgetid" | "urn:prodex:params:scim:schemas:gateway:2.0:user.budget_id" => {
-            user.budget_id = runtime_gateway_scim_optional_string_value(value, "budget_id")?;
+            user.budget_id = runtime_gateway_scim_optional_scope_value(value, "budget_id")?;
         }
         "allowed_key_prefixes"
         | "allowedkeyprefixes"
@@ -185,35 +185,35 @@ fn runtime_gateway_apply_scim_user_fields(
     if let Some(value) = runtime_gateway_scim_prodex_field(body, "tenant_id")
         .or_else(|| runtime_gateway_scim_prodex_field(body, "tenantId"))
     {
-        user.tenant_id = runtime_gateway_scim_optional_string_value(value, "tenant_id")?;
+        user.tenant_id = runtime_gateway_scim_optional_scope_value(value, "tenant_id")?;
     } else if !partial {
         user.tenant_id = None;
     }
     if let Some(value) = runtime_gateway_scim_prodex_field(body, "team_id")
         .or_else(|| runtime_gateway_scim_prodex_field(body, "teamId"))
     {
-        user.team_id = runtime_gateway_scim_optional_string_value(value, "team_id")?;
+        user.team_id = runtime_gateway_scim_optional_scope_value(value, "team_id")?;
     } else if !partial {
         user.team_id = None;
     }
     if let Some(value) = runtime_gateway_scim_prodex_field(body, "project_id")
         .or_else(|| runtime_gateway_scim_prodex_field(body, "projectId"))
     {
-        user.project_id = runtime_gateway_scim_optional_string_value(value, "project_id")?;
+        user.project_id = runtime_gateway_scim_optional_scope_value(value, "project_id")?;
     } else if !partial {
         user.project_id = None;
     }
     if let Some(value) = runtime_gateway_scim_prodex_field(body, "user_id")
         .or_else(|| runtime_gateway_scim_prodex_field(body, "userId"))
     {
-        user.user_id = runtime_gateway_scim_optional_string_value(value, "user_id")?;
+        user.user_id = runtime_gateway_scim_optional_scope_value(value, "user_id")?;
     } else if !partial {
         user.user_id = None;
     }
     if let Some(value) = runtime_gateway_scim_prodex_field(body, "budget_id")
         .or_else(|| runtime_gateway_scim_prodex_field(body, "budgetId"))
     {
-        user.budget_id = runtime_gateway_scim_optional_string_value(value, "budget_id")?;
+        user.budget_id = runtime_gateway_scim_optional_scope_value(value, "budget_id")?;
     } else if !partial {
         user.budget_id = None;
     }
@@ -242,14 +242,14 @@ pub(super) fn runtime_gateway_scim_string_value(
 ) -> Result<String, RuntimeGatewayAdminError> {
     value
         .as_str()
-        .map(str::trim)
         .filter(|value| !value.is_empty())
+        .filter(|value| !value.chars().any(char::is_whitespace))
         .map(str::to_string)
         .ok_or_else(|| {
             RuntimeGatewayAdminError::new(
                 400,
                 "invalid_scim_field",
-                format!("{field} must be a non-empty string"),
+                format!("{field} must be a non-empty string without whitespace"),
             )
         })
 }
@@ -271,6 +271,27 @@ fn runtime_gateway_scim_optional_string_value(
                 400,
                 "invalid_scim_field",
                 format!("{field} must be a string or null"),
+            )
+        })
+}
+
+pub(super) fn runtime_gateway_scim_optional_scope_value(
+    value: &serde_json::Value,
+    field: &'static str,
+) -> Result<Option<String>, RuntimeGatewayAdminError> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    value
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .filter(|value| !value.chars().any(char::is_whitespace))
+        .map(|value| Some(value.to_string()))
+        .ok_or_else(|| {
+            RuntimeGatewayAdminError::new(
+                400,
+                "invalid_scim_field",
+                format!("{field} must be a non-empty string without whitespace or null"),
             )
         })
 }
@@ -321,8 +342,8 @@ fn runtime_gateway_scim_key_prefixes_value(
         .map(|value| {
             value
                 .as_str()
-                .map(str::trim)
                 .filter(|value| !value.is_empty())
+                .filter(|value| !value.chars().any(char::is_whitespace))
                 .map(str::to_string)
         })
         .collect::<Option<Vec<_>>>()
@@ -330,7 +351,7 @@ fn runtime_gateway_scim_key_prefixes_value(
             RuntimeGatewayAdminError::new(
                 400,
                 "invalid_scim_field",
-                format!("{field} must be an array of non-empty strings"),
+                format!("{field} must be an array of non-empty strings without whitespace"),
             )
         })
 }
@@ -338,12 +359,14 @@ fn runtime_gateway_scim_key_prefixes_value(
 fn runtime_gateway_validate_scim_user(
     user: &RuntimeGatewayScimUser,
 ) -> Result<(), RuntimeGatewayAdminError> {
-    let user_name = user.user_name.trim();
-    if user_name.is_empty() || user_name.len() > 320 {
+    if user.user_name.is_empty()
+        || user.user_name.len() > 320
+        || user.user_name.chars().any(char::is_whitespace)
+    {
         return Err(RuntimeGatewayAdminError::new(
             400,
             "invalid_scim_user_name",
-            "SCIM userName must be 1-320 characters",
+            "SCIM userName must be 1-320 characters without whitespace",
         ));
     }
     if let Some(role) = user.role.as_deref()
@@ -356,4 +379,106 @@ fn runtime_gateway_validate_scim_user(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scim_user() -> RuntimeGatewayScimUser {
+        RuntimeGatewayScimUser {
+            id: "user_1".to_string(),
+            user_name: "alice@example.com".to_string(),
+            external_id: None,
+            display_name: None,
+            active: true,
+            role: None,
+            tenant_id: Some("tenant-a".to_string()),
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+            created_at_epoch: 1,
+            updated_at_epoch: 1,
+        }
+    }
+
+    #[test]
+    fn scim_scope_values_reject_whitespace_instead_of_trimming() {
+        let mut user = scim_user();
+        let err = runtime_gateway_apply_scim_user_patch(
+            &mut user,
+            &serde_json::json!({"tenant_id": " tenant-a "}),
+            true,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.test_status(), 400);
+        assert_eq!(err.test_code(), "invalid_scim_field");
+        assert_eq!(user.tenant_id.as_deref(), Some("tenant-a"));
+    }
+
+    #[test]
+    fn scim_user_name_rejects_whitespace_instead_of_trimming() {
+        let mut user = scim_user();
+        let err = runtime_gateway_apply_scim_user_patch(
+            &mut user,
+            &serde_json::json!({"userName": " alice@example.com "}),
+            true,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.test_status(), 400);
+        assert_eq!(err.test_code(), "invalid_scim_field");
+        assert_eq!(user.user_name, "alice@example.com");
+    }
+
+    #[test]
+    fn scim_role_rejects_whitespace_instead_of_trimming() {
+        let mut user = scim_user();
+        let err = runtime_gateway_apply_scim_user_patch(
+            &mut user,
+            &serde_json::json!({
+                "urn:prodex:params:scim:schemas:gateway:2.0:User": {
+                    "role": " admin "
+                }
+            }),
+            true,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.test_status(), 400);
+        assert_eq!(err.test_code(), "invalid_scim_field");
+        assert_eq!(user.role, None);
+    }
+
+    #[test]
+    fn scim_scope_values_accept_null_unset() {
+        let mut user = scim_user();
+
+        let result = runtime_gateway_apply_scim_user_patch(
+            &mut user,
+            &serde_json::json!({"tenant_id": null}),
+            true,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(user.tenant_id, None);
+    }
+
+    #[test]
+    fn scim_key_prefixes_reject_whitespace_instead_of_trimming() {
+        let mut user = scim_user();
+        let err = runtime_gateway_apply_scim_user_patch(
+            &mut user,
+            &serde_json::json!({"allowed_key_prefixes": [" team-a- "]}),
+            true,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.test_status(), 400);
+        assert_eq!(err.test_code(), "invalid_scim_field");
+        assert!(user.allowed_key_prefixes.is_empty());
+    }
 }

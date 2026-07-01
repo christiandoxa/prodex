@@ -15,6 +15,58 @@ fn catalog_covers_gateway_providers() {
         assert!(provider_supported_endpoints(provider).contains(&ProviderEndpoint::Responses));
         assert!(provider_supported_endpoints(provider).contains(&ProviderEndpoint::Models));
     }
+    assert!(provider_supported_endpoints(ProviderId::OpenAi).contains(&ProviderEndpoint::Images));
+    assert!(provider_supported_endpoints(ProviderId::Local).contains(&ProviderEndpoint::A2a));
+    assert!(
+        provider_supported_endpoints(ProviderId::Gemini).contains(&ProviderEndpoint::Embeddings)
+    );
+    assert!(
+        !provider_supported_endpoints(ProviderId::DeepSeek).contains(&ProviderEndpoint::Embeddings)
+    );
+    assert_eq!(
+        provider_supported_endpoints(ProviderId::OpenAi),
+        [
+            ProviderEndpoint::Responses,
+            ProviderEndpoint::ChatCompletions,
+            ProviderEndpoint::Messages,
+            ProviderEndpoint::Models,
+            ProviderEndpoint::Embeddings,
+            ProviderEndpoint::Images,
+            ProviderEndpoint::Audio,
+            ProviderEndpoint::Batches,
+            ProviderEndpoint::Rerank,
+            ProviderEndpoint::A2a,
+        ]
+    );
+    assert_eq!(
+        provider_supported_endpoints(ProviderId::Local),
+        provider_supported_endpoints(ProviderId::OpenAi)
+    );
+    assert_eq!(
+        provider_supported_endpoints(ProviderId::Gemini),
+        [
+            ProviderEndpoint::Responses,
+            ProviderEndpoint::ChatCompletions,
+            ProviderEndpoint::Messages,
+            ProviderEndpoint::Models,
+            ProviderEndpoint::Embeddings,
+        ]
+    );
+    for provider in [
+        ProviderId::Anthropic,
+        ProviderId::Copilot,
+        ProviderId::DeepSeek,
+    ] {
+        assert_eq!(
+            provider_supported_endpoints(provider),
+            [
+                ProviderEndpoint::Responses,
+                ProviderEndpoint::ChatCompletions,
+                ProviderEndpoint::Messages,
+                ProviderEndpoint::Models,
+            ]
+        );
+    }
 }
 
 #[test]
@@ -121,5 +173,29 @@ fn fallback_chain_preserves_existing_gemini_aliases() {
     assert_eq!(
         provider_model_fallback_chain(ProviderId::Copilot, "gpt-5.4"),
         vec!["gpt-5.4", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+    );
+    assert_eq!(
+        provider_model_fallback_chain(ProviderId::DeepSeek, "flash"),
+        vec!["deepseek-v4-flash", "deepseek-v4-pro"]
+    );
+    assert_eq!(
+        provider_model_fallback_chain(ProviderId::DeepSeek, "auto"),
+        vec!["deepseek-v4-pro", "deepseek-v4-flash"]
+    );
+    assert_eq!(
+        provider_model_fallback_chain(ProviderId::OpenAi, "combo:gpt-5,gpt-5;gpt-4o"),
+        vec!["gpt-5", "gpt-4o"]
+    );
+    assert_eq!(
+        provider_model_fallback_chain(ProviderId::OpenAi, "combo:gpt-5|GPT-5>gpt-4o"),
+        vec!["gpt-5", "gpt-4o"]
+    );
+    assert_eq!(
+        provider_model_fallback_chain(ProviderId::OpenAi, " custom-model "),
+        vec!["custom-model"]
+    );
+    assert_eq!(
+        provider_model_fallback_chain(ProviderId::Local, " local-model "),
+        vec!["local-model"]
     );
 }

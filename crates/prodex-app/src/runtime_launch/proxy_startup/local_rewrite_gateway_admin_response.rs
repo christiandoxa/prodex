@@ -15,6 +15,21 @@ impl RuntimeGatewayAdminError {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn test_status(&self) -> u16 {
+        self.status
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_code(&self) -> &'static str {
+        self.code
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_message(&self) -> &str {
+        &self.message
+    }
+
     pub(super) fn into_response(self) -> tiny_http::ResponseBox {
         build_runtime_proxy_json_error_response(self.status, self.code, &self.message)
     }
@@ -23,8 +38,12 @@ impl RuntimeGatewayAdminError {
 pub(super) fn runtime_gateway_admin_json_body(
     captured: &RuntimeProxyRequest,
 ) -> Result<serde_json::Value, tiny_http::ResponseBox> {
-    serde_json::from_slice::<serde_json::Value>(&captured.body).map_err(|err| {
-        build_runtime_proxy_json_error_response(400, "invalid_json", &err.to_string())
+    serde_json::from_slice::<serde_json::Value>(&captured.body).map_err(|_err| {
+        build_runtime_proxy_json_error_response(
+            400,
+            "invalid_json",
+            "request body is not valid JSON",
+        )
     })
 }
 
@@ -35,10 +54,14 @@ pub(super) fn runtime_gateway_admin_json_response(
     let body = serde_json::to_vec_pretty(&value).unwrap_or_else(|_| b"{}".to_vec());
     build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
         status,
-        headers: vec![(
-            "content-type".to_string(),
-            b"application/json; charset=utf-8".to_vec(),
-        )],
+        headers: vec![
+            (
+                "content-type".to_string(),
+                b"application/json; charset=utf-8".to_vec(),
+            ),
+            ("cache-control".to_string(), b"no-store".to_vec()),
+            ("x-content-type-options".to_string(), b"nosniff".to_vec()),
+        ],
         body: body.into(),
     })
 }
@@ -52,6 +75,7 @@ pub(super) fn runtime_gateway_admin_csv_response(body: String) -> tiny_http::Res
                 b"text/csv; charset=utf-8".to_vec(),
             ),
             ("cache-control".to_string(), b"no-store".to_vec()),
+            ("x-content-type-options".to_string(), b"nosniff".to_vec()),
         ],
         body: body.into_bytes().into(),
     })

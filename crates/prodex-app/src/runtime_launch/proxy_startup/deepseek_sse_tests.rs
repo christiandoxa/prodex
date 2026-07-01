@@ -1,6 +1,6 @@
 use super::super::deepseek_sse_reader::RuntimeDeepSeekChatSseReader;
 use super::{RuntimeDeepSeekConversationStore, RuntimeDeepSeekSseState};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read};
 use std::sync::{Arc, Mutex};
 
@@ -130,6 +130,121 @@ fn deepseek_sse_reader_wraps_text_delta_in_message_item() {
     assert!(item_done < completed);
     assert!(output.contains("\"type\":\"message\""));
     assert!(output.contains("\"text\":\"done\""));
+    let item_ids = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|event| event["item"]["id"].as_str().map(str::to_string))
+        .collect::<BTreeSet<_>>();
+    let item_id = item_ids
+        .iter()
+        .next()
+        .expect("message item id should be present");
+    let uuid = item_id
+        .strip_prefix("msg_deepseek_")
+        .expect("message item id should be prodex scoped")
+        .parse::<prodex_domain::RequestId>()
+        .unwrap();
+    assert_eq!(item_ids.len(), 1);
+    assert_eq!(uuid.as_uuid().get_version_num(), 7);
+    assert!(!output.contains("\"id\":\"msg_deepseek_7\""));
+}
+
+#[test]
+fn deepseek_sse_missing_response_id_fallback_uses_request_id_uuidv7() {
+    let stream = concat!(
+        "data: {\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    let created = output
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .and_then(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .expect("created event should be valid JSON");
+    let id = created["response"]["id"]
+        .as_str()
+        .and_then(|id| id.strip_prefix("resp_deepseek_"))
+        .expect("fallback DeepSeek SSE response id should be prodex scoped");
+
+    assert_eq!(
+        id.parse::<prodex_domain::RequestId>()
+            .unwrap()
+            .as_uuid()
+            .get_version_num(),
+        7
+    );
+    assert_ne!(created["response"]["id"].as_str(), Some("resp_deepseek_7"));
+}
+
+#[test]
+fn deepseek_sse_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
+    let conversations = conversation_store();
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_no_call_id\",\"model\":\"deepseek-v4-pro\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"shell\",\"arguments\":\"{\\\"cmd\\\":\"}}]}}]}\n\n",
+        "data: {\"id\":\"chatcmpl_no_call_id\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"cargo test -q\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        Arc::clone(&conversations),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    let generated_call_ids = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .flat_map(|event| {
+            let mut ids = Vec::new();
+            if let Some(id) = event["item"]["call_id"].as_str() {
+                ids.push(id.to_string());
+            }
+            if let Some(id) = event["call_id"].as_str() {
+                ids.push(id.to_string());
+            }
+            if let Some(id) = event["response"]["output"]
+                .as_array()
+                .and_then(|output| output.first())
+                .and_then(|item| item["call_id"].as_str())
+            {
+                ids.push(id.to_string());
+            }
+            ids
+        })
+        .filter(|id| id.starts_with("call_deepseek_"))
+        .collect::<BTreeSet<_>>();
+    let call_id = generated_call_ids
+        .iter()
+        .next()
+        .expect("fallback DeepSeek SSE call id should be present");
+    let uuid = call_id
+        .strip_prefix("call_deepseek_")
+        .expect("fallback call id should be prodex scoped")
+        .parse::<prodex_domain::CallId>()
+        .unwrap();
+
+    assert_eq!(generated_call_ids.len(), 1);
+    assert_eq!(uuid.as_uuid().get_version_num(), 7);
+    assert!(!output.contains("\"call_id\":\"call_deepseek_7_0\""));
+    let stored = conversations.lock().unwrap();
+    assert_eq!(
+        stored["chatcmpl_no_call_id"][0]["tool_calls"][0]["id"],
+        call_id.as_str()
+    );
 }
 
 #[test]

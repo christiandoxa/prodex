@@ -39,8 +39,10 @@ use super::provider_bridge::{
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result, bail};
+use prodex_domain::RequestId;
 use prodex_provider_core::ProviderTransformLoss;
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
+use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -485,7 +487,12 @@ pub(super) fn send_runtime_gemini_upstream_request(
                                                     "profile",
                                                     selected.profile_name.as_str(),
                                                 ),
-                                                runtime_proxy_log_field("error", err.to_string()),
+                                                runtime_proxy_log_field(
+                                                    "error",
+                                                    runtime_gemini_error_log_value(
+                                                        &err.to_string(),
+                                                    ),
+                                                ),
                                             ],
                                         ),
                                     );
@@ -1168,7 +1175,7 @@ fn runtime_gemini_exact_output_short_circuit(
         .as_ref()
         .map(|pool| runtime_gemini_binding_recorder(pool, selected.profile_name.clone(), None));
     let generate_chunk = serde_json::json!({
-        "responseId": format!("resp_gemini_exact_{request_id}"),
+        "responseId": runtime_gemini_exact_response_id(),
         "modelVersion": translated.model,
         "candidates": [{
             "content": {
@@ -1228,6 +1235,14 @@ fn runtime_gemini_exact_output_short_circuit(
     }))
 }
 
+fn runtime_gemini_exact_response_id() -> String {
+    format!("resp_gemini_exact_{}", RequestId::new())
+}
+
+fn runtime_gemini_error_log_value(error: &str) -> String {
+    redaction_redact_secret_like_text(error).replace('\n', " ")
+}
+
 fn runtime_gemini_thinking_budget_tokens(
     provider: &RuntimeLocalRewriteProviderOptions,
 ) -> Option<u64> {
@@ -1237,6 +1252,41 @@ fn runtime_gemini_thinking_budget_tokens(
             ..
         } => *thinking_budget_tokens,
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_exact_response_id_uses_request_id_uuidv7() {
+        let response_id = runtime_gemini_exact_response_id();
+        let id = response_id
+            .strip_prefix("resp_gemini_exact_")
+            .expect("Gemini exact response ID should keep compatibility prefix");
+
+        assert_eq!(
+            id.parse::<prodex_domain::RequestId>()
+                .unwrap()
+                .as_uuid()
+                .get_version_num(),
+            7
+        );
+        assert_ne!(response_id, "resp_gemini_exact_7");
+    }
+
+    #[test]
+    fn gemini_error_log_value_redacts_secret_like_material() {
+        let message = runtime_gemini_error_log_value(
+            "Gemini auth refresh failed\nAuthorization: Bearer gemini-token\napi_key=gemini-key",
+        );
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("gemini-token"));
+        assert!(!message.contains("gemini-key"));
     }
 }
 

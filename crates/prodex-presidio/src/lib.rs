@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 pub use prodex_cli::PresidioLanguageMode;
+use redaction::redaction_redact_secret_like_text;
 use serde::{Deserialize, Deserializer};
 use std::fs;
 use std::path::Path;
@@ -171,7 +172,10 @@ pub fn presidio_analyze(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
-        anyhow::bail!("Presidio Analyzer returned {status}: {}", body.trim());
+        anyhow::bail!(
+            "Presidio Analyzer returned {status}: {}",
+            presidio_redacted_message(body.trim())
+        );
     }
     response
         .json::<Vec<PresidioAnalyzerResult>>()
@@ -195,7 +199,10 @@ pub fn presidio_anonymize(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
-        anyhow::bail!("Presidio Anonymizer returned {status}: {}", body.trim());
+        anyhow::bail!(
+            "Presidio Anonymizer returned {status}: {}",
+            presidio_redacted_message(body.trim())
+        );
     }
     response
         .json::<PresidioAnonymizeResponse>()
@@ -212,13 +219,13 @@ pub fn probe_presidio_health(client: &reqwest::blocking::Client, base_url: &str)
                 message: if message.trim().is_empty() {
                     status.to_string()
                 } else {
-                    format!("{status} {}", message.trim())
+                    format!("{status} {}", presidio_redacted_message(message.trim()))
                 },
             }
         }
         Err(err) => PresidioHealth {
             ok: false,
-            message: err.to_string(),
+            message: presidio_redacted_message(&err.to_string()),
         },
     }
 }
@@ -236,4 +243,25 @@ pub fn validate_presidio_url(url: &str, field: &str) -> Result<()> {
 
 pub fn presidio_endpoint(base_url: &str, path: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
+}
+
+fn presidio_redacted_message(value: &str) -> String {
+    redaction_redact_secret_like_text(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presidio_error_message_redacts_secret_like_material() {
+        let message = presidio_redacted_message(
+            "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123",
+        );
+
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("fixture-token-123"));
+        assert!(!message.contains("sk-fixture-123"));
+    }
 }

@@ -125,26 +125,39 @@ pub(super) fn runtime_gateway_prometheus_response(
 
     build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
         status: 200,
-        headers: vec![(
-            "content-type".to_string(),
-            b"text/plain; version=0.0.4; charset=utf-8".to_vec(),
-        )],
+        headers: vec![
+            (
+                "content-type".to_string(),
+                b"text/plain; version=0.0.4; charset=utf-8".to_vec(),
+            ),
+            ("cache-control".to_string(), b"no-store".to_vec()),
+            ("x-content-type-options".to_string(), b"nosniff".to_vec()),
+        ],
         body: body.into_bytes().into(),
     })
 }
 
 fn runtime_gateway_prometheus_key_labels(name: &str, row: &RuntimeGatewayPrometheusRow) -> String {
     format!(
-        "key=\"{}\",source=\"{}\",disabled=\"{}\",tenant_id=\"{}\",team_id=\"{}\",project_id=\"{}\",user_id=\"{}\",budget_id=\"{}\"",
-        runtime_gateway_prometheus_label_escape(name),
+        "key_hash=\"{}\",source=\"{}\",disabled=\"{}\",tenant_scoped=\"{}\",team_scoped=\"{}\",project_scoped=\"{}\",user_scoped=\"{}\",budget_scoped=\"{}\"",
+        runtime_gateway_prometheus_label_escape(&runtime_gateway_prometheus_stable_hash(name)),
         runtime_gateway_prometheus_label_escape(&row.source),
         row.disabled,
-        runtime_gateway_prometheus_label_escape(row.tenant_id.as_deref().unwrap_or_default()),
-        runtime_gateway_prometheus_label_escape(row.team_id.as_deref().unwrap_or_default()),
-        runtime_gateway_prometheus_label_escape(row.project_id.as_deref().unwrap_or_default()),
-        runtime_gateway_prometheus_label_escape(row.user_id.as_deref().unwrap_or_default()),
-        runtime_gateway_prometheus_label_escape(row.budget_id.as_deref().unwrap_or_default())
+        row.tenant_id.is_some(),
+        row.team_id.is_some(),
+        row.project_id.is_some(),
+        row.user_id.is_some(),
+        row.budget_id.is_some()
     )
+}
+
+fn runtime_gateway_prometheus_stable_hash(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn runtime_gateway_prometheus_label_escape(value: &str) -> String {
@@ -165,10 +178,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prometheus_text_escapes_label_values() {
+    fn prometheus_text_omits_raw_high_cardinality_labels() {
+        assert_eq!(
+            runtime_gateway_prometheus_stable_hash("team-a"),
+            "de90a3717d1252d6"
+        );
+        let key_name = "team\"a\\b\nmain";
         let mut rows = BTreeMap::new();
         rows.insert(
-            "team\"a\\b\nmain".to_string(),
+            key_name.to_string(),
             RuntimeGatewayPrometheusRow {
                 source: "policy".to_string(),
                 disabled: false,
@@ -184,8 +202,15 @@ mod tests {
             },
         );
         let body = runtime_gateway_prometheus_text(&rows);
-        assert!(body.contains("key=\"team\\\"a\\\\b\\nmain\""));
-        assert!(body.contains("tenant_id=\"tenant\\nx\""));
+        assert!(!body.contains("team\\\"a\\\\b\\nmain"));
+        assert!(body.contains(&format!(
+            "key_hash=\"{}\"",
+            runtime_gateway_prometheus_stable_hash(key_name)
+        )));
+        assert!(!body.contains("tenant_id="));
+        assert!(!body.contains("tenant\\nx"));
+        assert!(body.contains("tenant_scoped=\"true\""));
+        assert!(body.contains("user_scoped=\"false\""));
         assert!(body.contains(" 7\n"));
     }
 }

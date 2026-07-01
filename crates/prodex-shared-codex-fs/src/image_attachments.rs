@@ -29,15 +29,12 @@ fn persist_codex_session_image_attachments_in_dir(
         return Ok(());
     }
 
-    for entry in fs::read_dir(sessions_dir)
-        .with_context(|| format!("failed to read {}", sessions_dir.display()))?
-    {
-        let entry =
-            entry.with_context(|| format!("failed to read entry in {}", sessions_dir.display()))?;
+    for entry in fs::read_dir(sessions_dir).context("failed to read codex sessions directory")? {
+        let entry = entry.context("failed to read codex sessions directory entry")?;
         let path = entry.path();
         let file_type = entry
             .file_type()
-            .with_context(|| format!("failed to read metadata for {}", path.display()))?;
+            .context("failed to read codex session entry metadata")?;
         if file_type.is_dir() {
             persist_codex_session_image_attachments_in_dir(codex_home, &path)?;
         } else if file_type.is_file()
@@ -56,12 +53,10 @@ pub(crate) fn persist_codex_session_file_image_attachments(
     codex_home: &Path,
     session_file: &Path,
 ) -> Result<String> {
-    let contents = fs::read_to_string(session_file)
-        .with_context(|| format!("failed to read {}", session_file.display()))?;
+    let contents = fs::read_to_string(session_file).context("failed to read codex session file")?;
     let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &contents)?;
     if rewritten != contents {
-        fs::write(session_file, &rewritten)
-            .with_context(|| format!("failed to write {}", session_file.display()))?;
+        fs::write(session_file, &rewritten).context("failed to write codex session file")?;
     }
     Ok(rewritten)
 }

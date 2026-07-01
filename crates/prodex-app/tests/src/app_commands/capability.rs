@@ -44,6 +44,31 @@ fn capability_value_color_highlights_status() {
 }
 
 #[test]
+fn capability_detail_redacts_secret_like_material() {
+    let detail = capability_redacted_detail(
+        "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123",
+    );
+
+    assert!(detail.contains("Authorization: Bearer <redacted>"));
+    assert!(detail.contains("api_key=<redacted>"));
+    assert!(!detail.contains("fixture-token-123"));
+    assert!(!detail.contains("sk-fixture-123"));
+}
+
+#[test]
+fn capability_failed_status_redacts_secret_like_chain() {
+    let err = anyhow::anyhow!("failed: Authorization: Bearer capability-token")
+        .context("capability check failed");
+
+    let status = capability_failed_status(&err);
+
+    assert!(status.starts_with("fail ("));
+    assert!(status.contains("capability check failed"));
+    assert!(status.contains("Authorization: Bearer <redacted>"));
+    assert!(!status.contains("capability-token"));
+}
+
+#[test]
 fn super_status_managed_optimizer_candidates_match_overlay_layouts() {
     let root = PathBuf::from("/tmp/prodex-optimizers");
     let candidates = managed_optimizer_command_candidates_for_super_status(&root, "sqz-mcp");

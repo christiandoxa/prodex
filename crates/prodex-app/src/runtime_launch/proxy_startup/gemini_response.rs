@@ -22,6 +22,7 @@ pub(in super::super) use gemini_response_status::{
     runtime_gemini_finish_reason_retryable_invalid, runtime_gemini_prompt_feedback_failure,
     runtime_gemini_response_status,
 };
+use prodex_domain::{CallId, RequestId};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::borrow::Cow;
 
@@ -534,7 +535,10 @@ fn runtime_gemini_response_id(value: &serde_json::Value, request_id: u64) -> Str
         .or_else(|| value.get("id"))
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
-        .unwrap_or_else(|| format!("resp_gemini_{request_id}"))
+        .unwrap_or_else(|| {
+            let _ = request_id;
+            format!("resp_gemini_{}", RequestId::new())
+        })
 }
 
 fn runtime_gemini_model(value: &serde_json::Value) -> String {
@@ -634,12 +638,15 @@ fn runtime_gemini_custom_tool_input_from_args_value(args_value: &serde_json::Val
 fn runtime_gemini_function_call_id(
     function_call: &serde_json::Value,
     request_id: u64,
-    index: usize,
+    _index: usize,
 ) -> String {
     function_call
         .get("id")
         .and_then(serde_json::Value::as_str)
         .filter(|id| !id.trim().is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| format!("call_gemini_{request_id}_{index}"))
+        .unwrap_or_else(|| {
+            let _ = request_id;
+            format!("call_gemini_{}", CallId::new())
+        })
 }

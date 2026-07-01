@@ -140,9 +140,94 @@ function preflightSteps(args) {
       args: ["scripts/ci/env-mutation-guard.mjs"],
     },
     {
+      label: "enterprise-docs-guard",
+      command: "node",
+      args: ["scripts/ci/enterprise-docs-guard.mjs"],
+    },
+    {
+      label: "enterprise-id-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/enterprise-id-boundary-guard.mjs"],
+    },
+    {
+      label: "enterprise-binaries-guard",
+      command: "node",
+      args: ["scripts/ci/enterprise-binaries-guard.mjs"],
+    },
+    {
       label: "crate-boundary-guard",
       command: "node",
       args: ["scripts/ci/crate-boundary-guard.mjs"],
+    },
+    {
+      label: "domain-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/domain-boundary-guard.mjs"],
+    },
+    {
+      label: "application-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/application-boundary-guard.mjs"],
+    },
+    {
+      label: "control-plane-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/control-plane-boundary-guard.mjs"],
+    },
+    {
+      label: "auth-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/auth-boundary-guard.mjs"],
+    },
+    {
+      label: "config-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/config-boundary-guard.mjs"],
+    },
+    {
+      label: "observability-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/observability-boundary-guard.mjs"],
+    },
+    {
+      label: "provider-spi-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/provider-spi-boundary-guard.mjs"],
+    },
+    {
+      label: "storage-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/storage-boundary-guard.mjs"],
+    },
+    {
+      label: "storage-postgres-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/storage-postgres-boundary-guard.mjs"],
+    },
+    {
+      label: "storage-redis-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/storage-redis-boundary-guard.mjs"],
+    },
+    {
+      label: "storage-sqlite-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/storage-sqlite-boundary-guard.mjs"],
+    },
+    {
+      label: "gateway-core-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/gateway-core-boundary-guard.mjs"],
+    },
+    {
+      label: "gateway-http-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/gateway-http-boundary-guard.mjs"],
+    },
+    {
+      label: "deployment-security-guard",
+      command: "node",
+      args: ["scripts/ci/deployment-security-guard.mjs"],
     },
     {
       label: "runtime-hotpath-guard",

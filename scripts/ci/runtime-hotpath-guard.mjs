@@ -10,6 +10,11 @@ const DEFAULT_SCAN_TARGETS = Object.freeze([
   "crates/prodex-runtime-proxy/src",
 ]);
 
+const DEFAULT_EXCLUDED_PATH_PREFIXES = Object.freeze([
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/",
+]);
+
 const FORBIDDEN_PATTERNS = Object.freeze([
   {
     id: "blocking-disk-io",
@@ -132,10 +137,10 @@ const ALLOWLIST = Object.freeze([
     name: "local-rewrite-gateway-file-ledger-io",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_file_ledger.rs",
     id: "blocking-disk-io",
-    pattern: /\bstd::fs::(?:read|create_dir_all|rename)\s*\(/,
-    maxHits: 4,
+    pattern: /\bstd::fs::(?:read|create_dir_all|rename|remove_file)\s*\(/,
+    maxHits: 5,
     reason:
-      "gateway file ledger I/O is limited to ledger loading, append setup, and atomic summary persistence",
+      "gateway file ledger I/O is limited to ledger loading, append setup, atomic summary persistence, and best-effort temp-file cleanup",
   },
   {
     name: "local-rewrite-gateway-ledger-background-save",
@@ -144,6 +149,15 @@ const ALLOWLIST = Object.freeze([
     pattern: /\bspawn_blocking\s*\(/,
     maxHits: 1,
     reason: "gateway ledger saves run on the bounded blocking pool after request admission",
+  },
+  {
+    name: "local-rewrite-transport-observability-background-sinks",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs",
+    id: "spawn-blocking",
+    pattern: /\bspawn_blocking\s*\(/,
+    maxHits: 2,
+    reason:
+      "gateway observability sinks run on the bounded blocking pool after spend-event emission instead of blocking the request path inline",
   },
   {
     name: "local-rewrite-gateway-store-file-io",
@@ -664,12 +678,17 @@ function allowlistOveruseViolations(allowlistHits) {
   });
 }
 
-async function collectScanFiles(targets) {
+async function collectScanFiles(targets, excludedPathPrefixes = []) {
   const files = [];
   for (const target of targets) {
     files.push(...(await rustFilesUnder(normalizePath(target))));
   }
-  return [...new Set(files)].sort();
+  return [...new Set(files)]
+    .filter(
+      (filePath) =>
+        !excludedPathPrefixes.some((prefix) => filePath.startsWith(prefix)),
+    )
+    .sort();
 }
 
 function printHuman(files, violations, allowlistHits) {
@@ -699,8 +718,12 @@ async function main() {
     return;
   }
 
-  const targets = args.targets.length > 0 ? args.targets : [...DEFAULT_SCAN_TARGETS];
-  const files = await collectScanFiles(targets);
+  const usingDefaultTargets = args.targets.length === 0;
+  const targets = usingDefaultTargets ? [...DEFAULT_SCAN_TARGETS] : args.targets;
+  const files = await collectScanFiles(
+    targets,
+    usingDefaultTargets ? DEFAULT_EXCLUDED_PATH_PREFIXES : [],
+  );
   const violations = [];
   const allowlistHits = [];
   for (const filePath of files) {

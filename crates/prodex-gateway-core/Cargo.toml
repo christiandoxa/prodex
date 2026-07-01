@@ -1,0 +1,19 @@
+[package]
+name = "prodex-gateway-core"
+version.workspace = true
+edition.workspace = true
+description = "HTTP-neutral gateway data-plane admission and routing core for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_gateway_core"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_authz = { workspace = true }
+prodex_domain = { workspace = true }
+prodex_observability = { workspace = true }
+prodex_provider_core = { workspace = true }
+prodex_provider_spi = { workspace = true }
+prodex_storage = { workspace = true }

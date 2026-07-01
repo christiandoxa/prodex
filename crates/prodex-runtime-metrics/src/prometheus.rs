@@ -189,7 +189,6 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             labels(&[
                 ("broker_key", self.snapshot.broker_key.as_str()),
                 ("listen_addr", self.snapshot.listen_addr.as_str()),
-                ("current_profile", self.snapshot.current_profile.as_str()),
                 (
                     "include_code_review",
                     bool_label(self.snapshot.include_code_review),
@@ -198,10 +197,6 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
                 (
                     "prodex_version",
                     self.snapshot.prodex_version.as_deref().unwrap_or("-"),
-                ),
-                (
-                    "executable_path",
-                    self.snapshot.executable_path.as_deref().unwrap_or("-"),
                 ),
                 (
                     "executable_sha256",

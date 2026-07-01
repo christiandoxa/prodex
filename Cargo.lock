@@ -2166,7 +2166,11 @@ dependencies = [
  "base64",
  "criterion",
  "libc",
+ "postgres",
  "prodex-app",
+ "prodex-storage-postgres",
+ "prodex-storage-sqlite",
+ "rusqlite",
  "serde",
  "serde_json",
 ]
@@ -2194,11 +2198,15 @@ dependencies = [
  "prodex-caveman-assets",
  "prodex-cli",
  "prodex-codex-config",
+ "prodex-config",
  "prodex-context",
  "prodex-core",
+ "prodex-domain",
+ "prodex-gateway-http",
  "prodex-housekeeping",
  "prodex-mcp-stdio",
  "prodex-memory",
+ "prodex-observability",
  "prodex-presidio",
  "prodex-profile-export",
  "prodex-profile-identity",
@@ -2261,6 +2269,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-application"
+version = "0.240.0"
+dependencies = [
+ "prodex-authn",
+ "prodex-config",
+ "prodex-control-plane",
+ "prodex-domain",
+ "prodex-gateway-core",
+ "prodex-gateway-http",
+ "prodex-observability",
+ "prodex-provider-core",
+ "prodex-provider-spi",
+ "prodex-storage",
+ "prodex-storage-postgres",
+ "prodex-storage-redis",
+ "prodex-storage-sqlite",
+]
+
+[[package]]
 name = "prodex-audit-log"
 version = "0.258.0"
 dependencies = [
@@ -2268,6 +2295,20 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "prodex-authn"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+]
+
+[[package]]
+name = "prodex-authz"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
 ]
 
 [[package]]
@@ -2306,6 +2347,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-config"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+]
+
+[[package]]
 name = "prodex-context"
 version = "0.258.0"
 dependencies = [
@@ -2316,11 +2364,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-control-plane"
+version = "0.240.0"
+dependencies = [
+ "prodex-config",
+ "prodex-domain",
+]
+
+[[package]]
 name = "prodex-core"
 version = "0.258.0"
 dependencies = [
  "anyhow",
  "dirs",
+]
+
+[[package]]
+name = "prodex-domain"
+version = "0.240.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "prodex-gateway-core"
+version = "0.240.0"
+dependencies = [
+ "prodex-authz",
+ "prodex-domain",
+ "prodex-observability",
+ "prodex-provider-core",
+ "prodex-provider-spi",
+ "prodex-storage",
+]
+
+[[package]]
+name = "prodex-gateway-http"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+ "prodex-gateway-core",
+ "prodex-observability",
 ]
 
 [[package]]
@@ -2352,11 +2438,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-observability"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+]
+
+[[package]]
 name = "prodex-presidio"
 version = "0.258.0"
 dependencies = [
  "anyhow",
  "prodex-cli",
+ "prodex-redaction",
  "reqwest",
  "serde",
  "serde_json",
@@ -2396,6 +2490,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-provider-spi"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+ "prodex-provider-core",
+]
+
+[[package]]
 name = "prodex-proxy-config"
 version = "0.258.0"
 dependencies = [
@@ -2430,6 +2532,7 @@ dependencies = [
  "anyhow",
  "base64",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -2644,6 +2747,37 @@ name = "prodex-state"
 version = "0.258.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "prodex-storage"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+]
+
+[[package]]
+name = "prodex-storage-postgres"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+ "prodex-storage",
+]
+
+[[package]]
+name = "prodex-storage-redis"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+ "prodex-storage",
+]
+
+[[package]]
+name = "prodex-storage-sqlite"
+version = "0.240.0"
+dependencies = [
+ "prodex-domain",
+ "prodex-storage",
 ]
 
 [[package]]
@@ -3964,6 +4098,18 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "uuid"
+version = "1.23.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "144d6b123cef80b301b8f72a9e2ca4370ddec21950d0a103dd22c437006d2db7"
+dependencies = [
+ "getrandom 0.4.3",
+ "js-sys",
+ "serde_core",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "vcpkg"

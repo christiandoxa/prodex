@@ -10,6 +10,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use redaction::redaction_redact_secret_like_text;
 use std::io::IsTerminal;
 use terminal_ui::{
     pad_cell, tui_border_style, tui_detail_style, tui_error_style, tui_muted_style,
@@ -375,7 +376,7 @@ pub(crate) fn watch_quota(
         match watch_profile_quota_tui(profile_name, provider, codex_home, base_url) {
             Ok(()) => return Ok(()),
             Err(err) if std::env::var_os("PRODEX_TUI_STRICT").is_none() => {
-                eprintln!("prodex quota TUI unavailable, falling back to plain watch: {err:#}");
+                eprintln!("{}", quota_watch_tui_fallback_message(&err));
             }
             Err(err) => return Err(err),
         }
@@ -385,7 +386,8 @@ pub(crate) fn watch_quota(
         let output = render_profile_quota_watch_output(
             profile_name,
             &quota_watch_updated_at(),
-            fetch_profile_quota(provider, codex_home, base_url).map_err(|err| err.to_string()),
+            fetch_profile_quota(provider, codex_home, base_url)
+                .map_err(|err| quota_error_message(&err)),
         );
         print_quota_watch_plain_snapshot(&output)?;
         thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
@@ -404,7 +406,8 @@ fn watch_profile_quota_tui(
         let frame = build_profile_quota_watch_tui_frame(
             profile_name,
             &updated,
-            fetch_profile_quota(provider, codex_home, base_url).map_err(|err| err.to_string()),
+            fetch_profile_quota(provider, codex_home, base_url)
+                .map_err(|err| quota_error_message(&err)),
         );
         tui.terminal
             .draw(|area| render_all_quota_watch_tui(area, &frame))
@@ -448,7 +451,7 @@ pub(crate) fn watch_all_quotas(
         ) {
             Ok(()) => return Ok(()),
             Err(err) if std::env::var_os("PRODEX_TUI_STRICT").is_none() => {
-                eprintln!("prodex quota TUI unavailable, falling back to plain watch: {err:#}");
+                eprintln!("{}", quota_watch_tui_fallback_message(&err));
             }
             Err(err) => return Err(err),
         }
@@ -461,6 +464,13 @@ pub(crate) fn watch_all_quotas(
         auth_filter,
         provider_filter,
         provider_filter_locked,
+    )
+}
+
+fn quota_watch_tui_fallback_message(err: &anyhow::Error) -> String {
+    format!(
+        "prodex quota TUI unavailable, falling back to plain watch: {}",
+        redaction_redact_secret_like_text(&format!("{err:#}"))
     )
 }
 
@@ -1542,7 +1552,7 @@ fn load_all_quota_watch_snapshot(
 ) -> AllQuotaWatchSnapshot {
     collect_all_quota_watch_snapshot(
         &quota_watch_updated_at(),
-        AppState::load(paths).map_err(|err| err.to_string()),
+        AppState::load(paths).map_err(|err| quota_error_message(&err)),
         base_url,
         auth_filter,
         provider_filter,

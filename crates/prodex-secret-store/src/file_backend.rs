@@ -75,7 +75,14 @@ impl SecretRevisionBackend for FileSecretBackend {
 
 fn file_path(location: &SecretLocation) -> Result<&Path, SecretError> {
     match location {
-        SecretLocation::File(path) => Ok(path),
+        SecretLocation::File(path) => {
+            if path.as_os_str().is_empty() {
+                return Err(SecretError::invalid_location(
+                    "file secret path cannot be empty",
+                ));
+            }
+            Ok(path)
+        }
         SecretLocation::Keyring { service, account } => Err(SecretError::unsupported(format!(
             "keyring://{service}/{account}"
         ))),

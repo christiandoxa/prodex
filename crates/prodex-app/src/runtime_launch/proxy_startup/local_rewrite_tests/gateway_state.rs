@@ -19,12 +19,21 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
         usage_path: path.clone(),
         ledger_path: ledger_path.clone(),
     };
+    let call_id_1 = format!("prodex-{}", prodex_domain::CallId::new());
+    let call_id_2 = format!("prodex-{}", prodex_domain::CallId::new());
 
     runtime_gateway_virtual_key_usage_apply_deltas(
         &state_store,
         &[RuntimeGatewayVirtualKeyUsageDelta {
             request_id: 1,
+            typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+            call_id: call_id_1.clone(),
             key_name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
             model: "gpt-5.4".to_string(),
             minute_epoch: 100,
             input_tokens: 7,
@@ -37,7 +46,14 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
         &state_store,
         &[RuntimeGatewayVirtualKeyUsageDelta {
             request_id: 2,
+            typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+            call_id: call_id_2,
             key_name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
             model: "gpt-5.4".to_string(),
             minute_epoch: 100,
             input_tokens: 13,
@@ -50,7 +66,14 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
         &state_store,
         &[RuntimeGatewayVirtualKeyUsageDelta {
             request_id: 2,
+            typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+            call_id: format!("prodex-{}", prodex_domain::CallId::new()),
             key_name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
             model: "gpt-5.4".to_string(),
             minute_epoch: 100,
             input_tokens: 13,
@@ -67,7 +90,7 @@ fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
     assert_eq!(usage["team-a"]["spend_microusd"], 28);
     let ledger = fs::read_to_string(&ledger_path).expect("ledger should be written");
     assert_eq!(ledger.lines().count(), 2);
-    assert!(ledger.contains("\"call_id\":\"prodex-1\""));
+    assert!(ledger.contains(&format!("\"call_id\":\"{call_id_1}\"")));
     assert!(ledger.contains("\"estimated_cost_microusd\":17"));
 }
 
@@ -78,7 +101,14 @@ fn gateway_sqlite_usage_deltas_are_idempotent_by_request_id() {
     let state_store = RuntimeGatewayStateStore::sqlite(db_path.clone());
     let delta = RuntimeGatewayVirtualKeyUsageDelta {
         request_id: 7,
+        typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+        call_id: format!("prodex-{}", prodex_domain::CallId::new()),
         key_name: "team-a".to_string(),
+        tenant_id: None,
+        team_id: None,
+        project_id: None,
+        user_id: None,
+        budget_id: None,
         model: "gpt-5.4".to_string(),
         minute_epoch: 100,
         input_tokens: 13,
@@ -164,7 +194,7 @@ fn gateway_sqlite_state_store_persists_admin_keys_and_usage() {
         .recv_timeout(Duration::from_secs(2))
         .expect("upstream should receive sqlite request");
     wait_for_sqlite_usage_total(&db_path, "team-sqlite", 1);
-    wait_for_sqlite_ledger_response_status(&db_path, 2, 200);
+    wait_for_sqlite_ledger_key_response_status(&db_path, "team-sqlite", 200);
     drop(proxy);
 
     let restarted = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
@@ -218,7 +248,19 @@ fn gateway_sqlite_state_store_persists_admin_keys_and_usage() {
     let ledger: serde_json::Value = ledger.json().expect("ledger response should be json");
     assert_eq!(ledger["state_backend"], "sqlite");
     assert_eq!(ledger["records"][0]["key_name"], "team-sqlite");
-    assert_eq!(ledger["records"][0]["call_id"], "prodex-2");
+    let call_id = ledger["records"][0]["call_id"]
+        .as_str()
+        .expect("ledger call ID should be a string");
+    let call_id_uuid = call_id
+        .strip_prefix("prodex-")
+        .expect("ledger call ID should keep prodex prefix")
+        .parse::<prodex_domain::CallId>()
+        .expect("ledger call ID should use typed UUIDv7 value");
+    assert_eq!(
+        call_id_uuid.as_uuid().get_version_num(),
+        7,
+        "ledger call ID should not use process-local request sequence: {call_id}"
+    );
     assert_eq!(ledger["records"][0]["response_status"], 200);
     assert_eq!(ledger["records"][0]["output_tokens"], 11);
     assert!(db_path.exists());

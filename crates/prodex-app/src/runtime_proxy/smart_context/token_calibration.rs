@@ -4,6 +4,7 @@ use crate::runtime_background::{
     schedule_runtime_smart_context_token_calibration_save_job,
 };
 use anyhow::Result;
+use redaction::redaction_redact_secret_like_text;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -317,7 +318,10 @@ pub(super) fn schedule_runtime_smart_context_token_calibration_save(
                         runtime_proxy_log_field("reason", reason),
                         runtime_proxy_log_field("lag_ms", "0"),
                         runtime_proxy_log_field("stage", "write"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
+                        runtime_proxy_log_field(
+                            "error",
+                            runtime_smart_context_token_calibration_error_log_value(&err),
+                        ),
                     ],
                 ),
             ),
@@ -350,6 +354,10 @@ pub(super) fn schedule_runtime_smart_context_token_calibration_save(
             ],
         ),
     );
+}
+
+fn runtime_smart_context_token_calibration_error_log_value(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&format!("{err:#}")).replace('\n', " ")
 }
 
 fn runtime_smart_context_save_token_calibration_snapshot(
@@ -434,6 +442,27 @@ fn runtime_smart_context_truncate_vec_tail<T>(items: &mut Vec<T>, limit: usize) 
     if items.len() > limit {
         let overflow = items.len().saturating_sub(limit);
         items.drain(0..overflow);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smart_context_token_calibration_error_log_value_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!(
+            "calibration save failed\nAuthorization: Bearer calibration-token\napi_key=calibration-key"
+        )
+        .context("smart context token calibration save failed");
+        let message = runtime_smart_context_token_calibration_error_log_value(&err);
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("smart context token calibration save failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("calibration-token"));
+        assert!(!message.contains("calibration-key"));
     }
 }
 

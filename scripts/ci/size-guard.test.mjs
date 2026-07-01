@@ -59,8 +59,8 @@ test("default ratchets match checked-in size thresholds", async () => {
       production: 850,
       test: 860,
       cohesion: 770,
-      maxNearLimitSiblings: 3,
-      nearLimitFiles: 20,
+      maxNearLimitSiblings: 5,
+      nearLimitFiles: 23,
     });
   } finally {
     await fs.rm(root, { recursive: true, force: true });

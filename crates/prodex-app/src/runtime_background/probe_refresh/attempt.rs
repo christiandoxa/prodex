@@ -2,6 +2,7 @@ use super::super::*;
 use super::apply::{
     apply_runtime_profile_probe_result, apply_runtime_profile_probe_result_with_timeout,
 };
+use redaction::redaction_redact_secret_like_text;
 
 pub(super) enum RuntimeProbeExecutionMode<'a> {
     Inline { context: &'a str },
@@ -44,8 +45,10 @@ impl RuntimeProbeExecutionMode<'_> {
                     shared,
                     if let Err(err) = apply_result {
                         format!(
-                            "{}_error profile={} error=state_update:{err:#}",
-                            context, profile_name
+                            "{}_error profile={} error={}",
+                            context,
+                            profile_name,
+                            runtime_probe_refresh_state_update_error(&err)
                         )
                     } else {
                         format!("{}_ok profile={profile_name}", context)
@@ -53,7 +56,12 @@ impl RuntimeProbeExecutionMode<'_> {
                 ),
                 Err(err) => runtime_proxy_log(
                     shared,
-                    format!("{}_error profile={} error={err}", context, profile_name),
+                    format!(
+                        "{}_error profile={} error={}",
+                        context,
+                        profile_name,
+                        runtime_probe_refresh_error_text(err)
+                    ),
                 ),
             },
             Self::Queued { .. } => {
@@ -69,7 +77,7 @@ impl RuntimeProbeExecutionMode<'_> {
                                     runtime_proxy_log_field("lag_ms", lag_ms.to_string()),
                                     runtime_proxy_log_field(
                                         "error",
-                                        format!("state_update:{err:#}"),
+                                        runtime_probe_refresh_state_update_error(&err),
                                     ),
                                 ],
                             )
@@ -90,7 +98,10 @@ impl RuntimeProbeExecutionMode<'_> {
                             [
                                 runtime_proxy_log_field("profile", profile_name),
                                 runtime_proxy_log_field("lag_ms", lag_ms.to_string()),
-                                runtime_proxy_log_field("error", err.as_str()),
+                                runtime_proxy_log_field(
+                                    "error",
+                                    runtime_probe_refresh_error_text(err),
+                                ),
                             ],
                         ),
                     ),
@@ -131,6 +142,17 @@ impl RuntimeProbeRefreshAttempt {
         let apply_result = mode.apply(shared, profile_name, self.auth, self.result.clone());
         mode.log_completion(shared, profile_name, queued_at, &self.result, apply_result);
     }
+}
+
+pub(crate) fn runtime_probe_refresh_error_text(err: &str) -> String {
+    redaction_redact_secret_like_text(err)
+}
+
+pub(crate) fn runtime_probe_refresh_state_update_error(err: &anyhow::Error) -> String {
+    format!(
+        "state_update:{}",
+        redaction_redact_secret_like_text(&format!("{err:#}"))
+    )
 }
 
 #[cfg(test)]

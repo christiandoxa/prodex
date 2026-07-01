@@ -39,8 +39,7 @@ pub(super) fn runtime_gateway_sqlite_load_key_store_from_conn(
     )?;
     let rows = stmt.query_map([], |row| {
         let allowed_models_json: String = row.get(7)?;
-        let allowed_models =
-            serde_json::from_str::<Vec<String>>(&allowed_models_json).unwrap_or_default();
+        let allowed_models = runtime_gateway_exact_json_vec(&allowed_models_json);
         Ok(RuntimeGatewayStoredVirtualKey {
             name: row.get(0)?,
             tenant_id: row.get(1)?,
@@ -116,8 +115,7 @@ fn runtime_gateway_sqlite_load_scim_users_from_conn(
     )?;
     let rows = stmt.query_map([], |row| {
         let prefixes_json: String = row.get(11)?;
-        let allowed_key_prefixes =
-            serde_json::from_str::<Vec<String>>(&prefixes_json).unwrap_or_default();
+        let allowed_key_prefixes = runtime_gateway_exact_json_vec(&prefixes_json);
         Ok(RuntimeGatewayScimUser {
             id: row.get(0)?,
             user_name: row.get(1)?,
@@ -170,8 +168,7 @@ fn runtime_gateway_postgres_load_scim_users_from_client<C: GenericClient>(
             display_name: row.get(8),
             active: row.get::<_, bool>(9),
             role: row.get(10),
-            allowed_key_prefixes: serde_json::from_str::<Vec<String>>(&prefixes_json)
-                .unwrap_or_default(),
+            allowed_key_prefixes: runtime_gateway_exact_json_vec(&prefixes_json),
             created_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(12)),
             updated_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(13)),
         });
@@ -183,8 +180,7 @@ fn runtime_gateway_postgres_stored_key_from_row(
     row: &postgres::Row,
 ) -> RuntimeGatewayStoredVirtualKey {
     let allowed_models_json: String = row.get(7);
-    let allowed_models =
-        serde_json::from_str::<Vec<String>>(&allowed_models_json).unwrap_or_default();
+    let allowed_models = runtime_gateway_exact_json_vec(&allowed_models_json);
     RuntimeGatewayStoredVirtualKey {
         name: row.get(0),
         tenant_id: row.get(1),
@@ -209,12 +205,49 @@ pub(super) fn runtime_gateway_redis_load_key_store(
     redis_key: &str,
 ) -> Result<RuntimeGatewayVirtualKeyStoreFile> {
     let mut conn = runtime_gateway_redis_connection(url)?;
-    let payload: Option<String> = conn.get(redis_key)?;
-    let Some(payload) = payload else {
-        return Ok(RuntimeGatewayVirtualKeyStoreFile::default());
-    };
-    serde_json::from_str::<RuntimeGatewayVirtualKeyStoreFile>(&payload)
-        .context("failed to parse gateway redis virtual key store")
+    runtime_gateway_redis_load_key_store_from_conn(&mut conn, redis_key)
+}
+
+pub(super) fn runtime_gateway_redis_load_key_store_from_conn(
+    conn: &mut redis::Connection,
+    redis_key: &str,
+) -> Result<RuntimeGatewayVirtualKeyStoreFile> {
+    let key_index = runtime_gateway_redis_key_store_key_index(redis_key);
+    let names: Vec<String> = conn.smembers(&key_index)?;
+    if names.is_empty() {
+        let payload: Option<String> = conn.get(redis_key)?;
+        let Some(payload) = payload else {
+            return Ok(RuntimeGatewayVirtualKeyStoreFile::default());
+        };
+        return serde_json::from_str::<RuntimeGatewayVirtualKeyStoreFile>(&payload)
+            .context("failed to parse legacy gateway redis virtual key store");
+    }
+
+    let mut keys = Vec::new();
+    for name in names {
+        let fields: std::collections::BTreeMap<String, String> =
+            conn.hgetall(runtime_gateway_redis_key_store_key_hash(redis_key, &name))?;
+        if let Some(record) = runtime_gateway_redis_stored_key_from_hash(&fields) {
+            keys.push(record);
+        }
+    }
+
+    let user_index = runtime_gateway_redis_key_store_scim_index(redis_key);
+    let user_ids: Vec<String> = conn.smembers(&user_index)?;
+    let mut scim_users = Vec::new();
+    for id in user_ids {
+        let fields: std::collections::BTreeMap<String, String> =
+            conn.hgetall(runtime_gateway_redis_key_store_scim_hash(redis_key, &id))?;
+        if let Some(user) = runtime_gateway_redis_scim_user_from_hash(&fields) {
+            scim_users.push(user);
+        }
+    }
+
+    Ok(RuntimeGatewayVirtualKeyStoreFile {
+        version: runtime_gateway_virtual_key_store_version(),
+        keys,
+        scim_users,
+    })
 }
 
 pub(super) fn runtime_gateway_redis_save_key_store(
@@ -222,9 +255,252 @@ pub(super) fn runtime_gateway_redis_save_key_store(
     redis_key: &str,
     store: &RuntimeGatewayVirtualKeyStoreFile,
 ) -> Result<()> {
-    let payload = serde_json::to_string(store)?;
-    let _: () = conn.set(redis_key, payload)?;
+    let key_index = runtime_gateway_redis_key_store_key_index(redis_key);
+    let old_names: Vec<String> = conn.smembers(&key_index)?;
+    for name in old_names {
+        let _: () = conn.del(runtime_gateway_redis_key_store_key_hash(redis_key, &name))?;
+    }
+    let user_index = runtime_gateway_redis_key_store_scim_index(redis_key);
+    let old_user_ids: Vec<String> = conn.smembers(&user_index)?;
+    for id in old_user_ids {
+        let _: () = conn.del(runtime_gateway_redis_key_store_scim_hash(redis_key, &id))?;
+    }
+    let _: () = conn.del(redis_key)?;
+    let _: () = conn.del(&key_index)?;
+    let _: () = conn.del(&user_index)?;
+
+    for record in &store.keys {
+        let hash_key = runtime_gateway_redis_key_store_key_hash(redis_key, &record.name);
+        let _: () = conn.sadd(&key_index, &record.name)?;
+        let _: () = redis::cmd("HSET")
+            .arg(hash_key)
+            .arg("name")
+            .arg(&record.name)
+            .arg("tenant_id")
+            .arg(record.tenant_id.as_deref().unwrap_or_default())
+            .arg("team_id")
+            .arg(record.team_id.as_deref().unwrap_or_default())
+            .arg("project_id")
+            .arg(record.project_id.as_deref().unwrap_or_default())
+            .arg("user_id")
+            .arg(record.user_id.as_deref().unwrap_or_default())
+            .arg("budget_id")
+            .arg(record.budget_id.as_deref().unwrap_or_default())
+            .arg("token_hash_base64")
+            .arg(&record.token_hash_base64)
+            .arg("allowed_models_json")
+            .arg(serde_json::to_string(&record.allowed_models)?)
+            .arg("budget_microusd")
+            .arg(runtime_gateway_redis_optional_u64_field(
+                record.budget_microusd,
+            ))
+            .arg("request_budget")
+            .arg(runtime_gateway_redis_optional_u64_field(
+                record.request_budget,
+            ))
+            .arg("rpm_limit")
+            .arg(runtime_gateway_redis_optional_u64_field(record.rpm_limit))
+            .arg("tpm_limit")
+            .arg(runtime_gateway_redis_optional_u64_field(record.tpm_limit))
+            .arg("disabled")
+            .arg(if record.disabled.unwrap_or(false) {
+                "1"
+            } else {
+                "0"
+            })
+            .arg("created_at_epoch")
+            .arg(record.created_at_epoch.to_string())
+            .arg("updated_at_epoch")
+            .arg(record.updated_at_epoch.to_string())
+            .query(conn)?;
+    }
+
+    for user in &store.scim_users {
+        let hash_key = runtime_gateway_redis_key_store_scim_hash(redis_key, &user.id);
+        let _: () = conn.sadd(&user_index, &user.id)?;
+        let _: () = redis::cmd("HSET")
+            .arg(hash_key)
+            .arg("id")
+            .arg(&user.id)
+            .arg("user_name")
+            .arg(&user.user_name)
+            .arg("tenant_id")
+            .arg(user.tenant_id.as_deref().unwrap_or_default())
+            .arg("team_id")
+            .arg(user.team_id.as_deref().unwrap_or_default())
+            .arg("project_id")
+            .arg(user.project_id.as_deref().unwrap_or_default())
+            .arg("user_id")
+            .arg(user.user_id.as_deref().unwrap_or_default())
+            .arg("budget_id")
+            .arg(user.budget_id.as_deref().unwrap_or_default())
+            .arg("external_id")
+            .arg(user.external_id.as_deref().unwrap_or_default())
+            .arg("display_name")
+            .arg(user.display_name.as_deref().unwrap_or_default())
+            .arg("active")
+            .arg(if user.active { "1" } else { "0" })
+            .arg("role")
+            .arg(user.role.as_deref().unwrap_or_default())
+            .arg("allowed_key_prefixes_json")
+            .arg(serde_json::to_string(&user.allowed_key_prefixes)?)
+            .arg("created_at_epoch")
+            .arg(user.created_at_epoch.to_string())
+            .arg("updated_at_epoch")
+            .arg(user.updated_at_epoch.to_string())
+            .query(conn)?;
+    }
     Ok(())
+}
+
+fn runtime_gateway_redis_key_store_key_index(redis_key: &str) -> String {
+    format!("{redis_key}:keys")
+}
+
+fn runtime_gateway_redis_key_store_key_hash(redis_key: &str, name: &str) -> String {
+    format!("{redis_key}:key:{name}")
+}
+
+fn runtime_gateway_redis_key_store_scim_index(redis_key: &str) -> String {
+    format!("{redis_key}:scim_users")
+}
+
+fn runtime_gateway_redis_key_store_scim_hash(redis_key: &str, id: &str) -> String {
+    format!("{redis_key}:scim_user:{id}")
+}
+
+fn runtime_gateway_redis_stored_key_from_hash(
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Option<RuntimeGatewayStoredVirtualKey> {
+    Some(RuntimeGatewayStoredVirtualKey {
+        name: runtime_gateway_redis_hash_exact_string(fields, "name")?,
+        tenant_id: runtime_gateway_redis_hash_optional_exact_string(fields, "tenant_id"),
+        team_id: runtime_gateway_redis_hash_optional_exact_string(fields, "team_id"),
+        project_id: runtime_gateway_redis_hash_optional_exact_string(fields, "project_id"),
+        user_id: runtime_gateway_redis_hash_optional_exact_string(fields, "user_id"),
+        budget_id: runtime_gateway_redis_hash_optional_exact_string(fields, "budget_id"),
+        token_hash_base64: runtime_gateway_redis_hash_exact_string(fields, "token_hash_base64")?,
+        allowed_models: runtime_gateway_redis_hash_exact_json_vec(fields, "allowed_models_json"),
+        budget_microusd: runtime_gateway_redis_hash_optional_u64(fields, "budget_microusd"),
+        request_budget: runtime_gateway_redis_hash_optional_u64(fields, "request_budget"),
+        rpm_limit: runtime_gateway_redis_hash_optional_u64(fields, "rpm_limit"),
+        tpm_limit: runtime_gateway_redis_hash_optional_u64(fields, "tpm_limit"),
+        disabled: Some(runtime_gateway_redis_hash_bool(fields, "disabled")),
+        created_at_epoch: runtime_gateway_redis_hash_u64(fields, "created_at_epoch"),
+        updated_at_epoch: runtime_gateway_redis_hash_u64(fields, "updated_at_epoch"),
+    })
+}
+
+fn runtime_gateway_redis_scim_user_from_hash(
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Option<RuntimeGatewayScimUser> {
+    Some(RuntimeGatewayScimUser {
+        id: runtime_gateway_redis_hash_exact_string(fields, "id")?,
+        user_name: runtime_gateway_redis_hash_exact_string(fields, "user_name")?,
+        tenant_id: runtime_gateway_redis_hash_optional_exact_string(fields, "tenant_id"),
+        team_id: runtime_gateway_redis_hash_optional_exact_string(fields, "team_id"),
+        project_id: runtime_gateway_redis_hash_optional_exact_string(fields, "project_id"),
+        user_id: runtime_gateway_redis_hash_optional_exact_string(fields, "user_id"),
+        budget_id: runtime_gateway_redis_hash_optional_exact_string(fields, "budget_id"),
+        external_id: runtime_gateway_redis_hash_optional_string(fields, "external_id"),
+        display_name: runtime_gateway_redis_hash_optional_string(fields, "display_name"),
+        active: runtime_gateway_redis_hash_bool(fields, "active"),
+        role: runtime_gateway_redis_hash_optional_exact_string(fields, "role"),
+        allowed_key_prefixes: runtime_gateway_redis_hash_exact_json_vec(
+            fields,
+            "allowed_key_prefixes_json",
+        ),
+        created_at_epoch: runtime_gateway_redis_hash_u64(fields, "created_at_epoch"),
+        updated_at_epoch: runtime_gateway_redis_hash_u64(fields, "updated_at_epoch"),
+    })
+}
+
+fn runtime_gateway_redis_hash_exact_string(
+    fields: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> Option<String> {
+    fields
+        .get(name)
+        .filter(|value| !value.is_empty())
+        .filter(|value| !value.chars().any(char::is_whitespace))
+        .cloned()
+}
+
+fn runtime_gateway_redis_hash_optional_exact_string(
+    fields: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> Option<String> {
+    runtime_gateway_redis_hash_exact_string(fields, name)
+}
+
+fn runtime_gateway_redis_hash_string(
+    fields: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> Option<String> {
+    fields
+        .get(name)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn runtime_gateway_redis_hash_optional_string(
+    fields: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> Option<String> {
+    runtime_gateway_redis_hash_string(fields, name)
+}
+
+fn runtime_gateway_redis_hash_u64(
+    fields: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> u64 {
+    fields
+        .get(name)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_default()
+}
+
+fn runtime_gateway_redis_hash_optional_u64(
+    fields: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> Option<u64> {
+    fields
+        .get(name)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn runtime_gateway_redis_optional_u64_field(value: Option<u64>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
+}
+
+fn runtime_gateway_redis_hash_bool(
+    fields: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> bool {
+    fields.get(name).is_some_and(|value| value == "1")
+}
+
+fn runtime_gateway_redis_hash_exact_json_vec(
+    fields: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> Vec<String> {
+    fields
+        .get(name)
+        .map(|value| runtime_gateway_exact_json_vec(value))
+        .unwrap_or_default()
+}
+
+fn runtime_gateway_exact_json_vec(value: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(value)
+        .ok()
+        .filter(|values| {
+            values
+                .iter()
+                .all(|value| !value.is_empty() && !value.chars().any(char::is_whitespace))
+        })
+        .unwrap_or_default()
 }
 
 pub(super) fn runtime_gateway_sqlite_save_key_store_in_tx(
@@ -373,6 +649,7 @@ pub(super) fn runtime_gateway_postgres_save_key_store_in_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
@@ -381,6 +658,69 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("prodex-gateway-key-store-{name}-{stamp}"))
+    }
+
+    #[test]
+    fn redis_hash_exact_string_rejects_trim_normalization() {
+        let fields = BTreeMap::from([
+            ("canonical".to_string(), "team-a".to_string()),
+            ("padded".to_string(), " team-a ".to_string()),
+            ("empty".to_string(), String::new()),
+        ]);
+
+        assert_eq!(
+            runtime_gateway_redis_hash_exact_string(&fields, "canonical"),
+            Some("team-a".to_string())
+        );
+        assert_eq!(
+            runtime_gateway_redis_hash_exact_string(&fields, "padded"),
+            None
+        );
+        assert_eq!(
+            runtime_gateway_redis_hash_exact_string(&fields, "empty"),
+            None
+        );
+    }
+
+    #[test]
+    fn redis_stored_key_rejects_padded_identity_fields() {
+        let fields = BTreeMap::from([
+            ("name".to_string(), " key-a ".to_string()),
+            ("token_hash_base64".to_string(), "hash".to_string()),
+            ("allowed_models_json".to_string(), "[]".to_string()),
+        ]);
+
+        assert!(runtime_gateway_redis_stored_key_from_hash(&fields).is_none());
+    }
+
+    #[test]
+    fn redis_exact_json_vec_rejects_whitespace_entries() {
+        let fields = BTreeMap::from([
+            (
+                "canonical".to_string(),
+                serde_json::json!(["gpt-5", "gpt-5-mini"]).to_string(),
+            ),
+            (
+                "padded".to_string(),
+                serde_json::json!(["gpt-5", " gpt-5-mini "]).to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            runtime_gateway_redis_hash_exact_json_vec(&fields, "canonical"),
+            vec!["gpt-5".to_string(), "gpt-5-mini".to_string()]
+        );
+        assert!(runtime_gateway_redis_hash_exact_json_vec(&fields, "padded").is_empty());
+    }
+
+    #[test]
+    fn exact_json_vec_rejects_whitespace_entries_across_backends() {
+        assert_eq!(
+            runtime_gateway_exact_json_vec(r#"["gpt-5","gpt-5-mini"]"#),
+            vec!["gpt-5".to_string(), "gpt-5-mini".to_string()]
+        );
+        assert!(runtime_gateway_exact_json_vec(r#"["gpt-5"," gpt-5-mini "]"#).is_empty());
+        assert!(runtime_gateway_exact_json_vec(r#"[""]"#).is_empty());
     }
 
     #[test]
@@ -437,5 +777,32 @@ mod tests {
         assert_eq!(loaded.scim_users[0].user_name, "user@example.com");
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn redis_key_store_backend_does_not_write_whole_store_json_blob() {
+        let source = include_str!("local_rewrite_gateway_key_store_backend.rs");
+        let set_blob = ["conn.set", "(redis_key"].join("");
+        let whole_store_json = ["serde_json::to_string", "(store"].join("");
+        assert!(!source.contains(&set_blob));
+        assert!(!source.contains(&whole_store_json));
+    }
+
+    #[test]
+    fn redis_key_store_optional_u64_preserves_zero() {
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert("zero".to_string(), "0".to_string());
+        fields.insert("missing".to_string(), String::new());
+
+        assert_eq!(
+            runtime_gateway_redis_hash_optional_u64(&fields, "zero"),
+            Some(0)
+        );
+        assert_eq!(
+            runtime_gateway_redis_hash_optional_u64(&fields, "missing"),
+            None
+        );
+        assert_eq!(runtime_gateway_redis_optional_u64_field(Some(0)), "0");
+        assert_eq!(runtime_gateway_redis_optional_u64_field(None), "");
     }
 }

@@ -1,4 +1,38 @@
 use super::*;
+use std::fmt;
+
+const RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
+
+const RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE: &str = "proxied request could not be captured";
+const RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE: &str = "proxied request could not be prepared";
+const RUNTIME_PROXY_ANTHROPIC_REQUEST_TRANSLATION_FAILED_MESSAGE: &str =
+    "Anthropic request could not be translated";
+const RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE: &str = "Anthropic request failed";
+
+#[derive(Debug)]
+pub(crate) struct RuntimeProxyBodyTooLarge {
+    limit: u64,
+    actual: Option<u64>,
+}
+
+impl fmt::Display for RuntimeProxyBodyTooLarge {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.actual {
+            Some(actual) => write!(
+                f,
+                "proxied request body is too large: {actual} bytes exceeds {limit} byte limit",
+                limit = self.limit
+            ),
+            None => write!(
+                f,
+                "proxied request body is too large: exceeds {limit} byte limit",
+                limit = self.limit
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeProxyBodyTooLarge {}
 
 fn runtime_proxy_log_dispatch_error(
     shared: &RuntimeRotationProxyShared,
@@ -13,10 +47,14 @@ fn runtime_proxy_log_dispatch_error(
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("error", error),
+                runtime_proxy_log_field("error", runtime_proxy_dispatch_error_log_value(&error)),
             ],
         ),
     );
+}
+
+fn runtime_proxy_dispatch_error_log_value(error: &str) -> String {
+    redaction_redact_secret_like_text(error)
 }
 
 pub(crate) fn handle_runtime_rotation_proxy_request(
@@ -91,20 +129,40 @@ fn dispatch_runtime_http_proxy_request(
     let mut captured = match capture_runtime_proxy_request(&mut request) {
         Ok(captured) => captured,
         Err(err) => {
+            if runtime_proxy_error_is_body_too_large(&err) {
+                runtime_proxy_log_dispatch_error(
+                    shared,
+                    request_id,
+                    "request_body_too_large",
+                    "request_body_too_large".to_string(),
+                );
+                let _ = request.respond(build_runtime_proxy_text_response(
+                    413,
+                    "proxied request body is too large",
+                ));
+                return;
+            }
             runtime_proxy_log_dispatch_error(shared, request_id, "capture_error", err.to_string());
-            let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+            let _ = request.respond(build_runtime_proxy_text_response(
+                502,
+                RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE,
+            ));
             return;
         }
     };
-    if let Err(err) = apply_runtime_presidio_redaction_to_request(request_id, &mut captured, shared)
+    if let Err(_err) =
+        apply_runtime_presidio_redaction_to_request(request_id, &mut captured, shared)
     {
         runtime_proxy_log_dispatch_error(
             shared,
             request_id,
             "presidio_redaction_failed",
-            format!("{err:#}"),
+            "presidio_redaction_failed".to_string(),
         );
-        let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+        let _ = request.respond(build_runtime_proxy_text_response(
+            502,
+            "gateway PII redaction failed",
+        ));
         return;
     }
 
@@ -176,7 +234,7 @@ fn dispatch_runtime_http_proxy_request(
                     RuntimeResponsesReply::Buffered(build_runtime_anthropic_error_parts(
                         502,
                         "api_error",
-                        &err.to_string(),
+                        RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE,
                     ))
                 }
             }
@@ -206,7 +264,7 @@ fn dispatch_runtime_http_proxy_request(
                     );
                     RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response_parts(
                         502,
-                        &err.to_string(),
+                        RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
                     ))
                 }
             }
@@ -233,11 +291,16 @@ fn dispatch_runtime_http_proxy_request(
                     "standard_error",
                     format!("{err:#}"),
                 );
-                build_runtime_proxy_text_response(502, &err.to_string())
+                build_runtime_proxy_text_response(502, RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE)
             }
         }
     };
     let _ = request.respond(response);
+}
+
+pub(crate) fn runtime_proxy_error_is_body_too_large(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.downcast_ref::<RuntimeProxyBodyTooLarge>().is_some())
 }
 
 pub(crate) fn respond_runtime_responses_reply(
@@ -264,17 +327,54 @@ pub(crate) fn is_tiny_http_websocket_upgrade(request: &tiny_http::Request) -> bo
 pub(crate) fn capture_runtime_proxy_request(
     request: &mut tiny_http::Request,
 ) -> Result<RuntimeProxyRequest> {
+    let max_body_bytes = runtime_proxy_max_request_body_bytes();
+    if let Some(content_length) = runtime_proxy_request_content_length(request)
+        && content_length > max_body_bytes
+    {
+        return Err(RuntimeProxyBodyTooLarge {
+            limit: max_body_bytes,
+            actual: Some(content_length),
+        }
+        .into());
+    }
+
     let mut body = Vec::new();
     request
         .as_reader()
+        .take(max_body_bytes.saturating_add(1))
         .read_to_end(&mut body)
         .context("failed to read proxied Codex request body")?;
+    if body.len() as u64 > max_body_bytes {
+        return Err(RuntimeProxyBodyTooLarge {
+            limit: max_body_bytes,
+            actual: None,
+        }
+        .into());
+    }
 
     Ok(RuntimeProxyRequest {
         method: request.method().as_str().to_string(),
         path_and_query: request.url().to_string(),
         headers: runtime_proxy_request_headers(request),
         body,
+    })
+}
+
+fn runtime_proxy_max_request_body_bytes() -> u64 {
+    env::var("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES)
+}
+
+fn runtime_proxy_request_content_length(request: &tiny_http::Request) -> Option<u64> {
+    request.headers().iter().find_map(|header| {
+        header
+            .field
+            .equiv("Content-Length")
+            .then(|| header.value.as_str().trim().parse::<u64>().ok())
+            .flatten()
     })
 }
 
@@ -358,7 +458,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
                     [
                         runtime_proxy_log_field("request", request_id.to_string()),
                         runtime_proxy_log_field("transport", "websocket"),
-                        runtime_proxy_log_field("error", format!("{err:#}")),
+                        runtime_proxy_log_field(
+                            "error",
+                            runtime_proxy_dispatch_error_log_value(&format!("{err:#}")),
+                        ),
                     ],
                 ),
             );
@@ -409,7 +512,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("session_error", format!("{err:#}")),
+                    runtime_proxy_log_field(
+                        "session_error",
+                        runtime_proxy_dispatch_error_log_value(&format!("{err:#}")),
+                    ),
                 ],
             ),
         );
@@ -450,9 +556,13 @@ pub(crate) fn proxy_runtime_anthropic_messages_request(
 ) -> Result<RuntimeResponsesReply> {
     let translated_request = match translate_runtime_anthropic_messages_request(request) {
         Ok(translated_request) => translated_request,
-        Err(err) => {
+        Err(_err) => {
             return Ok(RuntimeResponsesReply::Buffered(
-                build_runtime_anthropic_error_parts(400, "invalid_request_error", &err.to_string()),
+                build_runtime_anthropic_error_parts(
+                    400,
+                    "invalid_request_error",
+                    RUNTIME_PROXY_ANTHROPIC_REQUEST_TRANSLATION_FAILED_MESSAGE,
+                ),
             ));
         }
     };
@@ -555,4 +665,54 @@ pub(crate) fn proxy_runtime_anthropic_messages_request(
         ),
     }
     Ok(translated_response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dispatch_local_error_messages_are_stable_and_redacted() {
+        for message in [
+            RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE,
+            RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
+            RUNTIME_PROXY_ANTHROPIC_REQUEST_TRANSLATION_FAILED_MESSAGE,
+            RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE,
+        ] {
+            assert!(!message.contains("token"));
+            assert!(!message.contains("Authorization"));
+            assert!(!message.contains("127.0.0.1"));
+            assert!(!message.contains("serde"));
+            assert!(!message.contains("json"));
+            assert!(!message.contains("reqwest"));
+        }
+        assert_eq!(
+            RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE,
+            "proxied request could not be captured"
+        );
+        assert_eq!(
+            RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
+            "proxied request could not be prepared"
+        );
+        assert_eq!(
+            RUNTIME_PROXY_ANTHROPIC_REQUEST_TRANSLATION_FAILED_MESSAGE,
+            "Anthropic request could not be translated"
+        );
+        assert_eq!(
+            RUNTIME_PROXY_ANTHROPIC_REQUEST_FAILED_MESSAGE,
+            "Anthropic request failed"
+        );
+    }
+
+    #[test]
+    fn dispatch_error_log_value_redacts_secret_like_material() {
+        let message = runtime_proxy_dispatch_error_log_value(
+            "proxy failed: Authorization: Bearer dispatch-token and api_key=dispatch-key",
+        );
+
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("dispatch-token"));
+        assert!(!message.contains("dispatch-key"));
+    }
 }

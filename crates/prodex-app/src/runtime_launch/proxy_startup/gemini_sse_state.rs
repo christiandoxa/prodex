@@ -30,6 +30,7 @@ use super::gemini_sse_guardrails::{
     runtime_gemini_non_actionable_wait_or_poll_text, runtime_gemini_stream_error,
     runtime_gemini_tool_intent_without_call, runtime_gemini_unverified_success_claim,
 };
+use prodex_domain::{CallId, RequestId};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 
@@ -38,7 +39,6 @@ mod gemini_sse_tool_calls;
 use gemini_sse_tool_calls::RuntimeGeminiToolCall;
 
 pub(super) struct RuntimeGeminiSseState {
-    request_id: u64,
     response_id: String,
     created_at: u64,
     sequence_number: u64,
@@ -47,10 +47,13 @@ pub(super) struct RuntimeGeminiSseState {
     pub(super) eof: bool,
     output_text_item_added: bool,
     output_text_item_done: bool,
+    output_text_item_id: String,
     reasoning_summary_part_added: bool,
     media_item_done: bool,
+    media_item_id: String,
     image_generation_items_done: bool,
     citation_item_done: bool,
+    citation_item_id: String,
     metadata_sent: Option<serde_json::Value>,
     model: Option<String>,
     finish_reason: Option<String>,
@@ -76,7 +79,7 @@ pub(super) struct RuntimeGeminiSseState {
 
 impl RuntimeGeminiSseState {
     pub(super) fn new(
-        request_id: u64,
+        _request_id: u64,
         conversation_messages: Vec<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
@@ -87,8 +90,7 @@ impl RuntimeGeminiSseState {
         let internal_instruction_corpus =
             runtime_gemini_internal_instruction_corpus(&conversation_messages);
         Self {
-            request_id,
-            response_id: format!("resp_gemini_{request_id}"),
+            response_id: format!("resp_gemini_{}", RequestId::new()),
             created_at: runtime_deepseek_created_at(),
             sequence_number: 0,
             created: false,
@@ -96,10 +98,13 @@ impl RuntimeGeminiSseState {
             eof: false,
             output_text_item_added: false,
             output_text_item_done: false,
+            output_text_item_id: format!("msg_gemini_{}", RequestId::new()),
             reasoning_summary_part_added: false,
             media_item_done: false,
+            media_item_id: format!("msg_gemini_media_{}", RequestId::new()),
             image_generation_items_done: false,
             citation_item_done: false,
+            citation_item_id: format!("msg_gemini_citations_{}", RequestId::new()),
             metadata_sent: None,
             model: None,
             finish_reason: None,
@@ -480,8 +485,8 @@ impl RuntimeGeminiSseState {
         ))
     }
 
-    fn output_text_item_id(&self) -> String {
-        format!("msg_gemini_{}", self.request_id)
+    fn output_text_item_id(&self) -> &str {
+        &self.output_text_item_id
     }
 
     fn observe_output_text(&mut self, text: &str) -> Vec<String> {
@@ -553,7 +558,7 @@ impl RuntimeGeminiSseState {
         Some(runtime_provider_sse_output_text_item_added_event(
             sequence_number,
             &self.response_id,
-            &self.output_text_item_id(),
+            self.output_text_item_id(),
         ))
     }
 
@@ -622,18 +627,18 @@ impl RuntimeGeminiSseState {
         events.push(runtime_provider_sse_output_text_item_done_event(
             sequence_number,
             &self.response_id,
-            &self.output_text_item_id(),
+            self.output_text_item_id(),
             &self.output_text,
         ));
         events
     }
 
-    fn media_item_id(&self) -> String {
-        format!("msg_gemini_media_{}", self.request_id)
+    fn media_item_id(&self) -> &str {
+        &self.media_item_id
     }
 
-    fn citation_item_id(&self) -> String {
-        format!("msg_gemini_citations_{}", self.request_id)
+    fn citation_item_id(&self) -> &str {
+        &self.citation_item_id
     }
 
     fn observe_citation_text(&mut self, text: String) -> Vec<String> {
@@ -757,13 +762,13 @@ impl RuntimeGeminiSseState {
         if !self.tool_calls.is_empty() {
             assistant["tool_calls"] = serde_json::Value::Array(
                 self.tool_calls
-                    .iter()
-                    .map(|(index, tool_call)| {
+                    .values()
+                    .map(|tool_call| {
                         let mut item = serde_json::json!({
                             "id": tool_call
                                 .call_id
                                 .clone()
-                                .unwrap_or_else(|| format!("call_gemini_{}_{}", self.request_id, index)),
+                                .unwrap_or_else(|| format!("call_gemini_{}", CallId::new())),
                             "type": "function",
                             "function": {
                                 "name": tool_call
@@ -823,7 +828,7 @@ impl RuntimeGeminiSseState {
             let call_id = tool_call
                 .call_id
                 .clone()
-                .unwrap_or_else(|| format!("call_gemini_{}_{}", self.request_id, index));
+                .unwrap_or_else(|| format!("call_gemini_{}", CallId::new()));
             let flat_name = tool_call
                 .name
                 .clone()
@@ -877,12 +882,12 @@ impl RuntimeGeminiSseState {
 
     fn tool_call_ids(&self) -> Vec<String> {
         self.tool_calls
-            .iter()
-            .map(|(index, tool_call)| {
+            .values()
+            .map(|tool_call| {
                 tool_call
                     .call_id
                     .clone()
-                    .unwrap_or_else(|| format!("call_gemini_{}_{}", self.request_id, index))
+                    .unwrap_or_else(|| format!("call_gemini_{}", CallId::new()))
             })
             .filter(|call_id| !call_id.trim().is_empty())
             .collect()

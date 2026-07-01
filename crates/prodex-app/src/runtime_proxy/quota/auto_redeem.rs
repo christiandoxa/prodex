@@ -14,12 +14,11 @@ use super::{
 use crate::ProfileProviderExt;
 use anyhow::Result;
 use chrono::Local;
+use prodex_domain::RequestId;
 use prodex_quota::{RuntimeQuotaSummary, RuntimeQuotaWindowStatus};
+use redaction::redaction_redact_secret_like_text;
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-static RUNTIME_AUTO_REDEEM_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const RUNTIME_AUTO_REDEEM_NATURAL_RESET_GRACE_SECONDS: i64 = 5 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,15 +29,11 @@ pub(crate) enum RuntimeAutoRedeemResetCreditOutcome {
 }
 
 fn runtime_auto_redeem_idempotency_key() -> String {
-    let sequence = RUNTIME_AUTO_REDEEM_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let now_nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    format!(
-        "prodex-auto-redeem-{}-{now_nanos}-{sequence}",
-        std::process::id()
-    )
+    format!("prodex-auto-redeem-{}", RequestId::new())
+}
+
+fn runtime_auto_redeem_error_log_value(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&err.to_string()).replace('\n', " ")
 }
 
 fn runtime_auto_redeem_weekly_exhausted_reset_at(summary: RuntimeQuotaSummary) -> Option<i64> {
@@ -405,7 +400,7 @@ pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
                 format!(
                     "{context}_auto_redeem_availability_failed profile={profile_name} route={} error={}",
                     runtime_route_kind_label(route_kind),
-                    err.to_string().replace('\n', " "),
+                    runtime_auto_redeem_error_log_value(err),
                 ),
             );
         });
@@ -461,7 +456,7 @@ pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
             format!(
                 "{context}_auto_redeem_failed profile={profile_name} route={} error={}",
                 runtime_route_kind_label(route_kind),
-                err.to_string().replace('\n', " "),
+                runtime_auto_redeem_error_log_value(err),
             ),
         );
     });
@@ -492,7 +487,7 @@ pub(crate) fn runtime_auto_redeem_usage_limit_reset_credit(
                         format!(
                             "{context}_auto_redeem_refresh_failed profile={profile_name} route={} error={}",
                             runtime_route_kind_label(route_kind),
-                            err.to_string().replace('\n', " "),
+                            runtime_auto_redeem_error_log_value(&err),
                         ),
                     );
                     return Ok(RuntimeAutoRedeemResetCreditOutcome::Failed);
@@ -582,6 +577,36 @@ mod tests {
         assert!(!runtime_auto_redeem_precommit_reason_warrants_credit(
             RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend,
         ));
+    }
+
+    #[test]
+    fn auto_redeem_idempotency_key_uses_request_id_uuidv7() {
+        let key = runtime_auto_redeem_idempotency_key();
+        let uuid = key
+            .strip_prefix("prodex-auto-redeem-")
+            .expect("auto redeem key should be prodex scoped");
+
+        assert_eq!(
+            uuid.parse::<RequestId>()
+                .unwrap()
+                .as_uuid()
+                .get_version_num(),
+            7
+        );
+    }
+
+    #[test]
+    fn auto_redeem_error_log_value_redacts_secret_like_material() {
+        let err = anyhow::anyhow!(
+            "quota request failed\nAuthorization: Bearer auto-redeem-token\napi_key=auto-redeem-key"
+        );
+        let message = runtime_auto_redeem_error_log_value(&err);
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("auto-redeem-token"));
+        assert!(!message.contains("auto-redeem-key"));
     }
 
     #[test]

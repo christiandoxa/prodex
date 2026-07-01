@@ -168,7 +168,13 @@ pub(super) fn render_continuity_failure_reason_family(
         ),
         ("stale_continuation", &metrics.stale_continuation),
     ] {
+        let mut redacted_reasons = BTreeMap::<&'static str, u64>::new();
         for (reason, value) in reasons {
+            *redacted_reasons
+                .entry(continuity_failure_reason_label(reason))
+                .or_insert(0) += *value;
+        }
+        for (reason, value) in redacted_reasons {
             push_gauge(
                 out,
                 metric_name,
@@ -176,11 +182,22 @@ pub(super) fn render_continuity_failure_reason_family(
                     ("broker_key", broker_key),
                     ("listen_addr", listen_addr),
                     ("event", event),
-                    ("reason", reason.as_str()),
+                    ("reason", reason),
                 ]),
-                *value as f64,
+                value as f64,
             );
         }
+    }
+}
+
+fn continuity_failure_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "previous_response_not_found" => "previous_response_not_found",
+        "previous_response_not_found_locked_affinity" => {
+            "previous_response_not_found_locked_affinity"
+        }
+        "websocket_reuse_watchdog_locked_affinity" => "websocket_reuse_watchdog_locked_affinity",
+        _ => "other",
     }
 }
 
@@ -194,18 +211,13 @@ pub(super) fn render_inflight_family(
 ) {
     push_help(out, metric_name, help);
     push_type(out, metric_name, "gauge");
-    for (profile, count) in inflight {
-        push_gauge(
-            out,
-            metric_name,
-            labels(&[
-                ("broker_key", broker_key),
-                ("listen_addr", listen_addr),
-                ("profile", profile.as_str()),
-            ]),
-            *count as f64,
-        );
-    }
+    let total = inflight.values().sum::<u64>();
+    push_gauge(
+        out,
+        metric_name,
+        labels(&[("broker_key", broker_key), ("listen_addr", listen_addr)]),
+        total as f64,
+    );
 }
 
 pub(super) fn push_help(out: &mut String, metric_name: &str, help: &str) {

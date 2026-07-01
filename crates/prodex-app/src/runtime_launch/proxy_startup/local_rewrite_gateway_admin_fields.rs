@@ -34,8 +34,8 @@ pub(super) fn runtime_gateway_admin_optional_dimension_from_body(
         .map(|value| {
             value
                 .as_str()
-                .map(str::trim)
                 .filter(|value| !value.is_empty())
+                .filter(|value| !value.chars().any(char::is_whitespace))
                 .map(str::to_string)
         })
         .unwrap_or_else(|| current.map(str::to_string))
@@ -47,8 +47,8 @@ pub(super) fn runtime_gateway_admin_body_tenant_id(
     body.get("tenant_id").map(|value| {
         value
             .as_str()
-            .map(str::trim)
             .filter(|value| !value.is_empty())
+            .filter(|value| !value.chars().any(char::is_whitespace))
             .map(str::to_string)
     })
 }
@@ -71,11 +71,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn optional_dimension_trims_strings_and_preserves_current_when_absent() {
+    fn optional_dimension_rejects_whitespace_and_preserves_current_when_absent() {
         let body = serde_json::json!({"team_id": " platform "});
         assert_eq!(
             runtime_gateway_admin_optional_dimension_from_body(&body, "team_id", None).as_deref(),
-            Some("platform")
+            None
         );
         assert_eq!(
             runtime_gateway_admin_optional_dimension_from_body(&body, "project_id", Some("old"))
@@ -89,5 +89,6 @@ mod tests {
         assert!(runtime_gateway_validate_virtual_key_name("team.alpha-1").is_ok());
         assert!(runtime_gateway_validate_virtual_key_name("").is_err());
         assert!(runtime_gateway_validate_virtual_key_name("bad space").is_err());
+        assert!(runtime_gateway_validate_virtual_key_name(" team.alpha-1 ").is_err());
     }
 }

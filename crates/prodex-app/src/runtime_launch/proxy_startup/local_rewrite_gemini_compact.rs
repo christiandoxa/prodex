@@ -12,6 +12,7 @@ use super::*;
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result, bail};
 use prodex_runtime_gemini::GEMINI_CHAT_COMPRESSION_MODEL;
+use redaction::redaction_redact_secret_like_text;
 use std::io::Read;
 
 const GEMINI_LOCAL_COMPACT_SUMMARY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
@@ -26,6 +27,10 @@ const GEMINI_LOCAL_COMPACT_MAX_SNIPPET_BYTES: usize = 768;
 const GEMINI_LOCAL_COMPACT_MAX_SUMMARY_BYTES: usize = 24 * 1024;
 const GEMINI_SEMANTIC_COMPACT_ACTIVE_USER_MAX_BYTES: usize = 2 * 1024;
 const GEMINI_SEMANTIC_COMPACT_LATEST_TOOL_MAX_BYTES: usize = 1024;
+
+fn runtime_gemini_compact_error_log_value(err: &anyhow::Error) -> String {
+    redaction_redact_secret_like_text(&format!("{err:#}")).replace('\n', " ")
+}
 
 pub(super) fn respond_runtime_gemini_compact_request(
     request_id: u64,
@@ -116,7 +121,10 @@ pub(super) fn respond_runtime_gemini_compact_request(
                             path_without_query(&captured.path_and_query),
                         ),
                         runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
-                        runtime_proxy_log_field("reason", format!("{err:#}")),
+                        runtime_proxy_log_field(
+                            "reason",
+                            runtime_gemini_compact_error_log_value(&err),
+                        ),
                     ],
                 ),
             );
@@ -789,6 +797,22 @@ mod tests {
         };
 
         assert!(error.to_string().contains("no summary text"));
+    }
+
+    #[test]
+    fn gemini_compact_error_log_value_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!(
+            "compact failed\nAuthorization: Bearer gemini-compact-token\napi_key=gemini-compact-key"
+        )
+        .context("Gemini semantic compact fallback");
+        let message = runtime_gemini_compact_error_log_value(&err);
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Gemini semantic compact fallback"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("gemini-compact-token"));
+        assert!(!message.contains("gemini-compact-key"));
     }
 
     #[test]

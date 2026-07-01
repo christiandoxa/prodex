@@ -71,6 +71,70 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_missing_response_id_fallback_uses_request_id_uuidv7() {
+        let response = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "ok"
+                }
+            }]
+        });
+
+        let translated = runtime_deepseek_responses_value_from_chat_value(&response, 7);
+        let id = translated["id"]
+            .as_str()
+            .and_then(|id| id.strip_prefix("resp_deepseek_"))
+            .expect("fallback DeepSeek response id should be prodex scoped");
+
+        assert_eq!(
+            id.parse::<prodex_domain::RequestId>()
+                .unwrap()
+                .as_uuid()
+                .get_version_num(),
+            7
+        );
+        assert_ne!(translated["id"].as_str(), Some("resp_deepseek_7"));
+    }
+
+    #[test]
+    fn deepseek_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
+        let response = serde_json::json!({
+            "id": "chatcmpl_call_fallback",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "type": "function",
+                        "function": {
+                            "name": "shell",
+                            "arguments": "{\"cmd\":\"pwd\"}"
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let translated = runtime_deepseek_responses_value_from_chat_value(&response, 7);
+        let call_id = translated["output"][0]["call_id"]
+            .as_str()
+            .and_then(|id| id.strip_prefix("call_deepseek_"))
+            .expect("fallback DeepSeek call id should be prodex scoped");
+
+        assert_eq!(
+            call_id
+                .parse::<prodex_domain::CallId>()
+                .unwrap()
+                .as_uuid()
+                .get_version_num(),
+            7
+        );
+        assert_ne!(translated["output"][0]["call_id"].as_str(), Some("call_0"));
+    }
+
+    #[test]
     fn deepseek_tool_turn_keeps_tool_output_adjacent_when_instructions_repeat() {
         let conversations = conversation_store();
         let instructions = "You are Codex. Keep answers concise.";

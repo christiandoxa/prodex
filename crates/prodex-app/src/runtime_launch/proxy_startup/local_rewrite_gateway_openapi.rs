@@ -31,4 +31,33 @@ mod tests {
         assert!(spec["paths"]["/v1/prodex/gateway/keys"].is_object());
         assert!(spec["paths"]["/v1/prodex/gateway/openapi.json"].is_object());
     }
+
+    #[test]
+    fn openapi_documents_exact_gateway_identifier_boundaries() {
+        let spec = runtime_gateway_openapi_spec_for_mount("/v1/");
+        let schemas = &spec["components"]["schemas"];
+
+        assert_eq!(schemas["GatewayExactIdentifier"]["minLength"], 1);
+        assert_eq!(schemas["GatewayExactIdentifier"]["pattern"], "^\\S+$");
+        assert_eq!(
+            schemas["GatewayKeyCreateRequest"]["properties"]["name"]["$ref"],
+            "#/components/schemas/GatewayExactIdentifier"
+        );
+        assert_eq!(
+            schemas["GatewayKeyCreateRequest"]["properties"]["tenant_id"]["$ref"],
+            "#/components/schemas/GatewayNullableExactIdentifier"
+        );
+        assert_eq!(
+            schemas["GatewayKeyCreateRequest"]["properties"]["allowed_models"]["items"]["$ref"],
+            "#/components/schemas/GatewayExactIdentifier"
+        );
+        assert_eq!(
+            schemas["GatewayScimUserWrite"]["properties"]["userName"]["$ref"],
+            "#/components/schemas/GatewayExactIdentifier"
+        );
+        assert_eq!(
+            schemas["GatewayScimUserWrite"]["properties"]["allowed_key_prefixes"]["items"]["$ref"],
+            "#/components/schemas/GatewayExactIdentifier"
+        );
+    }
 }

@@ -12,6 +12,8 @@ const DEFAULT_MEMORY_LIMIT: i64 = 20;
 const PRODEX_MEMORY_BACKEND_ENV: &str = "PRODEX_MEMORY_BACKEND";
 const PRODEX_MEM0_API_URL_ENV: &str = "PRODEX_MEM0_API_URL";
 const PRODEX_MEM0_API_KEY_ENV: &str = "PRODEX_MEM0_API_KEY";
+const MEMORY_MCP_INVALID_PARAMS_MESSAGE: &str = "invalid memory tool parameters";
+const MEMORY_MCP_METHOD_NOT_FOUND_MESSAGE: &str = "method not found";
 
 pub fn default_memory_store_path(prodex_home: &Path) -> PathBuf {
     prodex_home.join("memory").join("prodex-memory.sqlite")
@@ -187,11 +189,11 @@ fn handle_mcp_request(backend: &MemoryBackend, request: Value) -> Result<Option<
             let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
             match handle_tool_call(backend, params) {
                 Ok(result) => result,
-                Err(err) => {
+                Err(_err) => {
                     return Ok(Some(json!({
                         "jsonrpc": "2.0",
                         "id": id,
-                        "error": { "code": -32602, "message": format!("{err:#}") }
+                        "error": { "code": -32602, "message": MEMORY_MCP_INVALID_PARAMS_MESSAGE }
                     })));
                 }
             }
@@ -200,7 +202,7 @@ fn handle_mcp_request(backend: &MemoryBackend, request: Value) -> Result<Option<
             return Ok(Some(json!({
                 "jsonrpc": "2.0",
                 "id": id,
-                "error": { "code": -32601, "message": format!("unknown method: {method}") }
+                "error": { "code": -32601, "message": MEMORY_MCP_METHOD_NOT_FOUND_MESSAGE }
             })));
         }
     };
@@ -286,7 +288,7 @@ fn handle_tool_call(backend: &MemoryBackend, params: Value) -> Result<Value> {
             MemoryBackend::Sqlite(conn) => memory_delete(conn, &args)?,
             MemoryBackend::Mem0(client) => mem0_memory_delete(client, &args)?,
         },
-        _ => format!("Unknown memory tool: {name}"),
+        _ => anyhow::bail!("unknown memory tool"),
     };
     Ok(json!({ "content": [{ "type": "text", "text": output }] }))
 }
@@ -632,6 +634,80 @@ mod tests {
         )
         .unwrap();
         assert!(content_length.starts_with(b"Content-Length:"));
+    }
+
+    #[test]
+    fn mcp_invalid_params_error_is_stable_and_redacted() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_memory_store(&conn).unwrap();
+        let backend = MemoryBackend::Sqlite(conn);
+        let response = handle_mcp_request(
+            &backend,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params": { "name": "memory_add", "arguments": { "text": 7, "secret": "secret-token-123" } }
+            }),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(response["error"]["code"], -32602);
+        assert_eq!(
+            response["error"]["message"],
+            MEMORY_MCP_INVALID_PARAMS_MESSAGE
+        );
+        assert!(!response.to_string().contains("secret-token-123"));
+    }
+
+    #[test]
+    fn mcp_unknown_tool_error_is_stable_and_redacted() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_memory_store(&conn).unwrap();
+        let backend = MemoryBackend::Sqlite(conn);
+        let response = handle_mcp_request(
+            &backend,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params": { "name": "secret-token-123", "arguments": {} }
+            }),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(response["error"]["code"], -32602);
+        assert_eq!(
+            response["error"]["message"],
+            MEMORY_MCP_INVALID_PARAMS_MESSAGE
+        );
+        assert!(!response.to_string().contains("secret-token-123"));
+    }
+
+    #[test]
+    fn mcp_unknown_method_error_is_stable_and_redacted() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_memory_store(&conn).unwrap();
+        let backend = MemoryBackend::Sqlite(conn);
+        let response = handle_mcp_request(
+            &backend,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"secret-token-123"
+            }),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(response["error"]["code"], -32601);
+        assert_eq!(
+            response["error"]["message"],
+            MEMORY_MCP_METHOD_NOT_FOUND_MESSAGE
+        );
+        assert!(!response.to_string().contains("secret-token-123"));
     }
 
     #[test]

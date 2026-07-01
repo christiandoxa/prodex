@@ -4,8 +4,6 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, Read};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_PRODEX_CLAUDE_MODEL: &str = "gpt-5.4";
 pub const RUNTIME_PROXY_OPENAI_UPSTREAM_PATH: &str = "/backend-api/codex";
@@ -14,8 +12,6 @@ pub const RUNTIME_PROXY_ANTHROPIC_MODELS_PATH: &str = "/v1/models";
 pub const RUNTIME_PROXY_ANTHROPIC_HEALTH_PATH: &str = "/health";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER: &str = "X-Prodex-Internal-Request-Origin";
 pub const PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES: &str = "anthropic_messages";
-
-static RUNTIME_TOKEN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 mod input;
 mod models;
@@ -529,16 +525,27 @@ pub fn extract_runtime_response_ids_from_value(value: &serde_json::Value) -> Vec
 }
 
 pub fn runtime_random_token(prefix: &str) -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = RUNTIME_TOKEN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}-{}-{nanos:x}-{sequence:x}", std::process::id())
+    format!("{prefix}-{}", uuid::Uuid::now_v7())
 }
 
 pub fn runtime_proxy_claude_session_id(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_proxy_request_header_value(&request.headers, "x-claude-code-session-id")
         .or_else(|| runtime_proxy_request_header_value(&request.headers, "session_id"))
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_random_token_uses_uuidv7_not_process_local_counter() {
+        let token = runtime_random_token("token");
+        let id = token
+            .strip_prefix("token-")
+            .expect("token should keep requested prefix");
+
+        assert_eq!(id.parse::<uuid::Uuid>().unwrap().get_version_num(), 7);
+        assert_ne!(token, format!("token-{}-0-0", std::process::id()));
+    }
 }

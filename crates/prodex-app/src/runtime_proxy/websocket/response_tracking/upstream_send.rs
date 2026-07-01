@@ -6,7 +6,7 @@ use super::{
     RuntimeWebsocketAttempt, RuntimeWebsocketSessionState,
     apply_runtime_presidio_redaction_to_websocket_text, note_runtime_profile_transport_failure,
     prepare_runtime_smart_context_websocket_text, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_structured_log_message,
+    runtime_proxy_structured_log_message, runtime_websocket_error_log_value,
 };
 use crate::runtime_proxy::log_runtime_upstream_payload_snapshot;
 
@@ -76,7 +76,10 @@ pub(super) fn send_runtime_websocket_upstream_request(
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
                     runtime_proxy_log_field("profile", profile_name),
-                    runtime_proxy_log_field("error", err.to_string()),
+                    runtime_proxy_log_field(
+                        "error",
+                        runtime_websocket_error_log_value(&err.to_string()),
+                    ),
                 ],
             ),
         );

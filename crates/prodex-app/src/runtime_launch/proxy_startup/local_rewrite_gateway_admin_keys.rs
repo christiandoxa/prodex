@@ -1,5 +1,8 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
-use super::local_rewrite_gateway_admin_audit::runtime_gateway_audit_admin_key_event;
+use super::local_rewrite_gateway_admin_audit::{
+    runtime_gateway_audit_admin_authorization_denied_event, runtime_gateway_audit_admin_key_event,
+    runtime_gateway_audit_admin_key_mutation_denied_event,
+};
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
 use super::local_rewrite_gateway_admin_fields::{
     runtime_gateway_admin_body_tenant_id, runtime_gateway_admin_key_patch_fields,
@@ -23,6 +26,17 @@ use super::local_rewrite_gateway_util::{
 };
 use super::*;
 
+const RUNTIME_GATEWAY_KEY_GENERATION_FAILED_MESSAGE: &str =
+    "gateway key token could not be generated";
+
+fn runtime_gateway_admin_key_generation_failed_error() -> RuntimeGatewayAdminError {
+    RuntimeGatewayAdminError::new(
+        500,
+        "gateway_key_generation_failed",
+        RUNTIME_GATEWAY_KEY_GENERATION_FAILED_MESSAGE,
+    )
+}
+
 pub(super) fn runtime_gateway_admin_get_key_response(
     name: &str,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -44,7 +58,12 @@ pub(super) fn runtime_gateway_admin_get_key_response(
         );
     };
     if !admin_auth.can_access_entry(entry) {
-        return runtime_gateway_admin_key_scope_forbidden_response();
+        return runtime_gateway_admin_key_scope_forbidden_response(
+            shared,
+            admin_auth,
+            "get_key",
+            &entry.key.name,
+        );
     }
     let usage = shared
         .gateway_usage
@@ -52,12 +71,13 @@ pub(super) fn runtime_gateway_admin_get_key_response(
         .lock()
         .ok()
         .and_then(|usage| usage.get(&entry.key.name).cloned());
-    runtime_gateway_admin_json_response(
+    runtime_gateway_admin_key_json_response_with_etag(
         200,
         serde_json::json!({
             "object": "gateway.key",
             "key": runtime_gateway_admin_key_json(entry, usage),
         }),
+        &runtime_gateway_admin_key_etag(entry.updated_at_epoch),
     )
 }
 
@@ -73,7 +93,6 @@ pub(super) fn runtime_gateway_admin_create_key_response(
     let name = match body
         .get("name")
         .and_then(serde_json::Value::as_str)
-        .map(str::trim)
         .filter(|value| !value.is_empty())
     {
         Some(name) => name.to_string(),
@@ -118,7 +137,16 @@ pub(super) fn runtime_gateway_admin_create_key_response(
         )
         || !admin_auth.can_access_key(&name)
     {
-        return runtime_gateway_admin_key_scope_forbidden_response();
+        let requested_name = body
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("<invalid>");
+        return runtime_gateway_admin_key_scope_forbidden_response(
+            shared,
+            admin_auth,
+            "create_key",
+            requested_name,
+        );
     }
     if runtime_gateway_virtual_key_name_exists(shared, &name) {
         return build_runtime_proxy_json_error_response(
@@ -137,11 +165,11 @@ pub(super) fn runtime_gateway_admin_create_key_response(
         Some(token) => token,
         None => match runtime_gateway_generate_virtual_key_token() {
             Ok(token) => token,
-            Err(err) => {
+            Err(_err) => {
                 return build_runtime_proxy_json_error_response(
                     500,
                     "gateway_key_generation_failed",
-                    &err.to_string(),
+                    RUNTIME_GATEWAY_KEY_GENERATION_FAILED_MESSAGE,
                 );
             }
         },
@@ -248,9 +276,22 @@ pub(super) fn runtime_gateway_admin_update_key_response(
         );
     };
     if !admin_auth.can_access_entry(&entry) {
-        return runtime_gateway_admin_key_scope_forbidden_response();
+        return runtime_gateway_admin_key_scope_forbidden_response(
+            shared,
+            admin_auth,
+            "update_key",
+            &entry.key.name,
+        );
     }
     if entry.source != RuntimeGatewayVirtualKeySource::Admin {
+        runtime_gateway_audit_admin_key_mutation_denied_event(
+            shared,
+            &admin_auth.name,
+            admin_auth.role.as_str(),
+            "gateway_key_read_only",
+            "update_key",
+            &entry.key.name,
+        );
         return build_runtime_proxy_json_error_response(
             403,
             "gateway_key_read_only",
@@ -264,7 +305,12 @@ pub(super) fn runtime_gateway_admin_update_key_response(
     if let Some(tenant_id) = runtime_gateway_admin_body_tenant_id(&body)
         && !admin_auth.can_access_tenant(tenant_id.as_deref())
     {
-        return runtime_gateway_admin_key_scope_forbidden_response();
+        return runtime_gateway_admin_key_scope_forbidden_response(
+            shared,
+            admin_auth,
+            "update_key",
+            &entry.key.name,
+        );
     }
     let requested_team_id = runtime_gateway_admin_optional_dimension_from_body(
         &body,
@@ -292,7 +338,12 @@ pub(super) fn runtime_gateway_admin_update_key_response(
         requested_user_id.as_deref(),
         requested_budget_id.as_deref(),
     ) {
-        return runtime_gateway_admin_key_scope_forbidden_response();
+        return runtime_gateway_admin_key_scope_forbidden_response(
+            shared,
+            admin_auth,
+            "update_key",
+            &entry.key.name,
+        );
     }
     let rotate = body
         .get("rotate")
@@ -312,9 +363,8 @@ pub(super) fn runtime_gateway_admin_update_key_response(
             ));
         };
         if rotate {
-            let token = runtime_gateway_generate_virtual_key_token().map_err(|err| {
-                RuntimeGatewayAdminError::new(500, "gateway_key_generation_failed", err.to_string())
-            })?;
+            let token = runtime_gateway_generate_virtual_key_token()
+                .map_err(|_err| runtime_gateway_admin_key_generation_failed_error())?;
             record.token_hash_base64 =
                 runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token).hash_base64();
             rotated_token = Some(token);
@@ -373,9 +423,22 @@ pub(super) fn runtime_gateway_admin_delete_key_response(
         );
     };
     if !admin_auth.can_access_entry(&entry) {
-        return runtime_gateway_admin_key_scope_forbidden_response();
+        return runtime_gateway_admin_key_scope_forbidden_response(
+            shared,
+            admin_auth,
+            "delete_key",
+            &entry.key.name,
+        );
     }
     if entry.source != RuntimeGatewayVirtualKeySource::Admin {
+        runtime_gateway_audit_admin_key_mutation_denied_event(
+            shared,
+            &admin_auth.name,
+            admin_auth.role.as_str(),
+            "gateway_key_read_only",
+            "delete_key",
+            &entry.key.name,
+        );
         return build_runtime_proxy_json_error_response(
             403,
             "gateway_key_read_only",
@@ -420,7 +483,20 @@ pub(super) fn runtime_gateway_admin_delete_key_response(
     }
 }
 
-fn runtime_gateway_admin_key_scope_forbidden_response() -> tiny_http::ResponseBox {
+fn runtime_gateway_admin_key_scope_forbidden_response(
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    action: &'static str,
+    key_name: &str,
+) -> tiny_http::ResponseBox {
+    runtime_gateway_audit_admin_authorization_denied_event(
+        shared,
+        &admin_auth.name,
+        admin_auth.role.as_str(),
+        "key",
+        action,
+        key_name,
+    );
     build_runtime_proxy_json_error_response(
         403,
         "gateway_admin_key_scope_forbidden",
@@ -433,4 +509,50 @@ fn runtime_gateway_admin_request_tenant_id(
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> Option<String> {
     runtime_gateway_admin_body_tenant_id(body).unwrap_or_else(|| admin_auth.tenant_id.clone())
+}
+
+pub(super) fn runtime_gateway_admin_key_etag(updated_at_epoch: Option<u64>) -> String {
+    format!("\"gateway-key-{}\"", updated_at_epoch.unwrap_or_default())
+}
+
+fn runtime_gateway_admin_key_json_response_with_etag(
+    status: u16,
+    value: serde_json::Value,
+    etag: &str,
+) -> tiny_http::ResponseBox {
+    let body = serde_json::to_vec_pretty(&value).unwrap_or_else(|_| b"{}".to_vec());
+    build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
+        status,
+        headers: vec![
+            (
+                "content-type".to_string(),
+                b"application/json; charset=utf-8".to_vec(),
+            ),
+            ("cache-control".to_string(), b"no-store".to_vec()),
+            ("x-content-type-options".to_string(), b"nosniff".to_vec()),
+            ("etag".to_string(), etag.as_bytes().to_vec()),
+        ],
+        body: body.into(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gateway_key_generation_error_uses_stable_redacted_message() {
+        let err = runtime_gateway_admin_key_generation_failed_error();
+        assert_eq!(err.test_status(), 500);
+        assert_eq!(err.test_code(), "gateway_key_generation_failed");
+        assert_eq!(
+            err.test_message(),
+            "gateway key token could not be generated"
+        );
+        assert!(!err.test_message().contains("getrandom"));
+        assert!(
+            !err.test_message()
+                .contains("failed to generate gateway virtual key")
+        );
+    }
 }

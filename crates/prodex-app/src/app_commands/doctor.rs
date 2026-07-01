@@ -4,7 +4,10 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use redaction::{redaction_key_looks_sensitive, redaction_redacted_body_snippet};
+use redaction::{
+    redaction_key_looks_sensitive, redaction_redact_secret_like_text,
+    redaction_redacted_body_snippet,
+};
 use terminal_ui::{
     text_width, tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style,
 };
@@ -315,10 +318,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                     }
                 }
                 Err(err) => {
-                    fields.push((
-                        "Quota".to_string(),
-                        format!("Error ({})", first_line_of_error(&err.to_string())),
-                    ));
+                    fields.push(("Quota".to_string(), doctor_quota_error_summary(&err)));
                 }
             }
         }
@@ -444,6 +444,11 @@ fn doctor_value_color(label: &str, value: &str) -> Color {
     } else {
         Color::Reset
     }
+}
+
+fn doctor_quota_error_summary(err: &str) -> String {
+    let redacted = redaction_redact_secret_like_text(err);
+    format!("Error ({})", first_line_of_error(&redacted))
 }
 
 struct DoctorRedactedBundleContext<'a> {
@@ -674,5 +679,17 @@ mod tests {
         assert_eq!(doctor_value_color("Quota", "Blocked"), Color::Red);
         assert_eq!(doctor_value_color("Runtime", "ready"), Color::Green);
         assert_eq!(doctor_value_color("Runtime", "critical"), Color::Red);
+    }
+
+    #[test]
+    fn doctor_quota_error_summary_redacts_secret_like_material() {
+        let err = "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123";
+
+        let summary = doctor_quota_error_summary(err);
+
+        assert!(summary.contains("Authorization: Bearer <redacted>"));
+        assert!(summary.contains("api_key=<redacted>"));
+        assert!(!summary.contains("fixture-token-123"));
+        assert!(!summary.contains("sk-fixture-123"));
     }
 }

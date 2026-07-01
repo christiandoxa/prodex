@@ -76,41 +76,35 @@ pub(super) fn resolve_gateway_launch_config(
         );
     }
 
-    let listen_addr = args
-        .listen
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            policy
-                .listen_addr
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| "127.0.0.1:4000".to_string());
+    let listen_addr = match args.listen.as_deref().or(policy.listen_addr.as_deref()) {
+        Some(value) if gateway_exact_policy_identifier(value) => value.to_string(),
+        Some(_) => bail!("gateway.listen_addr must be non-empty without whitespace"),
+        None => "127.0.0.1:4000".to_string(),
+    };
     gateway_validate_listen_auth(&listen_addr, auth_required)?;
 
     let provider_id = gateway_provider_catalog_id(provider);
     let route_aliases = policy
         .route_aliases
         .iter()
-        .map(|alias| {
-            let strategy = alias
-                .strategy
-                .as_deref()
-                .and_then(runtime_proxy_crate::RuntimeGatewayRouteStrategy::parse)
-                .unwrap_or_default();
+        .map(|alias| -> Result<_> {
+            let strategy = match alias.strategy.as_deref() {
+                Some(value) => runtime_proxy_crate::RuntimeGatewayRouteStrategy::parse(value)
+                    .with_context(|| {
+                        format!("gateway route alias '{}' strategy is invalid", alias.alias)
+                    })?,
+                None => Default::default(),
+            };
             let models = alias
                 .models
                 .iter()
-                .map(|model| model.trim().to_string())
-                .filter(|model| !model.is_empty())
+                .filter(|model| gateway_exact_policy_identifier(model))
+                .cloned()
                 .collect::<Vec<_>>();
-            runtime_proxy_crate::RuntimeGatewayRouteAlias {
-                alias: alias.alias.trim().to_string(),
+            Ok(runtime_proxy_crate::RuntimeGatewayRouteAlias {
+                alias: gateway_exact_policy_identifier(&alias.alias)
+                    .then(|| alias.alias.clone())
+                    .unwrap_or_default(),
                 model_metrics: gateway_route_alias_model_metrics(
                     provider_id,
                     &models,
@@ -118,37 +112,10 @@ pub(super) fn resolve_gateway_launch_config(
                 ),
                 models,
                 strategy,
-            }
+            })
         })
-        .collect::<Vec<_>>();
-    let guardrails = runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
-        blocked_keywords: policy
-            .guardrails
-            .blocked_keywords
-            .iter()
-            .map(|keyword| keyword.trim().to_string())
-            .filter(|keyword| !keyword.is_empty())
-            .collect(),
-        blocked_output_keywords: policy
-            .guardrails
-            .blocked_output_keywords
-            .iter()
-            .map(|keyword| keyword.trim().to_string())
-            .filter(|keyword| !keyword.is_empty())
-            .collect(),
-        allowed_models: policy
-            .guardrails
-            .allowed_models
-            .iter()
-            .map(|model| model.trim().to_string())
-            .filter(|model| !model.is_empty())
-            .collect(),
-        prompt_injection_detection: policy
-            .guardrails
-            .prompt_injection_detection
-            .unwrap_or(false),
-        pii_redaction: policy.guardrails.pii_redaction.unwrap_or(false),
-    };
+        .collect::<Result<Vec<_>>>()?;
+    let guardrails = gateway_guardrail_config(policy);
     let presidio_redaction_enabled = if args.presidio {
         true
     } else if args.no_presidio {
@@ -156,14 +123,7 @@ pub(super) fn resolve_gateway_launch_config(
     } else {
         policy.guardrails.presidio_redaction.unwrap_or(false)
     };
-    let call_id_header = policy
-        .observability
-        .call_id_header
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("x-prodex-call-id")
-        .to_string();
+    let call_id_header = gateway_call_id_header_config(policy)?;
 
     Ok(ResolvedGatewayLaunchConfig {
         provider_name: provider.map(SuperExternalProvider::as_str),
@@ -186,22 +146,21 @@ pub(super) fn resolve_gateway_launch_config(
         presidio_redaction_enabled,
     })
 }
-fn gateway_guardrail_webhook_config(
+pub(super) fn gateway_guardrail_webhook_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> RuntimeGatewayGuardrailWebhookConfig {
     let url = policy
         .guardrails
         .webhook_url
         .as_deref()
-        .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
     let phases = policy
         .guardrails
         .webhook_phases
         .iter()
-        .map(|phase| phase.trim().to_ascii_lowercase())
-        .filter(|phase| !phase.is_empty())
+        .filter(|phase| gateway_exact_policy_identifier(phase))
+        .map(|phase| phase.to_ascii_lowercase())
         .map(|phase| match phase.as_str() {
             "request" => "pre".to_string(),
             "response" => "post".to_string(),
@@ -212,8 +171,7 @@ fn gateway_guardrail_webhook_config(
         .guardrails
         .webhook_bearer_token_env
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| gateway_exact_policy_identifier(value))
         .and_then(|env_name| {
             env::var(env_name)
                 .ok()
@@ -227,28 +185,75 @@ fn gateway_guardrail_webhook_config(
         fail_closed: policy.guardrails.webhook_fail_closed.unwrap_or(false),
     }
 }
+
+pub(super) fn gateway_call_id_header_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<String> {
+    Ok(policy
+        .observability
+        .call_id_header
+        .as_deref()
+        .map(|value| {
+            gateway_exact_policy_identifier(value)
+                .then_some(value)
+                .context(
+                    "gateway.observability.call_id_header must be non-empty without whitespace",
+                )
+        })
+        .transpose()?
+        .unwrap_or("x-prodex-call-id")
+        .to_string())
+}
+
+pub(super) fn gateway_guardrail_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
+    runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
+        blocked_keywords: policy
+            .guardrails
+            .blocked_keywords
+            .iter()
+            .filter(|keyword| !keyword.trim().is_empty())
+            .cloned()
+            .collect(),
+        blocked_output_keywords: policy
+            .guardrails
+            .blocked_output_keywords
+            .iter()
+            .filter(|keyword| !keyword.trim().is_empty())
+            .cloned()
+            .collect(),
+        allowed_models: policy
+            .guardrails
+            .allowed_models
+            .iter()
+            .filter(|model| gateway_exact_policy_identifier(model))
+            .cloned()
+            .collect(),
+        prompt_injection_detection: policy
+            .guardrails
+            .prompt_injection_detection
+            .unwrap_or(false),
+        pii_redaction: policy.guardrails.pii_redaction.unwrap_or(false),
+    }
+}
 pub(super) fn gateway_state_store_config(
     paths: &AppPaths,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<RuntimeGatewayStateStore> {
-    match policy
-        .state
-        .backend
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("file")
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    let backend = match policy.state.backend.as_deref() {
+        Some(value) if gateway_exact_policy_identifier(value) => value,
+        Some(_) => bail!("gateway.state.backend must be non-empty without whitespace"),
+        None => "file",
+    };
+    match backend.to_ascii_lowercase().as_str() {
         "file" => Ok(RuntimeGatewayStateStore::file(paths)),
         "sqlite" => {
             let configured = policy
                 .state
                 .sqlite_path
                 .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .filter(|value| !value.trim().is_empty())
                 .unwrap_or("gateway-state.sqlite");
             let path = PathBuf::from(configured);
             let path = if path.is_absolute() {
@@ -263,8 +268,14 @@ pub(super) fn gateway_state_store_config(
                 .state
                 .postgres_url_env
                 .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .map(|value| {
+                    gateway_exact_policy_identifier(value)
+                        .then_some(value)
+                        .context(
+                            "gateway.state.postgres_url_env must be non-empty without whitespace",
+                        )
+                })
+                .transpose()?
                 .unwrap_or("PRODEX_GATEWAY_POSTGRES_URL");
             let url = env::var(env_name)
                 .with_context(|| format!("gateway.state.backend=postgres requires {env_name}"))?
@@ -283,8 +294,12 @@ pub(super) fn gateway_state_store_config(
                 .state
                 .redis_url_env
                 .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .map(|value| {
+                    gateway_exact_policy_identifier(value)
+                        .then_some(value)
+                        .context("gateway.state.redis_url_env must be non-empty without whitespace")
+                })
+                .transpose()?
                 .unwrap_or("PRODEX_GATEWAY_REDIS_URL");
             let url = env::var(env_name)
                 .with_context(|| format!("gateway.state.backend=redis requires {env_name}"))?
@@ -300,7 +315,7 @@ pub(super) fn gateway_state_store_config(
         }
     }
 }
-fn gateway_admin_tokens_config(
+pub(super) fn gateway_admin_tokens_config(
     legacy_admin_token: Option<&str>,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<Vec<RuntimeGatewayAdminToken>> {
@@ -322,6 +337,9 @@ fn gateway_admin_tokens_config(
         });
     }
     for configured in &policy.admin_tokens {
+        if !gateway_exact_policy_identifier(&configured.token_env) {
+            continue;
+        }
         let Some(token) = env::var(&configured.token_env)
             .ok()
             .map(|value| value.trim().to_string())
@@ -329,21 +347,22 @@ fn gateway_admin_tokens_config(
         else {
             continue;
         };
-        let role = configured
-            .role
-            .as_deref()
-            .and_then(RuntimeGatewayAdminRole::parse)
-            .unwrap_or(RuntimeGatewayAdminRole::Admin);
+        let role = match configured.role.as_deref() {
+            Some(role) => RuntimeGatewayAdminRole::parse(role).with_context(|| {
+                format!(
+                    "gateway.admin_tokens role for {:?} must be admin or viewer",
+                    configured.name
+                )
+            })?,
+            None => RuntimeGatewayAdminRole::Viewer,
+        };
         tokens.push(RuntimeGatewayAdminToken {
-            name: configured.name.trim().to_string(),
+            name: gateway_exact_policy_identifier(&configured.name)
+                .then(|| configured.name.clone())
+                .unwrap_or_default(),
             token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token),
             role,
-            tenant_id: configured
-                .tenant_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string),
+            tenant_id: gateway_optional_policy_string(configured.tenant_id.as_deref()),
             team_id: gateway_optional_policy_string(configured.team_id.as_deref()),
             project_id: gateway_optional_policy_string(configured.project_id.as_deref()),
             user_id: gateway_optional_policy_string(configured.user_id.as_deref()),
@@ -351,8 +370,8 @@ fn gateway_admin_tokens_config(
             allowed_key_prefixes: configured
                 .allowed_key_prefixes
                 .iter()
-                .map(|prefix| prefix.trim().to_string())
-                .filter(|prefix| !prefix.is_empty())
+                .filter(|prefix| !prefix.is_empty() && !prefix.chars().any(char::is_whitespace))
+                .cloned()
                 .collect(),
         });
     }
@@ -365,8 +384,7 @@ pub(super) fn gateway_sso_config(
         .sso
         .proxy_token_env
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| gateway_exact_policy_identifier(value))
     {
         Some(env_name) => {
             let token = env::var(env_name)
@@ -382,14 +400,9 @@ pub(super) fn gateway_sso_config(
         }
         None => None,
     };
-    let default_role = policy
-        .sso
-        .default_role
-        .as_deref()
-        .and_then(RuntimeGatewayAdminRole::parse)
-        .unwrap_or(RuntimeGatewayAdminRole::Admin);
     Ok(RuntimeGatewaySsoConfig {
         proxy_token_hash,
+        require_tenant: policy.sso.require_tenant.unwrap_or(false),
         token_header: gateway_sso_header(&policy.sso.token_header, "x-prodex-sso-token"),
         user_header: gateway_sso_header(&policy.sso.user_header, "x-prodex-sso-user"),
         role_header: gateway_sso_header(&policy.sso.role_header, "x-prodex-sso-role"),
@@ -399,7 +412,6 @@ pub(super) fn gateway_sso_config(
             "x-prodex-sso-key-prefixes",
         ),
         oidc: gateway_sso_oidc_config(policy)?,
-        default_role,
     })
 }
 
@@ -410,8 +422,7 @@ fn gateway_sso_oidc_config(
         .sso
         .oidc_issuer
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| gateway_exact_policy_identifier(value))
     else {
         return Ok(None);
     };
@@ -419,8 +430,7 @@ fn gateway_sso_oidc_config(
         .sso
         .oidc_audience
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| gateway_exact_policy_identifier(value))
         .context("gateway.sso.oidc_audience is required when oidc_issuer is set")?;
     Ok(Some(RuntimeGatewayOidcConfig {
         issuer: issuer.to_string(),
@@ -429,8 +439,7 @@ fn gateway_sso_oidc_config(
             .sso
             .oidc_jwks_url
             .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
+            .filter(|value| gateway_exact_policy_identifier(value))
             .map(str::to_string),
         user_claim: gateway_sso_header(&policy.sso.oidc_user_claim, "email"),
         role_claim: gateway_sso_header(&policy.sso.oidc_role_claim, "prodex_role"),
@@ -445,13 +454,12 @@ fn gateway_sso_oidc_config(
 fn gateway_sso_header(value: &Option<String>, default: &str) -> String {
     value
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| gateway_exact_policy_identifier(value))
         .unwrap_or(default)
         .to_string()
 }
 
-fn gateway_observability_config(
+pub(super) fn gateway_observability_config(
     paths: &AppPaths,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<RuntimeGatewayObservabilityConfig> {
@@ -459,8 +467,8 @@ fn gateway_observability_config(
         .observability
         .sinks
         .iter()
-        .map(|sink| sink.trim().to_string())
-        .filter(|sink| !sink.is_empty())
+        .filter(|sink| gateway_exact_policy_identifier(sink))
+        .cloned()
         .collect::<Vec<_>>();
     if !sinks
         .iter()
@@ -472,8 +480,7 @@ fn gateway_observability_config(
         .observability
         .jsonl_path
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
         .map(|value| {
             let path = PathBuf::from(value);
             if path.is_absolute() {
@@ -489,7 +496,6 @@ fn gateway_observability_config(
         .observability
         .http_endpoint
         .as_deref()
-        .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
     if http_endpoint.is_some() && !sinks.iter().any(|sink| sink.eq_ignore_ascii_case("http")) {
@@ -499,16 +505,19 @@ fn gateway_observability_config(
         .observability
         .http_schema
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .map(|value| {
+            gateway_exact_policy_identifier(value)
+                .then_some(value)
+                .context("gateway.observability.http_schema must be non-empty without whitespace")
+        })
+        .transpose()?
         .unwrap_or("generic")
         .to_ascii_lowercase();
     let http_bearer_token = policy
         .observability
         .http_bearer_token_env
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| gateway_exact_policy_identifier(value))
         .and_then(|env_name| {
             env::var(env_name)
                 .ok()
@@ -524,14 +533,17 @@ fn gateway_observability_config(
     })
 }
 
-fn gateway_virtual_keys_config(
+pub(super) fn gateway_virtual_keys_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>> {
     policy
         .virtual_keys
         .iter()
         .map(|key| {
-            let token_env = key.token_env.trim();
+            let token_env = key.token_env.as_str();
+            if !gateway_exact_policy_identifier(token_env) {
+                bail!("gateway virtual key '{}' token_env is invalid", key.name);
+            }
             let token = env::var(token_env)
                 .with_context(|| {
                     format!("gateway virtual key '{}' requires {token_env}", key.name)
@@ -545,13 +557,10 @@ fn gateway_virtual_keys_config(
                 );
             }
             Ok(runtime_proxy_crate::RuntimeGatewayVirtualKey {
-                name: key.name.trim().to_string(),
-                tenant_id: key
-                    .tenant_id
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string),
+                name: gateway_exact_policy_identifier(&key.name)
+                    .then(|| key.name.clone())
+                    .unwrap_or_default(),
+                tenant_id: gateway_optional_policy_string(key.tenant_id.as_deref()),
                 team_id: gateway_optional_policy_string(key.team_id.as_deref()),
                 project_id: gateway_optional_policy_string(key.project_id.as_deref()),
                 user_id: gateway_optional_policy_string(key.user_id.as_deref()),
@@ -560,8 +569,8 @@ fn gateway_virtual_keys_config(
                 allowed_models: key
                     .allowed_models
                     .iter()
-                    .map(|model| model.trim().to_string())
-                    .filter(|model| !model.is_empty())
+                    .filter(|model| gateway_exact_policy_identifier(model))
+                    .cloned()
                     .collect(),
                 budget_microusd: key.budget_usd.map(gateway_budget_usd_to_microusd),
                 request_budget: key.request_budget,
@@ -570,6 +579,20 @@ fn gateway_virtual_keys_config(
             })
         })
         .collect()
+}
+
+fn gateway_optional_policy_string(value: Option<&str>) -> Option<String> {
+    value
+        .filter(|value| gateway_exact_policy_identifier(value))
+        .map(str::to_string)
+}
+
+fn gateway_exact_policy_identifier(value: &str) -> bool {
+    !value.is_empty() && !value.chars().any(char::is_whitespace)
+}
+
+fn gateway_budget_usd_to_microusd(value: f64) -> u64 {
+    (value * 1_000_000.0).round().clamp(1.0, u64::MAX as f64) as u64
 }
 
 fn gateway_provider_catalog_id(
@@ -607,11 +630,10 @@ fn gateway_route_alias_model_metrics(
         }
     }
     for metric in configured {
-        let model = metric.model.trim().to_string();
-        if model.is_empty() {
+        if !gateway_exact_policy_identifier(&metric.model) {
             continue;
         }
-        let entry = metrics.entry(model).or_default();
+        let entry = metrics.entry(metric.model.clone()).or_default();
         if metric.input_cost_per_million_microusd.is_some() {
             entry.input_cost_per_million_microusd = metric.input_cost_per_million_microusd;
         }
@@ -632,7 +654,10 @@ fn gateway_route_alias_model_metrics(
 }
 
 fn gateway_policy_provider(value: &str) -> Option<SuperExternalProvider> {
-    match value.trim().to_ascii_lowercase().as_str() {
+    if !gateway_exact_policy_identifier(value) {
+        return None;
+    }
+    match value.to_ascii_lowercase().as_str() {
         "anthropic" | "claude" => Some(SuperExternalProvider::Anthropic),
         "copilot" | "github-copilot" | "github_copilot" => Some(SuperExternalProvider::Copilot),
         "deepseek" => Some(SuperExternalProvider::DeepSeek),
@@ -642,7 +667,7 @@ fn gateway_policy_provider(value: &str) -> Option<SuperExternalProvider> {
     }
 }
 
-fn gateway_upstream_base_url(
+pub(super) fn gateway_upstream_base_url(
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     provider: Option<SuperExternalProvider>,
@@ -651,25 +676,26 @@ fn gateway_upstream_base_url(
         .base_url
         .as_deref()
         .or(policy.base_url.as_deref())
-        .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or_else(|| provider.map(|provider| provider.default_base_url().to_string()))
         .or_else(|| {
             env::var("OPENAI_BASE_URL")
                 .ok()
-                .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
     gateway_normalize_upstream_base_url(&raw, provider)
 }
 
-fn gateway_normalize_upstream_base_url(
+pub(super) fn gateway_normalize_upstream_base_url(
     value: &str,
     provider: Option<SuperExternalProvider>,
 ) -> Result<String> {
-    let trimmed = value.trim().trim_end_matches('/').to_string();
+    if value.chars().any(char::is_whitespace) {
+        bail!("gateway --base-url must not contain whitespace");
+    }
+    let trimmed = value.trim_end_matches('/').to_string();
     let parsed = reqwest::Url::parse(&trimmed)
         .with_context(|| format!("invalid gateway --base-url {trimmed:?}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {

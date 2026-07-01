@@ -1,8 +1,12 @@
 use super::*;
+use crate::TestEnvVarGuard;
+use std::fs;
 
 #[test]
 fn gateway_admin_token_key_prefix_scope_limits_key_access() {
     let root = temp_root("gateway-admin-key-scope");
+    let audit_dir = root.join("audit");
+    let _audit_env = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", audit_dir.to_str().unwrap());
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(2);
     let admin_token = "admin-token";
@@ -205,6 +209,15 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
         .expect("scoped forbidden delete key request should be sent");
     assert_eq!(scoped_delete_forbidden.status().as_u16(), 403);
 
+    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("gateway admin audit log should be written");
+    assert!(audit_log.contains(r#""action":"authorization_denied""#));
+    assert!(audit_log.contains(r#""reason":"scope_forbidden""#));
+    assert!(audit_log.contains(r#""resource":"key""#));
+    assert!(audit_log.contains(r#""resource_name":"team-b-main""#));
+    assert!(!audit_log.contains(admin_token));
+    assert!(!audit_log.contains(scoped_token));
+
     let scoped_ledger = client
         .get(format!(
             "http://{}/v1/prodex/gateway/ledger",
@@ -247,14 +260,22 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
     let scoped_metrics = scoped_metrics
         .text()
         .expect("scoped metrics should be text");
-    assert!(scoped_metrics.contains("key=\"team-a-main\""));
-    assert!(scoped_metrics.contains("key=\"team-a-new\""));
-    assert!(!scoped_metrics.contains("key=\"team-b-main\""));
+    assert_eq!(
+        scoped_metrics
+            .matches("prodex_gateway_virtual_key_requests_total{")
+            .count(),
+        2
+    );
+    assert!(!scoped_metrics.contains("team-a-main"));
+    assert!(!scoped_metrics.contains("team-a-new"));
+    assert!(!scoped_metrics.contains("team-b-main"));
 }
 
 #[test]
 fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
     let root = temp_root("gateway-admin-governance-scope");
+    let audit_dir = root.join("audit");
+    let _audit_env = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", audit_dir.to_str().unwrap());
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(3);
     let admin_token = "admin-token";
@@ -374,6 +395,17 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
         .expect("team-scoped forbidden patch key request should be sent");
     assert_eq!(forbidden_patch.status().as_u16(), 403);
 
+    let forbidden_scope_clear = client
+        .patch(format!(
+            "http://{}/v1/prodex/gateway/keys/alpha-main",
+            proxy.listen_addr
+        ))
+        .bearer_auth(team_a_token)
+        .json(&serde_json::json!({"team_id": null}))
+        .send()
+        .expect("team-scoped scope-clearing patch key request should be sent");
+    assert_eq!(forbidden_scope_clear.status().as_u16(), 403);
+
     let team_scim_user = client
         .post(format!(
             "http://{}/v1/prodex/gateway/scim/v2/Users",
@@ -392,6 +424,24 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
         "team-a"
     );
 
+    let team_b_scim_user = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"userName": "bob-team@example.com", "team_id": "team-b"}))
+        .send()
+        .expect("admin SCIM team-b create request should be sent");
+    assert_eq!(team_b_scim_user.status().as_u16(), 201);
+    let team_b_scim_user: serde_json::Value = team_b_scim_user
+        .json()
+        .expect("team-b SCIM user response should be json");
+    let team_b_scim_user_id = team_b_scim_user["id"]
+        .as_str()
+        .expect("team-b SCIM user should have id")
+        .to_string();
+
     let forbidden_scim_user = client
         .post(format!(
             "http://{}/v1/prodex/gateway/scim/v2/Users",
@@ -399,12 +449,43 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
         ))
         .bearer_auth(team_a_token)
         .json(&serde_json::json!({
-            "userName": "bob-team@example.com",
+            "userName": "charlie-team@example.com",
             "team_id": "team-b"
         }))
         .send()
         .expect("team-scoped forbidden SCIM create request should be sent");
     assert_eq!(forbidden_scim_user.status().as_u16(), 403);
+
+    let forbidden_scim_patch = client
+        .patch(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users/{}",
+            proxy.listen_addr, team_b_scim_user_id
+        ))
+        .bearer_auth(team_a_token)
+        .json(&serde_json::json!({"displayName": "blocked"}))
+        .send()
+        .expect("team-scoped forbidden SCIM patch request should be sent");
+    assert_eq!(forbidden_scim_patch.status().as_u16(), 403);
+
+    let forbidden_scim_delete = client
+        .delete(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users/{}",
+            proxy.listen_addr, team_b_scim_user_id
+        ))
+        .bearer_auth(team_a_token)
+        .send()
+        .expect("team-scoped forbidden SCIM delete request should be sent");
+    assert_eq!(forbidden_scim_delete.status().as_u16(), 403);
+
+    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
+        .expect("gateway admin audit log should be written");
+    assert!(audit_log.contains(r#""action":"authorization_denied""#));
+    assert!(audit_log.contains(r#""resource":"scim_user""#));
+    assert!(audit_log.contains(r#""action":"update_scim_user""#));
+    assert!(audit_log.contains(r#""action":"delete_scim_user""#));
+    assert!(audit_log.contains(&team_b_scim_user_id));
+    assert!(!audit_log.contains(admin_token));
+    assert!(!audit_log.contains(team_a_token));
 
     for (token, input) in [
         (&alpha_token, "alpha traffic"),
@@ -482,7 +563,13 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
     let scoped_metrics = scoped_metrics
         .text()
         .expect("scoped metrics should be text");
-    assert!(scoped_metrics.contains("key=\"alpha-main\""));
-    assert!(scoped_metrics.contains("key=\"gamma-main\""));
-    assert!(!scoped_metrics.contains("key=\"beta-main\""));
+    assert_eq!(
+        scoped_metrics
+            .matches("prodex_gateway_virtual_key_requests_total{")
+            .count(),
+        2
+    );
+    assert!(!scoped_metrics.contains("alpha-main"));
+    assert!(!scoped_metrics.contains("gamma-main"));
+    assert!(!scoped_metrics.contains("beta-main"));
 }

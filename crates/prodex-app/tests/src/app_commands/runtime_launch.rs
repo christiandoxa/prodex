@@ -1,4 +1,5 @@
 use super::*;
+use crate::app_commands::runtime_launch::gateway_config::gateway_normalize_upstream_base_url;
 #[path = "runtime_launch/arg0_cleanup.rs"]
 mod arg0_cleanup;
 #[path = "runtime_launch/openai_spark_context.rs"]
@@ -41,6 +42,86 @@ fn gateway_state_store_config_builds_postgres_backend_from_env() {
         other => panic!("expected postgres gateway state backend, got {other:?}"),
     }
 }
+
+#[test]
+fn gateway_launch_config_rejects_padded_listen_addr() {
+    let root = temp_dir("gateway-listen-addr-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let args = GatewayArgs {
+        command: None,
+        listen: Some(" 127.0.0.1:4000 ".to_string()),
+        provider: None,
+        base_url: None,
+        api_key: None,
+        auth_token: None,
+        smart_context: false,
+        presidio: false,
+        no_presidio: false,
+    };
+    let policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+
+    let err = match resolve_gateway_launch_config(&paths, &args, &policy) {
+        Ok(_) => panic!("expected padded gateway listen address to fail"),
+        Err(err) => err,
+    };
+
+    assert!(err.to_string().contains("gateway.listen_addr"));
+}
+
+#[test]
+fn gateway_state_store_config_rejects_padded_postgres_url_env_ref() {
+    let root = temp_dir("gateway-postgres-state-env-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _postgres = TestEnvVarGuard::set(
+        "PRODEX_GATEWAY_POSTGRES_URL_TEST",
+        "postgres://prodex:prodex@127.0.0.1:5432/prodex",
+    );
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.state.backend = Some("postgres".to_string());
+    policy.state.postgres_url_env = Some(" PRODEX_GATEWAY_POSTGRES_URL_TEST ".to_string());
+
+    let err = gateway_state_store_config(&paths, &policy).unwrap_err();
+
+    assert!(err.to_string().contains("gateway.state.postgres_url_env"));
+}
+
+#[test]
+fn gateway_state_store_config_rejects_padded_backend_name() {
+    let root = temp_dir("gateway-state-backend-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.state.backend = Some(" redis ".to_string());
+
+    let err = gateway_state_store_config(&paths, &policy).unwrap_err();
+
+    assert!(err.to_string().contains("gateway.state.backend"));
+}
+
+#[test]
+fn gateway_state_store_config_preserves_sqlite_path_value() {
+    let root = temp_dir("gateway-sqlite-state-path-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.state.backend = Some("sqlite".to_string());
+    policy.state.sqlite_path = Some(" gateway state.sqlite ".to_string());
+
+    let store = gateway_state_store_config(&paths, &policy).unwrap();
+
+    match store {
+        RuntimeGatewayStateStore::Sqlite { path } => {
+            assert_eq!(
+                path.strip_prefix(&root).unwrap(),
+                std::path::Path::new(" gateway state.sqlite ")
+            );
+        }
+        other => panic!("expected sqlite gateway state backend, got {other:?}"),
+    }
+}
+
 #[test]
 fn gateway_state_store_config_builds_redis_backend_from_env() {
     let root = temp_dir("gateway-redis-state-config");
@@ -62,19 +143,395 @@ fn gateway_state_store_config_builds_redis_backend_from_env() {
         other => panic!("expected redis gateway state backend, got {other:?}"),
     }
 }
+
+#[test]
+fn gateway_state_store_config_rejects_padded_redis_url_env_ref() {
+    let root = temp_dir("gateway-redis-state-env-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _redis = TestEnvVarGuard::set("PRODEX_GATEWAY_REDIS_URL_TEST", "redis://127.0.0.1:6379/0");
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.state.backend = Some("redis".to_string());
+    policy.state.redis_url_env = Some(" PRODEX_GATEWAY_REDIS_URL_TEST ".to_string());
+
+    let err = gateway_state_store_config(&paths, &policy).unwrap_err();
+
+    assert!(err.to_string().contains("gateway.state.redis_url_env"));
+}
+
 #[test]
 fn gateway_sso_config_builds_trusted_proxy_settings_from_env() {
     let _sso = TestEnvVarGuard::set("PRODEX_GATEWAY_SSO_TOKEN_TEST", "sso-shared-secret");
     let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
     policy.sso.proxy_token_env = Some("PRODEX_GATEWAY_SSO_TOKEN_TEST".to_string());
     policy.sso.user_header = Some("x-auth-request-email".to_string());
-    policy.sso.default_role = Some("viewer".to_string());
     let config = gateway_sso_config(&policy).unwrap();
     assert!(config.proxy_token_hash.is_some());
     assert_eq!(config.token_header, "x-prodex-sso-token");
     assert_eq!(config.user_header, "x-auth-request-email");
-    assert_eq!(config.default_role, RuntimeGatewayAdminRole::Viewer);
 }
+
+#[test]
+fn gateway_sso_config_does_not_trim_proxy_token_env_ref() {
+    let _sso = TestEnvVarGuard::set("PRODEX_GATEWAY_SSO_TOKEN_TEST", "sso-shared-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.sso.proxy_token_env = Some(" PRODEX_GATEWAY_SSO_TOKEN_TEST ".to_string());
+
+    let config = gateway_sso_config(&policy).unwrap();
+
+    assert!(config.proxy_token_hash.is_none());
+}
+
+#[test]
+fn gateway_guardrail_webhook_config_does_not_trim_bearer_token_env_ref() {
+    let _token = TestEnvVarGuard::set("PRODEX_GATEWAY_GUARDRAIL_TOKEN_TEST", "guardrail-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.guardrails.webhook_bearer_token_env =
+        Some(" PRODEX_GATEWAY_GUARDRAIL_TOKEN_TEST ".to_string());
+
+    let config = gateway_guardrail_webhook_config(&policy);
+
+    assert!(config.bearer_token.is_none());
+}
+
+#[test]
+fn gateway_guardrail_webhook_config_does_not_trim_phase_values() {
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.guardrails.webhook_phases = vec![" pre ".to_string(), "post".to_string()];
+
+    let config = gateway_guardrail_webhook_config(&policy);
+
+    assert_eq!(config.phases, vec!["post"]);
+}
+
+#[test]
+fn gateway_guardrail_webhook_config_preserves_url_value() {
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.guardrails.webhook_url = Some(" https://guardrails.example/check ".to_string());
+
+    let config = gateway_guardrail_webhook_config(&policy);
+
+    assert_eq!(
+        config.url.as_deref(),
+        Some(" https://guardrails.example/check ")
+    );
+}
+
+#[test]
+fn gateway_guardrail_config_preserves_keyword_values() {
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.guardrails.blocked_keywords = vec![" secret project ".to_string(), "   ".to_string()];
+    policy.guardrails.blocked_output_keywords =
+        vec![" do not reveal ".to_string(), "   ".to_string()];
+
+    let config = gateway_guardrail_config(&policy);
+
+    assert_eq!(config.blocked_keywords, vec![" secret project "]);
+    assert_eq!(config.blocked_output_keywords, vec![" do not reveal "]);
+}
+
+#[test]
+fn gateway_observability_config_does_not_trim_bearer_token_env_ref() {
+    let root = temp_dir("gateway-observability-bearer-env-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _token = TestEnvVarGuard::set("PRODEX_GATEWAY_OBSERVABILITY_TOKEN_TEST", "otel-secret");
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.observability.http_bearer_token_env =
+        Some(" PRODEX_GATEWAY_OBSERVABILITY_TOKEN_TEST ".to_string());
+
+    let config = gateway_observability_config(&paths, &policy).unwrap();
+
+    assert!(config.http_bearer_token.is_none());
+}
+
+#[test]
+fn gateway_observability_config_rejects_padded_http_schema() {
+    let root = temp_dir("gateway-observability-schema-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.observability.http_schema = Some(" otel ".to_string());
+
+    let err = gateway_observability_config(&paths, &policy).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("gateway.observability.http_schema")
+    );
+}
+
+#[test]
+fn gateway_observability_config_does_not_trim_sink_values() {
+    let root = temp_dir("gateway-observability-sink-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.observability.sinks = vec![" jsonl ".to_string(), "http".to_string()];
+
+    let config = gateway_observability_config(&paths, &policy).unwrap();
+
+    assert_eq!(config.sinks, vec!["http", "runtime-log"]);
+}
+
+#[test]
+fn gateway_observability_config_preserves_jsonl_path_value() {
+    let root = temp_dir("gateway-observability-jsonl-path-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.observability.jsonl_path = Some(" gateway spend.jsonl ".to_string());
+
+    let config = gateway_observability_config(&paths, &policy).unwrap();
+
+    assert_eq!(
+        config
+            .jsonl_path
+            .as_ref()
+            .map(|path| path.strip_prefix(&root).unwrap()),
+        Some(std::path::Path::new(" gateway spend.jsonl "))
+    );
+    assert!(config.sinks.iter().any(|sink| sink == "jsonl"));
+}
+
+#[test]
+fn gateway_observability_config_preserves_http_endpoint_value() {
+    let root = temp_dir("gateway-observability-http-endpoint-exact");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let paths = AppPaths::discover().unwrap();
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.observability.http_endpoint =
+        Some(" https://otel-collector.example/v1/events ".to_string());
+
+    let config = gateway_observability_config(&paths, &policy).unwrap();
+
+    assert_eq!(
+        config.http_endpoint.as_deref(),
+        Some(" https://otel-collector.example/v1/events ")
+    );
+    assert!(config.sinks.iter().any(|sink| sink == "http"));
+}
+
+#[test]
+fn gateway_normalize_upstream_base_url_rejects_padded_url() {
+    let err = gateway_normalize_upstream_base_url(" https://api.example/v1 ", None).unwrap_err();
+
+    assert!(err.to_string().contains("must not contain whitespace"));
+}
+
+#[test]
+fn gateway_upstream_base_url_rejects_padded_env_url() {
+    let _base_url = TestEnvVarGuard::set("OPENAI_BASE_URL", " https://api.example/v1 ");
+    let args = GatewayArgs {
+        command: None,
+        listen: None,
+        provider: None,
+        base_url: None,
+        api_key: None,
+        auth_token: None,
+        smart_context: false,
+        presidio: false,
+        no_presidio: false,
+    };
+    let policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+
+    let err = gateway_upstream_base_url(&args, &policy, None).unwrap_err();
+
+    assert!(err.to_string().contains("must not contain whitespace"));
+}
+
+#[test]
+fn gateway_call_id_header_config_rejects_padded_header_name() {
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.observability.call_id_header = Some(" x-prodex-call-id ".to_string());
+
+    let err = gateway_call_id_header_config(&policy).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("gateway.observability.call_id_header")
+    );
+}
+
+#[test]
+fn gateway_admin_tokens_config_defaults_missing_role_to_viewer() {
+    let _admin = TestEnvVarGuard::set("PRODEX_GATEWAY_ADMIN_TOKEN_TEST", "admin-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy
+        .admin_tokens
+        .push(prodex_runtime_policy::RuntimePolicyGatewayAdminToken {
+            name: "scoped".to_string(),
+            token_env: "PRODEX_GATEWAY_ADMIN_TOKEN_TEST".to_string(),
+            ..Default::default()
+        });
+
+    let tokens = gateway_admin_tokens_config(None, &policy).unwrap();
+
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].role, RuntimeGatewayAdminRole::Viewer);
+}
+
+#[test]
+fn gateway_admin_tokens_config_rejects_unknown_role() {
+    let _admin = TestEnvVarGuard::set("PRODEX_GATEWAY_ADMIN_TOKEN_TEST", "admin-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy
+        .admin_tokens
+        .push(prodex_runtime_policy::RuntimePolicyGatewayAdminToken {
+            name: "scoped".to_string(),
+            token_env: "PRODEX_GATEWAY_ADMIN_TOKEN_TEST".to_string(),
+            role: Some("owner".to_string()),
+            ..Default::default()
+        });
+
+    let err = gateway_admin_tokens_config(None, &policy).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("gateway.admin_tokens role for \"scoped\"")
+    );
+}
+
+#[test]
+fn gateway_admin_tokens_config_does_not_trim_key_prefix_scopes() {
+    let _admin = TestEnvVarGuard::set("PRODEX_GATEWAY_ADMIN_TOKEN_TEST", "admin-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy
+        .admin_tokens
+        .push(prodex_runtime_policy::RuntimePolicyGatewayAdminToken {
+            name: "scoped".to_string(),
+            token_env: "PRODEX_GATEWAY_ADMIN_TOKEN_TEST".to_string(),
+            allowed_key_prefixes: vec!["team-a-".to_string(), " team-b- ".to_string()],
+            ..Default::default()
+        });
+
+    let tokens = gateway_admin_tokens_config(None, &policy).unwrap();
+
+    assert_eq!(tokens[0].allowed_key_prefixes, vec!["team-a-"]);
+}
+
+#[test]
+fn gateway_admin_tokens_config_does_not_trim_governance_scopes() {
+    let _admin = TestEnvVarGuard::set("PRODEX_GATEWAY_ADMIN_TOKEN_TEST", "admin-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy
+        .admin_tokens
+        .push(prodex_runtime_policy::RuntimePolicyGatewayAdminToken {
+            name: "scoped".to_string(),
+            token_env: "PRODEX_GATEWAY_ADMIN_TOKEN_TEST".to_string(),
+            tenant_id: Some(" tenant-a ".to_string()),
+            team_id: Some("team-a".to_string()),
+            project_id: Some(" project-a ".to_string()),
+            ..Default::default()
+        });
+
+    let tokens = gateway_admin_tokens_config(None, &policy).unwrap();
+
+    assert_eq!(tokens[0].tenant_id, None);
+    assert_eq!(tokens[0].team_id.as_deref(), Some("team-a"));
+    assert_eq!(tokens[0].project_id, None);
+}
+
+#[test]
+fn gateway_admin_tokens_config_does_not_trim_token_names() {
+    let _admin = TestEnvVarGuard::set("PRODEX_GATEWAY_ADMIN_TOKEN_TEST", "admin-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy
+        .admin_tokens
+        .push(prodex_runtime_policy::RuntimePolicyGatewayAdminToken {
+            name: " scoped ".to_string(),
+            token_env: "PRODEX_GATEWAY_ADMIN_TOKEN_TEST".to_string(),
+            ..Default::default()
+        });
+
+    let tokens = gateway_admin_tokens_config(None, &policy).unwrap();
+
+    assert_eq!(tokens[0].name, "");
+}
+
+#[test]
+fn gateway_admin_tokens_config_does_not_trim_token_env_refs() {
+    let _admin = TestEnvVarGuard::set("PRODEX_GATEWAY_ADMIN_TOKEN_TEST", "admin-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy
+        .admin_tokens
+        .push(prodex_runtime_policy::RuntimePolicyGatewayAdminToken {
+            name: "scoped".to_string(),
+            token_env: " PRODEX_GATEWAY_ADMIN_TOKEN_TEST ".to_string(),
+            ..Default::default()
+        });
+
+    let tokens = gateway_admin_tokens_config(None, &policy).unwrap();
+
+    assert!(tokens.is_empty());
+}
+
+#[test]
+fn gateway_virtual_keys_config_does_not_trim_allowed_models() {
+    let _key = TestEnvVarGuard::set("PRODEX_GATEWAY_KEY_TOKEN_TEST", "key-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy
+        .virtual_keys
+        .push(prodex_runtime_policy::RuntimePolicyGatewayVirtualKey {
+            name: "team-a".to_string(),
+            token_env: "PRODEX_GATEWAY_KEY_TOKEN_TEST".to_string(),
+            allowed_models: vec!["gpt-5".to_string(), " gpt-5-mini ".to_string()],
+            ..Default::default()
+        });
+
+    let keys = gateway_virtual_keys_config(&policy).unwrap();
+
+    assert_eq!(keys[0].allowed_models, vec!["gpt-5"]);
+}
+
+#[test]
+fn gateway_sso_config_can_require_tenant_context() {
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.sso.require_tenant = Some(true);
+
+    let config = gateway_sso_config(&policy).unwrap();
+
+    assert!(config.require_tenant);
+}
+
+#[test]
+fn gateway_sso_config_defaults_missing_role_to_viewer() {
+    let _sso = TestEnvVarGuard::set("PRODEX_GATEWAY_SSO_TOKEN_TEST", "sso-shared-secret");
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.sso.proxy_token_env = Some("PRODEX_GATEWAY_SSO_TOKEN_TEST".to_string());
+
+    let config = gateway_sso_config(&policy).unwrap();
+
+    assert_eq!(config.role_header, "x-prodex-sso-role");
+}
+
+#[test]
+fn gateway_sso_config_does_not_trim_header_or_claim_names() {
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.sso.user_header = Some(" x-auth-request-email ".to_string());
+    policy.sso.oidc_issuer = Some("https://idp.example".to_string());
+    policy.sso.oidc_audience = Some("prodex-gateway".to_string());
+    policy.sso.oidc_user_claim = Some(" preferred_username ".to_string());
+
+    let config = gateway_sso_config(&policy).unwrap();
+    let oidc = config.oidc.expect("OIDC config should be present");
+
+    assert_eq!(config.user_header, "x-prodex-sso-user");
+    assert_eq!(oidc.user_claim, "email");
+}
+
+#[test]
+fn gateway_sso_config_does_not_trim_oidc_endpoint_or_audience() {
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.sso.oidc_issuer = Some(" https://idp.example ".to_string());
+    policy.sso.oidc_audience = Some(" prodex-gateway ".to_string());
+    policy.sso.oidc_jwks_url = Some(" https://idp.example/.well-known/jwks.json ".to_string());
+
+    let config = gateway_sso_config(&policy).unwrap();
+
+    assert!(config.oidc.is_none());
+}
+
 #[test]
 fn gateway_sso_config_builds_oidc_settings() {
     let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
@@ -84,7 +541,6 @@ fn gateway_sso_config_builds_oidc_settings() {
     policy.sso.oidc_user_claim = Some("preferred_username".to_string());
     policy.sso.oidc_role_claim = Some("roles".to_string());
     policy.sso.oidc_key_prefixes_claim = Some("teams".to_string());
-    policy.sso.default_role = Some("viewer".to_string());
     let config = gateway_sso_config(&policy).unwrap();
     let oidc = config.oidc.expect("OIDC config should be present");
     assert_eq!(oidc.issuer, "https://idp.example");
@@ -96,7 +552,6 @@ fn gateway_sso_config_builds_oidc_settings() {
     assert_eq!(oidc.user_claim, "preferred_username");
     assert_eq!(oidc.role_claim, "roles");
     assert_eq!(oidc.key_prefixes_claim, "teams");
-    assert_eq!(config.default_role, RuntimeGatewayAdminRole::Viewer);
 }
 #[test]
 fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {

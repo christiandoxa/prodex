@@ -1,5 +1,5 @@
 use super::local_rewrite_gateway_admin_response::RuntimeGatewayAdminError;
-use super::local_rewrite_gateway_scim::runtime_gateway_scim_string_value;
+use super::local_rewrite_gateway_scim::runtime_gateway_scim_optional_scope_value;
 use super::local_rewrite_gateway_store_types::RuntimeGatewayStoredVirtualKey;
 
 pub(super) fn runtime_gateway_apply_virtual_key_patch(
@@ -8,11 +8,7 @@ pub(super) fn runtime_gateway_apply_virtual_key_patch(
     partial: bool,
 ) -> Result<(), RuntimeGatewayAdminError> {
     if let Some(value) = body.get("tenant_id") {
-        record.tenant_id = if value.is_null() {
-            None
-        } else {
-            Some(runtime_gateway_scim_string_value(value, "tenant_id")?)
-        };
+        record.tenant_id = runtime_gateway_scim_optional_scope_value(value, "tenant_id")?;
     } else if !partial {
         record.tenant_id = None;
     }
@@ -23,11 +19,7 @@ pub(super) fn runtime_gateway_apply_virtual_key_patch(
         ("budget_id", &mut record.budget_id),
     ] {
         if let Some(value) = body.get(field) {
-            *target = if value.is_null() {
-                None
-            } else {
-                Some(runtime_gateway_scim_string_value(value, field)?)
-            };
+            *target = runtime_gateway_scim_optional_scope_value(value, field)?;
         } else if !partial {
             *target = None;
         }
@@ -46,8 +38,8 @@ pub(super) fn runtime_gateway_apply_virtual_key_patch(
             .map(|value| {
                 value
                     .as_str()
-                    .map(str::trim)
                     .filter(|value| !value.is_empty())
+                    .filter(|value| !value.chars().any(char::is_whitespace))
             })
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| {
@@ -131,4 +123,75 @@ fn runtime_gateway_optional_f64_microusd(
                 format!("{field} must be a non-negative number or null"),
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stored_key() -> RuntimeGatewayStoredVirtualKey {
+        RuntimeGatewayStoredVirtualKey {
+            name: "team-a".to_string(),
+            token_hash_base64: "hash".to_string(),
+            tenant_id: Some("tenant-a".to_string()),
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_models: Vec::new(),
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: None,
+            tpm_limit: None,
+            disabled: Some(false),
+            created_at_epoch: 1,
+            updated_at_epoch: 1,
+        }
+    }
+
+    #[test]
+    fn virtual_key_scope_patch_rejects_whitespace_instead_of_trimming() {
+        let mut record = stored_key();
+
+        let err = runtime_gateway_apply_virtual_key_patch(
+            &mut record,
+            &serde_json::json!({"tenant_id": " tenant-b "}),
+            true,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.test_status(), 400);
+        assert_eq!(err.test_code(), "invalid_scim_field");
+        assert_eq!(record.tenant_id.as_deref(), Some("tenant-a"));
+    }
+
+    #[test]
+    fn virtual_key_scope_patch_accepts_null_unset() {
+        let mut record = stored_key();
+
+        let result = runtime_gateway_apply_virtual_key_patch(
+            &mut record,
+            &serde_json::json!({"tenant_id": null}),
+            true,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(record.tenant_id, None);
+    }
+
+    #[test]
+    fn virtual_key_allowed_models_reject_whitespace_instead_of_trimming() {
+        let mut record = stored_key();
+
+        let err = runtime_gateway_apply_virtual_key_patch(
+            &mut record,
+            &serde_json::json!({"allowed_models": [" gpt-5 "]}),
+            true,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.test_status(), 400);
+        assert_eq!(err.test_code(), "invalid_allowed_models");
+        assert!(record.allowed_models.is_empty());
+    }
 }

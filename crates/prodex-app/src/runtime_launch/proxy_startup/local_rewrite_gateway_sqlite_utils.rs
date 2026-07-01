@@ -1,9 +1,3 @@
-pub(super) fn runtime_gateway_sqlite_duplicate_column_error(err: &rusqlite::Error) -> bool {
-    err.to_string()
-        .to_ascii_lowercase()
-        .contains("duplicate column")
-}
-
 pub(super) fn runtime_gateway_sqlite_optional_i64_to_u64(value: Option<i64>) -> Option<u64> {
     value.map(runtime_gateway_sqlite_i64_to_u64)
 }

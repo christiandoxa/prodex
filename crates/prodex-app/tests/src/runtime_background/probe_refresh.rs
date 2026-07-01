@@ -78,6 +78,28 @@ fn test_runtime_probe_refresh_job(
 }
 
 #[test]
+fn runtime_probe_refresh_error_text_redacts_secret_like_material() {
+    let message =
+        runtime_probe_refresh_error_text("failed: Authorization: Bearer probe-refresh-token");
+
+    assert!(message.contains("Authorization: Bearer <redacted>"));
+    assert!(!message.contains("probe-refresh-token"));
+}
+
+#[test]
+fn runtime_probe_refresh_state_update_error_redacts_secret_like_chain() {
+    let err = anyhow::anyhow!("failed: Authorization: Bearer probe-state-token")
+        .context("probe state update failed");
+
+    let message = runtime_probe_refresh_state_update_error(&err);
+
+    assert!(message.starts_with("state_update:"));
+    assert!(message.contains("probe state update failed"));
+    assert!(message.contains("Authorization: Bearer <redacted>"));
+    assert!(!message.contains("probe-state-token"));
+}
+
+#[test]
 fn runtime_probe_refresh_take_next_job_leaves_remaining_backlog_for_other_workers() {
     let shared = test_runtime_probe_refresh_shared();
     let queue = test_runtime_probe_refresh_queue();

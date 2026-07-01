@@ -132,6 +132,7 @@ fn sample_snapshot() -> RuntimeBrokerSnapshot {
             )]),
             stale_continuation: BTreeMap::from([
                 ("previous_response_not_found".to_string(), 3),
+                ("tenant-secret-token".to_string(), 2),
                 ("websocket_reuse_watchdog_locked_affinity".to_string(), 1),
             ]),
         },
@@ -334,6 +335,10 @@ fn renders_prometheus_text_with_help_and_labels() {
             "prodex_runtime_broker_continuity_failures_total{broker_key=\"broker-123\",event=\"stale_continuation\",listen_addr=\"127.0.0.1:8080\",reason=\"websocket_reuse_watchdog_locked_affinity\"} 1"
         ));
     assert!(rendered.contains(
+            "prodex_runtime_broker_continuity_failures_total{broker_key=\"broker-123\",event=\"stale_continuation\",listen_addr=\"127.0.0.1:8080\",reason=\"other\"} 2"
+        ));
+    assert!(!rendered.contains("tenant-secret-token"));
+    assert!(rendered.contains(
             "prodex_runtime_broker_previous_response_negative_cache_entries{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\",route=\"responses\"} 2"
         ));
     assert!(rendered.contains(
@@ -341,11 +346,17 @@ fn renders_prometheus_text_with_help_and_labels() {
         ));
     assert!(rendered.contains("broker_key=\"broker-123\""));
     assert!(rendered.contains("listen_addr=\"127.0.0.1:8080\""));
-    assert!(rendered.contains("current_profile=\"main\""));
+    assert!(!rendered.contains("current_profile="));
     assert!(rendered.contains("prodex_version=\"0.29.0\""));
+    assert!(!rendered.contains("executable_path="));
+    assert!(!rendered.contains("/tmp/prodex"));
     assert!(rendered.contains("executable_sha256=\"abcd1234\""));
     assert!(rendered.contains("lane=\"responses\""));
-    assert!(rendered.contains("profile=\"main\""));
+    assert!(rendered.contains(
+        "prodex_runtime_broker_profile_inflight{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 4"
+    ));
+    assert!(!rendered.contains("profile=\"main\""));
+    assert!(!rendered.contains("profile=\"second\""));
 }
 
 #[test]

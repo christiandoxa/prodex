@@ -9,6 +9,7 @@ use crate::{
     runtime_proxy_structured_log_message, runtime_set_upstream_websocket_io_timeout,
 };
 use anyhow::{Context, Result};
+use redaction::redaction_redact_secret_like_text;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -22,6 +23,13 @@ pub(super) const GEMINI_LIVE_DEFAULT_MODEL: &str = "gemini-3.1-flash-live-previe
 const GEMINI_LIVE_PUMP_TIMEOUT: Duration = Duration::from_millis(20);
 const GEMINI_LIVE_IDLE_SLEEP: Duration = Duration::from_millis(5);
 const GEMINI_LIVE_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+const RUNTIME_GEMINI_LIVE_AUTH_FAILED_MESSAGE: &str =
+    "Gemini Live authentication could not be prepared";
+const RUNTIME_GEMINI_LIVE_UPGRADE_FAILED_MESSAGE: &str =
+    "Gemini Live websocket upgrade could not be prepared";
+const RUNTIME_GEMINI_LIVE_PROVIDER_STREAM_FAILED_MESSAGE: &str =
+    "Gemini Live provider stream failed";
 
 #[path = "local_rewrite_gemini_live_audio.rs"]
 mod local_rewrite_gemini_live_audio;
@@ -85,7 +93,10 @@ pub(super) fn spawn_runtime_gemini_live_sidecar(
                                     "local_rewrite_gemini_live_sidecar_error",
                                     [
                                         runtime_proxy_log_field("request", request_id.to_string()),
-                                        runtime_proxy_log_field("error", format!("{err:#}")),
+                                        runtime_proxy_log_field(
+                                            "error",
+                                            runtime_gemini_live_redacted_log_error(&err),
+                                        ),
                                     ],
                                 ),
                             );
@@ -110,7 +121,10 @@ pub(super) fn spawn_runtime_gemini_live_sidecar(
                         &shared.runtime_shared,
                         runtime_proxy_structured_log_message(
                             "local_rewrite_gemini_live_sidecar_accept_error",
-                            [runtime_proxy_log_field("error", err.to_string())],
+                            [runtime_proxy_log_field(
+                                "error",
+                                runtime_gemini_live_redacted_log_text(&err.to_string()),
+                            )],
                         ),
                     );
                     thread::sleep(Duration::from_millis(50));
@@ -135,8 +149,11 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     };
     let attempts = match runtime_gemini_live_auth_attempts(auth, shared) {
         Ok(attempts) => attempts,
-        Err(err) => {
-            let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+        Err(_err) => {
+            let _ = request.respond(build_runtime_proxy_text_response(
+                502,
+                RUNTIME_GEMINI_LIVE_AUTH_FAILED_MESSAGE,
+            ));
             return;
         }
     };
@@ -169,8 +186,11 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     };
     let response = match runtime_gemini_live_upgrade_response(&websocket_key) {
         Ok(response) => response,
-        Err(err) => {
-            let _ = request.respond(build_runtime_proxy_text_response(500, &err.to_string()));
+        Err(_err) => {
+            let _ = request.respond(build_runtime_proxy_text_response(
+                500,
+                RUNTIME_GEMINI_LIVE_UPGRADE_FAILED_MESSAGE,
+            ));
             return;
         }
     };
@@ -196,7 +216,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("profile", profile_name.as_str()),
-                    runtime_proxy_log_field("error", format!("{err:#}")),
+                    runtime_proxy_log_field("error", runtime_gemini_live_redacted_log_error(&err)),
                 ],
             ),
         );
@@ -205,7 +225,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
                 "type": "error",
                 "error": {
                     "type": "provider_stream_error",
-                    "message": err.to_string(),
+                    "message": RUNTIME_GEMINI_LIVE_PROVIDER_STREAM_FAILED_MESSAGE,
                 }
             })
             .to_string()
@@ -244,6 +264,14 @@ fn runtime_gemini_live_connect(auth: &RuntimeGeminiAuth) -> Result<RuntimeUpstre
     runtime_set_upstream_websocket_io_timeout(&mut socket, Some(Duration::from_secs(30)))
         .context("failed to configure Gemini Live websocket timeout")?;
     Ok(socket)
+}
+
+fn runtime_gemini_live_redacted_log_error(error: &anyhow::Error) -> String {
+    runtime_gemini_live_redacted_log_text(&format!("{error:#}"))
+}
+
+fn runtime_gemini_live_redacted_log_text(value: &str) -> String {
+    redaction_redact_secret_like_text(value)
 }
 
 fn handle_runtime_gemini_live_tcp_stream(
@@ -329,7 +357,7 @@ fn handle_runtime_gemini_live_tcp_stream(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("profile", profile_name.as_str()),
-                    runtime_proxy_log_field("error", format!("{err:#}")),
+                    runtime_proxy_log_field("error", runtime_gemini_live_redacted_log_error(&err)),
                 ],
             ),
         );
@@ -338,7 +366,7 @@ fn handle_runtime_gemini_live_tcp_stream(
                 "type": "error",
                 "error": {
                     "type": "provider_stream_error",
-                    "message": err.to_string(),
+                    "message": RUNTIME_GEMINI_LIVE_PROVIDER_STREAM_FAILED_MESSAGE,
                 }
             })
             .to_string()
@@ -619,3 +647,47 @@ where
 #[cfg(test)]
 #[path = "local_rewrite_gemini_live_tests.rs"]
 mod local_rewrite_gemini_live_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_live_error_messages_are_stable_and_redacted() {
+        for message in [
+            RUNTIME_GEMINI_LIVE_AUTH_FAILED_MESSAGE,
+            RUNTIME_GEMINI_LIVE_UPGRADE_FAILED_MESSAGE,
+            RUNTIME_GEMINI_LIVE_PROVIDER_STREAM_FAILED_MESSAGE,
+        ] {
+            assert!(!message.contains("api_key"));
+            assert!(!message.contains("oauth"));
+            assert!(!message.contains("wss://"));
+            assert!(!message.contains("generativelanguage.googleapis.com"));
+            assert!(!message.contains("WebSocket protocol error"));
+        }
+        assert_eq!(
+            RUNTIME_GEMINI_LIVE_AUTH_FAILED_MESSAGE,
+            "Gemini Live authentication could not be prepared"
+        );
+        assert_eq!(
+            RUNTIME_GEMINI_LIVE_UPGRADE_FAILED_MESSAGE,
+            "Gemini Live websocket upgrade could not be prepared"
+        );
+        assert_eq!(
+            RUNTIME_GEMINI_LIVE_PROVIDER_STREAM_FAILED_MESSAGE,
+            "Gemini Live provider stream failed"
+        );
+    }
+
+    #[test]
+    fn gemini_live_runtime_error_logs_redact_secret_like_material() {
+        let raw = "failed to connect Gemini Live upstream: Authorization: Bearer fixture_live_notreal_12345 url=wss://example.test?api_key=sk-live-fixture-notreal-123456";
+
+        let redacted = runtime_gemini_live_redacted_log_text(raw);
+
+        assert!(redacted.contains("Authorization: Bearer <redacted>"));
+        assert!(redacted.contains("api_key=<redacted>"));
+        assert!(!redacted.contains("fixture_live_notreal_12345"));
+        assert!(!redacted.contains("sk-live-fixture-notreal-123456"));
+    }
+}

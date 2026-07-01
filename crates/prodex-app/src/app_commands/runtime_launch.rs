@@ -11,7 +11,11 @@ mod selection;
 mod session_delete;
 use gateway_config::resolve_gateway_launch_config;
 #[cfg(test)]
-use gateway_config::{gateway_sso_config, gateway_state_store_config};
+use gateway_config::{
+    gateway_admin_tokens_config, gateway_call_id_header_config, gateway_guardrail_config,
+    gateway_guardrail_webhook_config, gateway_observability_config, gateway_sso_config,
+    gateway_state_store_config, gateway_upstream_base_url, gateway_virtual_keys_config,
+};
 use gateway_status::print_gateway_status;
 pub(crate) use mem0_gateway::start_mem0_memory_gateway_for_runtime_request;
 use resume_provider::runtime_resume_external_provider_from_codex_args;

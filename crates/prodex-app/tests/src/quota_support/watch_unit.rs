@@ -97,6 +97,18 @@
     }
 
     #[test]
+    fn quota_watch_tui_fallback_message_redacts_secret_like_error() {
+        let err = anyhow::anyhow!("failed: Authorization: Bearer quota-tui-token")
+            .context("quota TUI startup failed");
+
+        let message = quota_watch_tui_fallback_message(&err);
+
+        assert!(message.contains("quota TUI startup failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(!message.contains("quota-tui-token"));
+    }
+
+    #[test]
     fn quota_watch_scroll_range_uses_window_metadata() {
         let range = quota_watch_scroll_range(&RenderedQuotaReportWindow {
             output: String::new(),
