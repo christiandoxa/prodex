@@ -46,7 +46,7 @@ fn snapshot_hold_preserves_active_exhaustion_until_reset() {
 }
 
 #[test]
-fn precommit_block_reason_keeps_response_floor_only_for_main_lanes() {
+fn precommit_block_reason_allows_positive_five_hour_until_exhausted() {
     let summary = RuntimeProxyQuotaSummary {
         five_hour: RuntimeProxyQuotaWindowSummary {
             status: RuntimeSelectionQuotaWindowStatus::Critical,
@@ -63,7 +63,7 @@ fn precommit_block_reason_keeps_response_floor_only_for_main_lanes() {
 
     assert_eq!(
         runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Responses, 2,),
-        Some(RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend)
+        None
     );
     assert_eq!(
         runtime_proxy_precommit_quota_block_reason(summary, RuntimeRouteKind::Compact, 2),

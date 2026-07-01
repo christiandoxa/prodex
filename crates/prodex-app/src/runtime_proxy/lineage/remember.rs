@@ -502,12 +502,7 @@ pub(crate) fn remember_runtime_successful_previous_response_owner(
         .response_profile_bindings
         .get_mut(previous_response_id)
     {
-        Some(binding) if binding.profile_name == profile_name => {
-            if binding.bound_at < bound_at {
-                binding.bound_at = bound_at;
-            }
-            false
-        }
+        Some(binding) if binding.profile_name == profile_name => false,
         Some(binding) => {
             binding.profile_name = profile_name.to_string();
             binding.bound_at = bound_at;
@@ -526,15 +521,18 @@ pub(crate) fn remember_runtime_successful_previous_response_owner(
             true
         }
     };
-    if should_refresh_binding
-        || runtime_continuation_status_should_refresh_verified(
+    let should_refresh_status = should_refresh_binding
+        || runtime_continuation_status_map(
             &runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,
-            previous_response_id,
-            bound_at,
-            Some(verified_route),
         )
-    {
+        .get(previous_response_id)
+        .is_none_or(|status| {
+            status.state != prodex_runtime_state::RuntimeContinuationBindingLifecycle::Verified
+                || status.last_verified_route.as_deref()
+                    != Some(runtime_route_kind_label(verified_route))
+        });
+    if should_refresh_status {
         changed = runtime_mark_continuation_status_verified(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,

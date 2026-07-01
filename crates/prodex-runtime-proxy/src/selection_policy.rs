@@ -356,12 +356,11 @@ pub fn runtime_quota_precommit_floor_percent_for_route(
 
 pub fn runtime_quota_window_precommit_guard(
     window: RuntimeSelectionQuotaWindowSummary,
-    floor_percent: i64,
+    _floor_percent: i64,
 ) -> bool {
-    matches!(
-        window.status,
-        RuntimeSelectionQuotaWindowStatus::Critical | RuntimeSelectionQuotaWindowStatus::Exhausted
-    ) && window.remaining_percent <= floor_percent
+    matches!(window.status, RuntimeSelectionQuotaWindowStatus::Exhausted)
+        || (!matches!(window.status, RuntimeSelectionQuotaWindowStatus::Unknown)
+            && window.remaining_percent == 0)
 }
 
 pub fn runtime_quota_precommit_guard_reason(
@@ -385,7 +384,7 @@ pub fn runtime_quota_precommit_guard_reason(
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
     ) && runtime_quota_window_precommit_guard(summary.five_hour, floor_percent)
     {
-        return Some("quota_critical_floor_before_send");
+        return Some("quota_exhausted_before_send");
     }
 
     None

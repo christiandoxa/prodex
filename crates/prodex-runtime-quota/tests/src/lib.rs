@@ -87,7 +87,7 @@ fn cold_start_probe_block_respects_snapshot_guard() {
         weekly_reset_at: now + 86_400,
     };
 
-    assert!(runtime_snapshot_blocks_same_request_cold_start_probe(
+    assert!(!runtime_snapshot_blocks_same_request_cold_start_probe(
         &snapshot,
         RuntimeRouteKind::Responses,
         now,

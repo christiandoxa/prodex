@@ -427,10 +427,7 @@ fn candidate_plan_orders_fallback_candidates_and_reports_skip_reasons() {
         plan.ready_candidates[1].ready_skip_reason(),
         Some("auth_failure_backoff")
     );
-    assert_eq!(
-        plan.ready_candidates[2].ready_skip_reason(),
-        Some("quota_critical_floor_before_send")
-    );
+    assert_eq!(plan.ready_candidates[2].ready_skip_reason(), None);
     assert_eq!(
         plan.fallback_candidates
             .iter()
@@ -444,10 +441,7 @@ fn candidate_plan_orders_fallback_candidates_and_reports_skip_reasons() {
         plan.fallback_candidates[2].fallback_skip_reason(),
         Some("auth_failure_backoff")
     );
-    assert_eq!(
-        plan.fallback_candidates[3].fallback_skip_reason(),
-        Some("quota_critical_floor_before_send")
-    );
+    assert_eq!(plan.fallback_candidates[3].fallback_skip_reason(), None);
 }
 
 #[derive(Clone, Copy)]

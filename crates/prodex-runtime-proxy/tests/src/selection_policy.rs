@@ -375,7 +375,7 @@ fn direct_current_profile_fallback_requires_fresh_unfailed_request() {
 }
 
 #[test]
-fn soft_affinity_blocks_response_on_critical_floor() {
+fn soft_affinity_allows_response_on_positive_critical_five_hour() {
     let mut summary = healthy_summary();
     summary.five_hour = RuntimeSelectionQuotaWindowSummary {
         status: RuntimeSelectionQuotaWindowStatus::Critical,
@@ -393,10 +393,10 @@ fn soft_affinity_blocks_response_on_critical_floor() {
         responses_critical_floor_percent: 2,
     };
 
-    assert!(!runtime_soft_affinity_allowed(input));
+    assert!(runtime_soft_affinity_allowed(input));
     assert_eq!(
         runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Responses, 2),
-        Some("quota_critical_floor_before_send")
+        None
     );
 }
 
