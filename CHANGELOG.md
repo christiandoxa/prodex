@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.238.0 - 2026-07-01
+
+### Runtime
+
+- Keep prodex launch responsive under startup load (`7e71e83`)
+
+## 0.237.0 - 2026-07-01
+
+- No grouped changes.
+
 ## 0.236.0 - 2026-06-30
 
 ### Misc
@@ -84,13 +94,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Claude
 
 - Harden super optimizer mcp tools (`09a5cc3`)
-
-## 0.226.0 - 2026-06-28
-
-- No grouped changes.
-
-## 0.225.0 - 2026-06-27
-
-### CLI
-
-- Render quota views with native ratatui (`a6a766d`)
