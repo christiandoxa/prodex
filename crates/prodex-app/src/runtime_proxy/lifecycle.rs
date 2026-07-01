@@ -197,7 +197,9 @@ fn probe_runtime_proxy_active_request_slot(
             return Err(RuntimeProxyAdmissionRejection::GlobalLimit);
         }
         let lane_active = lane_active_count.load(Ordering::SeqCst);
-        if lane_active >= lane_limit {
+        let bypass_lane_limit = lane == RuntimeRouteKind::Standard
+            && runtime_proxy_startup_standard_lane_priority_path(path);
+        if lane_active >= lane_limit && !bypass_lane_limit {
             runtime_proxy_log(
                 shared,
                 format!(

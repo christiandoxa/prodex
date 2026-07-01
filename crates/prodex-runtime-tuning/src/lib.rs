@@ -267,7 +267,12 @@ pub fn runtime_proxy_lane_limits_from_overrides(
         standard: overrides
             .standard
             .filter(|value| *value > 0)
-            .unwrap_or_else(|| (worker_count / 2).clamp(2, 8).min(global_limit))
+            .unwrap_or_else(|| {
+                worker_count
+                    .saturating_mul(2)
+                    .clamp(8, 24)
+                    .min(global_limit)
+            })
             .min(global_limit)
             .max(1),
     }

@@ -35,6 +35,14 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
     let request_path = request.url().to_string();
     let websocket = is_tiny_http_websocket_upgrade(&request);
     let request_transport = if websocket { "websocket" } else { "http" };
+    let request_id = runtime_proxy_next_request_id(shared);
+    if !websocket
+        && let Some(response) =
+            runtime_startup_metadata_admission_pressure_response(request_id, &request_path, shared)
+    {
+        let _ = request.respond(response);
+        return;
+    }
     let _active_request_guard = match acquire_runtime_proxy_active_request_slot_with_wait(
         shared,
         request_transport,
@@ -56,7 +64,6 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         }
     };
 
-    let request_id = runtime_proxy_next_request_id(shared);
     if websocket {
         runtime_proxy_log(
             shared,

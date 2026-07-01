@@ -240,7 +240,7 @@ fn runtime_proxy_lane_limits_keep_defaults_and_clamp_overrides() {
             responses: 48,
             compact: 6,
             websocket: 16,
-            standard: 6,
+            standard: 24,
         }
     );
 
@@ -260,7 +260,7 @@ fn runtime_proxy_lane_limits_keep_defaults_and_clamp_overrides() {
             responses: 6,
             compact: 8,
             websocket: 3,
-            standard: 2,
+            standard: 8,
         }
     );
 }
