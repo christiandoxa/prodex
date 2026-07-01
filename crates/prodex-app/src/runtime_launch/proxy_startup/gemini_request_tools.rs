@@ -1,5 +1,7 @@
 use super::super::gemini_request_policy::{RuntimeGeminiPolicyCompat, runtime_gemini_tool_aliases};
 use super::super::gemini_schema::runtime_gemini_sanitize_function_schema;
+use crate::runtime_launch::proxy_startup::provider_tools;
+use std::collections::BTreeSet;
 
 pub(super) fn runtime_gemini_tools_from_requests(
     original: &serde_json::Value,
@@ -174,11 +176,22 @@ fn runtime_gemini_function_tools_from_chat(
     chat: &serde_json::Value,
     model: &str,
 ) -> Option<serde_json::Value> {
-    let mut declarations = chat
-        .get("tools")?
-        .as_array()?
+    let tool_source = provider_tools::runtime_provider_chat_tools_from_responses_request(original)
+        .or_else(|| {
+            chat.get("tools")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+        })?;
+    let mut seen = BTreeSet::new();
+    let mut declarations = tool_source
         .iter()
         .filter_map(runtime_gemini_function_declaration_from_chat_tool)
+        .filter(|declaration| {
+            declaration
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|name| seen.insert(name.to_string()))
+        })
         .collect::<Vec<_>>();
     runtime_gemini_apply_gemini3_tool_declaration_overrides(model, &mut declarations);
     RuntimeGeminiPolicyCompat::from_request_and_files(original)
@@ -335,8 +348,11 @@ fn runtime_gemini_function_declaration_from_chat_tool(
 
 pub(super) fn runtime_gemini_tool_config_from_chat(
     chat: &serde_json::Value,
+    original: &serde_json::Value,
 ) -> Option<serde_json::Value> {
-    let tool_choice = chat.get("tool_choice")?;
+    let tool_choice = chat.get("tool_choice").cloned().or_else(|| {
+        provider_tools::runtime_provider_chat_tool_choice_from_responses_request(original, false)
+    })?;
     if tool_choice.as_str() == Some("auto") {
         return None;
     }

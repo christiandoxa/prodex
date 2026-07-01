@@ -4,8 +4,8 @@
 //! behind boundary crates. The external migrator subcommand is wired now so DDL
 //! has a production entrypoint outside request-serving gateway opens.
 
-use std::path::PathBuf;
 use prodex::{GatewayMigrationTarget, run_gateway_migrate};
+use std::path::PathBuf;
 
 const HELP: &str = "prodex-gateway
 
@@ -59,9 +59,9 @@ fn main() {
 
 fn run_migrate(target: Result<MigrationTarget, String>) -> Result<(), String> {
     let message = match target? {
-        MigrationTarget::Sqlite { path } => run_gateway_migrate(GatewayMigrationTarget::Sqlite {
-            path,
-        })?,
+        MigrationTarget::Sqlite { path } => {
+            run_gateway_migrate(GatewayMigrationTarget::Sqlite { path })?
+        }
         MigrationTarget::Postgres { url_env } => {
             run_gateway_migrate(GatewayMigrationTarget::Postgres { url_env })?
         }

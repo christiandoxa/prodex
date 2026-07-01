@@ -102,9 +102,11 @@ pub(super) fn resolve_gateway_launch_config(
                 .cloned()
                 .collect::<Vec<_>>();
             Ok(runtime_proxy_crate::RuntimeGatewayRouteAlias {
-                alias: gateway_exact_policy_identifier(&alias.alias)
-                    .then(|| alias.alias.clone())
-                    .unwrap_or_default(),
+                alias: if gateway_exact_policy_identifier(&alias.alias) {
+                    alias.alias.clone()
+                } else {
+                    String::new()
+                },
                 model_metrics: gateway_route_alias_model_metrics(
                     provider_id,
                     &models,
@@ -357,9 +359,11 @@ pub(super) fn gateway_admin_tokens_config(
             None => RuntimeGatewayAdminRole::Viewer,
         };
         tokens.push(RuntimeGatewayAdminToken {
-            name: gateway_exact_policy_identifier(&configured.name)
-                .then(|| configured.name.clone())
-                .unwrap_or_default(),
+            name: if gateway_exact_policy_identifier(&configured.name) {
+                configured.name.clone()
+            } else {
+                String::new()
+            },
             token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token),
             role,
             tenant_id: gateway_optional_policy_string(configured.tenant_id.as_deref()),
@@ -557,9 +561,11 @@ pub(super) fn gateway_virtual_keys_config(
                 );
             }
             Ok(runtime_proxy_crate::RuntimeGatewayVirtualKey {
-                name: gateway_exact_policy_identifier(&key.name)
-                    .then(|| key.name.clone())
-                    .unwrap_or_default(),
+                name: if gateway_exact_policy_identifier(&key.name) {
+                    key.name.clone()
+                } else {
+                    String::new()
+                },
                 tenant_id: gateway_optional_policy_string(key.tenant_id.as_deref()),
                 team_id: gateway_optional_policy_string(key.team_id.as_deref()),
                 project_id: gateway_optional_policy_string(key.project_id.as_deref()),

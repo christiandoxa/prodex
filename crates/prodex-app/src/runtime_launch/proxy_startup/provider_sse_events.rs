@@ -51,27 +51,6 @@ pub(super) fn runtime_provider_sse_output_text_item_added_event(
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provider_sse_failed_event_redacts_secret_like_message_material() {
-        let event = runtime_provider_sse_failed_event(
-            1,
-            2,
-            "resp_1",
-            "provider_stream_error",
-            "upstream failed: Authorization: Bearer fixture_token_123 url=https://example.test?api_key=sk-fixture-123456",
-        );
-
-        assert!(event.contains("Authorization: Bearer <redacted>"));
-        assert!(event.contains("api_key=<redacted>"));
-        assert!(!event.contains("fixture_token_123"));
-        assert!(!event.contains("sk-fixture-123456"));
-    }
-}
-
 pub(super) fn runtime_provider_sse_output_text_item_done_event(
     sequence_number: u64,
     response_id: &str,
@@ -95,4 +74,25 @@ pub(super) fn runtime_provider_sse_output_text_item_done_event(
             },
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_sse_failed_event_redacts_secret_like_message_material() {
+        let event = runtime_provider_sse_failed_event(
+            1,
+            2,
+            "resp_1",
+            "provider_stream_error",
+            "upstream failed: Authorization: Bearer fixture_token_123 url=https://example.test?api_key=sk-fixture-123456",
+        );
+
+        assert!(event.contains("Authorization: Bearer <redacted>"));
+        assert!(event.contains("api_key=<redacted>"));
+        assert!(!event.contains("fixture_token_123"));
+        assert!(!event.contains("sk-fixture-123456"));
+    }
 }

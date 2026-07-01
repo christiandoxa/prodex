@@ -445,6 +445,14 @@ fn runtime_smart_context_truncate_vec_tail<T>(items: &mut Vec<T>, limit: usize) 
     }
 }
 
+fn runtime_smart_context_extend_unique_tail<T: PartialEq>(items: &mut Vec<T>, incoming: Vec<T>) {
+    for item in incoming {
+        if !items.contains(&item) {
+            items.push(item);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,13 +471,5 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("calibration-token"));
         assert!(!message.contains("calibration-key"));
-    }
-}
-
-fn runtime_smart_context_extend_unique_tail<T: PartialEq>(items: &mut Vec<T>, incoming: Vec<T>) {
-    for item in incoming {
-        if !items.contains(&item) {
-            items.push(item);
-        }
     }
 }

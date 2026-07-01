@@ -501,9 +501,9 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
 
     assert!(output.contains("ready-early"));
     assert!(output.contains("ready-late"));
-    assert!(output.contains("blocked"));
+    assert!(!output.contains("blocked"));
     assert!(!output.contains("error"));
-    assert!(output.contains("\n\nshowing top 3 of 4 profiles"));
+    assert!(output.contains("\n\nshowing top 2 of 4 profiles"));
 }
 
 #[test]

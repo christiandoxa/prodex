@@ -16,8 +16,9 @@ pub fn run_gateway_migrate(target: GatewayMigrationTarget) -> Result<String, Str
         GatewayMigrationTarget::Sqlite { path } => {
             let plan = plan_sqlite_migrations(SqliteRuntimeMode::ExternalMigrator)
                 .map_err(|err| err.to_string())?;
-            let conn = rusqlite::Connection::open(&path)
-                .map_err(|err| format!("failed to open sqlite database {}: {err}", path.display()))?;
+            let conn = rusqlite::Connection::open(&path).map_err(|err| {
+                format!("failed to open sqlite database {}: {err}", path.display())
+            })?;
             for migration in &plan.migrations {
                 conn.execute_batch(migration.sql).map_err(|err| {
                     format!("failed to apply sqlite migration {}: {err}", migration.name)

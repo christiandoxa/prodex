@@ -305,7 +305,8 @@ mod tests {
 
     #[test]
     fn admin_ledger_exports_are_bounded() {
-        assert!(RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT >= 1000);
-        assert!(RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT < usize::MAX);
+        let limit = std::hint::black_box(RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT);
+        assert!(limit >= 1000);
+        assert!(limit < usize::MAX);
     }
 }

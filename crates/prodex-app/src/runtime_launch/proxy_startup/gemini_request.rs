@@ -102,8 +102,9 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
 ) -> Result<RuntimeGeminiTranslatedRequest> {
     let original: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
+    let chat_source = runtime_gemini_chat_source_request(&original);
     let chat = runtime_chat_compatible_request_body(
-        body,
+        &serde_json::to_vec(&chat_source).context("failed to serialize Gemini chat source JSON")?,
         conversations,
         RuntimeProviderBridgeKind::Gemini,
         GEMINI_DEFAULT_MODEL,
@@ -133,7 +134,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
     if let Some(tools) = runtime_gemini_tools_from_requests(&original, &chat_value, &model) {
         request.insert("tools".to_string(), tools);
     }
-    if let Some(tool_config) = runtime_gemini_tool_config_from_chat(&chat_value) {
+    if let Some(tool_config) = runtime_gemini_tool_config_from_chat(&chat_value, &original) {
         request.insert("toolConfig".to_string(), tool_config);
     }
     request.insert(
@@ -176,6 +177,74 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
         model,
         stream,
     })
+}
+
+fn runtime_gemini_chat_source_request(original: &serde_json::Value) -> serde_json::Value {
+    let mut value = original.clone();
+    let Some(object) = value.as_object_mut() else {
+        return value;
+    };
+    for field in [
+        "tools",
+        "tool_choice",
+        "web_search_options",
+        "frequency_penalty",
+        "presence_penalty",
+        "n",
+        "seed",
+        "service_tier",
+        "prediction",
+        "logit_bias",
+        "functions",
+        "function_call",
+    ] {
+        object.remove(field);
+    }
+    if let Some(input) = object.get_mut("input") {
+        runtime_gemini_sanitize_chat_source_input(input);
+    }
+    value
+}
+
+fn runtime_gemini_sanitize_chat_source_input(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                runtime_gemini_sanitize_chat_source_item(item);
+            }
+        }
+        serde_json::Value::Object(_) => runtime_gemini_sanitize_chat_source_item(value),
+        _ => {}
+    }
+}
+
+fn runtime_gemini_sanitize_chat_source_item(value: &mut serde_json::Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    if object.get("type").and_then(serde_json::Value::as_str) != Some("message") {
+        return;
+    }
+    let Some(content) = object.get_mut("content") else {
+        return;
+    };
+    let serde_json::Value::Array(parts) = content else {
+        return;
+    };
+    parts.retain(runtime_gemini_chat_source_content_part_supported);
+}
+
+fn runtime_gemini_chat_source_content_part_supported(part: &serde_json::Value) -> bool {
+    let Some(object) = part.as_object() else {
+        return true;
+    };
+    object
+        .get("text")
+        .or_else(|| object.get("input_text"))
+        .or_else(|| object.get("output_text"))
+        .or_else(|| object.get("content"))
+        .and_then(serde_json::Value::as_str)
+        .is_some()
 }
 
 fn runtime_gemini_contents_from_chat(

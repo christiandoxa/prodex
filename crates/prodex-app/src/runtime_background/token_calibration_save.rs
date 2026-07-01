@@ -181,23 +181,6 @@ fn runtime_smart_context_next_token_calibration_save_job(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn runtime_token_calibration_save_error_redacts_secret_like_chain() {
-        let err = anyhow::anyhow!("failed: Authorization: Bearer token-calibration-token")
-            .context("token calibration save failed");
-
-        let message = runtime_token_calibration_save_error(&err);
-
-        assert!(message.contains("token calibration save failed"));
-        assert!(message.contains("Authorization: Bearer <redacted>"));
-        assert!(!message.contains("token-calibration-token"));
-    }
-}
-
 pub(crate) fn runtime_load_json_file_or_default<T>(path: &Path, valid: impl Fn(&T) -> bool) -> T
 where
     T: DeserializeOwned + Default,
@@ -229,4 +212,21 @@ where
     let merged = merge(existing, incoming);
     let bytes = serde_json::to_vec(&merged).context("failed to encode JSON")?;
     fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_token_calibration_save_error_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!("failed: Authorization: Bearer token-calibration-token")
+            .context("token calibration save failed");
+
+        let message = runtime_token_calibration_save_error(&err);
+
+        assert!(message.contains("token calibration save failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(!message.contains("token-calibration-token"));
+    }
 }

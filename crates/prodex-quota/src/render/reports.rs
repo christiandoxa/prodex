@@ -102,7 +102,7 @@ pub fn render_quota_reports_window_with_sort(
 }
 
 fn quota_report_column_widths(total_width: usize) -> QuotaReportColumnWidths {
-    const MIN_WIDTHS: [usize; 7] = [12, 3, 4, 14, 4, 8, 13];
+    const MIN_WIDTHS: [usize; 7] = [12, 3, 4, 14, 4, 10, 11];
     const EXTRA_WEIGHTS: [usize; 7] = [12, 1, 3, 13, 4, 8, 18];
     const DISTRIBUTION_ORDER: [usize; 7] = [6, 3, 0, 5, 4, 2, 1];
 

@@ -190,25 +190,6 @@ fn runtime_streaming_error_log_value(err: &io::Error) -> String {
     redaction_redact_secret_like_text(&err.to_string()).replace('\n', " ")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn streaming_error_log_value_redacts_secret_like_material() {
-        let err = io::Error::other(
-            "stream failed\nAuthorization: Bearer stream-token\napi_key=stream-key",
-        );
-        let message = runtime_streaming_error_log_value(&err);
-
-        assert!(!message.contains('\n'));
-        assert!(message.contains("Authorization: Bearer <redacted>"));
-        assert!(message.contains("api_key=<redacted>"));
-        assert!(!message.contains("stream-token"));
-        assert!(!message.contains("stream-key"));
-    }
-}
-
 struct RuntimeStreamChunkContext<'a> {
     request_id: u64,
     log_path: PathBuf,
@@ -282,4 +263,23 @@ fn write_runtime_stream_chunk(
         })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streaming_error_log_value_redacts_secret_like_material() {
+        let err = io::Error::other(
+            "stream failed\nAuthorization: Bearer stream-token\napi_key=stream-key",
+        );
+        let message = runtime_streaming_error_log_value(&err);
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("stream-token"));
+        assert!(!message.contains("stream-key"));
+    }
 }
