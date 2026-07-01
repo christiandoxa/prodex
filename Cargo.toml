@@ -175,9 +175,11 @@ bench-support = ["prodex_app/bench-support"]
 [dependencies]
 postgres = { workspace = true }
 prodex_app = { workspace = true }
+prodex_application = { workspace = true }
 prodex_config = { workspace = true }
 prodex_control_plane = { workspace = true }
 prodex_domain = { workspace = true }
+prodex_gateway_http = { workspace = true }
 prodex_storage_postgres = { workspace = true }
 prodex_storage_sqlite = { workspace = true }
 rusqlite = { workspace = true }

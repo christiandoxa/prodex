@@ -251,3 +251,123 @@ fn control_plane_binary_reports_config_publication_denial() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn control_plane_binary_plans_http_control_plane_route_and_idempotency() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-control-plane-http-plan-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    ));
+    fs::create_dir_all(&root).expect("create control-plane http root");
+    let request_path = root.join("http-plan-request.json");
+    fs::write(
+        &request_path,
+        serde_json::json!({
+            "principal": {
+                "id": "00000000-0000-7000-8000-000000000030",
+                "tenant_id": "00000000-0000-7000-8000-000000000001",
+                "kind": "user",
+                "role": "admin",
+                "credential_scope": "control_plane"
+            },
+            "tenant_id": "00000000-0000-7000-8000-000000000001",
+            "resource_id": "revision-1",
+            "occurred_at_unix_ms": 1700000000000u64,
+            "method": "POST",
+            "path": "/admin/configuration/revisions",
+            "body_len": 128,
+            "headers": [
+                {"name": "traceparent", "value": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+                {"name": "idempotency-key", "value": "config-publish-1"}
+            ],
+            "body_digest": "sha256:config-publish-1"
+        })
+        .to_string(),
+    )
+    .expect("write http plan request");
+
+    let output = Command::new(bin("prodex-control-plane"))
+        .args([
+            "plan-http-control-plane",
+            "--request",
+            request_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run http plan");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json output");
+    assert_eq!(stdout["planned"], true);
+    assert_eq!(stdout["operation"], "configuration_publish");
+    assert_eq!(stdout["resource_kind"], "configuration");
+    assert_eq!(stdout["requires_idempotency"], true);
+    assert_eq!(stdout["idempotency"]["required"], true);
+    assert_eq!(stdout["idempotency"]["key"], "config-publish-1");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn control_plane_binary_reports_http_control_plane_idempotency_error() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-control-plane-http-plan-denied-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    ));
+    fs::create_dir_all(&root).expect("create control-plane http denied root");
+    let request_path = root.join("http-plan-request-denied.json");
+    fs::write(
+        &request_path,
+        serde_json::json!({
+            "principal": {
+                "id": "00000000-0000-7000-8000-000000000040",
+                "tenant_id": "00000000-0000-7000-8000-000000000001",
+                "kind": "user",
+                "role": "admin",
+                "credential_scope": "control_plane"
+            },
+            "tenant_id": "00000000-0000-7000-8000-000000000001",
+            "resource_id": "revision-1",
+            "occurred_at_unix_ms": 1700000000000u64,
+            "method": "POST",
+            "path": "/admin/configuration/revisions",
+            "body_len": 128,
+            "headers": [
+                {"name": "traceparent", "value": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+            ],
+            "body_digest": "sha256:config-publish-1"
+        })
+        .to_string(),
+    )
+    .expect("write denied http plan request");
+
+    let output = Command::new(bin("prodex-control-plane"))
+        .args([
+            "plan-http-control-plane",
+            "--request",
+            request_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run denied http plan");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json output");
+    assert_eq!(stdout["planned"], false);
+    assert_eq!(stdout["operation"], "configuration_publish");
+    assert_eq!(stdout["code"], "control_plane_idempotency_key_required");
+
+    let _ = fs::remove_dir_all(root);
+}

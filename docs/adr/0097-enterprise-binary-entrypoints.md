@@ -34,5 +34,6 @@ without changing runtime traffic paths prematurely. Future adapter work can wire
 these binaries to async gateway/control-plane servers with focused tests while
 keeping the legacy `prodex` CLI path compatible until cutover. In the meantime,
 the enterprise binaries can host small one-shot operational entrypoints such as
-gateway schema migration and control-plane configuration publication planning or
-delivery without pulling legacy runtime code into the new boundaries.
+gateway schema migration, control-plane configuration publication planning or
+delivery, and control-plane HTTP route/idempotency planning without pulling
+legacy runtime code into the new boundaries.

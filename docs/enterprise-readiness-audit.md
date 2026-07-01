@@ -151,7 +151,10 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0823-domain-security-role-mapper-debug-redaction.md`.
 - **Remaining gap:** Replace the remaining hand-written legacy admin execution
   branches with application/control-plane use-case calls before enabling
-  multi-tenant production mode.
+  multi-tenant production mode. The dedicated `prodex-control-plane` binary can
+  now exercise control-plane HTTP route and idempotency planning for those
+  paths through the shared application and gateway-http boundaries instead of
+  duplicating that logic in ad hoc scripts.
 
 ### 2. Root Token Must Not Bypass Data-Plane Authorization
 
