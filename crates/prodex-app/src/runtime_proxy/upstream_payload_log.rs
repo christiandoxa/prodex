@@ -15,7 +15,7 @@ pub(crate) fn log_runtime_upstream_payload_snapshot(
     profile_name: &str,
     payload: &[u8],
 ) {
-    if route_kind == RuntimeRouteKind::Standard {
+    if !runtime_upstream_payload_logging_allowed(transport, route_kind) {
         return;
     }
     let logged_len = payload.len().min(RUNTIME_UPSTREAM_PAYLOAD_LOG_LIMIT_BYTES);
@@ -43,4 +43,29 @@ pub(crate) fn log_runtime_upstream_payload_snapshot(
             ],
         ),
     );
+}
+
+fn runtime_upstream_payload_logging_allowed(transport: &str, route_kind: RuntimeRouteKind) -> bool {
+    !transport.eq_ignore_ascii_case("websocket") && route_kind != RuntimeRouteKind::Standard
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upstream_payload_logging_skips_websocket_request_text() {
+        assert!(!runtime_upstream_payload_logging_allowed(
+            "websocket",
+            RuntimeRouteKind::Websocket
+        ));
+        assert!(runtime_upstream_payload_logging_allowed(
+            "http",
+            RuntimeRouteKind::Responses
+        ));
+        assert!(!runtime_upstream_payload_logging_allowed(
+            "http",
+            RuntimeRouteKind::Standard
+        ));
+    }
 }

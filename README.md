@@ -1300,7 +1300,7 @@ git diff | prodex context compact-output --kind git-diff
 | `prodex info` | Shows provider route/quota shapes plus effective runtime tuning values after environment, policy, and default resolution. |
 | `prodex log` | Shows the latest session transcript text plus the latest runtime token event. |
 | `prodex log stream` | Follows session/runtime logs and prints transcript text plus token events live. Add `--json` for JSON Lines token events only. |
-| `prodex log upstream` | Follows backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Add `--json` for JSON Lines payload events. Snapshots are capped at 128 KiB per payload. |
+| `prodex log upstream` | Follows HTTP backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting. Add `--json` for JSON Lines payload events. WebSocket request payloads are not logged. Snapshots are capped at 128 KiB per payload. |
 | `prodex doctor --install` | Adds install and embedded asset checks to doctor output. |
 | `prodex doctor --runtime` | Runs runtime diagnostics. |
 | `prodex doctor --bundle PATH --redacted` | Writes a shareable JSON diagnostic bundle without stored auth tokens or headers. |
