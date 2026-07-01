@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.239.0 - 2026-07-01
+
+### Runtime
+
+- Allow remaining five-hour quota usage (`b2fabd0`)
+
 ## 0.238.0 - 2026-07-01
 
 ### Runtime
 
+- Satisfy clippy test module ordering (`0a8e2e2`)
 - Keep prodex launch responsive under startup load (`7e71e83`)
 
 ## 0.237.0 - 2026-07-01
@@ -83,14 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Claude
 
 - Add codebase memory MCP integration (`0ac78f3`)
-
-## 0.227.0 - 2026-06-28
-
-### CLI
-
-- Preserve compact quota tui separators (`a19aac9`)
-- Refine quota status summaries (`613d8ab`)
-
-### Claude
-
-- Harden super optimizer mcp tools (`09a5cc3`)
