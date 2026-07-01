@@ -2169,6 +2169,7 @@ dependencies = [
  "postgres",
  "prodex-app",
  "prodex-config",
+ "prodex-control-plane",
  "prodex-domain",
  "prodex-storage-postgres",
  "prodex-storage-sqlite",

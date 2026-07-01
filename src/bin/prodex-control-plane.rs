@@ -8,7 +8,13 @@ use std::path::PathBuf;
 
 use prodex::deliver_config_publication_event_to_gateway_runtime;
 use prodex_config::{ConfigPublicationEventPlan, ConfigPublicationEventTarget};
-use prodex_domain::{PolicyRevisionId, TenantId};
+use prodex_control_plane::{
+    ConfigurationPublicationDecision, ConfigurationPublicationErrorStatus,
+    ConfigurationPublicationRequest, ControlPlaneActionRequest, ControlPlaneOperation,
+    ControlPlaneResourceRef, decide_configuration_publication,
+    plan_configuration_publication_error_response,
+};
+use prodex_domain::{PolicyRevisionId, Principal, ResourceKind, TenantId};
 use serde::Deserialize;
 
 const HELP: &str = "prodex-control-plane
@@ -18,6 +24,7 @@ Control-plane entrypoint.
 USAGE:
     prodex-control-plane --help
     prodex-control-plane --version
+    prodex-control-plane plan-config-publication --request <path>
     prodex-control-plane deliver-config-publication --event <path> --root <path>
 
 STATUS:
@@ -35,6 +42,22 @@ struct ConfigPublicationEventFile {
     targets: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ConfigPublicationPlanFile {
+    principal: Principal,
+    occurred_at_unix_ms: u64,
+    current_revision_id: Option<PolicyRevisionId>,
+    candidate: ConfigRevisionFile,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConfigRevisionFile {
+    tenant_id: TenantId,
+    revision_id: PolicyRevisionId,
+    published_at_unix_ms: u64,
+    payload: serde_json::Value,
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
@@ -50,6 +73,17 @@ fn main() {
             );
             std::process::exit(2);
         }
+        Some("plan-config-publication") => match run_plan_config_publication(args) {
+            Ok(output) => println!("{output}"),
+            Err(err) => {
+                eprintln!(
+                    "{err}
+
+{HELP}"
+                );
+                std::process::exit(2);
+            }
+        },
         Some("deliver-config-publication") => match run_deliver_config_publication(args) {
             Ok(output) => println!("{output}"),
             Err(err) => {
@@ -68,6 +102,62 @@ fn main() {
 {HELP}"
             );
             std::process::exit(2);
+        }
+    }
+}
+
+fn run_plan_config_publication(args: impl Iterator<Item = String>) -> Result<String, String> {
+    let mut request_path = None;
+    let mut args = args.peekable();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--request" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "missing value for --request".to_string())?;
+                request_path = Some(PathBuf::from(value));
+            }
+            other => {
+                return Err(format!("unknown plan-config-publication argument: {other}"));
+            }
+        }
+    }
+
+    let request_path = request_path
+        .ok_or_else(|| "plan-config-publication requires --request <path>".to_string())?;
+    let request = load_config_publication_request(&request_path)?;
+    match decide_configuration_publication(request) {
+        ConfigurationPublicationDecision::Authorized(plan) => {
+            serde_json::to_string_pretty(&serde_json::json!({
+                "authorized": true,
+                "tenant_id": plan.action.tenant.tenant_id,
+                "revision_id": plan.candidate.revision_id,
+                "required_role": plan.action.requirement.required_role,
+                "resource_kind": plan.action.requirement.resource,
+                "resource_action": plan.action.requirement.action,
+                "audit_action": plan.action.audit_event.action.as_str(),
+                "audit_outcome": plan.action.audit_event.outcome,
+                "audit_partition_tenant_id": plan.action.audit_write.tenant_partition_key,
+            }))
+            .map_err(|err| format!("failed to encode publication plan: {err}"))
+        }
+        ConfigurationPublicationDecision::Denied {
+            error,
+            audit_write,
+            audit_event,
+        } => {
+            let response = plan_configuration_publication_error_response(&error);
+            serde_json::to_string_pretty(&serde_json::json!({
+                "authorized": false,
+                "status": configuration_publication_error_status_label(response.status),
+                "code": response.code,
+                "message": response.message,
+                "audit_action": audit_event.action.as_str(),
+                "audit_outcome": audit_event.outcome,
+                "audit_reason_code": audit_event.reason_code,
+                "audit_partition_tenant_id": audit_write.tenant_partition_key,
+            }))
+            .map_err(|err| format!("failed to encode publication denial: {err}"))
         }
     }
 }
@@ -121,6 +211,52 @@ fn run_deliver_config_publication(args: impl Iterator<Item = String>) -> Result<
         }).collect::<Vec<_>>(),
     }))
     .map_err(|err| format!("failed to encode delivery summary: {err}"))
+}
+
+fn load_config_publication_request(
+    path: &PathBuf,
+) -> Result<ConfigurationPublicationRequest<serde_json::Value>, String> {
+    let bytes = std::fs::read(path).map_err(|err| {
+        format!(
+            "failed to read publication request {}: {err}",
+            path.display()
+        )
+    })?;
+    let request: ConfigPublicationPlanFile = serde_json::from_slice(&bytes).map_err(|err| {
+        format!(
+            "failed to parse publication request {}: {err}",
+            path.display()
+        )
+    })?;
+    Ok(ConfigurationPublicationRequest {
+        action: ControlPlaneActionRequest {
+            principal: request.principal,
+            operation: ControlPlaneOperation::ConfigurationPublish,
+            resource: ControlPlaneResourceRef::new(
+                request.candidate.tenant_id,
+                ResourceKind::Configuration,
+                Some(request.candidate.revision_id.to_string()),
+            ),
+            occurred_at_unix_ms: request.occurred_at_unix_ms,
+        },
+        current_revision_id: request.current_revision_id,
+        candidate: prodex_config::ConfigRevision {
+            tenant_id: request.candidate.tenant_id,
+            revision_id: request.candidate.revision_id,
+            published_at_unix_ms: request.candidate.published_at_unix_ms,
+            payload: request.candidate.payload,
+        },
+    })
+}
+
+fn configuration_publication_error_status_label(
+    status: ConfigurationPublicationErrorStatus,
+) -> &'static str {
+    match status {
+        ConfigurationPublicationErrorStatus::BadRequest => "bad_request",
+        ConfigurationPublicationErrorStatus::Conflict => "conflict",
+        ConfigurationPublicationErrorStatus::Forbidden => "forbidden",
+    }
 }
 
 fn load_config_publication_event(path: &PathBuf) -> Result<ConfigPublicationEventPlan, String> {

@@ -985,6 +985,11 @@ while moving legacy adapter code behind enterprise boundaries.
   cached state. That adapter also returns low-cardinality publication delivery
   metric plans for gateway cache refresh and runtime policy reload so delivery
   outcomes can be observed without tenant, revision, root, or payload labels.
+  The dedicated `prodex-control-plane` binary now exposes one-shot
+  `plan-config-publication` and `deliver-config-publication` commands so
+  operators can exercise the control-plane publication decision and local
+  gateway delivery paths without wiring the long-lived control-plane server
+  early.
 - **ADRs:** `docs/adr/0068-domain-policy-cache-refresh.md`,
   `docs/adr/0085-config-boundary-crate.md`,
   `docs/adr/0086-config-boundary-guard.md`,
