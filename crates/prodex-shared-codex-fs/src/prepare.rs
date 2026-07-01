@@ -31,6 +31,21 @@ struct SessionFileFingerprint {
 }
 
 pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result<()> {
+    prepare_managed_codex_home_internal(paths, codex_home, true)
+}
+
+pub fn prepare_managed_codex_home_for_runtime_launch(
+    paths: &AppPaths,
+    codex_home: &Path,
+) -> Result<()> {
+    prepare_managed_codex_home_internal(paths, codex_home, false)
+}
+
+fn prepare_managed_codex_home_internal(
+    paths: &AppPaths,
+    codex_home: &Path,
+    maintain_sessions: bool,
+) -> Result<()> {
     create_codex_home_if_missing(codex_home)?;
     migrate_legacy_shared_codex_roots(paths)?;
     fs::create_dir_all(&paths.shared_codex_root)
@@ -39,7 +54,9 @@ pub fn prepare_managed_codex_home(paths: &AppPaths, codex_home: &Path) -> Result
     for entry in shared_codex_entries(paths, codex_home)? {
         ensure_shared_codex_entry(paths, codex_home, &entry)?;
     }
-    maintain_managed_codex_sessions(paths)?;
+    if maintain_sessions {
+        maintain_managed_codex_sessions(paths)?;
+    }
 
     Ok(())
 }

@@ -22,6 +22,23 @@ fn context_audit_command_accepts_json_and_root() {
 }
 
 #[test]
+fn context_export_command_accepts_id_and_optional_path() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "context",
+        "export",
+        "019c9e3d",
+        "./context_session.md",
+    ])
+    .expect("context export command");
+    let Commands::Context(ContextCommands::Export(args)) = command else {
+        panic!("expected context export command");
+    };
+    assert_eq!(args.id, "019c9e3d");
+    assert_eq!(args.path.as_deref(), Some(Path::new("./context_session.md")));
+}
+
+#[test]
 fn context_compact_output_command_accepts_kind_limits_and_json() {
     let command = parse_cli_command_from([
         "prodex",

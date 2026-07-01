@@ -210,6 +210,8 @@ pub struct AuditArgs {
 pub enum ContextCommands {
     /// Read-only size and approximate token audit for shared Codex context roots.
     Audit(ContextAuditArgs),
+    /// Export a shared Codex session transcript/context to Markdown.
+    Export(ContextExportArgs),
     /// Deterministically compact prose context files and write .original.md backups.
     Compress(ContextCompressArgs),
     /// Evaluate a Smart Context replay metrics corpus.
@@ -231,6 +233,16 @@ pub struct ContextAuditArgs {
     /// Emit machine-readable JSON output.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ContextExportArgs {
+    /// Unique full or partial shared Codex session id.
+    #[arg(value_name = "ID")]
+    pub id: String,
+    /// Output Markdown path. Defaults to ./context_<resolved-session-id>.md
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]

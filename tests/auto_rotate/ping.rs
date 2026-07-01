@@ -34,6 +34,13 @@ fn ping_openai_sends_ping_to_each_ready_openai_profile() {
     let args = fs::read_to_string(&fixture.codex_args_log).expect("failed to read args log");
     assert_eq!(
         args.lines().collect::<Vec<_>>(),
-        vec!["exec", "ping", "exec", "ping"]
+        vec![
+            "--dangerously-bypass-approvals-and-sandbox",
+            "exec",
+            "ping",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "exec",
+            "ping",
+        ]
     );
 }

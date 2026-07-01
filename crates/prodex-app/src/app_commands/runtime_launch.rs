@@ -258,7 +258,7 @@ fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildPr
             .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
             .managed
     {
-        prepare_managed_codex_home(&paths, &selection.codex_home)?;
+        prepare_managed_codex_home_for_runtime_launch(&paths, &selection.codex_home)?;
     }
 
     let codex_args = prodex_runtime_launch::normalize_codex_profile_args(&args.codex_args);
@@ -301,7 +301,10 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
 
         let managed = self.selected_profile_is_managed()?;
         if managed {
-            prepare_managed_codex_home(&self.paths, &self.selection.codex_home)?;
+            // ponytail: keep launch hot path out of full shared-session maintenance;
+            // targeted resume repair runs before child launch, and full maintenance already runs
+            // after child exit.
+            prepare_managed_codex_home_for_runtime_launch(&self.paths, &self.selection.codex_home)?;
         }
 
         let runtime_proxy = RuntimeProxyStartupFactory::build(

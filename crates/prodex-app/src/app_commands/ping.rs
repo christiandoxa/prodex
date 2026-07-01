@@ -6,7 +6,8 @@ use std::ffi::OsString;
 use terminal_ui::print_stdout_line;
 
 use super::{
-    codex_child_plan, collect_run_profile_reports, ready_profile_candidates, run_child_plan,
+    codex_child_plan, collect_run_profile_reports, prepare_codex_launch_args,
+    ready_profile_candidates, run_child_plan,
 };
 use crate::app_state::{AppStateIoExt, repair_missing_active_profile_and_save};
 
@@ -55,10 +56,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
             continue;
         };
         print_stdout_line(&format!("Pinging {profile_name}..."));
-        let plan = codex_child_plan(
-            profile.codex_home.clone(),
-            vec![OsString::from("exec"), OsString::from("ping")],
-        );
+        let plan = ping_openai_child_plan(profile.codex_home.clone());
         let status = run_child_plan(&plan, None)?;
         if !status.success() {
             failures.push((profile_name, status.code().unwrap_or(1)));
@@ -76,4 +74,28 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
         .collect::<Vec<_>>()
         .join(", ");
     bail!("ping failed for {summary}")
+}
+
+fn ping_openai_child_plan(codex_home: std::path::PathBuf) -> crate::ChildProcessPlan {
+    let (args, _) =
+        prepare_codex_launch_args(&[OsString::from("exec"), OsString::from("ping")], true);
+    codex_child_plan(codex_home, args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ping_openai_child_plan_bypasses_approvals_and_sandbox() {
+        let plan = ping_openai_child_plan("/tmp/codex-home".into());
+        assert_eq!(
+            plan.args,
+            vec![
+                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+                OsString::from("exec"),
+                OsString::from("ping")
+            ]
+        );
+    }
 }

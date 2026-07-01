@@ -691,6 +691,26 @@ fn codex_command_server_detection_is_first_arg_only() {
     assert!(!is_codex_command_server_subcommand(&[]));
 }
 #[test]
+fn context_export_parses_id_and_optional_path() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "context",
+        "export",
+        "019c9e3d",
+        "./context_session.md",
+    ])
+    .expect("context export should parse");
+    let Commands::Context(ContextCommands::Export(args)) = command else {
+        panic!("expected context export command");
+    };
+    assert_eq!(args.id, "019c9e3d");
+    assert_eq!(
+        args.path.as_deref(),
+        Some(std::path::Path::new("./context_session.md"))
+    );
+}
+
+#[test]
 fn session_list_parses_line_modes_and_filters() {
     let command = parse_cli_command_from([
         "prodex",

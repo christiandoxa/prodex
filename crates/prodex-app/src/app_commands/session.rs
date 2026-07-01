@@ -458,10 +458,12 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
             path.display()
         );
     }
-    let reports =
-        prodex_session_store::collect_session_reports(&paths.shared_codex_root, None, &state)?;
-    let report = prodex_session_store::resolve_session_report_by_id(&reports, &args.id)
-        .map_err(anyhow::Error::new)?;
+    let report = prodex_session_store::resolve_session_report_by_id_in_store(
+        &paths.shared_codex_root,
+        &state,
+        &args.id,
+    )
+    .map_err(anyhow::Error::new)?;
 
     handle_run(RunArgs {
         profile: None,

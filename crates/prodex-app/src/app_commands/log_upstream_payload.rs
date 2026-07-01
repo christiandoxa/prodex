@@ -5,19 +5,19 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub(super) struct UpstreamPayloadEvent {
-    pub(super) timestamp: String,
-    pub(super) request: Option<u64>,
-    pub(super) transport: String,
-    pub(super) route: String,
-    pub(super) profile: String,
-    pub(super) bytes: usize,
-    pub(super) logged_bytes: usize,
-    pub(super) truncated: bool,
-    pub(super) payload: String,
+pub(crate) struct UpstreamPayloadEvent {
+    pub(crate) timestamp: String,
+    pub(crate) request: Option<u64>,
+    pub(crate) transport: String,
+    pub(crate) route: String,
+    pub(crate) profile: String,
+    pub(crate) bytes: usize,
+    pub(crate) logged_bytes: usize,
+    pub(crate) truncated: bool,
+    pub(crate) payload: String,
 }
 
-pub(super) fn upstream_payload_event_from_runtime_line(line: &str) -> Option<UpstreamPayloadEvent> {
+pub(crate) fn upstream_payload_event_from_runtime_line(line: &str) -> Option<UpstreamPayloadEvent> {
     let parsed = parse_runtime_log_line(line)?;
     if parsed.event.as_deref() != Some("upstream_payload") {
         return None;
@@ -64,7 +64,7 @@ pub(super) fn upstream_payload_event_from_runtime_line(line: &str) -> Option<Ups
     })
 }
 
-pub(super) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<String> {
+pub(crate) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<String> {
     let Ok(value) = serde_json::from_str::<Value>(payload) else {
         return render_text_body(payload, width);
     };

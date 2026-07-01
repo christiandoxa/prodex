@@ -128,6 +128,7 @@ impl CommandExecute for ContextCommands {
     fn execute(self) -> Result<()> {
         match self {
             Self::Audit(args) => handle_context_audit(args),
+            Self::Export(args) => handle_context_export(args),
             Self::Compress(args) => handle_context_compress(args),
             Self::ReplayReport(args) => handle_context_replay_report(args),
             Self::CompactOutput(args) => handle_context_compact_output(args),

@@ -187,6 +187,8 @@ Examples:
   prodex context audit
   prodex context audit --limit 30
   prodex context audit --json
+  prodex context export 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
+  prodex context export 019c9e3d ./context_session.md
   prodex context compress ~/.codex/AGENTS.md --dry-run
   prodex context compress ~/.codex/AGENTS.md
   prodex context replay-report smart-context-replay.json

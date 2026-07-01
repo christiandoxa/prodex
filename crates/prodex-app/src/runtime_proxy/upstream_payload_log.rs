@@ -46,7 +46,8 @@ pub(crate) fn log_runtime_upstream_payload_snapshot(
 }
 
 fn runtime_upstream_payload_logging_allowed(transport: &str, route_kind: RuntimeRouteKind) -> bool {
-    !transport.eq_ignore_ascii_case("websocket") && route_kind != RuntimeRouteKind::Standard
+    let _ = transport;
+    route_kind != RuntimeRouteKind::Standard
 }
 
 #[cfg(test)]
@@ -55,7 +56,7 @@ mod tests {
 
     #[test]
     fn upstream_payload_logging_skips_websocket_request_text() {
-        assert!(!runtime_upstream_payload_logging_allowed(
+        assert!(runtime_upstream_payload_logging_allowed(
             "websocket",
             RuntimeRouteKind::Websocket
         ));

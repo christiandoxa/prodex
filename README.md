@@ -1291,6 +1291,7 @@ prodex doctor --bundle ./prodex-doctor.json --redacted
 prodex setup --dry-run
 prodex capability list
 prodex context audit
+prodex context export 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 prodex context compress ~/.codex/AGENTS.md --dry-run
 git diff | prodex context compact-output --kind git-diff
 ```
@@ -1307,6 +1308,7 @@ git diff | prodex context compact-output --kind git-diff
 | `prodex setup --dry-run` | Shows setup reconciliation actions without changing files. |
 | `prodex capability list` | Lists built-in and optional Prodex capabilities with availability status. |
 | `prodex context audit` | Reports approximate token weight for shared instruction and memory files. |
+| `prodex context export` | Exports a selected shared Codex session transcript/context into a Markdown file. |
 | `prodex context compress` | Compresses Markdown/text context files and writes an `.original.md` backup. |
 | `prodex context compact-output` | Compacts copied command output such as `git status`, `git diff`, `rg`, `grep`, `find`, `tree`, or long logs. |
 

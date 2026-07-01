@@ -424,6 +424,98 @@ fn repair_resume_session_metadata_prefix_uses_state_db_prefix_rollout_path() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
+#[test]
+fn repair_resume_session_metadata_prefix_skips_unreadable_unrelated_files_for_exact_id() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = test_temp_dir("session-repair-skip-unreadable-unrelated");
+    let sessions = root.join("sessions/2026/07/01");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let target = sessions.join(format!("rollout-2026-07-01T20-00-00-{session_id}.jsonl"));
+    let unrelated = sessions.join("rollout-2026-07-01T20-00-00-other-session.jsonl");
+    fs::write(
+        &target,
+        "{\"timestamp\":\"2026-07-01T20:00:00Z\",\"type\":\"event\",\"payload\":{\"message\":\"target session\"}}\n",
+    )
+    .expect("target session should be written");
+    fs::write(
+        &unrelated,
+        "{\"timestamp\":\"2026-07-01T20:00:00Z\",\"type\":\"event\"}\n",
+    )
+    .expect("unrelated session should be written");
+    let mut perms = fs::metadata(&unrelated)
+        .expect("unrelated metadata should read")
+        .permissions();
+    perms.set_mode(0);
+    fs::set_permissions(&unrelated, perms).expect("unrelated permissions should update");
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(target.as_path()));
+    assert_codex_session_meta_line(
+        fs::read_to_string(&target)
+            .expect("target session should read")
+            .lines()
+            .next()
+            .expect("target first line should exist"),
+        session_id,
+        Some("2026-07-01T20:00:00Z"),
+    );
+
+    let mut perms = fs::metadata(&unrelated)
+        .expect("unrelated metadata should still read")
+        .permissions();
+    perms.set_mode(0o644);
+    let _ = fs::set_permissions(&unrelated, perms);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn resolve_session_report_by_id_in_store_skips_unreadable_unrelated_files_for_exact_id() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = test_temp_dir("resolve-session-report-skip-unreadable-unrelated");
+    let sessions = root.join("sessions/2026/07/01");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let target = sessions.join(format!("rollout-2026-07-01T20-00-00-{session_id}.jsonl"));
+    let unrelated = sessions.join("rollout-2026-07-01T20-00-00-other-session.jsonl");
+    fs::write(
+        &target,
+        format!(
+            "{{\"timestamp\":\"2026-07-01T20:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"/tmp/target\"}}}}\n"
+        ),
+    )
+    .expect("target session should be written");
+    fs::write(
+        &unrelated,
+        "{\"timestamp\":\"2026-07-01T20:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"other-session\",\"cwd\":\"/tmp/unrelated\"}}\n",
+    )
+    .expect("unrelated session should be written");
+    let mut perms = fs::metadata(&unrelated)
+        .expect("unrelated metadata should read")
+        .permissions();
+    perms.set_mode(0);
+    fs::set_permissions(&unrelated, perms).expect("unrelated permissions should update");
+
+    let report = resolve_session_report_by_id_in_store(&root, &AppState::default(), session_id)
+        .expect("resolve should succeed");
+
+    assert_eq!(report.id, session_id);
+    assert_eq!(report.cwd.as_deref(), Some("/tmp/target"));
+
+    let mut perms = fs::metadata(&unrelated)
+        .expect("unrelated metadata should still read")
+        .permissions();
+    perms.set_mode(0o644);
+    let _ = fs::set_permissions(&unrelated, perms);
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn repair_resume_session_metadata_prefix_synthesizes_unique_prefix_match() {
     let root = test_temp_dir("session-synthetic-prefix-rollout");

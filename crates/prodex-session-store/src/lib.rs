@@ -5,6 +5,7 @@ use prodex_app_reports::{
 };
 use prodex_state::AppState;
 use rusqlite::{Connection, OpenFlags};
+use std::env;
 use std::fmt;
 use std::fs;
 use std::io::{self, BufRead};
@@ -200,6 +201,44 @@ pub fn resolve_session_report_by_id<'a>(
     }
 }
 
+pub fn resolve_session_report_by_id_in_store(
+    shared_codex_root: &Path,
+    state: &AppState,
+    selector: &str,
+) -> std::result::Result<SessionReport, SessionResolveError> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return Err(SessionResolveError::Missing {
+            selector: selector.to_string(),
+        });
+    }
+
+    if full_codex_session_id(selector).is_some() {
+        let exact_matches =
+            resolve_exact_session_reports_by_id_in_store(shared_codex_root, state, selector)?;
+        if prodex_debug_resume_repair_enabled() {
+            eprintln!(
+                "prodex-session-store: resolve exact selector={} matches={}",
+                selector,
+                exact_matches.len()
+            );
+        }
+        return match exact_matches.len() {
+            0 => resolve_session_report_by_id_in_store_slow(shared_codex_root, state, selector),
+            1 => Ok(exact_matches
+                .into_iter()
+                .next()
+                .expect("exact match should exist")),
+            _ => Err(SessionResolveError::Ambiguous {
+                selector: selector.to_string(),
+                matches: exact_matches.into_iter().map(|report| report.id).collect(),
+            }),
+        };
+    }
+
+    resolve_session_report_by_id_in_store_slow(shared_codex_root, state, selector)
+}
+
 pub fn repair_resume_session_metadata_prefix(
     shared_codex_root: &Path,
     selector: &str,
@@ -208,13 +247,40 @@ pub fn repair_resume_session_metadata_prefix(
     if selector.is_empty() {
         return Ok(None);
     }
+    let selector_is_full = full_codex_session_id(selector).is_some();
 
     let session_paths = collect_resume_repair_candidate_paths(shared_codex_root, selector)?;
+    if prodex_debug_resume_repair_enabled() {
+        eprintln!(
+            "prodex-session-store: repair selector={} full={} candidates={}",
+            selector,
+            selector_is_full,
+            session_paths.len()
+        );
+    }
 
     let mut exact_paths = Vec::new();
     for candidate in &session_paths {
         if candidate.state_db_match_kind == Some(SessionRepairMatchKind::Exact) {
             exact_paths.push(candidate.clone());
+            continue;
+        }
+        if selector_is_full {
+            if session_path_id_matches_selector(&candidate.path, selector, true) {
+                exact_paths.push(SessionRepairCandidate {
+                    path: candidate.path.clone(),
+                    state_db_match_kind: None,
+                    resolved_session_id: None,
+                });
+            } else if session_path_might_contain_selector_prefix(&candidate.path, selector)
+                && let Ok(Some(path)) = session_file_repair_match(&candidate.path, selector, true)
+            {
+                exact_paths.push(SessionRepairCandidate {
+                    path,
+                    state_db_match_kind: None,
+                    resolved_session_id: None,
+                });
+            }
             continue;
         }
         if let Some(path) = session_file_repair_match(&candidate.path, selector, true)? {
@@ -230,6 +296,15 @@ pub fn repair_resume_session_metadata_prefix(
         if repair_session_file_metadata_prefix(&candidate.path, repair_selector, true)? {
             return Ok(Some(candidate.path));
         }
+    }
+    if prodex_debug_resume_repair_enabled() {
+        eprintln!(
+            "prodex-session-store: repair selector={} exact_paths_done full={}",
+            selector, selector_is_full
+        );
+    }
+    if selector_is_full {
+        return Ok(None);
     }
 
     let mut prefix_paths = Vec::new();
@@ -270,17 +345,33 @@ pub fn find_unrepairable_resume_session(
     if selector.is_empty() {
         return Ok(None);
     }
+    let selector_is_full = full_codex_session_id(selector).is_some();
 
     let session_paths = collect_resume_repair_candidate_paths(shared_codex_root, selector)?;
+    if prodex_debug_resume_repair_enabled() {
+        eprintln!(
+            "prodex-session-store: unrepairable selector={} full={} candidates={}",
+            selector,
+            selector_is_full,
+            session_paths.len()
+        );
+    }
 
     for candidate in session_paths {
         let path = if candidate.state_db_match_kind == Some(SessionRepairMatchKind::Exact) {
             candidate.path
         } else {
-            let Some(path) = session_file_repair_match(&candidate.path, selector, true)? else {
-                continue;
-            };
-            path
+            if selector_is_full {
+                if !session_path_id_matches_selector(&candidate.path, selector, true) {
+                    continue;
+                }
+                candidate.path
+            } else {
+                let Some(path) = session_file_repair_match(&candidate.path, selector, true)? else {
+                    continue;
+                };
+                path
+            }
         };
         if session_file_has_resume_metadata_for_selector(&path, selector)? {
             continue;
@@ -293,6 +384,48 @@ pub fn find_unrepairable_resume_session(
 
 fn session_match_ids(matches: &[&SessionReport]) -> Vec<String> {
     matches.iter().map(|report| report.id.clone()).collect()
+}
+
+fn resolve_session_report_by_id_in_store_slow(
+    shared_codex_root: &Path,
+    state: &AppState,
+    selector: &str,
+) -> std::result::Result<SessionReport, SessionResolveError> {
+    let reports = collect_session_reports(shared_codex_root, None, state).map_err(|_| {
+        SessionResolveError::Missing {
+            selector: selector.to_string(),
+        }
+    })?;
+    resolve_session_report_by_id(&reports, selector).cloned()
+}
+
+fn resolve_exact_session_reports_by_id_in_store(
+    shared_codex_root: &Path,
+    state: &AppState,
+    selector: &str,
+) -> std::result::Result<Vec<SessionReport>, SessionResolveError> {
+    let mut session_paths = Vec::new();
+    collect_exact_session_paths_for_selector(shared_codex_root, selector, &mut session_paths)
+        .map_err(|_| SessionResolveError::Missing {
+            selector: selector.to_string(),
+        })?;
+    session_paths.sort();
+    session_paths.dedup();
+
+    let mut matches = Vec::new();
+    for path in session_paths {
+        let Some(report) =
+            read_session_report(&path, state).map_err(|_| SessionResolveError::Missing {
+                selector: selector.to_string(),
+            })?
+        else {
+            continue;
+        };
+        if report.id.eq_ignore_ascii_case(selector) {
+            matches.push(report);
+        }
+    }
+    Ok(matches)
 }
 
 fn collect_session_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
@@ -309,6 +442,47 @@ fn collect_session_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
         if file_type.is_dir() {
             collect_session_paths(&path, paths)?;
         } else if file_type.is_file() && is_session_metadata_file(&path) {
+            paths.push(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_exact_session_paths_for_selector(
+    root: &Path,
+    selector: &str,
+    paths: &mut Vec<PathBuf>,
+) -> Result<()> {
+    collect_exact_session_paths(&root.join(SESSIONS_DIR), selector, paths)?;
+    collect_exact_session_paths(&root.join(ARCHIVED_SESSIONS_DIR), selector, paths)?;
+    let mut state_db_paths = Vec::new();
+    collect_state_db_rollout_paths(root, selector, &mut state_db_paths);
+    paths.extend(state_db_paths.into_iter().map(|candidate| candidate.path));
+    Ok(())
+}
+
+fn collect_exact_session_paths(
+    root: &Path,
+    selector: &str,
+    paths: &mut Vec<PathBuf>,
+) -> Result<()> {
+    if !root.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(root).with_context(|| format!("failed to read {}", root.display()))? {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", root.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        if file_type.is_dir() {
+            collect_exact_session_paths(&path, selector, paths)?;
+        } else if file_type.is_file()
+            && is_session_metadata_file(&path)
+            && session_path_id_matches_selector(&path, selector, true)
+        {
             paths.push(path);
         }
     }
@@ -387,16 +561,39 @@ fn state_db_rollout_paths_for_selector(
 ) -> Result<Vec<SessionRepairCandidate>> {
     let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("failed to open state db {}", db_path.display()))?;
-    let mut statement = connection
-        .prepare("SELECT id, rollout_path FROM threads")
-        .with_context(|| format!("failed to query state db {}", db_path.display()))?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .with_context(|| format!("failed to read state db {}", db_path.display()))?;
-
     let mut paths = Vec::new();
+    if let Some(full_selector) = full_codex_session_id(selector) {
+        let mut statement = connection
+            .prepare("SELECT id, rollout_path FROM threads WHERE id = ?1 OR id = ?2")
+            .with_context(|| format!("failed to query state db {}", db_path.display()))?;
+        let thread_selector = format!("thread_{full_selector}");
+        let rows = statement
+            .query_map([full_selector, thread_selector.as_str()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .with_context(|| format!("failed to read state db {}", db_path.display()))?;
+        append_state_db_rollout_rows(codex_home, db_path, selector, rows, &mut paths)?;
+    } else {
+        let mut statement = connection
+            .prepare("SELECT id, rollout_path FROM threads")
+            .with_context(|| format!("failed to query state db {}", db_path.display()))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .with_context(|| format!("failed to read state db {}", db_path.display()))?;
+        append_state_db_rollout_rows(codex_home, db_path, selector, rows, &mut paths)?;
+    }
+    Ok(paths)
+}
+
+fn append_state_db_rollout_rows(
+    codex_home: &Path,
+    db_path: &Path,
+    selector: &str,
+    rows: impl IntoIterator<Item = rusqlite::Result<(String, String)>>,
+    paths: &mut Vec<SessionRepairCandidate>,
+) -> Result<()> {
     for row in rows {
         let (thread_id, rollout_path) =
             row.with_context(|| format!("failed to read state db {}", db_path.display()))?;
@@ -415,7 +612,7 @@ fn state_db_rollout_paths_for_selector(
             });
         }
     }
-    Ok(paths)
+    Ok(())
 }
 
 fn state_db_rollout_row_match_kind(
@@ -705,6 +902,17 @@ fn session_path_id_matching_selector(path: &Path, selector: &str, exact: bool) -
         .find(|candidate| session_id_matches_selector(candidate, selector, exact))
 }
 
+fn session_path_might_contain_selector_prefix(path: &Path, selector: &str) -> bool {
+    let Some(prefix) = selector.split('-').next() else {
+        return false;
+    };
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    stem.to_ascii_lowercase()
+        .contains(&prefix.to_ascii_lowercase())
+}
+
 fn session_id_matches_selector(id: &str, selector: &str, exact: bool) -> bool {
     if id.eq_ignore_ascii_case(selector) {
         return true;
@@ -720,6 +928,10 @@ fn full_codex_session_id(selector: &str) -> Option<&str> {
             _ => byte.is_ascii_hexdigit(),
         });
     valid.then_some(selector)
+}
+
+fn prodex_debug_resume_repair_enabled() -> bool {
+    env::var_os("PRODEX_DEBUG_RESUME_REPAIR").is_some()
 }
 
 fn file_modified_epoch(path: &Path) -> Option<i64> {

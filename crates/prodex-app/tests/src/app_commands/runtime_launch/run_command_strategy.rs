@@ -149,6 +149,63 @@ fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
     assert!(codex_args.contains(&session_id.to_string()));
 }
 
+#[cfg(unix)]
+#[test]
+fn run_strategy_exact_resume_provider_detection_skips_unreadable_unrelated_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_dir("auto-route-gemini-resume-skip-unreadable");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let paths = AppPaths::discover().unwrap();
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+    let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
+    fs::create_dir_all(&sessions).unwrap();
+    let target = sessions.join(format!("rollout-2026-06-05T01-00-00-{session_id}.jsonl"));
+    let unrelated = sessions.join("rollout-2026-06-05T01-00-00-other-session.jsonl");
+    fs::write(
+        &target,
+        format!(
+            "{{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"{}\",\"model_provider\":\"prodex-gemini\"}}}}\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &unrelated,
+        "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"other-session\",\"cwd\":\"/tmp/unrelated\",\"model_provider\":\"openai\"}}\n",
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&unrelated).unwrap().permissions();
+    perms.set_mode(0);
+    fs::set_permissions(&unrelated, perms).unwrap();
+
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: None,
+        auto_rotate: false,
+        no_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: false,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
+        codex_args: vec![OsString::from(session_id)],
+    })
+    .unwrap();
+
+    assert_eq!(strategy.runtime_request().external_provider, Some("gemini"));
+
+    let mut perms = fs::metadata(&unrelated).unwrap().permissions();
+    perms.set_mode(0o644);
+    let _ = fs::set_permissions(&unrelated, perms);
+}
+
 #[test]
 fn run_strategy_repairs_resume_session_metadata_prefix_before_provider_detection() {
     let root = temp_dir("repair-resume-prefix-before-provider-detection");

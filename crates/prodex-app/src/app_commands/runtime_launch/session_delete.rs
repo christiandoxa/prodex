@@ -10,11 +10,13 @@ pub(super) fn resolve_codex_delete_session_id(codex_args: &[OsString]) -> Result
 
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let reports =
-        prodex_session_store::collect_session_reports(&paths.shared_codex_root, None, &state)?;
     Ok(
-        match prodex_session_store::resolve_session_report_by_id(&reports, selector) {
-            Ok(report) => Some(report.id.clone()),
+        match prodex_session_store::resolve_session_report_by_id_in_store(
+            &paths.shared_codex_root,
+            &state,
+            selector,
+        ) {
+            Ok(report) => Some(report.id),
             Err(prodex_session_store::SessionResolveError::Missing { .. })
             | Err(prodex_session_store::SessionResolveError::Ambiguous { .. }) => None,
         },

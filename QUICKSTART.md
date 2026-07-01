@@ -41,10 +41,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.240.0`:
+The current local version in this repo is `0.241.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.240.0
+npm install -g @christiandoxa/prodex@0.241.0
 ```
 
 Dependency status in this repo:
@@ -336,6 +336,7 @@ prodex doctor --install
 prodex audit
 prodex audit --tail 20 --component profile
 prodex context audit
+prodex context export 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 prodex context compress ~/.codex/AGENTS.md --dry-run
 prodex doctor --quota
 prodex doctor --runtime
@@ -365,7 +366,7 @@ Prodex also schedules non-blocking automatic housekeeping for stale runtime logs
 
 Use `prodex audit` when you want to inspect the local append-only audit log. It supports `--tail`, `--component`, `--action`, `--outcome`, and `--json`.
 
-Use `prodex context audit` when shared Codex memory, rule, skill, or AGENTS files feel too token-heavy. Use `prodex context compress PATH --dry-run` first; compression is local and deterministic, skips backups, only edits Markdown/text prose files, and writes an `.original.md` backup before replacement.
+Use `prodex context audit` when shared Codex memory, rule, skill, or AGENTS files feel too token-heavy. Use `prodex context export SESSION_ID` to dump a shared Codex session into `./context_<session-id>.md` by default, or pass a custom output path. Use `prodex context compress PATH --dry-run` first; compression is local and deterministic, skips backups, only edits Markdown/text prose files, and writes an `.original.md` backup before replacement.
 
 Use `prodex gateway` when you need an OpenAI-compatible service endpoint instead of launching Codex:
 

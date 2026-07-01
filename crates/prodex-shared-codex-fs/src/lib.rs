@@ -22,7 +22,10 @@ pub use self::image_attachments::persist_codex_session_image_attachments;
 use self::migration::*;
 pub use self::ops::create_codex_home_if_missing;
 use self::ops::*;
-pub use self::prepare::{maintain_managed_codex_sessions, prepare_managed_codex_home};
+pub use self::prepare::{
+    maintain_managed_codex_sessions, prepare_managed_codex_home,
+    prepare_managed_codex_home_for_runtime_launch,
+};
 
 const SHARED_CODEX_DIR_NAMES: &[&str] = &[
     "sessions",

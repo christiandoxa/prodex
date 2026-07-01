@@ -8,9 +8,11 @@ pub(super) fn runtime_resume_external_provider_from_codex_args(
     };
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let reports =
-        prodex_session_store::collect_session_reports(&paths.shared_codex_root, None, &state)?;
-    let report = match prodex_session_store::resolve_session_report_by_id(&reports, session_id) {
+    let report = match prodex_session_store::resolve_session_report_by_id_in_store(
+        &paths.shared_codex_root,
+        &state,
+        session_id,
+    ) {
         Ok(report) => report,
         Err(prodex_session_store::SessionResolveError::Missing { .. })
         | Err(prodex_session_store::SessionResolveError::Ambiguous { .. }) => return Ok(None),

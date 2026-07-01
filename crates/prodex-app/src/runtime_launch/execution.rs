@@ -45,6 +45,11 @@ struct RuntimeLaunchExecution {
     runtime_proxy: Option<RuntimeProxyEndpoint>,
 }
 
+struct RuntimeLaunchCompleted {
+    status: ExitStatus,
+    plan: RuntimeLaunchPlan,
+}
+
 struct RuntimeLaunchExecutionFactory<'a, F> {
     request: RuntimeLaunchRequest<'a>,
     plan_factory: &'a F,
@@ -105,9 +110,11 @@ where
     S: RuntimeLaunchStrategy,
 {
     let execution = build_runtime_launch_execution(&strategy)?;
-    let status = run_runtime_launch_execution(execution)?;
-    strategy.after_child_exit(&status)?;
-    exit_with_status(status)
+    let completed = run_runtime_launch_execution(execution)?;
+    let after_result = strategy.after_child_exit(&completed.status);
+    cleanup_runtime_launch_plan(&completed.plan);
+    after_result?;
+    exit_with_status(completed.status)
 }
 
 fn build_runtime_launch_execution<S>(strategy: &S) -> Result<RuntimeLaunchExecution>
@@ -132,7 +139,9 @@ fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
     }
 }
 
-fn run_runtime_launch_execution(execution: RuntimeLaunchExecution) -> Result<ExitStatus> {
+fn run_runtime_launch_execution(
+    execution: RuntimeLaunchExecution,
+) -> Result<RuntimeLaunchCompleted> {
     let RuntimeLaunchExecution {
         plan,
         runtime_proxy,
@@ -140,6 +149,59 @@ fn run_runtime_launch_execution(execution: RuntimeLaunchExecution) -> Result<Exi
     print_launch_status("starting child process...");
     let status = run_child_plan(&plan.child, runtime_proxy.as_ref());
     drop(runtime_proxy);
-    cleanup_runtime_launch_plan(&plan);
-    status
+    match status {
+        Ok(status) => Ok(RuntimeLaunchCompleted { status, plan }),
+        Err(err) => {
+            cleanup_runtime_launch_plan(&plan);
+            Err(err)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ChildProcessPlan;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn run_runtime_launch_execution_defers_cleanup_until_after_child_exit_work() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-execution-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let cleanup_path = root.join("overlay-home");
+        fs::create_dir_all(&cleanup_path).unwrap();
+
+        let plan = RuntimeLaunchPlan::new(
+            ChildProcessPlan::new(OsString::from("/bin/sh"), root.join("codex-home"))
+                .with_args(vec![OsString::from("-c"), OsString::from("exit 0")]),
+        )
+        .with_cleanup_path(cleanup_path.clone());
+
+        let completed = run_runtime_launch_execution(RuntimeLaunchExecution {
+            plan,
+            runtime_proxy: None,
+        })
+        .expect("child should run");
+
+        assert!(completed.status.success());
+        assert!(
+            cleanup_path.exists(),
+            "cleanup path must remain available for after_child_exit maintenance"
+        );
+
+        cleanup_runtime_launch_plan(&completed.plan);
+        assert!(
+            !cleanup_path.exists(),
+            "cleanup path should be removable after after_child_exit work"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }
