@@ -24,7 +24,6 @@ mod gateway_state;
 mod gateway_usage;
 mod model_memory;
 mod support;
-
 use support::*;
 
 #[test]
