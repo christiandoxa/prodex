@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.240.0 - Unreleased
+
+Changes after `0.239.0`.
+
+### Misc
+
+- Per-model auto_compact_token_limit from API context_window (`76791c9`)
+
 ## 0.239.0 - 2026-07-01
 
 ### Runtime
