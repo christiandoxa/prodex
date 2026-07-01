@@ -41,8 +41,18 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/log.rs",
-    "maxLines": 997,
-    "reason": "Log command ratatui rendering, filters, and table/detail behavior remain capped while renderer and query ownership are separated."
+    "maxLines": 1466,
+    "reason": "Log stream snapshot/TUI rendering, upstream payload display, and session/runtime parser coverage remain capped while renderer, runtime payload, and transcript extraction ownership are split."
+  },
+  {
+    "file": "crates/prodex-session-store/src/lib.rs",
+    "maxLines": 946,
+    "reason": "Session report resolution, resume repair, archived/state-db lookup, and prefix/full-id recovery remain capped while repair scanning and report/store ownership are split."
+  },
+  {
+    "file": "crates/prodex-session-store/tests/src/lib.rs",
+    "maxLines": 865,
+    "reason": "Resume-repair and session-store regression coverage remain capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",

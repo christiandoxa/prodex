@@ -219,7 +219,11 @@ fn quota_raw_uses_builtin_usage_client() {
 fn quota_all_detail_shows_main_reset_times() {
     let fixture = setup_fixture();
 
-    let output = run_prodex(&fixture, &["quota", "--all", "--detail", "--once"]);
+    let output = run_prodex_with_env(
+        &fixture,
+        &["quota", "--all", "--detail", "--once"],
+        &[("PRODEX_TERM_COLUMNS", "110")],
+    );
 
     assert!(
         output.status.success(),
@@ -242,7 +246,11 @@ fn quota_all_detail_sorts_by_status_then_nearest_main_reset() {
     let fixture = setup_fixture();
     add_managed_profile(&fixture, "third", "third-account");
 
-    let output = run_prodex(&fixture, &["quota", "--all", "--detail", "--once"]);
+    let output = run_prodex_with_env(
+        &fixture,
+        &["quota", "--all", "--detail", "--once"],
+        &[("PRODEX_TERM_COLUMNS", "110")],
+    );
 
     assert!(
         output.status.success(),

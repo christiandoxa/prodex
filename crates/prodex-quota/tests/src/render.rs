@@ -406,7 +406,7 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
         ),
     ];
 
-    let output = render_quota_reports_with_line_limit(&reports, false, Some(15));
+    let output = render_quota_reports_with_layout(&reports, false, Some(15), 90);
 
     assert!(output.contains("ready-early"));
     assert!(output.contains("ready-late"));
