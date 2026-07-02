@@ -421,9 +421,9 @@ fn provider_endpoint_contract_status(
         return ProviderCapabilityStatus::Partial;
     }
     match base {
-        ProviderCapabilityStatus::Unsupported => ProviderCapabilityStatus::Unsupported,
-        ProviderCapabilityStatus::Untested => ProviderCapabilityStatus::Untested,
-        ProviderCapabilityStatus::Partial => ProviderCapabilityStatus::Partial,
+        ProviderCapabilityStatus::Unsupported
+        | ProviderCapabilityStatus::Untested
+        | ProviderCapabilityStatus::Partial => base,
         other => other,
     }
 }

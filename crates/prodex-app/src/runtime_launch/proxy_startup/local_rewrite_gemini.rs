@@ -208,7 +208,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     &shared.runtime_shared,
                     request_id,
                     RuntimeProviderBridgeKind::Gemini,
-                    &result,
+                    result,
                 );
             }
             let mut translated = if responses_route {

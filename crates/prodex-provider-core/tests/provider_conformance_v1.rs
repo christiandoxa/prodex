@@ -1,8 +1,7 @@
 use prodex_provider_core::{
     ProviderConformanceExpectedErrorClass, ProviderConformanceExpectedLoss,
     ProviderConformanceOperation, ProviderEndpoint, ProviderErrorClass, ProviderId,
-    ProviderTransformInput, ProviderTransformLoss, ProviderTranslator, provider_conformance_cases,
-    provider_translator,
+    ProviderTransformInput, ProviderTransformLoss, provider_conformance_cases, provider_translator,
 };
 
 fn input(case: &prodex_provider_core::ProviderConformanceCase) -> ProviderTransformInput {

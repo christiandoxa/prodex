@@ -118,7 +118,7 @@ fn send_runtime_deepseek_responses_request(
                     &shared.runtime_shared,
                     request_id,
                     RuntimeProviderBridgeKind::DeepSeek,
-                    &result,
+                    result,
                 );
             }
             let mut translated = runtime_deepseek_chat_request_body_with_options(

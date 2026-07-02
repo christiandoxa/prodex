@@ -1,5 +1,18 @@
 [
   {
+    "id": "provider-conformance-v1-0.242.0",
+    "requiredSubjects": [
+      "feat: Provider Conformance Layer v1"
+    ],
+    "caps": {
+      "maxFiles": 60,
+      "maxBehaviorFiles": 48,
+      "maxLines": 15000,
+      "maxFileLines": 5000
+    },
+    "reason": "Reviewed cross-cutting provider conformance layer v1: ProviderTranslator trait, Gemini/DeepSeek translators, 109 conformance fixtures, JSON catalog (62 models), app-side bridge with full test suite, clippy, catalog/capability/compat gates."
+  },
+  {
     "id": "deepseek-compatibility-0.232.0",
     "requiredSubjects": [
       "feat(deepseek): expand compatibility for 0.232.0"
