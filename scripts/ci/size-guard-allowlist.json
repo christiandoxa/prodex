@@ -1,40 +1,5 @@
 [
   {
-    "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
-    "maxLines": 924,
-    "reason": "HTTP continuation, tool-output, and compact regression coverage remains capped while compact-specific fixtures are split by route."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
-    "maxLines": 890,
-    "reason": "Gemini SSE state-machine invariants, tool-intent tracking, and exact-output reconstruction remain in one capped module until state ownership is split."
-  },
-  {
-    "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 985,
-    "reason": "SuperArgs provider-flag extraction for trailing-var-arg session-ID-first syntax coexists with struct definition and tests; tightly coupled arg-parsing surface."
-  },
-  {
-    "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1867,
-    "reason": "Live quota ratatui rendering, status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
-  },
-  {
-    "file": "crates/prodex-app/src/app_commands/runtime_launch/providers.rs",
-    "maxLines": 910,
-    "reason": "Runtime provider launch config parsing, gateway defaults, and provider-specific environment projection remain capped while provider ownership is split from command routing."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs",
-    "maxLines": 1935,
-    "reason": "DeepSeek Responses-to-chat request validation, field mapping, reasoning, web-search gating, and conversation replay remain capped while the adapter is split by request domain."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs",
-    "maxLines": 2365,
-    "reason": "DeepSeek request rewrite regression coverage remains capped while compatibility cases are split by feature family."
-  },
-  {
     "file": "crates/prodex-app/src/app_commands/capability.rs",
     "maxLines": 933,
     "reason": "Capability report rendering, dry-run command probing, provider capability summaries, and optional Codebase Memory probe status remain capped while command execution probes are split from presentation."
@@ -45,18 +10,73 @@
     "reason": "Log stream snapshot/TUI rendering, upstream payload display, and session/runtime parser coverage remain capped while renderer, runtime payload, and transcript extraction ownership are split."
   },
   {
-    "file": "crates/prodex-session-store/src/lib.rs",
-    "maxLines": 946,
-    "reason": "Session report resolution, resume repair, archived/state-db lookup, and prefix/full-id recovery remain capped while repair scanning and report/store ownership are split."
-  },
-  {
-    "file": "crates/prodex-session-store/tests/src/lib.rs",
-    "maxLines": 865,
-    "reason": "Resume-repair and session-store regression coverage remain capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
+    "file": "crates/prodex-app/src/app_commands/runtime_launch/providers.rs",
+    "maxLines": 910,
+    "reason": "Runtime provider launch config parsing, gateway defaults, and provider-specific environment projection remain capped while provider ownership is split from command routing."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
     "maxLines": 945,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
+  },
+  {
+    "file": "crates/prodex-app/src/quota_support/watch.rs",
+    "maxLines": 1867,
+    "reason": "Live quota ratatui rendering, status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs",
+    "maxLines": 1988,
+    "reason": "DeepSeek Responses-to-chat request validation with expanded conformance logging; capped until adapter split."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
+    "maxLines": 933,
+    "reason": "Gemini SSE state-machine invariants with expanded tool-intent tracking; capped until split."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
+    "maxLines": 1181,
+    "reason": "Gemini rewrite orchestration with provider conformance integration; capped until split."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs",
+    "maxLines": 2365,
+    "reason": "DeepSeek request rewrite regression coverage remains capped while compatibility cases are split by feature family."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_tests.rs",
+    "maxLines": 1162,
+    "reason": "Provider bridge test coverage for conformance logging, error classification; capped until split."
+  },
+  {
+    "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
+    "maxLines": 924,
+    "reason": "HTTP continuation, tool-output, and compact regression coverage remains capped while compact-specific fixtures are split by route."
+  },
+  {
+    "file": "crates/prodex-cli/src/runtime_args.rs",
+    "maxLines": 985,
+    "reason": "SuperArgs provider-flag extraction for trailing-var-arg session-ID-first syntax coexists with struct definition and tests; tightly coupled arg-parsing surface."
+  },
+  {
+    "file": "crates/prodex-provider-core/src/translators/deepseek.rs",
+    "maxLines": 1229,
+    "reason": "DeepSeek translator: Responses-to-chat request/response/stream transforms; capped until split by domain."
+  },
+  {
+    "file": "crates/prodex-provider-core/src/translators/gemini.rs",
+    "maxLines": 2045,
+    "reason": "Gemini translator: Responses-to-GenerateContent request/response/stream transforms; capped until split by domain."
+  },
+  {
+    "file": "crates/prodex-session-store/src/lib.rs",
+    "maxLines": 935,
+    "reason": "Session report resolution, resume repair with slim threshold change; recapped at current size."
+  },
+  {
+    "file": "crates/prodex-session-store/tests/src/lib.rs",
+    "maxLines": 865,
+    "reason": "Resume-repair and session-store regression coverage remain capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
   }
 ]
