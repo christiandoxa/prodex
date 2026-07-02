@@ -2,9 +2,27 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.240.0 - Unreleased
+## 0.243.0 - 2026-07-02
 
-Changes after `0.239.0`.
+### Misc
+
+- Add provider conformance layer v1 (`4fe4c61`)
+
+## 0.242.0 - 2026-07-02
+
+### Misc
+
+- Resolve size guard violations for provider conformance files (`8395bdc`)
+- Resolve CI failures — clippy warnings and churn hygiene allowance (`a26de9a`)
+- Provider Conformance Layer v1 (`8b1c810`)
+
+## 0.241.0 - 2026-07-01
+
+### Misc
+
+- Improve log stream coverage (`6ac759f`)
+
+## 0.240.0 - 2026-07-01
 
 ### Misc
 
@@ -70,31 +88,3 @@ Changes after `0.239.0`.
 ### Misc
 
 - Expand compatibility for 0.232.0 (`b3867f2`)
-
-## 0.231.0 - 2026-06-29
-
-### CLI
-
-- Preserve pasted goal attachments across profile resume (`bc6e374`)
-
-## 0.230.0 - 2026-06-29
-
-### Runtime
-
-- Polish terminal flows and runtime helpers (`47a6994`)
-
-## 0.229.0 - 2026-06-28
-
-### Misc
-
-- Preserve pasted attachments across resume (`ef31ad6`)
-
-## 0.228.0 - 2026-06-28
-
-### CLI
-
-- Keep weekly quota pool visible (`7e7bb53`)
-
-### Claude
-
-- Add codebase memory MCP integration (`0ac78f3`)
