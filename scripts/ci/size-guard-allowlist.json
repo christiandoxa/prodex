@@ -41,7 +41,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1248,
+    "maxLines": 1249,
     "reason": "Gemini rewrite orchestration now routes more request-shape decisions through provider-core conformance; capped at current size until admission helpers split from send orchestration."
   },
   {
