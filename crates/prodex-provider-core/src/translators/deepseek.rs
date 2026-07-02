@@ -30,7 +30,40 @@ impl ProviderTranslator for DeepSeekTranslator {
                 | ProviderEndpoint::ChatCompletions
                 | ProviderEndpoint::Messages
         ) {
-            return ProviderParamSupport::full();
+            return ProviderParamSupport {
+                supported: true,
+                unsupported: vec![
+                    ProviderUnsupportedReason {
+                        field: "parallel_tool_calls=false".to_string(),
+                        reason:
+                            "DeepSeek does not expose a compatible parallel tool disable control"
+                                .to_string(),
+                    },
+                    ProviderUnsupportedReason {
+                        field: "web_search_options".to_string(),
+                        reason: "DeepSeek v1 translator does not map Responses web search options"
+                            .to_string(),
+                    },
+                    ProviderUnsupportedReason {
+                        field: "safety_identifier".to_string(),
+                        reason:
+                            "DeepSeek v1 translator does not forward Responses safety_identifier"
+                                .to_string(),
+                    },
+                    ProviderUnsupportedReason {
+                        field: "tools[type!=function]".to_string(),
+                        reason:
+                            "DeepSeek v1 translator only forwards plain function tools on Responses"
+                                .to_string(),
+                    },
+                    ProviderUnsupportedReason {
+                        field: "input[*].content[type!=text]".to_string(),
+                        reason:
+                            "DeepSeek v1 translator does not translate multimodal Responses input"
+                                .to_string(),
+                    },
+                ],
+            };
         }
         let mut support = ProviderParamSupport::full();
         if endpoint != ProviderEndpoint::Responses {
@@ -553,20 +586,34 @@ fn deepseek_user_id_from_request(value: &Value) -> Result<Option<String>, String
 }
 
 fn deepseek_messages_from_request(value: &Value) -> Vec<Value> {
-    if let Some(messages) = value.get("messages").and_then(Value::as_array) {
-        return messages.clone();
-    }
-    if let Some(input) = value.get("input") {
-        return match input {
+    let mut messages = if let Some(messages) = value.get("messages").and_then(Value::as_array) {
+        messages.clone()
+    } else if let Some(input) = value.get("input") {
+        match input {
             Value::String(text) => vec![json!({"role":"user","content": text})],
             Value::Array(items) => items
                 .iter()
                 .flat_map(deepseek_messages_from_input_item)
                 .collect(),
             _ => vec![json!({"role":"user","content":""})],
-        };
+        }
+    } else {
+        vec![json!({"role":"user","content":""})]
+    };
+    if let Some(instructions) = value
+        .get("instructions")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+    {
+        messages.insert(
+            0,
+            json!({
+                "role": "system",
+                "content": instructions,
+            }),
+        );
     }
-    vec![json!({"role":"user","content":""})]
+    messages
 }
 
 fn deepseek_messages_from_input_item(item: &Value) -> Vec<Value> {

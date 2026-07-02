@@ -29,6 +29,35 @@
     "expected_usage": null
   },
   {
+    "name": "deepseek-request-instructions-prepended",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "instructions": "You are Codex. Keep answers concise.",
+      "input": "hello deepseek"
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are Codex. Keep answers concise."
+        },
+        {
+          "role": "user",
+          "content": "hello deepseek"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
     "name": "deepseek-request-json-schema-degrades",
     "provider": "deepseek",
     "endpoint": "responses",
@@ -69,6 +98,24 @@
       }
     },
     "expected_loss": "degraded",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-response-format-type-rejected",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": "hello",
+      "response_format": {
+        "type": "xml"
+      }
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
     "expected_usage": null
   },
   {
@@ -874,6 +921,45 @@
     "expected_usage": null
   },
   {
+    "name": "gemini-request-text-input",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {
+      "x-codex-turn-state": "turn-state-a",
+      "session_id": "sess-a"
+    },
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini",
+      "previous_response_id": "resp_1"
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello gemini"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
     "name": "gemini-request-thinking-level-for-gemini-3",
     "provider": "gemini",
     "endpoint": "responses",
@@ -1055,6 +1141,24 @@
       }
     },
     "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-response-format-type-rejected",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini",
+      "response_format": {
+        "type": "xml"
+      }
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
     "expected_usage": null
   },
   {

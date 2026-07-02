@@ -209,7 +209,8 @@ pub(super) fn runtime_provider_request_conformance_result(
     request: &crate::RuntimeProxyRequest,
     body: &[u8],
 ) -> Option<ProviderTransformResult> {
-    if !path_without_query(&request.path_and_query).ends_with("/responses") {
+    let path = path_without_query(&request.path_and_query);
+    if !(path.ends_with("/responses") || path.ends_with("/responses/compact")) {
         return None;
     }
     let mut input = ProviderTransformInput::new(ProviderEndpoint::Responses, body.to_vec());

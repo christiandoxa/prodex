@@ -20,6 +20,14 @@ const validEndpoints = new Set([
   "rerank",
   "a2a",
 ]);
+const requiredFeatureFlags = [
+  "tools",
+  "json_schema",
+  "vision",
+  "audio",
+  "web_search",
+  "reasoning",
+];
 const providerCounts = new Map();
 const issues = [];
 const seenIds = new Set();
@@ -46,6 +54,22 @@ for (const model of models) {
       if (!validEndpoints.has(endpoint)) {
         issues.push(`unknown endpoint ${endpoint} for ${model.provider}:${model.id}`);
       }
+    }
+  }
+  if (!model.feature_flags || typeof model.feature_flags !== "object" || Array.isArray(model.feature_flags)) {
+    issues.push(`missing feature_flags for ${model.provider}:${model.id}`);
+  } else {
+    for (const key of requiredFeatureFlags) {
+      if (typeof model.feature_flags[key] !== "boolean") {
+        issues.push(`feature_flags.${key} must be boolean for ${model.provider}:${model.id}`);
+      }
+    }
+  }
+  if (typeof model.pricing_known !== "boolean") {
+    issues.push(`pricing_known must be boolean for ${model.provider}:${model.id}`);
+  } else if (model.pricing_known) {
+    if (model.input_cost_per_million_microusd == null || model.output_cost_per_million_microusd == null) {
+      issues.push(`pricing_known=true requires both input/output pricing for ${model.provider}:${model.id}`);
     }
   }
   const idKey = `${model.provider}:${String(model.id).toLowerCase()}`;

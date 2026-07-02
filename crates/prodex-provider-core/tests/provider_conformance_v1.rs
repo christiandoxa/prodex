@@ -151,6 +151,59 @@ fn translated_providers_advertise_endpoint_support_limitations_explicitly() {
 }
 
 #[test]
+fn translated_providers_advertise_known_parameter_limitations_explicitly() {
+    let deepseek = provider_translator(ProviderId::DeepSeek)
+        .supported_params(ProviderEndpoint::Responses, "deepseek-chat");
+    assert!(deepseek.supported);
+    assert!(
+        deepseek
+            .unsupported
+            .iter()
+            .any(|reason| reason.field == "parallel_tool_calls=false")
+    );
+    assert!(
+        deepseek
+            .unsupported
+            .iter()
+            .any(|reason| reason.field == "web_search_options")
+    );
+    assert!(
+        deepseek
+            .unsupported
+            .iter()
+            .any(|reason| reason.field == "safety_identifier")
+    );
+    assert!(
+        deepseek
+            .unsupported
+            .iter()
+            .any(|reason| reason.field == "tools[type!=function]")
+    );
+    assert!(
+        deepseek
+            .unsupported
+            .iter()
+            .any(|reason| reason.field == "input[*].content[type!=text]")
+    );
+
+    let gemini = provider_translator(ProviderId::Gemini)
+        .supported_params(ProviderEndpoint::Responses, "gemini-2.5-pro");
+    assert!(gemini.supported);
+    assert!(
+        gemini
+            .unsupported
+            .iter()
+            .any(|reason| reason.field == "input[*].content[type!=text]")
+    );
+    assert!(
+        gemini
+            .unsupported
+            .iter()
+            .any(|reason| reason.field == "response_format.type")
+    );
+}
+
+#[test]
 fn translated_providers_have_explicit_error_mapping_fixtures() {
     for provider in [ProviderId::DeepSeek, ProviderId::Gemini] {
         assert!(
@@ -158,6 +211,165 @@ fn translated_providers_have_explicit_error_mapping_fixtures() {
                 .iter()
                 .any(|case| case.provider == provider && case.expected_error_class.is_some()),
             "missing error mapping fixture for {provider:?}"
+        );
+    }
+}
+
+#[test]
+fn v1_translated_providers_have_explicit_non_lossless_fixtures() {
+    for provider in [ProviderId::DeepSeek, ProviderId::Gemini] {
+        assert!(
+            provider_conformance_cases().iter().any(|case| {
+                case.provider == provider
+                    && !matches!(
+                        case.expected_loss,
+                        ProviderConformanceExpectedLoss::Lossless
+                    )
+            }),
+            "missing non-lossless fixture for {provider:?}"
+        );
+    }
+}
+
+#[test]
+fn translated_providers_have_explicit_objective_coverage_fixtures() {
+    let cases = provider_conformance_cases();
+
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "deepseek-request-instructions-prepended")
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "deepseek-request-json-schema-degrades")
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "deepseek-request-response-format-type-rejected")
+    );
+    assert!(cases.iter().any(|case| case.name == "deepseek-request-assistant-tool-call-and-tool-output-history"));
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "deepseek-response-cache-and-tool-metadata")
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "gemini-request-text-input")
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "gemini-request-tool-schema-sanitized")
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "gemini-request-response-format-type-rejected")
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "gemini-request-multimodal-unsupported")
+    );
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.name == "gemini-response-generate-to-responses")
+    );
+}
+
+#[test]
+fn deepseek_request_fixture_preserves_continuation_metadata_explicitly() {
+    let case = provider_conformance_cases()
+        .iter()
+        .find(|case| case.name == "deepseek-request-text-input")
+        .expect("deepseek continuation fixture");
+    let result = provider_translator(case.provider).transform_request(input(case));
+    let continuation = result
+        .metadata
+        .get("continuation")
+        .and_then(serde_json::Value::as_object)
+        .expect("continuation metadata");
+    assert_eq!(
+        continuation
+            .get("x-codex-turn-state")
+            .and_then(serde_json::Value::as_str),
+        Some("turn-state-a")
+    );
+    assert_eq!(
+        continuation
+            .get("session_id")
+            .and_then(serde_json::Value::as_str),
+        Some("sess-a")
+    );
+    assert_eq!(
+        continuation
+            .get("previous_response_id")
+            .and_then(serde_json::Value::as_str),
+        Some("resp_1")
+    );
+}
+
+#[test]
+fn gemini_request_preserves_continuation_metadata_explicitly() {
+    let case = provider_conformance_cases()
+        .iter()
+        .find(|case| case.name == "gemini-request-text-input")
+        .expect("gemini continuation fixture");
+    let result = provider_translator(case.provider).transform_request(input(case));
+    let continuation = result
+        .metadata
+        .get("continuation")
+        .and_then(serde_json::Value::as_object)
+        .expect("continuation metadata");
+    assert_eq!(
+        continuation
+            .get("x-codex-turn-state")
+            .and_then(serde_json::Value::as_str),
+        Some("turn-state-a")
+    );
+    assert_eq!(
+        continuation
+            .get("session_id")
+            .and_then(serde_json::Value::as_str),
+        Some("sess-a")
+    );
+    assert_eq!(
+        continuation
+            .get("previous_response_id")
+            .and_then(serde_json::Value::as_str),
+        Some("resp_1")
+    );
+}
+
+#[test]
+fn translated_provider_stream_fixtures_emit_canonical_responses_event_names() {
+    let translated_responses_streams = provider_conformance_cases().iter().filter(|case| {
+        matches!(case.provider, ProviderId::DeepSeek | ProviderId::Gemini)
+            && case.endpoint == ProviderEndpoint::Responses
+            && case.operation == ProviderConformanceOperation::StreamEvent
+    });
+
+    for case in translated_responses_streams {
+        let expected = case
+            .expected_body
+            .as_ref()
+            .and_then(serde_json::Value::as_str)
+            .expect("stream fixture expected body");
+        assert!(
+            expected.starts_with("event: response."),
+            "{} should emit canonical Responses event names",
+            case.name
+        );
+        assert!(
+            expected.contains("\ndata: {\"") || expected.contains("\r\ndata: {\""),
+            "{} should emit SSE data payload",
+            case.name
         );
     }
 }

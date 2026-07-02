@@ -35,9 +35,14 @@
     "reason": "Gemini SSE state-machine invariants with expanded tool-intent tracking; capped until split."
   },
   {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek.rs",
+    "maxLines": 975,
+    "reason": "DeepSeek rewrite orchestration now carries provider-core conformance bridge gating and parity checks; capped at current size until pure request-shape admission is split from send orchestration."
+  },
+  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1181,
-    "reason": "Gemini rewrite orchestration with provider conformance integration; capped until split."
+    "maxLines": 1248,
+    "reason": "Gemini rewrite orchestration now routes more request-shape decisions through provider-core conformance; capped at current size until admission helpers split from send orchestration."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs",
@@ -46,8 +51,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_tests.rs",
-    "maxLines": 1162,
-    "reason": "Provider bridge test coverage for conformance logging, error classification; capped until split."
+    "maxLines": 1212,
+    "reason": "Provider bridge regression coverage now includes translated compact routing and continuation metadata parity; capped at current size until tests split by provider."
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
@@ -61,13 +66,13 @@
   },
   {
     "file": "crates/prodex-provider-core/src/translators/deepseek.rs",
-    "maxLines": 1229,
-    "reason": "DeepSeek translator: Responses-to-chat request/response/stream transforms; capped until split by domain."
+    "maxLines": 1276,
+    "reason": "DeepSeek translator now owns more explicit Responses compatibility loss reporting and continuation metadata handling; capped at current size until request/response helpers split by domain."
   },
   {
     "file": "crates/prodex-provider-core/src/translators/gemini.rs",
-    "maxLines": 2045,
-    "reason": "Gemini translator: Responses-to-GenerateContent request/response/stream transforms; capped until split by domain."
+    "maxLines": 2078,
+    "reason": "Gemini translator now owns more explicit Responses compatibility loss reporting and continuation metadata handling; capped at current size until request/response helpers split by domain."
   },
   {
     "file": "crates/prodex-session-store/src/lib.rs",

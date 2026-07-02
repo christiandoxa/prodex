@@ -3,6 +3,7 @@ use prodex_provider_core::{
     ProviderEndpoint, ProviderId, ProviderTransformPhase, ProviderWireFormat, extract_usage_tokens,
     provider_adapter, provider_adapter_contract_matrix, provider_model_catalog,
     provider_model_catalog_json, provider_model_fallback_chain, provider_replay_cases,
+    provider_translator,
 };
 
 #[test]
@@ -175,6 +176,55 @@ fn non_responses_supported_endpoint_statuses_follow_runtime_surface_more_closely
 }
 
 #[test]
+fn translated_responses_contract_surface_exposes_known_parameter_limitations() {
+    let matrix = provider_adapter_contract_matrix();
+
+    let deepseek = matrix
+        .iter()
+        .find(|spec| spec.provider == "deepseek")
+        .expect("deepseek contract");
+    let deepseek_responses = deepseek
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "responses")
+        .expect("deepseek responses endpoint");
+    assert!(
+        deepseek_responses
+            .unsupported_params
+            .iter()
+            .any(|field| field == "parallel_tool_calls=false")
+    );
+    assert!(
+        deepseek_responses
+            .unsupported_params
+            .iter()
+            .any(|field| field == "tools[type!=function]")
+    );
+
+    let gemini = matrix
+        .iter()
+        .find(|spec| spec.provider == "gemini")
+        .expect("gemini contract");
+    let gemini_responses = gemini
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "responses")
+        .expect("gemini responses endpoint");
+    assert!(
+        gemini_responses
+            .unsupported_params
+            .iter()
+            .any(|field| field == "input[*].content[type!=text]")
+    );
+    assert!(
+        gemini_responses
+            .unsupported_params
+            .iter()
+            .any(|field| field == "response_format.type")
+    );
+}
+
+#[test]
 fn covered_endpoint_statuses_do_not_overclaim_beyond_request_response_conformance() {
     for contract in provider_adapter_contract_matrix() {
         for endpoint in contract.endpoint_status {
@@ -281,6 +331,43 @@ fn claimed_endpoint_statuses_have_request_and_response_conformance_evidence() {
                 endpoint.endpoint,
                 endpoint.status
             );
+        }
+    }
+}
+
+#[test]
+fn translator_supported_params_do_not_overclaim_unsupported_endpoints() {
+    for provider in PROVIDER_CONTRACT_PROVIDERS {
+        let adapter = provider_adapter(*provider);
+        let translator = provider_translator(*provider);
+        for endpoint in [
+            ProviderEndpoint::Responses,
+            ProviderEndpoint::ChatCompletions,
+            ProviderEndpoint::Messages,
+            ProviderEndpoint::Embeddings,
+            ProviderEndpoint::Images,
+            ProviderEndpoint::Audio,
+            ProviderEndpoint::Batches,
+            ProviderEndpoint::Rerank,
+            ProviderEndpoint::A2a,
+        ] {
+            let support = translator.supported_params(endpoint, "test-model");
+            let claimed = matches!(
+                adapter.capability_status(endpoint),
+                ProviderCapabilityStatus::Native
+                    | ProviderCapabilityStatus::Passthrough
+                    | ProviderCapabilityStatus::Translated
+            );
+            assert_eq!(
+                support.supported, claimed,
+                "{provider:?} {endpoint:?} supported_params drifted from capability status"
+            );
+            if !claimed {
+                assert!(
+                    !support.unsupported.is_empty(),
+                    "{provider:?} {endpoint:?} should explain unsupported status"
+                );
+            }
         }
     }
 }

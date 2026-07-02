@@ -1,7 +1,8 @@
 use crate::translator::{
     ProviderParamSupport, ProviderTransformInput, ProviderTransformResult, ProviderTranslator,
+    ProviderUnsupportedReason,
 };
-use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
+use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
 
 #[derive(Clone, Copy)]
 pub struct PassthroughTranslator {
@@ -27,8 +28,22 @@ impl ProviderTranslator for PassthroughTranslator {
         ProviderWireFormat::OpenAiResponses
     }
 
-    fn supported_params(&self, _endpoint: ProviderEndpoint, _model: &str) -> ProviderParamSupport {
-        ProviderParamSupport::full()
+    fn supported_params(&self, endpoint: ProviderEndpoint, _model: &str) -> ProviderParamSupport {
+        if provider_supported_endpoints(self.provider).contains(&endpoint) {
+            ProviderParamSupport::full()
+        } else {
+            ProviderParamSupport {
+                supported: false,
+                unsupported: vec![ProviderUnsupportedReason {
+                    field: endpoint.label().to_string(),
+                    reason: format!(
+                        "{} does not expose {}",
+                        self.provider.label(),
+                        endpoint.label()
+                    ),
+                }],
+            }
+        }
     }
 
     fn transform_request(&self, input: ProviderTransformInput) -> ProviderTransformResult {

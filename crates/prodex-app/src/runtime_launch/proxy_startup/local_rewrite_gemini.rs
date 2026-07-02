@@ -892,12 +892,19 @@ fn runtime_gemini_provider_core_request_body(
 #[cfg(test)]
 mod tests {
     use super::{
-        runtime_gemini_provider_core_request_body, runtime_gemini_provider_core_simple_request,
+        runtime_gemini_generate_request_body, runtime_gemini_provider_core_request_body,
+        runtime_gemini_provider_core_simple_request,
     };
     use prodex_provider_core::{
-        ProviderEndpoint, ProviderId, ProviderTransformLoss, ProviderTransformResult,
-        ProviderWireFormat,
+        ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformLoss,
+        ProviderTransformResult, ProviderWireFormat, provider_translator,
     };
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    fn conversation_store() -> super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore {
+        Arc::new(Mutex::new(BTreeMap::new()))
+    }
 
     #[test]
     fn gemini_provider_core_simple_request_accepts_plain_text_and_context_blocks() {
@@ -937,7 +944,6 @@ mod tests {
         assert!(!runtime_gemini_provider_core_simple_request(&assistant));
     }
 
-    #[test]
     fn gemini_provider_core_simple_request_accepts_builtin_tools() {
         let body = serde_json::to_vec(&serde_json::json!({
             "model": "gemini-2.5-pro",
@@ -1080,6 +1086,67 @@ mod tests {
             merged["request"]["generationConfig"]["thinkingBudget"],
             8192
         );
+    }
+
+    #[test]
+    fn gemini_provider_core_body_overrides_legacy_simple_history_translation() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": [
+                {"role":"user","content":"find it"},
+                {
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[
+                        {
+                            "id":"call_1",
+                            "type":"function",
+                            "function":{
+                                "name":"grep",
+                                "arguments":"{\"pattern\":\"x\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role":"tool",
+                    "tool_call_id":"call_1",
+                    "content":"{\"match_count\":1}"
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_gemini_provider_core_simple_request(&body));
+
+        let translated =
+            runtime_gemini_generate_request_body(&body, &conversation_store(), true, None, None)
+                .unwrap();
+        let result = provider_translator(ProviderId::Gemini).transform_request(
+            ProviderTransformInput::new(ProviderEndpoint::Responses, body),
+        );
+        let merged = runtime_gemini_provider_core_request_body(&result, &translated.body).unwrap();
+
+        let provider_core_json: serde_json::Value = serde_json::from_slice(&merged).unwrap();
+        let app_json: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+        assert_ne!(provider_core_json, app_json);
+        assert_eq!(
+            provider_core_json["request"]["contents"][0]["parts"][0]["text"],
+            "find it"
+        );
+        assert_eq!(
+            provider_core_json["request"]["contents"][1]["parts"][0]["functionCall"]["name"],
+            "grep"
+        );
+        assert_eq!(
+            provider_core_json["request"]["contents"][2]["parts"][0]["functionResponse"]["name"],
+            "grep"
+        );
+        assert!(
+            provider_core_json["request"]
+                .get("systemInstruction")
+                .is_none()
+        );
+        assert!(app_json["request"].get("systemInstruction").is_some());
     }
 }
 

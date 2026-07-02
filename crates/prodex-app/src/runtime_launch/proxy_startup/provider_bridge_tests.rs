@@ -423,10 +423,60 @@ fn request_conformance_result_uses_provider_core_translator_for_deepseek_and_gem
     )
     .unwrap();
     assert!(matches!(gemini.loss, ProviderTransformLoss::Lossless));
+    assert_eq!(
+        gemini.metadata["continuation"]["x-codex-turn-state"],
+        "turn-1"
+    );
+    assert_eq!(gemini.metadata["continuation"]["session_id"], "sess-1");
     let body: serde_json::Value = serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
     assert_eq!(
         body["request"]["generationConfig"]["responseMimeType"],
         "application/json"
+    );
+}
+
+#[test]
+fn request_conformance_result_treats_compact_route_as_responses_translation_surface() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/responses/compact".to_string(),
+        headers: vec![
+            ("x-codex-turn-state".to_string(), "turn-compact".to_string()),
+            ("session_id".to_string(), "sess-compact".to_string()),
+        ],
+        body: Vec::new(),
+    };
+
+    let deepseek = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &request,
+        br#"{"model":"deepseek-chat","input":"hello","previous_response_id":"resp_compact"}"#,
+    )
+    .expect("deepseek compact conformance");
+    assert!(matches!(deepseek.loss, ProviderTransformLoss::Lossless));
+    assert_eq!(
+        deepseek.metadata["continuation"]["session_id"],
+        "sess-compact"
+    );
+    assert_eq!(
+        deepseek.metadata["continuation"]["previous_response_id"],
+        "resp_compact"
+    );
+
+    let gemini = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        &request,
+        br#"{"model":"gemini-2.5-pro","input":"hello","previous_response_id":"resp_compact"}"#,
+    )
+    .expect("gemini compact conformance");
+    assert!(matches!(gemini.loss, ProviderTransformLoss::Lossless));
+    assert_eq!(
+        gemini.metadata["continuation"]["session_id"],
+        "sess-compact"
+    );
+    assert_eq!(
+        gemini.metadata["continuation"]["previous_response_id"],
+        "resp_compact"
     );
 }
 

@@ -305,6 +305,7 @@ pub struct ProviderEndpointContractSpec {
     pub status: &'static str,
     pub streaming: bool,
     pub tested: bool,
+    pub unsupported_params: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -356,6 +357,8 @@ pub fn provider_adapter_contract_spec(provider: ProviderId) -> ProviderAdapterCo
             .map(|endpoint| {
                 let coverage = provider_endpoint_conformance_coverage(provider, endpoint);
                 let tested = coverage.any();
+                let support =
+                    provider_translator(provider).supported_params(endpoint, "test-model");
                 ProviderEndpointContractSpec {
                     endpoint: endpoint.label(),
                     status: provider_endpoint_contract_status(
@@ -372,6 +375,11 @@ pub fn provider_adapter_contract_spec(provider: ProviderId) -> ProviderAdapterCo
                                 | ProviderEndpoint::Messages
                         ),
                     tested,
+                    unsupported_params: support
+                        .unsupported
+                        .into_iter()
+                        .map(|reason| reason.field)
+                        .collect(),
                 }
             })
             .collect(),

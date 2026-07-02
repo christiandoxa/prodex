@@ -32,7 +32,23 @@ impl ProviderTranslator for GeminiTranslator {
                 | ProviderEndpoint::Messages
                 | ProviderEndpoint::Embeddings
         ) {
-            return ProviderParamSupport::full();
+            return ProviderParamSupport {
+                supported: true,
+                unsupported: vec![
+                    ProviderUnsupportedReason {
+                        field: "input[*].content[type!=text]".to_string(),
+                        reason:
+                            "Gemini conformance v1 does not yet translate multimodal Responses input"
+                                .to_string(),
+                    },
+                    ProviderUnsupportedReason {
+                        field: "response_format.type".to_string(),
+                        reason:
+                            "Gemini v1 translator supports only text, json_object, and json_schema response formats"
+                                .to_string(),
+                    },
+                ],
+            };
         }
         let mut support = ProviderParamSupport::full();
         if endpoint != ProviderEndpoint::Responses {
@@ -191,13 +207,30 @@ impl ProviderTranslator for GeminiTranslator {
         }
         let body = serde_json::to_vec(&json!({"model": model, "request": Value::Object(request)}))
             .expect("gemini request serializes");
-        ProviderTransformResult::lossless(
+        let result = ProviderTransformResult::lossless(
             self.provider(),
             input.endpoint,
             self.client_wire_format(),
             self.upstream_wire_format(),
             body,
-        )
+        );
+        let mut metadata = serde_json::Map::new();
+        for header in ["x-codex-turn-state", "session_id"] {
+            if let Some(value) = input.headers.get(header) {
+                metadata.insert(header.to_string(), Value::String(value.clone()));
+            }
+        }
+        if let Some(previous) = obj.get("previous_response_id").and_then(Value::as_str) {
+            metadata.insert(
+                "previous_response_id".to_string(),
+                Value::String(previous.to_string()),
+            );
+        }
+        if metadata.is_empty() {
+            result
+        } else {
+            result.with_metadata("continuation", Value::Object(metadata))
+        }
     }
 
     fn transform_response(&self, input: ProviderTransformInput) -> ProviderTransformResult {
