@@ -944,6 +944,7 @@ mod tests {
         assert!(!runtime_gemini_provider_core_simple_request(&assistant));
     }
 
+    #[test]
     fn gemini_provider_core_simple_request_accepts_builtin_tools() {
         let body = serde_json::to_vec(&serde_json::json!({
             "model": "gemini-2.5-pro",
