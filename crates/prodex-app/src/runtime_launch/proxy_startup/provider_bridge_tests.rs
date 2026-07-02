@@ -302,6 +302,18 @@ fn provider_native_passthrough_is_explicit() {
         RuntimeProviderBridgeKind::OpenAiResponses,
         "/v1/responses"
     ));
+    assert_eq!(
+        runtime_provider_label(RuntimeProviderBridgeKind::Kiro),
+        "kiro"
+    );
+    assert!(!runtime_provider_native_passthrough(
+        RuntimeProviderBridgeKind::Kiro,
+        "/v1/responses"
+    ));
+    assert!(!runtime_provider_native_passthrough(
+        RuntimeProviderBridgeKind::Kiro,
+        "/v1/chat/completions"
+    ));
     assert!(!runtime_provider_native_passthrough(
         RuntimeProviderBridgeKind::Gemini,
         "/v1/responses"

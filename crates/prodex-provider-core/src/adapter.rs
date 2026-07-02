@@ -26,6 +26,7 @@ impl ProviderAdapterContract for StaticProviderAdapter {
                 ProviderWireFormat::OpenAiResponses
             }
             ProviderId::Gemini => ProviderWireFormat::OpenAiResponses,
+            ProviderId::Kiro => ProviderWireFormat::OpenAiResponses,
         }
     }
 
@@ -36,6 +37,7 @@ impl ProviderAdapterContract for StaticProviderAdapter {
                 ProviderWireFormat::OpenAiChatCompletions
             }
             ProviderId::Gemini => ProviderWireFormat::GeminiGenerateContent,
+            ProviderId::Kiro => ProviderWireFormat::Passthrough,
         }
     }
 
@@ -46,6 +48,7 @@ impl ProviderAdapterContract for StaticProviderAdapter {
                 ProviderWireFormat::OpenAiResponses
             }
             ProviderId::Gemini => ProviderWireFormat::OpenAiResponses,
+            ProviderId::Kiro => ProviderWireFormat::OpenAiResponses,
         }
     }
 
@@ -62,7 +65,10 @@ impl ProviderAdapterContract for StaticProviderAdapter {
     }
 
     fn supports_model_fallback(&self) -> bool {
-        !matches!(self.provider, ProviderId::OpenAi | ProviderId::Local)
+        !matches!(
+            self.provider,
+            ProviderId::OpenAi | ProviderId::Kiro | ProviderId::Local
+        )
     }
 
     fn supported_endpoints(&self) -> &'static [ProviderEndpoint] {
@@ -82,6 +88,9 @@ impl ProviderAdapterContract for StaticProviderAdapter {
             ProviderId::Local => ProviderCapabilityStatus::Passthrough,
             ProviderId::Anthropic | ProviderId::Copilot | ProviderId::DeepSeek => match endpoint {
                 ProviderEndpoint::Responses => ProviderCapabilityStatus::Translated,
+                ProviderEndpoint::ResponsesCompact if self.provider == ProviderId::Copilot => {
+                    ProviderCapabilityStatus::Passthrough
+                }
                 ProviderEndpoint::ChatCompletions | ProviderEndpoint::Messages => {
                     ProviderCapabilityStatus::Passthrough
                 }
@@ -94,6 +103,17 @@ impl ProviderAdapterContract for StaticProviderAdapter {
                 | ProviderEndpoint::Messages
                 | ProviderEndpoint::Embeddings => ProviderCapabilityStatus::Passthrough,
                 ProviderEndpoint::Models => ProviderCapabilityStatus::Emulated,
+                _ => ProviderCapabilityStatus::Unsupported,
+            },
+            ProviderId::Kiro => match endpoint {
+                ProviderEndpoint::Responses
+                | ProviderEndpoint::ChatCompletions
+                | ProviderEndpoint::Messages => {
+                    ProviderCapabilityStatus::Translated
+                }
+                ProviderEndpoint::ResponsesCompact | ProviderEndpoint::Models => {
+                    ProviderCapabilityStatus::Emulated
+                }
                 _ => ProviderCapabilityStatus::Unsupported,
             },
         }

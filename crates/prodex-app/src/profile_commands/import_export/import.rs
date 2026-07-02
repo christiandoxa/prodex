@@ -3,6 +3,10 @@ use prodex_profile_export::{
     ProfileImportPlanAction, ProfileImportPlanInput,
 };
 
+use super::super::kiro::{
+    KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE, parse_kiro_auth_secret_text,
+    parse_kiro_model_catalog_text,
+};
 use super::super::manage::print_profile_panel;
 use super::passwords::read_profile_export_payload;
 use super::progress::print_profile_import_progress;
@@ -16,9 +20,12 @@ pub(crate) fn handle_import_profiles(args: ImportProfileArgs) -> Result<()> {
     if super::super::copilot::is_copilot_import_source(&args.path) {
         return handle_import_copilot_profile(&args);
     }
+    if super::super::kiro::is_kiro_import_source(&args.path) {
+        return handle_import_kiro_profile(&args);
+    }
     if args.name.is_some() || args.activate {
         bail!(
-            "--name and --activate are only supported for built-in import sources such as `claude` or `copilot`"
+            "--name and --activate are only supported for built-in import sources such as `claude`, `copilot`, or `kiro`"
         );
     }
 
@@ -546,7 +553,8 @@ pub(super) fn stage_imported_profiles(
 }
 
 fn validate_exported_secret_files(exported: &ExportedProfile) -> Result<()> {
-    let required_file = required_exported_secret_file_name(&exported.provider);
+    let required_files = required_exported_secret_file_names(&exported.provider);
+    let allowed_files = allowed_exported_secret_file_names(&exported.provider);
     let mut seen_paths = BTreeSet::new();
 
     for secret_file in &exported.secret_files {
@@ -558,7 +566,10 @@ fn validate_exported_secret_files(exported: &ExportedProfile) -> Result<()> {
                 exported.name
             );
         }
-        if Some(secret_file.path.as_str()) != required_file {
+        if !allowed_files
+            .iter()
+            .any(|allowed| *allowed == secret_file.path.as_str())
+        {
             bail!(
                 "profile export bundle contains unexpected secret file '{}' for profile '{}'",
                 secret_file.path,
@@ -568,14 +579,14 @@ fn validate_exported_secret_files(exported: &ExportedProfile) -> Result<()> {
         validate_exported_secret_file_content(exported, &secret_file.path, &secret_file.text)?;
     }
 
-    if let Some(required_file) = required_file
-        && !seen_paths.contains(required_file)
-    {
-        bail!(
-            "profile export bundle is missing secret file '{}' for profile '{}'",
-            required_file,
-            exported.name
-        );
+    for required_file in required_files {
+        if !seen_paths.contains(*required_file) {
+            bail!(
+                "profile export bundle is missing secret file '{}' for profile '{}'",
+                required_file,
+                exported.name
+            );
+        }
     }
 
     Ok(())
@@ -619,18 +630,47 @@ fn validate_exported_secret_file_content(
                 )
             })?;
         }
+        ProfileProvider::Kiro { .. } => {
+            if path == KIRO_CREDENTIALS_FILE {
+                parse_kiro_auth_secret_text(text).with_context(|| {
+                    format!(
+                        "failed to parse exported secret file '{}' for profile '{}'",
+                        path, exported.name
+                    )
+                })?;
+            } else if path == KIRO_MODEL_CATALOG_FILE {
+                parse_kiro_model_catalog_text(text).with_context(|| {
+                    format!(
+                        "failed to parse exported secret file '{}' for profile '{}'",
+                        path, exported.name
+                    )
+                })?;
+            }
+        }
         ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
         }
     }
     Ok(())
 }
 
-fn required_exported_secret_file_name(provider: &ProfileProvider) -> Option<&'static str> {
+fn required_exported_secret_file_names(provider: &ProfileProvider) -> &'static [&'static str] {
     match provider {
-        ProfileProvider::Gemini { .. } => Some(GEMINI_OAUTH_SECRET_FILE),
-        ProfileProvider::Anthropic { .. } => Some(CLAUDE_CREDENTIALS_FILE),
+        ProfileProvider::Gemini { .. } => &[GEMINI_OAUTH_SECRET_FILE],
+        ProfileProvider::Anthropic { .. } => &[CLAUDE_CREDENTIALS_FILE],
+        ProfileProvider::Kiro { .. } => &[KIRO_CREDENTIALS_FILE],
         ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
-            None
+            &[]
+        }
+    }
+}
+
+fn allowed_exported_secret_file_names(provider: &ProfileProvider) -> &'static [&'static str] {
+    match provider {
+        ProfileProvider::Gemini { .. } => &[GEMINI_OAUTH_SECRET_FILE],
+        ProfileProvider::Anthropic { .. } => &[CLAUDE_CREDENTIALS_FILE],
+        ProfileProvider::Kiro { .. } => &[KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE],
+        ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
+            &[]
         }
     }
 }

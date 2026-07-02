@@ -39,6 +39,7 @@ pub const PRODEX_ANTHROPIC_DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 pub const PRODEX_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
 pub const PRODEX_GEMINI_DEFAULT_MODEL: &str = "auto";
 pub const PRODEX_GEMINI_CHAT_COMPRESSION_MODEL: &str = "chat-compression-default";
+pub const PRODEX_KIRO_DEFAULT_MODEL: &str = "claude-sonnet-4";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ProviderId {
@@ -52,6 +53,8 @@ pub enum ProviderId {
     DeepSeek,
     #[serde(rename = "gemini")]
     Gemini,
+    #[serde(rename = "kiro")]
+    Kiro,
     #[serde(rename = "local")]
     Local,
 }
@@ -64,6 +67,7 @@ impl ProviderId {
             Self::Copilot => "copilot",
             Self::DeepSeek => "deepseek",
             Self::Gemini => "gemini",
+            Self::Kiro => "kiro",
             Self::Local => "local",
         }
     }
@@ -77,6 +81,7 @@ impl ProviderId {
             "copilot" | "github-copilot" | "github_copilot" => Some(Self::Copilot),
             "deepseek" => Some(Self::DeepSeek),
             "gemini" | "google" => Some(Self::Gemini),
+            "kiro" => Some(Self::Kiro),
             "local" | "local-openai" | "local_openai" => Some(Self::Local),
             _ => None,
         }
@@ -109,6 +114,8 @@ impl ProviderWireFormat {
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderEndpoint {
     Responses,
+    #[serde(rename = "responses/compact")]
+    ResponsesCompact,
     ChatCompletions,
     Messages,
     Models,
@@ -150,6 +157,7 @@ impl ProviderEndpoint {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Responses => "responses",
+            Self::ResponsesCompact => "responses/compact",
             Self::ChatCompletions => "chat-completions",
             Self::Messages => "messages",
             Self::Models => "models",
@@ -331,6 +339,7 @@ pub const PROVIDER_CONTRACT_PROVIDERS: &[ProviderId] = &[
     ProviderId::Copilot,
     ProviderId::DeepSeek,
     ProviderId::Gemini,
+    ProviderId::Kiro,
     ProviderId::Local,
 ];
 
@@ -461,6 +470,22 @@ const CORE_TEXT_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Models,
 ];
 
+const COPILOT_TEXT_ENDPOINTS: &[ProviderEndpoint] = &[
+    ProviderEndpoint::Responses,
+    ProviderEndpoint::ResponsesCompact,
+    ProviderEndpoint::ChatCompletions,
+    ProviderEndpoint::Messages,
+    ProviderEndpoint::Models,
+];
+
+const KIRO_ENDPOINTS: &[ProviderEndpoint] = &[
+    ProviderEndpoint::Responses,
+    ProviderEndpoint::ResponsesCompact,
+    ProviderEndpoint::ChatCompletions,
+    ProviderEndpoint::Messages,
+    ProviderEndpoint::Models,
+];
+
 const OPENAI_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
     ProviderEndpoint::ChatCompletions,
@@ -484,6 +509,7 @@ const GEMINI_ENDPOINTS: &[ProviderEndpoint] = &[
 
 pub const ALL_PROVIDER_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
+    ProviderEndpoint::ResponsesCompact,
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
     ProviderEndpoint::Models,
@@ -499,6 +525,8 @@ pub fn provider_supported_endpoints(provider: ProviderId) -> &'static [ProviderE
     match provider {
         ProviderId::OpenAi | ProviderId::Local => OPENAI_ENDPOINTS,
         ProviderId::Gemini => GEMINI_ENDPOINTS,
-        ProviderId::Anthropic | ProviderId::Copilot | ProviderId::DeepSeek => CORE_TEXT_ENDPOINTS,
+        ProviderId::Copilot => COPILOT_TEXT_ENDPOINTS,
+        ProviderId::Kiro => KIRO_ENDPOINTS,
+        ProviderId::Anthropic | ProviderId::DeepSeek => CORE_TEXT_ENDPOINTS,
     }
 }

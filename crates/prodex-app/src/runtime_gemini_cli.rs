@@ -1,7 +1,8 @@
 use crate::{
     PreparedRuntimeLaunch, RuntimeLaunchRequest, RuntimeLaunchStrategy, RuntimeProxyEndpoint,
-    agy_bin, clear_rtk_auto_wrap_control_env, execute_runtime_launch, gemini_bin,
-    prepare_prodex_overlay_home, prepend_child_path, refresh_gemini_oauth_secret_if_needed,
+    agy_bin, clear_rtk_auto_wrap_control_env, execute_runtime_launch, gemini_bin, kiro_bin,
+    prepare_prodex_overlay_home, prepend_child_path, read_kiro_auth_secret,
+    refresh_gemini_oauth_secret_if_needed, write_kiro_cli_data_dir,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -29,18 +30,23 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
                 .args
                 .base_url
                 .as_deref()
-                .or(Some(SUPER_GEMINI_DEFAULT_BASE_URL)),
+                .or((self.agent == SuperCliAgent::Gemini).then_some(SUPER_GEMINI_DEFAULT_BASE_URL)),
             upstream_no_proxy: self.args.no_proxy,
             include_code_review: false,
-            smart_context_enabled: true,
-            presidio_redaction_enabled: self.presidio_enabled,
+            smart_context_enabled: self.agent == SuperCliAgent::Gemini,
+            presidio_redaction_enabled: self.presidio_enabled
+                && self.agent == SuperCliAgent::Gemini,
             model_context_window_tokens: self.args.local_context_window.map(|value| value as u64),
             gemini_thinking_budget_tokens: None,
             force_runtime_proxy: false,
             model_provider_override: (self.agent == SuperCliAgent::Gemini)
                 .then_some(SUPER_GEMINI_PROVIDER_ID),
             profile_v2_name: None,
-            external_provider: (self.agent == SuperCliAgent::Gemini).then_some("gemini-oauth"),
+            external_provider: match self.agent {
+                SuperCliAgent::Gemini => Some("gemini-oauth"),
+                SuperCliAgent::Kiro => Some("kiro"),
+                SuperCliAgent::Agy | SuperCliAgent::Codex => None,
+            },
             external_provider_api_key: None,
         }
     }
@@ -91,6 +97,12 @@ impl RuntimeLaunchStrategy for SuperGeminiCliLaunchStrategy {
             SuperCliAgent::Agy => {
                 ChildProcessPlan::new(agy_bin(), prepared.codex_home.clone()).with_args(launch_args)
             }
+            SuperCliAgent::Kiro => ChildProcessPlan::new(kiro_bin(), prepared.codex_home.clone())
+                .with_args(launch_args)
+                .with_extra_env(runtime_super_kiro_cli_profile_env(
+                    &prepared.codex_home,
+                    &overlay_home,
+                )?),
             SuperCliAgent::Codex => bail!("Codex is not a native Google CLI launch target"),
         };
         prepend_child_path(&mut child, overlay_home.join("bin"));
@@ -125,6 +137,9 @@ fn runtime_super_google_cli_launch_args(
     args: &[OsString],
     model: Option<&str>,
 ) -> Vec<OsString> {
+    if agent == SuperCliAgent::Kiro {
+        return runtime_super_kiro_cli_launch_args(args, model);
+    }
     let mut launch_args = args.to_vec();
     match agent {
         SuperCliAgent::Gemini
@@ -156,11 +171,49 @@ fn runtime_super_google_cli_launch_args(
     launch_args
 }
 
-pub(super) fn handle_super_google_cli(args: SuperArgs, presidio_enabled: bool) -> Result<()> {
-    if args.provider != Some(SuperExternalProvider::Gemini) {
-        bail!("native Google agent CLIs require `gemini` or `--provider gemini`")
+fn runtime_super_kiro_cli_launch_args(args: &[OsString], model: Option<&str>) -> Vec<OsString> {
+    if model.is_none()
+        || args
+            .iter()
+            .any(|arg| matches!(arg.to_str(), Some("--model" | "-m")))
+    {
+        return args.to_vec();
     }
+    let mut launch_args = Vec::with_capacity(args.len() + 3);
+    launch_args.push(OsString::from("chat"));
+    launch_args.push(OsString::from("--model"));
+    launch_args.push(OsString::from(model.unwrap_or_default()));
+    launch_args.extend(args.iter().cloned());
+    launch_args
+}
+
+fn runtime_super_kiro_cli_profile_env(
+    codex_home: &Path,
+    overlay_home: &Path,
+) -> Result<Vec<(OsString, OsString)>> {
+    let secret = read_kiro_auth_secret(codex_home)?;
+    let data_dir = overlay_home.join("kiro-data");
+    write_kiro_cli_data_dir(&data_dir, &secret)?;
+    let mut env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];
+    if let Some(region) = secret.region.filter(|value| !value.trim().is_empty()) {
+        env.push((OsString::from("AWS_REGION"), OsString::from(region)));
+    }
+    Ok(env)
+}
+
+pub(super) fn handle_super_google_cli(args: SuperArgs, presidio_enabled: bool) -> Result<()> {
     let agent = args.cli.context("native Google agent CLI is missing")?;
+    match agent {
+        SuperCliAgent::Gemini | SuperCliAgent::Agy
+            if args.provider != Some(SuperExternalProvider::Gemini) =>
+        {
+            bail!("native Google agent CLIs require `gemini` or `--provider gemini`")
+        }
+        SuperCliAgent::Kiro if args.provider.is_some() => {
+            bail!("native Kiro CLI launch uses imported Kiro profiles directly; omit --provider")
+        }
+        _ => {}
+    }
     if args.api_key.is_some() {
         bail!("native Google agent CLIs do not support Prodex --api-key routing")
     }
@@ -175,7 +228,34 @@ pub(super) fn handle_super_google_cli(args: SuperArgs, presidio_enabled: bool) -
 mod tests {
     use super::*;
     use crate::{GeminiOAuthSecret, write_gemini_oauth_secret};
+    use prodex_cli::CodexRuntimeFeatureArgs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn native_cli_super_args() -> SuperArgs {
+        SuperArgs {
+            profile: Some("kiro-main".to_string()),
+            auto_rotate: false,
+            no_auto_rotate: false,
+            auto_redeem: false,
+            skip_quota_check: false,
+            dry_run: false,
+            base_url: None,
+            no_proxy: false,
+            presidio: false,
+            no_presidio: false,
+            mem0: false,
+            no_mem0: false,
+            url: None,
+            provider: None,
+            cli: None,
+            api_key: None,
+            local_model: None,
+            local_context_window: None,
+            local_auto_compact_token_limit: None,
+            codex_features: CodexRuntimeFeatureArgs::default(),
+            codex_args: Vec::new(),
+        }
+    }
 
     #[test]
     fn native_gemini_cli_defaults_to_yolo_and_forwards_model() {
@@ -255,5 +335,45 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn native_kiro_cli_injects_chat_model_when_needed() {
+        assert_eq!(
+            runtime_super_google_cli_launch_args(
+                SuperCliAgent::Kiro,
+                &[OsString::from("review this repo")],
+                Some("claude-4-sonnet"),
+            ),
+            vec![
+                OsString::from("chat"),
+                OsString::from("--model"),
+                OsString::from("claude-4-sonnet"),
+                OsString::from("review this repo"),
+            ]
+        );
+    }
+
+    #[test]
+    fn native_kiro_cli_keeps_explicit_model_flag() {
+        let args = [OsString::from("--model"), OsString::from("existing-model")];
+        assert_eq!(
+            runtime_super_google_cli_launch_args(SuperCliAgent::Kiro, &args, Some("ignored")),
+            args
+        );
+    }
+
+    #[test]
+    fn native_kiro_cli_runtime_request_skips_proxy_features() {
+        let strategy = SuperGeminiCliLaunchStrategy {
+            args: native_cli_super_args(),
+            presidio_enabled: true,
+            agent: SuperCliAgent::Kiro,
+        };
+        let request = strategy.runtime_request();
+        assert_eq!(request.external_provider, Some("kiro"));
+        assert!(!request.smart_context_enabled);
+        assert!(!request.presidio_redaction_enabled);
+        assert_eq!(request.base_url, None);
     }
 }

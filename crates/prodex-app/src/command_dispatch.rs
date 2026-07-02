@@ -296,8 +296,11 @@ impl CommandExecute for SuperArgs {
     fn execute(mut self) -> Result<()> {
         self.extract_provider_overrides_from_codex_args();
         if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
-            if matches!(self.cli, Some(SuperCliAgent::Gemini | SuperCliAgent::Agy)) {
-                bail!("--dry-run is not supported with native Google agent CLIs")
+            if matches!(
+                self.cli,
+                Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
+            ) {
+                bail!("--dry-run is not supported with native external agent CLIs")
             }
             let use_presidio = self.presidio_preference().unwrap_or(false);
             let use_mem0 = self.mem0_preference().unwrap_or(false);

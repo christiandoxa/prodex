@@ -382,6 +382,7 @@ fn responses_surface_has_request_response_and_stream_coverage_for_every_current_
         ProviderId::Copilot,
         ProviderId::DeepSeek,
         ProviderId::Gemini,
+        ProviderId::Kiro,
         ProviderId::Local,
     ] {
         let provider_cases: Vec<_> = provider_conformance_cases()
@@ -473,6 +474,7 @@ fn translated_provider_passthrough_endpoints_have_fixture_coverage_where_claimed
     for (provider, endpoint) in [
         (ProviderId::Anthropic, ProviderEndpoint::ChatCompletions),
         (ProviderId::Anthropic, ProviderEndpoint::Messages),
+        (ProviderId::Copilot, ProviderEndpoint::ResponsesCompact),
         (ProviderId::Copilot, ProviderEndpoint::ChatCompletions),
         (ProviderId::Copilot, ProviderEndpoint::Messages),
         (ProviderId::DeepSeek, ProviderEndpoint::ChatCompletions),

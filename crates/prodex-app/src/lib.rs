@@ -75,6 +75,8 @@ mod runtime_gemini_auth;
 mod runtime_gemini_cli;
 mod runtime_gemini_cli_compat;
 mod runtime_gemini_config;
+#[allow(dead_code)]
+mod runtime_kiro_acp;
 mod runtime_launch;
 mod runtime_launch_shared;
 mod runtime_local_provider_config;
@@ -257,6 +259,10 @@ fn gemini_bin() -> OsString {
 
 fn agy_bin() -> OsString {
     env::var_os("PRODEX_AGY_BIN").unwrap_or_else(|| OsString::from("agy"))
+}
+
+fn kiro_bin() -> OsString {
+    env::var_os("PRODEX_KIRO_BIN").unwrap_or_else(|| OsString::from("kiro-cli-chat"))
 }
 
 #[cfg(test)]

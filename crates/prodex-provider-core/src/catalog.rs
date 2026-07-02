@@ -149,6 +149,7 @@ mod tests {
             ProviderId::Copilot,
             ProviderId::DeepSeek,
             ProviderId::Gemini,
+            ProviderId::Kiro,
             ProviderId::Local,
         ] {
             assert!(entries.iter().any(|entry| entry.provider == provider));

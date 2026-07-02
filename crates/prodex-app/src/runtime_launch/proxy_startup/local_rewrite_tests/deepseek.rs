@@ -74,6 +74,31 @@ fn deepseek_request_translation_maps_responses_input_and_tools() {
 }
 
 #[test]
+fn deepseek_request_translation_accepts_untyped_role_content_items() {
+    let conversations = deepseek_conversation_store();
+    let body = serde_json::json!({
+        "model": "deepseek-v4-pro",
+        "input": [
+            {
+                "role": "user",
+                "content": "hello from anthropic-compat"
+            }
+        ]
+    });
+
+    let translated =
+        runtime_deepseek_chat_request_body(&serde_json::to_vec(&body).unwrap(), &conversations)
+            .expect("request should translate");
+    let translated: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+
+    assert_eq!(translated["messages"][0]["role"], "user");
+    assert_eq!(
+        translated["messages"][0]["content"],
+        "hello from anthropic-compat"
+    );
+}
+
+#[test]
 fn deepseek_request_translation_preserves_local_shell_call_fields() {
     let conversations = deepseek_conversation_store();
     let body = serde_json::json!({

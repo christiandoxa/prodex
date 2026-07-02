@@ -31,8 +31,9 @@ pub(super) use proxy_startup::{
     RuntimeDeepSeekWebSearchMode, RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
     RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
     RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
-    RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions,
-    RuntimeLocalRewriteProxyStartOptions, start_runtime_local_rewrite_proxy,
+    RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeKiroProfileAuth,
+    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
+    start_runtime_local_rewrite_proxy,
 };
 pub(super) use proxy_startup::{
     RuntimeRotationProxyStartOptions, start_runtime_rotation_proxy_with_options,

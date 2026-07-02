@@ -33,9 +33,14 @@ pub(super) use super::local_rewrite_gateway_util::runtime_gateway_generate_virtu
 use super::local_rewrite_gemini::{
     RuntimeGeminiOAuthPool, runtime_gemini_oauth_pool_from_provider,
 };
-use super::local_rewrite_gemini_compact::respond_runtime_gemini_compact_request;
+use super::local_rewrite_gemini_compact::{
+    respond_runtime_gemini_compact_request, runtime_gemini_local_compact_response_parts,
+};
 use super::local_rewrite_gemini_live::{
     handle_runtime_gemini_live_websocket_request, spawn_runtime_gemini_live_sidecar,
+};
+use super::local_rewrite_kiro::{
+    runtime_kiro_model_catalog_from_provider, runtime_kiro_models_buffered_response,
 };
 pub(super) use super::local_rewrite_model_memory::{
     RuntimeLocalRewriteModelMemoryState, runtime_local_rewrite_model_selection,
@@ -611,13 +616,49 @@ fn handle_runtime_local_rewrite_proxy_request(
             respond_runtime_gemini_compact_request(request_id, request, &captured, shared, auth);
             return;
         }
-        let _ = request.respond(build_runtime_proxy_text_response(
-            501,
-            &runtime_local_rewrite_remote_compact_unsupported_message(&shared.provider),
+        if let RuntimeLocalRewriteProviderOptions::Kiro { .. } = &shared.provider {
+            let parts = runtime_gemini_local_compact_response_parts(&captured.body);
+            let _ = request.respond(runtime_local_rewrite_response_with_call_id(
+                parts, request_id, shared,
+            ));
+            return;
+        }
+        if !matches!(
+            shared.provider,
+            RuntimeLocalRewriteProviderOptions::Copilot { .. }
+        ) {
+            let _ = request.respond(build_runtime_proxy_text_response(
+                501,
+                &runtime_local_rewrite_remote_compact_unsupported_message(&shared.provider),
+            ));
+            return;
+        }
+    }
+    if let RuntimeLocalRewriteProviderOptions::Kiro { auth } = &shared.provider
+        && let Some(parts) =
+            runtime_kiro_models_buffered_response(auth, &captured.method, &captured.path_and_query)
+    {
+        runtime_proxy_log(
+            runtime_shared,
+            runtime_provider_request_ledger_message(
+                request_id,
+                shared.provider.bridge_kind(),
+                &captured.path_and_query,
+                None,
+                parts.status,
+                0,
+                captured.body.len(),
+            ),
+        );
+        let _ = request.respond(runtime_local_rewrite_response_with_call_id(
+            parts, request_id, shared,
         ));
         return;
     }
-    let dynamic_model_catalog = runtime_copilot_model_catalog_from_provider(&shared.provider);
+    let mut dynamic_model_catalog = runtime_copilot_model_catalog_from_provider(&shared.provider);
+    if dynamic_model_catalog.is_empty() {
+        dynamic_model_catalog = runtime_kiro_model_catalog_from_provider(&shared.provider);
+    }
     if let Some(parts) = runtime_provider_models_buffered_response(
         shared.provider.bridge_kind(),
         (!dynamic_model_catalog.is_empty()).then_some(dynamic_model_catalog.as_slice()),
@@ -674,6 +715,7 @@ pub(super) fn runtime_local_rewrite_remote_compact_unsupported_message(
         RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => "Prodex local embeddings",
         RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
         RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => "DeepSeek",
+        RuntimeLocalRewriteProviderOptions::Kiro { .. } => "Kiro",
     };
     format!("{provider_name} provider does not support Codex remote compact yet")
 }

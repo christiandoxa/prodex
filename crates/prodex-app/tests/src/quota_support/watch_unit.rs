@@ -751,6 +751,10 @@
             QuotaProviderFilter::Copilot
         );
         assert_eq!(
+            QuotaProviderFilter::parse("kiro").unwrap(),
+            QuotaProviderFilter::Kiro
+        );
+        assert_eq!(
             QuotaProviderFilter::parse("deepseek").unwrap(),
             QuotaProviderFilter::DeepSeek
         );
@@ -779,6 +783,16 @@
                 api_url: "https://api.githubcopilot.com".to_string(),
                 access_type_sku: None,
                 copilot_plan: None,
+            })
+        );
+        assert!(
+            QuotaProviderFilter::Kiro.matches(&ProfileProvider::Kiro {
+                auth_key: "codewhisperer:odic:token".to_string(),
+                auth_kind: Some("builder-id".to_string()),
+                profile_arn: Some("arn:aws:codewhisperer:us-east-1:123:profile/test".to_string()),
+                profile_name: Some("test".to_string()),
+                start_url: Some("https://view.awsapps.com/start".to_string()),
+                region: Some("us-east-1".to_string()),
             })
         );
     }

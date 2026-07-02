@@ -36,6 +36,8 @@ impl RuntimeLaunchSelection {
         let anthropic_external_provider = external_provider.is_some_and(|provider| {
             provider.eq_ignore_ascii_case("anthropic") || provider.eq_ignore_ascii_case("claude")
         });
+        let kiro_external_provider =
+            external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("kiro"));
         if requested.is_none()
             && (state.profiles.is_empty()
                 || runtime_launch_should_use_profileless_gemini(
@@ -69,6 +71,8 @@ impl RuntimeLaunchSelection {
             resolve_copilot_runtime_launch_profile_name(state, requested)?
         } else if anthropic_external_provider {
             resolve_anthropic_runtime_launch_profile_name(state, requested)?
+        } else if kiro_external_provider {
+            resolve_kiro_runtime_launch_profile_name(state, requested)?
         } else {
             resolve_runtime_launch_profile_name(state, requested)?
         };

@@ -70,6 +70,9 @@ pub(super) fn respond_runtime_gemini_compact_request(
             RuntimeLocalRewriteUpstreamResponse::Live(_) => {
                 bail!("Gemini semantic compact unexpectedly returned a stream prefix")
             }
+            RuntimeLocalRewriteUpstreamResponse::Streaming(_) => {
+                bail!("Gemini semantic compact unexpectedly returned a local stream")
+            }
             RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
                 bail!(
                     "Gemini semantic compact returned buffered HTTP {}",

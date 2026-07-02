@@ -8,6 +8,7 @@ fn catalog_covers_gateway_providers() {
         ProviderId::Copilot,
         ProviderId::DeepSeek,
         ProviderId::Gemini,
+        ProviderId::Kiro,
         ProviderId::Local,
     ] {
         assert!(!provider_model_catalog(provider).is_empty());
@@ -22,7 +23,7 @@ fn provider_adapter_contract_matches_fixture() {
         serde_json::from_str(include_str!("../tests/fixtures/provider_contracts.json"))
             .expect("provider contract fixture should parse");
     let contracts = fixture.as_array().expect("fixture should be an array");
-    assert_eq!(contracts.len(), 6);
+    assert_eq!(contracts.len(), 7);
     for contract in contracts {
         let provider = ProviderId::parse(contract["provider"].as_str().unwrap())
             .expect("fixture provider should parse");
@@ -81,6 +82,7 @@ fn provider_contract_matrix_is_stable_and_complete() {
             "copilot",
             "deepseek",
             "gemini",
+            "kiro",
             "local"
         ]
     );
@@ -94,6 +96,9 @@ fn provider_contract_matrix_is_stable_and_complete() {
         );
         assert!(contract.supported_endpoints.contains(&"responses"));
         assert!(contract.supported_endpoints.contains(&"models"));
+        if contract.provider == "copilot" {
+            assert!(contract.supported_endpoints.contains(&"responses/compact"));
+        }
         assert!(contract.model_count > 0);
         assert_eq!(contract.replay_case_count, 1);
     }

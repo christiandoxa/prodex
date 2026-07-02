@@ -7,6 +7,7 @@ use super::*;
 mod anthropic;
 mod copilot;
 mod import_export;
+mod kiro;
 mod login;
 mod logout;
 mod manage;
@@ -22,6 +23,10 @@ use self::import_export::{build_profile_export_payload, import_profile_export_pa
 pub(crate) use self::import_export::{
     count_profile_import_auth_journals, handle_export_profiles, handle_import_current_profile,
     handle_import_profiles, repair_profile_import_auth_journals,
+};
+pub(crate) use self::kiro::{
+    KIRO_MODEL_CATALOG_FILE, handle_import_kiro_profile, parse_kiro_model_catalog_text,
+    read_kiro_auth_secret, write_kiro_cli_data_dir,
 };
 pub(crate) use self::login::handle_codex_login;
 pub(crate) use self::logout::handle_codex_logout;

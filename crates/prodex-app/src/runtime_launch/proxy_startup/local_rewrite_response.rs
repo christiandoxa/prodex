@@ -160,6 +160,30 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                 .map(|context| context.profile_name.clone())
         })
         .unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
+    if let RuntimeLocalRewriteUpstreamResponse::Streaming(streaming_response) = response {
+        let writer = request.into_writer();
+        let mut headers = streaming_response.headers;
+        runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
+        let body = runtime_gateway_spend_stream_body(
+            runtime_gateway_guardrail_stream_body(streaming_response.body, request_id, shared),
+            request_id,
+            streaming_response.status,
+            captured,
+            shared,
+        );
+        let streaming = RuntimeStreamingResponse {
+            status: streaming_response.status,
+            headers,
+            body,
+            request_id,
+            profile_name: streaming_response.profile_name,
+            log_path: shared.runtime_shared.log_path.clone(),
+            shared: shared.runtime_shared.clone(),
+            _inflight_guard: None,
+        };
+        let _ = write_runtime_streaming_response(writer, streaming);
+        return;
+    }
     let live_response = match response {
         RuntimeLocalRewriteUpstreamResponse::Live(live_response) => live_response,
         RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
@@ -176,6 +200,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             ));
             return;
         }
+        RuntimeLocalRewriteUpstreamResponse::Streaming(_) => unreachable!(),
     };
     let prefix = live_response.prefix;
     let response = live_response.response;

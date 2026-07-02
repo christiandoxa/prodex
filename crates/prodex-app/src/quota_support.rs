@@ -47,6 +47,7 @@ pub(crate) enum QuotaProviderFilter {
     Gemini,
     Anthropic,
     Copilot,
+    Kiro,
     DeepSeek,
     Local,
     Agy,
@@ -61,11 +62,12 @@ impl QuotaProviderFilter {
             "gemini" | "google" | "google-gemini" => Ok(Self::Gemini),
             "anthropic" | "claude" | "anthropic-claude" => Ok(Self::Anthropic),
             "copilot" | "github-copilot" | "github" => Ok(Self::Copilot),
+            "kiro" | "kiro-cli" => Ok(Self::Kiro),
             "deepseek" => Ok(Self::DeepSeek),
             "local" | "openai-compatible" | "openai_compatible" => Ok(Self::Local),
             "agy" | "anti-gravity" => Ok(Self::Agy),
             other => bail!(
-                "invalid quota provider filter '{other}'; supported values are all, openai, gemini, anthropic, claude, copilot, deepseek, local, agy"
+                "invalid quota provider filter '{other}'; supported values are all, openai, gemini, anthropic, claude, copilot, kiro, deepseek, local, agy"
             ),
         }
     }
@@ -76,7 +78,8 @@ impl QuotaProviderFilter {
             Self::OpenAi => Self::Gemini,
             Self::Gemini => Self::Anthropic,
             Self::Anthropic => Self::Copilot,
-            Self::Copilot => Self::DeepSeek,
+            Self::Copilot => Self::Kiro,
+            Self::Kiro => Self::DeepSeek,
             Self::DeepSeek => Self::Local,
             Self::Local => Self::Agy,
             Self::Agy => Self::All,
@@ -90,6 +93,7 @@ impl QuotaProviderFilter {
             Self::Gemini => "gemini",
             Self::Anthropic => "anthropic",
             Self::Copilot => "copilot",
+            Self::Kiro => "kiro",
             Self::DeepSeek => "deepseek",
             Self::Local => "local",
             Self::Agy => "agy",
@@ -103,6 +107,7 @@ impl QuotaProviderFilter {
             Self::Gemini => matches!(provider, ProfileProvider::Gemini { .. }),
             Self::Anthropic => matches!(provider, ProfileProvider::Anthropic { .. }),
             Self::Copilot => matches!(provider, ProfileProvider::Copilot { .. }),
+            Self::Kiro => matches!(provider, ProfileProvider::Kiro { .. }),
             Self::Agy => matches!(provider, ProfileProvider::Agy { .. }),
             Self::DeepSeek | Self::Local => false,
         }
@@ -127,6 +132,7 @@ impl QuotaProviderFilter {
             | Self::Gemini
             | Self::Anthropic
             | Self::Copilot
+            | Self::Kiro
             | Self::Agy => false,
         }
     }
@@ -238,6 +244,7 @@ pub(crate) fn collect_quota_reports_with_filters(
             ProfileProvider::Gemini { .. }
             | ProfileProvider::Anthropic { .. }
             | ProfileProvider::Copilot { .. }
+            | ProfileProvider::Kiro { .. }
             | ProfileProvider::Agy { .. } => (None, None),
         };
         QuotaReport {
@@ -504,6 +511,9 @@ pub(crate) fn fetch_profile_quota(
         ProfileProvider::Copilot { host, login, .. } => Ok(ProviderQuotaSnapshot::Copilot(
             fetch_copilot_user_info_for_account(host, login)?,
         )),
+        ProfileProvider::Kiro { .. } => {
+            bail!("quota is not supported for imported Kiro profiles")
+        }
         ProfileProvider::Agy { account } => Ok(ProviderQuotaSnapshot::External(
             fetch_agy_quota_info(account.as_deref())?,
         )),
@@ -534,6 +544,9 @@ pub(crate) fn fetch_profile_quota_json(
         .context("failed to render Anthropic quota JSON"),
         ProfileProvider::Copilot { host, login, .. } => {
             fetch_copilot_user_info_json_for_account(host, login)
+        }
+        ProfileProvider::Kiro { .. } => {
+            bail!("quota is not supported for imported Kiro profiles")
         }
         ProfileProvider::Agy { account } => {
             serde_json::to_value(fetch_agy_quota_info(account.as_deref())?)

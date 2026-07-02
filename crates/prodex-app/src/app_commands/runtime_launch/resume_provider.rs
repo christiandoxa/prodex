@@ -39,5 +39,21 @@ fn runtime_external_provider_from_model_provider_id(
     if model_provider.eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID) {
         return Some(SuperExternalProvider::DeepSeek);
     }
+    if model_provider.eq_ignore_ascii_case(prodex_cli::SUPER_KIRO_PROVIDER_ID) {
+        return Some(SuperExternalProvider::Kiro);
+    }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_external_provider_from_model_provider_id_accepts_kiro() {
+        assert_eq!(
+            runtime_external_provider_from_model_provider_id(prodex_cli::SUPER_KIRO_PROVIDER_ID),
+            Some(SuperExternalProvider::Kiro)
+        );
+    }
 }

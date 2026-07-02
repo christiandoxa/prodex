@@ -57,6 +57,23 @@ fn provider_capabilities_define_route_policy_and_quota_shape() {
     .capabilities();
     assert_eq!(copilot.quota_shape, ProviderQuotaShape::CopilotMonthly);
 
+    let kiro = ProfileProvider::Kiro {
+        auth_key: "kiro:key".to_string(),
+        auth_kind: None,
+        profile_arn: None,
+        profile_name: None,
+        start_url: None,
+        region: None,
+    }
+    .capabilities();
+    assert_eq!(
+        kiro.runtime_route_policy,
+        RuntimeRoutePolicy::ResponsesAdapter
+    );
+    assert_eq!(kiro.quota_shape, ProviderQuotaShape::ExternalStatus);
+    assert!(kiro.uses_openai_client_format);
+    assert!(!kiro.supports_runtime_rotation);
+
     let agy = ProfileProvider::Agy { account: None }.capabilities();
     assert_eq!(agy.runtime_route_policy, RuntimeRoutePolicy::ExternalCli);
     assert!(!agy.uses_openai_client_format);

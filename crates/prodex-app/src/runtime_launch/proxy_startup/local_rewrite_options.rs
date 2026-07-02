@@ -3,6 +3,7 @@ use super::local_rewrite_gateway_config::{
     RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
     RuntimeGatewayObservabilityConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
 };
+use super::local_rewrite_kiro::RuntimeKiroProfileAuth;
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use super::*;
 
@@ -31,6 +32,9 @@ pub(crate) enum RuntimeLocalRewriteProviderOptions {
         thinking_budget_tokens: Option<u64>,
         model_resolution: crate::RuntimeGeminiModelResolution,
     },
+    Kiro {
+        auth: RuntimeKiroProfileAuth,
+    },
 }
 
 impl RuntimeLocalRewriteProviderOptions {
@@ -50,6 +54,7 @@ impl RuntimeLocalRewriteProviderOptions {
                 RuntimeProviderBridgeKind::DeepSeek
             }
             RuntimeLocalRewriteProviderOptions::Gemini { .. } => RuntimeProviderBridgeKind::Gemini,
+            RuntimeLocalRewriteProviderOptions::Kiro { .. } => RuntimeProviderBridgeKind::Kiro,
         }
     }
 }

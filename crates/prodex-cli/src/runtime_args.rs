@@ -174,7 +174,7 @@ pub struct SuperArgs {
     /// External provider preset to use through Codex/Super.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
-    /// Agent CLI to launch. Gemini CLI requires the Gemini provider.
+    /// Agent CLI to launch. Gemini CLI requires the Gemini provider; Kiro CLI uses an imported Kiro profile.
     #[arg(long, value_name = "CLI", value_enum)]
     pub cli: Option<SuperCliAgent>,
     /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
@@ -222,6 +222,7 @@ pub enum SuperMemoryBackend {
 pub enum SuperCliAgent {
     Codex,
     Gemini,
+    Kiro,
     Agy,
 }
 
@@ -593,6 +594,12 @@ pub const SUPER_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
 const SUPER_COPILOT_DEFAULT_BASE_URL: &str = "https://api.githubcopilot.com";
 pub const SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW: usize = 1_000_000;
 pub const SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT: usize = 950_000;
+pub const SUPER_KIRO_PROVIDER_ID: &str = "prodex-kiro";
+const SUPER_KIRO_PROVIDER_NAME: &str = "Kiro";
+pub const SUPER_KIRO_DEFAULT_MODEL: &str = "claude-sonnet-4";
+const SUPER_KIRO_DEFAULT_BASE_URL: &str = "https://kiro.dev";
+pub const SUPER_KIRO_DEFAULT_CONTEXT_WINDOW: usize = 200_000;
+pub const SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT: usize = 180_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExternalProvider {
@@ -600,6 +607,7 @@ pub enum SuperExternalProvider {
     Copilot,
     DeepSeek,
     Gemini,
+    Kiro,
 }
 
 impl SuperExternalProvider {
@@ -609,6 +617,7 @@ impl SuperExternalProvider {
             Self::Copilot => "copilot",
             Self::DeepSeek => "deepseek",
             Self::Gemini => "gemini",
+            Self::Kiro => "kiro",
         }
     }
 
@@ -618,6 +627,7 @@ impl SuperExternalProvider {
             Self::Copilot => SUPER_COPILOT_PROVIDER_ID,
             Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_ID,
             Self::Gemini => SUPER_GEMINI_PROVIDER_ID,
+            Self::Kiro => SUPER_KIRO_PROVIDER_ID,
         }
     }
 
@@ -627,6 +637,7 @@ impl SuperExternalProvider {
             Self::Copilot => SUPER_COPILOT_PROVIDER_NAME,
             Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_NAME,
             Self::Gemini => SUPER_GEMINI_PROVIDER_NAME,
+            Self::Kiro => SUPER_KIRO_PROVIDER_NAME,
         }
     }
 
@@ -635,6 +646,7 @@ impl SuperExternalProvider {
             // Codex currently exposes no configurable remote-compaction capability flag.
             // It enables /responses/compact only for provider names OpenAI or Azure.
             Self::Gemini => "Azure",
+            Self::Kiro => "OpenAI",
             _ => self.display_name(),
         }
     }
@@ -645,6 +657,7 @@ impl SuperExternalProvider {
             Self::Copilot => SUPER_COPILOT_DEFAULT_MODEL,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_MODEL,
             Self::Gemini => SUPER_GEMINI_DEFAULT_MODEL,
+            Self::Kiro => SUPER_KIRO_DEFAULT_MODEL,
         }
     }
 
@@ -654,6 +667,7 @@ impl SuperExternalProvider {
             Self::Copilot => SUPER_COPILOT_DEFAULT_BASE_URL,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_BASE_URL,
             Self::Gemini => SUPER_GEMINI_DEFAULT_BASE_URL,
+            Self::Kiro => SUPER_KIRO_DEFAULT_BASE_URL,
         }
     }
 
@@ -663,6 +677,7 @@ impl SuperExternalProvider {
             Self::Copilot => SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
             Self::Gemini => SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW,
+            Self::Kiro => SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
         }
     }
 
@@ -672,12 +687,13 @@ impl SuperExternalProvider {
             Self::Copilot => SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::Gemini => SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
+            Self::Kiro => SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
         }
     }
 
     fn web_search_mode(self) -> &'static str {
         match self {
-            Self::Anthropic | Self::Copilot | Self::DeepSeek | Self::Gemini => "live",
+            Self::Anthropic | Self::Copilot | Self::DeepSeek | Self::Gemini | Self::Kiro => "live",
         }
     }
 
@@ -694,8 +710,9 @@ fn parse_super_external_provider(
         "copilot" | "github-copilot" | "github_copilot" => Ok(SuperExternalProvider::Copilot),
         "deepseek" => Ok(SuperExternalProvider::DeepSeek),
         "gemini" => Ok(SuperExternalProvider::Gemini),
+        "kiro" => Ok(SuperExternalProvider::Kiro),
         other => Err(format!(
-            "invalid --provider: supported values are anthropic, copilot, deepseek, gemini, got {other:?}"
+            "invalid --provider: supported values are anthropic, copilot, deepseek, gemini, kiro, got {other:?}"
         )),
     }
 }
@@ -945,6 +962,60 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
         );
+    }
+
+    #[test]
+    fn extract_provider_kiro_from_codex_args() {
+        let mut args = super_args_from(&[
+            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "--provider",
+            "kiro",
+            "--model",
+            "claude-sonnet-4",
+        ]);
+        args.extract_provider_overrides_from_codex_args();
+        assert_eq!(args.provider, Some(SuperExternalProvider::Kiro));
+        assert_eq!(args.local_model.as_deref(), Some("claude-sonnet-4"));
+        assert_eq!(
+            args.codex_args
+                .iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>(),
+            vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
+        );
+    }
+
+    #[test]
+    fn super_external_provider_codex_args_support_kiro() {
+        let args = super_external_provider_codex_args(
+            SuperExternalProvider::Kiro,
+            "http://127.0.0.1:4317/v1",
+            Some("claude-sonnet-4.5"),
+            Some(222_222),
+            Some(111_111),
+        );
+        let rendered = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(rendered.contains(&format!(
+            "model_provider={}",
+            toml_string_literal(SUPER_KIRO_PROVIDER_ID)
+        )));
+        assert!(rendered.contains(&format!(
+            "model={}",
+            toml_string_literal("claude-sonnet-4.5")
+        )));
+        assert!(rendered.contains(&format!(
+            "model_providers.{SUPER_KIRO_PROVIDER_ID}.name={}",
+            toml_string_literal("OpenAI")
+        )));
+        assert!(rendered.contains(&format!(
+            "model_providers.{SUPER_KIRO_PROVIDER_ID}.base_url={}",
+            toml_string_literal("http://127.0.0.1:4317/v1")
+        )));
+        assert!(rendered.contains(&"model_context_window=222222".to_string()));
+        assert!(rendered.contains(&"model_auto_compact_token_limit=111111".to_string()));
     }
 
     #[test]

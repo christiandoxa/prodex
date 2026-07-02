@@ -21,10 +21,15 @@ Examples:
   prodex profile import backup.json
   prodex profile import claude
   prodex profile import copilot
+  prodex profile import kiro
   prodex profile import copilot --name copilot-main --activate
   prodex profile import-current main
   prodex profile remove main
-  prodex profile remove --all";
+  prodex profile remove --all
+
+Notes:
+  `prodex profile import kiro` reads the installed Kiro CLI auth store and profile metadata.
+  Use `PRODEX_KIRO_BIN` to point prodex at a specific Kiro CLI binary when `kiro-cli-chat` is not on PATH.";
 pub const CLI_LOGIN_AFTER_HELP: &str = "\
 Examples:
   prodex login
@@ -54,7 +59,7 @@ Examples:
 
 Notes:
   `prodex quota` supports OpenAI/Codex, Gemini OAuth, Anthropic OAuth, imported Copilot, DeepSeek API-key, Antigravity CLI, local OpenAI-compatible, and custom provider snapshots.
-  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, `local`, or `agy`.
+  Use `--provider` with `--all` to filter by provider: `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`, or `agy`.
   Use `--auth` with `--all` to filter by auth label or compatibility, for example `no-auth` or `quota-compatible`.
   If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, prodex shows a provider snapshot instead of failing the quota view.";
 pub const CLI_REDEEM_AFTER_HELP: &str = "\
@@ -131,6 +136,7 @@ Examples:
   prodex super deepseek --model deepseek-v4-pro
   prodex super gemini
   prodex super gemini --cli gemini
+  prodex super --cli kiro --profile kiro-main
   prodex super gemini --cli agy
   prodex super doctor
   prodex super doctor --json --strict
@@ -156,6 +162,7 @@ Notes:
   Use `deepseek` or `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
   Use `gemini` or `--provider gemini` to route through Gemini. Supply `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS; or sign in with Google via `prodex login --with-google`.
   Add `--cli gemini` to launch Gemini CLI with its native tools in YOLO mode through Prodex OAuth profile routing. Override the binary with PRODEX_GEMINI_BIN.
+  Add `--cli kiro` to launch Kiro CLI from an imported Kiro profile snapshot. Import first with `prodex profile import kiro`; override the binary with PRODEX_KIRO_BIN.
   Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring auth and currently cannot use Prodex account rotation. Override the binary with PRODEX_AGY_BIN.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied optimizer prefixes.";

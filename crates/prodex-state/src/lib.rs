@@ -83,6 +83,19 @@ pub enum ProfileProvider {
         #[serde(default)]
         copilot_plan: Option<String>,
     },
+    Kiro {
+        auth_key: String,
+        #[serde(default)]
+        auth_kind: Option<String>,
+        #[serde(default)]
+        profile_arn: Option<String>,
+        #[serde(default)]
+        profile_name: Option<String>,
+        #[serde(default)]
+        start_url: Option<String>,
+        #[serde(default)]
+        region: Option<String>,
+    },
     Agy {
         #[serde(default)]
         account: Option<String>,
@@ -96,6 +109,7 @@ impl ProfileProvider {
             Self::Gemini { .. } => "gemini",
             Self::Anthropic { .. } => "anthropic",
             Self::Copilot { .. } => "copilot",
+            Self::Kiro { .. } => "kiro",
             Self::Agy { .. } => "agy",
         }
     }
@@ -106,6 +120,7 @@ impl ProfileProvider {
             Self::Gemini { .. } => "Google Gemini",
             Self::Anthropic { .. } => "Anthropic Claude",
             Self::Copilot { .. } => "GitHub Copilot",
+            Self::Kiro { .. } => "Kiro CLI",
             Self::Agy { .. } => "Anti-Gravity",
         }
     }
@@ -125,7 +140,36 @@ impl ProfileProvider {
                 login: stored_login,
                 ..
             } => stored_host.trim() == host.trim() && stored_login.trim() == login.trim(),
-            Self::Openai | Self::Gemini { .. } | Self::Anthropic { .. } | Self::Agy { .. } => false,
+            Self::Openai
+            | Self::Gemini { .. }
+            | Self::Anthropic { .. }
+            | Self::Kiro { .. }
+            | Self::Agy { .. } => false,
+        }
+    }
+
+    pub fn kiro_matches(
+        &self,
+        auth_key: &str,
+        profile_arn: Option<&str>,
+        profile_name: Option<&str>,
+    ) -> bool {
+        match self {
+            Self::Kiro {
+                auth_key: stored_auth_key,
+                profile_arn: stored_profile_arn,
+                profile_name: stored_profile_name,
+                ..
+            } => {
+                stored_auth_key.trim() == auth_key.trim()
+                    && optional_trimmed_eq(stored_profile_arn.as_deref(), profile_arn)
+                    && optional_trimmed_eq(stored_profile_name.as_deref(), profile_name)
+            }
+            Self::Openai
+            | Self::Gemini { .. }
+            | Self::Anthropic { .. }
+            | Self::Copilot { .. }
+            | Self::Agy { .. } => false,
         }
     }
 
@@ -135,9 +179,11 @@ impl ProfileProvider {
                 email: stored_email,
                 ..
             } => stored_email.trim().eq_ignore_ascii_case(email.trim()),
-            Self::Openai | Self::Anthropic { .. } | Self::Copilot { .. } | Self::Agy { .. } => {
-                false
-            }
+            Self::Openai
+            | Self::Anthropic { .. }
+            | Self::Copilot { .. }
+            | Self::Kiro { .. }
+            | Self::Agy { .. } => false,
         }
     }
 
@@ -159,8 +205,23 @@ impl ProfileProvider {
                 };
                 account_matches && auth_method_matches
             }
-            Self::Openai | Self::Gemini { .. } | Self::Copilot { .. } | Self::Agy { .. } => false,
+            Self::Openai
+            | Self::Gemini { .. }
+            | Self::Copilot { .. }
+            | Self::Kiro { .. }
+            | Self::Agy { .. } => false,
         }
+    }
+}
+
+fn optional_trimmed_eq(left: Option<&str>, right: Option<&str>) -> bool {
+    match (
+        left.map(str::trim).filter(|value| !value.is_empty()),
+        right.map(str::trim).filter(|value| !value.is_empty()),
+    ) {
+        (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+        (None, None) => true,
+        _ => false,
     }
 }
 

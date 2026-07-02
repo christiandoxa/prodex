@@ -32,6 +32,10 @@ impl ProfileProviderExt for ProfileProvider {
                 label: "copilot".to_string(),
                 quota_compatible: false,
             },
+            Self::Kiro { .. } => AuthSummary {
+                label: "kiro".to_string(),
+                quota_compatible: false,
+            },
             Self::Agy { .. } => AuthSummary {
                 label: "agy".to_string(),
                 quota_compatible: false,

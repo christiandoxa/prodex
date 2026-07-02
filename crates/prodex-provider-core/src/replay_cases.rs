@@ -52,6 +52,14 @@ const PROVIDER_REPLAY_CASES: &[ProviderReplayCase] = &[
         expected_output_tokens: Some(12),
     },
     ProviderReplayCase {
+        provider: ProviderId::Kiro,
+        model: "claude-sonnet-4",
+        request_body: br#"{"model":"claude-sonnet-4","input":"hello kiro"}"#,
+        response_body: br#"{"usage":{"input_tokens":9,"output_tokens":4,"total_tokens":13}}"#,
+        expected_input_tokens: Some(9),
+        expected_output_tokens: Some(4),
+    },
+    ProviderReplayCase {
         provider: ProviderId::Local,
         model: "local",
         request_body: br#"{"model":"local","input":"hello local"}"#,

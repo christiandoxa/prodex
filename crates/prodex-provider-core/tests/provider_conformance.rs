@@ -162,8 +162,10 @@ fn public_contract_matrix_is_machine_readable() {
 
 #[test]
 fn non_responses_supported_endpoint_statuses_follow_runtime_surface_more_closely() {
-    let anthropic = provider_adapter_contract_matrix()
-        .into_iter()
+    let matrix = provider_adapter_contract_matrix();
+
+    let anthropic = matrix
+        .iter()
         .find(|spec| spec.provider == "anthropic")
         .expect("anthropic contract");
     let chat = anthropic
@@ -173,6 +175,39 @@ fn non_responses_supported_endpoint_statuses_follow_runtime_surface_more_closely
         .expect("chat-completions endpoint");
     assert_eq!(chat.status, "passthrough");
     assert!(chat.tested);
+
+    let copilot = matrix
+        .iter()
+        .find(|spec| spec.provider == "copilot")
+        .expect("copilot contract");
+    let compact = copilot
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "responses/compact")
+        .expect("responses/compact endpoint");
+    assert_eq!(compact.status, "passthrough");
+    assert!(compact.tested);
+    assert!(!compact.streaming);
+
+    let kiro = matrix
+        .iter()
+        .find(|spec| spec.provider == "kiro")
+        .expect("kiro contract");
+    let chat = kiro
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "chat-completions")
+        .expect("kiro chat-completions endpoint");
+    assert!(
+        chat.unsupported_params
+            .iter()
+            .any(|field| field == "parallel_tool_calls")
+    );
+    assert!(
+        chat.unsupported_params
+            .iter()
+            .any(|field| field == "max_output_tokens/max_tokens/max_completion_tokens")
+    );
 }
 
 #[test]
@@ -236,7 +271,7 @@ fn covered_endpoint_statuses_do_not_overclaim_beyond_request_response_conformanc
                         contract.provider, endpoint.endpoint, endpoint.status
                     );
                 }
-                "partial" | "untested" | "unsupported" => {}
+                "emulated" | "partial" | "untested" | "unsupported" => {}
                 other => panic!("unexpected endpoint status {other}"),
             }
         }
@@ -300,6 +335,7 @@ fn claimed_endpoint_statuses_have_request_and_response_conformance_evidence() {
             let provider = ProviderId::parse(contract.provider).expect("provider should parse");
             let endpoint_id = match endpoint.endpoint {
                 "responses" => ProviderEndpoint::Responses,
+                "responses/compact" => ProviderEndpoint::ResponsesCompact,
                 "chat-completions" => ProviderEndpoint::ChatCompletions,
                 "messages" => ProviderEndpoint::Messages,
                 "models" => ProviderEndpoint::Models,

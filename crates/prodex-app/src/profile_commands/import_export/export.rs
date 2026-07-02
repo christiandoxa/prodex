@@ -1,3 +1,4 @@
+use super::super::kiro::{KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE};
 use super::super::manage::print_profile_panel;
 use super::passwords::{resolve_export_password, resolve_export_password_mode};
 use super::*;
@@ -71,6 +72,7 @@ pub(in crate::profile_commands) fn build_profile_export_payload(
             ProfileProvider::Gemini { .. }
             | ProfileProvider::Anthropic { .. }
             | ProfileProvider::Copilot { .. }
+            | ProfileProvider::Kiro { .. }
             | ProfileProvider::Agy { .. } => String::new(),
         };
         let secret_files = exported_provider_secret_files(profile)?;
@@ -101,6 +103,20 @@ fn exported_provider_secret_files(
     match &profile.provider {
         ProfileProvider::Openai | ProfileProvider::Copilot { .. } | ProfileProvider::Agy { .. } => {
             Ok(Vec::new())
+        }
+        ProfileProvider::Kiro { .. } => {
+            let mut files = vec![read_exported_secret_file(
+                &profile.codex_home,
+                KIRO_CREDENTIALS_FILE,
+            )?];
+            let model_catalog_path = profile.codex_home.join(KIRO_MODEL_CATALOG_FILE);
+            if model_catalog_path.is_file() {
+                files.push(read_exported_secret_file(
+                    &profile.codex_home,
+                    KIRO_MODEL_CATALOG_FILE,
+                )?);
+            }
+            Ok(files)
         }
         ProfileProvider::Gemini { .. } => {
             let secret_file =

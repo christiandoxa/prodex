@@ -62,6 +62,7 @@ mod local_rewrite_gemini_models;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_gemini_retry;
 mod local_rewrite_gemini_thought_signatures;
+mod local_rewrite_kiro;
 mod local_rewrite_model_memory;
 mod local_rewrite_options;
 mod local_rewrite_rate_limits;
@@ -95,6 +96,7 @@ pub(crate) use local_rewrite::{
     start_runtime_local_rewrite_proxy,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
+pub(crate) use local_rewrite_kiro::RuntimeKiroProfileAuth;
 
 #[cfg(test)]
 pub(crate) fn start_runtime_rotation_proxy(

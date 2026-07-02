@@ -10,6 +10,7 @@ use super::local_rewrite_deepseek::send_runtime_deepseek_upstream_request;
 use super::local_rewrite_gemini::{
     RuntimeGeminiRequestContext, send_runtime_gemini_upstream_request,
 };
+use super::local_rewrite_kiro::send_runtime_kiro_upstream_request;
 use super::local_rewrite_model_memory::runtime_local_rewrite_model_selection;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_search_fallback::{
@@ -48,11 +49,19 @@ pub(super) struct RuntimeLocalRewriteUpstreamResult {
 pub(super) enum RuntimeLocalRewriteUpstreamResponse {
     Live(RuntimeLocalRewriteLiveResponse),
     Buffered(RuntimeHeapTrimmedBufferedResponseParts),
+    Streaming(RuntimeLocalRewriteStreamingResponse),
 }
 
 pub(super) struct RuntimeLocalRewriteLiveResponse {
     pub(super) response: reqwest::blocking::Response,
     pub(super) prefix: Vec<u8>,
+}
+
+pub(super) struct RuntimeLocalRewriteStreamingResponse {
+    pub(super) status: u16,
+    pub(super) headers: Vec<(String, String)>,
+    pub(super) body: Box<dyn std::io::Read + Send>,
+    pub(super) profile_name: String,
 }
 
 impl RuntimeLocalRewriteLiveResponse {
@@ -339,6 +348,9 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         }
         RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } => {
             send_runtime_gemini_upstream_request(request_id, request, shared, body, auth)
+        }
+        RuntimeLocalRewriteProviderOptions::Kiro { auth } => {
+            send_runtime_kiro_upstream_request(request_id, request, shared, body, auth)
         }
     }
 }

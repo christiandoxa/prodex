@@ -87,6 +87,12 @@ impl ProfileProvider {
                 true,
                 false,
             ),
+            Self::Kiro { .. } => ProviderCapabilities::new(
+                RuntimeRoutePolicy::ResponsesAdapter,
+                ProviderQuotaShape::ExternalStatus,
+                true,
+                false,
+            ),
             Self::Anthropic { .. } => ProviderCapabilities::new(
                 RuntimeRoutePolicy::ResponsesAdapter,
                 ProviderQuotaShape::ExternalStatus,

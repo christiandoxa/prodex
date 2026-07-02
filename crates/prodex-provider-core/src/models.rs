@@ -1,6 +1,7 @@
 use super::{
-    CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, OPENAI_ENDPOINTS, PRODEX_GEMINI_CHAT_COMPRESSION_MODEL,
-    ProviderId, ProviderModelCost, ProviderModelSpec,
+    COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, OPENAI_ENDPOINTS,
+    PRODEX_GEMINI_CHAT_COMPRESSION_MODEL, PRODEX_KIRO_DEFAULT_MODEL, ProviderId, ProviderModelCost,
+    ProviderModelSpec,
 };
 
 const OPENAI_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
@@ -11,6 +12,7 @@ const COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
 const COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS: u64 = 1_048_576;
 const DEEPSEEK_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
 const GEMINI_CONTEXT_WINDOW_TOKENS: u64 = 1_048_576;
+const KIRO_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
 
 macro_rules! model {
     ($provider:expr, $owned_by:expr, $id:expr, $display:expr, $description:expr, $ctx:expr, $in_cost:expr, $out_cost:expr, $endpoints:expr, [$($alias:expr),* $(,)?]) => {
@@ -201,7 +203,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["default"]
     ),
     model!(
@@ -213,7 +215,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["pro"]
     ),
     model!(
@@ -225,7 +227,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -237,7 +239,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["best"]
     ),
     model!(
@@ -249,7 +251,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -261,7 +263,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["mini"]
     ),
     model!(
@@ -273,7 +275,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["nano"]
     ),
     model!(
@@ -285,7 +287,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -297,7 +299,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["claude", "sonnet"]
     ),
     model!(
@@ -309,7 +311,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["opus"]
     ),
     model!(
@@ -321,7 +323,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -333,7 +335,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -345,7 +347,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -357,7 +359,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -369,7 +371,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -381,7 +383,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -393,7 +395,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["haiku"]
     ),
     model!(
@@ -405,7 +407,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["gemini"]
     ),
     model!(
@@ -417,7 +419,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -429,7 +431,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         ["flash"]
     ),
     model!(
@@ -441,7 +443,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -453,7 +455,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -465,7 +467,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -477,7 +479,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
     model!(
@@ -489,7 +491,7 @@ const COPILOT_MODELS: &[ProviderModelSpec] = &[
         Some(COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS),
         None,
         None,
-        CORE_TEXT_ENDPOINTS,
+        COPILOT_TEXT_ENDPOINTS,
         []
     ),
 ];
@@ -788,6 +790,33 @@ const LOCAL_MODELS: &[ProviderModelSpec] = &[model!(
     ["default"]
 )];
 
+const KIRO_MODELS: &[ProviderModelSpec] = &[
+    model!(
+        ProviderId::Kiro,
+        "kiro-cli",
+        "auto",
+        "Kiro Auto",
+        "Kiro alias routed through the imported runtime model selection.",
+        Some(KIRO_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        super::KIRO_ENDPOINTS,
+        ["default"]
+    ),
+    model!(
+        ProviderId::Kiro,
+        "kiro-cli",
+        PRODEX_KIRO_DEFAULT_MODEL,
+        "Claude Sonnet 4",
+        "Kiro imported runtime compatibility model exposed through Prodex.",
+        Some(KIRO_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        super::KIRO_ENDPOINTS,
+        ["sonnet", "claude"]
+    ),
+];
+
 pub fn provider_model_catalog(provider: ProviderId) -> &'static [ProviderModelSpec] {
     match provider {
         ProviderId::OpenAi => OPENAI_MODELS,
@@ -795,6 +824,7 @@ pub fn provider_model_catalog(provider: ProviderId) -> &'static [ProviderModelSp
         ProviderId::Copilot => COPILOT_MODELS,
         ProviderId::DeepSeek => DEEPSEEK_MODELS,
         ProviderId::Gemini => GEMINI_MODELS,
+        ProviderId::Kiro => KIRO_MODELS,
         ProviderId::Local => LOCAL_MODELS,
     }
 }

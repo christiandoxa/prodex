@@ -1,4 +1,7 @@
-use crate::{PRODEX_ANTHROPIC_DEFAULT_MODEL, PRODEX_COPILOT_DEFAULT_MODEL, ProviderId};
+use crate::{
+    PRODEX_ANTHROPIC_DEFAULT_MODEL, PRODEX_COPILOT_DEFAULT_MODEL, PRODEX_KIRO_DEFAULT_MODEL,
+    ProviderId,
+};
 
 pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<String> {
     let model = model.trim();
@@ -109,6 +112,11 @@ pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<S
             "" | "auto" => &["deepseek-v4-pro", "deepseek-v4-flash"],
             "pro" => &["deepseek-v4-pro", "deepseek-v4-flash"],
             "flash" => &["deepseek-v4-flash", "deepseek-v4-pro"],
+            _ => return non_empty_single(model),
+        },
+        ProviderId::Kiro => match lower.as_str() {
+            "" | "auto" | "default" => &[PRODEX_KIRO_DEFAULT_MODEL],
+            "claude" | "sonnet" => &["claude-sonnet-4"],
             _ => return non_empty_single(model),
         },
         ProviderId::OpenAi | ProviderId::Local => return non_empty_single(model),

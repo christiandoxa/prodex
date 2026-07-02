@@ -58,13 +58,13 @@ pub struct ExportProfileArgs {
 
 #[derive(Args, Debug)]
 pub struct ImportProfileArgs {
-    /// Path to a profile export bundle created by `prodex profile export`, or a built-in source such as `claude` or `copilot`.
+    /// Path to a profile export bundle created by `prodex profile export`, or a built-in source such as `claude`, `copilot`, or `kiro`.
     #[arg(value_name = "PATH_OR_SOURCE")]
     pub path: PathBuf,
-    /// Override the imported profile name when using a built-in source such as `claude` or `copilot`.
+    /// Override the imported profile name when using a built-in source such as `claude`, `copilot`, or `kiro`.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,
-    /// Activate the imported profile immediately when using a built-in source such as `claude` or `copilot`.
+    /// Activate the imported profile immediately when using a built-in source such as `claude`, `copilot`, or `kiro`.
     #[arg(long)]
     pub activate: bool,
 }
@@ -149,7 +149,7 @@ pub struct QuotaArgs {
     pub auth: Option<String>,
     /// Show only profiles for one provider in --all views.
     ///
-    /// Supported values: all, openai, gemini, anthropic, claude, copilot, deepseek, local, agy.
+    /// Supported values: all, openai, gemini, anthropic, claude, copilot, kiro, deepseek, local, agy.
     #[arg(long, value_name = "PROVIDER", requires = "all")]
     pub provider: Option<String>,
     /// Include exact reset timestamps and expanded window details.

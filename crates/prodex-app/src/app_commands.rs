@@ -79,9 +79,14 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
         Some(use_presidio) => use_presidio,
         None => prompt_super_presidio_opt_in()?,
     };
-    if matches!(args.cli, Some(SuperCliAgent::Gemini | SuperCliAgent::Agy)) {
+    if matches!(
+        args.cli,
+        Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
+    ) {
         if args.mem0 {
-            bail!("--mem0 is only supported by the Codex Super overlay, not native Gemini/Agy CLI");
+            bail!(
+                "--mem0 is only supported by the Codex Super overlay, not native external agent CLIs"
+            );
         }
         return crate::runtime_gemini_cli::handle_super_google_cli(args, use_presidio);
     }

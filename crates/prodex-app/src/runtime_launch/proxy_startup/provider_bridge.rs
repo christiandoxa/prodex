@@ -26,6 +26,7 @@ pub(super) enum RuntimeProviderBridgeKind {
     OpenAiResponses,
     DeepSeek,
     Gemini,
+    Kiro,
 }
 
 impl RuntimeProviderBridgeKind {
@@ -36,6 +37,7 @@ impl RuntimeProviderBridgeKind {
             Self::OpenAiResponses => ProviderId::OpenAi,
             Self::DeepSeek => ProviderId::DeepSeek,
             Self::Gemini => ProviderId::Gemini,
+            Self::Kiro => ProviderId::Kiro,
         }
     }
 }
@@ -123,6 +125,12 @@ pub(super) fn runtime_provider_native_passthrough(
     let path = path_without_query(path_and_query);
     match kind {
         RuntimeProviderBridgeKind::OpenAiResponses => true,
+        RuntimeProviderBridgeKind::Kiro => {
+            !(path.ends_with("/responses")
+                || path.ends_with("/responses/compact")
+                || path.ends_with("/chat/completions")
+                || runtime_provider_models_path_suffix(path).is_some())
+        }
         RuntimeProviderBridgeKind::Copilot => {
             !(path.ends_with("/responses")
                 || path.ends_with("/responses/compact")

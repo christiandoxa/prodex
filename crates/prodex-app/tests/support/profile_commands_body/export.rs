@@ -1,4 +1,8 @@
 use super::*;
+use crate::profile_commands::kiro::{
+    KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE, parse_kiro_auth_secret_text,
+    parse_kiro_model_catalog_text, read_kiro_auth_secret,
+};
 
 #[test]
 fn profile_export_round_trip_plain_imports_profiles_and_sets_active() {
@@ -499,6 +503,107 @@ fn profile_import_copilot_reads_provider_metadata_from_logged_in_cli_state() {
     }
 }
 
+#[test]
+fn profile_import_kiro_reads_provider_metadata_from_local_cli_state() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let kiro_data_dir = sandbox_dir.path.join("home/.local/share/kiro-cli");
+    fs::create_dir_all(&kiro_data_dir).expect("kiro data dir should be created");
+    let database_path = kiro_data_dir.join("data.sqlite3");
+    let connection = rusqlite::Connection::open(&database_path).expect("kiro db should open");
+    connection
+        .execute_batch(
+            r#"
+            CREATE TABLE auth_kv (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT);
+            "#,
+        )
+        .expect("kiro schema should be created");
+    connection
+        .execute(
+            "INSERT INTO auth_kv(key, value) VALUES(?1, ?2)",
+            rusqlite::params![
+                "codewhisperer:odic:token",
+                serde_json::json!({
+                    "access_token": "kiro-access-token",
+                    "refresh_token": "kiro-refresh-token",
+                    "start_url": "https://view.awsapps.com/start",
+                    "region": "us-east-1"
+                })
+                .to_string()
+            ],
+        )
+        .expect("kiro token should be stored");
+    connection
+        .execute(
+            "INSERT INTO state(key, value) VALUES(?1, ?2)",
+            rusqlite::params![
+                "api.codewhisperer.profile",
+                serde_json::json!({
+                    "arn": "arn:aws:codewhisperer:us-east-1:123456789012:profile/test",
+                    "profile_name": "builder-id-test",
+                    "user_id": "kiro-user@example.com"
+                })
+                .to_string()
+            ],
+        )
+        .expect("kiro profile state should be stored");
+    connection
+        .execute(
+            "INSERT INTO state(key, value) VALUES(?1, ?2)",
+            rusqlite::params!["auth.idc.region", "us-east-1"],
+        )
+        .expect("kiro region should be stored");
+
+    handle_import_profiles(ImportProfileArgs {
+        path: PathBuf::from("kiro"),
+        name: Some("kiro-main".to_string()),
+        activate: true,
+    })
+    .expect("kiro import should succeed");
+
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let state = AppState::load(&paths).expect("state should load");
+    let profile = state
+        .profiles
+        .get("kiro-main")
+        .expect("kiro profile should exist");
+    assert!(profile.managed);
+    assert_eq!(state.active_profile.as_deref(), Some("kiro-main"));
+    assert_eq!(profile.email.as_deref(), Some("kiro-user@example.com"));
+    let imported_secret =
+        read_kiro_auth_secret(&profile.codex_home).expect("kiro secret should be readable");
+    assert_eq!(imported_secret.auth_key, "codewhisperer:odic:token");
+    assert_eq!(imported_secret.auth_kind, "builder-id");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&imported_secret.auth_json)
+            .expect("embedded auth json should parse")["access_token"]
+            .as_str(),
+        Some("kiro-access-token")
+    );
+    match &profile.provider {
+        ProfileProvider::Kiro {
+            auth_key,
+            auth_kind,
+            profile_arn,
+            profile_name,
+            start_url,
+            region,
+        } => {
+            assert_eq!(auth_key, "codewhisperer:odic:token");
+            assert_eq!(auth_kind.as_deref(), Some("builder-id"));
+            assert_eq!(
+                profile_arn.as_deref(),
+                Some("arn:aws:codewhisperer:us-east-1:123456789012:profile/test")
+            );
+            assert_eq!(profile_name.as_deref(), Some("builder-id-test"));
+            assert_eq!(start_url.as_deref(), Some("https://view.awsapps.com/start"));
+            assert_eq!(region.as_deref(), Some("us-east-1"));
+        }
+        other => panic!("expected kiro provider, got {other:?}"),
+    }
+}
+
 fn seed_profile_export_state() {
     let paths = AppPaths::discover().expect("paths should resolve");
     let main_home = paths.managed_profiles_root.join("main");
@@ -646,5 +751,136 @@ fn profile_export_round_trip_preserves_copilot_provider_metadata() {
             assert_eq!(copilot_plan.as_deref(), Some("business"));
         }
         other => panic!("expected copilot provider, got {other:?}"),
+    }
+}
+
+#[test]
+fn profile_export_round_trip_preserves_kiro_provider_metadata() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let source_dir = ProfileCommandsTestDir::new("kiro-export-source");
+    let source_paths = profile_commands_test_paths(&source_dir.path);
+    let kiro_home = source_paths.managed_profiles_root.join("kiro-main");
+    create_codex_home_if_missing(&kiro_home).expect("kiro home should exist");
+    let kiro_secret = serde_json::json!({
+        "auth_key": "codewhisperer:odic:token",
+        "auth_kind": "builder-id",
+        "auth_json": serde_json::json!({
+            "access_token": "kiro-access-token",
+            "refresh_token": "kiro-refresh-token",
+            "start_url": "https://view.awsapps.com/start",
+            "region": "us-east-1"
+        })
+        .to_string(),
+        "email": "kiro-user@example.com",
+        "profile_arn": "arn:aws:codewhisperer:us-east-1:123456789012:profile/test",
+        "profile_name": "builder-id-test",
+        "start_url": "https://view.awsapps.com/start",
+        "region": "us-east-1"
+    })
+    .to_string();
+    write_secret_text_file(&kiro_home.join(KIRO_CREDENTIALS_FILE), &kiro_secret)
+        .expect("kiro secret should be written");
+    write_secret_text_file(
+        &kiro_home.join(KIRO_MODEL_CATALOG_FILE),
+        &serde_json::json!({
+            "models": [
+                { "id": "claude-sonnet-4", "name": "claude-sonnet-4", "object": "model", "owned_by": "kiro-cli" },
+                { "id": "claude-sonnet-4.5", "name": "claude-sonnet-4.5", "object": "model", "owned_by": "kiro-cli" }
+            ]
+        })
+        .to_string(),
+    )
+    .expect("kiro model catalog should be written");
+
+    let source_state = AppState {
+        active_profile: Some("kiro-main".to_string()),
+        profiles: BTreeMap::from([(
+            "kiro-main".to_string(),
+            ProfileEntry {
+                codex_home: kiro_home,
+                managed: true,
+                email: Some("kiro-user@example.com".to_string()),
+                provider: ProfileProvider::Kiro {
+                    auth_key: "codewhisperer:odic:token".to_string(),
+                    auth_kind: Some("builder-id".to_string()),
+                    profile_arn: Some(
+                        "arn:aws:codewhisperer:us-east-1:123456789012:profile/test".to_string(),
+                    ),
+                    profile_name: Some("builder-id-test".to_string()),
+                    start_url: Some("https://view.awsapps.com/start".to_string()),
+                    region: Some("us-east-1".to_string()),
+                },
+            },
+        )]),
+        ..AppState::default()
+    };
+
+    let payload = build_profile_export_payload(&source_state, &["kiro-main".to_string()])
+        .expect("payload should build");
+    assert_eq!(payload.profiles.len(), 1);
+    assert!(payload.profiles[0].auth_json.is_empty());
+    assert_eq!(payload.profiles[0].secret_files.len(), 2);
+    assert_eq!(payload.profiles[0].secret_files[0].path, KIRO_CREDENTIALS_FILE);
+    assert_eq!(
+        parse_kiro_auth_secret_text(&payload.profiles[0].secret_files[0].text)
+            .expect("exported Kiro secret should parse")
+            .auth_key,
+        "codewhisperer:odic:token"
+    );
+    assert_eq!(payload.profiles[0].secret_files[1].path, KIRO_MODEL_CATALOG_FILE);
+    assert_eq!(
+        parse_kiro_model_catalog_text(&payload.profiles[0].secret_files[1].text)
+            .expect("exported Kiro model catalog should parse")
+            .len(),
+        2
+    );
+
+    let target_dir = ProfileCommandsTestDir::new("kiro-export-target");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let mut target_state = AppState::default();
+    import_profile_export_payload(&target_paths, &mut target_state, &payload)
+        .expect("kiro import should succeed");
+
+    let imported = target_state
+        .profiles
+        .get("kiro-main")
+        .expect("kiro profile should be imported");
+    assert_eq!(imported.email.as_deref(), Some("kiro-user@example.com"));
+    assert!(!imported.codex_home.join("auth.json").exists());
+    assert_eq!(
+        fs::read_to_string(imported.codex_home.join(KIRO_CREDENTIALS_FILE))
+            .expect("kiro secret should import"),
+        kiro_secret
+    );
+    assert_eq!(
+        parse_kiro_model_catalog_text(
+            &fs::read_to_string(imported.codex_home.join(KIRO_MODEL_CATALOG_FILE))
+                .expect("kiro model catalog should import")
+        )
+        .expect("imported Kiro model catalog should parse")
+        .len(),
+        2
+    );
+    match &imported.provider {
+        ProfileProvider::Kiro {
+            auth_key,
+            auth_kind,
+            profile_arn,
+            profile_name,
+            start_url,
+            region,
+        } => {
+            assert_eq!(auth_key, "codewhisperer:odic:token");
+            assert_eq!(auth_kind.as_deref(), Some("builder-id"));
+            assert_eq!(
+                profile_arn.as_deref(),
+                Some("arn:aws:codewhisperer:us-east-1:123456789012:profile/test")
+            );
+            assert_eq!(profile_name.as_deref(), Some("builder-id-test"));
+            assert_eq!(start_url.as_deref(), Some("https://view.awsapps.com/start"));
+            assert_eq!(region.as_deref(), Some("us-east-1"));
+        }
+        other => panic!("expected kiro provider, got {other:?}"),
     }
 }

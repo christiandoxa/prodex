@@ -149,6 +149,10 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             format_binary_resolution(&codex_bin()),
         ),
         (
+            "Kiro binary".to_string(),
+            format_binary_resolution(&kiro_bin()),
+        ),
+        (
             "Quota endpoint".to_string(),
             usage_url(&quota_base_url(None)),
         ),
@@ -473,6 +477,7 @@ fn doctor_redacted_bundle_json_value(
         "prodex": {
             "version": runtime_current_prodex_version(),
             "codex_binary": format_binary_resolution(&codex_bin()),
+            "kiro_binary": format_binary_resolution(&kiro_bin()),
         },
         "paths": {
             "prodex_root": context.paths.root.display().to_string(),

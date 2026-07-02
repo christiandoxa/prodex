@@ -1,4 +1,4 @@
-use crate::{claude_bin, codex_bin, default_memory_store_path, memory_store_ready};
+use crate::{claude_bin, codex_bin, default_memory_store_path, kiro_bin, memory_store_ready};
 use anyhow::{Context, Result, bail};
 use crossterm::terminal;
 use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs, SuperDoctorArgs};
@@ -84,6 +84,7 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
             command_status(codex_bin(), &["login", "status"]),
         ),
         version_check_row("Claude Code", claude_bin(), "--version"),
+        version_check_row("Kiro CLI", kiro_bin(), "--version"),
         version_check_row("RTK", "rtk", "--version"),
         version_check_row("SQZ MCP", "sqz-mcp", "--version"),
         version_check_row("token-savior", "token-savior", "--version"),

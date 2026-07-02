@@ -4,14 +4,16 @@ use super::{
     runtime_launch_profile_home,
 };
 use crate::{
-    AppState, CodexModelProviderSetting, ProfileProvider, RuntimeAnthropicOAuthProfileAuth,
-    RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth,
-    RuntimeDeepSeekWebSearchMode, RuntimeGeminiModelResolution, RuntimeGeminiOAuthProfileAuth,
-    RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions, SUPER_ANTHROPIC_PROVIDER_ID,
-    SUPER_COPILOT_PROVIDER_ID, SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID,
+    AppState, CodexModelProviderSetting, KIRO_MODEL_CATALOG_FILE, ProfileProvider,
+    RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth,
+    RuntimeCopilotProviderAuth, RuntimeDeepSeekWebSearchMode, RuntimeGeminiModelResolution,
+    RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeKiroProfileAuth,
+    RuntimeLocalRewriteProviderOptions, SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID,
+    SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID, SUPER_KIRO_PROVIDER_ID,
     SUPER_LOCAL_PROVIDER_ID, codex_config_value, ensure_gemini_code_assist_project_if_missing,
-    gemini_oauth_project_from_env, refresh_claude_oauth_secret_if_needed,
-    resolve_copilot_runtime_api_auth, resolve_profile_name, write_copilot_runtime_model_catalog,
+    gemini_oauth_project_from_env, parse_kiro_model_catalog_text,
+    refresh_claude_oauth_secret_if_needed, resolve_copilot_runtime_api_auth, resolve_profile_name,
+    write_copilot_runtime_model_catalog,
 };
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeSet;
@@ -137,6 +139,35 @@ pub(super) fn resolve_anthropic_runtime_launch_profile_name(
         })
 }
 
+pub(super) fn resolve_kiro_runtime_launch_profile_name(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<String> {
+    if let Some(requested) = requested {
+        return resolve_profile_name(state, Some(requested));
+    }
+    if let Some(active) = state.active_profile.as_deref()
+        && state
+            .profiles
+            .get(active)
+            .is_some_and(|profile| matches!(profile.provider, ProfileProvider::Kiro { .. }))
+    {
+        return Ok(active.to_string());
+    }
+    state
+        .profiles
+        .iter()
+        .find_map(|(name, profile)| {
+            matches!(profile.provider, ProfileProvider::Kiro { .. }).then(|| name.clone())
+        })
+        .or_else(|| resolve_runtime_launch_profile_name(state, None).ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "`prodex super --cli kiro` requires an imported Kiro profile from `prodex profile import kiro`"
+            )
+        })
+}
+
 pub(super) fn runtime_launch_profile_home_for_external_provider(
     state: &AppState,
     profile_name: &str,
@@ -150,6 +181,7 @@ pub(super) fn runtime_launch_profile_home_for_external_provider(
             || provider.eq_ignore_ascii_case("github_copilot")
             || provider.eq_ignore_ascii_case("anthropic")
             || provider.eq_ignore_ascii_case("claude")
+            || provider.eq_ignore_ascii_case("kiro")
     }) {
         let profile = state
             .profiles
@@ -159,6 +191,7 @@ pub(super) fn runtime_launch_profile_home_for_external_provider(
             profile.provider,
             ProfileProvider::Gemini { .. }
                 | ProfileProvider::Copilot { .. }
+                | ProfileProvider::Kiro { .. }
                 | ProfileProvider::Anthropic { .. }
                 | ProfileProvider::Agy { .. }
         ) || profile.provider.supports_codex_runtime()
@@ -181,6 +214,9 @@ pub(super) fn runtime_launch_model_provider_uses_local_rewrite(
         || provider
             .provider_id
             .eq_ignore_ascii_case(SUPER_GEMINI_PROVIDER_ID)
+        || provider
+            .provider_id
+            .eq_ignore_ascii_case(SUPER_KIRO_PROVIDER_ID)
         || provider
             .provider_id
             .eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID)
@@ -211,6 +247,8 @@ pub(super) fn runtime_local_rewrite_model_provider_id<'a>(
                 || provider.eq_ignore_ascii_case("github_copilot")
             {
                 Some(SUPER_COPILOT_PROVIDER_ID)
+            } else if provider.eq_ignore_ascii_case("kiro") {
+                Some(SUPER_KIRO_PROVIDER_ID)
             } else {
                 None
             }
@@ -316,6 +354,10 @@ pub(super) fn runtime_local_rewrite_provider_options(
                 model_resolution,
             })
         }
+        Some(provider) if provider.eq_ignore_ascii_case("kiro") => {
+            let auth = runtime_kiro_profile_for_provider(state, selection)?;
+            Ok(RuntimeLocalRewriteProviderOptions::Kiro { auth })
+        }
         Some(provider) => bail!("unsupported external provider '{provider}'"),
         None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses {
             api_keys: Vec::new(),
@@ -338,6 +380,7 @@ pub(super) fn runtime_provider_mode_uses_single_api_key(
                     .is_some())
             || (provider.eq_ignore_ascii_case("gemini")
                 && runtime_gemini_api_keys_from_request_or_env(external_provider_api_key).is_some())
+            || provider.eq_ignore_ascii_case("kiro")
     })
 }
 
@@ -437,6 +480,9 @@ fn runtime_external_provider_matches_profile(
         || external_provider.eq_ignore_ascii_case("github_copilot")
     {
         return matches!(profile_provider, ProfileProvider::Copilot { .. });
+    }
+    if external_provider.eq_ignore_ascii_case("kiro") {
+        return matches!(profile_provider, ProfileProvider::Kiro { .. });
     }
     false
 }
@@ -647,6 +693,48 @@ fn runtime_gemini_oauth_profiles_for_provider(
     }
 
     Ok(profiles)
+}
+
+fn runtime_kiro_profile_auth(
+    state: &AppState,
+    selected_profile_name: &str,
+) -> Result<RuntimeKiroProfileAuth> {
+    let selected_profile = state
+        .profiles
+        .get(selected_profile_name)
+        .with_context(|| format!("profile '{}' is missing", selected_profile_name))?;
+    if !matches!(selected_profile.provider, ProfileProvider::Kiro { .. }) {
+        bail!(
+            "profile '{}' uses {}. Run `prodex profile import kiro` first.",
+            selected_profile_name,
+            selected_profile.provider.display_name()
+        );
+    }
+    let model_catalog =
+        std::fs::read_to_string(selected_profile.codex_home.join(KIRO_MODEL_CATALOG_FILE))
+            .ok()
+            .and_then(|text| parse_kiro_model_catalog_text(&text).ok())
+            .unwrap_or_default();
+    Ok(RuntimeKiroProfileAuth {
+        profile_name: selected_profile_name.to_string(),
+        codex_home: selected_profile.codex_home.clone(),
+        model_catalog,
+        command: None,
+    })
+}
+
+fn runtime_kiro_profile_for_provider(
+    state: &AppState,
+    selection: &RuntimeLaunchSelection,
+) -> Result<RuntimeKiroProfileAuth> {
+    runtime_kiro_profile_auth(state, selection.selected_profile_name.as_str())
+}
+
+pub(super) fn runtime_kiro_gateway_profile_auth(
+    state: &AppState,
+) -> Result<RuntimeKiroProfileAuth> {
+    let profile_name = resolve_kiro_runtime_launch_profile_name(state, None)?;
+    runtime_kiro_profile_auth(state, &profile_name)
 }
 
 pub(super) fn runtime_deepseek_api_keys_from_request_or_env(

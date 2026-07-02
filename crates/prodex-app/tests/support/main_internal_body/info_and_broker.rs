@@ -140,6 +140,22 @@ fn format_info_provider_capabilities_summary_reports_routes_and_quota_shapes() {
             },
         ),
         (
+            "kiro".to_string(),
+            ProfileEntry {
+                codex_home: PathBuf::from("/tmp/kiro"),
+                managed: true,
+                email: None,
+                provider: ProfileProvider::Kiro {
+                    auth_key: "kiro:key".to_string(),
+                    auth_kind: None,
+                    profile_arn: None,
+                    profile_name: None,
+                    start_url: None,
+                    region: None,
+                },
+            },
+        ),
+        (
             "copilot".to_string(),
             ProfileEntry {
                 codex_home: PathBuf::from("/tmp/copilot"),
@@ -158,7 +174,7 @@ fn format_info_provider_capabilities_summary_reports_routes_and_quota_shapes() {
 
     assert_eq!(
         format_info_provider_capabilities_summary(&profiles),
-        "routes native=1, adapter=2, external-cli=1, unsupported=0; openai-format=3; quota copilot-monthly=1, external-status=1, gemini-buckets=1, openai-windows=1"
+        "routes native=1, adapter=3, external-cli=1, unsupported=0; openai-format=4; quota copilot-monthly=1, external-status=2, gemini-buckets=1, openai-windows=1"
     );
 }
 

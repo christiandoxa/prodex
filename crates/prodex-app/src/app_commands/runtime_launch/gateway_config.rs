@@ -33,13 +33,14 @@ pub(super) struct ResolvedGatewayLaunchConfig {
 
 pub(super) fn resolve_gateway_launch_config(
     paths: &AppPaths,
+    state: &AppState,
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<ResolvedGatewayLaunchConfig> {
     let provider = args
         .provider
         .or_else(|| policy.provider.as_deref().and_then(gateway_policy_provider));
-    let provider_options = gateway_provider_options(provider, args.api_key.as_deref())?;
+    let provider_options = gateway_provider_options(state, provider, args.api_key.as_deref())?;
     let auth_token = args
         .auth_token
         .as_deref()
@@ -573,33 +574,36 @@ fn gateway_virtual_keys_config(
 
 fn gateway_provider_catalog_id(
     provider: Option<SuperExternalProvider>,
-) -> prodex_provider_core::ProviderId {
+) -> Option<prodex_provider_core::ProviderId> {
     match provider {
-        Some(SuperExternalProvider::Anthropic) => prodex_provider_core::ProviderId::Anthropic,
-        Some(SuperExternalProvider::Copilot) => prodex_provider_core::ProviderId::Copilot,
-        Some(SuperExternalProvider::DeepSeek) => prodex_provider_core::ProviderId::DeepSeek,
-        Some(SuperExternalProvider::Gemini) => prodex_provider_core::ProviderId::Gemini,
-        None => prodex_provider_core::ProviderId::OpenAi,
+        Some(SuperExternalProvider::Anthropic) => Some(prodex_provider_core::ProviderId::Anthropic),
+        Some(SuperExternalProvider::Copilot) => Some(prodex_provider_core::ProviderId::Copilot),
+        Some(SuperExternalProvider::DeepSeek) => Some(prodex_provider_core::ProviderId::DeepSeek),
+        Some(SuperExternalProvider::Gemini) => Some(prodex_provider_core::ProviderId::Gemini),
+        Some(SuperExternalProvider::Kiro) => Some(prodex_provider_core::ProviderId::Kiro),
+        None => Some(prodex_provider_core::ProviderId::OpenAi),
     }
 }
 
 fn gateway_route_alias_model_metrics(
-    provider: prodex_provider_core::ProviderId,
+    provider: Option<prodex_provider_core::ProviderId>,
     models: &[String],
     configured: &[prodex_runtime_policy::RuntimePolicyGatewayRouteModelMetrics],
 ) -> BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelMetrics> {
     let mut metrics = BTreeMap::new();
     for model in models {
-        let cost = prodex_provider_core::provider_model_cost(provider, model);
-        if cost.any() {
-            metrics.insert(
-                model.clone(),
-                runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
-                    input_cost_per_million_microusd: cost.input_cost_per_million_microusd,
-                    output_cost_per_million_microusd: cost.output_cost_per_million_microusd,
-                    ..runtime_proxy_crate::RuntimeGatewayRouteModelMetrics::default()
-                },
-            );
+        if let Some(provider) = provider {
+            let cost = prodex_provider_core::provider_model_cost(provider, model);
+            if cost.any() {
+                metrics.insert(
+                    model.clone(),
+                    runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
+                        input_cost_per_million_microusd: cost.input_cost_per_million_microusd,
+                        output_cost_per_million_microusd: cost.output_cost_per_million_microusd,
+                        ..runtime_proxy_crate::RuntimeGatewayRouteModelMetrics::default()
+                    },
+                );
+            }
         }
     }
     for metric in configured {
@@ -633,6 +637,7 @@ fn gateway_policy_provider(value: &str) -> Option<SuperExternalProvider> {
         "copilot" | "github-copilot" | "github_copilot" => Some(SuperExternalProvider::Copilot),
         "deepseek" => Some(SuperExternalProvider::DeepSeek),
         "gemini" => Some(SuperExternalProvider::Gemini),
+        "kiro" => Some(SuperExternalProvider::Kiro),
         _ => None,
     }
 }
@@ -681,6 +686,7 @@ fn gateway_normalize_upstream_base_url(
 }
 
 fn gateway_provider_options(
+    state: &AppState,
     provider: Option<SuperExternalProvider>,
     api_key: Option<&str>,
 ) -> Result<RuntimeLocalRewriteProviderOptions> {
@@ -719,6 +725,13 @@ fn gateway_provider_options(
                 model_resolution: RuntimeGeminiModelResolution::from_current_settings(),
             })
         }
+        Some(SuperExternalProvider::Kiro) => {
+            super::providers::runtime_kiro_gateway_profile_auth(state)
+                .map(|auth| RuntimeLocalRewriteProviderOptions::Kiro { auth })
+                .context(
+                    "gateway kiro provider requires an imported Kiro profile from `prodex profile import kiro`",
+                )
+        }
         None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses {
             api_keys: gateway_openai_api_keys(api_key),
         }),
@@ -743,4 +756,89 @@ fn gateway_openai_api_keys(value: Option<&str>) -> Vec<String> {
                 })
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{KIRO_MODEL_CATALOG_FILE, ProfileEntry, ProfileProvider};
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "prodex-gateway-config-{name}-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("temp dir should exist");
+        dir
+    }
+
+    #[test]
+    fn gateway_policy_provider_accepts_kiro() {
+        assert_eq!(
+            gateway_policy_provider("kiro"),
+            Some(SuperExternalProvider::Kiro)
+        );
+    }
+
+    #[test]
+    fn gateway_provider_options_accepts_imported_kiro_profile() {
+        let root = temp_dir("kiro");
+        let codex_home = root.join("kiro-home");
+        fs::create_dir_all(&codex_home).expect("codex home should exist");
+        fs::write(
+            codex_home.join(KIRO_MODEL_CATALOG_FILE),
+            serde_json::json!({
+                "models": [
+                    { "id": "claude-sonnet-4", "name": "claude-sonnet-4", "owned_by": "kiro-cli" }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("kiro model catalog should be written");
+        let state = AppState {
+            active_profile: Some("kiro-main".to_string()),
+            profiles: BTreeMap::from([(
+                "kiro-main".to_string(),
+                ProfileEntry {
+                    codex_home: codex_home.clone(),
+                    managed: true,
+                    email: Some("kiro@example.com".to_string()),
+                    provider: ProfileProvider::Kiro {
+                        auth_key: "kiro-key".to_string(),
+                        auth_kind: Some("builder-id".to_string()),
+                        profile_arn: None,
+                        profile_name: None,
+                        start_url: None,
+                        region: Some("us-east-1".to_string()),
+                    },
+                },
+            )]),
+            ..Default::default()
+        };
+        let options = gateway_provider_options(&state, Some(SuperExternalProvider::Kiro), None)
+            .expect("kiro gateway should use imported profile");
+        let RuntimeLocalRewriteProviderOptions::Kiro { auth } = options else {
+            panic!("expected kiro provider options");
+        };
+        assert_eq!(auth.profile_name, "kiro-main");
+        assert_eq!(auth.codex_home, codex_home);
+        assert_eq!(auth.model_catalog.len(), 1);
+    }
+
+    #[test]
+    fn gateway_kiro_route_alias_metrics_do_not_infer_openai_costs() {
+        let metrics = gateway_route_alias_model_metrics(
+            gateway_provider_catalog_id(Some(SuperExternalProvider::Kiro)),
+            &[String::from("gpt-5.4")],
+            &[],
+        );
+        assert!(metrics.is_empty());
+    }
 }

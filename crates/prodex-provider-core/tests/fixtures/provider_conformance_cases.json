@@ -1761,6 +1761,26 @@
     "expected_usage": null
   },
   {
+    "name": "copilot-request-responses-compact-passthrough",
+    "provider": "copilot",
+    "endpoint": "responses/compact",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": "compact this",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "codex",
+      "input": "compact this",
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
     "name": "copilot-response-responses-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
@@ -1819,6 +1839,64 @@
     }
   },
   {
+    "name": "copilot-response-responses-compact-passthrough",
+    "provider": "copilot",
+    "endpoint": "responses/compact",
+    "operation": "response",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_copilot_compact_1",
+      "object": "response",
+      "model": "codex",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "compacted copilot"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "completion_tokens": 5,
+        "total_tokens": 16
+      }
+    },
+    "expected_body": {
+      "id": "resp_copilot_compact_1",
+      "object": "response",
+      "model": "codex",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "compacted copilot"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "completion_tokens": 5,
+        "total_tokens": 16
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 11,
+      "output_tokens": 5,
+      "total_tokens": 16
+    }
+  },
+  {
     "name": "copilot-stream-responses-passthrough",
     "provider": "copilot",
     "endpoint": "responses",
@@ -1829,6 +1907,376 @@
     "expected_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"co\"}\n\n",
     "expected_loss": "lossless",
     "expected_usage": null
+  },
+  {
+    "name": "kiro-request-responses-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "input": "hello kiro",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "input": "hello kiro",
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-response-responses-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_kiro_1",
+      "object": "response",
+      "model": "claude-sonnet-4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello kiro"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 4,
+        "total_tokens": 13
+      }
+    },
+    "expected_body": {
+      "id": "resp_kiro_1",
+      "object": "response",
+      "model": "claude-sonnet-4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello kiro"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 4,
+        "total_tokens": 13
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 9,
+      "output_tokens": 4,
+      "total_tokens": 13
+    }
+  },
+  {
+    "name": "kiro-stream-responses-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ki\"}\n\n",
+    "expected_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ki\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-chat-completions-request-passthrough",
+    "provider": "kiro",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-chat-completions-response-passthrough",
+    "provider": "kiro",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_kiro_1",
+      "object": "chat.completion",
+      "model": "claude-sonnet-4",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello kiro chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_kiro_1",
+      "object": "chat.completion",
+      "model": "claude-sonnet-4",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello kiro chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 7,
+      "output_tokens": 3,
+      "total_tokens": 10
+    }
+  },
+  {
+    "name": "kiro-messages-request-passthrough",
+    "provider": "kiro",
+    "endpoint": "messages",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro messages"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro messages"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-messages-response-passthrough",
+    "provider": "kiro",
+    "endpoint": "messages",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "id": "msg_kiro_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello kiro messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_body": {
+      "id": "msg_kiro_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello kiro messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 6,
+      "output_tokens": 2,
+      "total_tokens": 8
+    }
+  },
+  {
+    "name": "kiro-request-responses-compact-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses/compact",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "input": "compact this",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "input": "compact this",
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-response-responses-compact-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses/compact",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_kiro_compact_1",
+      "object": "response",
+      "model": "claude-sonnet-4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "compacted kiro"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 11,
+        "output_tokens": 5,
+        "total_tokens": 16
+      }
+    },
+    "expected_body": {
+      "id": "resp_kiro_compact_1",
+      "object": "response",
+      "model": "claude-sonnet-4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "compacted kiro"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 11,
+        "output_tokens": 5,
+        "total_tokens": 16
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 11,
+      "output_tokens": 5,
+      "total_tokens": 16
+    }
+  },
+  {
+    "name": "kiro-models-request-passthrough",
+    "provider": "kiro",
+    "endpoint": "models",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {},
+    "expected_body": {},
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-models-response-passthrough",
+    "provider": "kiro",
+    "endpoint": "models",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "object": "list",
+      "data": [
+        {
+          "id": "claude-sonnet-4",
+          "object": "model"
+        }
+      ]
+    },
+    "expected_body": {
+      "object": "list",
+      "data": [
+        {
+          "id": "claude-sonnet-4",
+          "object": "model"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": null,
+      "output_tokens": null,
+      "total_tokens": null
+    }
   },
   {
     "name": "local-request-responses-passthrough",
