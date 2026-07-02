@@ -80,10 +80,22 @@ impl ProviderAdapterContract for StaticProviderAdapter {
         match self.provider {
             ProviderId::OpenAi => ProviderCapabilityStatus::Native,
             ProviderId::Local => ProviderCapabilityStatus::Passthrough,
-            ProviderId::Anthropic
-            | ProviderId::Copilot
-            | ProviderId::DeepSeek
-            | ProviderId::Gemini => ProviderCapabilityStatus::Translated,
+            ProviderId::Anthropic | ProviderId::Copilot | ProviderId::DeepSeek => match endpoint {
+                ProviderEndpoint::Responses => ProviderCapabilityStatus::Translated,
+                ProviderEndpoint::ChatCompletions | ProviderEndpoint::Messages => {
+                    ProviderCapabilityStatus::Passthrough
+                }
+                ProviderEndpoint::Models => ProviderCapabilityStatus::Emulated,
+                _ => ProviderCapabilityStatus::Unsupported,
+            },
+            ProviderId::Gemini => match endpoint {
+                ProviderEndpoint::Responses => ProviderCapabilityStatus::Translated,
+                ProviderEndpoint::ChatCompletions
+                | ProviderEndpoint::Messages
+                | ProviderEndpoint::Embeddings => ProviderCapabilityStatus::Passthrough,
+                ProviderEndpoint::Models => ProviderCapabilityStatus::Emulated,
+                _ => ProviderCapabilityStatus::Unsupported,
+            },
         }
     }
 }

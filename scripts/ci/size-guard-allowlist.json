@@ -58,10 +58,5 @@
     "file": "crates/prodex-app/src/profile_commands/login.rs",
     "maxLines": 945,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
-  },
-  {
-    "file": "crates/prodex-provider-core/src/models.rs",
-    "maxLines": 853,
-    "reason": "Provider model catalog definitions, JSON serialization, and model metadata remain capped while model ownership is split from adapter logic."
   }
 ]

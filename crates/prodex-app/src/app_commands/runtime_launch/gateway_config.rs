@@ -5,6 +5,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[path = "gateway_config_helpers.rs"]
+mod gateway_config_helpers;
+pub(super) use gateway_config_helpers::gateway_api_keys_from_list;
+use gateway_config_helpers::{
+    gateway_budget_usd_to_microusd, gateway_optional_policy_string, gateway_validate_listen_auth,
+};
+
 pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) provider_name: Option<&'static str>,
     pub(super) upstream_base_url: String,
@@ -564,17 +571,6 @@ fn gateway_virtual_keys_config(
         .collect()
 }
 
-fn gateway_optional_policy_string(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn gateway_budget_usd_to_microusd(value: f64) -> u64 {
-    (value * 1_000_000.0).round().clamp(1.0, u64::MAX as f64) as u64
-}
-
 fn gateway_provider_catalog_id(
     provider: Option<SuperExternalProvider>,
 ) -> prodex_provider_core::ProviderId {
@@ -747,32 +743,4 @@ fn gateway_openai_api_keys(value: Option<&str>) -> Vec<String> {
                 })
         })
         .unwrap_or_default()
-}
-
-pub(super) fn gateway_api_keys_from_list(value: &str) -> Option<Vec<String>> {
-    let keys = value
-        .split([',', ';', '\n'])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    (!keys.is_empty()).then_some(keys)
-}
-
-fn gateway_validate_listen_auth(listen_addr: &str, auth_required: bool) -> Result<()> {
-    let host = listen_addr
-        .rsplit_once(':')
-        .map(|(host, _)| host.trim_matches(['[', ']']))
-        .unwrap_or(listen_addr)
-        .trim();
-    let loopback = host.eq_ignore_ascii_case("localhost")
-        || host
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|addr| addr.is_loopback());
-    if !loopback && !auth_required {
-        bail!(
-            "refusing to bind unauthenticated gateway on non-loopback address {listen_addr}; set --auth-token, PRODEX_GATEWAY_TOKEN, or [[gateway.virtual_keys]]"
-        );
-    }
-    Ok(())
 }

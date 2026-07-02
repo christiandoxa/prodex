@@ -16,8 +16,9 @@ use super::super::local_rewrite_transport::{
     runtime_local_rewrite_api_key_attempts,
 };
 use super::super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_model_fallback_chain,
-    runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
+    RuntimeProviderBridgeKind, runtime_provider_log_request_conformance,
+    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
+    runtime_provider_request_conformance_result, runtime_provider_should_retry_with_next_model,
     runtime_provider_should_rotate_auth_after_response,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
@@ -65,6 +66,18 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
+            if let Some(result) = runtime_provider_request_conformance_result(
+                RuntimeProviderBridgeKind::Gemini,
+                request,
+                &model_body,
+            ) {
+                runtime_provider_log_request_conformance(
+                    &shared.runtime_shared,
+                    request_id,
+                    RuntimeProviderBridgeKind::Gemini,
+                    &result,
+                );
+            }
             let translated = runtime_chat_compatible_request_body(
                 &model_body,
                 &shared.deepseek_conversations,

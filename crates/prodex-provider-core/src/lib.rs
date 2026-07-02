@@ -1,23 +1,35 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 mod adapter;
+mod catalog;
 mod errors;
 mod fallback;
 mod models;
 mod replay_cases;
 #[cfg(test)]
 mod tests;
+mod translator;
+mod translators;
 mod usage;
 
 pub use adapter::{StaticProviderAdapter, provider_adapter};
+pub use catalog::{
+    ProviderCatalogEntry, ProviderCatalogFeatureFlags, provider_catalog_entries,
+    provider_catalog_entries_for, provider_catalog_entry, provider_catalog_json,
+    provider_model_catalog_json, provider_model_json,
+};
 pub use errors::{ProviderErrorClass, ProviderErrorClassification, classify_provider_error};
 pub use fallback::provider_model_fallback_chain;
-pub use models::{
-    provider_model_catalog, provider_model_catalog_json, provider_model_cost, provider_model_json,
-    provider_model_spec,
-};
+pub use models::{provider_model_catalog, provider_model_cost, provider_model_spec};
 use replay_cases::provider_replay_case_count;
 pub use replay_cases::{ProviderReplayCase, provider_replay_cases};
+pub use translator::{
+    ProviderConformanceCase, ProviderConformanceExpectedErrorClass,
+    ProviderConformanceExpectedLoss, ProviderConformanceOperation, ProviderParamSupport,
+    ProviderTransformInput, ProviderTransformLoss, ProviderTransformResult, ProviderTranslator,
+    ProviderUnsupportedReason,
+};
+pub use translators::{provider_conformance_cases, provider_translator};
 pub use usage::{
     ProviderTokenUsage, calculate_cost_microusd, estimate_request_input_tokens,
     estimate_text_tokens, extract_usage_tokens, microusd_to_usd,
@@ -28,14 +40,19 @@ pub const PRODEX_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
 pub const PRODEX_GEMINI_DEFAULT_MODEL: &str = "auto";
 pub const PRODEX_GEMINI_CHAT_COMPRESSION_MODEL: &str = "chat-compression-default";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ProviderId {
+    #[serde(rename = "openai")]
     OpenAi,
+    #[serde(rename = "anthropic")]
     Anthropic,
+    #[serde(rename = "copilot")]
     Copilot,
+    #[serde(rename = "deepseek")]
     DeepSeek,
+    #[serde(rename = "gemini")]
     Gemini,
+    #[serde(rename = "local")]
     Local,
 }
 
@@ -66,7 +83,7 @@ impl ProviderId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderWireFormat {
     OpenAiResponses,
@@ -88,7 +105,7 @@ impl ProviderWireFormat {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderEndpoint {
     Responses,
@@ -103,7 +120,7 @@ pub enum ProviderEndpoint {
     A2a,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderCapabilityStatus {
     Native,
@@ -290,6 +307,23 @@ pub struct ProviderEndpointContractSpec {
     pub tested: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ProviderEndpointCoverage {
+    request: bool,
+    response: bool,
+    stream: bool,
+}
+
+impl ProviderEndpointCoverage {
+    fn any(self) -> bool {
+        self.request || self.response || self.stream
+    }
+
+    fn request_and_response(self) -> bool {
+        self.request && self.response
+    }
+}
+
 pub const PROVIDER_CONTRACT_PROVIDERS: &[ProviderId] = &[
     ProviderId::OpenAi,
     ProviderId::Anthropic,
@@ -319,18 +353,26 @@ pub fn provider_adapter_contract_spec(provider: ProviderId) -> ProviderAdapterCo
         endpoint_status: ALL_PROVIDER_ENDPOINTS
             .iter()
             .copied()
-            .map(|endpoint| ProviderEndpointContractSpec {
-                endpoint: endpoint.label(),
-                status: adapter.capability_status(endpoint).label(),
-                streaming: adapter.supports_streaming()
-                    && matches!(
-                        endpoint,
-                        ProviderEndpoint::Responses
-                            | ProviderEndpoint::ChatCompletions
-                            | ProviderEndpoint::Messages
-                    ),
-                tested: adapter.supported_endpoints().contains(&endpoint)
-                    && provider_replay_case_count(provider) > 0,
+            .map(|endpoint| {
+                let coverage = provider_endpoint_conformance_coverage(provider, endpoint);
+                let tested = coverage.any();
+                ProviderEndpointContractSpec {
+                    endpoint: endpoint.label(),
+                    status: provider_endpoint_contract_status(
+                        adapter.capability_status(endpoint),
+                        adapter.supported_endpoints().contains(&endpoint),
+                        coverage,
+                    )
+                    .label(),
+                    streaming: adapter.supports_streaming()
+                        && matches!(
+                            endpoint,
+                            ProviderEndpoint::Responses
+                                | ProviderEndpoint::ChatCompletions
+                                | ProviderEndpoint::Messages
+                        ),
+                    tested,
+                }
             })
             .collect(),
         model_count: adapter.model_catalog().len(),
@@ -344,6 +386,46 @@ pub fn provider_adapter_contract_matrix() -> Vec<ProviderAdapterContractSpec> {
         .copied()
         .map(provider_adapter_contract_spec)
         .collect()
+}
+
+fn provider_endpoint_conformance_coverage(
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+) -> ProviderEndpointCoverage {
+    let mut coverage = ProviderEndpointCoverage::default();
+    for case in provider_conformance_cases() {
+        if case.provider != provider || case.endpoint != endpoint {
+            continue;
+        }
+        match case.operation {
+            ProviderConformanceOperation::Request => coverage.request = true,
+            ProviderConformanceOperation::Response => coverage.response = true,
+            ProviderConformanceOperation::StreamEvent => coverage.stream = true,
+        }
+    }
+    coverage
+}
+
+fn provider_endpoint_contract_status(
+    base: ProviderCapabilityStatus,
+    supported: bool,
+    coverage: ProviderEndpointCoverage,
+) -> ProviderCapabilityStatus {
+    if !supported {
+        return ProviderCapabilityStatus::Unsupported;
+    }
+    if !coverage.any() {
+        return ProviderCapabilityStatus::Untested;
+    }
+    if !coverage.request_and_response() {
+        return ProviderCapabilityStatus::Partial;
+    }
+    match base {
+        ProviderCapabilityStatus::Unsupported => ProviderCapabilityStatus::Unsupported,
+        ProviderCapabilityStatus::Untested => ProviderCapabilityStatus::Untested,
+        ProviderCapabilityStatus::Partial => ProviderCapabilityStatus::Partial,
+        other => other,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

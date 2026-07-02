@@ -14,6 +14,10 @@ use super::super::gemini_rewrite::{
     runtime_gemini_web_search_call_from_grounding,
 };
 use super::super::gemini_thought_signatures::runtime_gemini_thought_signature;
+use super::super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_stream_reasoning_summary_text_delta_event,
+    runtime_provider_stream_text_delta_event,
+};
 use super::super::provider_sse_events::{
     runtime_provider_sse_failed_event, runtime_provider_sse_output_text_item_added_event,
     runtime_provider_sse_output_text_item_done_event,
@@ -490,16 +494,35 @@ impl RuntimeGeminiSseState {
         }
         self.output_text.push_str(text);
         let sequence_number = self.next_sequence_number();
-        events.push(self.event(
-            "response.output_text.delta",
-            serde_json::json!({
-                "type": "response.output_text.delta",
-                "sequence_number": sequence_number,
-                "created_at": self.created_at,
-                "response_id": self.response_id,
-                "delta": text,
-            }),
-        ));
+        let upstream_value = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": text,
+                    }]
+                }
+            }]
+        });
+        if let Some((event_name, data)) = runtime_provider_stream_text_delta_event(
+            RuntimeProviderBridgeKind::Gemini,
+            &upstream_value,
+            sequence_number,
+            self.created_at,
+            &self.response_id,
+        ) {
+            events.push(self.event(&event_name, data));
+        } else {
+            events.push(self.event(
+                "response.output_text.delta",
+                serde_json::json!({
+                    "type": "response.output_text.delta",
+                    "sequence_number": sequence_number,
+                    "created_at": self.created_at,
+                    "response_id": self.response_id,
+                    "delta": text,
+                }),
+            ));
+        }
         events
     }
 
@@ -553,16 +576,36 @@ impl RuntimeGeminiSseState {
             ));
         }
         let sequence_number = self.next_sequence_number();
-        events.push(self.event(
-            "response.reasoning_summary_text.delta",
-            serde_json::json!({
-                "type": "response.reasoning_summary_text.delta",
-                "sequence_number": sequence_number,
-                "response_id": self.response_id,
-                "summary_index": 0,
-                "delta": text,
-            }),
-        ));
+        let upstream_value = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": text,
+                        "thought": true,
+                    }]
+                }
+            }]
+        });
+        if let Some((event_name, data)) = runtime_provider_stream_reasoning_summary_text_delta_event(
+            RuntimeProviderBridgeKind::Gemini,
+            &upstream_value,
+            sequence_number,
+            &self.response_id,
+            0,
+        ) {
+            events.push(self.event(&event_name, data));
+        } else {
+            events.push(self.event(
+                "response.reasoning_summary_text.delta",
+                serde_json::json!({
+                    "type": "response.reasoning_summary_text.delta",
+                    "sequence_number": sequence_number,
+                    "response_id": self.response_id,
+                    "summary_index": 0,
+                    "delta": text,
+                }),
+            ));
+        }
         events
     }
 

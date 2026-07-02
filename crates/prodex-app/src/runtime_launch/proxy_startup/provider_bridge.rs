@@ -3,8 +3,10 @@ use super::provider_models::{
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use prodex_provider_core::{
-    ProviderAdapterContract, ProviderId, ProviderModelCost, ProviderWireFormat, provider_adapter,
-    provider_model_cost, provider_model_fallback_chain,
+    ProviderAdapterContract, ProviderEndpoint, ProviderErrorClass, ProviderErrorClassification,
+    ProviderId, ProviderModelCost, ProviderTransformInput, ProviderTransformLoss,
+    ProviderTransformResult, ProviderWireFormat, provider_adapter, provider_model_cost,
+    provider_model_fallback_chain, provider_translator,
 };
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
@@ -75,144 +77,6 @@ pub(super) enum RuntimeProviderErrorClass {
     NotFound,
     Fatal,
 }
-
-#[derive(Clone, Copy)]
-struct RuntimeProviderErrorRule {
-    status: Option<u16>,
-    code: Option<&'static str>,
-    text: Option<&'static str>,
-    class: RuntimeProviderErrorClass,
-    cooldown_ms: u64,
-}
-
-const RUNTIME_PROVIDER_ERROR_RULES: &[RuntimeProviderErrorRule] = &[
-    RuntimeProviderErrorRule {
-        status: Some(401),
-        code: None,
-        text: None,
-        class: RuntimeProviderErrorClass::Auth,
-        cooldown_ms: 0,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("unauthenticated"),
-        text: None,
-        class: RuntimeProviderErrorClass::Auth,
-        cooldown_ms: 0,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("invalid_api_key"),
-        text: None,
-        class: RuntimeProviderErrorClass::Auth,
-        cooldown_ms: 0,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("insufficient_quota"),
-        text: None,
-        class: RuntimeProviderErrorClass::Quota,
-        cooldown_ms: 300_000,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("quota_exhausted"),
-        text: None,
-        class: RuntimeProviderErrorClass::Quota,
-        cooldown_ms: 300_000,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("quota_exceeded"),
-        text: None,
-        class: RuntimeProviderErrorClass::Quota,
-        cooldown_ms: 300_000,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("resource_exhausted"),
-        text: None,
-        class: RuntimeProviderErrorClass::Quota,
-        cooldown_ms: 300_000,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("rate_limit_exceeded"),
-        text: None,
-        class: RuntimeProviderErrorClass::RateLimit,
-        cooldown_ms: 60_000,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("rate_limit_exceeded_error"),
-        text: None,
-        class: RuntimeProviderErrorClass::RateLimit,
-        cooldown_ms: 60_000,
-    },
-    RuntimeProviderErrorRule {
-        status: Some(429),
-        code: None,
-        text: None,
-        class: RuntimeProviderErrorClass::RateLimit,
-        cooldown_ms: 60_000,
-    },
-    RuntimeProviderErrorRule {
-        status: Some(404),
-        code: None,
-        text: None,
-        class: RuntimeProviderErrorClass::NotFound,
-        cooldown_ms: 0,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: Some("model_not_supported"),
-        text: None,
-        class: RuntimeProviderErrorClass::NotFound,
-        cooldown_ms: 0,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: None,
-        text: Some("model is not supported"),
-        class: RuntimeProviderErrorClass::NotFound,
-        cooldown_ms: 0,
-    },
-    RuntimeProviderErrorRule {
-        status: Some(500),
-        code: None,
-        text: None,
-        class: RuntimeProviderErrorClass::Transient,
-        cooldown_ms: 10_000,
-    },
-    RuntimeProviderErrorRule {
-        status: Some(502),
-        code: None,
-        text: None,
-        class: RuntimeProviderErrorClass::Transient,
-        cooldown_ms: 10_000,
-    },
-    RuntimeProviderErrorRule {
-        status: Some(503),
-        code: None,
-        text: None,
-        class: RuntimeProviderErrorClass::Transient,
-        cooldown_ms: 10_000,
-    },
-    RuntimeProviderErrorRule {
-        status: Some(504),
-        code: None,
-        text: None,
-        class: RuntimeProviderErrorClass::Transient,
-        cooldown_ms: 10_000,
-    },
-    RuntimeProviderErrorRule {
-        status: None,
-        code: None,
-        text: Some("overloaded"),
-        class: RuntimeProviderErrorClass::Transient,
-        cooldown_ms: 10_000,
-    },
-];
 
 pub(super) fn runtime_provider_label(kind: RuntimeProviderBridgeKind) -> &'static str {
     kind.provider_id().label()
@@ -340,6 +204,225 @@ pub(super) fn runtime_provider_model_from_body(body: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
+pub(super) fn runtime_provider_request_conformance_result(
+    kind: RuntimeProviderBridgeKind,
+    request: &crate::RuntimeProxyRequest,
+    body: &[u8],
+) -> Option<ProviderTransformResult> {
+    if !path_without_query(&request.path_and_query).ends_with("/responses") {
+        return None;
+    }
+    let mut input = ProviderTransformInput::new(ProviderEndpoint::Responses, body.to_vec());
+    input.model = runtime_provider_model_from_body(body);
+    input.headers = request.headers.iter().cloned().collect();
+    Some(provider_translator(kind.provider_id()).transform_request(input))
+}
+
+pub(super) fn runtime_provider_log_request_conformance(
+    shared: &crate::RuntimeRotationProxyShared,
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    result: &ProviderTransformResult,
+) {
+    let (loss, reason) = match &result.loss {
+        ProviderTransformLoss::Lossless => return,
+        ProviderTransformLoss::DegradedButSafe { reason, .. } => ("degraded", reason.as_str()),
+        ProviderTransformLoss::Rejected { reason } => ("rejected", reason.as_str()),
+        ProviderTransformLoss::UnsupportedUpstream { reason } => ("unsupported", reason.as_str()),
+    };
+    crate::runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "local_rewrite_provider_conformance_request",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("provider", runtime_provider_label(kind)),
+                runtime_proxy_log_field("endpoint", result.endpoint.label()),
+                runtime_proxy_log_field("loss", loss),
+                runtime_proxy_log_field("reason", reason),
+            ],
+        ),
+    );
+}
+
+pub(super) fn runtime_provider_response_conformance_result(
+    kind: RuntimeProviderBridgeKind,
+    status: u16,
+    body: &[u8],
+) -> Option<ProviderTransformResult> {
+    if !(200..300).contains(&status) {
+        return None;
+    }
+    let mut input = ProviderTransformInput::new(ProviderEndpoint::Responses, body.to_vec());
+    input.status = Some(status);
+    Some(provider_translator(kind.provider_id()).transform_response(input))
+}
+
+pub(super) fn runtime_provider_log_response_conformance(
+    shared: &crate::RuntimeRotationProxyShared,
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    result: &ProviderTransformResult,
+) {
+    let (loss, reason) = match &result.loss {
+        ProviderTransformLoss::Lossless => return,
+        ProviderTransformLoss::DegradedButSafe { reason, .. } => ("degraded", reason.as_str()),
+        ProviderTransformLoss::Rejected { reason } => ("rejected", reason.as_str()),
+        ProviderTransformLoss::UnsupportedUpstream { reason } => ("unsupported", reason.as_str()),
+    };
+    crate::runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "local_rewrite_provider_conformance_response",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("provider", runtime_provider_label(kind)),
+                runtime_proxy_log_field("endpoint", result.endpoint.label()),
+                runtime_proxy_log_field("loss", loss),
+                runtime_proxy_log_field("reason", reason),
+            ],
+        ),
+    );
+}
+
+pub(super) fn runtime_provider_stream_event_conformance_result(
+    kind: RuntimeProviderBridgeKind,
+    body: &[u8],
+) -> ProviderTransformResult {
+    provider_translator(kind.provider_id()).transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        body.to_vec(),
+    ))
+}
+
+pub(super) fn runtime_provider_stream_text_delta_event(
+    kind: RuntimeProviderBridgeKind,
+    upstream_value: &serde_json::Value,
+    sequence_number: u64,
+    created_at: u64,
+    response_id: &str,
+) -> Option<(String, serde_json::Value)> {
+    let mut event =
+        runtime_provider_stream_base_event(kind, upstream_value, "response.output_text.delta")?;
+    let object = event.1.as_object_mut()?;
+    object.insert(
+        "sequence_number".to_string(),
+        serde_json::Value::from(sequence_number),
+    );
+    object.insert(
+        "created_at".to_string(),
+        serde_json::Value::from(created_at),
+    );
+    object.insert(
+        "response_id".to_string(),
+        serde_json::Value::String(response_id.to_string()),
+    );
+    Some(event)
+}
+
+pub(super) fn runtime_provider_stream_function_call_arguments_delta_event(
+    kind: RuntimeProviderBridgeKind,
+    upstream_value: &serde_json::Value,
+    sequence_number: u64,
+) -> Option<(String, serde_json::Value)> {
+    let mut event = runtime_provider_stream_base_event(
+        kind,
+        upstream_value,
+        "response.function_call_arguments.delta",
+    )?;
+    event.1.as_object_mut()?.insert(
+        "sequence_number".to_string(),
+        serde_json::Value::from(sequence_number),
+    );
+    Some(event)
+}
+
+pub(super) fn runtime_provider_stream_reasoning_summary_text_delta_event(
+    kind: RuntimeProviderBridgeKind,
+    upstream_value: &serde_json::Value,
+    sequence_number: u64,
+    response_id: &str,
+    summary_index: u64,
+) -> Option<(String, serde_json::Value)> {
+    let mut event = runtime_provider_stream_base_event(
+        kind,
+        upstream_value,
+        "response.reasoning_summary_text.delta",
+    )?;
+    let object = event.1.as_object_mut()?;
+    object.insert(
+        "sequence_number".to_string(),
+        serde_json::Value::from(sequence_number),
+    );
+    object.insert(
+        "response_id".to_string(),
+        serde_json::Value::String(response_id.to_string()),
+    );
+    object.insert(
+        "summary_index".to_string(),
+        serde_json::Value::from(summary_index),
+    );
+    Some(event)
+}
+
+fn runtime_provider_stream_base_event(
+    kind: RuntimeProviderBridgeKind,
+    upstream_value: &serde_json::Value,
+    expected_event_name: &str,
+) -> Option<(String, serde_json::Value)> {
+    let body = format!("data: {upstream_value}\n\n");
+    let result = runtime_provider_stream_event_conformance_result(kind, body.as_bytes());
+    if !matches!(result.loss, ProviderTransformLoss::Lossless) {
+        return None;
+    }
+    let body = result.body.as_ref()?;
+    let event = String::from_utf8_lossy(body);
+    let event_name = event
+        .strip_prefix("event: ")?
+        .split_once('\n')?
+        .0
+        .trim()
+        .to_string();
+    if event_name != expected_event_name {
+        return None;
+    }
+    let payload = event
+        .split_once("data: ")?
+        .1
+        .trim()
+        .strip_suffix('\n')
+        .unwrap_or(event.split_once("data: ")?.1.trim());
+    let data = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    Some((event_name, data))
+}
+
+pub(super) fn runtime_provider_log_stream_conformance(
+    shared: &crate::RuntimeRotationProxyShared,
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    result: &ProviderTransformResult,
+) {
+    let (loss, reason) = match &result.loss {
+        ProviderTransformLoss::Lossless => return,
+        ProviderTransformLoss::DegradedButSafe { reason, .. } => ("degraded", reason.as_str()),
+        ProviderTransformLoss::Rejected { reason } => ("rejected", reason.as_str()),
+        ProviderTransformLoss::UnsupportedUpstream { reason } => ("unsupported", reason.as_str()),
+    };
+    crate::runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "local_rewrite_provider_conformance_stream",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("provider", runtime_provider_label(kind)),
+                runtime_proxy_log_field("endpoint", result.endpoint.label()),
+                runtime_proxy_log_field("loss", loss),
+                runtime_proxy_log_field("reason", reason),
+            ],
+        ),
+    );
+}
+
 pub(super) fn runtime_provider_model_fallback_chain(
     kind: RuntimeProviderBridgeKind,
     model: &str,
@@ -401,35 +484,7 @@ pub(super) fn runtime_provider_error_class(
     status: u16,
     body: &[u8],
 ) -> RuntimeProviderErrorClass {
-    let tokens = runtime_provider_error_tokens(body);
-    if kind == RuntimeProviderBridgeKind::Gemini
-        && status == 403
-        && tokens
-            .iter()
-            .any(|token| token == "permission_denied" || token == "iam_permission_denied")
-    {
-        return RuntimeProviderErrorClass::Auth;
-    }
-    for rule in RUNTIME_PROVIDER_ERROR_RULES {
-        let status_matches = rule.status.is_none_or(|expected| expected == status);
-        if !status_matches {
-            continue;
-        }
-        let code_matches = rule
-            .code
-            .is_none_or(|code| tokens.iter().any(|token| token == code));
-        let text_matches = rule
-            .text
-            .is_none_or(|text| tokens.iter().any(|token| token.contains(text)));
-        if code_matches && text_matches {
-            return rule.class;
-        }
-    }
-    if status >= 500 {
-        RuntimeProviderErrorClass::Transient
-    } else {
-        RuntimeProviderErrorClass::Fatal
-    }
+    runtime_provider_error_classification(kind, status, body).0
 }
 
 pub(super) fn runtime_provider_error_cooldown_ms(
@@ -437,28 +492,84 @@ pub(super) fn runtime_provider_error_cooldown_ms(
     status: u16,
     body: &[u8],
 ) -> u64 {
-    let tokens = runtime_provider_error_tokens(body);
-    RUNTIME_PROVIDER_ERROR_RULES
-        .iter()
-        .find(|rule| {
-            rule.class == class
-                && rule.status.is_none_or(|expected| expected == status)
-                && rule
-                    .code
-                    .is_none_or(|code| tokens.iter().any(|token| token == code))
-                && rule
-                    .text
-                    .is_none_or(|text| tokens.iter().any(|token| token.contains(text)))
-        })
-        .map(|rule| rule.cooldown_ms)
-        .unwrap_or(match class {
+    let (derived_class, classification) =
+        runtime_provider_error_classification(kind_from_class_hint(class), status, body);
+    if derived_class == class {
+        classification.cooldown_ms
+    } else {
+        match class {
             RuntimeProviderErrorClass::Quota => 300_000,
             RuntimeProviderErrorClass::RateLimit => 60_000,
             RuntimeProviderErrorClass::Transient => 10_000,
             RuntimeProviderErrorClass::Auth
             | RuntimeProviderErrorClass::NotFound
             | RuntimeProviderErrorClass::Fatal => 0,
-        })
+        }
+    }
+}
+
+fn kind_from_class_hint(class: RuntimeProviderErrorClass) -> RuntimeProviderBridgeKind {
+    match class {
+        RuntimeProviderErrorClass::Auth
+        | RuntimeProviderErrorClass::Quota
+        | RuntimeProviderErrorClass::RateLimit
+        | RuntimeProviderErrorClass::Transient
+        | RuntimeProviderErrorClass::NotFound
+        | RuntimeProviderErrorClass::Fatal => RuntimeProviderBridgeKind::OpenAiResponses,
+    }
+}
+
+fn runtime_provider_error_classification(
+    kind: RuntimeProviderBridgeKind,
+    status: u16,
+    body: &[u8],
+) -> (RuntimeProviderErrorClass, ProviderErrorClassification) {
+    let translator = provider_translator(kind.provider_id());
+    let text = std::str::from_utf8(body).ok();
+    let mut best = translator.classify_error(Some(status), None, text);
+    for token in runtime_provider_error_tokens(body) {
+        let candidate = translator.classify_error(Some(status), Some(&token), Some(&token));
+        if runtime_provider_error_classification_rank(candidate.class)
+            < runtime_provider_error_classification_rank(best.class)
+        {
+            best = candidate;
+        }
+    }
+    (
+        runtime_provider_error_class_from_core(best.class, status),
+        best,
+    )
+}
+
+fn runtime_provider_error_class_from_core(
+    class: ProviderErrorClass,
+    status: u16,
+) -> RuntimeProviderErrorClass {
+    match class {
+        ProviderErrorClass::Auth => RuntimeProviderErrorClass::Auth,
+        ProviderErrorClass::Quota => RuntimeProviderErrorClass::Quota,
+        ProviderErrorClass::RateLimit => RuntimeProviderErrorClass::RateLimit,
+        ProviderErrorClass::Transient => RuntimeProviderErrorClass::Transient,
+        ProviderErrorClass::NotFound => RuntimeProviderErrorClass::NotFound,
+        ProviderErrorClass::Other => {
+            if status >= 500 {
+                RuntimeProviderErrorClass::Transient
+            } else {
+                RuntimeProviderErrorClass::Fatal
+            }
+        }
+    }
+}
+
+fn runtime_provider_error_classification_rank(class: ProviderErrorClass) -> u8 {
+    match class {
+        ProviderErrorClass::Auth => 0,
+        ProviderErrorClass::Quota => 1,
+        ProviderErrorClass::RateLimit => 2,
+        ProviderErrorClass::NotFound => 3,
+        ProviderErrorClass::Transient => 4,
+        ProviderErrorClass::Other => 5,
+    }
 }
 
 pub(super) fn runtime_provider_request_ledger_message(

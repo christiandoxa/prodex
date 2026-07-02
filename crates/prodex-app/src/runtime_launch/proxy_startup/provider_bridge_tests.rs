@@ -392,3 +392,771 @@ fn gateway_response_spend_uses_response_usage_and_total_cost() {
     assert_eq!(event.output_tokens, Some(11));
     assert_eq!(event.cost_usd, Some(0.000029));
 }
+
+#[test]
+fn request_conformance_result_uses_provider_core_translator_for_deepseek_and_gemini() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/responses".to_string(),
+        headers: vec![
+            ("x-codex-turn-state".to_string(), "turn-1".to_string()),
+            ("session_id".to_string(), "sess-1".to_string()),
+        ],
+        body: Vec::new(),
+    };
+    let deepseek = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &request,
+        br#"{"model":"deepseek-chat","input":"hello"}"#,
+    )
+    .unwrap();
+    assert!(matches!(deepseek.loss, ProviderTransformLoss::Lossless));
+    assert_eq!(
+        deepseek.metadata["continuation"]["x-codex-turn-state"],
+        "turn-1"
+    );
+
+    let gemini = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        &request,
+        br#"{"model":"gemini-2.5-pro","input":"hello","response_format":{"type":"json_schema","schema":{"type":"object","strict":true}}}"#,
+    )
+    .unwrap();
+    assert!(matches!(gemini.loss, ProviderTransformLoss::Lossless));
+    let body: serde_json::Value = serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        body["request"]["generationConfig"]["responseMimeType"],
+        "application/json"
+    );
+}
+
+#[test]
+fn gemini_request_conformance_translates_message_content_arrays() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let gemini = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        &request,
+        &serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "# AGENTS.md instructions for /repo"},
+                        {"type": "input_text", "text": "<environment_context><cwd>/repo</cwd></environment_context>"}
+                    ]
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Run the update"}
+                    ]
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(gemini.loss, ProviderTransformLoss::Lossless));
+    let body: serde_json::Value = serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        body["request"]["contents"][0]["parts"][0]["text"],
+        "Run the update"
+    );
+    assert!(
+        body["request"]["systemInstruction"]["parts"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("# AGENTS.md instructions for /repo"))
+    );
+}
+
+#[test]
+fn deepseek_request_conformance_translates_message_content_arrays() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let deepseek = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &request,
+        &serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": "You are Codex."}]
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "read commit history"}]
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(deepseek.loss, ProviderTransformLoss::Lossless));
+    let body: serde_json::Value = serde_json::from_slice(deepseek.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["messages"][0]["role"], "system");
+    assert_eq!(body["messages"][0]["content"], "You are Codex.");
+    assert_eq!(body["messages"][1]["content"], "read commit history");
+}
+
+#[test]
+fn deepseek_request_conformance_preserves_assistant_tool_history() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let deepseek = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &request,
+        &serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "find the symbol"}]
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": ""}],
+                    "tool_calls": [
+                        {
+                            "id":"call_1",
+                            "type":"function",
+                            "function":{
+                                "name":"grep",
+                                "arguments":"{\"pattern\":\"ProviderTranslator\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "message",
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": [{"type": "output_text", "text": "{\"match_count\":1}"}]
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(deepseek.loss, ProviderTransformLoss::Lossless));
+    let body: serde_json::Value = serde_json::from_slice(deepseek.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["messages"][1]["role"], "assistant");
+    assert_eq!(body["messages"][1]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(
+        body["messages"][1]["tool_calls"][0]["function"]["name"],
+        "grep"
+    );
+    assert_eq!(body["messages"][2]["role"], "tool");
+    assert_eq!(body["messages"][2]["tool_call_id"], "call_1");
+}
+
+#[test]
+fn deepseek_request_conformance_translates_function_call_and_output_items() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let deepseek = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &request,
+        &serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "find the symbol"}]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "grep",
+                    "arguments": {"pattern": "ProviderTranslator"}
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "{\"match_count\":1}"
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(deepseek.loss, ProviderTransformLoss::Lossless));
+    let body: serde_json::Value = serde_json::from_slice(deepseek.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["messages"][1]["role"], "assistant");
+    assert_eq!(body["messages"][1]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(
+        body["messages"][1]["tool_calls"][0]["function"]["arguments"],
+        "{\"pattern\":\"ProviderTranslator\"}"
+    );
+    assert_eq!(body["messages"][2]["role"], "tool");
+    assert_eq!(body["messages"][2]["tool_call_id"], "call_1");
+}
+
+#[test]
+fn deepseek_request_conformance_translates_custom_and_shell_call_items() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let custom = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &request,
+        &serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_patch_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** End Patch"
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_patch_1",
+                    "output": "applied"
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let custom_body: serde_json::Value =
+        serde_json::from_slice(custom.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        custom_body["messages"][0]["tool_calls"][0]["function"]["name"],
+        "apply_patch"
+    );
+    assert_eq!(
+        custom_body["messages"][0]["tool_calls"][0]["function"]["arguments"],
+        "{\"input\":\"*** Begin Patch\\n*** End Patch\"}"
+    );
+    assert_eq!(custom_body["messages"][1]["tool_call_id"], "call_patch_1");
+
+    let shell = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &request,
+        &serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "local_shell_call",
+                    "call_id": "call_shell_1",
+                    "action": {
+                        "command": ["git", "status", "--short"]
+                    },
+                    "cwd": "/repo",
+                    "timeout": 1000
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_shell_1",
+                    "output": " M Cargo.toml"
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let shell_body: serde_json::Value =
+        serde_json::from_slice(shell.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        shell_body["messages"][0]["tool_calls"][0]["function"]["name"],
+        "shell_command"
+    );
+    assert_eq!(
+        shell_body["messages"][0]["tool_calls"][0]["function"]["arguments"],
+        "{\"command\":\"git status --short\",\"cwd\":\"/repo\",\"timeout\":1000}"
+    );
+    assert_eq!(shell_body["messages"][1]["tool_call_id"], "call_shell_1");
+}
+
+#[test]
+fn deepseek_request_conformance_translates_mcp_call_and_result_items() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let deepseek = runtime_provider_request_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &request,
+        &serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "compress this text"}]
+                },
+                {
+                    "type": "mcp_call",
+                    "id": "call_sqz_1",
+                    "name": "mcp__prodex_sqz__compress",
+                    "arguments": {"text": "large repeated content"},
+                    "output": "ref:abc123"
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(deepseek.loss, ProviderTransformLoss::Lossless));
+    let body: serde_json::Value = serde_json::from_slice(deepseek.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        body["messages"][1]["tool_calls"][0]["function"]["name"],
+        "mcp__prodex_sqz__compress"
+    );
+    assert_eq!(
+        body["messages"][1]["tool_calls"][0]["function"]["arguments"],
+        "{\"text\":\"large repeated content\"}"
+    );
+    assert_eq!(body["messages"][2]["tool_call_id"], "call_sqz_1");
+    assert_eq!(body["messages"][2]["content"], "ref:abc123");
+}
+
+#[test]
+fn request_conformance_result_skips_non_responses_paths() {
+    let request = crate::RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/chat/completions".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    assert!(
+        runtime_provider_request_conformance_result(
+            RuntimeProviderBridgeKind::DeepSeek,
+            &request,
+            br#"{"model":"deepseek-chat","input":"hello"}"#,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn response_conformance_result_uses_provider_core_translator_for_deepseek_and_gemini() {
+    let deepseek = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        200,
+        br#"{"id":"chatcmpl_1","model":"deepseek-chat","choices":[{"message":{"role":"assistant","content":"hi"}}],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}"#,
+    )
+    .unwrap();
+    assert!(matches!(deepseek.loss, ProviderTransformLoss::Lossless));
+    let deepseek_body: serde_json::Value =
+        serde_json::from_slice(deepseek.body.as_ref().unwrap()).unwrap();
+    assert_eq!(deepseek_body["object"], "response");
+
+    let gemini = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_1","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":4,"totalTokenCount":7}}"#,
+    )
+    .unwrap();
+    assert!(matches!(gemini.loss, ProviderTransformLoss::Lossless));
+    let gemini_body: serde_json::Value =
+        serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
+    assert_eq!(gemini_body["object"], "response");
+}
+
+#[test]
+fn deepseek_response_conformance_preserves_cache_and_tool_metadata() {
+    let deepseek = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        200,
+        br#"{"id":"chatcmpl_cache_1","model":"deepseek-chat","created":1700000000,"choices":[{"message":{"role":"assistant","content":"cached hello","reasoning_content":"think","tool_calls":[{"id":"call_1","function":{"name":"functions.exec_command","arguments":"{\"cmd\":\"echo hi\"}"},"extra_content":{"google":{"thought_signature":"sig_1"}}}]},"finish_reason":"tool_calls","logprobs":{"tokens":[]}}],"system_fingerprint":"fp_1","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"prompt_cache_hit_tokens":5,"prompt_cache_miss_tokens":6,"completion_tokens_details":{"reasoning_tokens":2}}}"#,
+    )
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(deepseek.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["created_at"], 1700000000);
+    assert_eq!(body["output"][1]["namespace"], "functions");
+    assert_eq!(body["output"][1]["name"], "exec_command");
+    assert_eq!(body["output"][1]["arguments"], "{\"cmd\":\"rtk echo hi\"}");
+    assert_eq!(body["output"][1]["gemini_thought_signature"], "sig_1");
+    assert_eq!(
+        body["usage"]["metadata"]["deepseek"]["prompt_cache_hit_tokens"],
+        5
+    );
+    assert_eq!(body["metadata"]["deepseek"]["finish_reason"], "tool_calls");
+}
+
+#[test]
+fn gemini_response_conformance_normalizes_wrapped_response_metadata() {
+    let gemini = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"traceId":"resp_wrapped_1","response":{"modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"wrapped hi"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":4,"totalTokenCount":7,"cachedContentTokenCount":1,"thoughtsTokenCount":2,"toolUsePromptTokenCount":1}}}"#,
+    )
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["id"], "resp_wrapped_1");
+    assert_eq!(body["usage"]["input_tokens_details"]["cached_tokens"], 1);
+    assert_eq!(
+        body["usage"]["output_tokens_details"]["reasoning_tokens"],
+        2
+    );
+    assert_eq!(
+        body["metadata"]["gemini"]["usageMetadata"]["toolUsePromptTokenCount"],
+        1
+    );
+}
+
+#[test]
+fn gemini_response_conformance_maps_prompt_feedback_and_incomplete_status() {
+    let blocked = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_blocked","modelVersion":"gemini-2.5-pro","promptFeedback":{"blockReason":"SAFETY"}}"#,
+    )
+    .unwrap();
+    let blocked_body: serde_json::Value =
+        serde_json::from_slice(blocked.body.as_ref().unwrap()).unwrap();
+    assert_eq!(blocked_body["status"], "failed");
+    assert_eq!(blocked_body["error"]["code"], "gemini_prompt_blocked");
+
+    let incomplete = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_truncated","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"MAX_TOKENS"}]}"#,
+    )
+    .unwrap();
+    let incomplete_body: serde_json::Value =
+        serde_json::from_slice(incomplete.body.as_ref().unwrap()).unwrap();
+    assert_eq!(incomplete_body["status"], "incomplete");
+    assert_eq!(
+        incomplete_body["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+}
+
+#[test]
+fn gemini_response_conformance_maps_safe_function_call_only_response() {
+    let gemini = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_sqz_1","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"thoughtSignature":"sig-response-1","functionCall":{"id":"call_sqz_1","name":"mcp__prodex_sqz__compress","args":{"text":"large content"}}}]}}]}"#,
+    )
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["output"][0]["type"], "function_call");
+    assert_eq!(body["output"][0]["namespace"], "mcp__prodex_sqz");
+    assert_eq!(body["output"][0]["name"], "compress");
+    assert_eq!(
+        body["output"][0]["gemini_thought_signature"],
+        "sig-response-1"
+    );
+}
+
+#[test]
+fn gemini_response_conformance_maps_tool_search_and_apply_patch_function_calls() {
+    let tool_search = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_search_1","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"functionCall":{"id":"call_search_1","name":"tool_search","args":{"query":"provider translator"}}}]}}]}"#,
+    )
+    .unwrap();
+    let tool_search_body: serde_json::Value =
+        serde_json::from_slice(tool_search.body.as_ref().unwrap()).unwrap();
+    assert_eq!(tool_search_body["output"][0]["type"], "tool_search_call");
+    assert_eq!(tool_search_body["output"][0]["call_id"], "call_search_1");
+    assert_eq!(
+        tool_search_body["output"][0]["arguments"]["query"],
+        "provider translator"
+    );
+
+    let apply_patch = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_patch_1","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"functionCall":{"id":"call_patch_1","name":"apply_patch","args":{"input":"*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"}}}]}}]}"#,
+    )
+    .unwrap();
+    let apply_patch_body: serde_json::Value =
+        serde_json::from_slice(apply_patch.body.as_ref().unwrap()).unwrap();
+    assert_eq!(apply_patch_body["output"][0]["type"], "custom_tool_call");
+    assert_eq!(apply_patch_body["output"][0]["name"], "apply_patch");
+    assert_eq!(
+        apply_patch_body["output"][0]["input"],
+        "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"
+    );
+}
+
+#[test]
+fn gemini_response_conformance_ignores_thought_text_in_function_call_only_response() {
+    let gemini = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_reason_call","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"internal summary","thought":true},{"thoughtSignature":"sig-response-1","functionCall":{"id":"call_sqz_1","name":"mcp__prodex_sqz__compress","args":{"text":"large content"}}}]}}]}"#,
+    )
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["output"].as_array().unwrap().len(), 1);
+    assert_eq!(body["output"][0]["type"], "function_call");
+    assert_eq!(
+        body["output"][0]["gemini_thought_signature"],
+        "sig-response-1"
+    );
+}
+
+#[test]
+fn gemini_response_conformance_maps_grounding_and_citation_outputs() {
+    let gemini = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_grounded","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"grounded answer"}]},"finishReason":"STOP","citationMetadata":{"citations":[{"uri":"https://citation.example","title":"Citation"}]},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://ground.example","title":"Ground"}}]},"urlContextMetadata":{"urlMetadata":[{"retrievedUrl":"https://context.example","urlRetrievalStatus":"URL_RETRIEVAL_STATUS_SUCCESS"}]}}]}"#,
+    )
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
+    let output = body["output"].as_array().unwrap();
+    assert!(output.iter().any(|item| item["type"] == "web_search_call"));
+    assert!(output.iter().any(|item| {
+        item["type"] == "message"
+            && item["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text == "Citations:\n(Citation) https://citation.example")
+    }));
+}
+
+#[test]
+fn gemini_response_conformance_maps_media_and_special_parts() {
+    let gemini = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        200,
+        br#"{"responseId":"resp_media","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"executableCode":{"language":"PYTHON","code":"print(2 + 2)"}},{"codeExecutionResult":{"outcome":"OUTCOME_OK","output":"4"}},{"videoMetadata":{"startOffset":"1s","endOffset":"3s"}},{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}},{"fileData":{"fileUri":"https://files.example/doc.pdf","mimeType":"application/pdf"}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":8,"totalTokenCount":32}}"#,
+    )
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(gemini.body.as_ref().unwrap()).unwrap();
+    let output = body["output"].as_array().unwrap();
+    let message = output
+        .iter()
+        .find(|item| item["type"] == "message")
+        .unwrap();
+    let content = message["content"].as_array().unwrap();
+
+    assert!(content.iter().any(|item| {
+        item["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Gemini executable code"))
+    }));
+    assert!(content.iter().any(|item| {
+        item["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Gemini code execution result"))
+    }));
+    assert!(content.iter().any(|item| {
+        item["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Gemini video metadata"))
+    }));
+    assert!(content.iter().any(|item| item["type"] == "input_image"));
+    assert!(content.iter().any(|item| {
+        item["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("application/pdf"))
+    }));
+    assert!(
+        output
+            .iter()
+            .any(|item| item["type"] == "image_generation_call")
+    );
+}
+
+#[test]
+fn response_conformance_result_skips_non_success_status() {
+    assert!(
+        runtime_provider_response_conformance_result(
+            RuntimeProviderBridgeKind::DeepSeek,
+            429,
+            br#"{"error":{"message":"too many requests"}}"#,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn stream_conformance_result_uses_provider_core_translator_for_deepseek_and_gemini() {
+    let deepseek = runtime_provider_stream_event_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        br#"data: {"choices":[{"delta":{"content":"hi"}}]}
+
+"#,
+    );
+    assert!(matches!(deepseek.loss, ProviderTransformLoss::Lossless));
+    assert_eq!(
+        String::from_utf8_lossy(deepseek.body.as_ref().unwrap()),
+        "event: response.output_text.delta\ndata: {\"delta\":\"hi\",\"type\":\"response.output_text.delta\"}\n\n"
+    );
+
+    let gemini = runtime_provider_stream_event_conformance_result(
+        RuntimeProviderBridgeKind::Gemini,
+        br#"data: {"candidates":[{"content":{"parts":[{"text":"gm"}]}}]}
+
+"#,
+    );
+    assert!(matches!(gemini.loss, ProviderTransformLoss::Lossless));
+    assert_eq!(
+        String::from_utf8_lossy(gemini.body.as_ref().unwrap()),
+        "event: response.output_text.delta\ndata: {\"delta\":\"gm\",\"type\":\"response.output_text.delta\"}\n\n"
+    );
+}
+
+#[test]
+fn stream_conformance_result_reports_unsupported_for_non_sse_payload() {
+    let result = runtime_provider_stream_event_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        b"not-sse",
+    );
+    assert!(matches!(
+        result.loss,
+        ProviderTransformLoss::UnsupportedUpstream { .. }
+    ));
+}
+
+#[test]
+fn stream_text_delta_event_uses_provider_core_for_gemini_and_deepseek() {
+    let deepseek = runtime_provider_stream_text_delta_event(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &serde_json::json!({
+            "choices": [{
+                "delta": {
+                    "content": "hi"
+                }
+            }]
+        }),
+        7,
+        123,
+        "resp_ds",
+    )
+    .unwrap();
+    assert_eq!(deepseek.0, "response.output_text.delta");
+    assert_eq!(deepseek.1["type"], "response.output_text.delta");
+    assert_eq!(deepseek.1["delta"], "hi");
+    assert_eq!(deepseek.1["sequence_number"], 7);
+    assert_eq!(deepseek.1["created_at"], 123);
+    assert_eq!(deepseek.1["response_id"], "resp_ds");
+
+    let gemini = runtime_provider_stream_text_delta_event(
+        RuntimeProviderBridgeKind::Gemini,
+        &serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "gm"
+                    }]
+                }
+            }]
+        }),
+        9,
+        456,
+        "resp_gm",
+    )
+    .unwrap();
+    assert_eq!(gemini.0, "response.output_text.delta");
+    assert_eq!(gemini.1["type"], "response.output_text.delta");
+    assert_eq!(gemini.1["delta"], "gm");
+    assert_eq!(gemini.1["sequence_number"], 9);
+    assert_eq!(gemini.1["created_at"], 456);
+    assert_eq!(gemini.1["response_id"], "resp_gm");
+}
+
+#[test]
+fn stream_function_call_arguments_delta_event_uses_provider_core_for_gemini_and_deepseek() {
+    let deepseek = runtime_provider_stream_function_call_arguments_delta_event(
+        RuntimeProviderBridgeKind::DeepSeek,
+        &serde_json::json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "id": "call_ds",
+                        "function": {
+                            "arguments": "{\"cmd\":\"rtk ls\"}"
+                        }
+                    }]
+                }
+            }]
+        }),
+        11,
+    )
+    .unwrap();
+    assert_eq!(deepseek.0, "response.function_call_arguments.delta");
+    assert_eq!(deepseek.1["type"], "response.function_call_arguments.delta");
+    assert_eq!(deepseek.1["call_id"], "call_ds");
+    assert_eq!(deepseek.1["delta"], "{\"cmd\":\"rtk ls\"}");
+    assert_eq!(deepseek.1["sequence_number"], 11);
+
+    let gemini = runtime_provider_stream_function_call_arguments_delta_event(
+        RuntimeProviderBridgeKind::Gemini,
+        &serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "functionCall": {
+                            "id": "call_gm",
+                            "name": "shell",
+                            "args": {"cmd":"rtk ls"}
+                        }
+                    }]
+                }
+            }]
+        }),
+        12,
+    )
+    .unwrap();
+    assert_eq!(gemini.0, "response.function_call_arguments.delta");
+    assert_eq!(gemini.1["type"], "response.function_call_arguments.delta");
+    assert_eq!(gemini.1["call_id"], "call_gm");
+    assert_eq!(gemini.1["delta"], "{\"cmd\":\"rtk ls\"}");
+    assert_eq!(gemini.1["sequence_number"], 12);
+}
+
+#[test]
+fn stream_reasoning_summary_text_delta_event_uses_provider_core_for_gemini() {
+    let gemini = runtime_provider_stream_reasoning_summary_text_delta_event(
+        RuntimeProviderBridgeKind::Gemini,
+        &serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "text": "internal summary",
+                        "thought": true
+                    }]
+                }
+            }]
+        }),
+        13,
+        "resp_gm",
+        0,
+    )
+    .unwrap();
+    assert_eq!(gemini.0, "response.reasoning_summary_text.delta");
+    assert_eq!(gemini.1["type"], "response.reasoning_summary_text.delta");
+    assert_eq!(gemini.1["delta"], "internal summary");
+    assert_eq!(gemini.1["sequence_number"], 13);
+    assert_eq!(gemini.1["response_id"], "resp_gm");
+    assert_eq!(gemini.1["summary_index"], 0);
+}

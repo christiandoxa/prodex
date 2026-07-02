@@ -272,8 +272,8 @@ pub fn repair_resume_session_metadata_prefix(
                     state_db_match_kind: None,
                     resolved_session_id: None,
                 });
-            } else if session_path_might_contain_selector_prefix(&candidate.path, selector)
-                && let Ok(Some(path)) = session_file_repair_match(&candidate.path, selector, true)
+            } else if let Ok(Some(path)) =
+                session_file_repair_match(&candidate.path, selector, true)
             {
                 exact_paths.push(SessionRepairCandidate {
                     path,
@@ -900,17 +900,6 @@ fn session_path_id_matching_selector(path: &Path, selector: &str, exact: bool) -
         .windows(5)
         .map(|parts| parts.join("-"))
         .find(|candidate| session_id_matches_selector(candidate, selector, exact))
-}
-
-fn session_path_might_contain_selector_prefix(path: &Path, selector: &str) -> bool {
-    let Some(prefix) = selector.split('-').next() else {
-        return false;
-    };
-    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-        return false;
-    };
-    stem.to_ascii_lowercase()
-        .contains(&prefix.to_ascii_lowercase())
 }
 
 fn session_id_matches_selector(id: &str, selector: &str, exact: bool) -> bool {

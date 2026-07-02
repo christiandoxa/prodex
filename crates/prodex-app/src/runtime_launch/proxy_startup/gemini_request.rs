@@ -1,6 +1,8 @@
 use super::super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, runtime_deepseek_chat_request_body,
+    RuntimeDeepSeekConversationStore, RuntimeDeepSeekRewriteOptions,
+    runtime_chat_compatible_request_body,
 };
+use super::super::provider_bridge::RuntimeProviderBridgeKind;
 use super::RuntimeGeminiTranslatedRequest;
 use super::gemini_command_output::runtime_gemini_structured_command_tool_response;
 use super::gemini_history_hardening::runtime_gemini_harden_contents;
@@ -100,7 +102,14 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
 ) -> Result<RuntimeGeminiTranslatedRequest> {
     let original: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
-    let chat = runtime_deepseek_chat_request_body(body, conversations)?;
+    let chat = runtime_chat_compatible_request_body(
+        body,
+        conversations,
+        RuntimeProviderBridgeKind::Gemini,
+        GEMINI_DEFAULT_MODEL,
+        true,
+        RuntimeDeepSeekRewriteOptions::default(),
+    )?;
     let chat_value: serde_json::Value = serde_json::from_slice(&chat.body)
         .context("failed to parse translated chat request JSON")?;
     let model = chat_value
@@ -224,6 +233,12 @@ fn runtime_gemini_contents_from_chat(
                             if let Some(signature) = tool_call
                                 .get("gemini_thought_signature")
                                 .or_else(|| function.get("gemini_thought_signature"))
+                                .or_else(|| {
+                                    tool_call
+                                        .get("extra_content")
+                                        .and_then(|value| value.get("google"))
+                                        .and_then(|value| value.get("thought_signature"))
+                                })
                                 .and_then(serde_json::Value::as_str)
                                 .filter(|signature| !signature.trim().is_empty())
                             {

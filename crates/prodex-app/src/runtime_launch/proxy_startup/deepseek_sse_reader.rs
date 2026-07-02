@@ -1,6 +1,8 @@
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::deepseek_sse::RuntimeDeepSeekSseState;
-use super::provider_sse_reader::{RuntimeProviderSseJsonReader, RuntimeProviderSseJsonState};
+use super::provider_sse_reader::{
+    RuntimeProviderSseJsonReader, RuntimeProviderSseJsonState, RuntimeProviderSseObserver,
+};
 use std::io::{self, Read};
 
 pub(super) struct RuntimeDeepSeekChatSseReader<R: Read> {
@@ -8,6 +10,7 @@ pub(super) struct RuntimeDeepSeekChatSseReader<R: Read> {
 }
 
 impl<R: Read> RuntimeDeepSeekChatSseReader<R> {
+    #[cfg(test)]
     pub(super) fn new(
         reader: R,
         request_id: u64,
@@ -15,8 +18,26 @@ impl<R: Read> RuntimeDeepSeekChatSseReader<R> {
         response_metadata: Option<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
     ) -> Self {
+        Self::new_with_observer(
+            reader,
+            request_id,
+            conversation_messages,
+            response_metadata,
+            conversations,
+            None,
+        )
+    }
+
+    pub(super) fn new_with_observer(
+        reader: R,
+        request_id: u64,
+        conversation_messages: Vec<serde_json::Value>,
+        response_metadata: Option<serde_json::Value>,
+        conversations: RuntimeDeepSeekConversationStore,
+        observer: Option<RuntimeProviderSseObserver>,
+    ) -> Self {
         Self {
-            inner: RuntimeProviderSseJsonReader::new(
+            inner: RuntimeProviderSseJsonReader::new_with_observer(
                 reader,
                 RuntimeDeepSeekSseState::new(
                     request_id,
@@ -24,6 +45,7 @@ impl<R: Read> RuntimeDeepSeekChatSseReader<R> {
                     response_metadata,
                     conversations,
                 ),
+                observer,
             ),
         }
     }

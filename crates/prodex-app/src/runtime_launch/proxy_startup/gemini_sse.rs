@@ -1,6 +1,8 @@
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::gemini_rewrite::runtime_gemini_normalized_response_value;
-use super::provider_sse_reader::{RuntimeProviderSseJsonReader, RuntimeProviderSseJsonState};
+use super::provider_sse_reader::{
+    RuntimeProviderSseJsonReader, RuntimeProviderSseJsonState, RuntimeProviderSseObserver,
+};
 use std::io::{self, Read};
 use std::sync::Arc;
 
@@ -26,8 +28,26 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
     ) -> Self {
+        Self::new_with_observer(
+            reader,
+            request_id,
+            conversation_messages,
+            conversations,
+            binding_recorder,
+            None,
+        )
+    }
+
+    pub(super) fn new_with_observer(
+        reader: R,
+        request_id: u64,
+        conversation_messages: Vec<serde_json::Value>,
+        conversations: RuntimeDeepSeekConversationStore,
+        binding_recorder: Option<RuntimeGeminiBindingRecorder>,
+        observer: Option<RuntimeProviderSseObserver>,
+    ) -> Self {
         Self {
-            inner: RuntimeProviderSseJsonReader::new(
+            inner: RuntimeProviderSseJsonReader::new_with_observer(
                 reader,
                 RuntimeGeminiSseState::new(
                     request_id,
@@ -35,6 +55,7 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
                     conversations,
                     binding_recorder,
                 ),
+                observer,
             ),
         }
     }

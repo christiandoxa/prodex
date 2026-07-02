@@ -1,5 +1,8 @@
 use super::super::super::deepseek_rewrite::runtime_deepseek_rtk_wrapped_tool_arguments;
 use super::super::super::gemini_rewrite::runtime_gemini_custom_tool_input_from_arguments;
+use super::super::super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_stream_function_call_arguments_delta_event,
+};
 use super::RuntimeGeminiSseState;
 use super::runtime_gemini_blocked_tool_call_item;
 use super::runtime_gemini_blocked_tool_call_message;
@@ -90,11 +93,33 @@ impl RuntimeGeminiSseState {
 
         if name != "tool_search" && name != "apply_patch" {
             let sequence_number = self.next_sequence_number();
-            let mut delta_event = serde_json::json!({
-                "type": "response.function_call_arguments.delta",
-                "sequence_number": sequence_number,
-                "call_id": call_id,
-                "delta": args,
+            let upstream_value = serde_json::json!({
+                "candidates": [{
+                    "content": {
+                        "parts": [{
+                            "functionCall": {
+                                "id": call_id,
+                                "name": name,
+                                "args": serde_json::from_str::<serde_json::Value>(&args)
+                                    .unwrap_or_else(|_| serde_json::json!({})),
+                            }
+                        }]
+                    }
+                }]
+            });
+            let mut delta_event = runtime_provider_stream_function_call_arguments_delta_event(
+                RuntimeProviderBridgeKind::Gemini,
+                &upstream_value,
+                sequence_number,
+            )
+            .map(|(_, data)| data)
+            .unwrap_or_else(|| {
+                serde_json::json!({
+                    "type": "response.function_call_arguments.delta",
+                    "sequence_number": sequence_number,
+                    "call_id": call_id,
+                    "delta": args,
+                })
             });
             if let Some(ref signature) = thought_signature.clone() {
                 delta_event["thought_signature"] = serde_json::Value::String(signature.to_string());

@@ -73,6 +73,7 @@ pub(crate) enum RuntimeDeepSeekWebSearchMode {
     FunctionProxy,
 }
 
+#[cfg(test)]
 pub(super) fn runtime_deepseek_chat_request_body(
     body: &[u8],
     conversations: &RuntimeDeepSeekConversationStore,
@@ -107,6 +108,7 @@ pub(super) fn runtime_chat_compatible_request_body(
     include_reasoning_params: bool,
     options: RuntimeDeepSeekRewriteOptions,
 ) -> Result<RuntimeDeepSeekTranslatedRequest> {
+    let gemini_compat = provider_kind == RuntimeProviderBridgeKind::Gemini;
     let value: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
     runtime_deepseek_reject_beta_completion_fields(&value)?;
@@ -124,13 +126,14 @@ pub(super) fn runtime_chat_compatible_request_body(
     request.insert("model".to_string(), serde_json::Value::String(model));
     request.insert("stream".to_string(), serde_json::Value::Bool(stream));
     let thinking_enabled = runtime_deepseek_thinking_enabled(&value);
-    let mut messages = runtime_deepseek_messages_from_responses_request(&value, conversations)?
-        .unwrap_or_else(|| {
-            vec![serde_json::json!({
-                "role": "user",
-                "content": "",
-            })]
-        });
+    let mut messages =
+        runtime_deepseek_messages_from_responses_request(&value, conversations, gemini_compat)?
+            .unwrap_or_else(|| {
+                vec![serde_json::json!({
+                    "role": "user",
+                    "content": "",
+                })]
+            });
     runtime_deepseek_repair_tool_call_adjacency(&mut messages);
     if provider_kind == RuntimeProviderBridgeKind::Gemini {
         runtime_gemini_openai_preserve_tool_call_signatures(&mut messages);
@@ -166,7 +169,7 @@ pub(super) fn runtime_chat_compatible_request_body(
         )?;
     }
     let mut tool_names = BTreeSet::new();
-    runtime_deepseek_validate_tools_shape(&value)?;
+    runtime_deepseek_validate_tools_shape(&value, gemini_compat)?;
     if let Some(tools) = runtime_deepseek_tools_from_responses_request(&value) {
         let tools = runtime_deepseek_dedup_and_validate_function_tools(tools, options)?;
         if tools.len() > 128 {
@@ -175,8 +178,9 @@ pub(super) fn runtime_chat_compatible_request_body(
         tool_names.extend(tools.iter().filter_map(runtime_deepseek_function_tool_name));
         request.insert("tools".to_string(), serde_json::Value::Array(tools));
     }
-    if let Some(web_search_options) =
-        runtime_deepseek_web_search_options_from_responses_request(&value)?
+    if !gemini_compat
+        && let Some(web_search_options) =
+            runtime_deepseek_web_search_options_from_responses_request(&value)?
     {
         runtime_deepseek_apply_web_search_mode(&mut request, web_search_options, options)?;
     }
@@ -189,7 +193,9 @@ pub(super) fn runtime_chat_compatible_request_body(
         request.insert("tool_choice".to_string(), tool_choice);
     }
     runtime_deepseek_insert_primitive_request_fields(&value, &mut request)?;
-    runtime_deepseek_reject_unsupported_request_fields(&value)?;
+    if !gemini_compat {
+        runtime_deepseek_reject_unsupported_request_fields(&value)?;
+    }
     if let Some(stop) = runtime_deepseek_stop_from_responses_request(&value)? {
         request.insert("stop".to_string(), stop);
     }
@@ -280,6 +286,7 @@ fn runtime_gemini_openai_preserve_tool_call_signatures(messages: &mut [serde_jso
 fn runtime_deepseek_messages_from_responses_request(
     value: &serde_json::Value,
     conversations: &RuntimeDeepSeekConversationStore,
+    gemini_compat: bool,
 ) -> Result<Option<Vec<serde_json::Value>>> {
     let mut messages = Vec::new();
     let mut history_messages = Vec::new();
@@ -323,7 +330,7 @@ fn runtime_deepseek_messages_from_responses_request(
         }
         Some(serde_json::Value::Array(items)) => {
             for item in items {
-                runtime_deepseek_validate_supported_input_item(item)?;
+                runtime_deepseek_validate_supported_input_item(item, gemini_compat)?;
                 runtime_deepseek_push_message_from_responses_item(
                     item,
                     &mut messages,
@@ -343,7 +350,10 @@ fn runtime_deepseek_messages_from_responses_request(
     }
 }
 
-fn runtime_deepseek_validate_supported_input_item(item: &serde_json::Value) -> Result<()> {
+fn runtime_deepseek_validate_supported_input_item(
+    item: &serde_json::Value,
+    gemini_compat: bool,
+) -> Result<()> {
     let Some(object) = item.as_object() else {
         anyhow::bail!("DeepSeek input items must be objects");
     };
@@ -351,7 +361,10 @@ fn runtime_deepseek_validate_supported_input_item(item: &serde_json::Value) -> R
     match object.get("type").and_then(serde_json::Value::as_str) {
         Some("message") => {
             runtime_deepseek_validate_input_message_role(object)?;
-            runtime_deepseek_validate_supported_message_content(object.get("content"))
+            runtime_deepseek_validate_supported_message_content(
+                object.get("content"),
+                gemini_compat,
+            )
         }
         Some("function_call" | "custom_tool_call" | "mcp_call") => {
             runtime_deepseek_validate_input_tool_call_item(object)
@@ -459,15 +472,16 @@ fn runtime_deepseek_input_item_tool_name(
 
 fn runtime_deepseek_validate_supported_message_content(
     content: Option<&serde_json::Value>,
+    gemini_compat: bool,
 ) -> Result<()> {
     match content {
         Some(serde_json::Value::Array(parts)) => {
             for part in parts {
-                runtime_deepseek_validate_supported_content_part(part)?;
+                runtime_deepseek_validate_supported_content_part(part, gemini_compat)?;
             }
         }
         Some(content @ serde_json::Value::Object(_)) => {
-            runtime_deepseek_validate_supported_content_part(content)?;
+            runtime_deepseek_validate_supported_content_part(content, gemini_compat)?;
         }
         Some(serde_json::Value::String(_)) | None => {}
         Some(_) => anyhow::bail!("DeepSeek message content must be a string, object, or array"),
@@ -475,7 +489,10 @@ fn runtime_deepseek_validate_supported_message_content(
     Ok(())
 }
 
-fn runtime_deepseek_validate_supported_content_part(part: &serde_json::Value) -> Result<()> {
+fn runtime_deepseek_validate_supported_content_part(
+    part: &serde_json::Value,
+    gemini_compat: bool,
+) -> Result<()> {
     let Some(object) = part.as_object() else {
         return Ok(());
     };
@@ -499,6 +516,20 @@ fn runtime_deepseek_validate_supported_content_part(part: &serde_json::Value) ->
             "DeepSeek text-only adapter does not support object message content parts without text or type"
         );
     };
+    if gemini_compat
+        && matches!(
+            part_type,
+            "input_image"
+                | "image_url"
+                | "input_file"
+                | "file"
+                | "media"
+                | "input_audio"
+                | "input_video"
+        )
+    {
+        return Ok(());
+    }
     if matches!(part_type, "input_text" | "output_text" | "text") {
         anyhow::bail!("DeepSeek {part_type} content parts require a text field");
     }
@@ -1130,7 +1161,10 @@ fn runtime_deepseek_reject_unsupported_request_fields(value: &serde_json::Value)
     Ok(())
 }
 
-fn runtime_deepseek_validate_tools_shape(value: &serde_json::Value) -> Result<()> {
+fn runtime_deepseek_validate_tools_shape(
+    value: &serde_json::Value,
+    gemini_compat: bool,
+) -> Result<()> {
     let Some(tools) = value.get("tools") else {
         return Ok(());
     };
@@ -1157,6 +1191,24 @@ fn runtime_deepseek_validate_tools_shape(value: &serde_json::Value) -> Result<()
             || tool_type == "web_search"
             || tool_type == "web_search_preview"
             || tool_type.starts_with("web_search_preview_")
+            || (gemini_compat
+                && matches!(
+                    tool_type,
+                    "web_fetch"
+                        | "url_context"
+                        | "urlContext"
+                        | "web_fetch_preview"
+                        | "code_interpreter"
+                        | "code_execution"
+                        | "codeExecution"
+                        | "computer"
+                        | "computer_use"
+                        | "computerUse"
+                        | "computer_use_preview"
+                ))
+            || (gemini_compat
+                && (tool_type.starts_with("web_fetch_preview_")
+                    || tool_type.starts_with("computer_")))
         {
             runtime_deepseek_validate_optional_string(object, "description", "tool description")?;
             if let Some(function) = object
@@ -1717,10 +1769,11 @@ fn runtime_deepseek_apply_web_search_mode(
 ) -> Result<()> {
     match options.web_search_mode {
         RuntimeDeepSeekWebSearchMode::Auto => {
-            // ponytail: auto = forward like 0.231.0; same path as openai_chat
-            runtime_deepseek_validate_web_search_options(&web_search_options)?;
-            request.insert("web_search_options".to_string(), web_search_options);
-            Ok(())
+            let _ = request;
+            let _ = web_search_options;
+            anyhow::bail!(
+                "DeepSeek web search auto mode has no documented native OpenAI Chat route yet; set deepseek.web_search_mode=openai_chat for best-effort forwarding"
+            )
         }
         RuntimeDeepSeekWebSearchMode::OpenAiChat => {
             runtime_deepseek_validate_web_search_options(&web_search_options)?;

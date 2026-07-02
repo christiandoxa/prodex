@@ -18,12 +18,14 @@ use super::local_rewrite_transport::{
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
-    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
+    runtime_provider_log_request_conformance, runtime_provider_model_fallback_chain,
+    runtime_provider_request_body_with_model, runtime_provider_request_conformance_result,
     runtime_provider_should_retry_with_next_model,
     runtime_provider_should_rotate_auth_after_response,
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::Result;
+use prodex_provider_core::ProviderTransformLoss;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -106,7 +108,20 @@ fn send_runtime_deepseek_responses_request(
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
-            let translated = runtime_deepseek_chat_request_body_with_options(
+            let conformance = runtime_provider_request_conformance_result(
+                RuntimeProviderBridgeKind::DeepSeek,
+                request,
+                &model_body,
+            );
+            if let Some(result) = conformance.as_ref() {
+                runtime_provider_log_request_conformance(
+                    &shared.runtime_shared,
+                    request_id,
+                    RuntimeProviderBridgeKind::DeepSeek,
+                    &result,
+                );
+            }
+            let mut translated = runtime_deepseek_chat_request_body_with_options(
                 &model_body,
                 &shared.deepseek_conversations,
                 RuntimeDeepSeekRewriteOptions {
@@ -114,6 +129,13 @@ fn send_runtime_deepseek_responses_request(
                     web_search_mode,
                 },
             )?;
+            if runtime_deepseek_provider_core_simple_request(&model_body)
+                && let Some(body) = conformance
+                    .as_ref()
+                    .and_then(runtime_deepseek_provider_core_request_body)
+            {
+                translated.body = body;
+            }
             if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
                 pending.insert(
                     request_id,
@@ -269,5 +291,350 @@ fn runtime_deepseek_live_result(
         )),
         gemini_context: None,
         copilot_context: None,
+    }
+}
+
+fn runtime_deepseek_provider_core_simple_request(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object.contains_key("previous_response_id")
+        || object.contains_key("instructions")
+        || object.contains_key("tools")
+        || object.contains_key("tool_choice")
+        || object.contains_key("response_format")
+        || object.contains_key("web_search_options")
+        || object.contains_key("safety_identifier")
+    {
+        return false;
+    }
+    match object.get("input") {
+        Some(serde_json::Value::String(_)) => true,
+        Some(serde_json::Value::Array(items)) => {
+            items.iter().all(runtime_deepseek_simple_input_item)
+        }
+        _ => false,
+    }
+}
+
+fn runtime_deepseek_simple_input_item(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    match object.get("type").and_then(serde_json::Value::as_str) {
+        Some("message") | None => {}
+        Some("function_call_output") => {
+            return object
+                .get("call_id")
+                .is_some_and(serde_json::Value::is_string)
+                && object.get("output").is_some();
+        }
+        Some("mcp_tool_result") | Some("mcp_call_output") => {
+            return object
+                .get("call_id")
+                .or_else(|| object.get("tool_call_id"))
+                .or_else(|| object.get("id"))
+                .is_some_and(serde_json::Value::is_string)
+                && ["output", "content", "result", "error"]
+                    .iter()
+                    .any(|key| object.contains_key(*key));
+        }
+        Some("custom_tool_call_output") => {
+            return object
+                .get("call_id")
+                .is_some_and(serde_json::Value::is_string)
+                && ["output", "content", "result", "error"]
+                    .iter()
+                    .any(|key| object.contains_key(*key));
+        }
+        Some("function_call") => {
+            let has_name = object
+                .get("name")
+                .or_else(|| object.get("tool_name"))
+                .or_else(|| {
+                    object
+                        .get("function")
+                        .and_then(|function| function.get("name"))
+                })
+                .is_some_and(serde_json::Value::is_string);
+            return has_name
+                && object
+                    .get("call_id")
+                    .or_else(|| object.get("tool_call_id"))
+                    .or_else(|| object.get("id"))
+                    .is_none_or(serde_json::Value::is_string);
+        }
+        Some("mcp_call") => {
+            let has_name = object
+                .get("name")
+                .or_else(|| object.get("tool_name"))
+                .or_else(|| {
+                    object
+                        .get("function")
+                        .and_then(|function| function.get("name"))
+                })
+                .is_some_and(serde_json::Value::is_string);
+            return has_name
+                && object
+                    .get("call_id")
+                    .or_else(|| object.get("tool_call_id"))
+                    .or_else(|| object.get("id"))
+                    .is_none_or(serde_json::Value::is_string);
+        }
+        Some("custom_tool_call") => {
+            let has_name = object
+                .get("name")
+                .or_else(|| object.get("tool_name"))
+                .is_some_and(serde_json::Value::is_string);
+            return has_name
+                && object
+                    .get("call_id")
+                    .or_else(|| object.get("tool_call_id"))
+                    .or_else(|| object.get("id"))
+                    .is_none_or(serde_json::Value::is_string);
+        }
+        Some("local_shell_call") => {
+            let has_call_id = object
+                .get("call_id")
+                .or_else(|| object.get("tool_call_id"))
+                .or_else(|| object.get("id"))
+                .is_none_or(serde_json::Value::is_string);
+            let has_command = object
+                .get("command")
+                .is_some_and(serde_json::Value::is_string)
+                || object
+                    .get("action")
+                    .and_then(|action| action.get("command"))
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|parts| parts.iter().all(serde_json::Value::is_string));
+            return has_call_id && has_command;
+        }
+        Some(_) => return false,
+    }
+    let role = object
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("user");
+    if !matches!(role, "system" | "user" | "assistant" | "tool") {
+        return false;
+    }
+    match object.get("content") {
+        Some(serde_json::Value::String(_)) | None => true,
+        Some(serde_json::Value::Array(parts)) => {
+            parts.iter().all(runtime_deepseek_simple_content_item)
+        }
+        _ => false,
+    }
+}
+
+fn runtime_deepseek_simple_content_item(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object
+        .get("type")
+        .is_some_and(|value| !matches!(value.as_str(), Some("input_text" | "output_text" | "text")))
+    {
+        return false;
+    }
+    object
+        .get("text")
+        .or_else(|| object.get("input_text"))
+        .or_else(|| object.get("output_text"))
+        .is_some_and(serde_json::Value::is_string)
+}
+
+fn runtime_deepseek_provider_core_request_body(
+    result: &prodex_provider_core::ProviderTransformResult,
+) -> Option<Vec<u8>> {
+    match result.loss {
+        ProviderTransformLoss::Lossless | ProviderTransformLoss::DegradedButSafe { .. } => {
+            result.body.clone()
+        }
+        ProviderTransformLoss::Rejected { .. }
+        | ProviderTransformLoss::UnsupportedUpstream { .. } => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::runtime_deepseek_provider_core_simple_request;
+
+    #[test]
+    fn deepseek_provider_core_simple_request_accepts_plain_text_first_turn() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": "hello",
+            "stream": true,
+            "temperature": 0.2
+        }))
+        .unwrap();
+        assert!(runtime_deepseek_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn deepseek_provider_core_simple_request_accepts_message_content_arrays() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": "You are Codex."}]
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "read commit history"}]
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_deepseek_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn deepseek_provider_core_simple_request_accepts_assistant_tool_history() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "find the symbol"}]
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": ""}],
+                    "tool_calls": [
+                        {
+                            "id":"call_1",
+                            "type":"function",
+                            "function":{
+                                "name":"grep",
+                                "arguments":"{\"pattern\":\"ProviderTranslator\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "message",
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": [{"type": "output_text", "text": "{\"match_count\":1}"}]
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_deepseek_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn deepseek_provider_core_simple_request_accepts_function_call_and_output_items() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "find the symbol"}]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "grep",
+                    "arguments": {"pattern": "ProviderTranslator"}
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "{\"match_count\":1}"
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_deepseek_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn deepseek_provider_core_simple_request_accepts_custom_and_shell_call_items() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_patch_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** End Patch"
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_patch_1",
+                    "output": "applied"
+                },
+                {
+                    "type": "local_shell_call",
+                    "call_id": "call_shell_1",
+                    "action": {
+                        "command": ["git", "status", "--short"]
+                    }
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_shell_1",
+                    "output": " M Cargo.toml"
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_deepseek_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn deepseek_provider_core_simple_request_accepts_mcp_call_and_result_items() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [
+                {
+                    "type": "mcp_call",
+                    "id": "call_sqz_1",
+                    "name": "mcp__prodex_sqz__compress",
+                    "arguments": {"text": "large repeated content"},
+                    "output": "ref:abc123"
+                },
+                {
+                    "type": "mcp_tool_result",
+                    "call_id": "call_sqz_1",
+                    "content": [{"type": "output_text", "text": "ref:abc123"}]
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_deepseek_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn deepseek_provider_core_simple_request_rejects_continuations_and_tools() {
+        let continuation = serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": "hello",
+            "previous_response_id": "resp_1"
+        }))
+        .unwrap();
+        assert!(!runtime_deepseek_provider_core_simple_request(
+            &continuation
+        ));
+
+        let tools = serde_json::to_vec(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": "hello",
+            "tools": [{"type":"function","function":{"name":"search"}}]
+        }))
+        .unwrap();
+        assert!(!runtime_deepseek_provider_core_simple_request(&tools));
     }
 }

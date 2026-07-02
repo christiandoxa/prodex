@@ -24,6 +24,10 @@ use super::local_rewrite_response_guardrails::runtime_gateway_guardrail_stream_b
 use super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
 };
+use super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_log_stream_conformance,
+    runtime_provider_stream_event_conformance_result,
+};
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeStreamingResponse,
     build_runtime_proxy_json_error_response, build_runtime_proxy_response_from_parts,
@@ -447,12 +451,29 @@ fn respond_runtime_chat_compatible_rewrite(
         )];
         append_text_rate_limit_headers(&mut headers, rate_limit_headers);
         runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-        let reader = RuntimeDeepSeekChatSseReader::new(
+        let observer = {
+            let shared = shared.runtime_shared.clone();
+            Arc::new(move |value: &serde_json::Value| {
+                let body = format!("data: {}\n\n", value).into_bytes();
+                let result = runtime_provider_stream_event_conformance_result(
+                    RuntimeProviderBridgeKind::DeepSeek,
+                    &body,
+                );
+                runtime_provider_log_stream_conformance(
+                    &shared,
+                    request_id,
+                    RuntimeProviderBridgeKind::DeepSeek,
+                    &result,
+                );
+            })
+        };
+        let reader = RuntimeDeepSeekChatSseReader::new_with_observer(
             response,
             request_id,
             conversation_messages,
             response_metadata,
             Arc::clone(&shared.deepseek_conversations),
+            Some(observer),
         );
         let body: Box<dyn Read + Send> = if let Some(binding_recorder) = binding_recorder {
             Box::new(RuntimeCopilotResponsesSseBindingReader::new(
@@ -491,6 +512,7 @@ fn respond_runtime_chat_compatible_rewrite(
         conversation_messages,
         response_metadata,
         &shared.deepseek_conversations,
+        &shared.runtime_shared,
     )
     .map(|mut parts| {
         runtime_copilot_remember_bindings_from_responses_body(
@@ -558,13 +580,31 @@ fn respond_runtime_gemini_rewrite(
         } else {
             Box::new(std::io::Cursor::new(prefix).chain(response))
         };
-        let body: Box<dyn Read + Send> = Box::new(RuntimeGeminiGenerateSseReader::new(
-            body,
-            request_id,
-            conversation_messages,
-            Arc::clone(&shared.gemini_conversations),
-            binding_recorder,
-        ));
+        let observer = {
+            let shared = shared.runtime_shared.clone();
+            Arc::new(move |value: &serde_json::Value| {
+                let body = format!("data: {}\n\n", value).into_bytes();
+                let result = runtime_provider_stream_event_conformance_result(
+                    RuntimeProviderBridgeKind::Gemini,
+                    &body,
+                );
+                runtime_provider_log_stream_conformance(
+                    &shared,
+                    request_id,
+                    RuntimeProviderBridgeKind::Gemini,
+                    &result,
+                );
+            })
+        };
+        let body: Box<dyn Read + Send> =
+            Box::new(RuntimeGeminiGenerateSseReader::new_with_observer(
+                body,
+                request_id,
+                conversation_messages,
+                Arc::clone(&shared.gemini_conversations),
+                binding_recorder,
+                Some(observer),
+            ));
         let body = runtime_gateway_spend_stream_body(
             runtime_gateway_guardrail_stream_body(body, request_id, shared),
             request_id,
@@ -593,6 +633,7 @@ fn respond_runtime_gemini_rewrite(
         request_id,
         conversation_messages,
         &shared.gemini_conversations,
+        &shared.runtime_shared,
     )
     .map(|mut parts| {
         runtime_gemini_remember_bindings_from_responses_body(

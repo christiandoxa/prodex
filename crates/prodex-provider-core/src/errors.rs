@@ -51,7 +51,10 @@ pub fn classify_provider_error(
             cooldown_ms: 60_000,
         };
     }
-    if status == Some(404) {
+    if status == Some(404)
+        || matches!(normalized_code.as_str(), "model_not_supported")
+        || normalized_text.contains("model is not supported")
+    {
         return ProviderErrorClassification {
             class: ProviderErrorClass::NotFound,
             cooldown_ms: 0,

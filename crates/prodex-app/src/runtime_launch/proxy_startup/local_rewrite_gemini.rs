@@ -33,11 +33,13 @@ use super::local_rewrite_transport::{
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
-    runtime_provider_error_cooldown_ms, runtime_provider_model_from_body,
-    runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
+    runtime_provider_error_cooldown_ms, runtime_provider_log_request_conformance,
+    runtime_provider_model_from_body, runtime_provider_request_body_with_model,
+    runtime_provider_request_conformance_result, runtime_provider_should_retry_with_next_model,
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result, bail};
+use prodex_provider_core::ProviderTransformLoss;
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
@@ -192,6 +194,23 @@ pub(super) fn send_runtime_gemini_upstream_request(
             } else {
                 base_body.clone()
             };
+            let conformance = if responses_route {
+                runtime_provider_request_conformance_result(
+                    RuntimeProviderBridgeKind::Gemini,
+                    request,
+                    &model_body,
+                )
+            } else {
+                None
+            };
+            if let Some(result) = conformance.as_ref() {
+                runtime_provider_log_request_conformance(
+                    &shared.runtime_shared,
+                    request_id,
+                    RuntimeProviderBridgeKind::Gemini,
+                    &result,
+                );
+            }
             let mut translated = if responses_route {
                 runtime_gemini_generate_request_body(
                     &model_body,
@@ -208,6 +227,14 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     stream: false,
                 }
             };
+            if responses_route
+                && runtime_gemini_provider_core_simple_request(&model_body)
+                && let Some(body) = conformance.as_ref().and_then(|result| {
+                    runtime_gemini_provider_core_request_body(result, &translated.body)
+                })
+            {
+                translated.body = body;
+            }
             harden_thoughts(
                 shared,
                 request_id,
@@ -680,6 +707,380 @@ pub(super) fn send_runtime_gemini_upstream_request(
     }
 
     bail!("no Gemini auth attempts were available")
+}
+
+fn runtime_gemini_provider_core_simple_request(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if let Some(tools) = object.get("tools") {
+        let Some(tools) = tools.as_array() else {
+            return false;
+        };
+        if !tools.iter().all(runtime_gemini_provider_core_builtin_tool) {
+            return false;
+        }
+        if object
+            .get("tool_choice")
+            .is_some_and(|value| !runtime_gemini_provider_core_builtin_tool_choice(value))
+        {
+            return false;
+        }
+    }
+    match object.get("input") {
+        Some(serde_json::Value::String(_)) => true,
+        Some(serde_json::Value::Array(items)) => items.iter().all(runtime_gemini_simple_input_item),
+        _ => false,
+    }
+}
+
+fn runtime_gemini_simple_input_item(item: &serde_json::Value) -> bool {
+    let Some(object) = item.as_object() else {
+        return false;
+    };
+    if object
+        .get("type")
+        .is_some_and(|value| value.as_str() != Some("message"))
+    {
+        return false;
+    }
+    let role = object
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("user");
+    if !matches!(role, "system" | "user" | "assistant" | "tool") {
+        return false;
+    }
+    match object.get("content") {
+        Some(serde_json::Value::String(_)) | None => {}
+        Some(serde_json::Value::Array(items))
+            if items.iter().all(runtime_gemini_simple_content_item) => {}
+        _ => return false,
+    }
+    if object.get("gemini_native_parts").is_some() {
+        return false;
+    }
+    if role == "assistant" {
+        return object
+            .get("tool_calls")
+            .is_none_or(runtime_gemini_simple_tool_calls);
+    }
+    if role == "tool" {
+        return object
+            .get("tool_call_id")
+            .is_none_or(serde_json::Value::is_string)
+            && object.get("name").is_none_or(serde_json::Value::is_string);
+    }
+    object.get("tool_calls").is_none()
+}
+
+fn runtime_gemini_simple_content_item(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .is_some()
+        || object
+            .get("content")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    {
+        return object.get("type").is_none_or(|value| {
+            matches!(value.as_str(), Some("input_text" | "output_text" | "text"))
+        });
+    }
+    false
+}
+
+fn runtime_gemini_simple_tool_calls(value: &serde_json::Value) -> bool {
+    let Some(tool_calls) = value.as_array() else {
+        return false;
+    };
+    tool_calls.iter().all(runtime_gemini_simple_tool_call)
+}
+
+fn runtime_gemini_simple_tool_call(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object
+        .get("id")
+        .is_some_and(|value| !serde_json::Value::is_string(value))
+    {
+        return false;
+    }
+    let Some(function) = object
+        .get("function")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return false;
+    };
+    function
+        .get("name")
+        .is_some_and(serde_json::Value::is_string)
+        && function
+            .get("arguments")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|arguments| serde_json::from_str::<serde_json::Value>(arguments).is_ok())
+}
+
+fn runtime_gemini_provider_core_builtin_tool(tool: &serde_json::Value) -> bool {
+    let tool_type = tool
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    tool_type == "web_search"
+        || tool_type == "web_search_preview"
+        || tool_type.starts_with("web_search_preview_")
+        || matches!(
+            tool_type,
+            "code_interpreter" | "code_execution" | "codeExecution"
+        )
+        || matches!(
+            tool_type,
+            "computer" | "computer_use" | "computerUse" | "computer_use_preview"
+        )
+        || tool_type.starts_with("computer_")
+        || matches!(
+            tool_type,
+            "web_fetch" | "url_context" | "urlContext" | "web_fetch_preview"
+        )
+        || tool_type.starts_with("web_fetch_preview_")
+        || tool.as_object().is_some_and(|object| {
+            object.contains_key("computerUse")
+                || object.contains_key("codeExecution")
+                || object.contains_key("urlContext")
+        })
+}
+
+fn runtime_gemini_provider_core_builtin_tool_choice(value: &serde_json::Value) -> bool {
+    value.is_null() || matches!(value.as_str(), None | Some("auto") | Some("none"))
+}
+
+fn runtime_gemini_provider_core_request_body(
+    result: &prodex_provider_core::ProviderTransformResult,
+    translated_body: &[u8],
+) -> Option<Vec<u8>> {
+    match result.loss {
+        ProviderTransformLoss::Lossless | ProviderTransformLoss::DegradedButSafe { .. } => {}
+        ProviderTransformLoss::Rejected { .. }
+        | ProviderTransformLoss::UnsupportedUpstream { .. } => {
+            return None;
+        }
+    }
+    let base = result.body.as_ref()?;
+    let mut base_value = serde_json::from_slice::<serde_json::Value>(base).ok()?;
+    let translated_value = serde_json::from_slice::<serde_json::Value>(translated_body).ok()?;
+    let base_object = base_value.as_object_mut()?;
+    let translated_object = translated_value.as_object()?;
+    if let Some(project) = translated_object.get("project") {
+        base_object.insert("project".to_string(), project.clone());
+    }
+    let translated_request = translated_object.get("request")?.as_object()?;
+    let base_request = base_object.get_mut("request")?.as_object_mut()?;
+    if let Some(generation_config) = translated_request.get("generationConfig") {
+        base_request.insert("generationConfig".to_string(), generation_config.clone());
+    }
+    serde_json::to_vec(&base_value).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        runtime_gemini_provider_core_request_body, runtime_gemini_provider_core_simple_request,
+    };
+    use prodex_provider_core::{
+        ProviderEndpoint, ProviderId, ProviderTransformLoss, ProviderTransformResult,
+        ProviderWireFormat,
+    };
+
+    #[test]
+    fn gemini_provider_core_simple_request_accepts_plain_text_and_context_blocks() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": [
+                {"role": "system", "content": "You are precise."},
+                {"role": "user", "content": "# AGENTS.md instructions for /repo"},
+                {"role": "user", "content": "Fix the test"}
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_gemini_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn gemini_provider_core_simple_request_rejects_tools_and_unsupported_assistant_history() {
+        let tools = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": "hello",
+            "tools": [{"type":"function","function":{"name":"search"}}]
+        }))
+        .unwrap();
+        assert!(!runtime_gemini_provider_core_simple_request(&tools));
+
+        let assistant = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": [
+                {
+                    "role":"assistant",
+                    "content":"hi",
+                    "gemini_native_parts":[{"text":"native"}]
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(!runtime_gemini_provider_core_simple_request(&assistant));
+    }
+
+    #[test]
+    fn gemini_provider_core_simple_request_accepts_builtin_tools() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": "hello",
+            "tools": [
+                {"type":"web_search_preview"},
+                {"type":"code_interpreter"},
+                {
+                    "type":"computer_use_preview",
+                    "environment":"ENVIRONMENT_BROWSER"
+                },
+                {"type":"web_fetch_preview"}
+            ],
+            "tool_choice": "auto"
+        }))
+        .unwrap();
+        assert!(runtime_gemini_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn gemini_provider_core_simple_request_accepts_text_format_and_cache_fields() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": "hello",
+            "cached_content": "cachedContents/abc123",
+            "text": {
+                "format": {
+                    "type": "json_object"
+                }
+            }
+        }))
+        .unwrap();
+        assert!(runtime_gemini_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn gemini_provider_core_simple_request_accepts_assistant_and_tool_history() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": [
+                {"role":"user","content":"find it"},
+                {
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[
+                        {
+                            "id":"call_1",
+                            "type":"function",
+                            "function":{
+                                "name":"grep",
+                                "arguments":"{\"pattern\":\"x\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "role":"tool",
+                    "tool_call_id":"call_1",
+                    "content":"{\"match_count\":1}"
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_gemini_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn gemini_provider_core_simple_request_accepts_message_content_arrays() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "# AGENTS.md instructions for /repo"},
+                        {"type": "input_text", "text": "<environment_context><cwd>/repo</cwd></environment_context>"}
+                    ]
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": ""}],
+                    "tool_calls": [
+                        {
+                            "id":"call_1",
+                            "type":"function",
+                            "function":{
+                                "name":"grep",
+                                "arguments":"{\"pattern\":\"x\"}"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "message",
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": [{"type": "output_text", "text": "{\"match_count\":1}"}]
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(runtime_gemini_provider_core_simple_request(&body));
+    }
+
+    #[test]
+    fn gemini_provider_core_request_body_preserves_project_and_generation_config() {
+        let result = ProviderTransformResult {
+            provider: ProviderId::Gemini,
+            endpoint: ProviderEndpoint::Responses,
+            from_format: ProviderWireFormat::OpenAiResponses,
+            to_format: ProviderWireFormat::GeminiGenerateContent,
+            body: Some(
+                serde_json::to_vec(&serde_json::json!({
+                    "model": "gemini-2.5-pro",
+                    "request": {
+                        "contents": [{"role":"user","parts":[{"text":"hello"}]}]
+                    }
+                }))
+                .unwrap(),
+            ),
+            headers: Default::default(),
+            metadata: Default::default(),
+            loss: ProviderTransformLoss::Lossless,
+        };
+        let translated = serde_json::to_vec(&serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "project": "project-1",
+            "request": {
+                "contents": [{"role":"user","parts":[{"text":"hello"}]}],
+                "generationConfig": {"includeThoughts": true, "thinkingBudget": 8192}
+            }
+        }))
+        .unwrap();
+        let merged = runtime_gemini_provider_core_request_body(&result, &translated).unwrap();
+        let merged: serde_json::Value = serde_json::from_slice(&merged).unwrap();
+        assert_eq!(merged["project"], "project-1");
+        assert_eq!(
+            merged["request"]["generationConfig"]["thinkingBudget"],
+            8192
+        );
+    }
 }
 
 fn runtime_gemini_exact_output_short_circuit(

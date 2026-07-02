@@ -1,4 +1,7 @@
-use super::runtime_gemini_responses_value_from_generate_value;
+use super::{
+    runtime_gemini_provider_core_simple_response,
+    runtime_gemini_responses_value_from_generate_value,
+};
 
 #[test]
 fn gemini_response_translation_marks_prompt_feedback_block_as_failed() {
@@ -80,4 +83,182 @@ fn gemini_response_translation_maps_safety_finish_to_invalid_prompt() {
             .unwrap()
             .contains("finishReason=SAFETY")
     );
+}
+
+#[test]
+fn gemini_provider_core_simple_response_accepts_prompt_feedback_block() {
+    let response = serde_json::json!({
+        "responseId": "resp_blocked",
+        "modelVersion": "gemini-2.5-pro",
+        "promptFeedback": {
+            "blockReason": "SAFETY"
+        }
+    });
+
+    assert!(runtime_gemini_provider_core_simple_response(&response));
+}
+
+#[test]
+fn gemini_provider_core_simple_response_accepts_max_tokens_plain_text_candidate() {
+    let response = serde_json::json!({
+        "responseId": "resp_truncated",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [{"text": "partial"}]},
+            "finishReason": "MAX_TOKENS",
+            "finishMessage": "token budget hit",
+            "safetyRatings": []
+        }]
+    });
+
+    assert!(runtime_gemini_provider_core_simple_response(&response));
+}
+
+#[test]
+fn gemini_provider_core_simple_response_accepts_safe_function_call_only_candidate() {
+    let response = serde_json::json!({
+        "responseId": "resp_call",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [{
+                "thoughtSignature": "sig-response-1",
+                "functionCall": {
+                    "id": "call_sqz_1",
+                    "name": "mcp__prodex_sqz__compress",
+                    "args": {"text": "large content"}
+                }
+            }]}
+        }]
+    });
+
+    assert!(runtime_gemini_provider_core_simple_response(&response));
+}
+
+#[test]
+fn gemini_provider_core_simple_response_accepts_apply_patch_function_call_candidate() {
+    let response = serde_json::json!({
+        "responseId": "resp_patch",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [{
+                "functionCall": {
+                    "id": "call_patch_1",
+                    "name": "apply_patch",
+                    "args": {"input": "*** Begin Patch\n*** End Patch"}
+                }
+            }]}
+        }]
+    });
+
+    assert!(runtime_gemini_provider_core_simple_response(&response));
+}
+
+#[test]
+fn gemini_provider_core_simple_response_accepts_tool_search_function_call_candidate() {
+    let response = serde_json::json!({
+        "responseId": "resp_search",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [{
+                "functionCall": {
+                    "id": "call_search_1",
+                    "name": "tool_search",
+                    "args": {"query": "provider translator"}
+                }
+            }]}
+        }]
+    });
+
+    assert!(runtime_gemini_provider_core_simple_response(&response));
+}
+
+#[test]
+fn gemini_provider_core_simple_response_accepts_thought_plus_safe_function_call_candidate() {
+    let response = serde_json::json!({
+        "responseId": "resp_reason_call",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [
+                {"text": "internal summary", "thought": true},
+                {
+                    "thoughtSignature": "sig-response-1",
+                    "functionCall": {
+                        "id": "call_sqz_1",
+                        "name": "mcp__prodex_sqz__compress",
+                        "args": {"text": "large content"}
+                    }
+                }
+            ]}
+        }]
+    });
+
+    assert!(runtime_gemini_provider_core_simple_response(&response));
+}
+
+#[test]
+fn gemini_provider_core_simple_response_accepts_grounding_and_citation_metadata() {
+    let response = serde_json::json!({
+        "responseId": "resp_grounded",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [{"text": "grounded answer"}]},
+            "finishReason": "STOP",
+            "citationMetadata": {
+                "citations": [{"uri": "https://citation.example", "title": "Citation"}]
+            },
+            "groundingMetadata": {
+                "groundingChunks": [{
+                    "web": {"uri": "https://ground.example", "title": "Ground"}
+                }]
+            },
+            "urlContextMetadata": {
+                "urlMetadata": [{
+                    "retrievedUrl": "https://context.example",
+                    "urlRetrievalStatus": "URL_RETRIEVAL_STATUS_SUCCESS"
+                }]
+            }
+        }]
+    });
+
+    assert!(runtime_gemini_provider_core_simple_response(&response));
+}
+
+#[test]
+fn gemini_provider_core_simple_response_accepts_media_and_special_parts() {
+    let response = serde_json::json!({
+        "responseId": "resp_media",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [
+                {"executableCode": {"language": "PYTHON", "code": "print(2 + 2)"}},
+                {"codeExecutionResult": {"outcome": "OUTCOME_OK", "output": "4"}},
+                {"videoMetadata": {"startOffset": "1s", "endOffset": "3s"}},
+                {"inlineData": {"mimeType": "image/png", "data": "aW1hZ2U="}},
+                {"fileData": {"fileUri": "https://files.example/doc.pdf", "mimeType": "application/pdf"}}
+            ]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    assert!(runtime_gemini_provider_core_simple_response(&response));
+}
+
+#[test]
+fn gemini_provider_core_simple_response_rejects_mixed_visible_text_and_function_call() {
+    let response = serde_json::json!({
+        "responseId": "resp_mixed",
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [{
+            "content": {"parts": [
+                {"text": "visible answer"},
+                {"functionCall": {
+                    "id": "call_sqz_1",
+                    "name": "mcp__prodex_sqz__compress",
+                    "args": {"text": "large content"}
+                }}
+            ]}
+        }]
+    });
+
+    assert!(!runtime_gemini_provider_core_simple_response(&response));
 }

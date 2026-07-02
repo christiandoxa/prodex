@@ -1,4 +1,8 @@
 use super::super::gemini_rewrite::runtime_gemini_custom_tool_input_from_arguments;
+use super::super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_log_response_conformance,
+    runtime_provider_response_conformance_result,
+};
 use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use super::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages,
@@ -7,6 +11,7 @@ use super::{
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
+use prodex_provider_core::ProviderTransformLoss;
 use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -17,6 +22,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
     conversation_messages: Vec<serde_json::Value>,
     response_metadata: Option<serde_json::Value>,
     conversations: &RuntimeDeepSeekConversationStore,
+    runtime_shared: &crate::RuntimeRotationProxyShared,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let mut body = Vec::new();
     response
@@ -24,7 +30,30 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
         .context("failed to read DeepSeek chat response body")?;
     let value: serde_json::Value =
         serde_json::from_slice(&body).context("failed to parse DeepSeek chat response JSON")?;
-    let mut response = runtime_deepseek_responses_value_from_chat_value(&value, request_id);
+    let translated = runtime_provider_response_conformance_result(
+        RuntimeProviderBridgeKind::DeepSeek,
+        status,
+        &body,
+    );
+    if let Some(result) = translated.as_ref() {
+        runtime_provider_log_response_conformance(
+            runtime_shared,
+            request_id,
+            RuntimeProviderBridgeKind::DeepSeek,
+            result,
+        );
+    }
+    let mut response = translated
+        .as_ref()
+        .and_then(|result| match result.loss {
+            ProviderTransformLoss::Lossless | ProviderTransformLoss::DegradedButSafe { .. } => {
+                result.body.as_ref()
+            }
+            ProviderTransformLoss::Rejected { .. }
+            | ProviderTransformLoss::UnsupportedUpstream { .. } => None,
+        })
+        .and_then(|body| serde_json::from_slice::<serde_json::Value>(body).ok())
+        .unwrap_or_else(|| runtime_deepseek_responses_value_from_chat_value(&value, request_id));
     runtime_deepseek_merge_response_metadata(&mut response, response_metadata);
     if response.get("status").and_then(serde_json::Value::as_str) != Some("failed")
         && let Some(response_id) = response.get("id").and_then(serde_json::Value::as_str)

@@ -160,6 +160,40 @@ fn public_contract_matrix_is_machine_readable() {
 }
 
 #[test]
+fn non_responses_supported_endpoint_statuses_follow_runtime_surface_more_closely() {
+    let anthropic = provider_adapter_contract_matrix()
+        .into_iter()
+        .find(|spec| spec.provider == "anthropic")
+        .expect("anthropic contract");
+    let chat = anthropic
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "chat-completions")
+        .expect("chat-completions endpoint");
+    assert_eq!(chat.status, "passthrough");
+    assert!(chat.tested);
+}
+
+#[test]
+fn covered_endpoint_statuses_do_not_overclaim_beyond_request_response_conformance() {
+    for contract in provider_adapter_contract_matrix() {
+        for endpoint in contract.endpoint_status {
+            match endpoint.status {
+                "native" | "passthrough" | "translated" => {
+                    assert!(
+                        endpoint.tested,
+                        "{} {} should be tested before claiming {}",
+                        contract.provider, endpoint.endpoint, endpoint.status
+                    );
+                }
+                "partial" | "untested" | "unsupported" => {}
+                other => panic!("unexpected endpoint status {other}"),
+            }
+        }
+    }
+}
+
+#[test]
 fn model_catalog_json_includes_machine_readable_contract_fields() {
     let models = provider_model_catalog_json(ProviderId::Gemini);
     assert!(!models.is_empty());
@@ -203,4 +237,50 @@ fn combo_fallback_deduplicates_user_supplied_chain() {
         provider_model_fallback_chain(ProviderId::Gemini, "combo:a,b,a|c"),
         vec!["a", "b", "c"]
     );
+}
+
+#[test]
+fn claimed_endpoint_statuses_have_request_and_response_conformance_evidence() {
+    let matrix = provider_adapter_contract_matrix();
+    for contract in matrix {
+        for endpoint in contract.endpoint_status {
+            if !matches!(endpoint.status, "native" | "passthrough" | "translated") {
+                continue;
+            }
+            let provider = ProviderId::parse(contract.provider).expect("provider should parse");
+            let endpoint_id = match endpoint.endpoint {
+                "responses" => ProviderEndpoint::Responses,
+                "chat-completions" => ProviderEndpoint::ChatCompletions,
+                "messages" => ProviderEndpoint::Messages,
+                "models" => ProviderEndpoint::Models,
+                "embeddings" => ProviderEndpoint::Embeddings,
+                "images" => ProviderEndpoint::Images,
+                "audio" => ProviderEndpoint::Audio,
+                "batches" => ProviderEndpoint::Batches,
+                "rerank" => ProviderEndpoint::Rerank,
+                "a2a" => ProviderEndpoint::A2a,
+                other => panic!("unexpected endpoint {other}"),
+            };
+            let coverage: Vec<_> = prodex_provider_core::provider_conformance_cases()
+                .iter()
+                .filter(|case| case.provider == provider && case.endpoint == endpoint_id)
+                .collect();
+            assert!(
+                coverage.iter().any(|case| case.operation
+                    == prodex_provider_core::ProviderConformanceOperation::Request),
+                "{} {} missing request fixture for claimed status {}",
+                contract.provider,
+                endpoint.endpoint,
+                endpoint.status
+            );
+            assert!(
+                coverage.iter().any(|case| case.operation
+                    == prodex_provider_core::ProviderConformanceOperation::Response),
+                "{} {} missing response fixture for claimed status {}",
+                contract.provider,
+                endpoint.endpoint,
+                endpoint.status
+            );
+        }
+    }
 }

@@ -1,4 +1,7 @@
 use std::io::{self, BufRead, Read};
+use std::sync::Arc;
+
+pub(super) type RuntimeProviderSseObserver = Arc<dyn Fn(&serde_json::Value) + Send + Sync>;
 
 pub(super) trait RuntimeProviderSseJsonState {
     fn eof(&self) -> bool;
@@ -14,16 +17,22 @@ pub(super) struct RuntimeProviderSseJsonReader<R: Read, S> {
     pending_offset: usize,
     accumulated_json: String,
     state: S,
+    observer: Option<RuntimeProviderSseObserver>,
 }
 
 impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S> {
-    pub(super) fn new(reader: R, state: S) -> Self {
+    pub(super) fn new_with_observer(
+        reader: R,
+        state: S,
+        observer: Option<RuntimeProviderSseObserver>,
+    ) -> Self {
         Self {
             reader: std::io::BufReader::new(reader),
             pending: Vec::new(),
             pending_offset: 0,
             accumulated_json: String::new(),
             state,
+            observer,
         }
     }
 
@@ -113,6 +122,9 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
         if !separate_values.is_empty() {
             let mut events = Vec::new();
             for value in separate_values {
+                if let Some(observer) = &self.observer {
+                    observer(&value);
+                }
                 events.extend(self.state.observe_value(&value));
             }
             return events;
@@ -131,7 +143,12 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
         }
         serde_json::from_str::<serde_json::Value>(data)
             .ok()
-            .map(|value| self.state.observe_value(&value))
+            .map(|value| {
+                if let Some(observer) = &self.observer {
+                    observer(&value);
+                }
+                self.state.observe_value(&value)
+            })
     }
 
     fn flush_accumulated_json(&mut self) -> Option<String> {
@@ -141,6 +158,9 @@ impl<R: Read, S: RuntimeProviderSseJsonState> RuntimeProviderSseJsonReader<R, S>
         }
         let value = serde_json::from_str::<serde_json::Value>(&self.accumulated_json).ok()?;
         self.accumulated_json.clear();
+        if let Some(observer) = &self.observer {
+            observer(&value);
+        }
         let events = self.state.observe_value(&value);
         (!events.is_empty()).then(|| events.join(""))
     }

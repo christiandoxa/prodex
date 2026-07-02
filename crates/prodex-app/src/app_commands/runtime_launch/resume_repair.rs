@@ -39,19 +39,8 @@ pub(super) fn repair_resume_session_in_home(
         return Ok(());
     };
     repair_resume_session_home_strict(codex_home, session_id)?;
-    if !session_id_looks_full(session_id) {
-        repair_resume_session_in_other_profile_homes(codex_home, session_id);
-    }
+    repair_resume_session_in_other_profile_homes(codex_home, session_id);
     Ok(())
-}
-
-fn session_id_looks_full(session_id: &str) -> bool {
-    let bytes = session_id.as_bytes();
-    bytes.len() == 36
-        && bytes.iter().enumerate().all(|(index, byte)| match index {
-            8 | 13 | 18 | 23 => *byte == b'-',
-            _ => byte.is_ascii_hexdigit(),
-        })
 }
 
 fn repair_resume_session_home_strict(codex_home: &Path, session_id: &str) -> Result<()> {

@@ -5,6 +5,10 @@ use super::deepseek_rewrite::{
     runtime_deepseek_store_conversation,
 };
 use super::gemini_rewrite::runtime_gemini_custom_tool_input_from_arguments;
+use super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_stream_function_call_arguments_delta_event,
+    runtime_provider_stream_text_delta_event,
+};
 use super::provider_sse_events::{
     runtime_provider_sse_failed_event, runtime_provider_sse_output_text_item_added_event,
     runtime_provider_sse_output_text_item_done_event,
@@ -170,16 +174,33 @@ impl RuntimeDeepSeekSseState {
                 }
                 self.output_text.push_str(text);
                 let sequence_number = self.next_sequence_number();
-                events.push(self.event(
-                    "response.output_text.delta",
-                    serde_json::json!({
-                        "type": "response.output_text.delta",
-                        "sequence_number": sequence_number,
-                        "created_at": self.created_at,
-                        "response_id": self.response_id,
-                        "delta": text,
-                    }),
-                ));
+                let upstream_value = serde_json::json!({
+                    "choices": [{
+                        "delta": {
+                            "content": text,
+                        }
+                    }]
+                });
+                if let Some((event_name, data)) = runtime_provider_stream_text_delta_event(
+                    RuntimeProviderBridgeKind::DeepSeek,
+                    &upstream_value,
+                    sequence_number,
+                    self.created_at,
+                    &self.response_id,
+                ) {
+                    events.push(self.event(&event_name, data));
+                } else {
+                    events.push(self.event(
+                        "response.output_text.delta",
+                        serde_json::json!({
+                            "type": "response.output_text.delta",
+                            "sequence_number": sequence_number,
+                            "created_at": self.created_at,
+                            "response_id": self.response_id,
+                            "delta": text,
+                        }),
+                    ));
+                }
             }
             if let Some(tool_calls) = delta
                 .get("tool_calls")
@@ -374,15 +395,37 @@ impl RuntimeDeepSeekSseState {
             }
             if !arguments.is_empty() {
                 let sequence_number = self.next_sequence_number();
-                events.push(self.event(
-                    "response.function_call_arguments.delta",
-                    serde_json::json!({
-                        "type": "response.function_call_arguments.delta",
-                        "sequence_number": sequence_number,
-                        "call_id": call_id,
-                        "delta": arguments,
-                    }),
-                ));
+                let upstream_value = serde_json::json!({
+                    "choices": [{
+                        "delta": {
+                            "tool_calls": [{
+                                "id": call_id,
+                                "function": {
+                                    "arguments": arguments,
+                                }
+                            }]
+                        }
+                    }]
+                });
+                if let Some((event_name, data)) =
+                    runtime_provider_stream_function_call_arguments_delta_event(
+                        RuntimeProviderBridgeKind::DeepSeek,
+                        &upstream_value,
+                        sequence_number,
+                    )
+                {
+                    events.push(self.event(&event_name, data));
+                } else {
+                    events.push(self.event(
+                        "response.function_call_arguments.delta",
+                        serde_json::json!({
+                            "type": "response.function_call_arguments.delta",
+                            "sequence_number": sequence_number,
+                            "call_id": call_id,
+                            "delta": arguments,
+                        }),
+                    ));
+                }
             }
             let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&name);
             let mut item = serde_json::json!({

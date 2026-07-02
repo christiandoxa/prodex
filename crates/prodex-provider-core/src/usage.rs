@@ -1,6 +1,6 @@
 use crate::ProviderModelCost;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderTokenUsage {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
