@@ -1109,6 +1109,7 @@ fn transcript_line_looks_binary(text: &str) -> bool {
     stats.total > 0
         && (stats.replacement > 0
             || stats.control > 0
+            || transcript_line_looks_like_mojibake(&stats)
             || stats.suspicious.saturating_mul(5) >= stats.total
             || stats.suspicious >= 6)
 }
@@ -1127,6 +1128,9 @@ struct TranscriptTextStats {
     suspicious: usize,
     replacement: usize,
     control: usize,
+    readable_ascii: usize,
+    non_ascii: usize,
+    whitespace: usize,
 }
 
 fn transcript_text_stats(text: &str) -> TranscriptTextStats {
@@ -1134,8 +1138,21 @@ fn transcript_text_stats(text: &str) -> TranscriptTextStats {
     let mut suspicious = 0usize;
     let mut replacement = 0usize;
     let mut control = 0usize;
+    let mut readable_ascii = 0usize;
+    let mut non_ascii = 0usize;
+    let mut whitespace = 0usize;
     for ch in text.chars().take(4096) {
         total += 1;
+        if ch.is_whitespace() {
+            whitespace += 1;
+        }
+        if ch.is_ascii()
+            && (ch.is_alphanumeric() || ch.is_whitespace() || is_common_punctuation(ch))
+        {
+            readable_ascii += 1;
+        } else if !ch.is_ascii() {
+            non_ascii += 1;
+        }
         let is_suspicious = ch == '\u{fffd}'
             || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
             || (!ch.is_ascii()
@@ -1157,7 +1174,18 @@ fn transcript_text_stats(text: &str) -> TranscriptTextStats {
         suspicious,
         replacement,
         control,
+        readable_ascii,
+        non_ascii,
+        whitespace,
     }
+}
+
+fn transcript_line_looks_like_mojibake(stats: &TranscriptTextStats) -> bool {
+    stats.total >= 24
+        && stats.non_ascii >= 8
+        && stats.non_ascii.saturating_mul(100) >= stats.total.saturating_mul(20)
+        && stats.readable_ascii.saturating_mul(100) <= stats.total.saturating_mul(55)
+        && stats.whitespace.saturating_mul(6) <= stats.total
 }
 
 fn strip_transcript_ansi_codes(input: &str) -> String {
@@ -1492,6 +1520,20 @@ mod tests {
     #[test]
     fn drops_multiline_binary_garbage_prefix_from_tool_output() {
         let mixed_tool_output = "{\"timestamp\":\"2026-07-03T02:26:44.748Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"output\":\"\\uFFFDabcz\\nxy\\uFFFD12\\n\\uFFFDqwe9\\nChunk ID: d103c4\\nWall time: 1.0007 seconds\\nOutput:\\nForwarding from 127.0.0.1:19080 -> 8080\\r\\nForwarding from [::1]:19080 -> 8080\\r\\n\"}}";
+
+        assert_eq!(
+            transcript_events_from_session_line(mixed_tool_output),
+            vec![TranscriptEvent {
+                timestamp: local_log_timestamp("2026-07-03T02:26:44.748Z"),
+                source: "tool-output".to_string(),
+                text: "Chunk ID: d103c4\nWall time: 1.0007 seconds\nOutput:\nForwarding from 127.0.0.1:19080 -> 8080\nForwarding from [::1]:19080 -> 8080".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn drops_mojibake_like_tool_output_lines_from_log_stream() {
+        let mixed_tool_output = "{\"timestamp\":\"2026-07-03T02:26:44.748Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"output\":\"Â�5◊c��I1���n@U◊U���hFz����|p�◊I8◊#◊EJ◊<◊B4����|p�\\nChunk ID: d103c4\\nWall time: 1.0007 seconds\\nOutput:\\nForwarding from 127.0.0.1:19080 -> 8080\\r\\nForwarding from [::1]:19080 -> 8080\\r\\n\"}}";
 
         assert_eq!(
             transcript_events_from_session_line(mixed_tool_output),
