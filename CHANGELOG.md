@@ -2,16 +2,23 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.246.0 - 2026-07-03
+
+- No grouped changes.
+
 ## 0.245.0 - 2026-07-03
+
+### Misc
+
+- Drop mojibake tool output from log stream (`3cf53da`)
+- Hide internal attachment paths in log stream (`a096138`)
+
+## 0.244.0 - 2026-07-03
 
 ### Runtime
 
 - Resume unfinished goals after usage limits (`a8706b7`)
 - Add Kiro provider parity (`6fe8650`)
-
-### Misc
-
-- Hide internal attachment paths in log stream (`a096138`)
 
 ## 0.243.0 - 2026-07-02
 
@@ -67,25 +74,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Add OpenAI ping command (`18819d9`)
-
-## 0.234.0 - 2026-06-30
-
-### CLI
-
-- Improve DeepSeek bridge and quota detail view (`e148a9d`)
-
-### Misc
-
-- Satisfy DeepSeek bridge clippy gate (`f448018`)
-
-## 0.233.0 - 2026-06-30
-
-### CLI
-
-- Prioritize blocked type over active status in current sort (`f65d480`)
-
-### Misc
-
-- Add scrollable TUI when session list exceeds terminal height (`951b66d`)
-- Auto web_search_mode forwards like 0.231.0 instead of 502 (`d29ca44`)
-- Gateway inspect, provider capabilities, app-server broker skeleton, and usage idempotency (`95430bf`)
