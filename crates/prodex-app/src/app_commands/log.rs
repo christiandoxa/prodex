@@ -949,7 +949,7 @@ fn event_msg_transcript_event(
     let text = payload
         .get(text_field)
         .and_then(serde_json::Value::as_str)
-        .filter(|text| !text.trim().is_empty())?;
+        .and_then(transcript_visible_message_text)?;
     let source = match event_type {
         "user_message" => "user",
         "agent_message" => "assistant",
@@ -1092,7 +1092,7 @@ fn transcript_visible_tool_output(output: &str) -> Option<String> {
             last_blank = true;
             continue;
         }
-        if transcript_text_looks_binary(line) {
+        if transcript_line_looks_binary(line) {
             continue;
         }
         visible_lines.push(line.to_string());
@@ -1104,7 +1104,32 @@ fn transcript_visible_tool_output(output: &str) -> Option<String> {
     (!visible_lines.is_empty()).then(|| visible_lines.join("\n"))
 }
 
+fn transcript_line_looks_binary(text: &str) -> bool {
+    let stats = transcript_text_stats(text);
+    stats.total > 0
+        && (stats.replacement > 0
+            || stats.control > 0
+            || stats.suspicious.saturating_mul(5) >= stats.total
+            || stats.suspicious >= 6)
+}
+
 fn transcript_text_looks_binary(text: &str) -> bool {
+    let stats = transcript_text_stats(text);
+    stats.total > 0
+        && (stats.replacement >= 3
+            || stats.control > 0
+            || stats.suspicious.saturating_mul(4) > stats.total
+            || stats.suspicious >= 8)
+}
+
+struct TranscriptTextStats {
+    total: usize,
+    suspicious: usize,
+    replacement: usize,
+    control: usize,
+}
+
+fn transcript_text_stats(text: &str) -> TranscriptTextStats {
     let mut total = 0usize;
     let mut suspicious = 0usize;
     let mut replacement = 0usize;
@@ -1127,11 +1152,12 @@ fn transcript_text_looks_binary(text: &str) -> bool {
             suspicious += 1;
         }
     }
-    total > 0
-        && (replacement >= 3
-            || control > 0
-            || suspicious.saturating_mul(4) > total
-            || suspicious >= 8)
+    TranscriptTextStats {
+        total,
+        suspicious,
+        replacement,
+        control,
+    }
 }
 
 fn strip_transcript_ansi_codes(input: &str) -> String {
@@ -1244,12 +1270,40 @@ fn transcript_text_from_content(content: &serde_json::Value) -> Option<String> {
             .get("text")
             .or_else(|| value.get("content"))
             .and_then(serde_json::Value::as_str)
-            .filter(|text| !text.trim().is_empty())
+            .and_then(transcript_visible_message_text)
         {
             parts.push(text.to_string());
         }
     }
     (!parts.is_empty()).then(|| parts.join("\n"))
+}
+
+fn transcript_visible_message_text(text: &str) -> Option<String> {
+    let mut visible_lines = Vec::new();
+    let mut last_blank = false;
+    for raw_line in text.lines() {
+        let line = raw_line.trim_end();
+        if line.is_empty() {
+            if !last_blank && !visible_lines.is_empty() {
+                visible_lines.push(String::new());
+            }
+            last_blank = true;
+            continue;
+        }
+        if transcript_line_contains_internal_attachment_path(line) {
+            continue;
+        }
+        visible_lines.push(line.to_string());
+        last_blank = false;
+    }
+    while visible_lines.last().is_some_and(|line| line.is_empty()) {
+        visible_lines.pop();
+    }
+    (!visible_lines.is_empty()).then(|| visible_lines.join("\n"))
+}
+
+fn transcript_line_contains_internal_attachment_path(text: &str) -> bool {
+    text.contains("/.prodex/profiles/.prodex-overlay-") && text.contains("/attachments/")
 }
 
 #[cfg(test)]
@@ -1388,6 +1442,30 @@ mod tests {
     }
 
     #[test]
+    fn skips_internal_overlay_attachment_paths_from_message_content() {
+        let user = r#"{"timestamp":"2026-07-03T09:26:44.748Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"image file: /home/doxa/.prodex/profiles/.prodex-overlay-436790-1783050493329574433-0/attachments/0ecd43b8-31d8-4c81-8c9f-2c5409f573ed/image-1.png"}]}}"#;
+
+        assert!(
+            transcript_events_from_session_line(user).is_empty(),
+            "internal overlay attachment paths should be hidden from prodex log stream"
+        );
+    }
+
+    #[test]
+    fn keeps_readable_message_lines_while_dropping_internal_attachment_paths() {
+        let user = r#"{"timestamp":"2026-07-03T09:26:44.748Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"please compare these screenshots\nimage file: /home/doxa/.prodex/profiles/.prodex-overlay-436790-1783050493329574433-0/attachments/0ecd43b8-31d8-4c81-8c9f-2c5409f573ed/image-1.png\nthen summarize the bug"}]}}"#;
+
+        assert_eq!(
+            transcript_events_from_session_line(user),
+            vec![TranscriptEvent {
+                timestamp: local_log_timestamp("2026-07-03T09:26:44.748Z"),
+                source: "user".to_string(),
+                text: "please compare these screenshots\nthen summarize the bug".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn skips_binary_like_tool_output_from_log_stream() {
         let noisy_tool_output = "{\"timestamp\":\"2026-07-03T02:26:44.748Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"output\":\"\\uFFFD\\uFFFD\\uFFFD\\u0000\\u0001\\uFFFD\\uFFFD\\uFFFDabc\"}}";
 
@@ -1400,6 +1478,20 @@ mod tests {
     #[test]
     fn keeps_readable_lines_when_tool_output_starts_with_binary_garbage() {
         let mixed_tool_output = "{\"timestamp\":\"2026-07-03T02:26:44.748Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"output\":\"\\uFFFD\\uFFFD\\uFFFD\\u0000junk\\nChunk ID: d103c4\\nWall time: 1.0007 seconds\\nOutput:\\nForwarding from 127.0.0.1:19080 -> 8080\\r\\nForwarding from [::1]:19080 -> 8080\\r\\n\"}}";
+
+        assert_eq!(
+            transcript_events_from_session_line(mixed_tool_output),
+            vec![TranscriptEvent {
+                timestamp: local_log_timestamp("2026-07-03T02:26:44.748Z"),
+                source: "tool-output".to_string(),
+                text: "Chunk ID: d103c4\nWall time: 1.0007 seconds\nOutput:\nForwarding from 127.0.0.1:19080 -> 8080\nForwarding from [::1]:19080 -> 8080".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn drops_multiline_binary_garbage_prefix_from_tool_output() {
+        let mixed_tool_output = "{\"timestamp\":\"2026-07-03T02:26:44.748Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"output\":\"\\uFFFDabcz\\nxy\\uFFFD12\\n\\uFFFDqwe9\\nChunk ID: d103c4\\nWall time: 1.0007 seconds\\nOutput:\\nForwarding from 127.0.0.1:19080 -> 8080\\r\\nForwarding from [::1]:19080 -> 8080\\r\\n\"}}";
 
         assert_eq!(
             transcript_events_from_session_line(mixed_tool_output),
