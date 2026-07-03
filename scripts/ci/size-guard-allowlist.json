@@ -56,7 +56,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 2226,
+    "maxLines": 2225,
     "reason": "Kiro local rewrite request/response translation and compatibility handling remain capped while request parsing and protocol mapping are split."
   },
   {
