@@ -10,7 +10,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 5,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 5,
+  "clippy::too_many_arguments": 6,
   "clippy::type_complexity": 1,
 });
 
@@ -38,6 +38,7 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::result_large_err|crates/prodex-app/tests/support/main_internal/runtime_proxy_backend/websocket/handler/accepted.rs|pub(super) fn accept_runtime_proxy_backend_websocket(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_stream_notification(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_stream_tool_call(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_streaming_worker(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_spend_event(",

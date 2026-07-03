@@ -81,7 +81,7 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
     let mut state = AppState::load(&paths)?;
     let profile_name = if let Some(existing_name) = find_kiro_profile_by_identity(&state, &context)
     {
-        let activate = !state.active_profile.is_some() || args.activate;
+        let activate = state.active_profile.is_none() || args.activate;
         let profile = state
             .profiles
             .get_mut(&existing_name)
@@ -118,7 +118,7 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
         }
     };
 
-    let activate = !state.active_profile.is_some() || args.activate;
+    let activate = state.active_profile.is_none() || args.activate;
     let codex_home = managed_profile_home_path(&paths, &profile_name)?;
     ensure_path_is_unique(&state, &codex_home)?;
     create_codex_home_if_missing(&codex_home)?;

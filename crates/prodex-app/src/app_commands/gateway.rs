@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn gateway_kiro_model_catalog_json_merges_imported_profile_snapshots() {
-        let _guard = TestEnvVarGuard::lock();
+        let _guard = acquire_test_env_lock();
         let root = temp_dir("catalog");
         let _env = EnvGuard::set(&root);
 
@@ -312,9 +312,9 @@ mod tests {
 
     #[test]
     fn gateway_kiro_capabilities_json_reports_runtime_surface() {
-        let _guard = TestEnvVarGuard::lock();
+        let _guard = acquire_test_env_lock();
         let root = temp_dir("capabilities");
-        let _env = GatewayTestEnvGuard::set(&root);
+        let _env = EnvGuard::set(&root);
 
         let paths = AppPaths::discover().expect("paths should resolve");
         let kiro_home = paths.managed_profiles_root.join("kiro-cap");
@@ -411,11 +411,7 @@ mod tests {
     #[test]
     fn gateway_copilot_capabilities_report_compact_surface() {
         let spec = prodex_provider_core::provider_adapter_contract_spec(ProviderId::Copilot);
-        assert!(
-            spec.supported_endpoints
-                .iter()
-                .any(|endpoint| *endpoint == "responses/compact")
-        );
+        assert!(spec.supported_endpoints.contains(&"responses/compact"));
         let compact = spec
             .endpoint_status
             .iter()

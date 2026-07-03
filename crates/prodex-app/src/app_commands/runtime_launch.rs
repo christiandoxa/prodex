@@ -199,7 +199,7 @@ struct GoalResumeSessionAnalysis {
 
 fn codex_args_include_goal_resume(codex_args: &[OsString]) -> bool {
     codex_args.windows(2).any(|window| {
-        window[0] == OsString::from("/goal")
+        window[0] == "/goal"
             && window[1]
                 .to_string_lossy()
                 .trim()

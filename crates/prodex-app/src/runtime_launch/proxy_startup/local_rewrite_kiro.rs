@@ -636,9 +636,7 @@ fn runtime_kiro_request_body_for_path(
     if object.contains_key("user") {
         object.remove("user");
     }
-    if let Err(error) = runtime_kiro_strip_accepted_token_limit_controls(object) {
-        return Err(error);
-    }
+    runtime_kiro_strip_accepted_token_limit_controls(object)?;
     if object.contains_key("input") || !object.contains_key("messages") {
         return Ok(body);
     }
@@ -1247,6 +1245,7 @@ fn runtime_kiro_streaming_reader(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_kiro_streaming_worker(
     sender: Sender<RuntimeKiroStreamingChunk>,
     request_id: u64,

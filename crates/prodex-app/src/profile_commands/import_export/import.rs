@@ -566,10 +566,7 @@ fn validate_exported_secret_files(exported: &ExportedProfile) -> Result<()> {
                 exported.name
             );
         }
-        if !allowed_files
-            .iter()
-            .any(|allowed| *allowed == secret_file.path.as_str())
-        {
+        if !allowed_files.contains(&secret_file.path.as_str()) {
             bail!(
                 "profile export bundle contains unexpected secret file '{}' for profile '{}'",
                 secret_file.path,
