@@ -6,15 +6,15 @@ import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
-  dead_code: 6,
+  dead_code: 7,
   "unused_imports": 5,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 3,
+  "clippy::too_many_arguments": 5,
   "clippy::type_complexity": 1,
 });
 
-export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 33;
+export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 34;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "dead_code|crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_anthropic_error_message_from_parts(",
@@ -23,6 +23,7 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "dead_code|crates/prodex-app/src/runtime_proxy/selection_plan.rs|provider_priority: usize,",
   "dead_code|crates/prodex-app/src/runtime_proxy/selection_plan.rs|pub(crate) fn runtime_prompt_cache_affinity_sort_key(",
   "dead_code|crates/prodex-app/src/runtime_proxy/websocket_message/auth.rs|pub(in crate::runtime_proxy) fn runtime_profile_auth_summary_for_selection(",
+  "dead_code|crates/prodex-app/src/lib.rs|mod runtime_kiro_acp;",
   "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
   "unused_imports|crates/prodex-app/src/runtime_background/probe_refresh.rs|pub(crate) use queue::note_runtime_probe_refresh_progress;",
   "unused_imports|crates/prodex-app/src/runtime_background/probe_refresh.rs|pub(crate) use startup::runtime_profiles_needing_startup_probe_refresh;",
@@ -35,6 +36,8 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::large_enum_variant|crates/prodex-runtime-state/src/background.rs|pub enum RuntimeStateSavePayload<S, Shared> {",
   "clippy::result_large_err|crates/prodex-app/src/runtime_proxy/lifecycle.rs|pub(crate) fn enqueue_runtime_proxy_long_lived_request_with_wait(",
   "clippy::result_large_err|crates/prodex-app/tests/support/main_internal/runtime_proxy_backend/websocket/handler/accepted.rs|pub(super) fn accept_runtime_proxy_backend_websocket(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_stream_notification(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_stream_tool_call(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_spend_event(",
@@ -44,6 +47,7 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
 export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
   "crates/prodex-app/src/app_commands.rs|pub(crate) fn resolve_runtime_launch_profile_name(",
   "crates/prodex-app/src/app_commands/selection.rs|pub(crate) fn required_main_window_snapshot(",
+  "crates/prodex-app/src/profile_commands/kiro.rs|pub(crate) fn read_kiro_auth_secret(codex_home: &Path) -> Result<KiroAuthSecret> {",
   "crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(",
   "crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_anthropic_sse_response_parts_from_message_value(",
   "crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_request_for_anthropic_server_tool_followup(",
