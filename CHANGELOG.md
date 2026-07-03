@@ -2,6 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.245.0 - 2026-07-03
+
+### Runtime
+
+- Resume unfinished goals after usage limits (`a8706b7`)
+- Add Kiro provider parity (`6fe8650`)
+
+### Misc
+
+- Hide internal attachment paths in log stream (`a096138`)
+
 ## 0.243.0 - 2026-07-02
 
 ### Misc
@@ -78,13 +89,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Add scrollable TUI when session list exceeds terminal height (`951b66d`)
 - Auto web_search_mode forwards like 0.231.0 instead of 502 (`d29ca44`)
 - Gateway inspect, provider capabilities, app-server broker skeleton, and usage idempotency (`95430bf`)
-
-## 0.232.0 - 2026-06-29
-
-### Runtime
-
-- Improve codex compatibility (`967305e`)
-
-### Misc
-
-- Expand compatibility for 0.232.0 (`b3867f2`)
