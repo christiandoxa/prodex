@@ -261,8 +261,83 @@ fn agy_bin() -> OsString {
     env::var_os("PRODEX_AGY_BIN").unwrap_or_else(|| OsString::from("agy"))
 }
 
+fn command_exists_on_path(command: &str) -> bool {
+    env::var_os("PATH")
+        .is_some_and(|paths| env::split_paths(&paths).any(|dir| dir.join(command).is_file()))
+}
+
 fn kiro_bin() -> OsString {
-    env::var_os("PRODEX_KIRO_BIN").unwrap_or_else(|| OsString::from("kiro-cli-chat"))
+    if let Some(path) = env::var_os("PRODEX_KIRO_BIN") {
+        return path;
+    }
+    if command_exists_on_path("kiro-cli-chat") {
+        return OsString::from("kiro-cli-chat");
+    }
+    if command_exists_on_path("kiro-cli") {
+        return OsString::from("kiro-cli");
+    }
+    OsString::from("kiro-cli-chat")
+}
+
+#[cfg(test)]
+mod kiro_bin_tests {
+    use super::kiro_bin;
+    use std::env;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn with_env_var(key: &str, value: Option<OsString>, f: impl FnOnce()) {
+        let previous = env::var_os(key);
+        match value {
+            Some(value) => unsafe { env::set_var(key, value) },
+            None => unsafe { env::remove_var(key) },
+        }
+        f();
+        match previous {
+            Some(value) => unsafe { env::set_var(key, value) },
+            None => unsafe { env::remove_var(key) },
+        }
+    }
+
+    #[test]
+    fn kiro_bin_prefers_explicit_override() {
+        with_env_var(
+            "PRODEX_KIRO_BIN",
+            Some(OsString::from("/tmp/custom-kiro")),
+            || assert_eq!(kiro_bin(), OsString::from("/tmp/custom-kiro")),
+        );
+    }
+
+    #[test]
+    fn kiro_bin_falls_back_to_kiro_cli_when_chat_binary_is_missing() {
+        let root = env::temp_dir().join(format!(
+            "prodex-kiro-bin-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("temp dir should exist");
+        fs::write(
+            root.join("kiro-cli"),
+            b"#!/bin/sh
+",
+        )
+        .expect("fake binary should write");
+
+        let previous_path = env::var_os("PATH");
+        with_env_var("PRODEX_KIRO_BIN", None, || {
+            unsafe { env::set_var("PATH", &root) };
+            assert_eq!(kiro_bin(), OsString::from("kiro-cli"));
+        });
+        match previous_path {
+            Some(value) => unsafe { env::set_var("PATH", value) },
+            None => unsafe { env::remove_var("PATH") },
+        }
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 #[cfg(test)]

@@ -70,6 +70,61 @@ fn runtime_proxy_http_fresh_request_reaches_later_profile_after_usage_limit_chai
 }
 
 #[test]
+fn runtime_proxy_http_fresh_sse_quota_after_output_item_added_rotates_before_model_output() {
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_http_delayed_quota_after_output_item_added(),
+        "main",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    );
+
+    let response = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.4",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "retry before any model text is emitted",
+                }],
+            }],
+        }),
+    );
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = read_runtime_http_stream_until(response, |body| {
+        body.contains("\"id\":\"resp-second\"") || body.contains("usage limit")
+    });
+    assert!(
+        body.contains("\"id\":\"resp-second\""),
+        "later healthy profile should complete the SSE request: {body}"
+    );
+    assert!(
+        !body.contains("usage limit"),
+        "quota failure after response.output_item.added must stay pre-commit and not leak: {body}"
+    );
+
+    let responses_accounts = fixture.backend.responses_accounts();
+    assert_eq!(
+        responses_accounts,
+        vec!["main-account".to_string(), "second-account".to_string()],
+        "fresh SSE request should retry on the ready profile after pre-output quota failure"
+    );
+
+    let log = fixture.wait_for_log(|log| {
+        log.contains("sse_quota_blocked profile=main") && log.contains("committed profile=second")
+    });
+    assert!(
+        log.contains("sse_quota_blocked profile=main")
+            && log.contains("transport=http committed profile=second"),
+        "delayed quota before output text should be classified pre-commit and rotate: {log}"
+    );
+}
+
+#[test]
 fn runtime_proxy_http_resume_continuation_preserves_metadata_headers_and_affinity() {
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_http_previous_response_needs_turn_state(),

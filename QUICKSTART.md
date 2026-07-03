@@ -1,8 +1,8 @@
 # Quick Start
 
-One Prodex profile pool for OpenAI-backed routing, plus runtime provider bridges for Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
+One Prodex profile pool for OpenAI-backed routing, plus runtime provider bridges for Gemini, Anthropic, Copilot, Kiro, DeepSeek, and local OpenAI-compatible servers.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, and `prodex claude` for Claude Code. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider gemini|anthropic|copilot|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, and `prodex claude` for Claude Code. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider gemini|anthropic|copilot|kiro|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, imported Kiro accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
 
 For contributors: this is a Cargo workspace. `src/main.rs` is the binary entrypoint, `src/lib.rs` is a compatibility shim, application orchestration lives under `crates/prodex-app/`, and reusable leaf crates live under `crates/`.
 
@@ -41,10 +41,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.243.0`:
+The current local version in this repo is `0.244.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.243.0
+npm install -g @christiandoxa/prodex@0.244.0
 ```
 
 Dependency status in this repo:
@@ -71,12 +71,14 @@ If your shared Codex home already contains a login:
 prodex profile import-current main
 ```
 
-If you already use Claude Code or GitHub Copilot CLI on this machine and want Prodex to track those provider identities:
+If you already use Claude Code, GitHub Copilot CLI, or Kiro CLI on this machine and want Prodex to track those provider identities:
 
 ```bash
 prodex profile import claude
 prodex profile import copilot
+prodex profile import kiro
 prodex profile import copilot --name copilot-main --activate
+prodex profile import kiro --name kiro-main --activate
 ```
 
 Or create a profile through the normal Codex login flow:
@@ -116,6 +118,7 @@ prodex profile list
 prodex profile export
 prodex profile import claude
 prodex profile import copilot
+prodex profile import kiro
 prodex quota --all
 prodex quota --all --auth no-auth --once
 prodex quota --all --detail --provider openai
@@ -133,7 +136,7 @@ prodex info
 prodex quota --all --once
 ```
 
-In the live `prodex quota --all --detail` view, press `f` to cycle provider filters: `all`, `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider deepseek`, or `--provider local` to start locked to one provider.
+In the live `prodex quota --all --detail` view, press `f` to cycle provider filters: `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, or `--provider local` to start locked to one provider.
 
 For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt.
 
@@ -155,7 +158,7 @@ prodex profile remove --all
 
 `prodex profile export` exports all configured profiles by default and asks whether to password-protect the bundle, defaulting to protected. In non-interactive use, pass `--password-protect` with `PRODEX_PROFILE_EXPORT_PASSWORD` set, or pass `--no-password` to explicitly write an unencrypted bundle.
 
-`prodex profile import claude` imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot, Gemini, Antigravity CLI, Anthropic, DeepSeek, local, and custom provider snapshots. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not OpenAI quota-compatible, but they still render provider metadata in `prodex quota`.
+`prodex profile import claude` imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. `prodex profile import kiro` reads the installed Kiro CLI auth database, snapshots the current auth payload into the managed profile, and refreshes a Kiro model catalog snapshot; override CLI discovery with `PRODEX_KIRO_BIN` when needed. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot, Kiro, Gemini, Antigravity CLI, Anthropic, DeepSeek, local, and custom provider snapshots. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not OpenAI quota-compatible, but they still render provider metadata in `prodex quota`.
 
 ## 3. Run Codex CLI with `prodex`
 
@@ -250,6 +253,16 @@ prodex s --provider copilot --model gpt-5.3-codex
 ```
 
 Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens before launch, can rotate fresh native Responses requests across multiple eligible profiles, and keeps `previous_response_id` continuations on the owning profile. `GITHUB_COPILOT_API_KEY` or `GITHUB_COPILOT_API_KEYS` is also accepted when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.
+
+Use Kiro with either the Codex/Super front end or the native Kiro CLI:
+
+```bash
+prodex profile import kiro
+prodex s --provider kiro --model claude-sonnet-4.5
+prodex super --cli kiro --profile kiro-main
+```
+
+`prodex profile import kiro` reads the installed Kiro CLI auth database, snapshots the current credential payload into the managed profile, and refreshes a Kiro model catalog snapshot for later routing. `--provider kiro` keeps the Codex front end and routes through Prodex's Kiro adapter; `--cli kiro` launches the imported Kiro CLI snapshot directly. Use `PRODEX_KIRO_BIN` if the installed Kiro launcher is not on `PATH`.
 
 Use Gemini with Google sign-in or an API key:
 

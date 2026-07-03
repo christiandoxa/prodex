@@ -2,7 +2,7 @@
 
 `prodex` is a multi-account, multi-provider Codex wrapper with quota-aware profile routing.
 
-Use multiple Codex accounts and supported provider backends from one command line. OpenAI/Codex profiles get quota-aware routing and can auto-rotate when multiple eligible profiles exist; provider adapters let `prodex s` launch the Codex front end against Gemini, Anthropic, Copilot, DeepSeek, and local OpenAI-compatible servers.
+Use multiple Codex accounts and supported provider backends from one command line. OpenAI/Codex profiles get quota-aware routing and can auto-rotate when multiple eligible profiles exist; provider adapters let `prodex s` launch the Codex front end against Gemini, Anthropic, Copilot, Kiro, DeepSeek, and local OpenAI-compatible servers.
 
 ![Prodex overview](https://github.com/christiandoxa/prodex/releases/download/assets/prodex-overview.png)
 
@@ -69,6 +69,7 @@ Prodex supports two provider paths:
 | Google Antigravity CLI | `prodex s gemini --cli agy` | Antigravity keyring / Google Sign-In via `prodex login --with-antigravity` or `agy auth login` | CLI quota snapshot | Native CLI path; no Prodex account auto-rotation or Presidio proxying. |
 | Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | OAuth profiles | Shows Claude OAuth readiness; add `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups. |
 | GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Native profile and API-key modes can rotate before commit across configured profiles/keys; continuations stay bound to the owning profile. |
+| Kiro CLI | `prodex s --provider kiro` or `prodex super --cli kiro` | Imported Kiro CLI profile via `prodex profile import kiro` | Imported profiles | Prodex snapshots the installed Kiro CLI auth store into a managed profile, can route Codex through the Kiro bridge, and can launch native Kiro CLI from that imported snapshot. |
 | DeepSeek | `prodex s deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
 | Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
@@ -733,6 +734,18 @@ When you import a Copilot profile, Prodex does not move the Copilot token into P
 
 </details>
 
+<details>
+<summary>Import a Kiro CLI account</summary>
+
+```bash
+prodex profile import kiro
+prodex profile import kiro --name kiro-main --activate
+```
+
+This reads the installed Kiro CLI state from the local auth database, snapshots the current Kiro auth payload into the managed Prodex profile, and refreshes a Kiro model catalog snapshot for later `--provider kiro` or `--cli kiro` launches. Override the detected CLI binary with `PRODEX_KIRO_BIN` when needed.
+
+</details>
+
 ## Daily command: `prodex s`
 
 <details>
@@ -889,7 +902,7 @@ prodex redeem main
 prodex dashboard
 ```
 
-The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `deepseek`, and `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider deepseek`, or `--provider local` to start locked to a single provider.
+The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, and `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, or `--provider local` to start locked to a single provider.
 
 For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt. Add `--auto-redeem` to a runtime launch when you want Prodex to consider a guarded automatic redeem after every OpenAI/Codex profile is weekly-exhausted.
 
@@ -1080,6 +1093,16 @@ prodex s --provider copilot --model gpt-5.3-codex
 
 Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens from GitHub before launch, can rotate fresh native Responses requests across multiple eligible profiles, and binds streaming response IDs back to the owning profile for continuations. `GITHUB_COPILOT_API_KEY`, `GITHUB_COPILOT_API_KEYS`, or `--api-key` can be used when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.
 
+Use `--provider kiro` or `--cli kiro` when you want the Codex/Super front end or native Kiro CLI with imported Kiro credentials:
+
+```bash
+prodex profile import kiro
+prodex s --provider kiro --model claude-sonnet-4.5
+prodex super --cli kiro --profile kiro-main
+```
+
+`prodex profile import kiro` reads the installed Kiro CLI auth database (`~/.local/share/kiro-cli/data.sqlite3` or the Amazon Q compatibility location when present), snapshots the current credential payload into `kiro_auth.json`, and stores a model catalog snapshot for runtime routing. `--provider kiro` routes Codex through Prodex's local Kiro adapter, while `--cli kiro` launches the native Kiro CLI from the imported Prodex snapshot. Override binary discovery with `PRODEX_KIRO_BIN` when the installed launcher is not on `PATH`.
+
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 
 ```bash
@@ -1223,6 +1246,7 @@ prodex logout --profile main
 
 ```bash
 prodex profile import copilot
+prodex profile import kiro
 prodex profile export
 prodex profile remove second
 prodex profile remove --all

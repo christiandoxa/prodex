@@ -13,7 +13,10 @@ pub(crate) trait RuntimeLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan>;
-    fn after_child_exit(&self, _status: &ExitStatus) -> Result<()> {
+    fn relaunch_after_child_exit(&mut self, _status: &ExitStatus) -> Result<bool> {
+        Ok(false)
+    }
+    fn after_child_exit(&mut self, _status: &ExitStatus) -> Result<()> {
         Ok(())
     }
 }
@@ -105,16 +108,22 @@ where
     }
 }
 
-pub(crate) fn execute_runtime_launch<S>(strategy: S) -> Result<()>
+pub(crate) fn execute_runtime_launch<S>(mut strategy: S) -> Result<()>
 where
     S: RuntimeLaunchStrategy,
 {
-    let execution = build_runtime_launch_execution(&strategy)?;
-    let completed = run_runtime_launch_execution(execution)?;
-    let after_result = strategy.after_child_exit(&completed.status);
-    cleanup_runtime_launch_plan(&completed.plan);
-    after_result?;
-    exit_with_status(completed.status)
+    loop {
+        let execution = build_runtime_launch_execution(&strategy)?;
+        let completed = run_runtime_launch_execution(execution)?;
+        let relaunch = strategy.relaunch_after_child_exit(&completed.status)?;
+        let after_result = strategy.after_child_exit(&completed.status);
+        cleanup_runtime_launch_plan(&completed.plan);
+        after_result?;
+        if relaunch {
+            continue;
+        }
+        return exit_with_status(completed.status);
+    }
 }
 
 fn build_runtime_launch_execution<S>(strategy: &S) -> Result<RuntimeLaunchExecution>

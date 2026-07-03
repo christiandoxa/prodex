@@ -671,8 +671,7 @@ fn runtime_deepseek_push_message_from_responses_item(
         return;
     };
     match object.get("type").and_then(serde_json::Value::as_str) {
-        Some("message")
-        | None
+        Some("message") | None
             if object.contains_key("role")
                 && object.contains_key("content")
                 && !object.contains_key("call_id")

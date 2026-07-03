@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn runtime_proxy_websocket_fresh_request_rotates_past_usage_limit_account() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let (_connect_timeout_guard, _progress_timeout_guard) =
+        ci_runtime_proxy_websocket_timeout_guards();
+
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket(),
+        "main",
+        &["main", "second"],
+        &[],
+        Vec::new(),
+    );
+    let mut socket = fixture.connect_websocket("backend-api/prodex/responses");
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": "continue on the next healthy account"
+            }],
+        }),
+    );
+
+    let (frames, completed_message) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("\"type\":\"response.completed\"")
+    });
+    let _ = socket.close(None);
+
+    assert!(
+        completed_message.contains("\"response\":{\"id\":\"resp-second\"}"),
+        "fresh websocket request should complete on the later healthy profile: {completed_message}"
+    );
+    assert!(
+        frames.iter().all(|frame| !frame.contains("usage limit")),
+        "retryable usage-limit websocket failures must not leak after later-profile success: {frames:?}"
+    );
+    assert_eq!(
+        fixture.backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()],
+        "websocket fresh request should try the active profile first, then rotate to the ready profile"
+    );
+
+    let log = fixture.wait_for_log(|log| {
+        log.contains("request=")
+            && log.contains("quota_blocked profile=main")
+            && log.contains("transport=websocket committed profile=second")
+    });
+    assert!(
+        log.contains("quota_blocked profile=main")
+            && log.contains("transport=websocket committed profile=second"),
+        "websocket quota-blocked owner should rotate and commit the healthy profile: {log}"
+    );
+}
+
+#[test]
 fn runtime_proxy_websocket_keepalive_before_content_does_not_commit_or_block_forwarding() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =

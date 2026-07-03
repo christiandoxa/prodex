@@ -29,7 +29,7 @@ Examples:
 
 Notes:
   `prodex profile import kiro` reads the installed Kiro CLI auth store and profile metadata.
-  Use `PRODEX_KIRO_BIN` to point prodex at a specific Kiro CLI binary when `kiro-cli-chat` is not on PATH.";
+  Prodex prefers `kiro-cli-chat`, falls back to `kiro-cli`, and accepts `PRODEX_KIRO_BIN` for an explicit path override.";
 pub const CLI_LOGIN_AFTER_HELP: &str = "\
 Examples:
   prodex login

@@ -329,7 +329,9 @@ pub(super) fn runtime_gemini_local_compact_response_parts(
     runtime_gemini_compact_response_parts(&summary)
 }
 
-fn runtime_gemini_compact_response_parts(summary: &str) -> RuntimeHeapTrimmedBufferedResponseParts {
+pub(super) fn runtime_gemini_compact_response_parts(
+    summary: &str,
+) -> RuntimeHeapTrimmedBufferedResponseParts {
     let text = format!(
         "{GEMINI_LOCAL_COMPACT_SUMMARY_PREFIX}\n\n{}",
         summary.trim()

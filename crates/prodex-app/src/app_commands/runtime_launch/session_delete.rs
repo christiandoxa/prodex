@@ -1,5 +1,23 @@
 use super::*;
 
+pub(super) fn clear_codex_session_binding(session_id: &str) -> Result<()> {
+    let paths = AppPaths::discover()?;
+    let _lock = acquire_state_file_lock(&paths)?;
+    let mut state = AppState::load(&paths)?;
+    let compact_key = prodex_runtime_store::runtime_compact_session_lineage_key(session_id);
+    let removed_session = state.session_profile_bindings.remove(session_id).is_some();
+    let removed_compact = state
+        .session_profile_bindings
+        .remove(&compact_key)
+        .is_some();
+    if removed_session || removed_compact {
+        let json =
+            serde_json::to_string_pretty(&state).context("failed to serialize prodex state")?;
+        write_state_json_atomic(&paths, &json)?;
+    }
+    Ok(())
+}
+
 pub(super) fn resolve_codex_delete_session_id(codex_args: &[OsString]) -> Result<Option<String>> {
     let Some(selector) = codex_delete_session_selector(codex_args) else {
         return Ok(None);
@@ -51,20 +69,5 @@ pub(super) fn cleanup_codex_deleted_session_binding(session_id: Option<&str>) ->
     let Some(session_id) = session_id else {
         return Ok(());
     };
-    let paths = AppPaths::discover()?;
-    let _lock = acquire_state_file_lock(&paths)?;
-    let mut state = AppState::load(&paths)?;
-    let compact_key = prodex_runtime_store::runtime_compact_session_lineage_key(session_id);
-    let removed_session = state.session_profile_bindings.remove(session_id).is_some();
-    let removed_compact = state
-        .session_profile_bindings
-        .remove(&compact_key)
-        .is_some();
-    let removed = removed_session || removed_compact;
-    if removed {
-        let json =
-            serde_json::to_string_pretty(&state).context("failed to serialize prodex state")?;
-        write_state_json_atomic(&paths, &json)?;
-    }
-    Ok(())
+    clear_codex_session_binding(session_id)
 }

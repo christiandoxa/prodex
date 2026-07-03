@@ -1027,14 +1027,13 @@ fn response_item_transcript_event(
             })
         }
         "function_call_output" => {
-            let output = payload
-                .get("output")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
+            let output = transcript_visible_tool_output(
+                payload.get("output").and_then(serde_json::Value::as_str)?,
+            )?;
             Some(TranscriptEvent {
                 timestamp,
                 source: "tool-output".to_string(),
-                text: output.to_string(),
+                text: output,
             })
         }
         "custom_tool_call" => {
@@ -1053,14 +1052,13 @@ fn response_item_transcript_event(
             })
         }
         "custom_tool_call_output" => {
-            let output = payload
-                .get("output")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
+            let output = transcript_visible_tool_output(
+                payload.get("output").and_then(serde_json::Value::as_str)?,
+            )?;
             Some(TranscriptEvent {
                 timestamp,
                 source: "tool-output".to_string(),
-                text: output.to_string(),
+                text: output,
             })
         }
         "reasoning" => transcript_text_from_reasoning(payload).map(|text| TranscriptEvent {
@@ -1071,6 +1069,69 @@ fn response_item_transcript_event(
         _ => None,
     }
     .filter(|event| !event.text.trim().is_empty())
+}
+
+fn transcript_visible_tool_output(output: &str) -> Option<String> {
+    let output = output.trim();
+    if output.is_empty() || transcript_text_looks_binary(output) {
+        return None;
+    }
+    Some(output.to_string())
+}
+
+fn transcript_text_looks_binary(text: &str) -> bool {
+    let mut total = 0usize;
+    let mut suspicious = 0usize;
+    for ch in text.chars().take(4096) {
+        total += 1;
+        if ch == '\u{fffd}'
+            || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
+            || (!ch.is_ascii()
+                && !ch.is_alphanumeric()
+                && !ch.is_whitespace()
+                && !is_common_punctuation(ch))
+        {
+            suspicious += 1;
+        }
+    }
+    total > 0 && suspicious.saturating_mul(5) > total * 2
+}
+
+fn is_common_punctuation(ch: char) -> bool {
+    matches!(
+        ch,
+        '.' | ','
+            | ':'
+            | ';'
+            | '!'
+            | '?'
+            | '-'
+            | '_'
+            | '/'
+            | '\\'
+            | '('
+            | ')'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '<'
+            | '>'
+            | '"'
+            | '\''
+            | '@'
+            | '#'
+            | '$'
+            | '%'
+            | '^'
+            | '&'
+            | '*'
+            | '+'
+            | '='
+            | '|'
+            | '~'
+            | '`'
+    )
 }
 
 fn transcript_text_from_reasoning(payload: &serde_json::Value) -> Option<String> {
@@ -1246,6 +1307,16 @@ mod tests {
                 source: "tool-output".to_string(),
                 text: "{\"output\":\"Success\"}".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn skips_binary_like_tool_output_from_log_stream() {
+        let noisy_tool_output = "{\"timestamp\":\"2026-07-03T02:26:44.748Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"output\":\"\\uFFFD\\uFFFD\\uFFFD\\u0000\\u0001\\uFFFD\\uFFFD\\uFFFDabc\"}}";
+
+        assert!(
+            transcript_events_from_session_line(noisy_tool_output).is_empty(),
+            "binary-like tool output should be hidden from prodex log stream"
         );
     }
 

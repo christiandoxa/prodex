@@ -514,6 +514,111 @@ fn compact_final_failure_logs_quota_terminal_reason() {
 }
 
 #[test]
+fn session_affinity_compact_quota_rotates_to_ready_profile() {
+    let temp_dir = TestDir::isolated();
+    let backend = RuntimeProxyBackend::start_http_usage_limit_message();
+    let main_home = temp_dir.path.join("homes/main");
+    let second_home = temp_dir.path.join("homes/second");
+    write_auth_json(&main_home.join("auth.json"), "main-account");
+    write_auth_json(&second_home.join("auth.json"), "second-account");
+
+    let shared = runtime_rotation_proxy_shared(
+        &temp_dir,
+        RuntimeRotationState {
+            paths: AppPaths {
+                root: temp_dir.path.join("prodex"),
+                state_file: temp_dir.path.join("prodex/state.json"),
+                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+                shared_codex_root: temp_dir.path.join("shared"),
+                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+            },
+            state: AppState {
+                active_profile: Some("main".to_string()),
+                profiles: BTreeMap::from([
+                    (
+                        "main".to_string(),
+                        ProfileEntry {
+                            codex_home: main_home,
+                            managed: true,
+                            email: Some("main@example.com".to_string()),
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                    (
+                        "second".to_string(),
+                        ProfileEntry {
+                            codex_home: second_home,
+                            managed: true,
+                            email: Some("second@example.com".to_string()),
+                            provider: ProfileProvider::Openai,
+                        },
+                    ),
+                ]),
+                last_run_selected_at: BTreeMap::new(),
+                response_profile_bindings: BTreeMap::new(),
+                session_profile_bindings: BTreeMap::new(),
+            },
+            upstream_base_url: backend.base_url(),
+            include_code_review: false,
+            current_profile: "main".to_string(),
+            profile_usage_auth: BTreeMap::new(),
+            turn_state_bindings: BTreeMap::new(),
+            session_id_bindings: BTreeMap::from([(
+                "sess-main".to_string(),
+                ResponseProfileBinding {
+                    profile_name: "main".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            )]),
+            continuation_statuses: RuntimeContinuationStatuses::default(),
+            profile_probe_cache: BTreeMap::new(),
+            profile_usage_snapshots: BTreeMap::new(),
+            profile_retry_backoff_until: BTreeMap::new(),
+            profile_transport_backoff_until: BTreeMap::new(),
+            profile_route_circuit_open_until: BTreeMap::new(),
+            profile_inflight: BTreeMap::new(),
+            profile_health: BTreeMap::new(),
+        },
+        usize::MAX,
+    );
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("session_id".to_string(), "sess-main".to_string()),
+            ("x-openai-subagent".to_string(), "compact".to_string()),
+        ],
+        body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_standard_request(43, &request, &shared)
+        .expect("compact quota request should rotate to another ready profile");
+    let (status, body) = tiny_http_response_status_and_body(response);
+    let responses_accounts = backend.responses_accounts();
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert_eq!(status, 200);
+    assert!(
+        !body.contains("usage limit"),
+        "compact quota error should not leak after rotating to another ready profile: {body}"
+    );
+    assert_eq!(
+        responses_accounts,
+        vec!["main-account".to_string(), "second-account".to_string()],
+        "compact should try the bound owner first, then rotate to the ready profile"
+    );
+    assert!(
+        log.contains("quota_blocked_affinity_released profile=main route=compact"),
+        "compact quota retry should release the blocked affinity: {log}"
+    );
+    assert!(
+        log.contains("compact_committed profile=second"),
+        "compact should commit the later ready profile after quota rotation: {log}"
+    );
+}
+
+#[test]
 fn compact_final_failure_logs_local_selection_terminal_reason() {
     let temp_dir = TestDir::isolated();
     let main_home = temp_dir.path.join("homes/main");

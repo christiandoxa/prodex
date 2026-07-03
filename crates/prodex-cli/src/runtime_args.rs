@@ -646,7 +646,7 @@ impl SuperExternalProvider {
             // Codex currently exposes no configurable remote-compaction capability flag.
             // It enables /responses/compact only for provider names OpenAI or Azure.
             Self::Gemini => "Azure",
-            Self::Kiro => "OpenAI",
+            Self::Copilot | Self::Kiro => "OpenAI",
             _ => self.display_name(),
         }
     }
@@ -1016,6 +1016,31 @@ mod tests {
         )));
         assert!(rendered.contains(&"model_context_window=222222".to_string()));
         assert!(rendered.contains(&"model_auto_compact_token_limit=111111".to_string()));
+    }
+
+    #[test]
+    fn super_external_provider_codex_args_support_copilot_compact() {
+        let args = super_external_provider_codex_args(
+            SuperExternalProvider::Copilot,
+            "https://api.githubcopilot.com",
+            Some("gpt-5.3-codex"),
+            Some(333_333),
+            Some(222_222),
+        );
+        let rendered = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(rendered.contains(&format!(
+            "model_provider={}",
+            toml_string_literal(SUPER_COPILOT_PROVIDER_ID)
+        )));
+        assert!(rendered.contains(&format!(
+            "model_providers.{SUPER_COPILOT_PROVIDER_ID}.name={}",
+            toml_string_literal("OpenAI")
+        )));
+        assert!(rendered.contains(&"model_context_window=333333".to_string()));
+        assert!(rendered.contains(&"model_auto_compact_token_limit=222222".to_string()));
     }
 
     #[test]

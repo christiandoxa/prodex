@@ -603,11 +603,27 @@ fn kiro_responses_route_supports_buffered_sse_streaming() {
 }
 
 #[test]
-fn kiro_remote_compact_returns_local_continuation_summary() {
+fn kiro_remote_compact_uses_kiro_semantic_summary_when_available() {
     let root = temp_root("kiro-compact");
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
+    fs::write(
+        codex_home.join("kiro_auth.json"),
+        serde_json::json!({
+            "auth_key": "kirocli:social:token",
+            "auth_kind": "social",
+            "auth_json": "{\"token\":\"abc\"}",
+            "email": "kiro@example.com",
+            "profile_arn": null,
+            "profile_name": null,
+            "start_url": null,
+            "region": "us-east-1"
+        })
+        .to_string(),
+    )
+    .expect("kiro auth secret should be written");
+    let fake_agent = write_fake_kiro_runtime_agent_no_prompt_assert(&root);
     let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
         paths: &paths,
         state: &AppState::default(),
@@ -622,7 +638,7 @@ fn kiro_remote_compact_returns_local_continuation_summary() {
                     "object": "model",
                     "owned_by": "kiro-cli"
                 })],
-                command: None,
+                command: Some(fake_agent),
             },
         },
         upstream_no_proxy: false,
@@ -673,10 +689,9 @@ fn kiro_remote_compact_returns_local_continuation_summary() {
     let summary = body["output"][0]["content"][0]["text"]
         .as_str()
         .expect("compact summary text should exist");
-    assert!(summary.contains("Another language model started to solve this problem"));
-    assert!(summary.contains("keep implementing parity"));
-    assert!(summary.contains("tool call read_file (call_1)"));
-    assert!(summary.contains("tool output call_1: fn main() {}"));
+    assert!(summary.contains("kiro says hi"));
+    assert!(!summary.contains("Local Gemini compact fallback summary."));
+    assert!(!summary.contains("tool call read_file (call_1)"));
 }
 
 #[test]

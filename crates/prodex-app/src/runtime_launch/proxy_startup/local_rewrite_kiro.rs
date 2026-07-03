@@ -6,6 +6,9 @@ use super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
+use super::local_rewrite_gemini_compact::{
+    runtime_gemini_compact_response_parts, runtime_gemini_local_compact_response_parts,
+};
 use super::local_rewrite_upstream::RuntimeLocalRewriteStreamingResponse;
 use super::provider_bridge::runtime_provider_stream_function_call_arguments_delta_event;
 use super::provider_sse_events::{
@@ -15,10 +18,8 @@ use super::provider_sse_events::{
 use crate::profile_commands::{read_kiro_auth_secret, write_kiro_cli_data_dir};
 use crate::runtime_anthropic::{
     RuntimeAnthropicMessagesRequest, build_runtime_anthropic_error_parts,
-    translate_runtime_anthropic_messages_request,
-    translate_runtime_responses_reply_to_anthropic,
+    translate_runtime_anthropic_messages_request, translate_runtime_responses_reply_to_anthropic,
 };
-use crate::runtime_proxy_shared::{RuntimeResponsesReply, RuntimeStreamingResponse};
 use crate::runtime_kiro_acp::{
     RuntimeKiroAcpClientInfo, RuntimeKiroAcpEnvelope, RuntimeKiroAcpPromptTurnResult,
     RuntimeKiroAcpSessionNotification, RuntimeKiroAcpSessionUpdate,
@@ -26,6 +27,7 @@ use crate::runtime_kiro_acp::{
     runtime_kiro_acp_prompt_turn_with_command, runtime_kiro_acp_responses_value_from_prompt_turn,
     runtime_kiro_acp_session_new_request, runtime_kiro_acp_session_prompt_request,
 };
+use crate::runtime_proxy_shared::{RuntimeResponsesReply, RuntimeStreamingResponse};
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest};
 use anyhow::{Context, Result};
 use runtime_proxy_crate::path_without_query;
@@ -40,6 +42,13 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const KIRO_SEMANTIC_COMPACT_INSTRUCTIONS: &str = "\
+Compact the supplied coding-agent transcript into one durable continuation summary. \
+Preserve the user's goals, repository instructions, decisions, files changed, exact identifiers, \
+commands and test results, unresolved failures, current worktree state, and the next concrete steps. \
+Remove redundant narration and obsolete intermediate reasoning. Do not call tools. \
+Return only the continuation summary, with no preamble or completion claim.";
 
 #[derive(Clone)]
 pub(crate) struct RuntimeKiroProfileAuth {
@@ -174,7 +183,10 @@ pub(super) fn send_runtime_kiro_upstream_request(
     let stream = if messages_route {
         client_stream
     } else {
-        value.get("stream").and_then(Value::as_bool).unwrap_or(false)
+        value
+            .get("stream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     };
 
     let translated = runtime_chat_compatible_request_body(
@@ -229,8 +241,8 @@ pub(super) fn send_runtime_kiro_upstream_request(
             );
         }
         if stream {
-            let response =
-                RuntimeLocalRewriteUpstreamResponse::Streaming(RuntimeLocalRewriteStreamingResponse {
+            let response = RuntimeLocalRewriteUpstreamResponse::Streaming(
+                RuntimeLocalRewriteStreamingResponse {
                     status: 200,
                     headers: vec![(
                         "content-type".to_string(),
@@ -250,7 +262,8 @@ pub(super) fn send_runtime_kiro_upstream_request(
                         shared,
                     )?),
                     profile_name: auth.profile_name.clone(),
-                });
+                },
+            );
             let response = if let Some(anthropic_request) = anthropic_request.as_ref() {
                 runtime_kiro_anthropic_streaming_local_response(
                     response,
@@ -275,18 +288,22 @@ pub(super) fn send_runtime_kiro_upstream_request(
             } else {
                 serde_json::to_vec(&response).context("failed to serialize Kiro response JSON")?
             };
-            let response =
-                RuntimeLocalRewriteUpstreamResponse::Buffered(RuntimeHeapTrimmedBufferedResponseParts {
+            let response = RuntimeLocalRewriteUpstreamResponse::Buffered(
+                RuntimeHeapTrimmedBufferedResponseParts {
                     status: 200,
                     headers: vec![(
                         "content-type".to_string(),
                         b"application/json; charset=utf-8".to_vec(),
                     )],
                     body: body.into(),
-                });
+                },
+            );
             let response = if let Some(anthropic_request) = anthropic_request.as_ref() {
                 RuntimeLocalRewriteUpstreamResponse::Buffered(
-                    runtime_kiro_anthropic_message_parts_from_response(&response, anthropic_request),
+                    runtime_kiro_anthropic_message_parts_from_response(
+                        &response,
+                        anthropic_request,
+                    ),
                 )
             } else {
                 response
@@ -300,6 +317,109 @@ pub(super) fn send_runtime_kiro_upstream_request(
     })();
     let _ = fs::remove_dir_all(&overlay_root);
     result
+}
+
+pub(super) fn runtime_kiro_compact_response_parts(
+    request_id: u64,
+    body: &[u8],
+    auth: &RuntimeKiroProfileAuth,
+) -> RuntimeHeapTrimmedBufferedResponseParts {
+    match runtime_kiro_semantic_compact_summary(request_id, body, auth) {
+        Ok(summary) => runtime_gemini_compact_response_parts(&summary),
+        Err(_) => runtime_gemini_local_compact_response_parts(body),
+    }
+}
+
+fn runtime_kiro_semantic_compact_summary(
+    request_id: u64,
+    body: &[u8],
+    auth: &RuntimeKiroProfileAuth,
+) -> Result<String> {
+    let mut value: Value =
+        serde_json::from_slice(body).context("failed to parse Kiro compact request JSON")?;
+    let object = value
+        .as_object_mut()
+        .context("Kiro compact request must be a JSON object")?;
+    let input = object
+        .get_mut("input")
+        .and_then(Value::as_array_mut)
+        .context("Kiro compact request must contain an input array")?;
+    input.push(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{
+            "type": "input_text",
+            "text": KIRO_SEMANTIC_COMPACT_INSTRUCTIONS,
+        }],
+    }));
+    object.insert("stream".to_string(), Value::Bool(false));
+    object.insert("store".to_string(), Value::Bool(false));
+    for key in [
+        "include",
+        "previous_response_id",
+        "prompt_cache_key",
+        "text",
+        "tool_choice",
+        "tools",
+    ] {
+        object.remove(key);
+    }
+
+    let translated = runtime_chat_compatible_request_body(
+        &serde_json::to_vec(&value).context("failed to serialize Kiro compact request")?,
+        &RuntimeDeepSeekConversationStore::default(),
+        super::provider_bridge::RuntimeProviderBridgeKind::Kiro,
+        "",
+        false,
+        Default::default(),
+    )?;
+    let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
+    let overlay_root = runtime_kiro_temp_dir("compact");
+    let result = (|| {
+        let secret = read_kiro_auth_secret(&auth.codex_home)?;
+        let data_dir = overlay_root.join("kiro-data");
+        write_kiro_cli_data_dir(&data_dir, &secret)?;
+        let mut extra_env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];
+        if let Some(region) = secret
+            .region
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            extra_env.push((OsString::from("AWS_REGION"), OsString::from(region)));
+        }
+        let cwd = env::current_dir().unwrap_or_else(|_| auth.codex_home.clone());
+        let default_command = crate::kiro_bin();
+        let command = auth
+            .command
+            .as_deref()
+            .map(Path::as_os_str)
+            .unwrap_or(default_command.as_os_str());
+        let turn = runtime_kiro_acp_prompt_turn_with_command(command, &cwd, &extra_env, &prompt)?;
+        let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
+        runtime_kiro_compact_summary_from_response(&response)
+    })();
+    let _ = fs::remove_dir_all(&overlay_root);
+    result
+}
+
+fn runtime_kiro_compact_summary_from_response(response: &Value) -> Result<String> {
+    let output = response
+        .get("output")
+        .and_then(Value::as_array)
+        .context("Kiro compact response is missing output")?;
+    let summary = output
+        .iter()
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+        .and_then(|item| item.get("content"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find_map(|item| item.get("text").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .context("Kiro compact response returned no summary text")?;
+    Ok(summary.to_string())
 }
 
 fn runtime_kiro_chat_completion_value_from_response(response: &Value, request_id: u64) -> Value {
@@ -986,9 +1106,10 @@ fn runtime_kiro_anthropic_message_parts_from_response(
         }));
     }
     let usage = value.get("usage").cloned().unwrap_or_else(|| json!({}));
-    let stop_reason = if content.iter().any(|block| {
-        block.get("type").and_then(Value::as_str) == Some("tool_use")
-    }) {
+    let stop_reason = if content
+        .iter()
+        .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+    {
         "tool_use"
     } else {
         value
@@ -1052,7 +1173,9 @@ fn runtime_kiro_anthropic_streaming_local_response(
         runtime_shared,
     )?;
     Ok(match translated {
-        RuntimeResponsesReply::Buffered(parts) => RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+        RuntimeResponsesReply::Buffered(parts) => {
+            RuntimeLocalRewriteUpstreamResponse::Buffered(parts)
+        }
         RuntimeResponsesReply::Streaming(streaming) => {
             RuntimeLocalRewriteUpstreamResponse::Streaming(RuntimeLocalRewriteStreamingResponse {
                 status: streaming.status,
@@ -1809,7 +1932,40 @@ mod tests {
     use crate::runtime_anthropic::translate_runtime_anthropic_messages_request;
     use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
     use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::Path;
     use std::sync::{Arc, Mutex};
+
+    fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
+        let script = root.join("fake-kiro-compact");
+        fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json, sys
+first = json.loads(sys.stdin.readline())
+second = json.loads(sys.stdin.readline())
+assert first["method"] == "initialize"
+assert second["method"] == "session/new"
+print(json.dumps({"jsonrpc":"2.0","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":True,"promptCapabilities":{"image":False,"audio":False,"embeddedContext":False},"mcpCapabilities":{"http":True,"sse":False},"sessionCapabilities":{},"auth":{}},"authMethods":[],"agentInfo":{"name":"Kiro CLI Agent","title":"Kiro CLI Agent","version":"2.10.0"}},"id":0}), flush=True)
+print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-1","models":{"currentModelId":"claude-sonnet-4","availableModels":[{"modelId":"claude-sonnet-4","name":"claude-sonnet-4"}]}},"id":1}), flush=True)
+third = json.loads(sys.stdin.readline())
+assert third["method"] == "session/prompt"
+prompt = third["params"]["prompt"][0]["text"]
+print(prompt, file=sys.stderr, flush=True)
+print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg_1","content":{"type":"text","text":"FAKE NATIVE KIRO COMPACT SUMMARY"}}}}), flush=True)
+print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
+"#,
+        )
+        .expect("fake kiro compact agent should be written");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&script).expect("metadata").permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&script, perms).expect("permissions should update");
+        }
+        script
+    }
 
     #[test]
     fn kiro_chat_tool_message_maps_only_to_function_call_output() {
@@ -1889,7 +2045,10 @@ mod tests {
         let request_body = String::from_utf8(translated_request.translated_request.body.clone())
             .expect("translated request should be utf8");
         let messages_json = serde_json::to_string(&translated.messages).unwrap();
-        assert!(messages_json.contains("start tool"), "{request_body}\n{messages_json}");
+        assert!(
+            messages_json.contains("start tool"),
+            "{request_body}\n{messages_json}"
+        );
         assert!(runtime_kiro_prompt_from_messages(&translated.messages).contains("start tool"));
     }
 
@@ -1993,5 +2152,75 @@ mod tests {
         };
         let body: Value = serde_json::from_slice(&error.body).unwrap();
         assert_eq!(body["error"]["code"], "unsupported_token_limit");
+    }
+
+    #[test]
+    fn kiro_semantic_compact_summary_uses_acp_turn() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-kiro-compact-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("temp root should exist");
+        let codex_home = root.join("kiro-home");
+        fs::create_dir_all(&codex_home).expect("codex home should exist");
+        fs::write(
+            codex_home.join("kiro_auth.json"),
+            serde_json::json!({
+                "auth_key": "kirocli:social:token",
+                "auth_kind": "social",
+                "auth_json": "{\"token\":\"abc\"}",
+                "email": "kiro@example.com",
+                "profile_arn": null,
+                "profile_name": null,
+                "start_url": null,
+                "region": "us-east-1"
+            })
+            .to_string(),
+        )
+        .expect("kiro auth secret should be written");
+        let auth = RuntimeKiroProfileAuth {
+            profile_name: "kiro-main".to_string(),
+            codex_home: codex_home.clone(),
+            model_catalog: vec![json!({
+                "id": "claude-sonnet-4",
+                "name": "claude-sonnet-4",
+                "object": "model",
+                "owned_by": "kiro-cli"
+            })],
+            command: Some(write_fake_kiro_compact_agent(&root)),
+        };
+        let summary = runtime_kiro_semantic_compact_summary(
+            7,
+            &serde_json::to_vec(&json!({
+                "model": "claude-sonnet-4",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "keep implementing parity"}]
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "read_file",
+                        "arguments": "{\"path\":\"src/main.rs\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": "fn main() {}"
+                    }
+                ]
+            }))
+            .expect("request body"),
+            &auth,
+        )
+        .expect("semantic compact summary should succeed");
+        assert_eq!(summary, "FAKE NATIVE KIRO COMPACT SUMMARY");
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -108,9 +108,7 @@ impl ProviderAdapterContract for StaticProviderAdapter {
             ProviderId::Kiro => match endpoint {
                 ProviderEndpoint::Responses
                 | ProviderEndpoint::ChatCompletions
-                | ProviderEndpoint::Messages => {
-                    ProviderCapabilityStatus::Translated
-                }
+                | ProviderEndpoint::Messages => ProviderCapabilityStatus::Translated,
                 ProviderEndpoint::ResponsesCompact | ProviderEndpoint::Models => {
                     ProviderCapabilityStatus::Emulated
                 }
