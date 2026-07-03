@@ -1,5 +1,18 @@
 [
   {
+    "id": "runtime-goal-resume-and-log-stream-0.244.0",
+    "requiredSubjects": [
+      "fix(runtime): resume unfinished goals after usage limits"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 25,
+      "maxLines": 1700,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed cross-cutting runtime goal resume fallback, post-exit relaunch wiring, log-stream binary tool-output suppression, Kiro/local rewrite parity updates, focused regression tests, and 0.244.0 release metadata with the full local Rust test suite."
+  },
+  {
     "id": "provider-conformance-v1-0.242.0",
     "requiredSubjects": [
       "feat: Provider Conformance Layer v1"
