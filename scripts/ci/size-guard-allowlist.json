@@ -6,8 +6,8 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/log.rs",
-    "maxLines": 1642,
-    "reason": "Log stream snapshot/TUI rendering, upstream payload display, transcript extraction, and binary-like tool-output suppression remain capped while renderer and parser ownership are split."
+    "maxLines": 1734,
+    "reason": "Log stream snapshot/TUI rendering, upstream payload display, transcript extraction, binary-like tool-output suppression, and internal attachment-path filtering remain capped while renderer and parser ownership are split."
   },
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
