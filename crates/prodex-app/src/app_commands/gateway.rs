@@ -168,18 +168,20 @@ fn parse_gateway_provider(value: &str) -> Result<ProviderId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TestEnvVarGuard, create_codex_home_if_missing};
+    use crate::{TestEnvLockGuard, acquire_test_env_lock, create_codex_home_if_missing};
     use std::collections::BTreeMap;
     use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    struct GatewayTestEnvGuard {
+    struct EnvGuard {
+        _lock: TestEnvLockGuard,
         previous_home: Option<std::ffi::OsString>,
         previous_xdg: Option<std::ffi::OsString>,
     }
 
-    impl GatewayTestEnvGuard {
+    impl EnvGuard {
         fn set(root: &std::path::Path) -> Self {
+            let lock = acquire_test_env_lock();
             let previous_home = env::var_os("HOME");
             let previous_xdg = env::var_os("XDG_CONFIG_HOME");
             unsafe {
@@ -187,13 +189,14 @@ mod tests {
                 env::set_var("XDG_CONFIG_HOME", root.join("config"));
             }
             Self {
+                _lock: lock,
                 previous_home,
                 previous_xdg,
             }
         }
     }
 
-    impl Drop for GatewayTestEnvGuard {
+    impl Drop for EnvGuard {
         fn drop(&mut self) {
             match self.previous_home.take() {
                 Some(value) => unsafe { env::set_var("HOME", value) },
@@ -231,7 +234,7 @@ mod tests {
     fn gateway_kiro_model_catalog_json_merges_imported_profile_snapshots() {
         let _guard = TestEnvVarGuard::lock();
         let root = temp_dir("catalog");
-        let _env = GatewayTestEnvGuard::set(&root);
+        let _env = EnvGuard::set(&root);
 
         let paths = AppPaths::discover().expect("paths should resolve");
         let first_home = paths.managed_profiles_root.join("kiro-a");

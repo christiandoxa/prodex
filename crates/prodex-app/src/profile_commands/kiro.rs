@@ -659,8 +659,35 @@ fn write_kiro_state_entry(connection: &Connection, key: &str, value: Option<&str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{TestEnvLockGuard, acquire_test_env_lock};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct EnvGuard {
+        _lock: TestEnvLockGuard,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set_kiro_bin(value: &Path) -> Self {
+            let lock = acquire_test_env_lock();
+            let previous = env::var_os("PRODEX_KIRO_BIN");
+            unsafe { env::set_var("PRODEX_KIRO_BIN", value) };
+            Self {
+                _lock: lock,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => unsafe { env::set_var("PRODEX_KIRO_BIN", value) },
+                None => unsafe { env::remove_var("PRODEX_KIRO_BIN") },
+            }
+        }
+    }
 
     fn write_fake_kiro_binary(root: &Path) -> PathBuf {
         let script = root.join("fake-kiro-cli");
@@ -772,8 +799,7 @@ sys.exit(1)
         let codex_home = root.join("codex-home");
         fs::create_dir_all(&codex_home).expect("codex home should exist");
         let fake_kiro = write_fake_kiro_binary(&root);
-        let previous_bin = env::var_os("PRODEX_KIRO_BIN");
-        unsafe { env::set_var("PRODEX_KIRO_BIN", &fake_kiro) };
+        let _guard = EnvGuard::set_kiro_bin(&fake_kiro);
 
         let secret = KiroAuthSecret {
             auth_key: "codewhisperer:odic:token".to_string(),
@@ -799,11 +825,6 @@ sys.exit(1)
         let value: Value = serde_json::from_str(&catalog_text).expect("catalog json should parse");
         assert_eq!(value["models"][0]["id"], "claude-sonnet-4");
         assert_eq!(value["models"][1]["id"], "claude-sonnet-4.5");
-
-        match previous_bin {
-            Some(value) => unsafe { env::set_var("PRODEX_KIRO_BIN", value) },
-            None => unsafe { env::remove_var("PRODEX_KIRO_BIN") },
-        }
         let _ = fs::remove_dir_all(root);
     }
 }

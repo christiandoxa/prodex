@@ -282,22 +282,46 @@ fn kiro_bin() -> OsString {
 #[cfg(test)]
 mod kiro_bin_tests {
     use super::kiro_bin;
+    use crate::{TestEnvLockGuard, acquire_test_env_lock};
     use std::env;
     use std::ffi::OsString;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn with_env_var(key: &str, value: Option<OsString>, f: impl FnOnce()) {
-        let previous = env::var_os(key);
-        match value {
-            Some(value) => unsafe { env::set_var(key, value) },
-            None => unsafe { env::remove_var(key) },
+    struct EnvGuard {
+        _lock: TestEnvLockGuard,
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: Option<OsString>) -> Self {
+            let lock = acquire_test_env_lock();
+            let previous = env::var_os(key);
+            match value {
+                Some(value) => unsafe { env::set_var(key, value) },
+                None => unsafe { env::remove_var(key) },
+            }
+            Self {
+                _lock: lock,
+                key,
+                previous,
+            }
         }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => unsafe { env::set_var(self.key, value) },
+                None => unsafe { env::remove_var(self.key) },
+            }
+        }
+    }
+
+    fn with_env_var(key: &'static str, value: Option<OsString>, f: impl FnOnce()) {
+        let _guard = EnvGuard::set(key, value);
         f();
-        match previous {
-            Some(value) => unsafe { env::set_var(key, value) },
-            None => unsafe { env::remove_var(key) },
-        }
     }
 
     #[test]
@@ -327,15 +351,10 @@ mod kiro_bin_tests {
         )
         .expect("fake binary should write");
 
-        let previous_path = env::var_os("PATH");
         with_env_var("PRODEX_KIRO_BIN", None, || {
-            unsafe { env::set_var("PATH", &root) };
+            let _path = EnvGuard::set("PATH", Some(root.clone().into_os_string()));
             assert_eq!(kiro_bin(), OsString::from("kiro-cli"));
         });
-        match previous_path {
-            Some(value) => unsafe { env::set_var("PATH", value) },
-            None => unsafe { env::remove_var("PATH") },
-        }
         let _ = fs::remove_dir_all(root);
     }
 }
