@@ -1072,29 +1072,106 @@ fn response_item_transcript_event(
 }
 
 fn transcript_visible_tool_output(output: &str) -> Option<String> {
+    let output = strip_transcript_ansi_codes(output);
     let output = output.trim();
-    if output.is_empty() || transcript_text_looks_binary(output) {
+    if output.is_empty() {
         return None;
     }
-    Some(output.to_string())
+    if !output.contains('\n') && transcript_text_looks_binary(output) {
+        return None;
+    }
+
+    let mut visible_lines = Vec::new();
+    let mut last_blank = false;
+    for raw_line in output.lines() {
+        let line = raw_line.trim_end();
+        if line.is_empty() {
+            if !last_blank && !visible_lines.is_empty() {
+                visible_lines.push(String::new());
+            }
+            last_blank = true;
+            continue;
+        }
+        if transcript_text_looks_binary(line) {
+            continue;
+        }
+        visible_lines.push(line.to_string());
+        last_blank = false;
+    }
+    while visible_lines.last().is_some_and(|line| line.is_empty()) {
+        visible_lines.pop();
+    }
+    (!visible_lines.is_empty()).then(|| visible_lines.join("\n"))
 }
 
 fn transcript_text_looks_binary(text: &str) -> bool {
     let mut total = 0usize;
     let mut suspicious = 0usize;
+    let mut replacement = 0usize;
+    let mut control = 0usize;
     for ch in text.chars().take(4096) {
         total += 1;
-        if ch == '\u{fffd}'
+        let is_suspicious = ch == '\u{fffd}'
             || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
             || (!ch.is_ascii()
                 && !ch.is_alphanumeric()
                 && !ch.is_whitespace()
-                && !is_common_punctuation(ch))
-        {
+                && !is_common_punctuation(ch));
+        if ch == '\u{fffd}' {
+            replacement += 1;
+        }
+        if ch.is_control() && !matches!(ch, '\n' | '\r' | '\t') {
+            control += 1;
+        }
+        if is_suspicious {
             suspicious += 1;
         }
     }
-    total > 0 && suspicious.saturating_mul(5) > total * 2
+    total > 0
+        && (replacement >= 3
+            || control > 0
+            || suspicious.saturating_mul(4) > total
+            || suspicious >= 8)
+}
+
+fn strip_transcript_ansi_codes(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            match chars.peek().copied() {
+                Some('[') => {
+                    chars.next();
+                    for code in chars.by_ref() {
+                        if ('@'..='~').contains(&code) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    let mut previous = '\0';
+                    for code in chars.by_ref() {
+                        if code == '\u{7}' || (previous == '\u{1b}' && code == '\\') {
+                            break;
+                        }
+                        previous = code;
+                    }
+                }
+                Some(_) => {
+                    chars.next();
+                }
+                None => {}
+            }
+        } else if ch == '\r' {
+            if !matches!(chars.peek(), Some('\n')) {
+                output.push('\n');
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+    output
 }
 
 fn is_common_punctuation(ch: char) -> bool {
@@ -1317,6 +1394,34 @@ mod tests {
         assert!(
             transcript_events_from_session_line(noisy_tool_output).is_empty(),
             "binary-like tool output should be hidden from prodex log stream"
+        );
+    }
+
+    #[test]
+    fn keeps_readable_lines_when_tool_output_starts_with_binary_garbage() {
+        let mixed_tool_output = "{\"timestamp\":\"2026-07-03T02:26:44.748Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"output\":\"\\uFFFD\\uFFFD\\uFFFD\\u0000junk\\nChunk ID: d103c4\\nWall time: 1.0007 seconds\\nOutput:\\nForwarding from 127.0.0.1:19080 -> 8080\\r\\nForwarding from [::1]:19080 -> 8080\\r\\n\"}}";
+
+        assert_eq!(
+            transcript_events_from_session_line(mixed_tool_output),
+            vec![TranscriptEvent {
+                timestamp: local_log_timestamp("2026-07-03T02:26:44.748Z"),
+                source: "tool-output".to_string(),
+                text: "Chunk ID: d103c4\nWall time: 1.0007 seconds\nOutput:\nForwarding from 127.0.0.1:19080 -> 8080\nForwarding from [::1]:19080 -> 8080".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn strips_ansi_from_tool_output_before_rendering() {
+        let ansi_tool_output = "{\"timestamp\":\"2026-07-03T02:26:44.748Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"output\":\"\\u001b[35mForwarding\\u001b[0m from 127.0.0.1:19080 -> 8080\\r\\n\"}}";
+
+        assert_eq!(
+            transcript_events_from_session_line(ansi_tool_output),
+            vec![TranscriptEvent {
+                timestamp: local_log_timestamp("2026-07-03T02:26:44.748Z"),
+                source: "tool-output".to_string(),
+                text: "Forwarding from 127.0.0.1:19080 -> 8080".to_string(),
+            }]
         );
     }
 
