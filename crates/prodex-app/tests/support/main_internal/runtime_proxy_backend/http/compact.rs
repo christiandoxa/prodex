@@ -11,26 +11,44 @@ pub(super) fn handle_runtime_proxy_backend_compact_route(
             (
                 "main-account",
                 RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage
+                | RuntimeProxyBackendMode::HttpOnlyWorkspaceCreditsExhausted
                 | RuntimeProxyBackendMode::HttpOnlyUsageLimitMessageLateReadyFifth,
             ) => (
-                "HTTP/1.1 429 Too Many Requests",
+                if matches!(mode, RuntimeProxyBackendMode::HttpOnlyWorkspaceCreditsExhausted) {
+                    "HTTP/1.1 402 Payment Required"
+                } else {
+                    "HTTP/1.1 429 Too Many Requests"
+                },
                 "application/json",
-                serde_json::json!({
-                    "error": {
-                        "type": "usage_limit_reached",
-                        "message": "The usage limit has been reached",
-                        "plan_type": "team",
-                        "resets_at": 1775183113_i64,
-                        "eligible_promo": serde_json::Value::Null,
-                        "resets_in_seconds": 259149
-                    }
-                })
-                .to_string(),
+                if matches!(mode, RuntimeProxyBackendMode::HttpOnlyWorkspaceCreditsExhausted) {
+                    serde_json::json!({
+                        "error": {
+                            "message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+                        }
+                    })
+                    .to_string()
+                } else {
+                    serde_json::json!({
+                        "error": {
+                            "type": "usage_limit_reached",
+                            "message": "The usage limit has been reached",
+                            "plan_type": "team",
+                            "resets_at": 1775183113_i64,
+                            "eligible_promo": serde_json::Value::Null,
+                            "resets_in_seconds": 259149
+                        }
+                    })
+                    .to_string()
+                },
                 None,
                 None,
                 None,
             ),
-            ("second-account", RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage) => (
+            (
+                "second-account",
+                RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage
+                | RuntimeProxyBackendMode::HttpOnlyWorkspaceCreditsExhausted,
+            ) => (
                 "HTTP/1.1 200 OK",
                 "application/json",
                 serde_json::json!({

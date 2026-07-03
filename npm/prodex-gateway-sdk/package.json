@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex-gateway-sdk",
-  "version": "0.245.0",
+  "version": "0.246.0",
   "description": "JavaScript client for the Prodex gateway admin and Responses API",
   "license": "Apache-2.0",
   "type": "module",

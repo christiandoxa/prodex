@@ -222,10 +222,10 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
         {
             continue;
         }
-        let retryable_quota = matches!(status, 403 | 429)
+        let retryable_quota = matches!(status, 402 | 403 | 429)
             && extract_runtime_proxy_quota_message(&parts.body).is_some();
         let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
-        if matches!(status, 403 | 429) && !retryable_quota {
+        if matches!(status, 402 | 403 | 429) && !retryable_quota {
             runtime_proxy_log(
                 shared,
                 format!(
@@ -515,12 +515,12 @@ pub(super) fn attempt_runtime_standard_request(
         {
             continue;
         }
-        let retryable_quota = matches!(status, 403 | 429)
+        let retryable_quota = matches!(status, 402 | 403 | 429)
             && extract_runtime_proxy_quota_message(&parts.body).is_some();
         let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
         let retryable_overload =
             extract_runtime_proxy_overload_message(status, &parts.body).is_some();
-        if matches!(status, 403 | 429) && !retryable_quota {
+        if matches!(status, 402 | 403 | 429) && !retryable_quota {
             runtime_proxy_log(
                 shared,
                 format!(

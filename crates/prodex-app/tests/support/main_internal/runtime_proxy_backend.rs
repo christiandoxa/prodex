@@ -50,6 +50,7 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlyCompactPreviousResponseNotFound,
     HttpOnlyLargeCompactResponse,
     HttpOnlyUsageLimitMessage,
+    HttpOnlyWorkspaceCreditsExhausted,
     HttpOnlyUsageLimitAutoRedeem,
     HttpOnlyUsageLimitMessageLateReadyFifth,
     HttpOnlyUsageLimitUntilThird,
@@ -144,6 +145,10 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_http_usage_limit_message() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyUsageLimitMessage)
+    }
+
+    pub(super) fn start_http_workspace_credits_exhausted() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyWorkspaceCreditsExhausted)
     }
 
     pub(super) fn start_http_usage_limit_auto_redeem() -> Self {

@@ -504,6 +504,16 @@ fn quota_http_body_detection_requires_explicit_error_code() {
             "{code}"
         );
     }
+
+    assert_eq!(
+        extract_runtime_proxy_quota_message(
+            br#"{"error":{"message":"Your workspace is out of credits. Ask your workspace owner to refill in order to continue."}}"#
+        ),
+        Some(
+            "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+                .to_string()
+        )
+    );
 }
 
 #[test]

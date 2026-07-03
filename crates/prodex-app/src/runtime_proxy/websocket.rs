@@ -323,7 +323,7 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                         ],
                     ),
                 );
-                if matches!(status, 403 | 429)
+                if matches!(status, 402 | 403 | 429)
                     && extract_runtime_proxy_quota_message(&body).is_some()
                 {
                     return Ok(RuntimeWebsocketConnectResult::QuotaBlocked(

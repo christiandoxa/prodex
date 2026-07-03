@@ -114,6 +114,40 @@ fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_status
 }
 
 #[test]
+fn workspace_credit_message_rotates_only_before_commit_for_explicit_quota_statuses() {
+    let body = json_body(serde_json::json!({
+        "error": {
+            "message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+        }
+    }));
+
+    for status in [402, 403, 429] {
+        let precommit = runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::PreCommit);
+        assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota, "{status}");
+        assert_eq!(
+            precommit.action,
+            RuntimeHttpErrorAction::RotateProfile,
+            "{status}"
+        );
+        assert_eq!(precommit.rule, Some("explicit_quota"), "{status}");
+        assert_eq!(
+            precommit.message.as_deref(),
+            Some(
+                "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+            )
+        );
+
+        let committed = runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::Committed);
+        assert_eq!(committed.class, RuntimeHttpErrorClass::Quota, "{status}");
+        assert_eq!(
+            committed.action,
+            RuntimeHttpErrorAction::PassThrough,
+            "{status}"
+        );
+    }
+}
+
+#[test]
 fn generic_429_passes_through_without_explicit_quota_code() {
     let policy = runtime_http_error_policy(
         429,

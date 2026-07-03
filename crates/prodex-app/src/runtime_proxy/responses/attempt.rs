@@ -113,7 +113,7 @@ pub(crate) fn attempt_runtime_responses_request(
             {
                 continue;
             }
-            let retryable_quota = matches!(status, 403 | 429)
+            let retryable_quota = matches!(status, 402 | 403 | 429)
                 && extract_runtime_proxy_quota_message(&parts.body).is_some();
             let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
             let retryable_previous = status == 400

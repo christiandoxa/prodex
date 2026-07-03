@@ -56,7 +56,7 @@ const RUNTIME_TRANSIENT_HTTP_STATUSES: &[u16] = &[500, 502, 503, 504, 529];
 const RUNTIME_HTTP_ERROR_RULES: &[RuntimeHttpErrorRule] = &[
     RuntimeHttpErrorRule {
         name: "explicit_quota",
-        statuses: &[403, 429],
+        statuses: &[402, 403, 429],
         signal: RuntimeHttpErrorSignal::ExplicitQuota,
         class: RuntimeHttpErrorClass::Quota,
         precommit_action: RuntimeHttpErrorAction::RotateProfile,
@@ -250,6 +250,7 @@ pub fn runtime_overload_payload_code(code: &str) -> bool {
 pub fn runtime_usage_limit_text_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitQuota)
+        || runtime_workspace_credit_exhausted_text_message(message)
         || lower.contains("you've hit your usage limit")
         || lower.contains("you have hit your usage limit")
         || lower.contains("the usage limit has been reached")
@@ -287,8 +288,9 @@ fn runtime_error_signal_message_from_body(
     runtime_utf8_text(body).and_then(|text| match signal {
         RuntimeHttpErrorSignal::ExplicitQuota => match quota_mode {
             RuntimeQuotaMatchMode::ExplicitCode => {
-                runtime_text_has_payload_code(text, RuntimeHttpErrorSignal::ExplicitQuota)
-                    .then(|| text.to_string())
+                (runtime_text_has_payload_code(text, RuntimeHttpErrorSignal::ExplicitQuota)
+                    || runtime_workspace_credit_exhausted_text_message(text))
+                .then(|| text.to_string())
             }
             RuntimeQuotaMatchMode::UsageMessage => {
                 runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Quota)
@@ -310,8 +312,9 @@ fn runtime_error_signal_candidate(
         serde_json::Value::String(message) => match signal {
             RuntimeHttpErrorSignal::ExplicitQuota => match quota_mode {
                 RuntimeQuotaMatchMode::ExplicitCode => {
-                    runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitQuota)
-                        .then(|| message.to_string())
+                    (runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitQuota)
+                        || runtime_workspace_credit_exhausted_text_message(message))
+                    .then(|| message.to_string())
                 }
                 RuntimeQuotaMatchMode::UsageMessage => {
                     runtime_usage_limit_text_message(message).then(|| message.to_string())
@@ -336,11 +339,16 @@ fn runtime_error_signal_candidate(
                 .any(|code| runtime_payload_code_matches(code, signal));
 
             match signal {
-                RuntimeHttpErrorSignal::ExplicitQuota if explicit_code => Some(
-                    message
-                        .unwrap_or("Upstream Codex account quota was exhausted.")
-                        .to_string(),
-                ),
+                RuntimeHttpErrorSignal::ExplicitQuota
+                    if explicit_code
+                        || message.is_some_and(runtime_workspace_credit_exhausted_text_message) =>
+                {
+                    Some(
+                        message
+                            .unwrap_or("Upstream Codex account quota was exhausted.")
+                            .to_string(),
+                    )
+                }
                 RuntimeHttpErrorSignal::ExplicitQuota
                     if quota_mode == RuntimeQuotaMatchMode::UsageMessage
                         && message.is_some_and(runtime_usage_limit_text_message) =>
@@ -397,6 +405,14 @@ fn runtime_text_has_payload_code(text: &str, signal: RuntimeHttpErrorSignal) -> 
             )
         ) && lower.contains(rule.code)
     })
+}
+
+fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("workspace is out of credits")
+        || (lower.contains("out of credits")
+            && lower.contains("workspace owner")
+            && lower.contains("refill"))
 }
 
 fn runtime_transient_http_error_message(status: u16, body: &[u8]) -> String {
