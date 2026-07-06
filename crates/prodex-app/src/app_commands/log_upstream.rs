@@ -1,12 +1,13 @@
 use super::collect_recent_runtime_log_paths;
 use super::log_format::{current_log_width, render_log_block};
+use super::log_tui::{LogTuiInput, LogTuiState, contains_ignore_ascii_case, visible_text};
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
 };
 use crate::{prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -113,6 +114,7 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
 
 fn stream_upstream_payload_events_tui() -> Result<()> {
     let mut tui = UpstreamPayloadTui::new()?;
+    let mut view = LogTuiState::default();
     let mut events = VecDeque::<UpstreamPayloadEvent>::new();
     if let Some(event) = latest_upstream_payload_event() {
         push_upstream_payload_event(&mut events, event);
@@ -140,19 +142,16 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             }
         }
         tui.terminal.draw(|frame| {
-            render_upstream_payload_tui(frame, &events);
+            render_upstream_payload_tui(frame, &events, &view);
         })?;
         if event::poll(LOG_STREAM_POLL_INTERVAL)?
             && let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
-            && (matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
-                || (key.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('z'))))
+            && view.apply_key(key) == LogTuiInput::Quit
         {
-            break;
+            return Ok(());
         }
     }
-    Ok(())
 }
 
 fn push_upstream_payload_event(
@@ -238,6 +237,7 @@ fn print_upstream_payload_event(event: &UpstreamPayloadEvent, json: bool) -> Res
 fn render_upstream_payload_tui(
     frame: &mut ratatui::Frame<'_>,
     events: &VecDeque<UpstreamPayloadEvent>,
+    state: &LogTuiState,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -247,10 +247,15 @@ fn render_upstream_payload_tui(
             Constraint::Length(3),
         ])
         .split(frame.area());
+    let matches = matching_upstream_payload_events(events, state.query()).len();
+    let count = match state.query() {
+        Some(_) => format!("{matches}/{} match(es)", events.len()),
+        None => format!("{} event(s)", events.len()),
+    };
     let header = Paragraph::new(Line::from(vec![
         Span::styled("Prodex Upstream Payloads", tui_title_style()),
         Span::raw("  "),
-        Span::styled(format!("{} event(s)", events.len()), tui_secondary_style()),
+        Span::styled(count, tui_secondary_style()),
     ]))
     .block(
         Block::default()
@@ -260,21 +265,25 @@ fn render_upstream_payload_tui(
     frame.render_widget(header, chunks[0]);
 
     let width = chunks[1].width.saturating_sub(4).max(24) as usize;
-    let body = Paragraph::new(upstream_payload_tui_text(events, width))
-        .block(
-            Block::default()
-                .borders(Borders::LEFT | Borders::RIGHT)
-                .border_style(tui_border_style()),
-        )
-        .wrap(Wrap { trim: false });
+    let body = Paragraph::new(upstream_payload_tui_text(
+        events,
+        width,
+        usize::from(chunks[1].height),
+        state.query(),
+        state.scroll_from_bottom(),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT)
+            .border_style(tui_border_style()),
+    )
+    .wrap(Wrap { trim: false });
     frame.render_widget(body, chunks[1]);
 
-    let footer = Paragraph::new(Line::from(vec![
-        Span::styled("q", tui_hint_style()),
-        Span::raw(" quit  "),
-        Span::styled("esc", tui_hint_style()),
-        Span::raw(" close"),
-    ]))
+    let footer = Paragraph::new(Line::styled(
+        state.footer_text("q quit esc close"),
+        tui_title_style(),
+    ))
     .block(
         Block::default()
             .borders(Borders::ALL)
@@ -286,6 +295,9 @@ fn render_upstream_payload_tui(
 fn upstream_payload_tui_text(
     events: &VecDeque<UpstreamPayloadEvent>,
     width: usize,
+    max_lines: usize,
+    query: Option<&str>,
+    scroll_from_bottom: usize,
 ) -> Text<'static> {
     if events.is_empty() {
         return Text::from(Line::from(Span::styled(
@@ -294,8 +306,16 @@ fn upstream_payload_tui_text(
         )));
     }
 
+    let matching = matching_upstream_payload_events(events, query);
+    if matching.is_empty() {
+        return Text::from(Line::from(Span::styled(
+            "No upstream payload events match search.",
+            tui_secondary_style(),
+        )));
+    }
+
     let mut lines = Vec::new();
-    for (index, event) in events.iter().enumerate() {
+    for (index, event) in matching.iter().enumerate() {
         if index > 0 {
             lines.push(Line::raw(""));
         }
@@ -342,7 +362,39 @@ fn upstream_payload_tui_text(
             lines.push(Line::raw(line));
         }
     }
-    Text::from(lines)
+    visible_text(lines, max_lines, scroll_from_bottom)
+}
+
+fn matching_upstream_payload_events<'a>(
+    events: &'a VecDeque<UpstreamPayloadEvent>,
+    query: Option<&str>,
+) -> Vec<&'a UpstreamPayloadEvent> {
+    events
+        .iter()
+        .filter(|event| query.is_none_or(|query| upstream_payload_event_matches(event, query)))
+        .collect()
+}
+
+fn upstream_payload_event_matches(event: &UpstreamPayloadEvent, query: &str) -> bool {
+    let request = event
+        .request
+        .map(|request| request.to_string())
+        .unwrap_or_default();
+    contains_ignore_ascii_case(
+        &format!(
+            "{} {} {} {} {} {} {} {} {}",
+            event.timestamp,
+            event.profile,
+            request,
+            event.transport,
+            event.route,
+            event.bytes,
+            event.logged_bytes,
+            event.truncated,
+            event.payload
+        ),
+        query,
+    )
 }
 
 fn latest_upstream_payload_event() -> Option<UpstreamPayloadEvent> {
@@ -370,11 +422,27 @@ fn latest_upstream_payload_event() -> Option<UpstreamPayloadEvent> {
 #[cfg(test)]
 mod tests {
     use super::{
-        FollowedLog, SystemTime, UNIX_EPOCH, collect_new_upstream_payload_events, env, fs,
+        FollowedLog, SystemTime, UNIX_EPOCH, UpstreamPayloadEvent,
+        collect_new_upstream_payload_events, env, fs, upstream_payload_tui_text,
     };
     use crate::app_commands::log_upstream_payload::BASE64_STANDARD;
     use base64::Engine;
+    use ratatui::text::Text;
+    use std::collections::VecDeque;
     use std::io::Write;
+
+    fn rendered(text: Text<'static>) -> String {
+        text.lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     #[test]
     fn follows_only_complete_upstream_payload_lines() {
@@ -410,5 +478,41 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(state.pending.is_empty());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn upstream_tui_text_can_filter_and_scroll() {
+        let events = VecDeque::from([
+            UpstreamPayloadEvent {
+                timestamp: "2026-07-06 10:00:00".to_string(),
+                request: Some(1),
+                transport: "http".to_string(),
+                route: "responses".to_string(),
+                profile: "main".to_string(),
+                bytes: 5,
+                logged_bytes: 5,
+                truncated: false,
+                payload: "alpha payload".to_string(),
+            },
+            UpstreamPayloadEvent {
+                timestamp: "2026-07-06 10:00:01".to_string(),
+                request: Some(2),
+                transport: "websocket".to_string(),
+                route: "websocket".to_string(),
+                profile: "second".to_string(),
+                bytes: 4,
+                logged_bytes: 4,
+                truncated: false,
+                payload: "beta payload".to_string(),
+            },
+        ]);
+
+        let filtered = rendered(upstream_payload_tui_text(&events, 80, 20, Some("beta"), 0));
+        assert!(!filtered.contains("alpha payload"));
+        assert!(filtered.contains("beta payload"));
+
+        let scrolled = rendered(upstream_payload_tui_text(&events, 80, 4, None, usize::MAX));
+        assert!(scrolled.contains("alpha payload"));
+        assert!(!scrolled.contains("beta payload"));
     }
 }

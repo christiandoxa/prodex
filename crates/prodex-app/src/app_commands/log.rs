@@ -2,6 +2,12 @@ use super::collect_recent_runtime_log_paths;
 use super::log_format::{
     current_log_width, local_log_timestamp, render_log_block, render_text_body,
 };
+#[cfg(test)]
+use super::log_stream_tui::log_stream_tui_text;
+use super::log_stream_tui::{
+    log_snapshot_tui_height, render_log_snapshot_tui, render_log_stream_tui,
+};
+use super::log_tui::{LogTuiInput, LogTuiState};
 use super::log_upstream::stream_upstream_payload_events;
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
@@ -9,7 +15,7 @@ use super::log_upstream_payload::{
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -18,10 +24,6 @@ use prodex_core::AppPaths;
 use prodex_runtime_doctor::read_runtime_log_tail;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::{BTreeMap, VecDeque};
 #[cfg(test)]
 use std::env;
@@ -32,10 +34,6 @@ use std::thread;
 #[cfg(test)]
 use std::time::SystemTime;
 use std::time::{Duration, UNIX_EPOCH};
-use terminal_ui::{
-    tui_accent_style, tui_border_style, tui_metric_style, tui_muted_style, tui_primary_style,
-    tui_title_style, tui_tool_style,
-};
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
@@ -57,7 +55,7 @@ pub(crate) struct TranscriptEvent {
 }
 
 #[derive(Debug, Clone)]
-enum LogStreamItem {
+pub(super) enum LogStreamItem {
     Transcript(TranscriptEvent),
     TokenUsage(InfoTokenUsageEvent),
     UpstreamPayload(UpstreamPayloadEvent),
@@ -207,6 +205,7 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
 
 fn stream_token_usage_events_tui() -> Result<()> {
     let mut tui = LogStreamTui::new()?;
+    let mut view = LogTuiState::default();
     let mut items = VecDeque::<LogStreamItem>::new();
     if let Some(event) = latest_transcript_event()? {
         push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
@@ -260,20 +259,17 @@ fn stream_token_usage_events_tui() -> Result<()> {
         }
 
         tui.terminal
-            .draw(|frame| render_log_stream_tui(frame, &items))
+            .draw(|frame| render_log_stream_tui(frame, &items, &view))
             .context("failed to draw log stream TUI")?;
 
         if event::poll(LOG_STREAM_POLL_INTERVAL).context("failed to poll log stream TUI input")? {
             match event::read().context("failed to read log stream TUI input")? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Char('c') | KeyCode::Char('z')
-                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                    {
-                        return Ok(());
-                    }
-                    _ => {}
-                },
+                Event::Key(key)
+                    if key.kind == KeyEventKind::Press
+                        && view.apply_key(key) == LogTuiInput::Quit =>
+                {
+                    return Ok(());
+                }
                 _ => {}
             }
         }
@@ -334,251 +330,10 @@ fn log_snapshot_items(
     items
 }
 
-fn log_snapshot_tui_height(
-    transcript: Option<&TranscriptEvent>,
-    upstream_payload: Option<&UpstreamPayloadEvent>,
-    token_usage: Option<&InfoTokenUsageEvent>,
-) -> u16 {
-    let body_rows = if transcript.is_none() && upstream_payload.is_none() && token_usage.is_none() {
-        1
-    } else {
-        let transcript_rows = transcript
-            .map(|event| render_text_body(&event.text, 100).len().saturating_add(2))
-            .unwrap_or(0);
-        let upstream_rows = upstream_payload
-            .map(|event| {
-                render_upstream_payload_lines(&event.payload, 100)
-                    .len()
-                    .saturating_add(3)
-            })
-            .unwrap_or(0);
-        let usage_rows = token_usage.map(|_| 3).unwrap_or(0);
-        transcript_rows
-            .saturating_add(upstream_rows)
-            .saturating_add(usage_rows)
-            .saturating_add(1)
-    };
-    body_rows.saturating_add(4).clamp(8, 28) as u16
-}
-
-fn render_log_snapshot_tui(frame: &mut ratatui::Frame<'_>, items: &VecDeque<LogStreamItem>) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
-        .split(frame.area());
-
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled("Prodex Log Snapshot", log_title_style()),
-        Span::raw("  "),
-        Span::styled(format!("{} event(s)", items.len()), log_muted_style()),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(log_border_style()),
-    );
-    frame.render_widget(header, chunks[0]);
-
-    let body = Paragraph::new(log_stream_tui_text(
-        items,
-        usize::from(chunks[1].height),
-        usize::from(chunks[1].width).saturating_sub(2).max(20),
-    ))
-    .block(
-        Block::default()
-            .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-            .border_style(log_border_style()),
-    )
-    .wrap(Wrap { trim: false });
-    frame.render_widget(body, chunks[1]);
-}
-
 fn push_log_stream_item(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem) {
     items.push_back(item);
     while items.len() > LOG_TUI_EVENT_LIMIT {
         items.pop_front();
-    }
-}
-
-fn render_log_stream_tui(frame: &mut ratatui::Frame<'_>, items: &VecDeque<LogStreamItem>) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ])
-        .split(frame.area());
-
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled("Prodex Log Stream", log_title_style()),
-        Span::raw("  "),
-        Span::styled(format!("{} event(s)", items.len()), log_muted_style()),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(log_border_style()),
-    );
-    frame.render_widget(header, chunks[0]);
-
-    let body = Paragraph::new(log_stream_tui_text(
-        items,
-        usize::from(chunks[1].height),
-        usize::from(chunks[1].width).saturating_sub(2).max(20),
-    ))
-    .block(
-        Block::default()
-            .borders(Borders::LEFT | Borders::RIGHT)
-            .border_style(log_border_style()),
-    )
-    .wrap(Wrap { trim: false });
-    frame.render_widget(body, chunks[1]);
-
-    let footer = Paragraph::new(Line::styled(
-        "live transcript + token usage | q quit",
-        log_footer_style(),
-    ))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(log_border_style()),
-    );
-    frame.render_widget(footer, chunks[2]);
-}
-
-fn log_stream_tui_text(
-    items: &VecDeque<LogStreamItem>,
-    max_lines: usize,
-    body_width: usize,
-) -> Text<'_> {
-    if items.is_empty() {
-        return Text::from(Line::styled(
-            "Waiting for transcript or token usage events...",
-            log_muted_style(),
-        ));
-    }
-
-    let mut lines = Vec::new();
-    for item in items {
-        if !lines.is_empty() {
-            lines.push(Line::raw(""));
-        }
-        match item {
-            LogStreamItem::Transcript(event) => {
-                lines.push(Line::from(vec![
-                    Span::styled(event.timestamp.as_str(), log_muted_style()),
-                    Span::raw(" "),
-                    Span::styled(
-                        format!("stream {}", event.source),
-                        Style::default()
-                            .fg(log_stream_source_color(&event.source))
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                for line in render_text_body(&event.text, body_width) {
-                    lines.push(Line::styled(line, tui_primary_style()));
-                }
-            }
-            LogStreamItem::TokenUsage(event) => {
-                let request = event
-                    .request
-                    .map(|request| request.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                lines.push(Line::from(vec![
-                    Span::styled(event.timestamp.as_str(), log_muted_style()),
-                    Span::raw(" "),
-                    Span::styled(
-                        "stream usage",
-                        Style::default()
-                            .fg(Color::LightMagenta)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled("profile ", log_muted_style()),
-                    Span::styled(event.profile.as_str(), tui_primary_style()),
-                    Span::styled(" request ", log_muted_style()),
-                    Span::styled(request, tui_primary_style()),
-                    Span::styled(" transport ", log_muted_style()),
-                    Span::styled(event.transport.as_str(), tui_primary_style()),
-                    Span::styled(" source ", log_muted_style()),
-                    Span::styled(event.source.as_str(), tui_primary_style()),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled("sent ", log_muted_style()),
-                    Span::styled(event.input_tokens.to_string(), tui_metric_style()),
-                    Span::styled(" cached ", log_muted_style()),
-                    Span::styled(event.cached_input_tokens.to_string(), tui_accent_style()),
-                    Span::styled(" received ", log_muted_style()),
-                    Span::styled(event.output_tokens.to_string(), tui_metric_style()),
-                    Span::styled(" reasoning ", log_muted_style()),
-                    Span::styled(event.reasoning_tokens.to_string(), tui_tool_style()),
-                ]));
-            }
-            LogStreamItem::UpstreamPayload(event) => {
-                let request = event
-                    .request
-                    .map(|request| request.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                lines.push(Line::from(vec![
-                    Span::styled(event.timestamp.as_str(), log_muted_style()),
-                    Span::raw(" "),
-                    Span::styled(
-                        "stream payload",
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled("profile ", log_muted_style()),
-                    Span::styled(event.profile.as_str(), tui_primary_style()),
-                    Span::styled(" request ", log_muted_style()),
-                    Span::styled(request, tui_primary_style()),
-                    Span::styled(" transport ", log_muted_style()),
-                    Span::styled(event.transport.as_str(), tui_primary_style()),
-                    Span::styled(" route ", log_muted_style()),
-                    Span::styled(event.route.as_str(), tui_primary_style()),
-                ]));
-                for line in render_upstream_payload_lines(&event.payload, body_width) {
-                    lines.push(Line::styled(line, tui_primary_style()));
-                }
-            }
-        }
-    }
-    if lines.len() > max_lines {
-        lines.drain(..lines.len().saturating_sub(max_lines));
-    }
-    Text::from(lines)
-}
-
-fn log_title_style() -> Style {
-    tui_title_style()
-}
-
-fn log_border_style() -> Style {
-    tui_border_style()
-}
-
-fn log_muted_style() -> Style {
-    tui_muted_style()
-}
-
-fn log_footer_style() -> Style {
-    tui_title_style()
-}
-
-fn log_stream_source_color(source: &str) -> Color {
-    match source {
-        "user" => Color::Green,
-        "assistant" => Color::Cyan,
-        "reasoning" => Color::Yellow,
-        "turn-context" | "session-context" => Color::Blue,
-        "prompt-engineering" => Color::LightBlue,
-        "tool-output" => Color::Magenta,
-        source if source.starts_with("tool-call:") => Color::Magenta,
-        _ => Color::Reset,
     }
 }
 

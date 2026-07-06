@@ -31,6 +31,8 @@ mod info_handler;
 mod inspect_mcp;
 mod log;
 mod log_format;
+mod log_stream_tui;
+mod log_tui;
 mod log_upstream;
 mod log_upstream_payload;
 mod mcp_jsonl_bridge;
