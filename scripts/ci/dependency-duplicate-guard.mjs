@@ -21,6 +21,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "digest 0.10 and 0.11 pull different crypto-common lines.",
   },
   {
+    name: "cfg_aliases",
+    maxVersions: 2,
+    reason: "Codex-compatible os_info metadata pulls nix 0.31 build tooling while portable PTY dependencies still use cfg_aliases 0.1.",
+  },
+  {
     name: "digest",
     maxVersions: 2,
     reason: "tungstenite/sha1 and export crypto use different digest major lines.",
@@ -44,6 +49,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     name: "itertools",
     maxVersions: 2,
     reason: "ratatui-core/unicode-truncate and criterion benchmark tooling currently resolve separate itertools minor lines.",
+  },
+  {
+    name: "nix",
+    maxVersions: 2,
+    reason: "Codex-compatible os_info metadata uses nix 0.31 while portable PTY support still resolves nix 0.28.",
   },
   {
     name: "rand_core",

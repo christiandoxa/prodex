@@ -232,13 +232,9 @@ fn analyze_goal_resume_session(path: &Path) -> Result<GoalResumeSessionAnalysis>
         }
         tail.push_back(line);
     }
-    analysis.saw_usage_limit = tail.iter().any(|line| {
-        let lower = line.to_ascii_lowercase();
-        lower.contains("usage limit")
-            || lower.contains("insufficient_quota")
-            || lower.contains("rate_limit_exceeded")
-            || lower.contains("usage_limit_reached")
-    });
+    analysis.saw_usage_limit = tail
+        .iter()
+        .any(|line| goal_resume_line_has_usage_limit(line));
     Ok(analysis)
 }
 

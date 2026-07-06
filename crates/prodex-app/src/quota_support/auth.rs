@@ -1,3 +1,9 @@
+use super::codex_openai_auth::codex_openai_auth_headers_for_home;
+#[cfg(test)]
+use super::codex_openai_auth::{
+    codex_openai_auth_headers, codex_openai_auth_originator,
+    codex_openai_auth_user_agent_for_version, parse_codex_cli_version_output,
+};
 use super::{
     CHATGPT_AUTH_REFRESH_CLIENT_ID, CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS,
     CHATGPT_AUTH_REFRESH_INTERVAL_DAYS, CHATGPT_AUTH_REFRESH_URL,
@@ -139,6 +145,7 @@ impl<'a> RateLimitResetCreditConsumeFlow<'a> {
     fn send(&self, redeem_request_id: &str) -> Result<(reqwest::StatusCode, Vec<u8>)> {
         send_rate_limit_reset_credit_consume_request(
             &self.client,
+            self.codex_home,
             &self.consume_url,
             &self.auth,
             redeem_request_id,
@@ -254,7 +261,7 @@ impl<'a> UsageFetchFlow<'a> {
     }
 
     fn send(&self) -> Result<(reqwest::StatusCode, Vec<u8>)> {
-        send_usage_request(&self.client, &self.usage_url, &self.auth)
+        send_usage_request(&self.client, self.codex_home, &self.usage_url, &self.auth)
     }
 
     fn reload_auth_after_unauthorized(&mut self) -> bool {
@@ -352,10 +359,8 @@ pub(crate) fn read_profile_workspace_from_auth(
         return Ok(fallback());
     };
     let accounts_url = chatgpt_accounts_check_url(&quota_base_url(base_url));
-    let mut request = client
-        .get(&accounts_url)
-        .header("Authorization", format!("Bearer {}", auth.access_token))
-        .header("User-Agent", "codex-cli");
+    let mut request = codex_openai_auth_headers_for_home(client.get(&accounts_url), codex_home)
+        .header("Authorization", format!("Bearer {}", auth.access_token));
     request = request.header("ChatGPT-Account-Id", &account_id);
     let Ok(response) = request.send() else {
         return Ok(fallback());
@@ -534,13 +539,12 @@ fn refresh_usage_auth_from_disk_with_proxy_policy(
 
 fn send_usage_request(
     client: &Client,
+    codex_home: &Path,
     usage_url: &str,
     auth: &UsageAuth,
 ) -> Result<(reqwest::StatusCode, Vec<u8>)> {
-    let mut request = client
-        .get(usage_url)
-        .header("Authorization", format!("Bearer {}", auth.access_token))
-        .header("User-Agent", "codex-cli");
+    let mut request = codex_openai_auth_headers_for_home(client.get(usage_url), codex_home)
+        .header("Authorization", format!("Bearer {}", auth.access_token));
 
     if let Some(account_id) = auth.account_id.as_deref() {
         request = request.header("ChatGPT-Account-Id", account_id);
@@ -559,14 +563,13 @@ fn send_usage_request(
 
 fn send_rate_limit_reset_credit_consume_request(
     client: &Client,
+    codex_home: &Path,
     consume_url: &str,
     auth: &UsageAuth,
     redeem_request_id: &str,
 ) -> Result<(reqwest::StatusCode, Vec<u8>)> {
-    let mut request = client
-        .post(consume_url)
+    let mut request = codex_openai_auth_headers_for_home(client.post(consume_url), codex_home)
         .header("Authorization", format!("Bearer {}", auth.access_token))
-        .header("User-Agent", "codex-cli")
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&RateLimitResetCreditConsumeRequest { redeem_request_id });
 
@@ -596,7 +599,8 @@ fn refresh_usage_auth_file(
     upstream_no_proxy: bool,
 ) -> Result<()> {
     let mut auth_json = read_auth_json_value(codex_home)?;
-    let refreshed = request_chatgpt_auth_refresh_with_lease(refresh_token, upstream_no_proxy)?;
+    let refreshed =
+        request_chatgpt_auth_refresh_with_lease(codex_home, refresh_token, upstream_no_proxy)?;
     apply_chatgpt_refresh(&mut auth_json, refreshed)?;
     write_auth_json_value(codex_home, &auth_json)
 }
@@ -628,6 +632,7 @@ fn read_auth_json_value(codex_home: &Path) -> Result<serde_json::Value> {
 }
 
 fn request_chatgpt_auth_refresh_with_lease(
+    codex_home: &Path,
     refresh_token: &str,
     upstream_no_proxy: bool,
 ) -> Result<prodex_quota::ChatgptRefreshResponse> {
@@ -640,14 +645,15 @@ fn request_chatgpt_auth_refresh_with_lease(
             serde_json::from_str(&result_json).context("failed to parse shared auth refresh JSON")
         }
         secret_store::RefreshLeaseDecision::Owner(owner) => {
-            let refreshed = request_chatgpt_auth_refresh_direct(refresh_token, upstream_no_proxy)?;
+            let refreshed =
+                request_chatgpt_auth_refresh_direct(codex_home, refresh_token, upstream_no_proxy)?;
             let result_json = serde_json::to_string(&refreshed)
                 .context("failed to serialize shared auth refresh JSON")?;
             let _ = owner.commit_result(&result_json);
             Ok(refreshed)
         }
         secret_store::RefreshLeaseDecision::Bypass { .. } => {
-            request_chatgpt_auth_refresh_direct(refresh_token, upstream_no_proxy)
+            request_chatgpt_auth_refresh_direct(codex_home, refresh_token, upstream_no_proxy)
         }
     }
 }
@@ -660,21 +666,21 @@ fn usage_auth_refresh_lease_coordinator() -> Result<secret_store::RefreshLeaseCo
 }
 
 fn request_chatgpt_auth_refresh_direct(
+    codex_home: &Path,
     refresh_token: &str,
     upstream_no_proxy: bool,
 ) -> Result<prodex_quota::ChatgptRefreshResponse> {
     let client = build_upstream_blocking_http_client("auth refresh HTTP", upstream_no_proxy)?;
-    let response = client
-        .post(refresh_usage_auth_endpoint())
-        .header("Content-Type", "application/json")
-        .header("User-Agent", "codex-cli")
-        .json(&ChatgptRefreshRequest {
-            client_id: CHATGPT_AUTH_REFRESH_CLIENT_ID,
-            grant_type: "refresh_token",
-            refresh_token,
-        })
-        .send()
-        .context("failed to request ChatGPT auth refresh")?;
+    let response =
+        codex_openai_auth_headers_for_home(client.post(refresh_usage_auth_endpoint()), codex_home)
+            .header("Content-Type", "application/json")
+            .json(&ChatgptRefreshRequest {
+                client_id: CHATGPT_AUTH_REFRESH_CLIENT_ID,
+                grant_type: "refresh_token",
+                refresh_token,
+            })
+            .send()
+            .context("failed to request ChatGPT auth refresh")?;
     let status = response.status();
     let body = response
         .text()

@@ -91,7 +91,7 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
             "{\"id\":\"019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9\",\"cwd\":\"/tmp/test\"}}\n",
             "{\"timestamp\":\"2026-06-05T01:00:00Z\",\"type\":\"thread\",\"payload\":{\"thread_id\":\"thread-1\"}}\n",
             "{\"timestamp\":\"2026-06-05T01:00:01Z\",\"type\":\"message\",\"payload\":{\"role\":\"assistant\",\"content\":\"partial answer\"}}\n",
-            "{\"timestamp\":\"2026-06-05T01:00:02Z\",\"type\":\"error\",\"payload\":{\"message\":\"You've hit your usage limit. Try again later.\"}}\n"
+            "{\"timestamp\":\"2026-06-05T01:00:02Z\",\"type\":\"error\",\"payload\":{\"message\":\"Your workspace is out of credits. Ask your workspace owner to refill in order to continue.\"}}\n"
         ),
     )
     .unwrap();

@@ -31,6 +31,12 @@ crypto-common v0.1.7
 crypto-common v0.2.1
     digest v0.11.3
 
+cfg_aliases v0.1.1
+    nix v0.28.0
+
+cfg_aliases v0.2.1
+    nix v0.31.3
+
 digest v0.10.7 (*)
 
 digest v0.11.3 (*)
@@ -61,6 +67,12 @@ itertools v0.13.0
 
 itertools v0.14.0
     ratatui-core v0.1.2
+
+nix v0.28.0
+    portable-pty v0.9.0
+
+nix v0.31.3
+    os_info v3.15.0
 
 rand v0.9.4
     provider crypto v0.1.0
@@ -104,6 +116,7 @@ test("default budget accepts current duplicate families", () => {
     duplicateFamilies.map((entry) => [entry.name, entry.versions.length]),
     [
       ["block-buffer", 2],
+      ["cfg_aliases", 2],
       ["cpufeatures", 2],
       ["crypto-common", 2],
       ["digest", 2],
@@ -111,6 +124,7 @@ test("default budget accepts current duplicate families", () => {
       ["getrandom", 3],
       ["hashbrown", 2],
       ["itertools", 2],
+      ["nix", 2],
       ["rand", 2],
       ["rand_core", 3],
       ["thiserror", 2],

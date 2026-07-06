@@ -1,6 +1,7 @@
 use super::*;
 
 mod auth;
+mod codex_openai_auth;
 mod external_provider;
 mod render;
 mod virtual_provider;

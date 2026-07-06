@@ -89,6 +89,83 @@ fn accounts_check_url_matches_codex_backend_style() {
     );
 }
 
+#[test]
+fn codex_openai_auth_headers_match_upstream_metadata_shape() {
+    let request =
+        codex_openai_auth_headers(reqwest::blocking::Client::new().get("http://127.0.0.1/"))
+            .build()
+            .unwrap();
+    let headers = request.headers();
+
+    assert_eq!(
+        headers
+            .get("originator")
+            .and_then(|value| value.to_str().ok()),
+        Some("codex_cli_rs")
+    );
+    if let Some(user_agent) = headers
+        .get(reqwest::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+    {
+        assert!(user_agent.starts_with("codex_cli_rs/"));
+        assert!(!user_agent.contains("prodex"));
+    }
+}
+
+#[test]
+fn codex_openai_auth_headers_include_configured_residency() {
+    let root = temp_dir("auth-headers-residency");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("config.toml"), "enforce_residency = 'us'\n").unwrap();
+
+    let request = codex_openai_auth_headers_for_home(
+        reqwest::blocking::Client::new().get("http://127.0.0.1/"),
+        &root,
+    )
+    .build()
+    .unwrap();
+
+    assert_eq!(
+        request
+            .headers()
+            .get("x-openai-internal-codex-residency")
+            .and_then(|value| value.to_str().ok()),
+        Some("us")
+    );
+}
+
+#[test]
+fn codex_openai_auth_user_agent_uses_codex_version_shape() {
+    let user_agent = codex_openai_auth_user_agent_for_version(
+        "codex_cli_rs",
+        "0.142.5",
+        "xterm-256color".to_string(),
+    );
+
+    assert!(user_agent.starts_with("codex_cli_rs/0.142.5 ("));
+    assert!(user_agent.ends_with(") xterm-256color"));
+    assert!(!user_agent.contains("prodex"));
+}
+
+#[test]
+fn codex_cli_version_output_parses_codex_version() {
+    assert_eq!(
+        parse_codex_cli_version_output("codex-cli 0.142.5\n").as_deref(),
+        Some("0.142.5")
+    );
+}
+
+#[test]
+fn codex_openai_auth_originator_honors_upstream_override() {
+    let _env_lock = crate::test_support::TestEnvVarGuard::lock();
+    let _originator = crate::test_support::TestEnvVarGuard::set(
+        "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+        "codex-tui",
+    );
+
+    assert_eq!(codex_openai_auth_originator(), "codex-tui");
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!(
         "prodex-auth-summary-{name}-{}-{}",

@@ -74,6 +74,7 @@ dirs = "6.0.0"
 fs2 = "0.4.3"
 filetime = "0.2.26"
 getrandom = "0.4.2"
+os_info = "3.12.0"
 pbkdf2 = "0.13.0"
 portable-pty = "0.9.0"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }

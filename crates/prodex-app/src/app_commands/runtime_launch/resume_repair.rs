@@ -127,3 +127,12 @@ fn repair_resume_session_in_profile_home(
     }
     let _ = prodex_session_store::repair_resume_session_metadata_prefix(profile_home, session_id);
 }
+
+pub(super) fn goal_resume_line_has_usage_limit(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    runtime_proxy_crate::runtime_usage_limit_text_message(line)
+        || lower.contains("usage limit")
+        || lower.contains("insufficient_quota")
+        || lower.contains("rate_limit_exceeded")
+        || lower.contains("usage_limit_reached")
+}
