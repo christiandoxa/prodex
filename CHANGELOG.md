@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.248.0 - 2026-07-06
+
+### Misc
+
+- Add interactive log search and scroll (`d2b7150`)
+- Refresh yanked transitive dependency (`db7ce2c`)
+- Satisfy clippy for binary payload detection (`572ef2a`)
+
 ## 0.246.0 - 2026-07-03
 
 - No grouped changes.
@@ -68,9 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Preserve shared session attachments (`3ddbc77`)
-
-## 0.235.0 - 2026-06-30
-
-### CLI
-
-- Add OpenAI ping command (`18819d9`)
