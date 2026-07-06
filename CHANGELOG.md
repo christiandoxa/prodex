@@ -2,11 +2,22 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.249.0 - 2026-07-06
+
+### Misc
+
+- Align Codex OpenAI metadata (`bd4dbe1`)
+
 ## 0.248.0 - 2026-07-06
 
 ### Misc
 
 - Add interactive log search and scroll (`d2b7150`)
+
+## 0.247.0 - 2026-07-06
+
+### Misc
+
 - Refresh yanked transitive dependency (`db7ce2c`)
 - Satisfy clippy for binary payload detection (`572ef2a`)
 
@@ -66,13 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Satisfy clippy test module ordering (`0a8e2e2`)
 - Keep prodex launch responsive under startup load (`7e71e83`)
-
-## 0.237.0 - 2026-07-01
-
-- No grouped changes.
-
-## 0.236.0 - 2026-06-30
-
-### Misc
-
-- Preserve shared session attachments (`3ddbc77`)
